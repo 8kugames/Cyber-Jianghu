@@ -1,0 +1,168 @@
+{
+  "version": "2.0.0",
+  "description": "叙事化状态描述配置（数据驱动架构 - 统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "Cognitive Engine v2",
+    "tags": ["narrative", "descriptions", "config"],
+    "notes": [
+      "数据驱动的叙事化配置，将数值状态转换为自然语言描述",
+      "thresholds: 按数值范围定义叙事描述",
+      "status_effects: 状态效果的叙事描述",
+      "支持运行时加载和热更新"
+    ]
+  },
+  "data": {
+    "attributes": {
+      "hp": {
+        "name": "hp",
+        "display_name": "生命值",
+        "thresholds": [
+          {
+            "min": 90,
+            "max": 100,
+            "description": "身体状况极佳，精力充沛，几乎感受不到任何伤痛"
+          },
+          {
+            "min": 70,
+            "max": 89,
+            "description": "身体状态良好，虽有轻微疲惫但无大碍"
+          },
+          {
+            "min": 50,
+            "max": 69,
+            "description": "身体状况一般，能感受到明显的疲劳和轻微伤痛"
+          },
+          {
+            "min": 30,
+            "max": 49,
+            "description": "身体虚弱，伤痛明显，需要休息或治疗"
+          },
+          {
+            "min": 10,
+            "max": 29,
+            "description": "身受重伤，意识模糊，急需救治"
+          },
+          {
+            "min": 0,
+            "max": 9,
+            "description": "生命垂危，濒临死亡边缘"
+          }
+        ]
+      },
+      "hunger": {
+        "name": "hunger",
+        "display_name": "饥饿",
+        "note": "值越高表示越饱，越低表示越饿",
+        "thresholds": [
+          {
+            "min": 80,
+            "max": 100,
+            "description": "肚子很饱，完全没有饥饿感"
+          },
+          {
+            "min": 60,
+            "max": 79,
+            "description": "肚子还算饱，暂时不需要进食"
+          },
+          {
+            "min": 40,
+            "max": 59,
+            "description": "肚子有些饿了，该考虑找点东西吃"
+          },
+          {
+            "min": 20,
+            "max": 39,
+            "description": "饥肠辘辘，肚子饿得咕咕叫，需要尽快进食"
+          },
+          {
+            "min": 0,
+            "max": 19,
+            "description": "饥饿难耐，已经饿得头昏眼花，再不进食会有生命危险"
+          }
+        ]
+      },
+      "thirst": {
+        "name": "thirst",
+        "display_name": "口渴",
+        "note": "值越高表示越不渴，越低表示越渴",
+        "thresholds": [
+          {
+            "min": 80,
+            "max": 100,
+            "description": "完全不渴，身体水分充足"
+          },
+          {
+            "min": 60,
+            "max": 79,
+            "description": "略有口渴，但暂不需要喝水"
+          },
+          {
+            "min": 40,
+            "max": 59,
+            "description": "口渴明显，嗓子发干，该找水喝了"
+          },
+          {
+            "min": 20,
+            "max": 39,
+            "description": "非常口渴，嘴唇干裂，急需补充水分"
+          },
+          {
+            "min": 0,
+            "max": 19,
+            "description": "渴得难以忍受，已经出现脱水症状，再不喝水会有生命危险"
+          }
+        ]
+      },
+      "stamina": {
+        "name": "stamina",
+        "display_name": "体力",
+        "thresholds": [
+          {
+            "min": 80,
+            "max": 100,
+            "description": "体力充沛，精神饱满，可以做任何事"
+          },
+          {
+            "min": 60,
+            "max": 79,
+            "description": "体力尚可，虽有些疲惫但还能活动"
+          },
+          {
+            "min": 40,
+            "max": 59,
+            "description": "体力有些不支，感到疲劳，不宜进行剧烈活动"
+          },
+          {
+            "min": 20,
+            "max": 39,
+            "description": "精疲力竭，浑身乏力，需要休息恢复体力"
+          },
+          {
+            "min": 0,
+            "max": 19,
+            "description": "体力耗尽，已经没有力气行动，必须立即休息"
+          }
+        ]
+      }
+    },
+    "status_effects": {
+      "poisoned": {
+        "description": "身中剧毒，浑身难受"
+      },
+      "bleeding": {
+        "description": "正在流血，伤口疼痛"
+      },
+      "diseased": {
+        "description": "身患疾病，身体不适"
+      },
+      "exhausted": {
+        "description": "精疲力尽，需要休息"
+      },
+      "stunned": {
+        "description": "神志不清，头晕目眩"
+      }
+    }
+  }
+}

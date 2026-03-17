@@ -1,0 +1,76 @@
+[package]
+name = "cyber-jianghu-agent"
+version = "0.1.0"
+edition = "2021"
+authors = ["Cyber-Jianghu Community @8kugames"]
+license = "AGPL-3.0"
+description = "Agent SDK for Cyber-Jianghu MMO-MAS - connects to game server with multiple decision modes"
+
+[dependencies]
+# 协议（包含合并后的 GameError)
+cyber-jianghu-protocol = { path = "../protocol" }
+
+# 异步运行时
+tokio = { workspace = true }
+async-trait = "0.1"
+
+# WebSocket 客户端
+tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-native-roots"] }
+futures-util = { workspace = true }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# 错误处理
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# 日志
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# 工具库
+chrono = { workspace = true }
+uuid = { workspace = true }
+url = "2.5"
+dirs = "6.0.0"
+clap = { version = "4.5", features = ["derive"] }
+
+# HTTP 客户端（用于 OpenClaw HTTP API）
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# HTTP 服务器（用于 headless 模式的 Local API）
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+
+# SQLite 数据库（用于本地记忆存储）
+rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+
+# 向量计算（用于语义记忆）
+candle-core = "0.9"
+candle-transformers = "0.9"
+candle-nn = "0.9"
+
+# Tokenizer（用于分词）
+tokenizers = "0.22.2"
+
+# HNSW 向量索引（用于向量检索）
+instant-distance = "0.6"
+
+# 并行计算
+rayon = "1.10"
+
+# 随机数生成
+rand = "0.9"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.27.0"
+dotenv = "0.15"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"

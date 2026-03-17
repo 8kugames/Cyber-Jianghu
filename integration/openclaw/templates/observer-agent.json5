@@ -1,0 +1,85 @@
+// ============================================================================
+// OpenClaw Agent Configuration: Observer Agent Template (HTTP Mode)
+// ============================================================================
+//
+// Observer agents are passive - they observe and record but don't act.
+// They use game_observe tool to record world events.
+// ============================================================================
+
+{
+  // Agent 基本信息
+  name: "{AGENT_NAME}",
+  description: "Observer Agent - watches and records",
+
+  // 工作区配置
+  agents: {
+    defaults: {
+      workspace: "~/.openclaw/cyber-jianghu-agents/{AGENT_NAME}",
+
+      // Observer 使用不同的 skill
+      skills: ["cyber-jianghu-observer"],
+
+      cron: [
+        {
+          name: "observe-tick",
+          expression: "* * * * * *",  // Every second
+          prompt: `观察并记录当前世界状态。
+
+使用 game_observe 工具记录重要事件：
+- 玩家交互
+- 战斗事件
+- 经济活动
+- 环境变化
+
+注意：观察者不应该使用 jianghu_act 工具。`,
+          session: "main",
+          enabled: true
+        },
+        {
+          name: "daily-summary",
+          expression: "0 0 * * *",  // Daily at midnight
+          prompt: "总结今天的观察结果，生成每日报告。分析玩家行为模式和趋势。",
+          session: "main",
+          enabled: true
+        }
+      ],
+
+      heartbeat: {
+        every: "0m",
+        enabled: false
+      },
+
+      model: "claude/claude-sonnet-4-20250514",
+      timeoutSeconds: 60,  // Observer 可以有更长超时
+    }
+  },
+
+  // Local HTTP API 配置
+  localApiPort: 23333,
+  localApiHost: "127.0.0.1",
+
+  // Hook 配置
+  hooks: {
+    "agent:bootstrap": "integration/openclaw/hooks/bootstrap.ts",
+    "agent_end": "integration/openclaw/hooks/memory.ts"
+  },
+
+  // 工具配置 - Observer 使用 game_observe 而不是 jianghu_act
+  tools: {
+    allow: ["game_observe", "memory_search", "memory_get"],
+    deny: ["jianghu_act", "exec", "system"]
+  },
+
+  // 沙箱配置 - Observer 默认启用沙箱
+  sandbox: {
+    enabled: true,
+    workspaceRoot: "~/.openclaw/sandboxes",
+    privilegeMode: "restricted"
+  },
+
+  // 环境变量
+  env: {
+    CYBER_JIANGHU_WS_URL: "ws://localhost:23332",
+    CYBER_JIANGHU_TOKEN: "{YOUR_AUTH_TOKEN}",
+  },
+}

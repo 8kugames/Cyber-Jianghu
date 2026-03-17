@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/server",
+    "crates/agent",
+]
+
+[workspace.dependencies]
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 异步运行时
+tokio = { version = "1.35", features = ["full"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+# 工具库
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+# 随机数
+rand = "=0.8"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 协议 crate
+cyber-jianghu-protocol = { path = "crates/protocol" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

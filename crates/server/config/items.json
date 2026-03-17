@@ -1,0 +1,146 @@
+{
+  "version": "2.0.0",
+  "description": "物品配置文件（统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "System",
+    "tags": ["items", "objects", "config"]
+  },
+  "data": [
+    {
+      "item_id": "mantou",
+      "name": "馒头",
+      "item_type": "consumable",
+      "effects": [
+        {
+          "attribute": "hunger",
+          "operation": "add",
+          "value": 30
+        }
+      ],
+      "description": "热腾腾的馒头，吃了不饿。恢复30点饥饿值。",
+      "stack_size": 10
+    },
+    {
+      "item_id": "water",
+      "name": "水",
+      "item_type": "consumable",
+      "effects": [
+        {
+          "attribute": "thirst",
+          "operation": "add",
+          "value": 30
+        }
+      ],
+      "description": "清凉的井水，解渴必备。恢复30点口渴值。",
+      "stack_size": 10
+    },
+    {
+      "item_id": "silver",
+      "name": "银子",
+      "item_type": "currency",
+      "effects": [],
+      "description": "流通货币，可以用来购买物品。",
+      "stack_size": 9999
+    },
+    {
+      "item_id": "knife",
+      "name": "刀",
+      "item_type": "weapon",
+      "effects": [
+        {
+          "attribute": "attack_bonus",
+          "operation": "add",
+          "value": 5
+        }
+      ],
+      "description": "一把锋利的刀，增加5点攻击力。",
+      "stack_size": 1
+    },
+    {
+      "item_id": "li_guang_apricot",
+      "name": "李广杏",
+      "item_type": "consumable",
+      "effects": [
+        {
+          "attribute": "hunger",
+          "operation": "add",
+          "value": 10
+        },
+        {
+          "attribute": "thirst",
+          "operation": "add",
+          "value": 10
+        }
+      ],
+      "description": "敦煌特产李广杏，甘甜多汁。恢复10点饥饿与口渴。",
+      "stack_size": 20
+    },
+    {
+      "item_id": "dried_li_guang_apricot",
+      "name": "李广杏干",
+      "item_type": "consumable",
+      "effects": [
+        {
+          "attribute": "hunger",
+          "operation": "add",
+          "value": 20
+        },
+        {
+          "attribute": "thirst",
+          "operation": "add",
+          "value": -5
+        }
+      ],
+      "description": "风干后的李广杏，更耐饥饿，但有些干。恢复20点饥饿，扣除5点水分。",
+      "stack_size": 20
+    },
+    {
+      "item_id": "flour",
+      "name": "面粉",
+      "item_type": "material",
+      "effects": [],
+      "description": "精细的小麦面粉，是制作面食的基础材料。",
+      "stack_size": 20
+    },
+    {
+      "item_id": "wheat",
+      "name": "小麦",
+      "item_type": "material",
+      "effects": [],
+      "description": "金黄的小麦，可以磨成面粉。",
+      "stack_size": 50
+    },
+    {
+      "item_id": "dough",
+      "name": "生面团",
+      "item_type": "material",
+      "effects": [],
+      "description": "未加工的生面团，可以用来制作馒头。",
+      "stack_size": 20
+    },
+    {
+      "item_id": "wood",
+      "name": "木材",
+      "item_type": "material",
+      "effects": [],
+      "description": "普通的木材，用于制作工具或武器。",
+      "stack_size": 50
+    },
+    {
+      "item_id": "wooden_sword",
+      "name": "木剑",
+      "item_type": "weapon",
+      "effects": [
+        {
+          "attribute": "attack_bonus",
+          "operation": "add",
+          "value": 3
+        }
+      ],
+      "description": "简单削制的木剑，适合防身。增加3点攻击力。",
+      "stack_size": 1
+    }
+  ]
+}

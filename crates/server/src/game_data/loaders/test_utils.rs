@@ -1,0 +1,473 @@
+// ============================================================================
+// OpenClaw Cyber-Jianghu 测试工具模块
+// ============================================================================
+//
+// 本模块提供测试辅助函数和测试配置数据
+// ============================================================================
+
+#[cfg(test)]
+use std::fs;
+#[cfg(test)]
+use tempfile::TempDir;
+
+/// 创建测试配置目录
+///
+/// 生成所有必需的配置文件用于测试
+#[cfg(test)]
+pub fn create_test_config_dir() -> TempDir {
+    let dir = TempDir::new().unwrap();
+
+    // 创建 game_rules.json
+    fs::write(
+        dir.path().join("game_rules.json"),
+        r#"{
+            "version": "1.0.0",
+            "agent_state": {
+                "decay": {
+                    "sanity_per_tick": 0,
+                    "hunger_per_tick": -5,
+                    "thirst_per_tick": -5,
+                    "stamina_recovery": 5,
+                    "stamina_after_action": 2,
+                    "idle_bonus": 5
+                },
+                "limits": {
+                    "hp_min": 0,
+                    "hp_max": 100,
+                    "stamina_min": 0,
+                    "stamina_max": 100,
+                    "hunger_min": 0,
+                    "hunger_max": 100,
+                    "thirst_min": 0,
+                    "thirst_max": 100,
+                    "sanity_min": 0,
+                    "sanity_max": 100,
+                    "reputation_min": -1000,
+                    "reputation_max": 1000
+                },
+                "tick": {
+                    "game_hours_per_tick": 1,
+                    "real_seconds_per_tick": 60
+                },
+                "location": {
+                    "spawn_location": "longmen_inn"
+                },
+                "game_time": {
+                    "time_ratio": 120,
+                    "start_date": "2024-01-01"
+                }
+            },
+            "validation": {
+                "action_validation": {
+                    "max_content_length": 1000
+                },
+                "max_agent_name_length": 100,
+                "max_system_prompt_length": 102400,
+                "max_speak_content_length": 500
+            },
+            "world": {
+                "name": "赛博江湖",
+                "description": "一个充满武侠与科技的世界"
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 items.json
+    fs::write(
+        dir.path().join("items.json"),
+        r#"{
+            "version": "1.0.0",
+            "items": [
+                {
+                    "item_id": "mantou",
+                    "name": "馒头",
+                    "item_type": "consumable",
+                    "effects": [
+                        {
+                            "description": "恢复饥饿值",
+                            "attribute": "hunger",
+                            "operation": "add",
+                            "value": 30
+                        }
+                    ],
+                    "stack_size": 10,
+                    "description": "热腾腾的馒头"
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 actions.json
+    fs::write(
+        dir.path().join("actions.json"),
+        r#"{
+            "version": "1.0.0",
+            "actions": {
+                "attack": { "base_damage": 10 },
+                "steal": { "success_rate": 0.5 }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 initial_inventory.json
+    fs::write(
+        dir.path().join("initial_inventory.json"),
+        r#"{
+            "version": "1.0.0",
+            "items": [
+                { "item_id": "mantou", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" }
+            ]
+        }"#,
+    ).unwrap();
+
+    // 创建 inventory.json
+    fs::write(
+        dir.path().join("inventory.json"),
+        r#"{
+            "version": "1.0.0",
+            "limits": {
+                "max_slots": 10,
+                "max_stack_size": 10
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 network.json
+    fs::write(
+        dir.path().join("network.json"),
+        r#"{
+            "version": "1.0.0",
+            "websocket": {
+                "rate_limit_ms": 500,
+                "cleanup_interval_secs": 300,
+                "cleanup_threshold": 100
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 primary_attributes.json (先天属性)
+    fs::write(
+        dir.path().join("primary_attributes.json"),
+        r#"{
+            "version": "1.0.0",
+            "description": "先天属性系统（DND风格）",
+            "attributes": {
+                "strength": {
+                    "name": "strength",
+                    "type": "static",
+                    "display_name": "力量",
+                    "description": "影响物理攻击和负重",
+                    "birth_range": [8, 12],
+                    "affects": ["max_carry_weight", "physical_damage"]
+                },
+                "agility": {
+                    "name": "agility",
+                    "type": "static",
+                    "display_name": "敏捷",
+                    "description": "影响闪避和移动速度",
+                    "birth_range": [8, 12],
+                    "affects": ["dodge_rate"]
+                },
+                "constitution": {
+                    "name": "constitution",
+                    "type": "static",
+                    "display_name": "体质",
+                    "description": "影响生命值和抗性",
+                    "birth_range": [8, 12],
+                    "affects": ["max_carry_weight", "hp"]
+                },
+                "intelligence": {
+                    "name": "intelligence",
+                    "type": "static",
+                    "display_name": "智力",
+                    "description": "影响技能效果和经验获取",
+                    "birth_range": [8, 12],
+                    "affects": []
+                },
+                "charisma": {
+                    "name": "charisma",
+                    "type": "static",
+                    "display_name": "魅力",
+                    "description": "影响社交和交易",
+                    "birth_range": [8, 12],
+                    "affects": []
+                },
+                "luck": {
+                    "name": "luck",
+                    "type": "static",
+                    "display_name": "运气",
+                    "description": "影响随机事件和掉落",
+                    "birth_range": [8, 12],
+                    "affects": []
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 status_attributes.json (状态值)
+    fs::write(
+        dir.path().join("status_attributes.json"),
+        r#"{
+            "version": "1.0.0",
+            "attributes": {
+                "hp": {
+                    "type": "integer",
+                    "default_value": 100,
+                    "min_value": 0,
+                    "max_value": 100,
+                    "decay_per_tick": 0,
+                    "death_condition": {"operator": "equals", "value": 0},
+                    "display_name": "生命",
+                    "description": "Agent的生命值，归零时死亡"
+                },
+                "stamina": {
+                    "type": "integer",
+                    "default_value": 100,
+                    "min_value": 0,
+                    "max_value": 100,
+                    "decay_per_tick": 5,
+                    "display_name": "体力",
+                    "description": "Agent的体力值，用于行动消耗"
+                },
+                "hunger": {
+                    "type": "integer",
+                    "default_value": 50,
+                    "min_value": 0,
+                    "max_value": 100,
+                    "decay_per_tick": -5,
+                    "death_condition": {"operator": "equals", "value": 0},
+                    "display_name": "饥饿",
+                    "description": "Agent的饥饿值，过低会影响生命值"
+                },
+                "thirst": {
+                    "type": "integer",
+                    "default_value": 50,
+                    "min_value": 0,
+                    "max_value": 100,
+                    "decay_per_tick": -5,
+                    "death_condition": {"operator": "equals", "value": 0},
+                    "display_name": "口渴",
+                    "description": "Agent的口渴值，过低会影响生命值"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 derived_attributes.json (派生属性)
+    fs::write(
+        dir.path().join("derived_attributes.json"),
+        r#"{
+            "version": "1.0.0",
+            "attributes": {
+                "max_carry_weight": {
+                    "type": "integer",
+                    "default_value": 30,
+                    "min_value": 0,
+                    "max_value": 200,
+                    "formula": "15 + constitution * 2",
+                    "display_name": "最大负重",
+                    "description": "可以携带的物品重量上限"
+                },
+                "physical_damage": {
+                    "type": "integer",
+                    "default_value": 10,
+                    "min_value": 0,
+                    "max_value": 50,
+                    "formula": "5 + strength * 0.5",
+                    "display_name": "物理攻击力",
+                    "description": "物理攻击造成的伤害"
+                },
+                "dodge_rate": {
+                    "type": "float",
+                    "default_value": 0.05,
+                    "min_value": 0.0,
+                    "max_value": 1.0,
+                    "formula": "0.05 + agility * 0.005",
+                    "display_name": "闪避率",
+                    "description": "躲避攻击的概率"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 locations.json
+    fs::write(
+        dir.path().join("locations.json"),
+        r#"{
+            "version": "1.0.0",
+            "nodes": [
+                {
+                    "node_id": "inn",
+                    "name": "龙门客栈",
+                    "type": "map"
+                },
+                {
+                    "node_id": "lobby",
+                    "name": "大堂",
+                    "type": "sub_scene",
+                    "parent_id": "inn"
+                }
+            ],
+            "edges": []
+        }"#,
+    )
+    .unwrap();
+
+    // 创建 attributes.json (统一属性配置)
+    fs::write(
+        dir.path().join("attributes.json"),
+        r#"{
+            "version": "3.0.0",
+            "description": "统一属性配置文件（数据驱动架构）",
+            "categories": {
+                "primary": {
+                    "description": "先天属性（DND风格）",
+                    "attributes": {
+                        "strength": {
+                            "name": "strength",
+                            "type": "static",
+                            "display_name": "力量",
+                            "description": "影响物理攻击和负重",
+                            "birth_range": [8, 12],
+                            "affects": ["max_carry_weight", "physical_damage"]
+                        },
+                        "agility": {
+                            "name": "agility",
+                            "type": "static",
+                            "display_name": "敏捷",
+                            "description": "影响闪避和移动速度",
+                            "birth_range": [8, 12],
+                            "affects": ["dodge_rate"]
+                        },
+                        "constitution": {
+                            "name": "constitution",
+                            "type": "static",
+                            "display_name": "体质",
+                            "description": "影响生命值和抗性",
+                            "birth_range": [8, 12],
+                            "affects": ["max_carry_weight", "hp"]
+                        },
+                        "intelligence": {
+                            "name": "intelligence",
+                            "type": "static",
+                            "display_name": "智力",
+                            "description": "影响技能效果和经验获取",
+                            "birth_range": [8, 12],
+                            "affects": []
+                        },
+                        "charisma": {
+                            "name": "charisma",
+                            "type": "static",
+                            "display_name": "魅力",
+                            "description": "影响社交和交易",
+                            "birth_range": [8, 12],
+                            "affects": []
+                        },
+                        "luck": {
+                            "name": "luck",
+                            "type": "static",
+                            "display_name": "运气",
+                            "description": "影响随机事件和掉落",
+                            "birth_range": [8, 12],
+                            "affects": []
+                        }
+                    }
+                },
+                "status": {
+                    "description": "状态值",
+                    "attributes": {
+                        "hp": {
+                            "name": "hp",
+                            "type": "status",
+                            "display_name": "生命",
+                            "description": "Agent的生命值，归零时死亡",
+                            "default_value": 100,
+                            "min_value": 0,
+                            "max_value_formula": "100",
+                            "decay_per_tick": 0,
+                            "death_condition": {"operator": "equals", "value": 0}
+                        },
+                        "stamina": {
+                            "name": "stamina",
+                            "type": "status",
+                            "display_name": "体力",
+                            "description": "Agent的体力值，用于行动消耗",
+                            "default_value": 100,
+                            "min_value": 0,
+                            "max_value_formula": "100",
+                            "decay_per_tick": 5
+                        },
+                        "hunger": {
+                            "name": "hunger",
+                            "type": "status",
+                            "display_name": "饥饿",
+                            "description": "Agent的饥饿值，过低会影响生命值",
+                            "default_value": 50,
+                            "min_value": 0,
+                            "max_value_formula": "100",
+                            "decay_per_tick": -5,
+                            "death_condition": {"operator": "equals", "value": 0}
+                        },
+                        "thirst": {
+                            "name": "thirst",
+                            "type": "status",
+                            "display_name": "口渴",
+                            "description": "Agent的口渴值，过低会影响生命值",
+                            "default_value": 50,
+                            "min_value": 0,
+                            "max_value_formula": "100",
+                            "decay_per_tick": -5,
+                            "death_condition": {"operator": "equals", "value": 0}
+                        }
+                    }
+                },
+                "derived": {
+                    "description": "派生属性",
+                    "attributes": {
+                        "max_carry_weight": {
+                            "name": "max_carry_weight",
+                            "type": "derived",
+                            "display_name": "最大负重",
+                            "description": "可以携带的物品重量上限",
+                            "formula": "15 + constitution * 2",
+                            "default_value": 30,
+                            "min_value": 0,
+                            "max_value": 200
+                        },
+                        "physical_damage": {
+                            "name": "physical_damage",
+                            "type": "derived",
+                            "display_name": "物理攻击力",
+                            "description": "物理攻击造成的伤害",
+                            "formula": "5 + strength * 0.5",
+                            "default_value": 10,
+                            "min_value": 0,
+                            "max_value": 50
+                        },
+                        "dodge_rate": {
+                            "name": "dodge_rate",
+                            "type": "derived",
+                            "display_name": "闪避率",
+                            "description": "躲避攻击的概率",
+                            "formula": "0.05 + agility * 0.005",
+                            "default_value": 0.05,
+                            "min_value": 0.0,
+                            "max_value": 1.0
+                        }
+                    }
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+
+    dir
+}

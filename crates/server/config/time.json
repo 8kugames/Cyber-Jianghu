@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "description": "时间与季节系统配置（统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "System",
+    "tags": ["time", "seasons", "config"]
+  },
+  "data": {
+    "ticks_per_hour": 60,
+    "hours_per_day": 24,
+    "days_per_season": 10,
+    "seasons": [
+      {
+        "id": "spring",
+        "name": "春",
+        "description": "万物复苏，适合采集草药和播种",
+        "temperature_modifier": 5,
+        "resource_growth_rate": 1.5
+      },
+      {
+        "id": "summer",
+        "name": "夏",
+        "description": "烈日炎炎，水分消耗加剧",
+        "temperature_modifier": 15,
+        "resource_growth_rate": 1.2
+      },
+      {
+        "id": "autumn",
+        "name": "秋",
+        "description": "秋高气爽，丰收的季节",
+        "temperature_modifier": 0,
+        "resource_growth_rate": 1.0
+      },
+      {
+        "id": "winter",
+        "name": "冬",
+        "description": "寒风凛冽，体力和饱食度消耗加剧，资源匮乏",
+        "temperature_modifier": -15,
+        "resource_growth_rate": 0.2
+      }
+    ]
+  }
+}
