@@ -1,0 +1,52 @@
+# OpenClaw Cyber-Jianghu MVP Server Configuration
+# 配置文件示例 - 根据实际环境修改
+
+# 服务端配置
+server:
+  host: "0.0.0.0"  # 监听地址，0.0.0.0表示所有网卡
+  port: 23333        # 监听端口
+
+# Tick引擎配置
+tick_engine:
+  tick_duration_secs: 60  # Tick周期（秒），60秒 = 1个游戏小时
+
+# 数据库配置
+database:
+  # PostgreSQL连接URL
+  # 格式: postgres://用户名:密码@主机:端口/数据库名
+  url: "postgres://postgres:your_password_here@localhost:5432/cyber_jianghu"
+
+# Redis配置
+redis:
+  # Redis连接URL
+  # 格式: redis://主机:端口/数据库编号
+  url: "redis://localhost:6379/0"
+
+# ============================================================================
+# MVP阶段说明
+# ============================================================================
+#
+# 以上配置为MVP阶段最小配置，仅包含：
+# 1. 服务端监听配置
+# 2. Tick引擎配置
+# 3. PostgreSQL数据库配置
+# 4. Redis缓存配置
+#
+# 未包含的配置（推迟到后续版本）：
+# - JWT认证配置
+# - 日志级别配置
+# - 监控指标配置
+# - 多节点配置
+# - 性能调优配置
+#
+# 注意：
+# - 敏感信息（如密码）应使用环境变量覆盖
+# - 生产环境请修改默认端口和密码
+# - 数据库和Redis服务需提前启动
+#
+# 使用方式：
+# 1. 复制此文件为 config.yaml
+# 2. 修改数据库密码和Redis地址
+# 3. 或通过环境变量覆盖：
+#    export DATABASE_URL="postgres://..."
+#    export REDIS_URL="redis://..."

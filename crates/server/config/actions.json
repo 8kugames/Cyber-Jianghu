@@ -1,0 +1,254 @@
+{
+  "version": "2.0.0",
+  "description": "动作系统配置文件（统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-17",
+    "author": "System",
+    "tags": ["actions", "commands", "config"]
+  },
+  "data": {
+    "attack": {
+      "description": "攻击目标，造成伤害",
+      "base_damage": 10,
+      "damage_formula": "10 + strength * 0.5 + weapon_bonus * weapon_multiplier",
+      "weapon_bonus": 5,
+      "weapon_bonus_multiplier": 1.0,
+      "validation": {
+        "requires_target": true,
+        "requires_target_alive": true,
+        "required_fields": ["target_agent_id"]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 5,
+          "consume": true
+        }
+      ]
+    },
+    "steal": {
+      "description": "从目标身上偷取物品，有一定成功率",
+      "success_rate": 0.5,
+      "validation": {
+        "requires_target": true,
+        "requires_target_alive": true,
+        "required_fields": ["target_agent_id", "item_id"]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 5,
+          "consume": true
+        }
+      ]
+    },
+    "speak": {
+      "description": "公开说话，所有人可见",
+      "max_content_length": 500,
+      "validation": {
+        "required_fields": ["content"],
+        "field_validations": [
+          {
+            "field": "content",
+            "validation_type": "not_empty"
+          },
+          {
+            "field": "content",
+            "validation_type": "max_length",
+            "max_length": 500
+          }
+        ]
+      },
+      "requirements": []
+    },
+    "move": {
+      "description": "移动到指定位置（多场景版本）",
+      "validation": {
+        "required_fields": ["target_location"],
+        "field_validations": [
+          {
+            "field": "target_location",
+            "validation_type": "not_empty"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 10,
+          "consume": true
+        }
+      ]
+    },
+    "give": {
+      "description": "将物品给予目标",
+      "validation": {
+        "requires_target": true,
+        "requires_target_alive": true,
+        "required_fields": ["target_agent_id", "item_id", "quantity"],
+        "field_validations": [
+          {
+            "field": "quantity",
+            "validation_type": "min_value",
+            "min_value": 1
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 2,
+          "consume": true
+        }
+      ]
+    },
+    "use": {
+      "description": "使用物品（如食物、水等）",
+      "validation": {
+        "required_fields": ["item_id"],
+        "field_validations": [
+          {
+            "field": "item_id",
+            "validation_type": "not_empty"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 1,
+          "consume": true
+        }
+      ]
+    },
+    "pickup": {
+      "description": "从地面拾取物品",
+      "validation": {
+        "required_fields": ["item_id"],
+        "field_validations": [
+          {
+            "field": "item_id",
+            "validation_type": "not_empty"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 2,
+          "consume": true
+        }
+      ]
+    },
+    "drop": {
+      "description": "将物品丢弃到地面",
+      "validation": {
+        "required_fields": ["item_id", "quantity"],
+        "field_validations": [
+          {
+            "field": "item_id",
+            "validation_type": "not_empty"
+          },
+          {
+            "field": "quantity",
+            "validation_type": "min_value",
+            "min_value": 1
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 1,
+          "consume": true
+        }
+      ]
+    },
+    "gather": {
+      "description": "从场景中采集自然资源",
+      "validation": {
+        "required_fields": ["target_id"],
+        "field_validations": [
+          {
+            "field": "target_id",
+            "validation_type": "not_empty"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 5,
+          "consume": true
+        }
+      ]
+    },
+    "craft": {
+      "description": "制造/合成物品",
+      "validation": {
+        "required_fields": ["recipe_id"],
+        "field_validations": [
+          {
+            "field": "recipe_id",
+            "validation_type": "not_empty"
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 10,
+          "consume": true
+        }
+      ]
+    },
+    "trade": {
+      "description": "与目标进行交易，以指定价格买卖物品",
+      "validation": {
+        "requires_target": true,
+        "requires_target_alive": true,
+        "required_fields": ["target_agent_id", "item_id", "price"],
+        "field_validations": [
+          {
+            "field": "price",
+            "validation_type": "min_value",
+            "min_value": 0
+          }
+        ]
+      },
+      "requirements": [
+        {
+          "requirement_type": "attribute",
+          "target": "target",
+          "attribute": "stamina",
+          "min": 3,
+          "consume": true
+        }
+      ]
+    },
+    "idle": {
+      "description": "休息，不做任何操作",
+      "validation": {},
+      "requirements": []
+    }
+  }
+}

@@ -1,0 +1,36 @@
+# PR Check - 仅验证 PR 可构建，不发布
+# 完整构建和发布由 ci.yml 处理
+
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - ".github/workflows/pr-check.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # 快速验证: 仅 Linux 构建 + 测试
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install deps
+        run: sudo apt-get install -y libssl-dev libpq-dev pkg-config
+
+      - name: Build
+        run: cargo build --release -p cyber-jianghu-server -p cyber-jianghu-agent
+
+      - name: Test
+        run: cargo test --workspace

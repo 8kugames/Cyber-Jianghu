@@ -1,0 +1,98 @@
+// ============================================================================
+// OpenClaw Agent Configuration: Player Agent Template (HTTP Mode)
+// ============================================================================
+//
+// This is a template configuration for a player agent using HTTP API mode.
+// Copy this file and customize it for your agent.
+//
+// Usage:
+//   cp integration/openclaw/templates/player-agent.json5 ~/.openclaw/agents/your-agent.json5
+//   # Edit the file and replace placeholders with actual values
+// ============================================================================
+
+{
+  // Agent 基本信息
+  name: "{AGENT_NAME}",
+  description: "{AGENT_DESCRIPTION}",
+
+  // 工作区配置
+  agents: {
+    defaults: {
+      // 工作区路径（包含 SOUL.md, CONTEXT.md, memory/ 等）
+      workspace: "~/.openclaw/cyber-jianghu-agents/{AGENT_NAME}",
+
+      // Cron 配置（高频任务 - 游戏循环）
+      // 使用 Cron 而非 Heartbeat 来持续响应游戏 Tick
+      cron: [
+        {
+          // 游戏主循环 - 每秒检查一次是否有新的 WorldState
+          name: "game-tick",
+          expression: "* * * * * *",  // 每秒执行
+          prompt: `检查 CONTEXT.md，根据当前状态做出决策。
+
+⚠️ CRITICAL: 你必须调用 jianghu_act 工具来提交动作。没有例外。
+
+决策流程:
+1. 阅读 CONTEXT.md 了解当前状态
+2. 根据你的人设和当前情况思考
+3. 调用 jianghu_act 工具提交动作
+
+可用动作: idle, speak, move, attack, use, pickup, drop, give, steal, trade, gather, craft`,
+          session: "main",
+          enabled: true
+        },
+        {
+          // 状态检查 - 每 30 秒检查连接状态
+          name: "connection-check",
+          expression: "*/30 * * * * *",
+          prompt: "检查与游戏服务器的连接状态，确认 HTTP API 可达",
+          session: "main",
+          enabled: true
+        }
+      ],
+
+      // Heartbeat 配置（低频任务 - 可选）
+      // Heartbeat 用于长时间没有活动时的提醒
+      heartbeat: {
+        every: "0m",  // 禁用 - 使用 Cron 代替
+        enabled: false
+      },
+
+      // 模型配置
+      model: "claude/claude-sonnet-4-20250514",  // 或其他模型
+
+      // 超时配置
+      timeoutSeconds: 30,  // 游戏要求 55 秒内响应，这里设置更短的值
+    }
+  },
+
+  // Local HTTP API 配置 (连接到 crates/agent)
+  localApiPort: 23333,
+  localApiHost: "127.0.0.1",
+
+  // Hook 配置
+  hooks: {
+    // Bootstrap: 每次决策开始前调用，获取最新 WorldState
+    "agent:bootstrap": "integration/openclaw/hooks/bootstrap.ts",
+    // Agent end: 决策完成后持久化到 memory
+    "agent_end": "integration/openclaw/hooks/memory.ts"
+  },
+
+  // 工具配置 - jianghu_act 是必需的
+  tools: {
+    required: ["jianghu_act"]
+  },
+
+  // 沙箱配置（多 Agent 场景建议启用）
+  sandbox: {
+    enabled: false,               // 单 Agent 场景可以关闭
+    workspaceRoot: "~/.openclaw/sandboxes",
+    privilegeMode: "restricted"
+  },
+
+  // 环境变量
+  env: {
+    CYBER_JIANGHU_WS_URL: "ws://localhost:23332",
+    CYBER_JIANGHU_TOKEN: "{YOUR_AUTH_TOKEN}",
+  },
+}

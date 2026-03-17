@@ -1,0 +1,267 @@
+{
+  "version": "4.0.0",
+  "description": "统一属性配置文件（数据驱动架构 - 统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "System Architect",
+    "tags": ["attributes", "stats", "config"],
+    "notes": [
+      "primary: 先天属性（力量、敏捷、根骨、悟性、魅力、福缘）",
+      "status: 状态值（HP、体力、饥饿、口渴、内力、理智、声望）",
+      "derived: 派生属性（负重上限、物理伤害、闪避率等）",
+      "公式支持：基于主属性动态计算状态值和派生属性",
+      "数据驱动：所有属性定义来自配置，代码只提供访问器和验证逻辑"
+    ]
+  },
+  "data": {
+    "primary": {
+      "description": "先天属性（出生时决定，部分可成长）",
+      "attributes": {
+        "strength": {
+          "name": "strength",
+          "display_name": "力量",
+          "description": "负重能力、外功物理伤害",
+          "type": "growable",
+          "birth_range": [10, 50],
+          "initial_value": 10,
+          "growth_rate": 1.0,
+          "affects": ["max_carry_weight", "physical_damage"]
+        },
+        "agility": {
+          "name": "agility",
+          "display_name": "敏捷",
+          "description": "反应能力、洞察能力、神经与肌体敏感度",
+          "type": "growable",
+          "birth_range": [10, 50],
+          "initial_value": 10,
+          "growth_rate": 1.0,
+          "affects": ["dodge_rate", "critical_rate", "perception"]
+        },
+        "constitution": {
+          "name": "constitution",
+          "display_name": "根骨",
+          "description": "生存韧性、环境适应力、内气速度与容量",
+          "type": "growable",
+          "birth_range": [10, 50],
+          "initial_value": 10,
+          "growth_rate": 0.8,
+          "affects": ["max_hp", "stamina_regen", "qi_regen"]
+        },
+        "intelligence": {
+          "name": "intelligence",
+          "display_name": "悟性",
+          "description": "学习速度与深度、智力上限",
+          "type": "growable",
+          "birth_range": [10, 50],
+          "initial_value": 10,
+          "growth_rate": 1.2,
+          "affects": ["skill_learning_speed", "exp_bonus"]
+        },
+        "charisma": {
+          "name": "charisma",
+          "display_name": "魅力",
+          "description": "人际关系第一印象、事件解决难易度",
+          "type": "static",
+          "birth_range": [10, 50],
+          "affects": ["social_interaction", "event_difficulty"]
+        },
+        "luck": {
+          "name": "luck",
+          "display_name": "福缘",
+          "description": "突发事件几率、意外收获或损失几率",
+          "type": "dailyrandom",
+          "birth_range": [10, 50],
+          "affects": ["event_probability", "surprise_gain_loss"]
+        }
+      }
+    },
+    "status": {
+      "description": "状态值（生理/精神状态，会随时间衰减或恢复）",
+      "attributes": {
+        "hp": {
+          "name": "hp",
+          "display_name": "生命值",
+          "description": "Agent的生命值，受根骨影响，降为0时死亡",
+          "type": "status",
+          "formula": "100 + constitution * 2",
+          "default_value": 100,
+          "min_value": 0,
+          "max_value_formula": "100 + constitution * 2",
+          "decay_per_tick": 0,
+          "death_condition": {
+            "operator": "equals",
+            "value": 0
+          },
+          "primary_attribute_deps": ["constitution"]
+        },
+        "stamina": {
+          "name": "stamina",
+          "display_name": "体力",
+          "description": "Agent的体力值，用于执行动作，受根骨影响",
+          "type": "status",
+          "formula": "100 + constitution * 1",
+          "default_value": 100,
+          "min_value": 0,
+          "max_value_formula": "100 + constitution * 1",
+          "decay_per_tick": 5,
+          "recovery_formula": "5 + constitution * 0.1",
+          "primary_attribute_deps": ["constitution"]
+        },
+        "hunger": {
+          "name": "hunger",
+          "display_name": "饥饿值",
+          "description": "Agent的饥饿程度，降为0时死亡",
+          "type": "status",
+          "formula": "50",
+          "default_value": 50,
+          "min_value": 0,
+          "decay_per_tick": -5,
+          "death_condition": {
+            "operator": "equals",
+            "value": 0
+          },
+          "primary_attribute_deps": []
+        },
+        "thirst": {
+          "name": "thirst",
+          "display_name": "口渴值",
+          "description": "Agent的口渴程度，降为0时死亡",
+          "type": "status",
+          "formula": "50",
+          "default_value": 50,
+          "min_value": 0,
+          "decay_per_tick": -5,
+          "death_condition": {
+            "operator": "equals",
+            "value": 0
+          },
+          "primary_attribute_deps": []
+        },
+        "qi": {
+          "name": "qi",
+          "display_name": "内力",
+          "description": "Agent修炼的内力值，上限受根骨影响",
+          "type": "status",
+          "formula": "100 + constitution * 10",
+          "default_value": 0,
+          "min_value": 0,
+          "max_value_formula": "100 + constitution * 10",
+          "decay_per_tick": 0,
+          "primary_attribute_deps": ["constitution"]
+        },
+        "sanity": {
+          "name": "sanity",
+          "display_name": "理智值",
+          "description": "Agent的理智程度，影响决策能力，受悟性影响",
+          "type": "status",
+          "formula": "100 + intelligence * 0.5",
+          "default_value": 100,
+          "min_value": 0,
+          "max_value_formula": "100 + intelligence * 0.5",
+          "decay_per_tick": -1,
+          "primary_attribute_deps": ["intelligence"]
+        },
+        "reputation": {
+          "name": "reputation",
+          "display_name": "声望",
+          "description": "Agent在江湖中的声望，初始值受魅力影响",
+          "type": "status",
+          "formula": "0 + charisma * 0.2",
+          "default_value": 0,
+          "min_value": -100,
+          "decay_per_tick": 0,
+          "primary_attribute_deps": ["charisma"]
+        }
+      }
+    },
+    "derived": {
+      "description": "派生属性（基于先天属性实时计算，不存储）",
+      "attributes": {
+        "max_carry_weight": {
+          "name": "max_carry_weight",
+          "display_name": "负重上限",
+          "description": "Agent可携带的物品重量上限，受力量影响",
+          "type": "derived",
+          "formula": "50 + strength * 2",
+          "default_value": 50,
+          "min_value": 0,
+          "primary_attribute_deps": ["strength"]
+        },
+        "physical_damage": {
+          "name": "physical_damage",
+          "display_name": "物理伤害",
+          "description": "Agent的基础物理伤害，受力量影响",
+          "type": "derived",
+          "formula": "10 + strength * 0.5",
+          "default_value": 10,
+          "min_value": 0,
+          "primary_attribute_deps": ["strength"]
+        },
+        "dodge_rate": {
+          "name": "dodge_rate",
+          "display_name": "闪避率",
+          "description": "Agent的闪避概率，受敏捷影响",
+          "type": "derived",
+          "formula": "0.05 + agility * 0.005",
+          "default_value": 0.05,
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "primary_attribute_deps": ["agility"]
+        },
+        "critical_rate": {
+          "name": "critical_rate",
+          "display_name": "暴击率",
+          "description": "Agent的暴击概率，受敏捷影响",
+          "type": "derived",
+          "formula": "0.01 + agility * 0.003",
+          "default_value": 0.01,
+          "min_value": 0.0,
+          "max_value": 1.0,
+          "primary_attribute_deps": ["agility"]
+        },
+        "skill_learning_speed": {
+          "name": "skill_learning_speed",
+          "display_name": "技能学习速度",
+          "description": "Agent学习技能的速度倍率，受悟性影响",
+          "type": "derived",
+          "formula": "1.0 + intelligence * 0.02",
+          "default_value": 1.0,
+          "min_value": 0.1,
+          "max_value": 5.0,
+          "primary_attribute_deps": ["intelligence"]
+        },
+        "exp_bonus": {
+          "name": "exp_bonus",
+          "display_name": "经验加成",
+          "description": "Agent获得的经验倍率，受悟性影响",
+          "type": "derived",
+          "formula": "1.0 + intelligence * 0.01",
+          "default_value": 1.0,
+          "min_value": 1.0,
+          "primary_attribute_deps": ["intelligence"]
+        },
+        "stamina_regen": {
+          "name": "stamina_regen",
+          "display_name": "体力恢复",
+          "description": "Agent每tick体力恢复量，受根骨影响",
+          "type": "derived",
+          "formula": "5 + constitution * 0.1",
+          "default_value": 5,
+          "min_value": 0,
+          "primary_attribute_deps": ["constitution"]
+        },
+        "qi_regen": {
+          "name": "qi_regen",
+          "display_name": "内力恢复",
+          "description": "Agent每tick内力恢复量，受根骨影响",
+          "type": "derived",
+          "formula": "1 + constitution * 0.05",
+          "default_value": 1,
+          "min_value": 0,
+          "primary_attribute_deps": ["constitution"]
+        }
+      }
+    }
+  }
+}

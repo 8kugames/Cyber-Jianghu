@@ -1,0 +1,26 @@
+{
+  "id": "cyber-jianghu",
+  "name": "cyber-jianghu",
+  "version": "2.1.0",
+  "description": "Cyber-Jianghu Agent - OpenClaw integration for MMO-MAS game",
+  "author": "8kugames",
+  "license": "AGPL-3.0",
+  "homepage": "https://github.com/8kugames/Cyber-Jianghu",
+  "skills": ["./skills/cyber-jianghu"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "localApiPort": {
+        "type": "number",
+        "default": 0,
+        "description": "Port for crates/agent HTTP API (0 = auto-discover from 23340-23349 range)"
+      },
+      "localApiHost": {
+        "type": "string",
+        "default": "127.0.0.1",
+        "description": "Host for crates/agent HTTP API"
+      }
+    }
+  }
+}

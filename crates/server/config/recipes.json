@@ -1,0 +1,86 @@
+{
+  "version": "2.0.0",
+  "description": "制作配方配置文件（统一数据格式）",
+  "meta": {
+    "created_at": "2026-03-16",
+    "updated_at": "2026-03-16",
+    "author": "System",
+    "tags": ["recipes", "crafting", "config"]
+  },
+  "data": {
+    "make_flour": {
+      "name": "磨面粉",
+      "description": "将小麦磨成面粉",
+      "result_item": "flour",
+      "result_quantity": 1,
+      "materials": [
+        {
+          "item_id": "wheat",
+          "quantity": 2
+        }
+      ],
+      "tools": [],
+      "stamina_cost": 5
+    },
+    "make_dough": {
+      "name": "揉面团",
+      "description": "将面粉和水混合，揉制成生面团",
+      "result_item": "dough",
+      "result_quantity": 1,
+      "materials": [
+        {
+          "item_id": "flour",
+          "quantity": 1
+        },
+        {
+          "item_id": "water",
+          "quantity": 1
+        }
+      ],
+      "tools": [],
+      "stamina_cost": 5
+    },
+    "cooked_mantou": {
+      "name": "热馒头",
+      "description": "用生面团烤制而成的热馒头，能大幅恢复饥饿",
+      "result_item": "mantou",
+      "result_quantity": 1,
+      "materials": [
+        {
+          "item_id": "dough",
+          "quantity": 1
+        }
+      ],
+      "tools": [],
+      "stamina_cost": 10
+    },
+    "dried_apricot": {
+      "name": "李广杏干",
+      "description": "风干李广杏，更易保存",
+      "result_item": "dried_li_guang_apricot",
+      "result_quantity": 1,
+      "materials": [
+        {
+          "item_id": "li_guang_apricot",
+          "quantity": 2
+        }
+      ],
+      "tools": [],
+      "stamina_cost": 5
+    },
+    "wooden_sword": {
+      "name": "木剑",
+      "description": "简单削制的木剑，适合防身",
+      "result_item": "wooden_sword",
+      "result_quantity": 1,
+      "materials": [
+        {
+          "item_id": "wood",
+          "quantity": 2
+        }
+      ],
+      "tools": ["knife"],
+      "stamina_cost": 20
+    }
+  }
+}

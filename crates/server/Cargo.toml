@@ -1,0 +1,45 @@
+[package]
+name = "cyber-jianghu-server"
+version = "0.1.13"
+edition = "2021"
+authors = ["Cyber-Jianghu Community @8kugames"]
+license = "AGPL-3.0"
+description = "MVP server for Cyber-Jianghu MMO-MAS"
+
+[dependencies]
+# 内部 crates
+cyber-jianghu-protocol = { path = "../protocol", features = ["sqlx-support"] }
+
+# Web 框架
+axum = { version = "0.8.8", features = ["ws"] }
+tokio = { workspace = true }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["cors", "trace", "fs"] }
+futures-util = { workspace = true }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# 数据库
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid", "json"] }
+
+# 错误处理
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# 日志
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# 工具库
+chrono = { workspace = true }
+uuid = { workspace = true }
+config = "0.15.21"
+dotenv = "0.15"
+# 锁定 rand 版本为 0.8.5，防止 cargo update 升级到不兼容的新版本
+rand = "=0.8.5"
+evalexpr = "13.1.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"
