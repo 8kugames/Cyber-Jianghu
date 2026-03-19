@@ -90,7 +90,7 @@ impl DisplayMessagesConfig {
     /// 创建内置默认配置
     pub fn builtin() -> Self {
         Self {
-            version: "1.0.0-builtin".to_string(),
+            version: "0.0.1-builtin".to_string(),
             description: "内置默认显示消息配置".to_string(),
             entity_states: EntityStatesConfig {
                 alive: "存活".to_string(),

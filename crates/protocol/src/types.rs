@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_world_building_rules_default() {
         let rules = WorldBuildingRules::default();
-        assert_eq!(rules.version, "1.0.0");
+        assert_eq!(rules.version, "0.0.1");
         assert!(rules.allowed_concepts.contains(&"内力".to_string()));
         assert!(rules.forbidden_concepts.contains(&"魔法".to_string()));
     }

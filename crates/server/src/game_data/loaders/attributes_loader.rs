@@ -55,7 +55,7 @@ mod tests {
         fs::write(
             dir.path().join("attributes.json"),
             r#"{
-                "version": "4.0.0",
+                "version": "0.0.1",
                 "description": "统一属性配置文件（数据驱动架构 - 统一数据格式）",
                 "meta": {
                     "created_at": "2026-03-16",
@@ -128,7 +128,7 @@ mod tests {
         create_test_unified_config(&dir);
 
         let attrs = load_unified_attributes(dir.path()).unwrap();
-        assert_eq!(attrs.version, "4.0.0");
+        assert_eq!(attrs.version, "0.0.1");
         assert!(attrs.data.primary.attributes.contains_key("strength"));
         assert!(attrs.data.status.attributes.contains_key("hp"));
         assert!(attrs.data.status.attributes.contains_key("stamina"));
@@ -147,7 +147,7 @@ mod tests {
         create_test_unified_config(&dir);
 
         let attrs = load_attributes(dir.path()).unwrap();
-        assert_eq!(attrs.version, "4.0.0");
+        assert_eq!(attrs.version, "0.0.1");
     }
 
     #[test]

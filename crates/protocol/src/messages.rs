@@ -96,7 +96,7 @@ pub struct DialogueSession {
 ///     tick_duration_secs: 60,
 ///     available_actions: vec![],
 ///     initial_items: vec![],
-///     version: "1.0.0".to_string(),
+///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
 /// };
 ///
@@ -299,7 +299,7 @@ mod tests {
             tick_duration_secs: 60,
             available_actions: vec![],
             initial_items: vec![],
-            version: "1.0.0".to_string(),
+            version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };
         let msg = ServerMessage::Registered {
@@ -433,7 +433,7 @@ mod tests {
             tick_duration_secs: 60,
             available_actions: vec![],
             initial_items: vec![],
-            version: "1.0.0".to_string(),
+            version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };
         let world_rules = WorldBuildingRules::default();

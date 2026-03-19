@@ -123,42 +123,31 @@ update_dependencies() {
             continue
         fi
 
-        # Check if this crate depends on the updated crate
-        # Pattern 1: cyber-jianghu-protocol = { path = "../protocol" }
-        # Pattern 2: cyber-jianghu-protocol = { path = "../protocol", features = [...] }
-        # Pattern 3: cyber-jianghu-protocol = { path = "../protocol", version = "0.1.6" }
+        # Check if this crate depends on the updated crate (path dependency)
+        if ! grep -q "$package_name.*path.*\.\./$updated_crate" "$cargo_file"; then
+            continue
+        fi
 
-        if grep -q "$package_name.*path.*\.\./$updated_crate" "$cargo_file"; then
-            echo -e "  ${BLUE}→${NC} Updating dependency in $crate"
+        echo -e "  ${BLUE}→${NC} Updating dependency in $crate"
 
-            # Check if version is already specified
-            if grep -q "$package_name.*path.*\.\./$updated_crate.*version" "$cargo_file"; then
-                # Update existing version
-                if [[ "$OSTYPE" == "darwin"* ]]; then
-                    sed -i '' "s|$package_name = { path = \"\.\./$updated_crate\", version = \"[0-9]\+\.[0-9]\+\.[0-9]\+\"|$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\"|g" "$cargo_file"
-                else
-                    sed -i "s|$package_name = { path = \"\.\./$updated_crate\", version = \"[0-9]\+\.[0-9]\+\.[0-9]\+\"|$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\"|g" "$cargo_file"
-                fi
+        # Use perl for more robust multi-line handling (works on both macOS and Linux)
+        # This handles all formats:
+        # - { path = "../protocol" }
+        # - { path = "../protocol", version = "0.0.1" }
+        # - { path = "../protocol", features = ["sqlx-support"] }
+        # - { path = "../protocol", version = "0.0.1", features = ["sqlx-support"] }
+        if command -v perl &> /dev/null; then
+            perl -i -pe "s|($package_name = \{ path = \"\.\./$updated_crate\", )(?:version = \"[0-9]+\.[0-9]+\.[0-9]+\", )?|\${1}version = \"$new_version\", |g" "$cargo_file"
+            echo -e "  ${GREEN}✓${NC} Updated $package_name dependency to $new_version in $crate"
+        else
+            # Fallback to sed if perl is not available
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                # macOS: update version field if exists, otherwise add it
+                sed -i '' -E "s|($package_name = \{ path = \"\.\./$updated_crate\", )(version = \"[0-9]+\.[0-9]+\.[0-9]+\", )?|\1version = \"$new_version\", |g" "$cargo_file"
             else
-                # Add version to dependency
-                # Check the exact format to avoid duplicate version fields
-                if grep -q "$package_name = { path = \"\.\./$updated_crate\" }" "$cargo_file"; then
-                    # Format: cyber-jianghu-protocol = { path = "../protocol" }
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "s|$package_name = { path = \"\.\./$updated_crate\" }|$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\" }|g" "$cargo_file"
-                    else
-                        sed -i "s|$package_name = { path = \"\.\./$updated_crate\" }|$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\" }|g" "$cargo_file"
-                    fi
-                elif grep -q "$package_name = { path = \"\.\./$updated_crate\", " "$cargo_file"; then
-                    # Format: cyber-jianghu-protocol = { path = "../protocol", features = [...] }
-                    if [[ "$OSTYPE" == "darwin"* ]]; then
-                        sed -i '' "s|$package_name = { path = \"\.\./$updated_crate\", |$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\", |g" "$cargo_file"
-                    else
-                        sed -i "s|$package_name = { path = \"\.\./$updated_crate\", |$package_name = { path = \"\.\./$updated_crate\", version = \"$new_version\", |g" "$cargo_file"
-                    fi
-                fi
+                # Linux: update version field if exists, otherwise add it
+                sed -i -E "s|($package_name = \{ path = \"\.\./$updated_crate\", )(version = \"[0-9]+\.[0-9]+\.[0-9]+\", )?|\1version = \"$new_version\", |g" "$cargo_file"
             fi
-
             echo -e "  ${GREEN}✓${NC} Updated $package_name dependency to $new_version in $crate"
         fi
     done
