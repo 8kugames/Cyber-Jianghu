@@ -111,7 +111,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("items.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用物品配置",
                 "data": [
                     {
@@ -170,7 +170,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("actions.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用动作配置",
                 "data": {
                     "attack": {
@@ -281,7 +281,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("initial_inventory.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用初始物品配置",
                 "data": {
                     "items": {
@@ -301,7 +301,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("inventory.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用物品栏配置",
                 "data": {
                     "max_slots": 10,
@@ -314,7 +314,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("network.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用网络配置",
                 "data": {
                     "websocket": {
@@ -330,7 +330,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("locations.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用位置配置",
                 "data": {
                     "nodes": [
@@ -356,7 +356,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("primary_attributes.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "先天属性系统（DND风格）",
                 "data": {
                     "attributes": {
@@ -417,7 +417,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("status_attributes.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用状态属性配置",
                 "data": {
                     "attributes": {
@@ -469,7 +469,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("derived_attributes.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用派生属性配置",
                 "data": {
                     "attributes": {
@@ -511,7 +511,7 @@ pub fn init_test_registry() {
         fs::write(
             dir.path().join("recipes.json"),
             r#"{
-                "version": "1.0.0",
+                "version": "0.0.1",
                 "description": "测试用配方配置",
                 "data": {}
             }"#,

@@ -266,7 +266,7 @@ impl NarrativeConfig {
         );
 
         Self {
-            version: "1.0.0-builtin".to_string(),
+            version: "0.0.1-builtin".to_string(),
             description: "内置默认叙事配置".to_string(),
             attributes,
             status_effects,

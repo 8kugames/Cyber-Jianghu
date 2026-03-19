@@ -57,7 +57,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("items.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "items": [
                 {
                     "item_id": "mantou",
@@ -83,7 +83,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("actions.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "actions": {
                 "attack": { "base_damage": 10 },
                 "steal": { "success_rate": 0.5 }
@@ -96,7 +96,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("initial_inventory.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "description": "测试用初始物品配置",
             "meta": {},
             "data": {
@@ -113,7 +113,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("inventory.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "limits": {
                 "max_slots": 10,
                 "max_stack_size": 10
@@ -126,7 +126,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("network.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "websocket": {
                 "rate_limit_ms": 500,
                 "cleanup_interval_secs": 300,
@@ -140,7 +140,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("primary_attributes.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "description": "先天属性系统（DND风格）",
             "attributes": {
                 "strength": {
@@ -200,7 +200,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("status_attributes.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "attributes": {
                 "hp": {
                     "type": "integer",
@@ -250,7 +250,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("derived_attributes.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "attributes": {
                 "max_carry_weight": {
                     "type": "integer",
@@ -288,7 +288,7 @@ pub fn create_test_config_dir() -> TempDir {
     fs::write(
         dir.path().join("locations.json"),
         r#"{
-            "version": "1.0.0",
+            "version": "0.0.1",
             "nodes": [
                 {
                     "node_id": "inn",

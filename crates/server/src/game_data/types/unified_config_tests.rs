@@ -120,7 +120,7 @@ mod unified_config_tests {
         use crate::game_data::formula_engine::FormulaEngine;
 
         let json = r#"{
-            "version": "4.0.0",
+            "version": "0.0.1",
             "description": "测试统一属性配置",
             "meta": {},
             "data": {
@@ -190,7 +190,7 @@ mod unified_config_tests {
         use crate::game_data::formula_engine::FormulaEngine;
 
         let json = r#"{
-            "version": "4.0.0",
+            "version": "0.0.1",
             "description": "测试公式计算",
             "meta": {},
             "data": {

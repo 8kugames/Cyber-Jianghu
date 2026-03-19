@@ -69,7 +69,7 @@ pub struct WorldBuildingRules {
 impl Default for WorldBuildingRules {
     fn default() -> Self {
         Self {
-            version: "1.0.0".to_string(),
+            version: "0.0.1".to_string(),
             era: EraSettings {
                 name: "北宋前期（约10世纪中国）".to_string(),
                 tech_level: "冷兵器时代，火药仅用于烟火".to_string(),

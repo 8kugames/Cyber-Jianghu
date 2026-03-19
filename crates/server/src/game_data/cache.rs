@@ -251,7 +251,7 @@ mod tests {
                 },
             },
             attributes: UnifiedAttributesConfig {
-                version: "4.0.0".to_string(),
+                version: "0.0.1".to_string(),
                 description: "测试统一属性配置".to_string(),
                 meta: Default::default(),
                 data: AttributeCategories {

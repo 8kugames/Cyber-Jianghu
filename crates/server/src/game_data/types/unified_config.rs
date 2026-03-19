@@ -453,9 +453,9 @@ mod tests {
             max_slots: 10,
             max_stack_size: 99,
         };
-        let config = UnifiedConfig::new("1.0.0", "Test config", data);
+        let config = UnifiedConfig::new("0.0.1", "Test config", data);
 
-        assert_eq!(config.version, "1.0.0");
+        assert_eq!(config.version, "0.0.1");
         assert_eq!(config.description, "Test config");
         assert_eq!(config.data.max_slots, 10);
     }
@@ -478,11 +478,11 @@ mod tests {
             max_slots: 20,
             max_stack_size: 50,
         };
-        let config = UnifiedConfig::new("1.0.0", "Test", data);
+        let config = UnifiedConfig::new("0.0.1", "Test", data);
         let json = serde_json::to_string(&config).unwrap();
         let parsed: UnifiedConfig<InventoryLimitsData> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.version, "1.0.0");
+        assert_eq!(parsed.version, "0.0.1");
         assert_eq!(parsed.data.max_slots, 20);
     }
 
@@ -494,11 +494,11 @@ mod tests {
             days_per_season: 10,
             seasons: vec![],
         };
-        let config = UnifiedConfig::new("1.0.0", "Time config", data);
+        let config = UnifiedConfig::new("0.0.1", "Time config", data);
         let json = serde_json::to_string(&config).unwrap();
         let parsed: UnifiedConfig<TimeData> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(parsed.version, "1.0.0");
+        assert_eq!(parsed.version, "0.0.1");
         assert_eq!(parsed.data.ticks_per_hour, 60);
     }
 }
