@@ -1331,10 +1331,22 @@
                         <div class="detail-section">
                             <div class="detail-title">生理状态</div>
                             <div class="detail-grid">
-                                <div class="detail-item"><span class="detail-label">生命值 (HP):</span> ${agent.hp}/100</div>
-                                <div class="detail-item"><span class="detail-label">体力 (Stamina):</span> ${agent.stamina}/100</div>
-                                <div class="detail-item"><span class="detail-label">饱食度 (Hunger):</span> ${agent.hunger}/100</div>
-                                <div class="detail-item"><span class="detail-label">口渴度 (Thirst):</span> ${agent.thirst}/100</div>
+                                <div class="detail-item"><span class="detail-label">生命值 (HP):</span> ${agent.hp}/${agent.max_hp}</div>
+                                <div class="detail-item"><span class="detail-label">体力 (Stamina):</span> ${agent.stamina}/${agent.max_stamina}</div>
+                                <div class="detail-item"><span class="detail-label">饱食度 (Hunger):</span> ${agent.hunger}/${agent.max_hunger}</div>
+                                <div class="detail-item"><span class="detail-label">口渴度 (Thirst):</span> ${agent.thirst}/${agent.max_thirst}</div>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-title">先天属性</div>
+                            <div class="detail-grid">
+                                <div class="detail-item"><span class="detail-label">力量 (STR):</span> ${agent.attributes?.strength ?? 0}/${agent.attributes?.strength_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">敏捷 (AGI):</span> ${agent.attributes?.agility ?? 0}/${agent.attributes?.agility_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">根骨 (CON):</span> ${agent.attributes?.constitution ?? 0}/${agent.attributes?.constitution_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">悟性 (INT):</span> ${agent.attributes?.intelligence ?? 0}/${agent.attributes?.intelligence_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">魅力 (CHA):</span> ${agent.attributes?.charisma ?? 0}</div>
+                                <div class="detail-item"><span class="detail-label">福缘 (LUK):</span> ${agent.attributes?.luck ?? 0}</div>
                             </div>
                         </div>
 

@@ -171,17 +171,18 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
     let hour = (remaining_after_month % hours_per_day) as i32;
 
     // 获取季节信息
-    let season = crate::game_data::registry::TimeRegistry::get_current_season(current_world_tick_id)
-        .map(|s| s.name)
-        .unwrap_or_else(|| "未知".to_string());
+    let season =
+        crate::game_data::registry::TimeRegistry::get_current_season(current_world_tick_id)
+            .map(|s| s.name)
+            .unwrap_or_else(|| "未知".to_string());
 
     let game_time = WorldTime {
         year,
         month,
         day,
         hour,
-        minute: 0,  // 前端会自行计算平滑值
-        second: 0,  // 前端会自行计算平滑值
+        minute: 0, // 前端会自行计算平滑值
+        second: 0, // 前端会自行计算平滑值
         season,
     };
 
@@ -408,11 +409,16 @@ pub struct AgentDetail {
     pub last_active: Option<chrono::DateTime<chrono::Utc>>,
     pub location: String,
     pub hp: i32,
+    pub max_hp: i32,
     pub hunger: i32,
+    pub max_hunger: i32,
     pub thirst: i32,
+    pub max_thirst: i32,
     pub stamina: i32,
+    pub max_stamina: i32,
     pub is_alive: bool,
     pub inventory: Vec<AgentInventoryItem>,
+    pub attributes: std::collections::HashMap<String, i32>,
 }
 
 #[derive(Serialize)]
@@ -469,19 +475,67 @@ pub async fn get_agent_details(
         })
         .collect();
 
-    let (location, hp, hunger, thirst, stamina, is_alive) = if let Some(row) = state_row {
+    let (
+        location,
+        hp,
+        max_hp,
+        hunger,
+        max_hunger,
+        thirst,
+        max_thirst,
+        stamina,
+        max_stamina,
+        is_alive,
+        attributes_map,
+    ) = if let Some(row) = state_row {
         // 从 JSONB attributes 列提取属性值
         let attrs: serde_json::Value = row.get::<serde_json::Value, _>("attributes");
+
+        let mut attributes_map = std::collections::HashMap::new();
+        if let Some(obj) = attrs.as_object() {
+            for (k, v) in obj {
+                if let Some(val) = v.as_i64() {
+                    attributes_map.insert(k.clone(), val as i32);
+                }
+            }
+        }
+
         (
             row.get::<String, _>("node_id"),
             attrs.get("hp").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs.get("hp_max").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs.get("hunger").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("hunger_max")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32,
             attrs.get("thirst").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("thirst_max")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32,
             attrs.get("stamina").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("stamina_max")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32,
             row.get::<bool, _>("is_alive"),
+            attributes_map,
         )
     } else {
-        ("unknown".to_string(), 100, 100, 100, 100, true)
+        (
+            "unknown".to_string(),
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            100,
+            true,
+            std::collections::HashMap::new(),
+        )
     };
 
     Ok(Json(AgentDetail {
@@ -492,10 +546,15 @@ pub async fn get_agent_details(
         last_active: agent_row.get("last_tick_online"),
         location,
         hp,
+        max_hp,
         hunger,
+        max_hunger,
         thirst,
+        max_thirst,
         stamina,
+        max_stamina,
         is_alive,
         inventory,
+        attributes: attributes_map,
     }))
 }
