@@ -189,6 +189,7 @@ mod tests {
                         },
                         game_time: GameTimeRulesData {
                             start_date: "2024-01-01".to_string(),
+                            timezone_offset: 8, // UTC+8 北京时间
                         },
                     },
                     validation: ValidationRulesData {

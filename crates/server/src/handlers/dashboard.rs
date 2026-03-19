@@ -25,6 +25,10 @@ pub struct DashboardStats {
     pub game_flow_total_hours: i64,
     pub world_overview: String,
     pub tick_duration_secs: u64,
+    /// 当前 tick ID（供前端计算平滑时间）
+    pub current_tick_id: i64,
+    /// 每游戏小时对应的 tick 数（供前端计算平滑时间）
+    pub ticks_per_hour: f64,
 }
 
 #[derive(Serialize)]
@@ -35,6 +39,8 @@ pub struct WorldTime {
     pub hour: i32,
     pub minute: i32,
     pub second: i32,
+    /// 当前季节名称
+    pub season: String,
 }
 
 pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<DashboardStats> {
@@ -134,75 +140,52 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
     let server_uptime_secs = uptime.num_seconds();
     let server_running_days = uptime.num_days();
 
-    // 9. Game time - 平滑插值计算（仅用于前端展示）
+    // 9. Game time - 基础数据供前端计算平滑时间
     let current_world_tick_id = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);
 
     // 从配置读取时间参数
     let config = crate::game_data::registry::TimeRegistry::get_config();
-    // 预留：每小时 tick 数（待用于更精确的时间显示）
-    let _ticks_per_hour = config
+    let ticks_per_hour = config
         .as_ref()
-        .map(|c| c.ticks_per_hour as i64)
-        .unwrap_or(60);
+        .map(|c| c.ticks_per_hour as f64)
+        .unwrap_or(1.0);
     let hours_per_day = config
         .as_ref()
         .map(|c| c.hours_per_day as i64)
         .unwrap_or(24);
-    let days_per_month = 30; // 固定 30 天/月
-    let months_per_year = 12; // 固定 12 月/年
-
-    // 平滑插值：获取最后一次 tick 时间戳
-    let last_tick_ts = crate::db::get_last_tick_time(&state.db_pool)
-        .await
-        .unwrap_or_else(|_| state.start_time);
-
-    // 计算当前 tick 进度 (0.0-1.0)
-    let now = Utc::now();
-    let secs_since_tick = (now - last_tick_ts).num_seconds().max(0) as f64;
-    // 从配置读取每 tick 对应的现实秒数
-    let real_secs_per_tick = state
-        .game_data
-        .get()
-        .game_rules
-        .data
-        .agent_state
-        .tick
-        .real_seconds_per_tick as f64;
-    let tick_frac = (secs_since_tick / real_secs_per_tick).min(1.0);
-
-    // 计算平滑的游戏时间（包含小数部分）
-    let total_game_hours_f = (current_world_tick_id as f64) + tick_frac;
-
-    // 转换为整数游戏时间（用于计算年月日）
-    let total_hours_i = total_game_hours_f.floor() as i64;
+    let days_per_month = 30;
+    let months_per_year = 12;
     let hours_per_month = hours_per_day * days_per_month;
     let hours_per_year = hours_per_month * months_per_year;
 
-    // 计算年月日时
-    let year = 1 + (total_hours_i / hours_per_year) as i32;
-    let remaining_after_year = total_hours_i % hours_per_year;
+    // 计算整数游戏时间（前端会自行计算平滑的小数部分）
+    let total_game_hours = current_world_tick_id as i64 / ticks_per_hour as i64;
+
+    let year = 1 + (total_game_hours / hours_per_year) as i32;
+    let remaining_after_year = total_game_hours % hours_per_year;
     let month = 1 + (remaining_after_year / hours_per_month) as i32;
     let remaining_after_month = remaining_after_year % hours_per_month;
     let day = 1 + (remaining_after_month / hours_per_day) as i32;
     let hour = (remaining_after_month % hours_per_day) as i32;
 
-    // 平滑插值：分钟和秒来自小数部分
-    let hour_frac = total_game_hours_f.fract();
-    let minute = (hour_frac * 60.0).floor() as i32;
-    let second = ((hour_frac * 60.0).fract() * 60.0).round() as i32;
+    // 获取季节信息
+    let season = crate::game_data::registry::TimeRegistry::get_current_season(current_world_tick_id)
+        .map(|s| s.name)
+        .unwrap_or_else(|| "未知".to_string());
 
     let game_time = WorldTime {
         year,
         month,
         day,
         hour,
-        minute,
-        second,
+        minute: 0,  // 前端会自行计算平滑值
+        second: 0,  // 前端会自行计算平滑值
+        season,
     };
 
-    let game_flow_total_hours = total_game_hours_f.floor() as i64;
+    let game_flow_total_hours = total_game_hours;
 
     // 10. World overview
     // Try to load world building rules
@@ -230,6 +213,8 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         game_flow_total_hours,
         world_overview,
         tick_duration_secs,
+        current_tick_id: current_world_tick_id,
+        ticks_per_hour,
     })
 }
 
