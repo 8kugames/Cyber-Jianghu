@@ -1,0 +1,58 @@
+# ============================================================================
+# 游戏规则配置
+# ============================================================================
+#
+# 职责：定义现实时间和 tick 的消耗关系（服务器调度用）
+# - real_seconds_per_tick: 服务器每多少秒执行一个 tick
+#
+# 配合 time.yaml 使用：
+# - game_rules.yaml 定义"现实时间 → Tick"的转换（服务器调度）
+# - time.yaml 定义"Tick → 游戏时间"的转换（游戏世界观）
+#
+# 示例：
+# - real_seconds_per_tick: 60 → 现实每60秒执行1个tick
+# - time.yaml 中 ticks_per_hour: 1 → 1 tick = 1 游戏小时
+# - 结果：现实1分钟 = 1 tick = 1 游戏小时
+# ============================================================================
+
+version: "0.0.1"
+description: "游戏规则配置文件"
+
+meta:
+  created_at: "2026-03-16"
+  updated_at: "2026-03-18"
+  author: "Cyber-Jianghu Community"
+  tags: ["rules", "gameplay", "config"]
+  notes:
+    - "decay 配置已移至 attributes.yaml（每属性独立配置）"
+    - "action 消耗配置已移至 actions.yaml（每个动作独立配置）"
+    - "此处只保留真正的全局游戏规则"
+    - "tick → 游戏时间转换由 time.yaml 管理"
+
+data:
+  # Agent 状态规则
+  agent_state:
+    # Tick 调度配置（现实时间 → Tick 转换）
+    tick:
+      # 服务器每多少秒执行一个 tick
+      real_seconds_per_tick: 15
+
+    # 出生点配置
+    location:
+      spawn_location: "longmen_lobby"
+
+    # 游戏纪元（用于计算 tick_id）
+    game_time:
+      # 游戏纪元起始日期（格式：YYYY-MM-DD）
+      start_date: "2026-03-03"
+      # 时区偏移量（UTC+8 = 8，UTC-5 = -5）
+      # 用于将 start_date 解释为当地时区的午夜
+      timezone_offset: 8
+
+  # 验证规则
+  validation:
+    action_validation:
+      max_content_length: 500
+    max_agent_name_length: 100
+    max_system_prompt_length: 102400
+    max_speak_content_length: 500

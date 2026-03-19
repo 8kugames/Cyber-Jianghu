@@ -1,0 +1,26 @@
+[package]
+name = "cyber-jianghu-protocol"
+version = "0.0.3"
+edition = "2024"
+authors = ["Cyber-Jianghu Community"]
+license = "AGPL-3.0"
+description = "Shared protocol types for Cyber-Jianghu MMO-MAS"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+rand = { workspace = true }
+
+# 可选的 sqlx 支持 (用于服务端)
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "macros"], optional = true }
+
+[features]
+default = []
+sqlx-support = ["sqlx"]
+
+[dev-dependencies]
+serde_json = "1.0"

@@ -1,0 +1,46 @@
+[package]
+name = "cyber-jianghu-server"
+version = "0.0.4"
+edition = "2024"
+authors = ["Cyber-Jianghu Community"]
+license = "AGPL-3.0"
+description = "MVP server for Cyber-Jianghu MMO-MAS"
+
+[dependencies]
+# 内部 crates
+cyber-jianghu-protocol = { path = "../protocol", version = "0.0.3", version = "0.0.2", features = ["sqlx-support"] }
+
+# Web 框架
+axum = { version = "0.8.8", features = ["ws"] }
+tokio = { workspace = true }
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["cors", "trace", "fs"] }
+futures-util = { workspace = true }
+
+# 序列化
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# 数据库
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid", "json"] }
+
+# 错误处理
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = "0.1"
+
+# 日志
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# 工具库
+chrono = { workspace = true }
+uuid = { workspace = true }
+config = "0.15.21"
+dotenv = "0.15"
+rand = { workspace = true }
+evalexpr = "13.1.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

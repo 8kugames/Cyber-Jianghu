@@ -1,0 +1,396 @@
+// ============================================================================
+// OpenClaw Cyber-Jianghu MVP 服务端主入口
+// ============================================================================
+//
+// 这是整个服务端的入口点，负责：
+// 1. 初始化日志和配置
+// 2. 启动Tick引擎（后台任务）
+// 3. 启动Web服务器（HTTP + WebSocket）
+//
+// 架构说明：
+// - Tick引擎在独立的tokio任务中运行，负责驱动游戏世界
+// - Web服务器在主任务中运行，处理HTTP请求和WebSocket连接
+// - 两者通过Arc<AppState>共享配置和状态
+//
+// MVP阶段功能：
+// - 基础的HTTP API（健康检查、Agent注册）
+// - Tick引擎框架（待完善）
+// - WebSocket框架（待实现）
+// ============================================================================
+
+// 引入 library crate
+use cyber_jianghu_server::*;
+
+use anyhow::Result;
+use axum::{
+    Router,
+    routing::{get, post},
+};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
+use tower_http::services::ServeDir;
+use tracing::{Level, error, info};
+use tracing_subscriber::FmtSubscriber;
+
+// ============================================================================
+// Tick引擎启动
+// ============================================================================
+
+/// 启动Tick引擎（后台任务）
+///
+/// Tick引擎在独立的tokio任务中运行，负责驱动游戏世界
+fn start_tick_engine(
+    game_data_cache: Arc<game_data::GameDataCache>,
+    db_pool: DbPool,
+    connection_manager: websocket::ConnectionManager,
+    intent_manager: websocket::IntentManager,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick_scheduler =
+            TickScheduler::new(game_data_cache, db_pool, connection_manager, intent_manager);
+
+        info!("启动Tick引擎（后台任务）");
+
+        if let Err(e) = tick_scheduler.run().await {
+            error!("Tick引擎运行失败: {}", e);
+        }
+    })
+}
+
+// ============================================================================
+// 主函数
+// ============================================================================
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // 1. 初始化日志
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .with_target(false)
+        .with_thread_ids(false)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+
+    info!(
+        "OpenClaw Cyber-Jianghu MVP Server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    info!("天道无为，万物自化。");
+
+    // 打印关键路径信息
+    info!("运行时路径配置:");
+    info!("  Config: {:?}", crate::paths::get_config_dir());
+    info!("  Static: {:?}", crate::paths::get_static_dir());
+    info!("  Logs:   {:?}", crate::paths::get_logs_dir());
+
+    // 2. 加载环境变量（从.env文件）
+    dotenv::dotenv().ok();
+
+    // 3. 加载配置
+    let config = Config::load()?;
+    info!("配置加载成功");
+
+    // 4. 验证配置
+    config.validate()?;
+    info!("配置验证通过");
+
+    // 5. 初始化数据库连接池
+    let db_pool = init_db_pool(&config.database.url).await?;
+    info!("数据库连接池初始化成功");
+
+    // 6. 加载游戏数据配置
+    let game_data = game_data::load_game_data()?;
+    info!(
+        "游戏数据配置加载成功 (version: {})",
+        game_data.game_rules.version
+    );
+
+    // 创建游戏数据缓存并初始化统一注册表
+    let game_data_cache = Arc::new(game_data::GameDataCache::new(game_data));
+    game_data::init_registry(game_data_cache.clone());
+    info!("统一配置注册表初始化完成");
+
+    // 初始化物品系统缓存（物品需要独立的缓存用于快速查询）
+    {
+        let guard = game_data_cache.get();
+        items::init_item_cache_from_config(&guard.items.data)?;
+        info!("物品系统初始化完成，共 {} 种物品", guard.items.data.len());
+    }
+
+    // 7. 初始化 WebSocket 连接管理器、Intent 管理器和速率限制器
+    let connection_manager = websocket::create_connection_manager();
+    let intent_manager = websocket::create_intent_manager();
+    let rate_limiter = create_rate_limiter();
+    info!("WebSocket、Intent 管理器和速率限制器初始化成功");
+
+    // 7.1 初始化对话管理器（从配置读取最大消息数）
+    let gd_guard = game_data_cache.get();
+    let dialogue_manager = Arc::new(dialogue::DialogueManager::new(
+        gd_guard.network.data.dialogue.max_messages_per_agent,
+    ));
+    drop(gd_guard); // 释放锁
+    info!("对话管理器初始化成功");
+
+    // 8. 获取或生成管理 Token
+    let admin_read_token = config
+        .server
+        .admin_read_token
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let admin_write_token = config
+        .server
+        .admin_write_token
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let read_token_source = if config.server.admin_read_token.is_some() {
+        "配置/环境变量"
+    } else {
+        "自动生成"
+    };
+    let write_token_source = if config.server.admin_write_token.is_some() {
+        "配置/环境变量"
+    } else {
+        "自动生成"
+    };
+
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    let tokens_file = "cyber_jianghu_admin.tmp";
+    let mut token_paths = vec![PathBuf::from(tokens_file)];
+    let logs_token_path = crate::paths::get_logs_dir().join(tokens_file);
+    if logs_token_path != PathBuf::from(tokens_file) {
+        token_paths.push(logs_token_path);
+    }
+
+    for token_path in token_paths {
+        if let Some(parent) = token_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        let mut file = File::create(&token_path).map_err(|e| {
+            anyhow::anyhow!("无法创建admin token文件 {}: {}", token_path.display(), e)
+        })?;
+
+        writeln!(file, "========================================")?;
+        writeln!(file, "🔐 Cyber-Jianghu 管理员访问凭证")?;
+        writeln!(file, "========================================")?;
+        writeln!(file)?;
+        writeln!(file, "Read Token (只读): [{}]", read_token_source)?;
+        writeln!(file, "  {}", admin_read_token)?;
+        writeln!(file)?;
+        writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
+        writeln!(file, "  {}", admin_write_token)?;
+        writeln!(file)?;
+        writeln!(file, "可直接写入 .env:")?;
+        writeln!(file, "ADMIN_READ_TOKEN={}", admin_read_token)?;
+        writeln!(file, "ADMIN_WRITE_TOKEN={}", admin_write_token)?;
+        writeln!(file, "========================================")?;
+
+        info!("管理员访问凭证已保存到: {}", token_path.display());
+        info!("查看凭证: cat {}", token_path.display());
+    }
+
+    // 9. 创建应用状态
+    let state = Arc::new(AppState::new(
+        config.clone(),
+        db_pool.clone(),
+        connection_manager.clone(),
+        intent_manager.clone(),
+        rate_limiter.clone(),
+        game_data_cache.clone(),
+        dialogue_manager.clone(),
+        admin_read_token,
+        admin_write_token,
+        crate::paths::get_config_dir(),
+    ));
+
+    // 10. 启动Tick引擎（后台任务）
+    let tick_engine_handle = start_tick_engine(
+        game_data_cache.clone(),
+        db_pool,
+        connection_manager.clone(),
+        intent_manager.clone(),
+    );
+
+    // 10.1 启动速率限制器清理任务
+    let _cleanup_handle = start_rate_limiter_cleanup(rate_limiter.clone());
+
+    // 11. 构建路由
+    let app = Router::new()
+        .route("/", get(handlers::system::root))
+        .route("/health", get(handlers::system::health_check))
+        .route(
+            "/api/v1/agent/register",
+            post(handlers::agent::agent_register),
+        )
+        .route(
+            "/api/v1/agent/{id}/context",
+            get(handlers::context::get_agent_context),
+        )
+        .route(
+            "/api/v1/validate-action",
+            post(handlers::validation::validate_action),
+        )
+        .route("/ws", get(websocket::websocket_handler))
+        // Dashboard API (需要 Read 权限)
+        .route(
+            "/api/dashboard/stats",
+            get(handlers::dashboard::get_dashboard_stats).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents",
+            get(handlers::dashboard::get_online_agents).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents/offline",
+            get(handlers::dashboard::get_offline_agents).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents/dead",
+            get(handlers::dashboard::get_dead_agents).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/agent/{id}",
+            get(handlers::dashboard::get_agent_details).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
+        .route(
+            "/api/config",
+            get(handlers::config_editor::list_configs).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/config/{filename}",
+            get(handlers::config_editor::get_config_content)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .put(handlers::config_editor::update_config_content)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
+        )
+        // Config Reload API (需要 Write 权限)
+        .route(
+            "/api/admin/reload-config",
+            post(handlers::config_reload::reload_config_handler).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
+        )
+        // Static files (Admin panel)
+        .nest_service("/admin", ServeDir::new(crate::paths::get_static_dir()))
+        .with_state(state);
+
+    // 12. 启动Web服务器
+    let addr = SocketAddr::new(config.server.host.parse()?, config.server.port);
+
+    // Get tick duration from game_data for logging
+    let tick_duration_secs = {
+        let gd = game_data_cache.get();
+        gd.game_rules.data.agent_state.tick.real_seconds_per_tick
+    };
+
+    info!("启动服务器于 {}", addr);
+    info!("注意：生产环境请务必通过 Nginx/Traefik 启用 WSS (WebSocket Secure)");
+    info!("健康检查: http://{}/health", addr);
+    info!("Agent注册: POST http://{}/api/v1/agent/register", addr);
+    info!("Tick周期: {}秒 (来自 game_rules.yaml)", tick_duration_secs);
+    info!("服务启动完成，等待连接...");
+    info!(
+        "WebSocket端点: ws://{}:{}/ws?token=YOUR_AUTH_TOKEN",
+        addr.ip(),
+        addr.port()
+    );
+
+    // 12. 启动监听
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+
+    // 13. 注册信号处理（优雅关闭）
+    let shutdown_signal = async {
+        // 监听 Ctrl+C (SIGINT)
+        let ctrl_c = async {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to install Ctrl+C handler");
+        };
+
+        // 监听 SIGTERM (Docker stop / Kubernetes pod termination)
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("Failed to install signal handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => info!("收到 SIGINT 信号 (Ctrl+C)"),
+            _ = terminate => info!("收到 SIGTERM 信号"),
+        }
+    };
+
+    // 14. 等待服务器结束、Tick引擎失败或关闭信号
+    tokio::select! {
+        // 关闭信号
+        _ = shutdown_signal => {
+            info!("正在关闭服务...");
+            info!("服务已优雅关闭");
+        }
+
+        // Web服务器运行
+        result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()) => {
+            if let Err(e) = result {
+                error!("Web服务器错误: {}", e);
+            }
+        }
+
+        // Tick引擎任务
+        result = tick_engine_handle => {
+            if let Err(e) = result {
+                error!("Tick引擎任务失败: {}", e);
+            }
+        }
+    }
+
+    info!("服务停止");
+    Ok(())
+}

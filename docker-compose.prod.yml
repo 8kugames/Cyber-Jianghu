@@ -1,0 +1,103 @@
+# ============================================================================
+# Cyber-Jianghu Production Docker Compose
+# Uses pre-built images from GitHub Container Registry
+# ============================================================================
+#
+# 部署步骤：
+#
+# 1. 首次部署（在服务器上）
+#    git clone https://github.com/8kugames/cyber-jianghu.git
+#    cd cyber-jianghu
+#    cp .env.example .env
+#    # 编辑 .env，修改 DB_PASSWORD 等敏感配置
+#
+# 2. 如果镜像仓库是私有的，先登录 GHCR：
+#    echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+#
+# 3. 启动服务
+#    docker compose -f docker-compose.prod.yml up -d
+#
+# 4. 查看日志
+#    docker compose -f docker-compose.prod.yml logs -f
+#
+# 5. 更新镜像
+#    docker compose -f docker-compose.prod.yml pull
+#    docker compose -f docker-compose.prod.yml up -d
+#
+# 注意：
+# - 数据库端口不对外暴露，仅容器内部访问
+# - 日志持久化到 ./logs 目录
+# - 首次启动会自动执行数据库迁移
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cyber-jianghu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: cyber_jianghu
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 挂载所有迁移文件（按文件名排序执行）
+      - ./crates/server/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+      - ./crates/server/migrations/002_jsonb_attributes.sql:/docker-entrypoint-initdb.d/002_jsonb_attributes.sql:ro
+      - ./crates/server/migrations/003_ground_items.sql:/docker-entrypoint-initdb.d/003_ground_items.sql:ro
+      - ./crates/server/migrations/004_drop_legacy_columns.sql:/docker-entrypoint-initdb.d/004_drop_legacy_columns.sql:ro
+    # 生产环境不暴露数据库端口，仅容器内部访问
+    # ports:
+    #   - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cyber-jianghu-network
+
+  server:
+    image: ghcr.io/8kugames/cyber-jianghu-server
+    container_name: cyber-jianghu-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://postgres:${DB_PASSWORD:-changeme}@postgres:5432/cyber_jianghu
+      - RUST_LOG=${RUST_LOG:-info}
+      - SERVER_PORT=23333
+      - TICK_DURATION_SECS=${TICK_DURATION_SECS:-60}
+      - ADMIN_READ_TOKEN=${ADMIN_READ_TOKEN:-}
+      - ADMIN_WRITE_TOKEN=${ADMIN_WRITE_TOKEN:-}
+    ports:
+      - "${SERVER_PORT:-23333}:23333"
+    volumes:
+      # 配置文件挂载（数据驱动架构 - 支持热插拔）
+      - ./crates/server/config:/app/config:ro
+      # 日志持久化
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - cyber-jianghu-network
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  cyber-jianghu-network:
+    driver: bridge
+    name: cyber-jianghu-network
+
+# ============================================================================
+# 数据卷配置
+# ============================================================================
+volumes:
+  postgres_data:
+    name: cyber-jianghu-postgres-data

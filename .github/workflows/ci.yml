@@ -1,0 +1,217 @@
+# Cyber-Jianghu CI/CD
+# 流程: build -> docker-build -> release (tag only)
+# 触发: PR合并 | v* tag | 手动触发
+
+name: CI
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main, master]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ==========================================================================
+  # Job 1: 跨平台构建 (5 targets)
+  # Linux x86_64/arm64 (musl): cargo-zigbuild 交叉编译
+  # macOS x86_64/arm64: 原生构建
+  # Windows x86_64: 原生构建
+  # ==========================================================================
+  build:
+    name: Build ${{ matrix.platform }}
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            target: x86_64-unknown-linux-musl
+            use_zigbuild: true
+            artifact_server: cyber-jianghu-server-linux-x86_64
+            artifact_client: cyber-jianghu-agent-linux-x86_64
+            bin_server: cyber-jianghu-server
+            bin_client: cyber-jianghu-agent
+          - os: ubuntu-latest
+            platform: linux-arm64
+            target: aarch64-unknown-linux-musl
+            use_zigbuild: true
+            artifact_server: cyber-jianghu-server-linux-arm64
+            artifact_client: cyber-jianghu-agent-linux-arm64
+            bin_server: cyber-jianghu-server
+            bin_client: cyber-jianghu-agent
+          - os: macos-latest
+            platform: macos-arm64
+            target: aarch64-apple-darwin
+            artifact_server: cyber-jianghu-server-macos-arm64
+            artifact_client: cyber-jianghu-agent-macos-arm64
+            bin_server: cyber-jianghu-server
+            bin_client: cyber-jianghu-agent
+          - os: windows-latest
+            platform: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            artifact_server: cyber-jianghu-server-windows-x86_64.exe
+            artifact_client: cyber-jianghu-agent-windows-x86_64.exe
+            bin_server: cyber-jianghu-server.exe
+            bin_client: cyber-jianghu-agent.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+
+      - name: Install zigbuild deps (Linux musl)
+        if: matrix.use_zigbuild
+        run: sudo apt-get install -y libpq-dev pkg-config
+
+      - uses: goto-bus-stop/setup-zig@v2
+        if: matrix.use_zigbuild
+        with:
+          version: 0.13.0
+
+      - uses: taiki-e/install-action@v2
+        if: matrix.use_zigbuild
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install native deps (Linux glibc)
+        if: runner.os == 'Linux' && !matrix.use_zigbuild
+        run: sudo apt-get install -y libssl-dev libpq-dev pkg-config
+
+      - name: Install native deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl libpq
+
+      - name: Build (zigbuild)
+        if: matrix.use_zigbuild
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p cyber-jianghu-server -p cyber-jianghu-agent
+
+      - name: Build (native)
+        if: ${{ !matrix.use_zigbuild }}
+        run: cargo build --release --target ${{ matrix.target }} -p cyber-jianghu-server -p cyber-jianghu-agent
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/${{ matrix.bin_server }} artifacts/${{ matrix.artifact_server }}
+          cp target/${{ matrix.target }}/release/${{ matrix.bin_client }} artifacts/${{ matrix.artifact_client }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_server }}
+          path: artifacts/${{ matrix.artifact_server }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_client }}
+          path: artifacts/${{ matrix.artifact_client }}
+
+      - name: Summary
+        run: |
+          echo "## ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target**: ${{ matrix.target }}" >> $GITHUB_STEP_SUMMARY
+          grep "^version" crates/*/Cargo.toml >> $GITHUB_STEP_SUMMARY || true
+
+  # ==========================================================================
+  # Job 2: Docker 镜像
+  # ==========================================================================
+  docker-build:
+    name: Docker Image
+    needs: [build]
+    if: |
+      always() && needs.build.result == 'success' &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      startsWith(github.ref, 'refs/tags/') ||
+      github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-server
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./crates/server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "## Docker 镜像" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # Job 3: GitHub Release (tag only)
+  # ==========================================================================
+  release:
+    name: GitHub Release
+    needs: [build, docker-build]
+    if: always() && needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Summary
+        run: |
+          echo "## Release: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
