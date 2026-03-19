@@ -177,15 +177,29 @@ impl AgentState {
     /// 将组件化的属性转换为 HashMap 格式，用于 WebSocket 传输
     pub fn get_attributes_for_protocol(&self) -> HashMap<String, i32> {
         let mut attributes = HashMap::new();
+        let context = self.get_formula_context();
 
         // 从 StatusComponent 收集所有状态属性
         for (name, attr) in &self.status.collection.attributes {
             attributes.insert(name.clone(), attr.value.get());
+            
+            // 顺便提供上限值
+            let max_value = crate::game_data::types::StatusComponent::evaluate_max_value(
+                &attr.metadata.max_value_formula,
+                255,
+                &context
+            );
+            attributes.insert(format!("{}_max", name), max_value);
         }
 
         // 从 AttributeComponent 收集所有先天属性
         for (name, attr) in &self.primary_attributes.collection.attributes {
             attributes.insert(name.clone(), attr.value.get());
+            
+            // 提供先天属性的极限值（如果是可成长属性）
+            if let crate::game_data::types::attributes::AttributeValue::Growable { base, .. } = &attr.value {
+                attributes.insert(format!("{}_max", name), *base as i32);
+            }
         }
 
         attributes
