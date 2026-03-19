@@ -204,8 +204,17 @@ pub struct LocationRulesData {
 /// 游戏时间规则数据（用于计算 tick_id）
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GameTimeRulesData {
-    /// 游戏纪元起始日期
+    /// 游戏纪元起始日期（格式：YYYY-MM-DD）
     pub start_date: String,
+
+    /// 时区偏移量（UTC+8 = 8，UTC-5 = -5）
+    /// 用于将 start_date 解释为当地时区的午夜
+    #[serde(default = "default_timezone_offset")]
+    pub timezone_offset: i32,
+}
+
+fn default_timezone_offset() -> i32 {
+    8 // 默认使用 UTC+8（北京时间）
 }
 
 /// 验证规则数据

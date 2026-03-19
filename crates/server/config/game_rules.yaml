@@ -43,7 +43,11 @@ data:
 
     # 游戏纪元（用于计算 tick_id）
     game_time:
+      # 游戏纪元起始日期（格式：YYYY-MM-DD）
       start_date: "2026-03-03"
+      # 时区偏移量（UTC+8 = 8，UTC-5 = -5）
+      # 用于将 start_date 解释为当地时区的午夜
+      timezone_offset: 8
 
   # 验证规则
   validation:

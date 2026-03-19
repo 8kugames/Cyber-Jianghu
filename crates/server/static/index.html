@@ -748,6 +748,10 @@
             let refreshInterval = null;
             let authToken = localStorage.getItem("admin_token") || "";
 
+            // Smooth time animation state
+            let smoothTimeConfig = null;  // { tickId, tickDurationSecs, ticksPerHour, lastSyncTime }
+            let smoothTimeAnimationId = null;
+
             // Check for token in URL
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.has("token")) {
@@ -832,6 +836,7 @@
                     startAutoRefresh();
                 } else {
                     stopAutoRefresh();
+                    stopSmoothTimeAnimation();
                     loadConfigList();
                 }
             }
@@ -849,8 +854,22 @@
 
                     const data = await res.json();
 
-                    const renderCard = (label, value, sub = "") => `
-                    <div class="stat-card">
+                    // Store config for smooth time animation (前端自行计算)
+                    smoothTimeConfig = {
+                        tickId: data.current_tick_id,
+                        tickDurationSecs: data.tick_duration_secs,
+                        ticksPerHour: data.ticks_per_hour,
+                        season: data.game_time.season,  // 季节名称
+                        lastSyncTime: Date.now(),  // 记录同步时刻
+                    };
+
+                    // Start smooth time animation if not already running
+                    if (!smoothTimeAnimationId) {
+                        startSmoothTimeAnimation();
+                    }
+
+                    const renderCard = (label, value, sub = "", id = "") => `
+                    <div class="stat-card" ${id ? `id="${id}"` : ""}>
                         <div class="stat-label">${label}</div>
                         <div class="stat-value">${value}</div>
                         ${sub ? `<div class="stat-sub">${sub}</div>` : ""}
@@ -870,8 +889,9 @@
                         ),
                         renderCard(
                             "游戏时间",
-                            formatGameTime(data.game_time),
-                            `Tick: ${data.game_flow_total_hours}`,
+                            `${formatGameTimeDate(data.game_time)}<br>${data.game_time.season} | Tick: ${data.current_tick_id}`,
+                            "",
+                            "game-time-card", // ID for smooth update
                         ),
                         renderCard("日活跃用户 (DAU)", data.dau),
                         renderCard("月活跃用户 (MAU)", data.mau),
@@ -905,7 +925,83 @@
 
             function formatGameTime(time) {
                 const pad = (n) => String(n).padStart(2, "0");
+                return `${time.season} | ${time.year}-${pad(time.month)}-${pad(time.day)} ${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}`;
+            }
+
+            function formatGameTimeDate(time) {
+                const pad = (n) => String(n).padStart(2, "0");
                 return `${time.year}-${pad(time.month)}-${pad(time.day)} ${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}`;
+            }
+
+            // ==========================================
+            // Smooth Time Animation (前端自行计算)
+            // ==========================================
+            function startSmoothTimeAnimation() {
+                if (smoothTimeAnimationId) {
+                    cancelAnimationFrame(smoothTimeAnimationId);
+                }
+
+                function updateSmoothTime() {
+                    if (!smoothTimeConfig) return;
+
+                    const now = Date.now();
+                    // 计算自上次同步以来经过的现实时间
+                    const elapsedRealMs = now - smoothTimeConfig.lastSyncTime;
+                    // 计算当前 tick 内的进度 (基于现实时间)
+                    const elapsedRealSecs = elapsedRealMs / 1000;
+                    const tickProgress = Math.min(elapsedRealSecs / smoothTimeConfig.tickDurationSecs, 1.0);
+
+                    // 计算平滑游戏时间
+                    // 总游戏小时 = tickId / ticksPerHour + tick进度 / ticksPerHour
+                    const baseGameHours = smoothTimeConfig.tickId / smoothTimeConfig.ticksPerHour;
+                    const fractionalHours = tickProgress / smoothTimeConfig.ticksPerHour;
+                    const totalGameHours = baseGameHours + fractionalHours;
+
+                    // 转换为年/月/日/时/分/秒
+                    const hoursPerDay = 24;
+                    const daysPerMonth = 30;
+                    const monthsPerYear = 12;
+                    const hoursPerMonth = hoursPerDay * daysPerMonth;
+                    const hoursPerYear = hoursPerMonth * monthsPerYear;
+
+                    const totalHoursI = Math.floor(totalGameHours);
+                    const year = 1 + Math.floor(totalHoursI / hoursPerYear);
+                    const remainingAfterYear = totalHoursI % hoursPerYear;
+                    const month = 1 + Math.floor(remainingAfterYear / hoursPerMonth);
+                    const remainingAfterMonth = remainingAfterYear % hoursPerMonth;
+                    const day = 1 + Math.floor(remainingAfterMonth / hoursPerDay);
+                    const hour = remainingAfterMonth % hoursPerDay;
+
+                    // 小数部分计算分钟和秒
+                    const hourFrac = totalGameHours % 1;
+                    const minute = Math.floor(hourFrac * 60);
+                    const second = Math.round((hourFrac * 60) % 1 * 60);
+
+                    // 更新显示（季节和Tick同行，时间换行）
+                    const pad = (n) => String(n).padStart(2, "0");
+                    const seasonStr = smoothTimeConfig.season || "未知";
+                    const tickStr = smoothTimeConfig.tickId;
+                    const dateStr = `${year}-${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)}`;
+
+                    const card = document.getElementById("game-time-card");
+                    if (card) {
+                        const valueEl = card.querySelector(".stat-value");
+                        if (valueEl) {
+                            valueEl.innerHTML = `${dateStr}<br>${seasonStr} | Tick: ${tickStr}`;
+                        }
+                    }
+
+                    smoothTimeAnimationId = requestAnimationFrame(updateSmoothTime);
+                }
+
+                updateSmoothTime();
+            }
+
+            function stopSmoothTimeAnimation() {
+                if (smoothTimeAnimationId) {
+                    cancelAnimationFrame(smoothTimeAnimationId);
+                    smoothTimeAnimationId = null;
+                }
             }
 
             function toggleAutoRefresh() {
@@ -919,11 +1015,13 @@
 
             function startAutoRefresh() {
                 if (refreshInterval) clearInterval(refreshInterval);
-                refreshInterval = setInterval(loadStats, 1000);
+                // 5秒刷新一次即可，游戏时间由前端自行平滑计算
+                refreshInterval = setInterval(loadStats, 5000);
             }
 
             function stopAutoRefresh() {
                 if (refreshInterval) clearInterval(refreshInterval);
+                stopSmoothTimeAnimation();
             }
 
             // ==========================================

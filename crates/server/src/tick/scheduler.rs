@@ -15,6 +15,7 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
+use chrono::FixedOffset;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
@@ -171,21 +172,43 @@ impl TickScheduler {
     }
 
     /// 解析游戏纪元（从 YAML 配置）
+    ///
+    /// 使用配置的时区偏移量计算游戏纪元。
+    /// 例如：start_date: "2026-03-03", timezone_offset: 8
+    /// 表示 UTC+8 时区 2026-03-03 00:00:00，对应 UTC 2026-03-02 16:00:00。
     fn parse_game_epoch(&self) -> Result<i64> {
         let gd = self.game_data_cache.get();
         let start_date_str = gd.game_rules.data.agent_state.game_time.start_date.clone();
+        let timezone_offset = gd.game_rules.data.agent_state.game_time.timezone_offset;
         drop(gd);
 
-        // 解析日期字符串 (YYYY-MM-DD 格式) 为 Unix 时间戳
+        // 解析日期字符串 (YYYY-MM-DD 格式)
         let date = chrono::NaiveDate::parse_from_str(&start_date_str, "%Y-%m-%d")
             .with_context(|| format!("无法解析游戏纪元日期: {}", start_date_str))?;
 
+        // 使用配置的时区偏移量
+        // 例如 UTC+8 = 8 * 3600 = 28800 秒
+        let offset_seconds = timezone_offset * 3600;
+        let offset = FixedOffset::east_opt(offset_seconds)
+            .with_context(|| format!("无效的时区偏移量: {}", timezone_offset))?;
+
         let datetime = date.and_hms_opt(0, 0, 0).unwrap();
-        let timestamp = datetime.and_utc().timestamp();
+        let datetime_with_tz = datetime.and_local_timezone(offset).single()
+            .with_context(|| format!("无法创建时区感知时间: {}", start_date_str))?;
+
+        let timestamp = datetime_with_tz.timestamp();
+
+        // 计算对应的 UTC 时间用于日志
+        let utc_datetime = datetime_with_tz.naive_utc();
+        let utc_offset_sign = if timezone_offset >= 0 { "+" } else { "" };
 
         info!(
-            "游戏纪元: {} (Unix timestamp: {})",
-            start_date_str, timestamp
+            "游戏纪元: {} 00:00:00 UTC{}{} = {} UTC (Unix timestamp: {})",
+            start_date_str,
+            utc_offset_sign,
+            timezone_offset,
+            utc_datetime.format("%Y-%m-%d %H:%M:%S"),
+            timestamp
         );
         Ok(timestamp)
     }
@@ -447,5 +470,107 @@ impl TickScheduler {
         }
 
         Ok((agents_processed, actions_executed))
+    }
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Datelike, NaiveDate, TimeZone, Timelike};
+
+    /// 测试东八区时间解析
+    ///
+    /// 验证 start_date: "2026-03-03" 被正确解析为北京时间 00:00:00
+    #[test]
+    fn test_utc8_game_epoch() {
+        // 解析日期字符串
+        let start_date_str = "2026-03-03";
+        let date = NaiveDate::parse_from_str(start_date_str, "%Y-%m-%d").unwrap();
+
+        // 使用东八区（UTC+8）时间
+        let offset = FixedOffset::east_opt(8 * 3600).unwrap();
+        let datetime = date.and_hms_opt(0, 0, 0).unwrap();
+        let datetime_with_tz = datetime.and_local_timezone(offset).single().unwrap();
+
+        // 获取 Unix 时间戳
+        let timestamp = datetime_with_tz.timestamp();
+
+        // 验证：北京时间 2026-03-03 00:00:00 = UTC 2026-03-02 16:00:00
+        // 预期的 UTC 时间戳
+        let expected_utc = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap()
+            .and_hms_opt(16, 0, 0).unwrap()
+            .and_utc()
+            .timestamp();
+
+        assert_eq!(
+            timestamp, expected_utc,
+            "北京时间 2026-03-03 00:00:00 应该等于 UTC 2026-03-02 16:00:00"
+        );
+
+        // 验证具体数值
+        // 2026-03-02 16:00:00 UTC 的 Unix 时间戳
+        // 通过在线工具验证：https://www.unixtimestamp.com/
+        // 2026-03-03 00:00:00 UTC+8 = 2026-03-02 16:00:00 UTC = 1772467200
+        assert_eq!(timestamp, 1772467200, "时间戳应该等于 1772467200");
+    }
+
+    /// 测试 tick_id 计算
+    ///
+    /// 验证基于东八区时间的 tick_id 计算正确
+    #[test]
+    fn test_tick_id_calculation() {
+        let start_date_str = "2026-03-03";
+        let date = NaiveDate::parse_from_str(start_date_str, "%Y-%m-%d").unwrap();
+        let offset = FixedOffset::east_opt(8 * 3600).unwrap();
+        let datetime = date.and_hms_opt(0, 0, 0).unwrap();
+        let game_epoch = datetime.and_local_timezone(offset).single().unwrap().timestamp();
+
+        // 假设 15 秒一个 tick
+        let tick_duration_secs: u64 = 15;
+
+        // 在北京时间 2026-03-03 00:00:00，tick_id 应该是 0
+        let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;
+        assert_eq!(tick_at_epoch, 0, "纪元时刻的 tick_id 应该是 0");
+
+        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 4
+        // 1 分钟 = 60 秒 = 4 个 tick
+        let one_minute_later = game_epoch + 60;
+        let tick_after_1min = (one_minute_later - game_epoch) / tick_duration_secs as i64;
+        assert_eq!(tick_after_1min, 4, "1分钟后的 tick_id 应该是 4");
+
+        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 240
+        // 1 小时 = 3600 秒 = 240 个 tick
+        let one_hour_later = game_epoch + 3600;
+        let tick_after_1hour = (one_hour_later - game_epoch) / tick_duration_secs as i64;
+        assert_eq!(tick_after_1hour, 240, "1小时后的 tick_id 应该是 240");
+    }
+
+    /// 测试时间戳转换的一致性
+    ///
+    /// 验证从时间戳反向转换回日期时间的正确性
+    #[test]
+    fn test_timestamp_roundtrip() {
+        let start_date_str = "2026-03-03";
+        let date = NaiveDate::parse_from_str(start_date_str, "%Y-%m-%d").unwrap();
+        let offset = FixedOffset::east_opt(8 * 3600).unwrap();
+        let datetime = date.and_hms_opt(0, 0, 0).unwrap();
+        let datetime_with_tz = datetime.and_local_timezone(offset).single().unwrap();
+
+        let timestamp = datetime_with_tz.timestamp();
+
+        // 从时间戳反向转换
+        let reversed = offset.timestamp_opt(timestamp, 0).single().unwrap();
+
+        // 验证年月日时分秒一致
+        assert_eq!(reversed.year(), 2026);
+        assert_eq!(reversed.month(), 3);
+        assert_eq!(reversed.day(), 3);
+        assert_eq!(reversed.hour(), 0);
+        assert_eq!(reversed.minute(), 0);
+        assert_eq!(reversed.second(), 0);
     }
 }
