@@ -1,0 +1,81 @@
+# ============================================================================
+# 时间与季节系统配置
+# ============================================================================
+#
+# 职责：定义 tick 在游戏世界中的时间系统
+# - ticks_per_hour: 1 tick = 1/游戏小时（用于计算游戏内时间）
+# - hours_per_day: 每天多少小时
+# - days_per_season: 每季节多少天
+#
+# 配合 game_rules.yaml 使用：
+# - game_rules.yaml 定义"现实时间 → Tick"的转换（服务器调度）
+# - time.yaml 定义"Tick → 游戏时间"的转换（游戏世界观）
+#
+# 示例：
+# - ticks_per_hour: 1 → 1 tick = 1 游戏小时
+# - game_rules.yaml 中 real_seconds_per_tick: 60 → 现实每60秒 = 1 tick
+# - 结果：现实1分钟 = 1 tick = 1 游戏小时
+# ============================================================================
+
+version: "0.0.1"
+description: "时间与季节系统配置"
+
+meta:
+  created_at: "2026-03-16"
+  updated_at: "2026-03-18"
+  author: "Cyber-Jianghu Community"
+  tags: ["time", "seasons", "config"]
+  notes:
+    - "attribute_modifiers: 键为属性名，值为修饰系数"
+    - "1.0 = 无修饰，>1.0 = 消耗/恢复增加，<1.0 = 消耗/恢复减少"
+    - "对于 decaying 属性（如 hunger）: 修饰系数应用于消耗量"
+    - "对于 recovering 属性（如 stamina）: 修饰系数应用于恢复量"
+
+data:
+  # Tick → 游戏时间转换（唯一配置源）
+  # ticks_per_hour: 1 表示 1 tick = 1 游戏小时
+  ticks_per_hour: 1
+  hours_per_day: 24
+  days_per_season: 10
+
+  # 季节定义
+  seasons:
+    - id: "spring"
+      name: "春"
+      description: "万物复苏，适合采集草药和播种"
+      temperature_modifier: 5
+      resource_growth_rate: 1.5
+      attribute_modifiers:
+        hunger: 1.0
+        thirst: 1.0
+        stamina: 0.8
+
+    - id: "summer"
+      name: "夏"
+      description: "烈日炎炎，水分消耗加剧"
+      temperature_modifier: 15
+      resource_growth_rate: 1.2
+      attribute_modifiers:
+        hunger: 1.2
+        thirst: 1.3
+        stamina: 1.0
+
+    - id: "autumn"
+      name: "秋"
+      description: "秋高气爽，丰收的季节"
+      temperature_modifier: 0
+      resource_growth_rate: 1.0
+      attribute_modifiers:
+        hunger: 1.0
+        thirst: 1.0
+        stamina: 1.0
+
+    - id: "winter"
+      name: "冬"
+      description: "寒风凛冽，体力和饱食度消耗加剧，资源匮乏"
+      temperature_modifier: -15
+      resource_growth_rate: 0.2
+      attribute_modifiers:
+        hunger: 1.5
+        thirst: 1.5
+        stamina: 1.3

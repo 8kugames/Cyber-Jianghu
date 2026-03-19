@@ -1,0 +1,48 @@
+# ============================================================================
+# 初始背包物品配置
+# ============================================================================
+#
+# 定义新玩家注册时获得的初始物品
+#
+# 字段说明：
+#   items: 初始物品列表（按组分类，组名仅用于组织，不影响功能）
+#     item_id: 物品 ID（对应 items.yaml）
+#     name: 物品名称（显示用）
+#     quantity: 初始数量
+#     description: 物品描述
+#
+# 注意：
+#   - 组分类 key 使用英文（food, drink, currency）
+#   - item_id 必须在 items.yaml 中定义
+#   - 总物品数量不应超过 inventory.yaml 中的 max_slots
+# ============================================================================
+
+version: "0.0.1"
+description: "初始背包物品配置"
+
+meta:
+  created_at: "2026-03-16"
+  updated_at: "2026-03-19"
+  author: "Cyber-Jianghu Community"
+  tags: ["inventory", "initial", "config"]
+
+data:
+  # 初始物品列表（按组分类，组名仅用于组织，不影响功能）
+  items:
+    food:
+      - item_id: "mantou"
+        name: "馒头"
+        quantity: 3
+        description: "普通的馒头，可以恢复饥饿值"
+
+    drink:
+      - item_id: "water"
+        name: "清水"
+        quantity: 3
+        description: "干净的饮用水，可以恢复口渴值"
+
+    currency:
+      - item_id: "silver"
+        name: "银两"
+        quantity: 10
+        description: "通用货币，用于交易"

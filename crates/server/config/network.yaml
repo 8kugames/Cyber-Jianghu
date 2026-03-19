@@ -1,0 +1,45 @@
+# ============================================================================
+# 网络系统配置
+# ============================================================================
+#
+# 定义 WebSocket 和对话系统的网络参数
+#
+# 字段说明：
+#   websocket:
+#     rate_limit_ms: 消息发送速率限制（毫秒），防止客户端刷屏
+#     cleanup_interval_secs: 清理断开连接的间隔（秒）
+#     cleanup_threshold: 触发清理的连接数阈值
+#   dialogue:
+#     window_seconds: 对话窗口时间（秒），用于对话上下文
+#     max_messages_per_agent: 每个 Agent 最大消息数，超出后移除最早消息
+#
+# 注意：
+#   - rate_limit_ms 过低可能导致正常交互受限
+#   - cleanup_interval_secs 建议与心跳检测周期协调
+# ============================================================================
+
+version: "0.0.1"
+description: "网络系统配置"
+
+meta:
+  created_at: "2026-03-16"
+  updated_at: "2026-03-19"
+  author: "Cyber-Jianghu Community"
+  tags: ["network", "websocket", "config"]
+
+data:
+  # WebSocket 配置
+  websocket:
+    # 消息发送速率限制（毫秒），防止客户端刷屏
+    rate_limit_ms: 500
+    # 清理断开连接的间隔（秒）
+    cleanup_interval_secs: 300
+    # 触发清理的连接数阈值
+    cleanup_threshold: 100
+
+  # 对话系统配置
+  dialogue:
+    # 对话窗口时间（秒），用于对话上下文
+    window_seconds: 300
+    # 每个 Agent 最大消息数，超出后移除最早消息
+    max_messages_per_agent: 20

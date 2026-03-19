@@ -1,0 +1,145 @@
+# OpenClaw Cyber-Jianghu MVP Docker Compose Configuration
+# 用于单机部署的最简配置
+#
+# 使用方式：
+# 1. 复制 .env.example 为 .env 并修改配置
+# 2. 运行: docker compose up -d
+# 3. 查看日志: docker compose logs -f server
+# 4. 停止服务: docker compose down
+
+services:
+  # ============================================================================
+  # PostgreSQL 数据库
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: cyber-jianghu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cyber_jianghu
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      # 性能优化配置（MVP阶段使用默认配置即可）
+      # POSTGRES_MAX_CONNECTIONS: 100
+      # POSTGRES_SHARED_BUFFERS: 256MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 挂载所有迁移文件（按文件名排序执行）
+      - ./crates/server/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
+      - ./crates/server/migrations/002_jsonb_attributes.sql:/docker-entrypoint-initdb.d/002_jsonb_attributes.sql:ro
+      - ./crates/server/migrations/003_ground_items.sql:/docker-entrypoint-initdb.d/003_ground_items.sql:ro
+      - ./crates/server/migrations/004_drop_legacy_columns.sql:/docker-entrypoint-initdb.d/004_drop_legacy_columns.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cyber-jianghu-network
+
+  # ============================================================================
+  # Rust 服务端
+  # ============================================================================
+  server:
+    build:
+      context: .
+      dockerfile: crates/server/Dockerfile
+    container_name: cyber-jianghu-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 服务端配置
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 23333
+
+      # Tick引擎配置
+      TICK_DURATION_SECS: ${TICK_DURATION_SECS:-60}
+
+      # 管理后台访问凭证
+      ADMIN_READ_TOKEN: ${ADMIN_READ_TOKEN:-}
+      ADMIN_WRITE_TOKEN: ${ADMIN_WRITE_TOKEN:-}
+
+
+      # 数据库配置
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-changeme}@postgres:5432/cyber_jianghu
+
+      # 日志级别
+      RUST_LOG: ${RUST_LOG:-info}
+
+      # 环境标识
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    ports:
+      - "${SERVER_PORT:-23333}:23333"
+    volumes:
+      # 配置文件挂载（数据驱动架构 - 支持热插拔）
+      - ./crates/server/config:/app/config:ro
+      # 日志持久化
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - cyber-jianghu-network
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  cyber-jianghu-network:
+    driver: bridge
+    name: cyber-jianghu-network
+
+# ============================================================================
+# 数据卷配置
+# ============================================================================
+volumes:
+  postgres_data:
+    name: cyber-jianghu-postgres-data
+
+# ============================================================================
+# MVP阶段说明
+# ============================================================================
+#
+# 包含的服务：
+# 1. PostgreSQL 15 - 数据持久化
+# 2. Rust Server - 游戏服务端
+#
+# 注意：Redis 在 MVP 阶段暂不需要，将在后续版本引入用于：
+# - 状态缓存
+# - 分布式锁
+# - 消息队列
+#
+# 未包含的服务（推迟到后续版本）：
+# - Redis - 状态缓存（Phase 2）
+# - Prometheus - 监控指标
+# - Grafana - 监控大屏
+# - Nginx - 反向代理
+# - ELK - 日志聚合
+#
+# 性能说明：
+# - 使用debian-slim镜像（更好的兼容性）
+# - 多阶段构建优化镜像大小
+# - 包含健康检查
+# - 数据持久化到volume
+# - 自动重启策略
+#
+# 常用命令：
+# 启动所有服务：docker compose up -d
+# 查看服务状态：docker compose ps
+# 查看服务日志：docker compose logs -f server
+# 停止所有服务：docker compose down
+# 停止并删除数据：docker compose down -v
+# 重新构建服务：docker compose build server
+#
+# 注意事项：
+# 1. 生产环境请修改DB_PASSWORD
+# 2. 首次启动会自动执行数据库迁移
+# 3. 日志文件会保存到./logs目录
+# 4. 数据库数据会持久化到Docker volume
