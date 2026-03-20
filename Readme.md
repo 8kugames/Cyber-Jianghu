@@ -77,6 +77,10 @@
 | [Server](crates/server/Readme.md)           | 服务端开发指南    |
 | [Whitepaper](docs/WHITEPAPER/01_Executive_Summary.md) | 赛博江湖白皮书    |
 
+## 更新日志
+
+查看 [CHANGELOG.md](./CHANGELOG.md) 了解版本历史和变更记录。
+
 ## 许可证
 
 AGPL-3.0 License
