@@ -101,6 +101,15 @@ enter_component_dir() {
     cd "$component_dir"
 }
 
+ensure_network() {
+    local network_name="${1:-}"
+    [ -n "$network_name" ] || error "网络名称为空"
+    if ! docker network inspect "$network_name" >/dev/null 2>&1; then
+        info "创建 Docker 网络: $network_name"
+        docker network create "$network_name" >/dev/null
+    fi
+}
+
 # ============================================================================
 # 服务端命令
 # ============================================================================
@@ -170,6 +179,7 @@ cmd_agent_start() {
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "启动 Agent ($mode)..."
     docker compose -f "$compose_file" up -d
@@ -180,6 +190,7 @@ cmd_agent_start() {
     echo "  - Health:  http://localhost:23340/api/v1/health"
 }
 cmd_agent_stop() {
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "停止 Agent..."
     docker compose down
@@ -188,6 +199,7 @@ cmd_agent_stop() {
 cmd_agent_restart() {
     local mode
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "重启 Agent..."
     local compose_file="docker-compose.yml"
@@ -196,21 +208,25 @@ cmd_agent_restart() {
     success "Agent 已重启"
 }
 cmd_agent_status() {
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "Agent 状态:"
     docker compose ps
 }
 cmd_agent_logs() {
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     docker compose logs -f
 }
 cmd_agent_build() {
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "构建 Agent 镜像..."
     docker compose build
     success "构建完成"
 }
 cmd_agent_reset() {
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     warn "将删除所有数据!"
     prompt "确认重置 Agent 数据? (y/N): "
