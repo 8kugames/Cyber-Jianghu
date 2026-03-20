@@ -37,7 +37,9 @@ services:
   # Agent（HTTP 模式 - 供 OpenClaw 调用）
   # ============================================================================
   agent:
-    image: ghcr.io/8kugames/cyber-jianghu-agent
+    build:
+      context: ../..
+      dockerfile: ./crates/agent/Dockerfile
     container_name: cyber-jianghu-agent
     restart: unless-stopped
     environment:
