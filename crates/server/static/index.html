@@ -535,6 +535,13 @@
                                 >
                                     刷新
                                 </button>
+                                <button
+                                    class="btn btn-secondary"
+                                    onclick="cleanupOfflineAgents()"
+                                    style="margin-left: 10px"
+                                >
+                                    清理离线
+                                </button>
                             </div>
                         </div>
 
@@ -1199,6 +1206,36 @@
                     if (currentAgentTab === "dead") renderAgents();
                 } catch (e) {
                     console.error("Failed to load dead agents", e);
+                }
+            }
+
+            async function cleanupOfflineAgents() {
+                if (!confirm("确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。")) {
+                    return;
+                }
+                
+                try {
+                    const res = await fetch("/api/dashboard/agents/cleanup", {
+                        method: "POST",
+                        headers: getAuthHeaders(),
+                    });
+
+                    if (handleAuthError(res)) return;
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        showToast(`清理成功！共删除了 ${data.deleted_count} 个离线 Agent。`, "success");
+                        loadStats();
+                        if (currentAgentTab === "offline") {
+                            loadOfflineAgents();
+                        }
+                    } else {
+                        const errorText = await res.text();
+                        showToast(`清理失败: ${errorText}`, "error");
+                    }
+                } catch (e) {
+                    console.error("Failed to cleanup agents", e);
+                    showToast("网络请求失败", "error");
                 }
             }
 
