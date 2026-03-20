@@ -29,6 +29,19 @@ pub struct DashboardStats {
     pub current_tick_id: i64,
     /// 每游戏小时对应的 tick 数（供前端计算平滑时间）
     pub ticks_per_hour: f64,
+
+    // Bug #5: 新增监控指标
+    pub natural_deaths_last_24h: i64,
+    pub abnormal_deaths_last_24h: i64,
+    pub offline_duration_distribution: OfflineDistribution,
+}
+
+#[derive(Serialize)]
+pub struct OfflineDistribution {
+    pub less_than_1h: i64,
+    pub one_to_24h: i64,
+    pub one_to_7d: i64,
+    pub more_than_7d: i64,
 }
 
 #[derive(Serialize)]
@@ -200,6 +213,51 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64
     };
 
+    // 11. Offline distribution
+    let mut less_than_1h = 0;
+    let mut one_to_24h = 0;
+    let mut one_to_7d = 0;
+    let mut more_than_7d = 0;
+
+    let offline_rows = sqlx::query(
+        "SELECT EXTRACT(EPOCH FROM (NOW() - last_tick_online)) as offline_secs 
+         FROM agents WHERE last_tick_online IS NOT NULL",
+    )
+    .fetch_all(&state.db_pool)
+    .await
+    .unwrap_or_default();
+
+    for row in offline_rows {
+        let secs: Option<f64> = row.get(0);
+        if let Some(s) = secs {
+            if s < 3600.0 {
+                less_than_1h += 1;
+            } else if s < 86400.0 {
+                one_to_24h += 1;
+            } else if s < 604800.0 {
+                one_to_7d += 1;
+            } else {
+                more_than_7d += 1;
+            }
+        }
+    }
+
+    // 12. Death statistics (simplified implementation using recent state changes)
+    let dead_agents = sqlx::query(
+        "SELECT COUNT(*) FROM agent_states s1
+         JOIN agent_states s2 ON s1.agent_id = s2.agent_id AND s1.tick_id = s2.tick_id - 1
+         WHERE s1.is_alive = true AND s2.is_alive = false",
+    )
+    .fetch_one(&state.db_pool)
+    .await
+    .map(|r| r.get::<i64, _>(0))
+    .unwrap_or(0);
+
+    // 假设目前所有死亡都是自然死亡（饿死等），这里作简化处理。
+    // 如果有异常导致的死亡，可以在后续按需分类。
+    let natural_deaths_last_24h = dead_agents;
+    let abnormal_deaths_last_24h = 0;
+
     Json(DashboardStats {
         current_active_agents,
         total_registered_agents,
@@ -216,6 +274,14 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         tick_duration_secs,
         current_tick_id: current_world_tick_id,
         ticks_per_hour,
+        natural_deaths_last_24h,
+        abnormal_deaths_last_24h,
+        offline_duration_distribution: OfflineDistribution {
+            less_than_1h,
+            one_to_24h,
+            one_to_7d,
+            more_than_7d,
+        },
     })
 }
 
@@ -500,25 +566,47 @@ pub async fn get_agent_details(
             }
         }
 
+        // 获取配置计算动态最大值
+        let config = crate::game_data::registry::StateRegistry::get_attributes_config();
+        let get_max = |name: &str| -> i32 {
+            if let Some(cfg) = &config {
+                if let Some(attr_def) = cfg.data.status.attributes.get(name) {
+                    return crate::game_data::types::StatusComponent::evaluate_max_value(
+                        &attr_def.max_value_formula,
+                        100,
+                        &attributes_map,
+                    );
+                }
+            }
+            100
+        };
+
         (
             row.get::<String, _>("node_id"),
             attrs.get("hp").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
-            attrs.get("hp_max").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
+            attrs
+                .get("hp_max")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or_else(|| get_max("hp")),
             attrs.get("hunger").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
                 .get("hunger_max")
                 .and_then(|v| v.as_i64())
-                .unwrap_or(100) as i32,
+                .map(|v| v as i32)
+                .unwrap_or_else(|| get_max("hunger")),
             attrs.get("thirst").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
                 .get("thirst_max")
                 .and_then(|v| v.as_i64())
-                .unwrap_or(100) as i32,
+                .map(|v| v as i32)
+                .unwrap_or_else(|| get_max("thirst")),
             attrs.get("stamina").and_then(|v| v.as_i64()).unwrap_or(100) as i32,
             attrs
                 .get("stamina_max")
                 .and_then(|v| v.as_i64())
-                .unwrap_or(100) as i32,
+                .map(|v| v as i32)
+                .unwrap_or_else(|| get_max("stamina")),
             row.get::<bool, _>("is_alive"),
             attributes_map,
         )
@@ -556,5 +644,59 @@ pub async fn get_agent_details(
         is_alive,
         inventory,
         attributes: attributes_map,
+    }))
+}
+
+// ============================================================================
+// Maintenance API
+// ============================================================================
+
+#[derive(Serialize)]
+pub struct CleanupResult {
+    pub deleted_count: u64,
+}
+
+/// 清理长期离线的 Agent
+pub async fn cleanup_offline_agents(
+    State(state): State<Arc<AppState>>,
+) -> impl axum::response::IntoResponse {
+    let cleanup_days = {
+        let gd_guard = state.game_data.get();
+        gd_guard.game_rules.data.ops.offline_cleanup_days
+    };
+
+    let mut tx = match state.db_pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!("Failed to begin transaction for cleanup: {}", e);
+            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let query_str = format!(
+        "DELETE FROM agents WHERE last_tick_online < NOW() - INTERVAL '{} days'",
+        cleanup_days
+    );
+
+    let result = match sqlx::query(&query_str).execute(&mut *tx).await {
+        Ok(res) => res,
+        Err(e) => {
+            tracing::error!("Failed to execute cleanup query: {}", e);
+            return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    if let Err(e) = tx.commit().await {
+        tracing::error!("Failed to commit transaction for cleanup: {}", e);
+        return Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    tracing::info!(
+        "Dashboard triggered cleanup: deleted {} agents.",
+        result.rows_affected()
+    );
+
+    Ok(Json(CleanupResult {
+        deleted_count: result.rows_affected(),
     }))
 }
