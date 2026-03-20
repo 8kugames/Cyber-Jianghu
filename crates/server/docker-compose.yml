@@ -29,6 +29,8 @@ services:
       - ./migrations/002_jsonb_attributes.sql:/docker-entrypoint-initdb.d/002_jsonb_attributes.sql:ro
       - ./migrations/003_ground_items.sql:/docker-entrypoint-initdb.d/003_ground_items.sql:ro
       - ./migrations/004_drop_legacy_columns.sql:/docker-entrypoint-initdb.d/004_drop_legacy_columns.sql:ro
+      - ./migrations/005_devices.sql:/docker-entrypoint-initdb.d/005_devices.sql:ro
+      - ./migrations/006_agents_device_link.sql:/docker-entrypoint-initdb.d/006_agents_device_link.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -45,7 +47,7 @@ services:
   server:
     build:
       context: ../..
-      dockerfile: ./Dockerfile
+      dockerfile: ./crates/server/Dockerfile
     container_name: cyber-jianghu-server
     restart: unless-stopped
     depends_on:
