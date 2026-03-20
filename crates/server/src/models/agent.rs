@@ -9,11 +9,15 @@ use uuid::Uuid;
 
 /// Agent基本信息
 ///
-/// 存储Agent的基本信息，包括名称、人设Prompt、认证token等
+/// 存储Agent的基本信息，包括名称、人设Prompt等
+/// 认证信息存储在 devices 表，通过 device_id 关联
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Agent {
     /// Agent唯一ID（UUID）
     pub agent_id: Uuid,
+
+    /// 所属设备ID（关联 devices 表）
+    pub device_id: Uuid,
 
     /// Agent名称（如：老板娘、富商、刀客、新秀、小偷）
     pub name: String,
@@ -21,9 +25,6 @@ pub struct Agent {
     /// Agent人设Prompt（LLM使用）
     /// 定义Agent的性格、行为规则等
     pub system_prompt: String,
-
-    /// 认证token（WebSocket连接时使用）
-    pub auth_token: String,
 
     /// 创建时间
     pub created_at: DateTime<Utc>,

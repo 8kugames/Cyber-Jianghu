@@ -17,70 +17,146 @@ use crate::models::{Agent, AgentState};
 use super::common::generate_secure_token;
 
 // ============================================================================
+// 设备连接（Phase 3）
+// ============================================================================
+
+/// 设备连接结果
+#[derive(Debug)]
+pub struct DeviceConnectResult {
+    /// 设备 ID
+    pub device_id: Uuid,
+    /// 认证令牌
+    pub auth_token: String,
+    /// 是否为新设备
+    pub is_new: bool,
+}
+
+/// 注册或获取设备
+///
+/// - 如果设备不存在，创建新设备记录并生成 auth_token
+/// - 如果设备已存在，返回现有的 auth_token
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 客户端生成的设备 UUID
+///
+/// # 返回
+/// - Ok(DeviceConnectResult): 连接结果
+/// - Err: 数据库操作失败
+pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConnectResult> {
+    debug!("设备连接: {}", device_id);
+
+    // 先尝试获取现有设备
+    let existing: Option<(String,)> = sqlx::query_as(
+        r#"
+        SELECT auth_token FROM devices WHERE device_id = $1
+        "#,
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await
+    .context("查询设备失败")?;
+
+    if let Some((auth_token,)) = existing {
+        debug!("设备已存在: {}", device_id);
+        return Ok(DeviceConnectResult {
+            device_id,
+            auth_token,
+            is_new: false,
+        });
+    }
+
+    // 创建新设备
+    let auth_token = generate_secure_token();
+
+    sqlx::query(
+        r#"
+        INSERT INTO devices (device_id, auth_token)
+        VALUES ($1, $2)
+        ON CONFLICT (device_id) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+        "#,
+    )
+    .bind(device_id)
+    .bind(&auth_token)
+    .execute(pool)
+    .await
+    .context("创建设备记录失败")?;
+
+    tracing::info!("新设备注册成功: {}", device_id);
+
+    Ok(DeviceConnectResult {
+        device_id,
+        auth_token,
+        is_new: true,
+    })
+}
+
+/// 验证设备认证令牌
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+/// - auth_token: 认证令牌
+///
+/// # 返回
+/// - Ok(true): 验证通过
+/// - Ok(false): 验证失败
+/// - Err: 数据库错误
+pub async fn verify_device_token(pool: &PgPool, device_id: Uuid, auth_token: &str) -> Result<bool> {
+    let result: Option<(i64,)> = sqlx::query_as(
+        r#"
+        SELECT 1 FROM devices WHERE device_id = $1 AND auth_token = $2
+        "#,
+    )
+    .bind(device_id)
+    .bind(auth_token)
+    .fetch_optional(pool)
+    .await
+    .context("验证设备令牌失败")?;
+
+    Ok(result.is_some())
+}
+
+/// 更新设备最后在线时间
+pub async fn update_device_last_seen(pool: &PgPool, device_id: Uuid) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE devices SET last_seen = CURRENT_TIMESTAMP WHERE device_id = $1
+        "#,
+    )
+    .bind(device_id)
+    .execute(pool)
+    .await
+    .context("更新设备在线时间失败")?;
+
+    Ok(())
+}
+
+// ============================================================================
 // Agent 相关操作
 // ============================================================================
 
-/// 创建新Agent
-///
-/// 已废弃：请使用 `register_agent_transactional` 替代，它在单个事务中创建 Agent 和初始状态
+/// 根据agent_id查询Agent
 ///
 /// # 参数
 /// - pool: 数据库连接池
-/// - name: Agent名称
-/// - system_prompt: Agent人设Prompt
-///
-/// # 返回
-/// - Ok(Agent): 创建的Agent
-/// - Err: 创建失败
-#[deprecated(since = "0.1.0", note = "请使用 `register_agent_transactional` 替代")]
-#[allow(dead_code)]
-pub async fn create_agent(pool: &PgPool, name: &str, system_prompt: &str) -> Result<Agent> {
-    debug!("创建Agent: {}", name);
-
-    // 生成安全的 auth_token
-    // 使用 UUID v4 + 随机后缀，提供 128 位 + 额外64 位
-    // 格式: {uuid_v4}_{random_16_hex}
-    let auth_token = generate_secure_token();
-
-    let agent = sqlx::query_as::<Postgres, Agent>(
-        r#"
-        INSERT INTO agents (name, system_prompt, auth_token)
-        VALUES ($1, $2, $3)
-        RETURNING *
-        "#,
-    )
-    .bind(name)
-    .bind(system_prompt)
-    .bind(&auth_token)
-    .fetch_one(pool)
-    .await
-    .context("创建 Agent 失败")?;
-
-    tracing::info!("Agent创建成功: {} ({})", agent.name, agent.agent_id);
-    Ok(agent)
-}
-
-/// 根据auth_token查询Agent
-///
-/// # 参数
-/// - pool: 数据库连接池
-/// - auth_token: 认证token
+/// - agent_id: Agent ID
 ///
 /// # 返回
 /// - Ok(Agent): 查询到的Agent
 /// - Err: 查询失败或未找到
-pub async fn get_agent_by_token(pool: &PgPool, auth_token: &str) -> Result<Agent> {
-    debug!("查询Agent by token");
+pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
+    debug!("查询Agent by id: {}", agent_id);
 
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        SELECT * FROM agents WHERE auth_token = $1
+        SELECT * FROM agents WHERE agent_id = $1
         "#,
     )
-    .bind(auth_token)
+    .bind(agent_id)
     .fetch_one(pool)
     .await
-    .context("根据 token 查询 Agent 失败")?;
+    .context("根据 agent_id 查询 Agent 失败")?;
 
     Ok(agent)
 }
@@ -262,36 +338,43 @@ pub struct RegistrationResult {
 /// 事务性注册Agent（F-04）
 ///
 /// 在单个数据库事务中执行：
-/// 1. 创建Agent记录
+/// 1. 创建Agent记录（关联到设备）
 /// 2. 创建初始状态
 /// 3. 分配初始物品
 ///
 /// 任何步骤失败都会回滚整个事务
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备ID（Agent所属设备）
+/// - name: Agent名称
+/// - system_prompt: Agent人设Prompt
+/// - initial_tick_id: 初始Tick ID
+/// - initial_items: 初始物品列表
 pub async fn register_agent_transactional(
     pool: &PgPool,
+    device_id: Uuid,
     name: &str,
     system_prompt: &str,
     initial_tick_id: i64,
     initial_items: &[(String, String, i32, String)],
 ) -> Result<RegistrationResult> {
-    debug!("事务性注册Agent: {}", name);
-
-    let auth_token = generate_secure_token();
+    debug!("事务性注册Agent: {} (device: {})", name, device_id);
 
     // 开始事务
     let mut tx = pool.begin().await.context("开始事务失败")?;
 
-    // 步骤1: 创建Agent
+    // 步骤1: 创建Agent（关联设备）
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        INSERT INTO agents (name, system_prompt, auth_token)
+        INSERT INTO agents (device_id, name, system_prompt)
         VALUES ($1, $2, $3)
         RETURNING *
         "#,
     )
+    .bind(device_id)
     .bind(name)
     .bind(system_prompt)
-    .bind(&auth_token)
     .fetch_one(&mut *tx)
     .await
     .context("在事务中创建 Agent 失败")?;
