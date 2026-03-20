@@ -57,3 +57,35 @@ Agent SDK 是接入世界的"躯壳"和"大脑"。
 - [x] OpenClaw 集成已独立发布为 npm 包 `@8kugames/cyber-jianghu-openclaw`。
 - [x] 实现了 `jianghu_act` 动作执行工具、注册 Hook 以及内存插件，支持外部 AI Agent 零代码接入赛博江湖。
 - [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)。
+
+---
+
+## 五、 设备与角色系统 (Phase 3 重构)
+
+实现了设备身份（Device）与角色身份（Agent）的完全分离，支持转世机制。
+
+### 1. 设备管理
+- [x] **设备注册**: 新增 `/api/v1/agent/connect` 端点，用于设备首次连接时获取身份凭证。
+- [x] **设备持久化**: 设备信息存储在 `devices` 表中，包含 `device_token` 和 `last_seen_at`。
+- [x] **设备认证**: WebSocket 连接现在基于 `device_id` 进行验证，而非角色 Token。
+
+### 2. 角色管理
+- [x] **角色注册**: 新增 `/api/v1/agent/register` 端点，设备可为自身创建多个角色。
+- [x] **转世机制**: 支持角色死亡后重新开始，通过 `/api/v1/agent/rebirth` 删除旧角色数据。
+- [x] **角色绑定**: 角色通过 `device_id` 关联到设备，支持一个设备管理多个角色。
+
+### 3. Web 管理面板
+- [x] **角色创建页面**: `GET /` 提供可视化角色创建界面。
+- [x] **角色信息页面**: `GET /character.html` 展示角色属性、背包、经历等信息。
+- [x] **管理页面**: `GET /manage.html` 支持梦境注入和转生操作。
+
+## 六、 生产部署 (Phase 4)
+
+### 1. Docker 部署优化
+- [x] **自动迁移**: 容器启动时自动执行数据库迁移文件 (`/app/migrations/*.sql`)。
+- [x] **Token 自动生成**: 当 `ADMIN_READ_TOKEN` 或 `ADMIN_WRITE_TOKEN` 为空时自动生成随机 Token。
+- [x] **版本管理脚本**: 新增 `scripts/version-bump.sh` 自动检测变更并升级版本号。
+
+### 2. 配置优化
+- [x] **空值过滤**: Token 环境变量增加空字符串过滤，避免空值被误认为有效配置。
+- [x] **数据库等待**: 容器启动时等待 PostgreSQL 就绪后再执行迁移。
