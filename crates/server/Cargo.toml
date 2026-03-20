@@ -7,10 +7,6 @@ license = "AGPL-3.0"
 description = "MVP server for Cyber-Jianghu MMO-MAS"
 
 [[bin]]
-name = "migrate_max_attributes"
-path = "src/bin/migrate_max_attributes.rs"
-
-[[bin]]
 name = "cleanup_offline_agents"
 path = "src/bin/cleanup_offline_agents.rs"
 
