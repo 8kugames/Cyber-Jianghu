@@ -46,6 +46,9 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
+// 导入 handlers 中的 DreamState
+pub use handlers::DreamState;
+
 // 导入 AI 模块类型
 use crate::ai::cognitive::narrative::NarrativeEngine;
 use crate::ai::dialogue::{DialogueClient, DialogueEventHandler};
@@ -106,6 +109,8 @@ pub struct HttpApiState {
     pub server_http_url: String,
     /// 设备身份（device_id + auth_token）
     pub identity: Option<crate::config::IdentityConfig>,
+    /// 配置文件路径（用于读取角色配置）
+    pub config_path: PathBuf,
 
     // AI 组件（全部可选，支持按需注入）
     /// 对话客户端，处理 Agent 间对话
@@ -128,6 +133,8 @@ pub struct HttpApiState {
     pub narrative_engine: Option<Arc<NarrativeEngine>>,
     /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
     pub review_store: Option<Arc<ReviewStore>>,
+    /// 托梦存储，管理持续 n 回合的念头注入
+    pub dream_store: Option<Arc<RwLock<DreamState>>>,
 }
 
 /// HTTP 决策状态
@@ -286,6 +293,21 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/register",
             post(handlers::register_character_handler),
         ) // 创建新角色（转发到 Server）
+        // === 角色信息端点 ===
+        .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
+        .route(
+            "/api/v1/character/experiences",
+            get(handlers::get_experiences_handler),
+        ) // 获取经历日志（分页）
+        .route(
+            "/api/v1/character/rebirth",
+            post(handlers::rebirth_character_handler),
+        ) // 转生（强制归隐重新注册）
+        .route("/api/v1/character/dream", get(handlers::get_dream_handler)) // 获取托梦状态
+        .route(
+            "/api/v1/character/dream",
+            post(handlers::dream_character_handler),
+        ) // 托梦（持续 n 回合的念头注入）
         // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
         .route("/api/v1/review/pending", get(review::get_pending_reviews)) // 获取待审查意图
         .route("/api/v1/review/{intent_id}", post(review::submit_review)) // 提交审查结果
@@ -384,9 +406,13 @@ pub fn create_http_state(
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
-    // 初始化数据目录
+    // 初始化数据目录和配置目录
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let data_dir = home.join(".cyber-jianghu").join("data");
+    let config_path = dirs::config_dir()
+        .unwrap_or_else(|| home.join(".config"))
+        .join("cyber-jianghu")
+        .join("agent.yaml");
 
     // 读取 agent_id（使用 block_in_place 在同步上下文中读取异步锁）
     let current_agent_id = {
@@ -440,6 +466,7 @@ pub fn create_http_state(
         agent_id,
         server_http_url,
         identity,
+        config_path,
         dialogue_client,
         relationship_store,
         lifespan_calculator,
@@ -449,6 +476,7 @@ pub fn create_http_state(
         dynamic_persona: None,
         narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
+        dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -513,6 +541,34 @@ impl HttpApiState {
     pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
         self.review_store = Some(store);
         self
+    }
+
+    /// 设置托梦存储
+    pub fn with_dream_store(mut self, store: Arc<RwLock<DreamState>>) -> Self {
+        self.dream_store = Some(store);
+        self
+    }
+
+    /// 获取当前托梦内容（如果有）
+    /// 每次调用会减少剩余回合数
+    pub async fn consume_dream(&self) -> Option<String> {
+        let dream_store = self.dream_store.as_ref()?;
+        let mut dream = dream_store.write().await;
+
+        if dream.remaining_ticks > 0 {
+            let thought = dream.thought.clone();
+            dream.remaining_ticks = dream.remaining_ticks.saturating_sub(1);
+
+            if dream.remaining_ticks == 0 {
+                info!("[dream] 托梦效果已结束");
+                dream.thought = None;
+            }
+
+            thought
+        } else {
+            dream.thought = None;
+            None
+        }
     }
 
     /// 在 Tick 处理后异步更新关系描述

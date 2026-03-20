@@ -235,6 +235,11 @@ async fn main() -> Result<()> {
             "/api/v1/agent/register",
             post(handlers::agent::agent_register),
         )
+        // 角色转生（Phase 4）- 删除角色，保留设备身份
+        .route(
+            "/api/v1/agent/rebirth",
+            post(handlers::agent::agent_rebirth),
+        )
         .route(
             "/api/v1/agent/{id}/context",
             get(handlers::context::get_agent_context),

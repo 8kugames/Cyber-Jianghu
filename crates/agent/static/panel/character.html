@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>赛博江湖 - 角色信息</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <h1>赛博江湖</h1>
+                <p class="subtitle">角色信息</p>
+                <nav class="nav-tabs">
+                    <a href="index.html" class="nav-tab">创建角色</a>
+                    <a href="character.html" class="nav-tab active">角色信息</a>
+                    <a href="manage.html" class="nav-tab">管理</a>
+                </nav>
+            </header>
+
+            <main>
+                <!-- 加载状态 -->
+                <div id="loading" class="loading">
+                    <p>加载中...</p>
+                </div>
+
+                <!-- 错误显示 -->
+                <div id="error" class="error hidden">
+                    <h3>加载失败</h3>
+                    <p id="error-message"></p>
+                    <button onclick="loadCharacter()" class="retry-btn">重试</button>
+                </div>
+
+                <!-- 角色信息 -->
+                <div id="character-info" class="hidden">
+                    <!-- 基本信息 -->
+                    <section class="info-section">
+                        <h2>基本信息</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="label">姓名</span>
+                                <span class="value" id="name">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">年龄</span>
+                                <span class="value" id="age">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">性别</span>
+                                <span class="value" id="gender">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">身份</span>
+                                <span class="value" id="identity">-</span>
+                            </div>
+                        </div>
+                        <div class="info-item full-width">
+                            <span class="label">外貌</span>
+                            <span class="value" id="appearance">-</span>
+                        </div>
+                    </section>
+
+                    <!-- 性格与价值观 -->
+                    <section class="info-section">
+                        <h2>性格与价值观</h2>
+                        <div class="info-item">
+                            <span class="label">性格特征</span>
+                            <div class="tag-list" id="personality">-</div>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">核心价值观</span>
+                            <div class="tag-list" id="values">-</div>
+                        </div>
+                    </section>
+
+                    <!-- 当前状态 -->
+                    <section class="info-section">
+                        <h2>当前状态</h2>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="label">当前位置</span>
+                                <span class="value" id="location">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">当前 Tick</span>
+                                <span class="value" id="tick-id">-</span>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">游戏时间</span>
+                            <span class="value" id="world-time">-</span>
+                        </div>
+                    </section>
+
+                    <!-- 属性 -->
+                    <section class="info-section">
+                        <h2>属性</h2>
+                        <div id="attributes" class="attributes-grid">
+                            <!-- 动态加载 -->
+                        </div>
+                    </section>
+
+                    <!-- 物品 -->
+                    <section class="info-section">
+                        <h2>持有物品</h2>
+                        <div id="inventory" class="inventory-list">
+                            <!-- 动态加载 -->
+                        </div>
+                    </section>
+                </div>
+
+                <!-- 经历日志 -->
+                <section id="experiences-section" class="info-section hidden">
+                    <h2>经历日志</h2>
+                    <div id="experiences" class="experience-list">
+                        <!-- 动态加载 -->
+                    </div>
+                    <div id="load-more" class="load-more hidden">
+                        <button onclick="loadMoreExperiences()">加载更多</button>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <script>
+            // 获取当前主机和端口
+            const API_BASE = `${window.location.protocol}//${window.location.host}`;
+
+            let currentPage = 1;
+            const limit = 20;
+            let hasMore = false;
+
+            // 加载角色信息
+            async function loadCharacter() {
+                const loading = document.getElementById('loading');
+                const error = document.getElementById('error');
+                const info = document.getElementById('character-info');
+                const expSection = document.getElementById('experiences-section');
+
+                loading.classList.remove('hidden');
+                error.classList.add('hidden');
+                info.classList.add('hidden');
+                expSection.classList.add('hidden');
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/v1/character`);
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.message || `服务器错误: ${response.status}`);
+                    }
+
+                    // 填充基本信息
+                    document.getElementById('name').textContent = data.name || '-';
+                    document.getElementById('age').textContent = data.age || '-';
+                    document.getElementById('gender').textContent = data.gender || '-';
+                    document.getElementById('identity').textContent = data.identity || '-';
+                    document.getElementById('appearance').textContent = data.appearance || '-';
+                    document.getElementById('location').textContent = data.location || '-';
+                    document.getElementById('tick-id').textContent = data.tick_id || '-';
+
+                    // 游戏时间
+                    if (data.world_time) {
+                        const wt = data.world_time;
+                        document.getElementById('world-time').textContent =
+                            `${wt.year}年${wt.month}月${wt.day}日 ${wt.hour}:${String(wt.minute).padStart(2, '0')}`;
+                    }
+
+                    // 性格标签
+                    const personalityEl = document.getElementById('personality');
+                    personalityEl.innerHTML = data.personality && data.personality.length > 0
+                        ? data.personality.map(p => `<span class="info-tag">${p}</span>`).join('')
+                        : '-';
+
+                    // 价值观标签
+                    const valuesEl = document.getElementById('values');
+                    valuesEl.innerHTML = data.values && data.values.length > 0
+                        ? data.values.map(v => `<span class="info-tag">${v}</span>`).join('')
+                        : '-';
+
+                    // 属性
+                    const attrsEl = document.getElementById('attributes');
+                    if (data.attributes) {
+                        const attrs = Object.entries(data.attributes);
+                        attrsEl.innerHTML = attrs.map(([key, value]) => `
+                            <div class="attr-item">
+                                <span class="attr-name">${key}</span>
+                                <span class="attr-value">${value}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        attrsEl.innerHTML = '<p class="no-data">暂无属性数据</p>';
+                    }
+
+                    // 物品
+                    const invEl = document.getElementById('inventory');
+                    if (data.inventory && data.inventory.length > 0) {
+                        invEl.innerHTML = data.inventory.map(item => `
+                            <div class="inv-item">
+                                <span class="inv-name">${item.name || item.item_id}</span>
+                                <span class="inv-qty">x${item.quantity || 1}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        invEl.innerHTML = '<p class="no-data">暂无物品</p>';
+                    }
+
+                    loading.classList.add('hidden');
+                    info.classList.remove('hidden');
+                    expSection.classList.remove('hidden');
+
+                    // 加载经历日志
+                    loadExperiences();
+
+                } catch (err) {
+                    loading.classList.add('hidden');
+                    document.getElementById('error-message').textContent = err.message;
+                    error.classList.remove('hidden');
+                }
+            }
+
+            // 加载经历日志
+            async function loadExperiences(page = 1) {
+                const expEl = document.getElementById('experiences');
+                const loadMoreEl = document.getElementById('load-more');
+
+                if (page === 1) {
+                    expEl.innerHTML = '<p class="loading-text">加载中...</p>';
+                }
+
+                try {
+                    const response = await fetch(
+                        `${API_BASE}/api/v1/character/experiences?page=${page}&limit=${limit}`
+                    );
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.message || `服务器错误: ${response.status}`);
+                    }
+
+                    hasMore = data.has_more;
+                    currentPage = page;
+
+                    if (page === 1) {
+                        expEl.innerHTML = '';
+                    }
+
+                    if (data.experiences && data.experiences.length > 0) {
+                        data.experiences.forEach(exp => {
+                            const div = document.createElement('div');
+                            div.className = 'exp-item';
+                            div.innerHTML = `
+                                <div class="exp-header">
+                                    <span class="exp-tick">Tick ${exp.tick_id}</span>
+                                </div>
+                                <div class="exp-content">${exp.event}</div>
+                            `;
+                            expEl.appendChild(div);
+                        });
+                    } else if (page === 1) {
+                        expEl.innerHTML = '<p class="no-data">暂无经历记录</p>';
+                    }
+
+                    if (hasMore) {
+                        loadMoreEl.classList.remove('hidden');
+                    } else {
+                        loadMoreEl.classList.add('hidden');
+                    }
+
+                } catch (err) {
+                    expEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
+                }
+            }
+
+            function loadMoreExperiences() {
+                loadExperiences(currentPage + 1);
+            }
+
+            // 页面加载时获取角色信息
+            document.addEventListener('DOMContentLoaded', loadCharacter);
+        </script>
+    </body>
+</html>
