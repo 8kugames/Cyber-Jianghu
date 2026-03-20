@@ -15,8 +15,8 @@
 -- tick_logs 表 - Tick 执行日志
 -- ============================================================================
 CREATE TABLE tick_logs (
-    -- Tick 编号（自增主键）
-    tick_id BIGSERIAL PRIMARY KEY,
+    -- Tick 编号（由代码提供，非自增）
+    tick_id BIGINT PRIMARY KEY,
 
     -- 开始时间
     started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -94,5 +94,5 @@ COMMENT ON COLUMN agent_action_logs.result IS '动作执行结果：success/fail
 -- 记录版本
 -- ============================================================================
 INSERT INTO schema_version (version, description)
-VALUES (5, 'TickSystem: tick_logs and agent_action_logs tables')
+VALUES (5, 'TickSystem: tick_logs (BIGINT tick_id) and agent_action_logs tables')
 ON CONFLICT (version) DO NOTHING;
