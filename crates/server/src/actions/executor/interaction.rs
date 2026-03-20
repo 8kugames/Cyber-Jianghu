@@ -34,7 +34,7 @@ impl InteractionActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少给予数据".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -43,7 +43,7 @@ impl InteractionActionExecutor {
         if get_item_definition(&data.item_id).is_none() {
             return ActionExecutionResult::failure(
                 format!("物品不存在: {}", data.item_id),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
         }
 
@@ -51,7 +51,7 @@ impl InteractionActionExecutor {
         if data.quantity <= 0 {
             return ActionExecutionResult::failure(
                 "给予数量必须大于 0".to_string(),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
         }
 
@@ -61,7 +61,7 @@ impl InteractionActionExecutor {
             Err(_) => {
                 return ActionExecutionResult::failure(
                     "无效的目标 ID".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -69,7 +69,7 @@ impl InteractionActionExecutor {
         // 创建成功结果并添加状态变更
         let mut result = ActionExecutionResult::success(
             format!("给予 {} 个 {} 成功", data.quantity, data.item_id),
-            intent.action_type.to_string(),
+            intent.action_type.to_string(), Some(intent.intent_id),
         );
 
         // 添加物品转移变更
@@ -98,7 +98,7 @@ impl InteractionActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少偷窃数据".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -109,7 +109,7 @@ impl InteractionActionExecutor {
             Err(_) => {
                 return ActionExecutionResult::failure(
                     "无效的目标 ID".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -121,7 +121,7 @@ impl InteractionActionExecutor {
                 // 配置缺失，返回失败
                 return ActionExecutionResult::failure(
                     "偷窃动作配置缺失".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -138,7 +138,7 @@ impl InteractionActionExecutor {
         if success {
             let mut result = ActionExecutionResult::success(
                 format!("偷窃 {} 成功!", data.item_id),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
 
             // 偷窃成功，物品从目标转移到自己
@@ -155,7 +155,7 @@ impl InteractionActionExecutor {
         } else {
             ActionExecutionResult::failure(
                 "偷窃失败，被发现了!".to_string(),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             )
         }
     }
@@ -173,7 +173,7 @@ impl InteractionActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少交易数据".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -184,7 +184,7 @@ impl InteractionActionExecutor {
             Err(_) => {
                 return ActionExecutionResult::failure(
                     "无效的目标 ID".to_string(),
-                    intent.action_type.to_string(),
+                    intent.action_type.to_string(), Some(intent.intent_id),
                 );
             }
         };
@@ -193,7 +193,7 @@ impl InteractionActionExecutor {
         if get_item_definition(&data.item_id).is_none() {
             return ActionExecutionResult::failure(
                 format!("物品不存在: {}", data.item_id),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
         }
 
@@ -201,13 +201,13 @@ impl InteractionActionExecutor {
         if data.price < 0 {
             return ActionExecutionResult::failure(
                 "交易价格不能为负数".to_string(),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
         }
 
         let mut result = ActionExecutionResult::success(
             format!("准备交易：{} 以 {} 两银子", data.item_id, data.price),
-            intent.action_type.to_string(),
+            intent.action_type.to_string(), Some(intent.intent_id),
         );
 
         // 使用 TradeExecuted 进行原子交易（物品和银两在一个事务中处理）

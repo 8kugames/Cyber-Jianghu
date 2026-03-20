@@ -18,6 +18,9 @@ use uuid::Uuid;
 /// 记录动作执行的完整结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionExecutionResult {
+    /// 对应的 Intent ID（如果有）
+    pub intent_id: Option<Uuid>,
+
     /// 是否成功
     pub success: bool,
 
@@ -33,8 +36,13 @@ pub struct ActionExecutionResult {
 
 impl ActionExecutionResult {
     /// 创建成功结果
-    pub fn success(message: impl Into<String>, action_type: impl Into<String>) -> Self {
+    pub fn success(
+        message: impl Into<String>,
+        action_type: impl Into<String>,
+        intent_id: Option<Uuid>,
+    ) -> Self {
         Self {
+            intent_id,
             success: true,
             message: message.into(),
             state_changes: Vec::new(),
@@ -43,8 +51,13 @@ impl ActionExecutionResult {
     }
 
     /// 创建失败结果
-    pub fn failure(message: impl Into<String>, action_type: impl Into<String>) -> Self {
+    pub fn failure(
+        message: impl Into<String>,
+        action_type: impl Into<String>,
+        intent_id: Option<Uuid>,
+    ) -> Self {
         Self {
+            intent_id,
             success: false,
             message: message.into(),
             state_changes: Vec::new(),
