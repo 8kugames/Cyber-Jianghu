@@ -225,6 +225,12 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(handlers::system::root))
         .route("/health", get(handlers::system::health_check))
+        // 设备连接（Phase 3）- 首次启动时注册设备身份
+        .route(
+            "/api/v1/agent/connect",
+            post(handlers::agent::agent_connect),
+        )
+        // 角色注册（Phase 4）- 创建游戏角色
         .route(
             "/api/v1/agent/register",
             post(handlers::agent::agent_register),
@@ -279,6 +285,15 @@ async fn main() -> Result<()> {
                 axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents/cleanup",
+            post(handlers::dashboard::cleanup_offline_agents).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
                 ),
             ),
         )
