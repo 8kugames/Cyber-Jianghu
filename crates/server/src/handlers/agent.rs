@@ -3,21 +3,80 @@ use axum::{Json, extract::State, http::StatusCode};
 use std::sync::Arc;
 use tracing::{error, info};
 
+use crate::db::{self, verify_device_token, DeviceConnectResult};
 use crate::game_data;
-use crate::models::{self, AgentRegisterRequest, AgentRegisterResponse};
+use crate::models::{
+    get_max_agent_name_length, get_max_system_prompt_length, AgentConnectRequest,
+    AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse, AvailableAction,
+    GameRules, InitialItem,
+};
 use crate::state::AppState;
+
+// ============================================================================
+// 设备连接 API（Phase 3）
+// ============================================================================
+
+/// 设备连接接口
+///
+/// POST /api/v1/agent/connect
+///
+/// 客户端首次启动时调用，用于注册设备身份或获取现有认证令牌。
+///
+/// 流程：
+/// 1. 客户端生成 device_id (UUID v4)
+/// 2. 调用此接口注册设备
+/// 3. 服务器返回 auth_token
+/// 4. 客户端保存 device_id + auth_token 到 agent.yaml
+///
+/// 后续 WebSocket 连接使用: ws://server/ws?device_id={}&token={}
+pub async fn agent_connect(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<AgentConnectRequest>,
+) -> Result<Json<AgentConnectResponse>, StatusCode> {
+    info!("设备连接请求: {}", payload.device_id);
+
+    // 注册或获取设备
+    let DeviceConnectResult {
+        device_id,
+        auth_token,
+        is_new,
+    } = db::connect_device(&state.db_pool, payload.device_id)
+        .await
+        .map_err(|e| {
+            error!("设备连接失败: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    let message = if is_new {
+        format!("设备 {} 注册成功", device_id)
+    } else {
+        format!("设备 {} 已连接", device_id)
+    };
+
+    info!("{}", message);
+
+    Ok(Json(AgentConnectResponse {
+        auth_token,
+        message,
+    }))
+}
+
+// ============================================================================
+// Agent 注册 API（Phase 4 - 角色创建）
+// ============================================================================
 
 /// Agent降生注册接口
 ///
 /// POST /api/v1/agent/register
 ///
 /// 实现Agent注册流程（事务性）：
-/// 1. 验证 name 和 system_prompt
-/// 2. 在单个事务中执行：
+/// 1. 验证设备认证（device_id + auth_token）
+/// 2. 验证 name 和 system_prompt
+/// 3. 在单个事务中执行：
 ///    - 创建Agent记录
 ///    - 创建初始状态（使用当前 tick_id）
 ///    - 分配默认初始物品
-/// 3. 构建并返回游戏规则
+/// 4. 构建并返回游戏规则
 ///
 /// 注意：根据架构原则，服务器只负责世界状态和规则。
 /// Agent人设Prompt应由客户端（Agent SDK）提供，服务器仅存储。
@@ -27,20 +86,36 @@ pub async fn agent_register(
 ) -> Result<Json<AgentRegisterResponse>, StatusCode> {
     info!("Agent registration request: {}", payload.name);
 
-    // 1. 验证 name 长度
-    if payload.name.is_empty() || payload.name.len() > models::get_max_agent_name_length() {
+    // 1. 验证设备认证（device_id + auth_token）
+    let device_valid = verify_device_token(&state.db_pool, payload.device_id, &payload.auth_token)
+        .await
+        .map_err(|e| {
+            error!("Device verification failed: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if !device_valid {
+        error!(
+            "Invalid device credentials: device_id={}",
+            payload.device_id
+        );
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // 2. 验证 name 长度
+    if payload.name.is_empty() || payload.name.len() > get_max_agent_name_length() {
         error!("Invalid name length: {} chars", payload.name.len());
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // 2. 获取并验证 system_prompt（必需）
+    // 3. 获取并验证 system_prompt（必需）
     let system_prompt = payload.system_prompt.ok_or_else(|| {
         error!("Missing required field: system_prompt");
         StatusCode::BAD_REQUEST
     })?;
 
     // 验证 system_prompt 长度，防止滥用
-    if system_prompt.is_empty() || system_prompt.len() > models::get_max_system_prompt_length() {
+    if system_prompt.is_empty() || system_prompt.len() > get_max_system_prompt_length() {
         error!(
             "Invalid system_prompt length: {} bytes",
             system_prompt.len()
@@ -48,12 +123,12 @@ pub async fn agent_register(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // 3. 获取当前服务器的 tick_id（避免新 agent 累积"出生前"伤害）
+    // 4. 获取当前服务器的 tick_id（避免新 agent 累积"出生前"伤害）
     let current_tick_id = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);
 
-    // 4. 准备初始物品数据
+    // 5. 准备初始物品数据
     let initial_items = game_data::InitialInventoryRegistry::items();
     let initial_items_data: Vec<(String, String, i32, String)> = initial_items
         .iter()
@@ -67,9 +142,10 @@ pub async fn agent_register(
         })
         .collect();
 
-    // 5. 事务性注册（F-04：原子性保证）
+    // 6. 事务性注册（F-04：原子性保证）
     let registration = match crate::db::register_agent_transactional(
         &state.db_pool,
+        payload.device_id, // 关联设备ID
         &payload.name,
         &system_prompt,
         current_tick_id,
@@ -90,19 +166,19 @@ pub async fn agent_register(
         agent.name
     );
 
-    // 6. 构建游戏规则（从配置动态获取）
+    // 7. 构建游戏规则（从配置动态获取）
     let tick_duration_secs = {
         let gd = state.game_data.get();
         gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64
     };
-    let game_rules = crate::models::GameRules {
+    let game_rules = GameRules {
         tick_duration_secs,
         available_actions: game_data::ActionRegistry::all_action_names()
             .into_iter()
             .map(|action_name| {
                 let description = game_data::ActionRegistry::get(&action_name).map(|config| config.description)
                     .unwrap_or_default();
-                crate::models::AvailableAction {
+                AvailableAction {
                     action: action_name,
                     description,
                     valid_targets: None,
@@ -111,7 +187,7 @@ pub async fn agent_register(
             .collect(),
         initial_items: initial_items
             .into_iter()
-            .map(|item| crate::models::InitialItem {
+            .map(|item| InitialItem {
                 item_id: item.item_id,
                 name: item.name,
                 quantity: item.quantity,
@@ -122,12 +198,11 @@ pub async fn agent_register(
         last_updated: chrono::Utc::now().to_rfc3339(),
     };
 
-    // 7. 获取叙事化配置（用于属性描述转换）
+    // 8. 获取叙事化配置（用于属性描述转换）
     let narrative_config = state.game_data.get().narrative.clone();
 
     Ok(Json(AgentRegisterResponse {
         agent_id: agent.agent_id.to_string(),
-        auth_token: agent.auth_token,
         message: format!("Agent '{}' registered successfully", agent.name),
         game_rules,
         narrative_config,
