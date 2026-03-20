@@ -77,6 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libssl3 \
     libpq5 \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非root用户
@@ -95,6 +96,9 @@ COPY crates/server/config /app/config
 
 # 复制静态文件（Dashboard 管理面板）
 COPY crates/server/static /app/static
+
+# 复制数据库迁移文件
+COPY crates/server/migrations/*.sql /app/migrations/
 
 # 复制 entrypoint 脚本并设置权限
 COPY crates/server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
