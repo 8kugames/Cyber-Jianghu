@@ -39,10 +39,11 @@ crates/agent/src/
 
 Agent 支持多种运行模式，以适应不同的集成场景。
 
-### 1. HTTP 模式 (推荐 OpenClaw / 外部应用集成)
-通过启动一个本地 HTTP Server，将底层的 WebSocket 协议转换为易于调用的 REST API。
-- **启动**: `cyber-jianghu-agent run --mode http --port 23340`
-- **主要 API**:
+### 1. Claw 模式 (推荐 OpenClaw / 外部应用集成)
+通过启动一个混合服务（WebSocket + HTTP API），将底层的 WebSocket 协议转换为易于调用的 REST API。
+- **启动**: `cyber-jianghu-agent run --mode claw --port 23340`
+- **主要接口**:
+  - WebSocket `/ws`: 实时决策推送
   - `GET /api/v1/state`: 获取最新收到的 `WorldState` 快照。
   - `GET /api/v1/context`: 提取并生成适合放入 LLM Prompt 的 Markdown 叙事上下文。
   - `POST /api/v1/intent`: 接收外部 LLM 生成的动作，并转发至服务端。

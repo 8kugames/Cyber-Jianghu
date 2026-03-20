@@ -87,6 +87,9 @@ COPY --from=builder /app/target/release/cyber-jianghu-agent /app/agent
 COPY crates/agent/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# 复制静态文件（Web 面板）
+COPY crates/agent/static /app/static
+
 # 创建数据和配置目录并设置权限
 RUN mkdir -p /app/data /app/config && \
     chown -R cyberjianghu:cyberjianghu /app
@@ -103,5 +106,5 @@ ENV RUST_LOG=info \
 # 容器入口点
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# 默认启动 HTTP 模式（用于 OpenClaw 集成）
-CMD ["./agent", "run", "--mode", "http", "--port", "23340"]
+# 默认启动 Claw 模式（用于 OpenClaw 等外部助手集成）
+CMD ["./agent", "run", "--mode", "claw", "--port", "23340"]
