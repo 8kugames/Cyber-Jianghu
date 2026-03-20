@@ -287,6 +287,43 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
 }
 
 // ============================================================================
+// 通用工具方法
+// ============================================================================
+
+#[derive(Serialize)]
+struct ErrorResponse {
+    error_code: String,
+    message: String,
+}
+
+/// 解析 tick_id：优先使用请求中的值，否则使用当前状态的 tick_id
+/// 如果当前没有状态，则拒绝请求
+async fn resolve_tick_id_or_reject(
+    req_tick_id: Option<i64>,
+    state: &HttpApiState,
+) -> Result<i64, axum::response::Response> {
+    if let Some(tick_id) = req_tick_id {
+        return Ok(tick_id);
+    }
+
+    let current = state.current_state.read().await;
+    match current.as_ref() {
+        Some(world_state) => Ok(world_state.tick_id),
+        None => {
+            let resp = (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error_code: "tick_state_unavailable".to_string(),
+                    message: "World state is not available yet".to_string(),
+                }),
+            )
+                .into_response();
+            Err(resp)
+        }
+    }
+}
+
+// ============================================================================
 // 基础端点 Handlers
 // ============================================================================
 
@@ -387,6 +424,31 @@ pub(super) async fn submit_intent_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<IntentRequest>,
 ) -> impl IntoResponse {
+    let tick_id = match resolve_tick_id_or_reject(req.tick_id, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    let current_tick = state
+        .current_state
+        .read()
+        .await
+        .as_ref()
+        .map(|s| s.tick_id)
+        .unwrap_or(0);
+    if tick_id < current_tick {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "intent_expired",
+                "message": format!("Intent tick {} is older than current tick {}", tick_id, current_tick),
+                "current_tick": current_tick,
+                "retry_suggestion": "Please fetch the latest state and submit intent for the new tick."
+            })),
+        )
+            .into_response();
+    }
+
     // 从共享状态读取最新的 agent_id（注册后会被更新）
     let state_agent_id = *state.agent_id.read().await;
     let agent_id = req
@@ -395,11 +457,16 @@ pub(super) async fn submit_intent_handler(
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or(state_agent_id);
 
-    // 从共享状态获取当前 tick_id，确保意图在有效窗口内
-    let current_tick = state.current_state.read().await.as_ref().map(|s| s.tick_id).unwrap_or(0);
-    let tick_id = req.tick_id.unwrap_or(current_tick);
     let action_type: ActionType = req.action_type.into();
-    let intent = Intent::new(agent_id, tick_id, action_type, req.action_data);
+    let intent = if let Some(id_str) = &req.intent_id {
+        if let Ok(id) = Uuid::parse_str(id_str) {
+            Intent::new_with_id(id, agent_id, tick_id, action_type, req.action_data)
+        } else {
+            Intent::new(agent_id, tick_id, action_type, req.action_data)
+        }
+    } else {
+        Intent::new(agent_id, tick_id, action_type, req.action_data)
+    };
 
     match state.intent_tx.send(intent).await {
         Ok(_) => (StatusCode::OK, "Intent submitted").into_response(),
@@ -696,6 +763,11 @@ pub(super) async fn validate_intent_handler(
         .into_response();
     }
 
+    let tick_id = match resolve_tick_id_or_reject(req.tick_id, &state).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
     let validator = match &state.intent_validator {
         Some(v) => v,
         None => {
@@ -716,12 +788,7 @@ pub(super) async fn validate_intent_handler(
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or(state_agent_id);
 
-    let intent = Intent::new(
-        agent_id,
-        req.tick_id.unwrap_or(0),
-        req.action_type,
-        req.action_data,
-    );
+    let intent = Intent::new(agent_id, tick_id, req.action_type, req.action_data);
 
     let persona_info = PersonaInfo {
         gender: req.persona_gender.unwrap_or_else(|| "未知".to_string()),
@@ -784,10 +851,22 @@ pub(super) async fn get_tick_status_handler(
 ) -> impl IntoResponse {
     let current = state.current_state.read().await;
     let agent_id = *state.agent_id.read().await;
+    let last_update = state.last_state_update.read().await;
 
-    let (tick_id, has_state) = match current.as_ref() {
-        Some(ws) => (ws.tick_id, true),
-        None => (0, false),
+    let (tick_id, has_state, state_tick_id) = match current.as_ref() {
+        Some(ws) => (ws.tick_id, true, Some(ws.tick_id)),
+        None => (0, false, None),
+    };
+
+    let (state_updated_at, state_age_ms) = match *last_update {
+        Some(instant) => {
+            let age_ms = instant.elapsed().as_millis() as u64;
+            // 假设我们不能精确地将 Instant 转为 UTC（因为是单调时钟），
+            // 但我们可以用当前 UTC 减去 age_ms 估算。
+            let utc_time = chrono::Utc::now() - std::time::Duration::from_millis(age_ms);
+            (Some(utc_time.to_rfc3339()), Some(age_ms))
+        }
+        None => (None, None),
     };
 
     Json(dto::TickStatusResponse {
@@ -796,5 +875,191 @@ pub(super) async fn get_tick_status_handler(
         has_new_state: has_state,
         seconds_until_next_tick: None, // 服务端未提供此信息
         last_updated_at: chrono::Utc::now().to_rfc3339(),
+        state_tick_id,
+        state_updated_at,
+        state_age_ms,
     })
+}
+
+// ============================================================================
+// 角色注册 API Handlers
+// ============================================================================
+
+/// 角色注册请求（从 CLI 接收）
+#[derive(Debug, Deserialize)]
+pub struct CharacterRegisterRequest {
+    /// 角色姓名
+    pub name: String,
+    /// 年龄
+    #[serde(default = "default_age")]
+    pub age: u8,
+    /// 性别
+    #[serde(default = "default_gender")]
+    pub gender: String,
+    /// 外貌描述
+    #[serde(default)]
+    pub appearance: Option<String>,
+    /// 身份背景
+    #[serde(default)]
+    pub identity: Option<String>,
+    /// 性格特征
+    #[serde(default)]
+    pub personality: Vec<String>,
+    /// 核心价值观
+    #[serde(default)]
+    pub values: Vec<String>,
+    /// 语言风格
+    #[serde(default)]
+    pub language_style: LanguageStyleRequest,
+    /// 目标
+    #[serde(default)]
+    pub goals: GoalsRequest,
+    /// 系统提示词（可选）
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub(super) struct LanguageStyleRequest {
+    #[serde(default)]
+    tone: Option<String>,
+    #[serde(default)]
+    speech_patterns: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+pub(super) struct GoalsRequest {
+    #[serde(default)]
+    short_term: Option<String>,
+    #[serde(default)]
+    long_term: Option<String>,
+}
+
+fn default_age() -> u8 {
+    25
+}
+fn default_gender() -> String {
+    "男".to_string()
+}
+
+/// 角色注册响应（返回给 CLI）
+#[derive(Debug, Serialize)]
+pub struct CharacterRegisterResponse {
+    /// 角色 ID（服务器分配）
+    pub agent_id: String,
+    /// 结果消息
+    pub message: String,
+}
+
+/// 角色注册处理器
+///
+/// POST /api/v1/character/register - 创建新角色
+///
+/// 接收 CLI 的角色创建请求，添加设备认证信息后转发到 Server
+pub(super) async fn register_character_handler(
+    State(state): State<HttpApiState>,
+    Json(payload): Json<CharacterRegisterRequest>,
+) -> impl IntoResponse {
+    use reqwest::Client;
+    use tracing::info;
+
+    // 1. 检查设备身份
+    let identity = match &state.identity {
+        Some(id) => id,
+        None => {
+            error!("设备身份未初始化，请先启动 Agent 进行设备注册");
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: "设备身份未初始化，请先启动 Agent".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    info!("角色注册请求: {}", payload.name);
+
+    // 2. 构建发送到 Server 的请求
+    let server_request = serde_json::json!({
+        "device_id": identity.device_id,
+        "auth_token": identity.auth_token,
+        "name": payload.name,
+        "age": payload.age,
+        "gender": payload.gender,
+        "appearance": payload.appearance,
+        "identity": payload.identity,
+        "personality": payload.personality,
+        "values": payload.values,
+        "language_style": payload.language_style,
+        "goals": payload.goals,
+        "system_prompt": payload.system_prompt,
+    });
+
+    // 3. 转发到 Server
+    let client = Client::new();
+    let server_url = format!("{}/api/v1/agent/register", state.server_http_url);
+
+    let response = match client.post(&server_url).json(&server_request).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("连接服务器失败: {}", e);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: format!("连接服务器失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 4. 处理 Server 响应
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        error!("服务器拒绝注册: {} - {}", status, body);
+        return (
+            status,
+            Json(CharacterRegisterResponse {
+                agent_id: String::new(),
+                message: format!("服务器拒绝: {}", body),
+            }),
+        )
+            .into_response();
+    }
+
+    // 5. 解析成功响应
+    #[derive(Deserialize)]
+    struct ServerRegisterResponse {
+        agent_id: String,
+        message: String,
+    }
+
+    match response.json::<ServerRegisterResponse>().await {
+        Ok(result) => {
+            info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
+            (
+                StatusCode::OK,
+                Json(CharacterRegisterResponse {
+                    agent_id: result.agent_id,
+                    message: result.message,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!("解析服务器响应失败: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: format!("解析响应失败: {}", e),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
