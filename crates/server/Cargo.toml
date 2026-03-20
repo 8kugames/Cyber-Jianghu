@@ -6,6 +6,14 @@ authors = ["Cyber-Jianghu Community"]
 license = "AGPL-3.0"
 description = "MVP server for Cyber-Jianghu MMO-MAS"
 
+[[bin]]
+name = "migrate_max_attributes"
+path = "src/bin/migrate_max_attributes.rs"
+
+[[bin]]
+name = "cleanup_offline_agents"
+path = "src/bin/cleanup_offline_agents.rs"
+
 [dependencies]
 # 内部 crates
 cyber-jianghu-protocol = { path = "../protocol", version = "0.0.2", features = ["sqlx-support"] }
