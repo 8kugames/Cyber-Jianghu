@@ -18,10 +18,10 @@ impl super::Agent {
     pub async fn run(&mut self) -> Result<()> {
         // 连接服务端
         self.client.connect().await?;
-        info!("Agent '{}' connected to server", self.config.agent.name);
+        info!("Agent '{}' connected to server", self.character_name());
 
         // 设置游戏规则更新回调
-        let agent_name_for_callback = self.config.agent.name.clone();
+        let agent_name_for_callback = self.character_name().to_string();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
@@ -34,7 +34,7 @@ impl super::Agent {
         // 设置对话消息回调（如果启用了对话系统）
         if self.dialogue_client.is_some() {
             let dialogue_client = self.dialogue_client.clone();
-            let agent_name_for_dialogue = self.config.agent.name.clone();
+            let agent_name_for_dialogue = self.character_name().to_string();
             self.client.set_dialogue_callback(Arc::new(move |message| {
                 debug!(
                     "Agent '{}' received dialogue message",
@@ -46,14 +46,14 @@ impl super::Agent {
             }));
             info!(
                 "Dialogue callback set for agent '{}'",
-                self.config.agent.name
+                self.character_name()
             );
         }
 
         // 设置世界观规则更新回调（如果启用了验证器）
         if self.validator.is_some() {
             let validator = self.validator.clone();
-            let agent_name_for_rules = self.config.agent.name.clone();
+            let agent_name_for_rules = self.character_name().to_string();
             self.client
                 .set_world_building_rules_callback(Arc::new(move |rules| {
                     info!(
@@ -71,13 +71,13 @@ impl super::Agent {
                 }));
             info!(
                 "World building rules callback set for agent '{}'",
-                self.config.agent.name
+                self.character_name()
             );
         }
 
         // 等待注册确认（包含游戏规则）
         let (agent_id, game_rules) = self.client.wait_for_registration().await?;
-        info!("Agent '{}' registered with server", self.config.agent.name);
+        info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
 
         // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
@@ -120,7 +120,7 @@ impl super::Agent {
             }) {
                 warn!(
                     "Agent '{}' has died: {}",
-                    self.config.agent.name, death_event.description
+                    self.character_name(), death_event.description
                 );
                 // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
                 // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
@@ -159,7 +159,7 @@ impl super::Agent {
                 if status.is_deceased() {
                     info!(
                         "Agent '{}' has passed away at age {}",
-                        self.config.agent.name,
+                        self.character_name(),
                         status.age()
                     );
                     // 发送最后一个 idle 意图后退出
@@ -226,7 +226,7 @@ impl super::Agent {
     /// 关闭连接
     pub async fn close(&mut self) -> Result<()> {
         self.client.close().await;
-        info!("Agent '{}' stopped", self.config.agent.name);
+        info!("Agent '{}' stopped", self.character_name());
         Ok(())
     }
 }

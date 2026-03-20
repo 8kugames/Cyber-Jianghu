@@ -124,10 +124,17 @@ impl Agent {
         }
     }
 
+    /// 获取角色名称（如果已创建）
+    pub(crate) fn character_name(&self) -> &str {
+        self.config.agent.as_ref()
+            .map(|c| c.name.as_str())
+            .unwrap_or("(未创建)")
+    }
+
     /// 连接服务端
     pub async fn connect(&mut self) -> Result<()> {
         self.client.connect().await?;
-        info!("Agent '{}' connected to server", self.config.agent.name);
+        info!("Agent '{}' connected to server", self.character_name());
         Ok(())
     }
 
@@ -136,7 +143,7 @@ impl Agent {
     /// 必须在连接之后调用，因为需要 agent_id
     pub fn set_dialogue_client(&mut self, dialogue_client: DialogueClient) {
         self.dialogue_client = Some(dialogue_client);
-        info!("Dialogue client set for agent '{}'", self.config.agent.name);
+        info!("Dialogue client set for agent '{}'", self.character_name());
     }
 
     /// 设置关系存储
@@ -144,7 +151,7 @@ impl Agent {
         self.relationship_store = Some(relationship_store);
         info!(
             "Relationship store set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -176,7 +183,7 @@ impl Agent {
     /// 设置验证器
     pub fn set_validator(&mut self, validator: std::sync::Arc<dyn Validator>) {
         self.validator = Some(validator);
-        info!("Validator set for agent '{}'", self.config.agent.name);
+        info!("Validator set for agent '{}'", self.character_name());
     }
 
     /// 设置带反馈的决策回调
@@ -184,7 +191,7 @@ impl Agent {
         self.decision_with_feedback_callback = Some(callback);
         info!(
             "Decision with feedback callback set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -193,7 +200,7 @@ impl Agent {
         self.lifespan_calculator = Some(calculator);
         info!(
             "Lifespan calculator set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -210,7 +217,7 @@ impl Agent {
         self.registration_callback = Some(callback);
         info!(
             "Registration callback set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -263,7 +270,7 @@ impl Agent {
     /// 设置记忆管理器
     pub fn set_memory_manager(&mut self, manager: MemoryManager) {
         self.memory_manager = Some(manager);
-        info!("Memory manager set for agent '{}'", self.config.agent.name);
+        info!("Memory manager set for agent '{}'", self.character_name());
     }
 
     /// 获取记忆管理器的可变引用
@@ -327,16 +334,28 @@ impl Agent {
 
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
-        let persona_config = &self.config.agent.persona;
-        PersonaInfo {
-            gender: persona_config.gender.clone(),
-            age: self
-                .lifespan_calculator
-                .as_ref()
-                .map(|c| c.current_age())
-                .unwrap_or(persona_config.initial_age),
-            personality: persona_config.personality.clone(),
-            values: persona_config.values.clone(),
+        match &self.config.agent {
+            Some(character) => {
+                PersonaInfo {
+                    gender: character.gender.clone(),
+                    age: self
+                        .lifespan_calculator
+                        .as_ref()
+                        .map(|c| c.current_age())
+                        .unwrap_or(character.age),
+                    personality: character.personality.clone(),
+                    values: character.values.clone(),
+                }
+            }
+            None => {
+                // 未创建角色时的默认人设
+                PersonaInfo {
+                    gender: "未知".to_string(),
+                    age: 25,
+                    personality: vec![],
+                    values: vec![],
+                }
+            }
         }
     }
 

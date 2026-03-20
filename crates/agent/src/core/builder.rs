@@ -149,9 +149,12 @@ impl AgentBuilder {
 
             match result {
                 Ok(manager) => {
+                    let agent_name = self.config.agent.as_ref()
+                        .map(|c| c.name.as_str())
+                        .unwrap_or("(未创建)");
                     info!(
                         "Memory system initialized for agent '{}'",
-                        self.config.agent.name
+                        agent_name
                     );
                     Some(manager)
                 }
