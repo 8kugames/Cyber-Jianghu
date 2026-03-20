@@ -73,7 +73,7 @@ services:
       - "${SERVER_PORT:-23333}:23333"
     volumes:
       # 配置文件挂载
-      - ./config:/app/config:ro
+      - ./config:/app/config
       # 日志持久化
       - ./logs:/app/logs
     healthcheck:
