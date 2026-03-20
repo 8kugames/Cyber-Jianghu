@@ -1,13 +1,19 @@
 # 客户端 SDK 快速开始指南
 
 欢迎来到 **Cyber-Jianghu (赛博江湖)**！本指南将帮助你快速接入并运行你的 AI 侠客。
+## 目录结构
 
-## 前置条件
+```
+crates/agent/
+├── .env.example           # 环境变量模板
+├── docker-compose.yml       # 开发环境 Docker Compose
+└── docker-compose.prod.yml  # 生产环境 Docker Compose
+```
+## 平置条件
 
 在开始之前，请确保你已经：
 1. 服务端已启动（参见 [QuickStart-Server.md](./QuickStart-Server.md)）
-2. 拥有服务端地址（默认 `ws://localhost:23333/ws`）
-3. 已注册 Agent 并获取 `auth_token`
+2. 已注册 Agent 并获取 `auth_token`
 
 ## 1. 注册 Agent
 
@@ -20,56 +26,136 @@ curl -X POST http://localhost:23333/api/v1/agent/register \
 **响应字段说明**:
 - `agent_id`: Agent 唯一标识
 - `auth_token`: 认证令牌（后续 WebSocket 连接使用）
-- `game_rules`: 游戏规则配置（tick 时长、可用动作等）
-- `narrative_config`: 叙事化配置（属性阈值描述，用于将数值转换为叙事语言）
+- `game_rules`: 游戏规则配置
+- `narrative_config`: 叙事化配置
 
-响应中会包含 `auth_token`，后续连接 WebSocket 使用。
+## 2. 方式 A：Docker 部署（推荐）
+### 2.1 单个 Agent 部署
+```bash
+cd crates/agent
 
-## 2. 方式 A：使用 CLI（推荐）
+# 1. 复制配置文件
+cp .env.example .env
 
-### 2.1 安装 CLI
+# 2. 编辑 .env，设置 AGENT_AUTH_TOKEN
+vim .env  # 或使用其他编辑器
+
+# 3. 启动 Agent（开发环境）
+docker compose up -d
+
+# 4. 查看日志
+docker compose logs -f agent
+```
+
+### 2.2 生产环境部署
 
 ```bash
+cd crates/agent
+
+# 启动（使用预构建镜像）
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### 2.3 使用 install.sh 脚本
+
+```bash
+# 开发环境启动 Agent
+./install.sh agent start
+
+# 生产环境启动 Agent
+./install.sh agent start --prod
+
+```
+
+常用命令：
+| 命令 | 说明 |
+|------|------|
+| `./install.sh agent start` | 开发环境启动 |
+| `./install.sh agent start --prod` | 生产环境启动 |
+| `./install.sh agent stop` | 停止服务 |
+| `./install.sh agent logs` | 查看日志 |
+| `./install.sh agent status` | 查看状态 |
+| `./install.sh agent reset` | 重置数据 |
+
+## 3. 方式 B：CLI 本地运行（开发调试）
+```bash
+# 安装 CLI
 cargo install --path crates/agent
-```
 
-### 2.2 HTTP 模式（用于 OpenClaw 集成）
-
-```bash
+# HTTP 模式（供 OpenClaw 调用）
 cyber-jianghu-agent run --mode http --port 23340
-```
 
-### 2.3 Cognitive 模式（内置 AI）
-
-该模式内置了完整的心智流水线（感知 -> 记忆检索 -> 动机 -> 决策 -> 验证 -> 执行），并且自带 SQLite 支持的多级记忆系统（工作记忆、情景记忆、语义记忆）。
-
-```bash
+# Cognitive 模式（内置 AI)
 cyber-jianghu-agent run --mode cognitive
 ```
 
-## 3. HTTP API 端点一览
+## 4. 多 Agent 实例部署
+如需同时运行多个 Agent（例如多个角色），创建 `docker-compose.multi.yml`:
+```yaml
+# crates/agent/docker-compose.multi.yml
+services:
+  agent-linghu:
+    extends:
+      file: docker-compose.yml
+      service: agent
+    container_name: cyber-jianghu-agent-linghu
+    environment:
+      CYBER_JIANGHU_AGENT_NAME: 令狐冲
+      CYBER_JIANGHU_SYSTEM_PROMPT: 你是华山派大弟子，剑法高超。
+      CYBER_JIANGHU_AUTH_TOKEN: ${AGENT_TOKEN_LINGHU}
+    ports:
+      - "23341:23340"
+    volumes:
+      - agent_linghu_config:/app/config
+      - agent_linghu_data:/app/data
 
+  agent-guo:
+    extends:
+      file: docker-compose.yml
+      service: agent
+    container_name: cyber-jianghu-agent-guo
+    environment:
+      CYBER_JIANGHU_AGENT_NAME: 郭靖
+      CYBER_JIANGHU_SYSTEM_PROMPT: 你是蒙古长大的汉人，憨厚正直。
+      CYBER_JIANGHU_AUTH_TOKEN: ${AGENT_TOKEN_GUO}
+    ports:
+      - "23342:23340"
+    volumes:
+      - agent_guo_config:/app/config
+      - agent_guo_data:/app/data
+
+volumes:
+  agent_linghu_config:
+  agent_linghu_data:
+  agent_guo_config:
+  agent_guo_data:
+```
+在 `.env` 中设置各 Token:
+```bash
+AGENT_TOKEN_LINGHU=token_from_server_1
+AGENT_TOKEN_GUO=token_from_server_2
+```
+启动多 Agent:
+```bash
+cd crates/agent
+docker compose -f docker-compose.yml -f docker-compose.multi.yml up -d
+```
+## 5. HTTP API 端点
 在 HTTP 模式下，Agent 暴露以下 RESTful API：
-
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1` | GET | API 发现端点（返回所有可用 API 列表） |
+| `/api/v1` | GET | API 发现端点 |
 | `/api/v1/health` | GET | 健康检查 |
 | `/api/v1/state` | GET | 获取当前 WorldState |
-| `/api/v1/context` | GET | 获取叙事化上下文（Markdown 格式） |
-| `/api/v1/attributes` | GET | 获取属性数值（禁止存储到记忆） |
+| `/api/v1/context` | GET | 获取叙事化上下文（Markdown） |
+| `/api/v1/attributes` | GET | 获取属性数值 |
 | `/api/v1/intent` | POST | 提交决策意图 |
-| `/api/v1/validate` | POST | 验证意图是否符合人设 |
-| `/api/v1/memory/recent` | GET | 获取最近记忆 |
-| `/api/v1/memory/search` | POST | 搜索记忆 |
-| `/api/v1/memory` | POST | 存储记忆 |
-| `/api/v1/relationship/list` | GET | 获取所有关系 |
-| `/api/v1/relationship/{id}` | GET | 获取特定关系 |
-| `/api/v1/relationship` | POST | 更新关系 |
+| `/api/v1/validate` | POST | 验证意图 |
+| `/api/v1/memory` | GET/POST | 记忆管理 |
+| `/api/v1/relationship` | GET/POST | 关系管理 |
 | `/api/v1/lifespan` | GET | 获取寿命状态 |
 
 ### 使用示例
-
 ```bash
 # 获取当前世界状态
 curl http://localhost:23340/api/v1/state
@@ -81,35 +167,36 @@ curl http://localhost:23340/api/v1/context
 curl -X POST http://localhost:23340/api/v1/intent \
   -H "Content-Type: application/json" \
   -d '{"action_type":"idle"}'
-
-# 验证动作
-curl -X POST http://localhost:23340/api/v1/validate \
-  -H "Content-Type: application/json" \
-  -d '{"action_type":"attack","target_id":"..."}'
 ```
-
-## 4. 进阶：OpenClaw 作为 AI 大脑
-
+## 6. OpenClaw 集成
 如果你希望使用 OpenClaw 或其他兼容协议的 LLM：
-
 1. 以 HTTP 模式启动 Agent（见上文）
-2. 在 OpenClaw 中配置指向本地 HTTP API（默认 `http://127.0.0.1:23340`）
+2. 在 OpenClaw 中配置指向 HTTP API：
+   - 本机： `http://localhost:23340/api/v1`
+   - Docker 网络： `http://cyber-jianghu-agent:23340/api/v1`
 3. 使用 `GET /api/v1/context` 获取叙事化上下文供 LLM 理解
 4. 使用 `POST /api/v1/intent` 提交 LLM 决策的意图
-
+## 埥看日志
+```bash
+# 使用 install.sh
+./install.sh agent logs
+# 或直接使用 docker compose
+cd crates/agent && docker compose logs -f agent
+```
 ## 常见问题
 
 - **Q: Agent 断线后会重连吗？**
   - A: SDK 内置自动重连与指数退避策略。
 
 - **Q: 如何查看更详细日志？**
-  - A: 设置 `RUST_LOG=debug` 环境变量运行。
+  - A: 设置 `RUST_LOG=debug` 环境变量。
 
-- **Q: 支持哪些语言？**
-  - A: 当前官方 SDK 为 Rust。其他语言可基于 `cyber-jianghu-protocol` 自行实现客户端。
+- **Q: 多 Agent 实例如何避免端口冲突？**
+  - A: 每个实例映射到不同的宿主机端口（23341、23342 等），容器内部始终使用 23340。
 
+- **Q: Agent 数据存储在哪里？**
+  - A: Docker 模式使用 Volume 持久化；CLI 模式存储在 `~/.cyber-jianghu/` 目录。
 ## 更多资源
-
 - **SDK 文档**: [crates/agent/README.md](./crates/agent/README.md)
 - **协议文档**: [crates/protocol/README.md](./crates/protocol/README.md)
 - **项目主文档**: [README.md](./README.md)

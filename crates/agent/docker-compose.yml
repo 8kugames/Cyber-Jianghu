@@ -1,0 +1,83 @@
+# ============================================================================
+# Cyber-Jianghu Agent Docker Compose (Development)
+# Agent 开发环境配置 - HTTP 模式， 供 OpenClaw 调用
+# ============================================================================
+#
+# 使用方式：
+# 1. 确保服务端已启动
+#    docker compose -f ../server/docker-compose.yml up -d
+#
+# 2. 从服务端获取 Agent Token
+#
+# 3. 设置 .env 中的 AGENT_AUTH_TOKEN
+#
+# 4. 启动 Agent
+#    docker compose up -d
+#
+# 5. 查看日志
+#    docker compose logs -f agent
+#
+# 多 Agent 实例：
+# 参见 QuickStart-Client-SDK.md
+# ============================================================================
+
+services:
+  # ============================================================================
+  # Agent（HTTP 模式 - 供 OpenClaw 调用）
+  # ============================================================================
+  agent:
+    build:
+      context: ../..
+      dockerfile: ./Dockerfile
+    container_name: cyber-jianghu-agent
+    restart: unless-stopped
+    environment:
+      # Agent 基本配置
+      CYBER_JIANGHU_AGENT_NAME: ${AGENT_NAME:-江湖侠客}
+      CYBER_JIANGHU_SYSTEM_PROMPT: ${AGENT_SYSTEM_PROMPT:-你是一位行走江湖的侠客。}
+
+      # 服务端连接配置
+      # Docker 网络： 使用服务名
+      # 本机: 使用 localhost 或 host.docker.internal
+      CYBER_JIANGHU_SERVER_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
+      CYBER_JIANGHU_AUTH_TOKEN: ${AGENT_AUTH_TOKEN:-}
+
+      # Agent HTTP API 端口（容器内部固定为 23340)
+      PORT: 23340
+
+      # 日志级别
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      # HTTP API 端口 - 供本机或外部 OpenClaw 访问
+      # 多 Agent 实例时，映射不同宿主机端口：23341:23340, 23342:23340 等
+      - "${AGENT_PORT:-23340}:23340"
+    volumes:
+      # 配置持久化（包含 narrative_config 等)
+      - agent_config:/app/config
+      # 数据持久化（SQLite 数据库、记忆存储等)
+      - agent_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - cyber-jianghu-network
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  cyber-jianghu-network:
+    external: true
+    name: cyber-jianghu-network
+
+# ============================================================================
+# 数据卷配置
+# ============================================================================
+volumes:
+  agent_config:
+    name: cyber-jianghu-agent-config
+  agent_data:
+    name: cyber-jianghu-agent-data
