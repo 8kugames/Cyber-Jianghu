@@ -440,3 +440,90 @@ pub async fn register_agent_transactional(
         initial_state: state,
     })
 }
+
+// ============================================================================
+// Agent 转生（归隐）
+// ============================================================================
+
+/// 转生结果
+#[derive(Debug)]
+pub struct RebirthResult {
+    /// 被删除的 Agent ID
+    pub retired_agent_id: Uuid,
+    /// 被删除的 Agent 名称
+    pub retired_name: String,
+}
+
+/// 转生（归隐）- 删除当前设备的 Agent
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+/// - auth_token: 认证令牌
+///
+/// # 返回
+/// - Ok(RebirthResult): 转生成功
+/// - Err: 数据库错误或认证失败
+///
+/// # 注意
+/// 由于 agents 表有 ON DELETE CASCADE，删除 agent 会自动删除：
+/// - agent_states 表中的所有状态记录
+/// - agent_inventory 表中的所有物品记录
+pub async fn rebirth_agent(
+    pool: &PgPool,
+    device_id: Uuid,
+    auth_token: &str,
+) -> Result<RebirthResult> {
+    debug!("Agent 转生请求: device_id={}", device_id);
+
+    // 1. 验证设备认证
+    let valid = verify_device_token(pool, device_id, auth_token).await?;
+    if !valid {
+        anyhow::bail!("设备认证失败");
+    }
+
+    // 2. 获取当前设备的 Agent 信息（删除前记录）
+    let agent_info: Option<(Uuid, String)> = sqlx::query_as(
+        r#"
+        SELECT agent_id, name FROM agents WHERE device_id = $1
+        "#,
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await
+    .context("查询 Agent 失败")?;
+
+    let (agent_id, name) = match agent_info {
+        Some(info) => info,
+        None => {
+            anyhow::bail!("该设备没有已注册的角色");
+        }
+    };
+
+    // 3. 删除 Agent（级联删除状态和物品）
+    let deleted = sqlx::query(
+        r#"
+        DELETE FROM agents WHERE agent_id = $1 AND device_id = $2
+        "#,
+    )
+    .bind(agent_id)
+    .bind(device_id)
+    .execute(pool)
+    .await
+    .context("删除 Agent 失败")?;
+
+    if deleted.rows_affected() == 0 {
+        anyhow::bail!("删除 Agent 失败：未找到匹配记录");
+    }
+
+    tracing::info!(
+        "Agent 转生成功: {} ({}) 已归隐",
+        name,
+        agent_id
+    );
+
+    Ok(RebirthResult {
+        retired_agent_id: agent_id,
+        retired_name: name,
+    })
+}

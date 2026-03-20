@@ -208,3 +208,62 @@ pub async fn agent_register(
         narrative_config,
     }))
 }
+
+// ============================================================================
+// Agent 转生 API（Phase 4 - 归隐重生）
+// ============================================================================
+
+/// 转生请求
+#[derive(Debug, serde::Deserialize)]
+pub struct RebirthRequest {
+    /// 设备 ID
+    pub device_id: uuid::Uuid,
+    /// 认证令牌
+    pub auth_token: String,
+}
+
+/// 转生响应
+#[derive(Debug, serde::Serialize)]
+pub struct RebirthResponse {
+    /// 是否成功
+    pub success: bool,
+    /// 消息
+    pub message: String,
+    /// 归隐的角色 ID
+    pub retired_agent_id: Option<String>,
+}
+
+/// Agent 转生接口
+///
+/// POST /api/v1/agent/rebirth
+///
+/// 删除当前设备的角色，保留设备身份，允许重新创建新角色。
+/// 由于 agents 表有 ON DELETE CASCADE，会自动删除：
+/// - agent_states 表中的所有状态记录
+/// - agent_inventory 表中的所有物品记录
+pub async fn agent_rebirth(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<RebirthRequest>,
+) -> Result<Json<RebirthResponse>, StatusCode> {
+    info!("Agent 转生请求: device_id={}", payload.device_id);
+
+    // 调用数据库操作
+    match db::rebirth_agent(&state.db_pool, payload.device_id, &payload.auth_token).await {
+        Ok(result) => {
+            info!(
+                "Agent 转生成功: {} ({}) 已归隐",
+                result.retired_name,
+                result.retired_agent_id
+            );
+            Ok(Json(RebirthResponse {
+                success: true,
+                message: format!("角色 '{}' 已归隐，可以创建新角色", result.retired_name),
+                retired_agent_id: Some(result.retired_agent_id.to_string()),
+            }))
+        }
+        Err(e) => {
+            error!("Agent 转生失败: {}", e);
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}

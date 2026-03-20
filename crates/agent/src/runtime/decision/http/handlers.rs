@@ -1063,3 +1063,549 @@ pub(super) async fn register_character_handler(
         }
     }
 }
+
+// ============================================================================
+// 角色信息 API Handlers
+// ============================================================================
+
+/// 角色信息响应（合并配置文件 + WorldState 实时数据）
+#[derive(Debug, Serialize)]
+pub struct CharacterInfoResponse {
+    // === 配置文件数据（注册时提供） ===
+    /// 角色 ID
+    pub agent_id: Option<String>,
+    /// 姓名
+    pub name: String,
+    /// 年龄
+    pub age: u8,
+    /// 性别
+    pub gender: String,
+    /// 外貌描述
+    pub appearance: Option<String>,
+    /// 身份背景
+    pub identity: Option<String>,
+    /// 性格特征
+    pub personality: Vec<String>,
+    /// 核心价值观
+    pub values: Vec<String>,
+
+    // === WorldState 实时数据 ===
+    /// 当前属性
+    pub attributes: Option<serde_json::Value>,
+    /// 持有物品
+    pub inventory: Option<serde_json::Value>,
+    /// 当前位置
+    pub location: Option<String>,
+    /// 当前 Tick
+    pub tick_id: Option<i64>,
+    /// 游戏时间
+    pub world_time: Option<serde_json::Value>,
+}
+
+/// 获取角色信息
+///
+/// GET /api/v1/character - 获取当前角色完整信息
+///
+/// 数据来源：
+/// - 配置文件：name, age, gender, appearance, identity, personality, values
+/// - WorldState：attributes, inventory, location, tick_id, world_time
+pub(super) async fn get_character_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    // 1. 从配置文件读取角色配置
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            error!("读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "config_read_error".to_string(),
+                    message: format!("读取配置文件失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. 从配置中提取角色信息
+    let character = match &config.agent {
+        Some(ch) => ch,
+        None => {
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                Json(ErrorResponse {
+                    error_code: "character_not_registered".to_string(),
+                    message: "角色尚未注册，请先创建角色".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 3. 从当前 WorldState 获取实时状态
+    let current = state.current_state.read().await;
+
+    let (
+        agent_id,
+        attributes,
+        inventory,
+        location,
+        tick_id,
+        world_time,
+    ) = match current.as_ref() {
+        Some(ws) => {
+            let agent_id = ws.agent_id.map(|id| id.to_string());
+            let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
+            let inv = serde_json::to_value(&ws.self_state.inventory).ok();
+            let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+            let time = serde_json::to_value(&ws.world_time).ok();
+            (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
+        }
+        None => (character.agent_id.map(|id| id.to_string()), None, None, None, None, None),
+    };
+
+    // 4. 构建响应
+    let response = CharacterInfoResponse {
+        agent_id,
+        name: character.name.clone(),
+        age: character.age,
+        gender: character.gender.clone(),
+        appearance: character.appearance.clone(),
+        identity: character.identity.clone(),
+        personality: character.personality.clone(),
+        values: character.values.clone(),
+        attributes,
+        inventory,
+        location,
+        tick_id,
+        world_time,
+    };
+
+    Json(response).into_response()
+}
+
+/// 经历日志条目
+#[derive(Debug, Clone, Serialize)]
+pub struct ExperienceEntry {
+    /// Tick ID
+    pub tick_id: i64,
+    /// 游戏时间
+    pub world_time: Option<serde_json::Value>,
+    /// 事件描述
+    pub event: String,
+    /// 观察者思维链（可选）
+    pub observer_thought: Option<String>,
+    /// 意图摘要（可选）
+    pub intent_summary: Option<String>,
+}
+
+/// 经历日志响应
+#[derive(Debug, Serialize)]
+pub struct ExperiencesResponse {
+    /// 当前页
+    pub page: u32,
+    /// 每页数量
+    pub limit: u32,
+    /// 总数
+    pub total: u32,
+    /// 是否有更多
+    pub has_more: bool,
+    /// 经历列表
+    pub experiences: Vec<ExperienceEntry>,
+}
+
+/// 获取经历日志（分页）
+///
+/// GET /api/v1/character/experiences?page=1&limit=20
+///
+/// 当前实现：从 WorldState.events_log 获取
+/// 未来：从本地记忆系统获取更完整的历史记录
+pub(super) async fn get_experiences_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let page: u32 = params
+        .get("page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let limit: u32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+
+    // 从当前 WorldState 获取 events_log
+    let current = state.current_state.read().await;
+    let experiences: Vec<ExperienceEntry> = match current.as_ref() {
+        Some(ws) => ws
+            .events_log
+            .iter()
+            .enumerate()
+            .map(|(i, event)| ExperienceEntry {
+                tick_id: ws.tick_id - (ws.events_log.len() - i - 1) as i64,
+                world_time: serde_json::to_value(&ws.world_time).ok(),
+                event: event.description.clone(),
+                observer_thought: None, // 未来从记忆系统获取
+                intent_summary: None,   // 未来从记忆系统获取
+            })
+            .collect(),
+        None => vec![],
+    };
+
+    let total = experiences.len() as u32;
+    let start = ((page - 1) * limit) as usize;
+    let end = std::cmp::min(start + limit as usize, experiences.len());
+
+    let paginated = if start < experiences.len() {
+        experiences[start..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    Json(ExperiencesResponse {
+        page,
+        limit,
+        total,
+        has_more: end < experiences.len(),
+        experiences: paginated,
+    })
+}
+
+/// 转生请求
+#[derive(Debug, Deserialize)]
+pub struct RebirthRequest {
+    /// 确认转生
+    pub confirm: bool,
+}
+
+/// 转生响应
+#[derive(Debug, Serialize)]
+pub struct RebirthResponse {
+    /// 是否成功
+    pub success: bool,
+    /// 消息
+    pub message: String,
+}
+
+/// 转生（强制归隐重新注册）
+///
+/// POST /api/v1/character/rebirth
+///
+/// 删除当前角色，保留设备身份，允许重新创建新角色
+pub(super) async fn rebirth_character_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<RebirthRequest>,
+) -> impl IntoResponse {
+    use tracing::info;
+
+    if !req.confirm {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(RebirthResponse {
+                success: false,
+                message: "请确认转生操作 (confirm: true)".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // 1. 检查设备身份
+    let identity = match &state.identity {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                Json(RebirthResponse {
+                    success: false,
+                    message: "设备身份未初始化".to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. 获取当前 agent_id
+    let agent_id = *state.agent_id.read().await;
+    if agent_id.is_nil() {
+        return (
+            StatusCode::PRECONDITION_FAILED,
+            Json(RebirthResponse {
+                success: false,
+                message: "当前没有已注册的角色".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    info!("角色转生: agent_id={}", agent_id);
+
+    // 3. 通知 Server 删除角色（POST /api/v1/agent/rebirth）
+    let client = reqwest::Client::new();
+    let server_url = format!("{}/api/v1/agent/rebirth", state.server_http_url);
+
+    // 构造请求体
+    #[derive(Serialize)]
+    struct ServerRebirthRequest {
+        device_id: Uuid,
+        auth_token: String,
+    }
+
+    let request_body = ServerRebirthRequest {
+        device_id: identity.device_id,
+        auth_token: identity.auth_token.clone(),
+    };
+
+    let response = match client.post(&server_url).json(&request_body).send().await {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("连接服务器失败: {}", e);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(RebirthResponse {
+                    success: false,
+                    message: format!("连接服务器失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 4. 服务器必须成功才继续
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        error!("服务器转生请求失败: {} - {}", status, body);
+        return (
+            StatusCode::BAD_GATEWAY,
+            Json(RebirthResponse {
+                success: false,
+                message: format!("服务器拒绝转生: {}", body),
+            }),
+        )
+            .into_response();
+    }
+
+    // 5. 重置 agent_id 为 nil（表示未注册状态）
+    {
+        let mut agent_id_guard = state.agent_id.write().await;
+        *agent_id_guard = Uuid::nil();
+    }
+
+    // 6. 清理本地 WorldState
+    {
+        let mut current = state.current_state.write().await;
+        *current = None;
+    }
+
+    // 7. 清理本地配置文件（角色信息）
+    {
+        let agent_config = state.config_path.join("agent.yaml");
+        if agent_config.exists() {
+            if let Err(e) = std::fs::remove_file(&agent_config) {
+                error!("删除配置文件失败: {}", e);
+            } else {
+                info!("已删除角色配置文件: {:?}", agent_config);
+            }
+        }
+    }
+
+    Json(RebirthResponse {
+        success: true,
+        message: "转生成功，请重新创建角色".to_string(),
+    })
+    .into_response()
+}
+
+/// 托梦请求
+#[derive(Debug, Deserialize)]
+pub struct DreamRequest {
+    /// 念头内容（注入到上下文）
+    pub thought: String,
+    /// 持续回合数
+    #[serde(default = "default_dream_duration")]
+    pub duration: u32,
+}
+
+fn default_dream_duration() -> u32 {
+    5
+}
+
+/// 托梦响应
+#[derive(Debug, Serialize)]
+pub struct DreamResponse {
+    /// 是否成功
+    pub success: bool,
+    /// 消息
+    pub message: String,
+    /// 剩余回合数
+    pub remaining_ticks: u32,
+    /// 今天是否还能使用
+    pub can_use_today: bool,
+}
+
+/// 托梦状态（存储在 HttpApiState 中）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DreamState {
+    /// 当前托梦内容
+    pub thought: Option<String>,
+    /// 剩余回合数
+    pub remaining_ticks: u32,
+    /// 上次使用的游戏日期（用于每日限制）
+    pub last_used_game_date: Option<GameDate>,
+}
+
+/// 游戏日期（用于每日限制）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GameDate {
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+}
+
+impl GameDate {
+    pub fn from_world_time(world_time: &cyber_jianghu_protocol::WorldTime) -> Self {
+        Self {
+            year: world_time.year,
+            month: world_time.month,
+            day: world_time.day,
+        }
+    }
+}
+
+/// 托梦（持续 n 回合的念头注入）
+///
+/// POST /api/v1/character/dream
+///
+/// 将念头注入到 Agent 的上下文中，持续指定回合数
+pub(super) async fn dream_character_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<DreamRequest>,
+) -> impl IntoResponse {
+    use tracing::info;
+
+    // 检查是否有托梦存储
+    let dream_store = match &state.dream_store {
+        Some(store) => store,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(DreamResponse {
+                    success: false,
+                    message: "托梦功能未初始化".to_string(),
+                    remaining_ticks: 0,
+                    can_use_today: false,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 获取当前 WorldState
+    let current = state.current_state.read().await;
+    let ws = match current.as_ref() {
+        Some(ws) => ws,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(DreamResponse {
+                    success: false,
+                    message: "游戏状态尚未加载".to_string(),
+                    remaining_ticks: 0,
+                    can_use_today: false,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let current_date = GameDate::from_world_time(&ws.world_time);
+
+    // 检查每日限制
+    {
+        let dream = dream_store.read().await;
+        if let Some(ref last_date) = dream.last_used_game_date {
+            if last_date == &current_date {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(DreamResponse {
+                        success: false,
+                        message: "今日已使用过托梦，请明天再试".to_string(),
+                        remaining_ticks: dream.remaining_ticks,
+                        can_use_today: false,
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    info!(
+        "托梦注入: thought={}, duration={}, game_date={}-{}-{}",
+        req.thought, req.duration, current_date.year, current_date.month, current_date.day
+    );
+
+    // 更新托梦状态
+    let mut dream = dream_store.write().await;
+    dream.thought = Some(req.thought.clone());
+    dream.remaining_ticks = req.duration;
+    dream.last_used_game_date = Some(current_date);
+
+    Json(DreamResponse {
+        success: true,
+        message: format!("托梦成功，将持续 {} 回合", req.duration),
+        remaining_ticks: req.duration,
+        can_use_today: false, // 刚用过，今天不能再用了
+    })
+    .into_response()
+}
+
+/// 获取当前托梦状态
+///
+/// GET /api/v1/character/dream
+pub(super) async fn get_dream_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let dream_store = match &state.dream_store {
+        Some(store) => store,
+        None => {
+            return Json(DreamStatusResponse {
+                thought: None,
+                remaining_ticks: 0,
+                can_use_today: true,
+            })
+            .into_response();
+        }
+    };
+
+    let dream = dream_store.read().await;
+
+    // 获取当前游戏日期，判断今天是否还能使用
+    let can_use_today = {
+        let current = state.current_state.read().await;
+        match current.as_ref() {
+            Some(ws) => {
+                let current_date = GameDate::from_world_time(&ws.world_time);
+                dream.last_used_game_date.as_ref() != Some(&current_date)
+            }
+            None => true, // 没有状态时默认可用
+        }
+    };
+
+    Json(DreamStatusResponse {
+        thought: dream.thought.clone(),
+        remaining_ticks: dream.remaining_ticks,
+        can_use_today,
+    })
+    .into_response()
+}
+
+/// 托梦状态响应
+#[derive(Debug, Serialize)]
+pub struct DreamStatusResponse {
+    /// 当前托梦内容
+    pub thought: Option<String>,
+    /// 剩余回合数
+    pub remaining_ticks: u32,
+    /// 今天是否还能使用
+    pub can_use_today: bool,
+}
