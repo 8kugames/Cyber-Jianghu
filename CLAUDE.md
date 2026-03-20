@@ -216,7 +216,9 @@ use super::builder::AgentBuilder;
 ### Server (port 23333)
 
 - `GET /health` - Health check
+- `POST /api/v1/agent/connect` - Connect device (register/get auth token)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
+- `POST /api/v1/agent/rebirth` - Delete agent (CASCADE delete states/inventory)
 - `GET /api/dashboard/stats` - Dashboard statistics (requires admin token)
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
@@ -237,6 +239,21 @@ use super::builder::AgentBuilder;
 - `GET /api/v1/memory/recent` - Get recent memories
 - `POST /api/v1/memory/search` - Search memories
 - `POST /api/v1/memory` - Store memory
+
+#### Character Management (Web Panel)
+
+- `GET /api/v1/character` - Get character info (name, age, gender, attributes, inventory)
+- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated)
+- `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
+- `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
+- `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)
+- `POST /api/v1/character/register` - Register new character (forward to server)
+
+### Agent Web Panel
+
+- `GET /` or `GET /index.html` - Character creation page
+- `GET /character.html` - Character info page
+- `GET /manage.html` - Management page (dream injection, rebirth)
 
 ## Narrative Config Delivery
 
