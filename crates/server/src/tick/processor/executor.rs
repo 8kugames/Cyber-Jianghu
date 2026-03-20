@@ -15,6 +15,7 @@ pub async fn apply_state_change(
     db_pool: &DbPool,
     tick_id: i64,
     change: &StateChange,
+    intent_id: Option<uuid::Uuid>,
     agent_states: &mut [AgentState],
     events: &mut Vec<(uuid::Uuid, WorldEvent)>,
 ) -> bool {
@@ -128,14 +129,17 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("使用失败，你没有 {}", item_id),
                     metadata: serde_json::json!({
-                        "action": "use_failed",
+                        "action": "use",
                         "item_id": item_id,
-                        "reason": "item_not_found",
+                        "intent_id": intent_id,
+                        "result": "failed",
+                        "reason": if e.to_string().contains("不足") { "insufficient_quantity" } else { "item_not_found" },
                     }),
                 };
                 events.push((*agent_id, event));
                 false
             } else {
+                let mut attribute_delta = serde_json::Map::new();
                 if let Some(state) = agent_states.iter_mut().find(|s| s.agent_id == *agent_id) {
                     let context = state.get_formula_context();
                     for effect in effects {
@@ -171,12 +175,18 @@ pub async fn apply_state_change(
                             _ => effect.value,
                         };
 
-                        let _ =
+                        if let Ok(_) =
                             state
                                 .status
-                                .apply_change(&effect.attribute, value_to_apply, &context);
+                                .apply_change(&effect.attribute, value_to_apply, &context)
+                        {
+                            attribute_delta.insert(
+                                effect.attribute.clone(),
+                                serde_json::json!(value_to_apply),
+                            );
+                        }
                     }
-                    
+
                     if state.status.check_death_condition("hp") {
                         state.is_alive = false;
                         let _ = state.status.set("hp", 0);
@@ -191,6 +201,10 @@ pub async fn apply_state_change(
                     metadata: serde_json::json!({
                         "action": "use",
                         "item_id": item_id,
+                        "intent_id": intent_id,
+                        "result": "success",
+                        "inventory_delta": { item_id: -1 },
+                        "attribute_delta": attribute_delta,
                     }),
                 };
                 events.push((*agent_id, event));
@@ -204,12 +218,8 @@ pub async fn apply_state_change(
         } => {
             if let Some(state) = agent_states.iter().find(|s| s.agent_id == *agent_id) {
                 let node_id = state.node_id.clone();
-                
-                match crate::db::remove_ground_item(
-                    db_pool, &node_id, item_id, *quantity,
-                )
-                .await
-                {
+
+                match crate::db::remove_ground_item(db_pool, &node_id, item_id, *quantity).await {
                     Ok(true) => {
                         if let Err(e) = crate::inventory::InventoryManager::add_item(
                             db_pool, *agent_id, item_id, *quantity,
@@ -276,7 +286,6 @@ pub async fn apply_state_change(
             item_id,
             quantity,
         } => {
-            
             if let Err(e) =
                 crate::inventory::InventoryManager::add_item(db_pool, *agent_id, item_id, *quantity)
                     .await
@@ -468,7 +477,6 @@ pub async fn apply_state_change(
             }
         }
         StateChange::ItemEquipped { agent_id, item_id } => {
-            
             if let Err(e) =
                 crate::inventory::InventoryManager::equip_item(db_pool, *agent_id, item_id).await
             {
@@ -555,7 +563,6 @@ pub async fn apply_state_change(
             quantity,
             location,
         } => {
-            
             if let Err(e) = crate::inventory::InventoryManager::remove_item(
                 db_pool,
                 *from_agent,
@@ -829,9 +836,7 @@ pub async fn apply_state_change(
                 state.node_id = new_location.clone();
             }
 
-            
-            if let Err(e) =
-                crate::db::update_agent_location(db_pool, *agent_id, new_location).await
+            if let Err(e) = crate::db::update_agent_location(db_pool, *agent_id, new_location).await
             {
                 warn!("更新位置失败: {}", e);
                 false
@@ -878,6 +883,7 @@ mod tests {
             &db_pool,
             tick_id,
             &change,
+            None,
             &mut [agent_state],
             &mut events,
         )
