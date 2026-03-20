@@ -186,8 +186,9 @@ cmd_agent_start() {
     success "Agent 已启动"
     echo ""
     info "访问地址:"
-    echo "  - HTTP API: http://localhost:23340/api/v1"
-    echo "  - Health:  http://localhost:23340/api/v1/health"
+    echo "  - Web Panel:  http://localhost:23340/"
+    echo "  - HTTP API:   http://localhost:23340/api/v1"
+    echo "  - Health:     http://localhost:23340/api/v1/health"
 }
 cmd_agent_stop() {
     ensure_network "cyber-jianghu-network"

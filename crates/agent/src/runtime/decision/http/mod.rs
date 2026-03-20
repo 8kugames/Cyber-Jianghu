@@ -353,6 +353,10 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     let local_addr = listener.local_addr()?;
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
+    info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
+    info!("[http] - Create character: http://127.0.0.1:{}/index.html", local_addr.port());
+    info!("[http] - Character info:  http://127.0.0.1:{}/character.html", local_addr.port());
+    info!("[http] - Management:      http://127.0.0.1:{}/manage.html", local_addr.port());
 
     axum::serve(listener, app).await?;
     Ok(())
