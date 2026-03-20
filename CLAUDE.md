@@ -35,8 +35,8 @@ cargo test -p cyber-jianghu-server test_name
 # Build agent with cargo install
 cargo install --path crates/agent
 
-# Run agent in HTTP mode (for OpenClaw integration)
-cyber-jianghu-agent run --mode http --port 23340
+# Run agent in Claw mode (for OpenClaw integration)
+cyber-jianghu-agent run --mode claw --port 23340
 ```
 
 ### Service Management
@@ -114,7 +114,7 @@ The agent crate provides two integration modes:
 
 Key agent modules:
 - `src/core/` - WebSocket client to game server
-- `src/runtime/decision/` - Decision modes (http / cognitive)
+- `src/runtime/decision/` - Decision modes (claw / cognitive)
 - `src/ai/` - AI components:
   - `cognitive/` - Narrative engine for attribute descriptions
   - `memory/` - Working, episodic, semantic memory with SQLite backends

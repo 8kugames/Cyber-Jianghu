@@ -5,15 +5,20 @@
 #
 # 部署步骤：
 #
-# 1. 础保服务端已启动
+# 1. 确保服务端已启动
 #    docker compose -f ../server/docker-compose.prod.yml up -d
 #
-# 2. 从服务端获取 Agent Token
+# 2. 首次启动 Agent 时，会自动：
+#    - 生成设备 ID (device_id)
+#    - 向服务端注册设备并获取 auth_token
+#    - 身份信息保存到 ~/.cyber-jianghu/agent.yaml
 #
-# 3. 设置 .env 中的 AGENT_AUTH_TOKEN
-#
-# 4. 启动 Agent
+# 3. 启动 Agent
 #    docker compose -f docker-compose.prod.yml up -d
+#
+# 4. 创建角色（两种方式）：
+#    - Web 面板: http://localhost:23340/panel/
+#    - CLI 命令: cyber-jianghu-agent character create <name>
 #
 # 5. 查看日志
 #    docker compose -f docker-compose.prod.yml logs -f agent
@@ -36,16 +41,13 @@ services:
     container_name: cyber-jianghu-agent
     restart: unless-stopped
     environment:
-      # Agent 基本配置
-      CYBER_JIANGHU_AGENT_NAME: ${AGENT_NAME:-江湖侠客}
-      CYBER_JIANGHU_SYSTEM_PROMPT: ${AGENT_SYSTEM_PROMPT:-你是一位行走江湖的侠客。}
-
       # 服务端连接配置
-      CYBER_JIANGHU_SERVER_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
-      CYBER_JIANGHU_AUTH_TOKEN: ${AGENT_AUTH_TOKEN:-}
+      CYBER_JIANGHU_SERVER_WS_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
+      CYBER_JIANGHU_SERVER_HTTP_URL: ${AGENT_SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
 
-      # Agent HTTP API 端口
-      PORT: 23340
+      # Agent 运行配置
+      CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-claw}
+      CYBER_JIANGHU_PORT: ${AGENT_PORT:-23340}
 
       # 日志级别
       RUST_LOG: ${RUST_LOG:-info}

@@ -639,7 +639,7 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
                 let agent_id = world_state.agent_id.unwrap_or_default();
                 let mode = mode_string.clone();
                 Box::pin(async move {
-                    error!("Unknown mode: {}. Supported: cognitive, http", mode);
+                    error!("Unknown mode: {}. Supported: claw, cognitive", mode);
                     Intent::idle(agent_id, tick_id).with_thought(format!("未知模式: {}", mode))
                 })
             })
