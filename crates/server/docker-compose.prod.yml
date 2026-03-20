@@ -55,7 +55,9 @@ services:
   # Rust 服务端
   # ============================================================================
   server:
-    image: ghcr.io/8kugames/cyber-jianghu-server
+    build:
+      context: ../..
+      dockerfile: ./crates/server/Dockerfile
     container_name: cyber-jianghu-server
     restart: unless-stopped
     depends_on:

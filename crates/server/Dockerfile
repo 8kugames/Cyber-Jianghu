@@ -38,16 +38,17 @@ COPY crates/agent/Cargo.toml ./crates/agent/
 
 RUN mkdir -p ./.cargo \
     && echo '[source.crates-io]\n\
-replace-with = "aliyun"\n\
-\n\
-[source.aliyun]\n\
-registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
+    replace-with = "aliyun"\n\
+    \n\
+    [source.aliyun]\n\
+    registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
 # 创建空的 src 目录，用于下载依赖（仅 server 需要的依赖）
-RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src && \
+RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
     echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
     echo "fn main() {}" > crates/server/src/main.rs && \
-    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs
+    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
+    echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
 # 构建依赖（这一步会被缓存）
 RUN cargo build --release -p cyber-jianghu-server
