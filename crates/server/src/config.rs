@@ -95,8 +95,8 @@ impl Config {
                 .unwrap_or_else(|_| "23333".to_string())
                 .parse()
                 .context("SERVER_PORT must be a valid port number")?,
-            admin_read_token: std::env::var("ADMIN_READ_TOKEN").ok(),
-            admin_write_token: std::env::var("ADMIN_WRITE_TOKEN").ok(),
+            admin_read_token: std::env::var("ADMIN_READ_TOKEN").ok().filter(|s| !s.is_empty()),
+            admin_write_token: std::env::var("ADMIN_WRITE_TOKEN").ok().filter(|s| !s.is_empty()),
         };
 
         // 从环境变量读取数据库配置（必需）
