@@ -664,12 +664,6 @@
                             </div>
                             <div style="display: flex; gap: 10px">
                                 <button
-                                    class="btn btn-secondary"
-                                    onclick="formatJson()"
-                                >
-                                    格式化 JSON
-                                </button>
-                                <button
                                     class="btn btn-success"
                                     onclick="saveConfig()"
                                 >
@@ -889,8 +883,8 @@
                         ),
                         renderCard(
                             "游戏时间",
-                            `${formatGameTimeDate(data.game_time)}<br>${data.game_time.season} | Tick: ${data.current_tick_id}`,
-                            "",
+                            formatGameTimeDate(data.game_time),
+                            `${data.game_time.season} | Tick: ${data.current_tick_id}`,
                             "game-time-card", // ID for smooth update
                         ),
                         renderCard("日活跃用户 (DAU)", data.dau),
@@ -986,8 +980,12 @@
                     const card = document.getElementById("game-time-card");
                     if (card) {
                         const valueEl = card.querySelector(".stat-value");
+                        const subEl = card.querySelector(".stat-sub");
                         if (valueEl) {
-                            valueEl.innerHTML = `${dateStr}<br>${seasonStr} | Tick: ${tickStr}`;
+                            valueEl.textContent = dateStr;
+                        }
+                        if (subEl) {
+                            subEl.textContent = `${seasonStr} | Tick: ${tickStr}`;
                         }
                     }
 
@@ -1075,23 +1073,8 @@
 
                     const data = await res.json();
                     document.getElementById("code-editor").value = data.content;
-                    // Auto format on load if it's JSON
-                    if (filename.endsWith(".json")) {
-                        formatJson(true); // silent format
-                    }
                 } catch (e) {
                     showToast("加载文件内容失败", "error");
-                }
-            }
-
-            function formatJson(silent = false) {
-                const editor = document.getElementById("code-editor");
-                try {
-                    const val = JSON.parse(editor.value);
-                    editor.value = JSON.stringify(val, null, 2);
-                    if (!silent) showToast("JSON 格式化成功", "success");
-                } catch (e) {
-                    if (!silent) showToast("无效的 JSON 格式", "error");
                 }
             }
 
