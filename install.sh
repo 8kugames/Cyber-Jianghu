@@ -31,7 +31,7 @@
 
 set -eu
 
-(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" >/dev/null || exit 1
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 1
 
 IFS=$'\n\t'
 
@@ -49,6 +49,7 @@ info() { echo -e "${BLUE}[INFO]${NC} ${1:-}"; }
 success() { echo -e "${GREEN}[OK]${NC} ${1:-}"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} ${1:-}"; }
 error() { echo -e "${RED}[ERROR]${NC} ${1:-}"; exit 1; }
+prompt() { echo -ne "${CYAN}${1:-}${NC}"; }
 
 # ============================================================================
 # 显示 Banner
@@ -66,29 +67,49 @@ show_banner() {
 # 检查依赖
 # ============================================================================
 check_dependencies() {
-    local missing=0
-    for cmd in docker curl; do
-        if ! command -v "$cmd" &> /dev/null; then
-            error "$cmd 未安装"
-            missing=1
+    local dep_cmd
+    for dep_cmd in docker; do
+        if ! command -v "$dep_cmd" &> /dev/null; then
+            error "$dep_cmd 未安装"
         fi
     done
 
     if ! docker compose version &> /dev/null 2>&1; then
         error "Docker Compose 未安装"
-        missing=1
     fi
-    [ $missing -eq 1 ] && exit 1
+}
+
+resolve_mode() {
+    local raw_mode="${1:-}"
+    case "$raw_mode" in
+        ""|dev|--dev)
+            printf '%s\n' "dev"
+            ;;
+        prod|--prod)
+            printf '%s\n' "prod"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+enter_component_dir() {
+    local component_name="$1"
+    local component_dir="$PROJECT_ROOT/crates/$component_name"
+    [ -d "$component_dir" ] || error "组件目录不存在: $component_dir"
+    cd "$component_dir"
 }
 
 # ============================================================================
 # 服务端命令
 # ============================================================================
 cmd_server_start() {
-    local mode="${1:-dev}"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    cd "$PROJECT_ROOT/crates/server"
+    enter_component_dir "server"
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
     success "服务端已启动"
@@ -100,14 +121,15 @@ cmd_server_start() {
 }
 
 cmd_server_stop() {
-    cd "$PROJECT_ROOT/crates/server"
+    enter_component_dir "server"
     info "停止服务端..."
     docker compose down
     success "服务端已停止"
 }
 cmd_server_restart() {
-    local mode="${1:-dev}"
-    cd "$PROJECT_ROOT/crates/server"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    enter_component_dir "server"
     info "重启服务端..."
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
@@ -115,23 +137,23 @@ cmd_server_restart() {
     success "服务端已重启"
 }
 cmd_server_status() {
-    cd "$PROJECT_ROOT/crates/server"
+    enter_component_dir "server"
     info "服务端状态:"
     docker compose ps
 }
 cmd_server_logs() {
-    cd "$PROJECT_ROOT/crates/server"
+    enter_component_dir "server"
     docker compose logs -f
 }
 cmd_server_build() {
-    cd "$PROJECT_ROOT/crates/server"
+    enter_component_dir "server"
     info "构建服务端镜像..."
     docker compose build
     success "构建完成"
 }
 cmd_server_reset() {
-    cd "$PROJECT_ROOT/crates/server"
-    warn "将删除所有数据！ 按"
+    enter_component_dir "server"
+    warn "将删除所有数据！"
     prompt "确认重置服务端数据? (y/N): "
     read -r confirm
     [ "$confirm" = "y" ] || exit 0
@@ -144,10 +166,11 @@ cmd_server_reset() {
 # Agent 命令
 # ============================================================================
 cmd_agent_start() {
-    local mode="${1:-dev}"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     info "启动 Agent ($mode)..."
     docker compose -f "$compose_file" up -d
     success "Agent 已启动"
@@ -157,14 +180,15 @@ cmd_agent_start() {
     echo "  - Health:  http://localhost:23340/api/v1/health"
 }
 cmd_agent_stop() {
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     info "停止 Agent..."
     docker compose down
     success "Agent 已停止"
 }
 cmd_agent_restart() {
-    local mode="${1:-dev}"
-    cd "$PROJECT_ROOT/crates/agent"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    enter_component_dir "agent"
     info "重启 Agent..."
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
@@ -172,22 +196,22 @@ cmd_agent_restart() {
     success "Agent 已重启"
 }
 cmd_agent_status() {
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     info "Agent 状态:"
     docker compose ps
 }
 cmd_agent_logs() {
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     docker compose logs -f
 }
 cmd_agent_build() {
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     info "构建 Agent 镜像..."
     docker compose build
     success "构建完成"
 }
 cmd_agent_reset() {
-    cd "$PROJECT_ROOT/crates/agent"
+    enter_component_dir "agent"
     warn "将删除所有数据!"
     prompt "确认重置 Agent 数据? (y/N): "
     read -r confirm
@@ -201,9 +225,9 @@ cmd_agent_reset() {
 # 全部组件命令
 # ============================================================================
 cmd_all_start() {
-    local mode="${1:-dev}"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     show_banner
-    check_dependencies
     cmd_server_start "$mode"
     echo ""
     cmd_agent_start "$mode"
@@ -213,7 +237,8 @@ cmd_all_stop() {
     cmd_agent_stop
 }
 cmd_all_restart() {
-    local mode="${1:-dev}"
+    local mode
+    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     cmd_server_restart "$mode"
     cmd_agent_restart "$mode"
 }
@@ -286,6 +311,12 @@ main() {
     [ -z "$component" ] && { show_help; exit 1; }
     [ -z "$cmd" ] && { show_help; exit 1; }
 
+    case "$cmd" in
+        start|stop|restart|status|logs|build|reset)
+            check_dependencies
+            ;;
+    esac
+
     # 分发到对应组件的处理函数
     case "$component" in
         server)
@@ -324,5 +355,10 @@ main() {
                 *)          error "未知命令: $cmd" ;;
             esac
             ;;
+        *)
+            error "未知组件: $component"
+            ;;
     esac
 }
+
+main "$@"
