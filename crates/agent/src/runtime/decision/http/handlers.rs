@@ -395,7 +395,9 @@ pub(super) async fn submit_intent_handler(
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or(state_agent_id);
 
-    let tick_id = req.tick_id.unwrap_or(0);
+    // 从共享状态获取当前 tick_id，确保意图在有效窗口内
+    let current_tick = state.current_state.read().await.as_ref().map(|s| s.tick_id).unwrap_or(0);
+    let tick_id = req.tick_id.unwrap_or(current_tick);
     let action_type: ActionType = req.action_type.into();
     let intent = Intent::new(agent_id, tick_id, action_type, req.action_data);
 
