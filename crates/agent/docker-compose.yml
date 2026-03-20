@@ -33,7 +33,7 @@ services:
   agent:
     build:
       context: ../..
-      dockerfile: ./Dockerfile
+      dockerfile: ./crates/agent/Dockerfile
     container_name: cyber-jianghu-agent
     restart: unless-stopped
     environment:
