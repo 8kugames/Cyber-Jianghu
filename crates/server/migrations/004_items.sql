@@ -63,6 +63,9 @@ CREATE TABLE agent_inventory (
     -- 是否已装备（仅对武器有效）
     is_equipped BOOLEAN NOT NULL DEFAULT false,
 
+    -- 当前耐久度（默认 -1 表示无限)
+    durability INTEGER DEFAULT -1,
+
     -- 创建时间
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
