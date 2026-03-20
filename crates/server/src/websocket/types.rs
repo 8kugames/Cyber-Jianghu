@@ -20,8 +20,13 @@ use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldBuild
 /// WebSocket 升级请求的查询参数
 #[derive(Debug, Deserialize)]
 pub struct WebSocketQuery {
-    /// 认证 token
+    /// 设备 ID（客户端生成的 UUID）
+    pub device_id: Uuid,
+    /// 认证 token（服务器生成的 auth_token）
     pub token: String,
+    /// Agent ID（可选，角色创建后由服务器分配）
+    #[serde(default)]
+    pub agent_id: Option<Uuid>,
 }
 
 // ============================================================================

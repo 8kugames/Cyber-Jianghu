@@ -34,34 +34,73 @@ use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_buil
 
 /// WebSocket 升级处理器
 ///
-/// GET /ws?token=xxx
+/// GET /ws?device_id=xxx&token=yyy
 ///
-/// 处理 WebSocket 升级请求，验证 token 并建立连接
+/// 处理 WebSocket 升级请求，验证设备身份并建立连接
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
     Query(query): Query<WebSocketQuery>,
     State(state): State<Arc<crate::state::AppState>>,
 ) -> Response {
-    // 验证 token 并获取 Agent 信息
-    let agent = match crate::db::get_agent_by_token(&state.db_pool, &query.token).await {
-        Ok(agent) => agent,
-        Err(e) => {
-            warn!("Invalid auth token: {}", e);
-            // 返回 400 错误（但不升级到 WebSocket）
-            return Response::builder()
-                .status(400)
-                .body("Invalid auth token".into())
-                .unwrap();
+    // 1. 验证设备身份（device_id + auth_token）
+    let device_valid =
+        match crate::db::verify_device_token(&state.db_pool, query.device_id, &query.token).await {
+            Ok(valid) => valid,
+            Err(e) => {
+                warn!("Device verification error: {}", e);
+                return Response::builder()
+                    .status(500)
+                    .body("Internal server error".into())
+                    .unwrap();
+            }
+        };
+
+    if !device_valid {
+        warn!("Invalid device credentials: device_id={}", query.device_id);
+        return Response::builder()
+            .status(401)
+            .body("Unauthorized".into())
+            .unwrap();
+    }
+
+    // 2. 更新设备最后在线时间
+    if let Err(e) = crate::db::update_device_last_seen(&state.db_pool, query.device_id).await {
+        warn!("Failed to update device last_seen: {}", e);
+    }
+
+    // 3. 获取该设备的角色信息（如果有）
+    // TODO: 需要实现 get_agent_by_device_id
+    // 暂时使用 agent_id 从 query 获取（后续可改为从数据库查询）
+    let agent_id = match query.agent_id {
+        Some(id) => id,
+        None => {
+            // 设备验证通过但没有角色，允许连接但标记为待注册状态
+            info!(
+                "Device {} connected without agent_id, waiting for character registration",
+                query.device_id
+            );
+            // 使用 device_id 作为临时标识
+            uuid::Uuid::nil()
         }
     };
 
+    // 4. 获取 Agent 名称（如果有）
+    let agent_name = if agent_id != uuid::Uuid::nil() {
+        match crate::db::get_agent_by_id(&state.db_pool, agent_id).await {
+            Ok(agent) => agent.name,
+            Err(_) => "Unknown".to_string(),
+        }
+    } else {
+        "Pending".to_string()
+    };
+
     info!(
-        "Agent '{}' ({}) requesting WebSocket connection",
-        agent.name, agent.agent_id
+        "Device {} (agent: {}) requesting WebSocket connection",
+        query.device_id, agent_id
     );
 
     // 升级到 WebSocket
-    ws.on_upgrade(move |socket| handle_websocket(socket, agent.agent_id, agent.name, state))
+    ws.on_upgrade(move |socket| handle_websocket(socket, agent_id, agent_name, state))
 }
 
 // ============================================================================
@@ -280,6 +319,7 @@ async fn handle_client_message(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match msg {
         ClientMessage::Intent {
+            intent_id,
             tick_id,
             thought_log,
             action_type,
@@ -288,6 +328,7 @@ async fn handle_client_message(
         } => {
             handle_intent(
                 *agent_id,
+                intent_id,
                 tick_id,
                 thought_log,
                 action_type,
@@ -313,6 +354,7 @@ const TICK_WINDOW_SIZE: i64 = 2;
 /// 包含速率限制检查和 tick_id 校验
 async fn handle_intent(
     agent_id: uuid::Uuid,
+    req_intent_id: Option<uuid::Uuid>,
     tick_id: i64,
     thought_log: Option<String>,
     action_type: String,
@@ -357,6 +399,7 @@ async fn handle_intent(
 
     // 构造 Intent
     let intent = Intent {
+        intent_id: req_intent_id.unwrap_or_else(uuid::Uuid::new_v4), // 如果 ClientMessage 中没有传 intent_id，这里生成一个新的
         agent_id,
         tick_id,
         thought_log,
