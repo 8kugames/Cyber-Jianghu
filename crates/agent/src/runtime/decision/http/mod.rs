@@ -94,10 +94,18 @@ impl Default for HttpDecisionConfig {
 pub struct HttpApiState {
     /// 当前游戏世界状态
     pub current_state: Arc<RwLock<Option<WorldState>>>,
+    /// 状态最后更新时间
+    pub last_state_update: Arc<RwLock<Option<std::time::Instant>>>,
     /// Intent 发送通道，将外部提交的 Intent 发送给决策函数
     pub intent_tx: mpsc::Sender<Intent>,
     /// 当前 Agent ID (共享，WebSocket 注册后会更新)
     pub agent_id: Arc<RwLock<Uuid>>,
+
+    // === 服务器连接配置 ===
+    /// Server HTTP URL（用于角色注册等 API 调用）
+    pub server_http_url: String,
+    /// 设备身份（device_id + auth_token）
+    pub identity: Option<crate::config::IdentityConfig>,
 
     // AI 组件（全部可选，支持按需注入）
     /// 对话客户端，处理 Agent 间对话
@@ -136,6 +144,8 @@ pub struct HttpDecisionState {
 /// 添加新的 action type 不需要修改服务端代码。
 #[derive(Deserialize)]
 pub struct IntentRequest {
+    /// Intent 唯一 ID（可选，如果未提供则自动生成）
+    pub intent_id: Option<String>,
     /// 动作类型（如 "idle", "speak", "move" 等）
     pub action_type: String,
     /// Agent ID（可选，默认使用服务端配置的 agent_id）
@@ -164,7 +174,7 @@ pub struct IntentRequest {
 pub fn http_decision(
     agent_id: Arc<RwLock<Uuid>>,
     state: Arc<HttpDecisionState>,
-    timeout_secs: u64,
+    _timeout_secs: u64, // 废弃固定值，改用动态计算
 ) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
     move |world_state: &WorldState| {
         let world_state = world_state.clone();
@@ -176,6 +186,9 @@ pub fn http_decision(
             {
                 let mut current = state.api_state.current_state.write().await;
                 *current = Some(world_state.clone());
+
+                let mut last_update = state.api_state.last_state_update.write().await;
+                *last_update = Some(std::time::Instant::now());
             }
 
             // 触发叙事更新（异步，不阻塞）
@@ -184,7 +197,27 @@ pub fn http_decision(
             // 等待外部决策
             let mut rx = state.intent_rx.lock().await;
 
-            match tokio::time::timeout(Duration::from_secs(timeout_secs), rx.recv()).await {
+            // 计算动态超时时间：min(tick_duration_secs * 0.8, 10s)
+            // 假设默认 tick_duration_secs 为 60（如果没有获取到）
+            // TODO: 最好能从某处获取真实的 tick_duration_secs
+            let dynamic_timeout = std::cmp::min((60.0 * 0.8) as u64, 10);
+
+            // 消费队列中过期的意图
+            loop {
+                match rx.try_recv() {
+                    Ok(intent) if intent.tick_id < world_state.tick_id => {
+                        tracing::warn!("[http] Dropped expired intent for tick {}", intent.tick_id);
+                        continue;
+                    }
+                    Ok(intent) => {
+                        // 发现当前或未来 tick 的意图，直接返回
+                        return intent;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            match tokio::time::timeout(Duration::from_secs(dynamic_timeout), rx.recv()).await {
                 Ok(Some(intent)) => intent,
                 Ok(None) => {
                     error!("[http] Channel closed, defaulting to idle");
@@ -207,13 +240,11 @@ pub fn http_decision(
 // HTTP Server
 // ============================================================================
 
-/// 启动 HTTP API 服务器
+/// 创建 HTTP API Router（供 claw 模式复用）
 ///
-/// 启动后监听指定端口，提供 RESTful API 供外部系统调用
-/// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
-/// 则返回 503 SERVICE_UNAVAILABLE 错误
-pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
-    let app = Router::new()
+/// 返回包含所有数据访问 API 的 Router，需要调用者提供 HttpApiState
+pub fn create_api_router() -> Router<HttpApiState> {
+    Router::new()
         // === API 发现端点 ===
         .route("/api/v1", get(handlers::api_list_handler)) // API 列表和使用规范
         // === 基础端点 ===
@@ -250,20 +281,50 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         .route("/api/v1/memory", post(handlers::store_memory_handler)) // 存储记忆
         // === 意图验证端点 ===
         .route("/api/v1/validate", post(handlers::validate_intent_handler)) // 验证意图是否符合人设
+        // === 角色注册端点 ===
+        .route(
+            "/api/v1/character/register",
+            post(handlers::register_character_handler),
+        ) // 创建新角色（转发到 Server）
         // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
-        .route(
-            "/api/v1/review/pending",
-            get(review::get_pending_reviews),
-        ) // 获取待审查意图
-        .route(
-            "/api/v1/review/{intent_id}",
-            post(review::submit_review),
-        ) // 提交审查结果
+        .route("/api/v1/review/pending", get(review::get_pending_reviews)) // 获取待审查意图
+        .route("/api/v1/review/{intent_id}", post(review::submit_review)) // 提交审查结果
         .route(
             "/api/v1/review/{intent_id}/status",
             get(review::get_review_status),
         ) // 获取审查状态
-        .with_state(api_state.clone());
+}
+
+/// 获取静态文件服务目录（供 claw 模式复用）
+pub fn get_static_serve_dir() -> PathBuf {
+    let panel_path = PathBuf::from("crates/agent/static/panel");
+    let panel_path_alt = PathBuf::from("static/panel");
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default();
+    let exe_panel_path = exe_dir.join("static/panel");
+
+    if panel_path.exists() {
+        panel_path
+    } else if panel_path_alt.exists() {
+        panel_path_alt
+    } else {
+        exe_panel_path
+    }
+}
+
+/// 启动 HTTP API 服务器
+///
+/// 启动后监听指定端口，提供 RESTful API 供外部系统调用
+/// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
+/// 则返回 503 SERVICE_UNAVAILABLE 错误
+pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
+    let app = create_api_router().with_state(api_state.clone());
+
+    // 添加静态文件服务（用于 Web 面板）
+    let serve_dir = get_static_serve_dir();
+    let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -299,6 +360,8 @@ impl DialogueEventHandler for NoopDialogueHandler {
 /// # 参数
 ///
 /// - `agent_id`: 当前 Agent ID (共享引用，注册后会被更新)
+/// - `server_http_url`: Server HTTP URL（用于角色注册等 API 调用）
+/// - `identity`: 设备身份（device_id + auth_token）
 ///
 /// # 返回值
 ///
@@ -314,7 +377,11 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// # 注意
 /// agent_id 是共享的，WebSocket 注册后会更新为服务器分配的真正 ID
-pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>, HttpApiState) {
+pub fn create_http_state(
+    agent_id: Arc<RwLock<Uuid>>,
+    server_http_url: String,
+    identity: Option<crate::config::IdentityConfig>,
+) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
     // 初始化数据目录
@@ -330,9 +397,10 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
     }; // guard 在这里释放
 
     // 初始化关系存储
-    let relationship_store = RelationshipStore::open(current_agent_id, &data_dir.join("relationships.db"))
-        .ok()
-        .map(Arc::new);
+    let relationship_store =
+        RelationshipStore::open(current_agent_id, &data_dir.join("relationships.db"))
+            .ok()
+            .map(Arc::new);
 
     // 初始化记忆管理器（无 LLM 版本，基础功能可用）
     // TODO: 语义搜索功能下一阶段实现，需要 LLM Client 提供嵌入能力
@@ -353,7 +421,10 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
     // 初始化对话客户端（使用空操作处理器）
     // 实际对话事件处理由外部系统通过 API 完成
     let dialogue_handler = Arc::new(NoopDialogueHandler);
-    let dialogue_client = Some(Arc::new(DialogueClient::new(current_agent_id, dialogue_handler)));
+    let dialogue_client = Some(Arc::new(DialogueClient::new(
+        current_agent_id,
+        dialogue_handler,
+    )));
 
     // 初始化意图验证器（使用默认规则引擎验证器）
     let intent_validator =
@@ -364,8 +435,11 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
 
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
+        last_state_update: Arc::new(RwLock::new(None)),
         intent_tx: intent_tx.clone(),
         agent_id,
+        server_http_url,
+        identity,
         dialogue_client,
         relationship_store,
         lifespan_calculator,

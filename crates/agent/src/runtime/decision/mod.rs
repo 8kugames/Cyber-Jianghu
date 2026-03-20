@@ -16,12 +16,19 @@
 
 pub mod cognitive;
 pub mod http;
+pub mod ws;
 
-// 重导出
+// 重导出 cognitive
 pub use cognitive::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_retry};
+// 重导出 http
 pub use http::{
     HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest, create_http_state,
     http_decision, run_http_server,
+};
+// 重导出 ws
+pub use ws::{
+    WsDecisionConfig, WsDecisionState, WsSharedState, ws_decision, ws_router,
+    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO,
 };
 
 use cyber_jianghu_protocol::{Intent, WorldState};
