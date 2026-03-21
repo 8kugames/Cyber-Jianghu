@@ -1007,7 +1007,23 @@ pub(super) async fn register_character_handler(
 
     info!("角色注册请求: {}", payload.name);
 
-    // 2. 构建发送到 Server 的请求
+    // 2. 生成默认 system_prompt（如果未提供）
+    let system_prompt = payload.system_prompt.clone().unwrap_or_else(|| {
+        format!(
+            "你是{}，{}，{}岁。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
+            payload.name,
+            payload.identity.as_deref().unwrap_or("江湖中人"),
+            payload.age,
+            payload.appearance.as_deref().map(|a| format!("{}。", a)).unwrap_or_default(),
+            if !payload.personality.is_empty() {
+                format!("性格特点：{}。", payload.personality.join("、"))
+            } else {
+                String::new()
+            }
+        )
+    });
+
+    // 3. 构建发送到 Server 的请求
     let server_request = serde_json::json!({
         "device_id": identity.device_id,
         "auth_token": identity.auth_token,
@@ -1020,10 +1036,10 @@ pub(super) async fn register_character_handler(
         "values": payload.values,
         "language_style": payload.language_style,
         "goals": payload.goals,
-        "system_prompt": payload.system_prompt,
+        "system_prompt": system_prompt,
     });
 
-    // 3. 转发到 Server
+    // 4. 转发到 Server
     let client = Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
     let server_url = format!("{}/api/v1/agent/register", server_http_url);
@@ -1044,7 +1060,7 @@ pub(super) async fn register_character_handler(
         }
     };
 
-    // 4. 处理 Server 响应
+    // 5. 处理 Server 响应
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -1060,7 +1076,7 @@ pub(super) async fn register_character_handler(
             .into_response();
     }
 
-    // 5. 解析成功响应
+    // 6. 解析成功响应
     #[derive(Deserialize)]
     struct ServerRegisterResponse {
         agent_id: String,
@@ -1075,7 +1091,7 @@ pub(super) async fn register_character_handler(
         Ok(result) => {
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
-            // 6. 保存 narrative_config 到本地配置目录
+            // 7. 保存 narrative_config 到本地配置目录
             if let Some(ref narrative_config) = result.narrative_config {
                 if let Some(home) = dirs::home_dir() {
                     let config_dir = home.join(".cyber-jianghu").join("config");
@@ -1097,7 +1113,7 @@ pub(super) async fn register_character_handler(
                 }
             }
 
-            // 7. 更新本地配置文件（添加注册时间、先天属性和游戏规则）
+            // 8. 更新本地配置文件（添加注册时间、先天属性和游戏规则）
             let mut config_warning = None;
             if let Ok(mut config) = crate::config::Config::from_file(&state.config_path) {
                 if let Some(ref game_rules) = result.game_rules {
