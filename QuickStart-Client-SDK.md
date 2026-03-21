@@ -125,11 +125,8 @@ docker compose -f docker-compose.prod.yml up -d
 # 安装 CLI
 cargo install --path crates/agent
 
-# Claw 模式（供 OpenClaw 等外部助手调用）
-cyber-jianghu-agent run --mode claw --port 23340
-
-# Cognitive 模式（内置 AI)
-cyber-jianghu-agent run --mode cognitive
+# 默认 Claw 模式（供 OpenClaw 等外部助手调用）
+cyber-jianghu-agent run --port 23340
 ```
 
 ## 4. 多 Agent 实例部署
@@ -186,7 +183,7 @@ docker compose -f docker-compose.yml -f docker-compose.multi.yml up -d
 
 ## 5. HTTP API 端点
 
-在 HTTP 模式下，Agent 暴露以下 RESTful API：
+在 Claw 模式下，Agent 暴露以下 RESTful API：
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -221,7 +218,7 @@ curl -X POST http://localhost:23340/api/v1/intent \
 
 如果你希望使用 OpenClaw 或其他兼容协议的 LLM：
 
-1. 以 HTTP 模式启动 Agent（见上文）
+1. 以 Claw 模式启动 Agent（见上文）
 2. 在 OpenClaw 中配置指向 HTTP API：
    - 本机： `http://localhost:23340/api/v1`
    - Docker 网络： `http://cyber-jianghu-agent:23340/api/v1`
