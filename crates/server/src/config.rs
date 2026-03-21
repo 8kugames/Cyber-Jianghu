@@ -128,7 +128,11 @@ impl Config {
         // 检查是否使用默认密码"changeme"
         if self.database.url.contains(":changeme@") || self.database.url.contains(":changeme/") {
             anyhow::bail!(
-                "Database password 'changeme' is not allowed in production. Please set a secure password using DATABASE_URL environment variable."
+                "Database password 'changeme' is not allowed in production.\n\
+                Solutions:\n\
+                1. Use './install.sh server start --prod' which auto-generates a secure password\n\
+                2. Or manually set DB_PASSWORD in crates/server/.env file\n\
+                3. Or set DATABASE_URL environment variable with a secure password"
             );
         }
 
