@@ -103,7 +103,7 @@ pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConn
 /// - Ok(false): 验证失败
 /// - Err: 数据库错误
 pub async fn verify_device_token(pool: &PgPool, device_id: Uuid, auth_token: &str) -> Result<bool> {
-    let result: Option<(i64,)> = sqlx::query_as(
+    let result: Option<(i32,)> = sqlx::query_as(
         r#"
         SELECT 1 FROM devices WHERE device_id = $1 AND auth_token = $2
         "#,
