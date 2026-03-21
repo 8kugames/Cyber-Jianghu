@@ -20,7 +20,7 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::ai::lifespan::LifespanStatus;
@@ -999,7 +999,8 @@ pub(super) async fn register_character_handler(
 
     // 3. 转发到 Server
     let client = Client::new();
-    let server_url = format!("{}/api/v1/agent/register", state.server_http_url);
+    let server_http_url = state.server_http_url.read().await.clone();
+    let server_url = format!("{}/api/v1/agent/register", server_http_url);
 
     let response = match client.post(&server_url).json(&server_request).send().await {
         Ok(resp) => resp,
@@ -1341,7 +1342,8 @@ pub(super) async fn rebirth_character_handler(
 
     // 3. 通知 Server 删除角色（POST /api/v1/agent/rebirth）
     let client = reqwest::Client::new();
-    let server_url = format!("{}/api/v1/agent/rebirth", state.server_http_url);
+    let server_http_url = state.server_http_url.read().await.clone();
+    let server_url = format!("{}/api/v1/agent/rebirth", server_http_url);
 
     // 构造请求体
     #[derive(Serialize)]
@@ -1399,9 +1401,9 @@ pub(super) async fn rebirth_character_handler(
 
     // 7. 清理本地配置文件（角色信息）
     {
-        let agent_config = state.config_path.join("agent.yaml");
+        let agent_config = &state.config_path;
         if agent_config.exists() {
-            if let Err(e) = std::fs::remove_file(&agent_config) {
+            if let Err(e) = std::fs::remove_file(agent_config) {
                 error!("删除配置文件失败: {}", e);
             } else {
                 info!("已删除角色配置文件: {:?}", agent_config);
@@ -1608,4 +1610,288 @@ pub struct DreamStatusResponse {
     pub remaining_ticks: u32,
     /// 今天是否还能使用
     pub can_use_today: bool,
+}
+
+// ============================================================================
+// 配置管理 API Handlers
+// ============================================================================
+
+/// 配置信息响应
+#[derive(Debug, Serialize)]
+pub struct ConfigResponse {
+    /// Server HTTP URL
+    pub server_http_url: String,
+    /// Server WebSocket URL
+    pub server_ws_url: String,
+    /// 运行模式
+    pub runtime_mode: String,
+    /// HTTP 端口
+    pub port: u16,
+}
+
+// ============================================================================
+// 服务器配置 API
+// ============================================================================
+
+/// 设置服务器地址请求
+#[derive(Debug, Deserialize)]
+pub struct SetServerRequest {
+    /// WebSocket URL
+    pub ws_url: String,
+    /// HTTP URL（可选）
+    pub http_url: Option<String>,
+}
+
+/// 设置服务器地址响应
+#[derive(Debug, Serialize)]
+pub struct SetServerResponse {
+    pub success: bool,
+    pub message: String,
+    pub current: ServerConfigResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerConfigResponse {
+    pub ws_url: String,
+    pub http_url: String,
+}
+
+/// 获取当前配置
+///
+/// GET /api/v1/config - 返回当前运行时配置
+pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let server_http_url = state.server_http_url.read().await.clone();
+    let server_ws_url = state.server_ws_url.read().await.clone();
+
+    Json(ConfigResponse {
+        server_http_url,
+        server_ws_url,
+        runtime_mode: "claw".to_string(),
+        port: 23340,
+    })
+}
+
+/// 配置重载请求
+#[derive(Debug, Deserialize)]
+pub struct ConfigReloadRequest {
+    /// 新的 Server HTTP URL（可选）
+    pub server_http_url: Option<String>,
+    /// 新的 Server WebSocket URL（可选）
+    pub server_ws_url: Option<String>,
+}
+
+/// 配置重载响应
+#[derive(Debug, Serialize)]
+pub struct ConfigReloadResponse {
+    /// 是否成功
+    pub success: bool,
+    /// 消息
+    pub message: String,
+    /// 更新后的配置
+    pub config: Option<ConfigResponse>,
+}
+
+/// 热重载配置
+///
+/// POST /api/v1/config/reload - 热重载服务器配置
+///
+/// 支持两种方式：
+/// 1. 不传参数：从配置文件重新加载
+/// 2. 传入参数：直接更新配置（不写文件）
+pub(super) async fn reload_config_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<ConfigReloadRequest>,
+) -> impl IntoResponse {
+    use tracing::info;
+
+    // 如果提供了参数，直接更新
+    if req.server_http_url.is_some() || req.server_ws_url.is_some() {
+        if let Some(http_url) = &req.server_http_url {
+            let mut url = state.server_http_url.write().await;
+            *url = http_url.clone();
+            info!("[config] 已更新 server_http_url: {}", http_url);
+        }
+        if let Some(ws_url) = &req.server_ws_url {
+            let mut url = state.server_ws_url.write().await;
+            *url = ws_url.clone();
+            info!("[config] 已更新 server_ws_url: {}", ws_url);
+        }
+
+        let config = ConfigResponse {
+            server_http_url: state.server_http_url.read().await.clone(),
+            server_ws_url: state.server_ws_url.read().await.clone(),
+            runtime_mode: "claw".to_string(),
+            port: 23340,
+        };
+
+        return Json(ConfigReloadResponse {
+            success: true,
+            message: "配置已更新".to_string(),
+            config: Some(config),
+        })
+        .into_response();
+    }
+
+    // 没有参数，从配置文件重新加载
+    let config_path = state.config_path.clone();
+    match crate::config::Config::from_file(&config_path) {
+        Ok(config) => {
+            // 更新 server URLs
+            {
+                let mut http_url = state.server_http_url.write().await;
+                *http_url = config.server.http_url.clone();
+            }
+            {
+                let mut ws_url = state.server_ws_url.write().await;
+                *ws_url = config.server.ws_url.clone();
+            }
+
+            info!(
+                "[config] 已从文件重载配置: http={}, ws={}",
+                config.server.http_url, config.server.ws_url
+            );
+
+            let response_config = ConfigResponse {
+                server_http_url: config.server.http_url,
+                server_ws_url: config.server.ws_url,
+                runtime_mode: "claw".to_string(),
+                port: 23340,
+            };
+
+            Json(ConfigReloadResponse {
+                success: true,
+                message: "配置已从文件重载".to_string(),
+                config: Some(response_config),
+            })
+            .into_response()
+        }
+        Err(e) => {
+            error!("[config] 重载配置失败: {}", e);
+            Json(ConfigReloadResponse {
+                success: false,
+                message: format!("重载配置失败: {}", e),
+                config: None,
+            })
+            .into_response()
+        }
+    }
+}
+
+/// 保存服务器配置到文件
+///
+/// # Arguments
+/// * `config_path` - 配置文件完整路径（如 `~/.config/cyber-jianghu/agent.yaml`）
+/// * `ws_url` - WebSocket URL
+/// * `http_url` - HTTP URL（可选）
+fn save_server_config(
+    config_path: &std::path::PathBuf,
+    ws_url: &str,
+    http_url: Option<&str>,
+) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    // 读取现有配置
+    let existing_content = std::fs::read_to_string(config_path)
+        .unwrap_or_else(|_| String::new());
+
+    // 解析或创建 YAML
+    let mut config: serde_yaml::Value = if existing_content.is_empty() {
+        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    } else {
+        serde_yaml::from_str(&existing_content)?
+    };
+
+    // 更新 server 部分
+    if let Some(mapping) = config.as_mapping_mut() {
+        let mut server_mapping = serde_yaml::Mapping::new();
+        server_mapping.insert(
+            serde_yaml::Value::String("ws_url".to_string()),
+            serde_yaml::Value::String(ws_url.to_string()),
+        );
+        if let Some(http) = http_url {
+            server_mapping.insert(
+                serde_yaml::Value::String("http_url".to_string()),
+                serde_yaml::Value::String(http.to_string()),
+            );
+        }
+        mapping.insert(
+            serde_yaml::Value::String("server".to_string()),
+            serde_yaml::Value::Mapping(server_mapping),
+        );
+    }
+
+    // 写回文件
+    let yaml_content = serde_yaml::to_string(&config)?;
+    let mut file = std::fs::File::create(config_path)?;
+    file.write_all(yaml_content.as_bytes())?;
+
+    Ok(())
+}
+
+/// POST /api/v1/config/server - 设置服务器地址
+///
+/// 设置服务器地址并触发重连。
+/// 配置会持久化到 `config_path` 文件。
+pub(super) async fn set_server_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<SetServerRequest>,
+) -> impl IntoResponse {
+    // 1. 更新内存中的配置
+    {
+        let mut ws_url = state.server_ws_url.write().await;
+        *ws_url = req.ws_url.clone();
+    }
+    let http_url_value = req.http_url.clone().unwrap_or_else(|| {
+        req.ws_url
+            .replace("ws://", "http://")
+            .replace("wss://", "https://")
+            .replace("/ws", "")
+    });
+    {
+        let mut url = state.server_http_url.write().await;
+        *url = http_url_value.clone();
+    }
+
+    // 2. 持久化到配置文件（config_path 是文件路径，非目录）
+    if let Err(e) = save_server_config(
+        &state.config_path,
+        &req.ws_url,
+        req.http_url.as_deref(),
+    ) {
+        error!("保存配置失败: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(SetServerResponse {
+                success: false,
+                message: format!("保存配置失败: {}", e),
+                current: ServerConfigResponse {
+                    ws_url: req.ws_url,
+                    http_url: http_url_value,
+                },
+            }),
+        );
+    }
+
+    // 3. 触发重连（通过 channel 通知主循环）
+    if let Some(ref tx) = state.reconnect_tx {
+        let reconnect_req = super::ReconnectRequest {
+            ws_url: req.ws_url.clone(),
+        };
+        if let Err(e) = tx.send(reconnect_req).await {
+            error!("发送重连请求失败: {}", e);
+        } else {
+            info!("[config] 触发 WebSocket 重连: {}", req.ws_url);
+        }
+    }
+
+    let response = SetServerResponse {
+        success: true,
+        message: "服务器地址已更新，正在重连...".to_string(),
+        current: ServerConfigResponse {
+            ws_url: req.ws_url,
+            http_url: http_url_value,
+        },
+    };
+
+    (StatusCode::OK, Json(response))
 }

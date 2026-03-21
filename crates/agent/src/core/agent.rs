@@ -7,6 +7,7 @@
 
 use anyhow::Result;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -20,6 +21,7 @@ use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{PersonaInfo, Validator};
 use crate::config::Config;
 use crate::models::{Intent, WorldState};
+use crate::runtime::decision::http::ReconnectRequest;
 use crate::transport::websocket::AgentClient;
 
 use super::builder::AgentBuilder;
@@ -98,6 +100,10 @@ pub struct Agent {
 
     /// 重连退避计数器（用于逐步降低重试频率）
     pub(crate) reconnect_backoff: u32,
+
+    /// 重连请求接收通道（可选，用于热切换触发重连）
+    /// Claw 模式下由 HTTP API 触发重连，其他模式为 None
+    pub(crate) reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
 }
 
 impl Agent {
@@ -109,7 +115,16 @@ impl Agent {
     /// 创建新的 Agent（简单构造函数）
     ///
     /// 注意：此构造函数不初始化记忆系统。如需启用记忆系统，请使用 `Agent::builder()`。
-    pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
+    ///
+    /// # Arguments
+    /// * `config` - Agent 配置
+    /// * `decision_callback` - 决策回调函数
+    /// * `reconnect_rx` - 重连请求接收通道（Claw 模式下用于热切换）
+    pub fn new(
+        config: Config,
+        decision_callback: DecisionCallback,
+        reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+    ) -> Self {
         let client = AgentClient::new(config.server.clone());
 
         // 设置设备身份（如果已存在）
@@ -131,6 +146,7 @@ impl Agent {
             validator_config: ValidatorConfig::default(),
             registration_callback: None,
             reconnect_backoff: 0,  // 初始为 0，重连成功后重置
+            reconnect_rx,
         }
     }
 

@@ -21,7 +21,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{Level, error, info, warn};
 use uuid::Uuid;
 
@@ -305,6 +305,25 @@ struct RunOptions {
 }
 
 // ============================================================================
+// 启动 Banner
+// ============================================================================
+
+/// 打印启动 Banner
+fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str) {
+    info!("╔══════════════════════════════════════════════╗");
+    info!("║       Cyber-Jianghu Agent (Claw Mode)        ║");
+    info!("╠══════════════════════════════════════════════╣");
+    info!("║ HTTP API:  http://0.0.0.0:{}                 ║", port);
+    info!("║ WebSocket: {:<34} ║", server_ws_url);
+    info!("║ Config:    {:<34} ║", config_path_str);
+    info!("╠══════════════════════════════════════════════╣");
+    info!("║ 切换服务器: POST /api/v1/config/server       ║");
+    info!("║ 热加载配置: POST /api/v1/config/reload       ║");
+    info!("║ API 文档:   GET  /api/v1                     ║");
+    info!("╚══════════════════════════════════════════════╝");
+}
+
+// ============================================================================
 // 主入口
 // ============================================================================
 
@@ -532,11 +551,23 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
 
         info!("启动 Claw 模式（WebSocket + HTTP API），端口: {}", actual_port);
 
+        // 打印启动 Banner
+        let config_path_str = config_path().display().to_string();
+        print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+
+        // 创建重连通道（用于热切换触发重连）
+        let (reconnect_tx, reconnect_rx) = mpsc::channel::<
+            cyber_jianghu_agent::runtime::decision::http::ReconnectRequest
+        >(10);
+
         // 创建 HTTP API 状态（用于数据访问 API）
         let (http_decision_state, api_state) = create_http_state(
             device_id.clone(),
             config.server.http_url.clone(),
+            config.server.ws_url.clone(),
             Some(identity.clone()),
+            Some(reconnect_tx),  // 传递重连通道发送端
+            config_path(),  // 传入配置文件路径，确保与主程序一致
         );
 
         // 创建 WebSocket 决策状态（用于实时决策）
@@ -551,17 +582,17 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
             }
         });
 
-        // 返回 HTTP decision state（用于 http_decision）
-        Some(http_decision_state)
+        // 返回 HTTP decision state 和 reconnect_rx（用于 http_decision 和 Agent）
+        Some((http_decision_state, reconnect_rx))
     } else {
         None
     };
 
-    // 6. 选择决策模式
-    let decision: Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync> = match mode {
+    // 6. 选择决策模式 + 提取 reconnect_rx
+    let (decision, agent_reconnect_rx): (Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>, Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>) = match mode {
         "claw" | "http" => {
-            let state = claw_decision_state.expect("claw_decision_state should exist in claw mode");
-            Arc::new(http_decision(device_id.clone(), state, 55))
+            let (state, rx) = claw_decision_state.expect("claw_decision_state should exist in claw mode");
+            (Arc::new(http_decision(device_id.clone(), state, 55)), Some(rx))
         }
         "cognitive" => {
             info!("启动 Cognitive 模式");
@@ -615,39 +646,45 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
 
             let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_client, engine_config));
 
-            Arc::new(move |world_state: &WorldState| {
-                let engine = cognitive_engine.clone();
-                let agent_id = world_state.agent_id.unwrap_or_default();
-                let tick_id = world_state.tick_id;
-                let world_state_clone = world_state.clone();
+            (
+                Arc::new(move |world_state: &WorldState| {
+                    let engine = cognitive_engine.clone();
+                    let agent_id = world_state.agent_id.unwrap_or_default();
+                    let tick_id = world_state.tick_id;
+                    let world_state_clone = world_state.clone();
 
-                Box::pin(async move {
-                    match engine.think(&world_state_clone).await {
-                        Ok(chain) => chain.final_intent,
-                        Err(e) => {
-                            error!("认知流程失败: {}", e);
-                            Intent::idle(agent_id, tick_id).with_thought(format!("认知失败: {}", e))
+                    Box::pin(async move {
+                        match engine.think(&world_state_clone).await {
+                            Ok(chain) => chain.final_intent,
+                            Err(e) => {
+                                error!("认知流程失败: {}", e);
+                                Intent::idle(agent_id, tick_id).with_thought(format!("认知失败: {}", e))
+                            }
                         }
-                    }
-                })
-            })
+                    })
+                }),
+                None,  // cognitive 模式不使用热切换
+            )
         }
         _ => {
             let mode_string = mode.to_string();
-            Arc::new(move |world_state: &WorldState| {
-                let tick_id = world_state.tick_id;
-                let agent_id = world_state.agent_id.unwrap_or_default();
-                let mode = mode_string.clone();
-                Box::pin(async move {
-                    error!("Unknown mode: {}. Supported: claw, cognitive", mode);
-                    Intent::idle(agent_id, tick_id).with_thought(format!("未知模式: {}", mode))
-                })
-            })
+            (
+                Arc::new(move |world_state: &WorldState| {
+                    let tick_id = world_state.tick_id;
+                    let agent_id = world_state.agent_id.unwrap_or_default();
+                    let mode = mode_string.clone();
+                    Box::pin(async move {
+                        error!("Unknown mode: {}. Supported: claw, cognitive", mode);
+                        Intent::idle(agent_id, tick_id).with_thought(format!("未知模式: {}", mode))
+                    })
+                }),
+                None,  // 未知模式不使用热切换
+            )
         }
     };
 
     // 7. 创建并运行 Agent
-    let mut agent = Agent::new(config, decision);
+    let mut agent = Agent::new(config, decision, agent_reconnect_rx);
 
     // 设置注册回调（仅 claw 模式需要）
     if is_claw_mode {
