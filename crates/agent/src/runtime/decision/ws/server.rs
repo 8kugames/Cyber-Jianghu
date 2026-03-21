@@ -61,6 +61,8 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
     // 订阅 WorldState 广播
     let mut state_rx = state.state_tx.subscribe();
+    // 订阅 tick_closed 广播
+    let mut tick_closed_rx = state.tick_closed_tx.subscribe();
     let intent_tx = state.intent_tx.clone();
 
     // 使用 Arc<AtomicBool> 来共享活跃状态
@@ -124,42 +126,82 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
         is_active_read.store(false, Ordering::Relaxed);
     };
 
-    // 写任务：广播 WorldState
+    // 写任务：广播 WorldState 和 tick_closed
     let write_task = async {
-        while is_active_write.load(Ordering::Relaxed) {
-            match state_rx.recv().await {
-                Ok(world_state) => {
-                    // 构造 tick 消息
-                    let deadline_ms = state.get_deadline_ms();
-                    let msg = DownstreamMessage::Tick {
-                        tick_id: world_state.tick_id,
-                        deadline_ms,
-                        state: (*world_state).clone(),
-                    };
+        loop {
+            if !is_active_write.load(Ordering::Relaxed) {
+                break;
+            }
 
-                    let json = match serde_json::to_string(&msg) {
-                        Ok(j) => j,
-                        Err(e) => {
-                            error!("Failed to serialize tick message: {}", e);
-                            continue;
+            // 使用 select 同时监听 state_rx 和 tick_closed_rx
+            tokio::select! {
+                // 接收 WorldState
+                result = state_rx.recv() => {
+                    match result {
+                        Ok(world_state) => {
+                            // 构造 tick 消息
+                            let deadline_ms = state.get_deadline_ms();
+                            // 生成叙事化上下文
+                            let context = state.generate_context(&world_state);
+                            let msg = DownstreamMessage::Tick {
+                                tick_id: world_state.tick_id,
+                                deadline_ms,
+                                state: (*world_state).clone(),
+                                context,
+                            };
+
+                            let json = match serde_json::to_string(&msg) {
+                                Ok(j) => j,
+                                Err(e) => {
+                                    error!("Failed to serialize tick message: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            let mut tx = ws_tx.lock().await;
+                            if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                debug!("Failed to send tick: {}", e);
+                                break;
+                            }
+
+                            debug!("Sent tick {}", world_state.tick_id);
                         }
-                    };
-
-                    let mut tx = ws_tx.lock().await;
-                    if let Err(e) = tx.send(Message::Text(json.into())).await {
-                        debug!("Failed to send tick: {}", e);
-                        break;
+                        Err(broadcast::error::RecvError::Closed) => {
+                            debug!("Broadcast channel closed");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("Client lagged {} messages", n);
+                        }
                     }
+                }
+                // 接收 tick_closed
+                result = tick_closed_rx.recv() => {
+                    match result {
+                        Ok(msg) => {
+                            let json = match serde_json::to_string(&msg) {
+                                Ok(j) => j,
+                                Err(e) => {
+                                    error!("Failed to serialize tick_closed message: {}", e);
+                                    continue;
+                                }
+                            };
 
-                    debug!("Sent tick {}", world_state.tick_id);
-                }
-                Err(broadcast::error::RecvError::Closed) => {
-                    debug!("Broadcast channel closed");
-                    break;
-                }
-                Err(broadcast::error::RecvError::Lagged(n)) => {
-                    warn!("Client lagged {} messages", n);
-                    // 继续处理，会收到最新消息
+                            let mut tx = ws_tx.lock().await;
+                            if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                debug!("Failed to send tick_closed: {}", e);
+                                break;
+                            }
+
+                            debug!("Sent tick_closed message");
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            debug!("tick_closed channel closed");
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("Client lagged {} tick_closed messages", n);
+                        }
+                    }
                 }
             }
         }
@@ -173,31 +215,6 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
     info!("WebSocket client disconnected");
 }
-
-// ============================================================================
-// 发送 tick_closed 消息
-// ============================================================================
-
-/// 向所有连接的客户端发送 tick_closed 消息
-///
-/// 注意：由于使用 broadcast 通道，此函数会向所有客户端广播
-/// 但只有活跃的客户端会收到
-pub fn broadcast_tick_closed(
-    _state_tx: &broadcast::Sender<Arc<WorldState>>,
-    tick_id: i64,
-    reason: &str,
-    next_tick_in_ms: u64,
-) {
-    // TODO: 需要一个专门的 DownstreamMessage broadcast channel
-    debug!(
-        "Would broadcast tick_closed for tick {} (reason: {}, next in {}ms)",
-        tick_id, reason, next_tick_in_ms
-    );
-}
-
-// ============================================================================
-// 单元测试
-// ============================================================================
 
 // ============================================================================
 // 启动混合服务器（WebSocket + HTTP API）
@@ -256,15 +273,18 @@ mod tests {
     #[tokio::test]
     async fn test_ws_shared_state() {
         let (state_tx, _) = broadcast::channel(1);
+        let (tick_closed_tx, _) = broadcast::channel(16);
         let (intent_tx, _) = mpsc::channel(16);
 
         let shared = WsSharedState {
             state_tx,
+            tick_closed_tx,
             intent_tx,
             current_tick: Arc::new(AtomicI64::new(100)),
             deadline_ms: Arc::new(AtomicU64::new(1710937800000)),
             tick_duration_ms: Arc::new(AtomicU64::new(60000)),
             agent_id: Arc::new(AtomicI64::new(0)),
+            narrative_engine: None,
         };
 
         assert_eq!(shared.get_current_tick(), 100);

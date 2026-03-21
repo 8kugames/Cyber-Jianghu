@@ -41,6 +41,9 @@ pub struct WsDecisionState {
     /// WorldState 广播通道（容量 1，只保留最新）
     pub state_tx: broadcast::Sender<Arc<WorldState>>,
 
+    /// tick_closed 广播通道（容量 16）
+    pub tick_closed_tx: broadcast::Sender<DownstreamMessage>,
+
     /// Intent 接收通道
     pub intent_rx: mpsc::Receiver<WsIntent>,
 
@@ -64,10 +67,12 @@ impl WsDecisionState {
     /// 创建新的 WebSocket 决策状态
     pub fn new() -> Self {
         let (state_tx, _) = broadcast::channel(1);
+        let (tick_closed_tx, _) = broadcast::channel(16);
         let (intent_tx, intent_rx) = mpsc::channel(16);
 
         Self {
             state_tx,
+            tick_closed_tx,
             intent_rx,
             intent_tx,
             current_tick: Arc::new(AtomicI64::new(0)),
@@ -200,6 +205,18 @@ impl WsDecisionState {
             next_tick_in_ms: tick_duration_ms,
         }
     }
+
+    /// 广播 tick_closed 消息给所有客户端
+    pub fn broadcast_tick_closed(&self, tick_id: i64, reason: &str) {
+        let msg = self.create_tick_closed_message(tick_id, reason);
+        match self.tick_closed_tx.send(msg) {
+            Ok(n) => debug!(
+                "Broadcast tick_closed for tick {} to {} clients (reason: {})",
+                tick_id, n, reason
+            ),
+            Err(_) => debug!("No clients connected for tick_closed"),
+        }
+    }
 }
 
 impl Default for WsDecisionState {
@@ -218,6 +235,9 @@ pub struct WsSharedState {
     /// WorldState 广播通道
     pub state_tx: broadcast::Sender<Arc<WorldState>>,
 
+    /// tick_closed 广播通道
+    pub tick_closed_tx: broadcast::Sender<DownstreamMessage>,
+
     /// Intent 发送通道
     pub intent_tx: mpsc::Sender<WsIntent>,
 
@@ -232,17 +252,22 @@ pub struct WsSharedState {
 
     /// Agent ID
     pub agent_id: Arc<AtomicI64>,
+
+    /// 叙事引擎（可选，用于生成上下文）
+    pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
 }
 
 impl From<&WsDecisionState> for WsSharedState {
     fn from(state: &WsDecisionState) -> Self {
         Self {
             state_tx: state.state_tx.clone(),
+            tick_closed_tx: state.tick_closed_tx.clone(),
             intent_tx: state.intent_tx.clone(),
             current_tick: state.current_tick.clone(),
             deadline_ms: state.deadline_ms.clone(),
             tick_duration_ms: state.tick_duration_ms.clone(),
             agent_id: state.agent_id.clone(),
+            narrative_engine: None,
         }
     }
 }
@@ -261,6 +286,29 @@ impl WsSharedState {
     /// 获取 Tick 持续时间（毫秒）
     pub fn get_tick_duration_ms(&self) -> u64 {
         self.tick_duration_ms.load(Ordering::Relaxed)
+    }
+
+    /// 生成叙事化上下文
+    ///
+    /// 如果配置了叙事引擎，使用叙事引擎生成；否则返回 None
+    pub fn generate_context(&self, world_state: &WorldState) -> Option<String> {
+        use crate::ai::cognitive::narrative::NarrativeEngine;
+
+        // 获取叙事引擎（配置的或默认的）
+        let engine: &NarrativeEngine = self
+            .narrative_engine
+            .as_deref()
+            .unwrap_or_else(|| {
+                // 使用静态默认引擎
+                static DEFAULT_ENGINE: std::sync::OnceLock<NarrativeEngine> =
+                    std::sync::OnceLock::new();
+                DEFAULT_ENGINE.get_or_init(NarrativeEngine::with_builtin_config)
+            });
+
+        // 生成简化上下文（不包含关系信息）
+        Some(super::super::http::generate_context_markdown_no_relationship(
+            world_state, engine,
+        ))
     }
 }
 
