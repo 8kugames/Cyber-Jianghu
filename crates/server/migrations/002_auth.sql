@@ -14,7 +14,7 @@
 -- ============================================================================
 -- devices 表
 -- ============================================================================
-CREATE TABLE devices (
+CREATE TABLE IF NOT EXISTS devices (
     -- 设备唯一标识（客户端生成的 UUID v4）
     device_id UUID PRIMARY KEY,
 
@@ -29,8 +29,8 @@ CREATE TABLE devices (
 );
 
 -- 索引
-CREATE INDEX idx_devices_auth_token ON devices(auth_token);
-CREATE INDEX idx_devices_last_seen ON devices(last_seen);
+CREATE INDEX IF NOT EXISTS idx_devices_auth_token ON devices(auth_token);
+CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen);
 
 -- 注释
 COMMENT ON TABLE devices IS '设备身份表 - 存储客户端设备的认证信息';
