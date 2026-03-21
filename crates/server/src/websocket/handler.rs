@@ -42,12 +42,22 @@ pub async fn websocket_handler(
     Query(query): Query<WebSocketQuery>,
     State(state): State<Arc<crate::state::AppState>>,
 ) -> Response {
+    // 调试日志：显示收到的参数
+    debug!("WebSocket request: device_id={}, token={}", query.device_id, query.token);
+
     // 1. 验证设备身份（device_id + auth_token）
     let device_valid =
         match crate::db::verify_device_token(&state.db_pool, query.device_id, &query.token).await {
             Ok(valid) => valid,
             Err(e) => {
-                warn!("Device verification error: {}", e);
+                // 输出完整的错误链
+                let mut err_msg = format!("{}", e);
+                let mut source = e.source();
+                while let Some(s) = source {
+                    err_msg.push_str(&format!("\n  Caused by: {}", s));
+                    source = s.source();
+                }
+                warn!("Device verification error: {}", err_msg);
                 return Response::builder()
                     .status(500)
                     .body("Internal server error".into())

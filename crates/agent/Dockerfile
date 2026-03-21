@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y \
 # 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
 COPY Cargo.toml ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
+COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
 
 RUN mkdir -p ./.cargo \
@@ -42,8 +43,9 @@ replace-with = "aliyun"\n\
 registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
 # 创建空的 src 目录，用于下载依赖
-RUN mkdir -p crates/protocol/src crates/agent/src/bin && \
+RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
     echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
+    echo "pub fn placeholder() {}" > crates/server/src/lib.rs && \
     echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
     echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
