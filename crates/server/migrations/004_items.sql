@@ -15,7 +15,7 @@
 -- ============================================================================
 -- items 表 - 物品模板
 -- ============================================================================
-CREATE TABLE items (
+CREATE TABLE IF NOT EXISTS items (
     -- 物品唯一 ID（如：mantou, water, silver, knife）
     item_id VARCHAR(50) PRIMARY KEY,
 
@@ -47,7 +47,7 @@ COMMENT ON COLUMN items.description IS '物品描述';
 -- ============================================================================
 -- agent_inventory 表 - Agent 背包
 -- ============================================================================
-CREATE TABLE agent_inventory (
+CREATE TABLE IF NOT EXISTS agent_inventory (
     -- 记录 ID
     id BIGSERIAL PRIMARY KEY,
 
@@ -77,10 +77,11 @@ CREATE TABLE agent_inventory (
 );
 
 -- 索引
-CREATE INDEX idx_agent_inventory_agent_id ON agent_inventory(agent_id);
-CREATE INDEX idx_agent_inventory_item_id ON agent_inventory(item_id);
+CREATE INDEX IF NOT EXISTS idx_agent_inventory_agent_id ON agent_inventory(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_inventory_item_id ON agent_inventory(item_id);
 
--- 触发器：自动更新 updated_at
+-- 触发器：自动更新 updated_at（幂等性： 先删除再创建）
+DROP TRIGGER IF EXISTS update_agent_inventory_updated_at ON agent_inventory;
 CREATE TRIGGER update_agent_inventory_updated_at
     BEFORE UPDATE ON agent_inventory
     FOR EACH ROW

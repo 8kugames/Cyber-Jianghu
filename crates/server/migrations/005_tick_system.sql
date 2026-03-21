@@ -14,7 +14,7 @@
 -- ============================================================================
 -- tick_logs 表 - Tick 执行日志
 -- ============================================================================
-CREATE TABLE tick_logs (
+CREATE TABLE IF NOT EXISTS tick_logs (
     -- Tick 编号（由代码提供，非自增）
     tick_id BIGINT PRIMARY KEY,
 
@@ -42,8 +42,8 @@ CREATE TABLE tick_logs (
 );
 
 -- 索引
-CREATE INDEX idx_tick_logs_started_at ON tick_logs(started_at);
-CREATE INDEX idx_tick_logs_status ON tick_logs(status);
+CREATE INDEX IF NOT EXISTS idx_tick_logs_started_at ON tick_logs(started_at);
+CREATE INDEX IF NOT EXISTS idx_tick_logs_status ON tick_logs(status);
 
 -- 注释
 COMMENT ON TABLE tick_logs IS 'Tick日志表，记录每次Tick的执行情况';
@@ -56,7 +56,7 @@ COMMENT ON COLUMN tick_logs.status IS 'Tick状态：running/completed/failed';
 -- ============================================================================
 -- agent_action_logs 表 - Agent 动作日志
 -- ============================================================================
-CREATE TABLE agent_action_logs (
+CREATE TABLE IF NOT EXISTS agent_action_logs (
     -- 记录 ID
     id BIGSERIAL PRIMARY KEY,
 
@@ -80,9 +80,9 @@ CREATE TABLE agent_action_logs (
 );
 
 -- 索引
-CREATE INDEX idx_agent_action_logs_tick_id ON agent_action_logs(tick_id);
-CREATE INDEX idx_agent_action_logs_agent_id ON agent_action_logs(agent_id);
-CREATE INDEX idx_agent_action_logs_action_type ON agent_action_logs(action_type);
+CREATE INDEX IF NOT EXISTS idx_agent_action_logs_tick_id ON agent_action_logs(tick_id);
+CREATE INDEX IF NOT EXISTS idx_agent_action_logs_agent_id ON agent_action_logs(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_action_logs_action_type ON agent_action_logs(action_type);
 
 -- 注释
 COMMENT ON TABLE agent_action_logs IS 'Agent动作日志表，记录Agent执行的所有动作';

@@ -125,8 +125,13 @@ impl Config {
             anyhow::bail!("Database URL must start with 'postgres://'");
         }
 
-        // 检查是否使用默认密码"changeme"
-        if self.database.url.contains(":changeme@") || self.database.url.contains(":changeme/") {
+        // 检查是否在生产环境使用默认密码"changeme"
+        // 只在生产环境(ENVIRONMENT=production)时检查，否则允许开发环境使用默认密码
+        let is_production = std::env::var("ENVIRONMENT")
+            .map(|v| v == "production")
+            .unwrap_or(false);
+
+        if is_production && (self.database.url.contains(":changeme@") || self.database.url.contains(":changeme/")) {
             anyhow::bail!(
                 "Database password 'changeme' is not allowed in production.\n\
                 Solutions:\n\

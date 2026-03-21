@@ -14,7 +14,7 @@
 -- ============================================================================
 -- agents 表 - Agent 基本信息
 -- ============================================================================
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
     -- Agent 唯一 ID
     agent_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 
@@ -35,8 +35,8 @@ CREATE TABLE agents (
 );
 
 -- 索引
-CREATE INDEX idx_agents_device_id ON agents(device_id);
-CREATE INDEX idx_agents_last_tick_online ON agents(last_tick_online);
+CREATE INDEX IF NOT EXISTS idx_agents_device_id ON agents(device_id);
+CREATE INDEX IF NOT EXISTS idx_agents_last_tick_online ON agents(last_tick_online);
 
 -- 注释
 COMMENT ON TABLE agents IS 'Agent基本信息表';
@@ -49,7 +49,7 @@ COMMENT ON COLUMN agents.last_tick_online IS '最后一次上报意图的时间'
 -- ============================================================================
 -- agent_states 表 - Agent 状态快照
 -- ============================================================================
-CREATE TABLE agent_states (
+CREATE TABLE IF NOT EXISTS agent_states (
     -- 记录 ID
     id BIGSERIAL PRIMARY KEY,
 
@@ -76,15 +76,15 @@ CREATE TABLE agent_states (
 );
 
 -- 基础索引
-CREATE INDEX idx_agent_states_agent_id ON agent_states(agent_id);
-CREATE INDEX idx_agent_states_tick_id ON agent_states(tick_id);
-CREATE INDEX idx_agent_states_is_alive ON agent_states(is_alive);
+CREATE INDEX IF NOT EXISTS idx_agent_states_agent_id ON agent_states(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_states_tick_id ON agent_states(tick_id);
+CREATE INDEX IF NOT EXISTS idx_agent_states_is_alive ON agent_states(is_alive);
 
--- 部分索引：仅索引存活的 Agent
-CREATE INDEX idx_agent_states_alive_only ON agent_states(agent_id) WHERE is_alive = true;
+-- 部分索引: 仅索引存活的 Agent
+CREATE INDEX IF NOT EXISTS idx_agent_states_alive_only ON agent_states(agent_id) WHERE is_alive = true;
 
--- JSONB GIN 索引：支持高效属性查询
-CREATE INDEX idx_agent_states_attributes_gin ON agent_states USING GIN (attributes);
+-- JSONB GIN 索引: 支持高效属性查询
+CREATE INDEX IF NOT EXISTS idx_agent_states_attributes_gin ON agent_states USING GIN (attributes);
 
 -- 注释
 COMMENT ON TABLE agent_states IS 'Agent状态表，每Tick记录一次状态快照';

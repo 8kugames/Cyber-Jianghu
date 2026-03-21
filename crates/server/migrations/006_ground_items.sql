@@ -13,7 +13,7 @@
 -- ============================================================================
 -- ground_items 表
 -- ============================================================================
-CREATE TABLE ground_items (
+CREATE TABLE IF NOT EXISTS ground_items (
     -- 记录 ID
     id BIGSERIAL PRIMARY KEY,
 
@@ -34,8 +34,8 @@ CREATE TABLE ground_items (
 );
 
 -- 索引
-CREATE INDEX idx_ground_items_node_id ON ground_items(node_id);
-CREATE INDEX idx_ground_items_item_id ON ground_items(item_id);
+CREATE INDEX IF NOT EXISTS idx_ground_items_node_id ON ground_items(node_id);
+CREATE INDEX IF NOT EXISTS idx_ground_items_item_id ON ground_items(item_id);
 
 -- 注释
 COMMENT ON TABLE ground_items IS '地面物品表，记录场景中掉落的物品';
