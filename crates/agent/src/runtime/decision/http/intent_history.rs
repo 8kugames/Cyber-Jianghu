@@ -14,6 +14,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// 默认最大保存条目数
+const DEFAULT_MAX_ENTRIES: usize = 100;
+
 /// Intent 历史条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntentHistoryEntry {
@@ -45,7 +48,7 @@ pub struct IntentHistoryStore {
 
 impl Default for IntentHistoryStore {
     fn default() -> Self {
-        Self::new(100)
+        Self::new(DEFAULT_MAX_ENTRIES)
     }
 }
 
