@@ -116,6 +116,11 @@ async fn main() -> Result<()> {
         let guard = game_data_cache.get();
         items::init_item_cache_from_config(&guard.items.data)?;
         info!("物品系统初始化完成，共 {} 种物品", guard.items.data.len());
+
+        // 同步物品到数据库（用于外键约束）
+        if let Err(e) = db::sync_items_from_config(&db_pool, &guard.items.data).await {
+            error!("同步物品到数据库失败: {}", e);
+        }
     }
 
     // 7. 初始化 WebSocket 连接管理器、Intent 管理器和速率限制器
