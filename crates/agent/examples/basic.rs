@@ -2,18 +2,20 @@
 // 基础使用示例
 // ============================================================================
 //
-// 展示如何使用 Agent SDK 与 OpenClaw 服务端通信
-// ============================================================================
+// 屼示如何使用 Agent SDK 与 OpenClaw 服务端通信
+//
 
 use anyhow::Result;
-use cyber_jianghu_agent::{ActionType, Agent, Config, Intent, WorldState};
+use cyber_jianghu_agent::{Agent, Config, Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use uuid::Uuid;
 
-/// 模拟决策函数（完全动态架构）
+use tracing_subscriber;
+
+/// 模拟决策函数（完全动态架构)
 ///
-/// 在实际使用中，这个函数会由 OpenClaw 或外部 LLM 提供
+/// 在实际使用中,这个函数会由 OpenClaw 或外部 LLM 提供
 fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
     let world_state = world_state.clone();
     Box::pin(async move {
@@ -30,7 +32,7 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
             hp, hunger, thirst, stamina
         );
 
-        // 打印所有动态属性（展示完全动态特性）
+        // 打印所有动态属性（展示完全动态特性)
         println!("所有属性:");
         for (name, value) in &world_state.self_state.attributes {
             println!("  {} = {:?}", name, value);
@@ -41,9 +43,9 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
             println!("  附近: {} ({})", entity.name, entity.state);
         }
 
-        // 简单决策逻辑：
-        // - 如果饥饿值低，使用馒头
-        // - 如果口渴值低，使用水
+        // 简单决策逻辑:
+        // - 如果饥饿值低, 使用馒头
+        // - 如果口渴值低, 使用水
         // - 否则 idle
         let action = if hunger < 30 {
             "use"
@@ -53,7 +55,7 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
             "idle"
         };
 
-        // 创建意图（使用便捷构造方法）
+        // 创建意图(使用便捷构造方法)
         let agent_id = Uuid::parse_str(&std::env::var("AGENT_ID").unwrap_or_default())
             .unwrap_or_else(|_| Uuid::nil());
 
@@ -73,9 +75,9 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
                         Intent::use_item(agent_id, world_state.tick_id, "mantou")
                             .with_thought(thought)
                     } else {
-                        // 没有馒头，尝试使用水
+                        // 没有馒头,尝试使用水
                         Intent::use_item(agent_id, world_state.tick_id, "water")
-                            .with_thought("没有馒头了，尝试喝水".to_string())
+                            .with_thought("没有馒头了,尝试喝水".to_string())
                     }
                 } else {
                     Intent::use_item(agent_id, world_state.tick_id, "water").with_thought(thought)
@@ -97,10 +99,10 @@ async fn main() -> Result<()> {
     println!("Agent 配置: {:?}", config.agent);
     println!("服务端: {}", config.server.ws_url);
 
-    println!("创建 Agent '{}'...", config.agent.name);
+    println!("创建 Agent...");
 
-    // 创建 Agent（使用 Arc 包装决策函数）
-    let mut agent = Agent::new(config, Arc::new(make_decision));
+    // 创建 Agent(使用 Arc 包装决策函数)
+    let mut agent = Agent::new(config, Arc::new(make_decision), None);
 
     // 运行 Agent
     agent.run().await?;

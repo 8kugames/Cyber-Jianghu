@@ -70,6 +70,7 @@ pub use review::{PendingReviewEntry, ReviewState, ReviewStore};
 // 重导出 context 模块的公共 API
 pub use context::{
     AttributesGlimpse, ContextResponse, create_attributes_glimpse, create_narrative_engine,
+    generate_context_markdown_no_relationship,
 };
 
 // ============================================================================
@@ -109,6 +110,10 @@ pub struct HttpApiState {
     pub intent_tx: mpsc::Sender<Intent>,
     /// 当前 Agent ID (共享，WebSocket 注册后会更新)
     pub agent_id: Arc<RwLock<Uuid>>,
+
+    // === Tick 时序信息 ===
+    /// Tick 持续时间（秒），从 GameRules 获取
+    pub tick_duration_secs: Arc<std::sync::atomic::AtomicU64>,
 
     // === 服务器连接配置 ===
     /// Server HTTP URL（用于角色注册等 API 调用）
@@ -216,9 +221,9 @@ pub fn http_decision(
             let mut rx = state.intent_rx.lock().await;
 
             // 计算动态超时时间：min(tick_duration_secs * 0.8, 10s)
-            // 假设默认 tick_duration_secs 为 60（如果没有获取到）
-            // TODO: 最好能从某处获取真实的 tick_duration_secs
-            let dynamic_timeout = std::cmp::min((60.0 * 0.8) as u64, 10);
+            // 从 GameRules 获取真实的 tick_duration_secs（默认 60 秒）
+            let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
+            let dynamic_timeout = std::cmp::min((tick_duration as f64 * 0.8) as u64, 10);
 
             // 消费队列中过期的意图
             loop {
@@ -485,6 +490,7 @@ pub fn create_http_state(
         last_state_update: Arc::new(RwLock::new(None)),
         intent_tx: intent_tx.clone(),
         agent_id,
+        tick_duration_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)), // 默认 60 秒，注册后更新
         server_http_url: Arc::new(RwLock::new(server_http_url)),
         server_ws_url: Arc::new(RwLock::new(server_ws_url)),
         identity,
@@ -570,6 +576,13 @@ impl HttpApiState {
     pub fn with_dream_store(mut self, store: Arc<RwLock<DreamState>>) -> Self {
         self.dream_store = Some(store);
         self
+    }
+
+    /// 更新 Tick 持续时间（从 GameRules 获取后调用）
+    pub fn set_tick_duration(&self, secs: u64) {
+        use std::sync::atomic::Ordering;
+        self.tick_duration_secs.store(secs, Ordering::Relaxed);
+        tracing::info!("[http] Updated tick_duration to {}s", secs);
     }
 
     /// 获取当前托梦内容（如果有）

@@ -87,8 +87,8 @@ pub fn ws_decision(
                         world_state.tick_id
                     );
 
-                    // TODO: 发送 tick_closed 消息给客户端
-                    // 这需要在 state 中添加一个专门的 broadcast channel
+                    // 广播 tick_closed 消息给客户端
+                    ws_state.broadcast_tick_closed(world_state.tick_id, "timeout");
 
                     Intent::idle(agent_id_value, world_state.tick_id)
                         .with_thought("Tick timeout, auto idle".to_string())
