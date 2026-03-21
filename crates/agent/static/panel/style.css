@@ -1,15 +1,16 @@
-/* 赛博江湖 - 角色创建面板样式 */
+/* 赛博江湖 - Agent Web Panel Styles */
 
 :root {
-    --primary-color: #1a1a2e;
-    --secondary-color: #16213e;
-    --accent-color: #e94560;
-    --text-color: #eee;
-    --text-muted: #888;
-    --success-color: #4ecca3;
-    --error-color: #e94560;
-    --border-color: #333;
-    --card-bg: #1a1a2e;
+    --primary-color: #2c3e50;
+    --accent-color: #3498db;
+    --bg-color: #f5f6fa;
+    --card-bg: #ffffff;
+    --text-color: #2c3e50;
+    --text-muted: #7f8c8d;
+    --border-color: #dcdde1;
+    --success-color: #27ae60;
+    --error-color: #c0392b;
+    --warning-color: #f39c12;
 }
 
 * {
@@ -20,85 +21,100 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+    background-color: var(--bg-color);
     color: var(--text-color);
     min-height: 100vh;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 
 .container {
-    max-width: 600px;
+    max-width: 800px;
     margin: 0 auto;
-    padding: 20px;
+    padding: 0;
 }
 
+/* Header */
 header {
-    text-align: center;
-    margin-bottom: 30px;
-    padding: 20px 0;
-    border-bottom: 1px solid var(--border-color);
+    background-color: var(--primary-color);
+    color: white;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 header h1 {
-    font-size: 2.5rem;
-    color: var(--accent-color);
-    margin-bottom: 5px;
-    text-shadow: 0 0 10px rgba(233, 69, 96, 0.3);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin: 0;
 }
 
-.subtitle {
-    color: var(--text-muted);
-    font-size: 1.1rem;
-}
-
-/* 导航标签 */
+/* Navigation Tabs */
 .nav-tabs {
     display: flex;
-    justify-content: center;
-    gap: 10px;
-    margin-top: 15px;
+    height: 100%;
+    gap: 0;
 }
 
 .nav-tab {
-    padding: 8px 16px;
-    background: var(--secondary-color);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    color: var(--text-color);
+    padding: 0 20px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    color: white;
     text-decoration: none;
-    font-size: 0.9rem;
+    font-size: 14px;
+    opacity: 0.7;
     transition: all 0.2s;
+    border-bottom: 3px solid transparent;
 }
 
 .nav-tab:hover {
-    border-color: var(--accent-color);
+    opacity: 1;
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .nav-tab.active {
-    background: var(--accent-color);
-    border-color: var(--accent-color);
-    color: white;
+    opacity: 1;
+    border-bottom-color: var(--accent-color);
 }
 
-/* 表单样式 */
+/* Main Content */
+main {
+    padding: 24px;
+}
+
+/* Form Sections */
 .form-section {
     background: var(--card-bg);
     border-radius: 8px;
     padding: 20px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     border: 1px solid var(--border-color);
 }
 
 .form-section h2 {
-    font-size: 1.2rem;
-    color: var(--accent-color);
-    margin-bottom: 15px;
-    padding-bottom: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 16px;
+    padding-bottom: 12px;
     border-bottom: 1px solid var(--border-color);
 }
 
+.section-desc {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
 .form-group {
-    margin-bottom: 15px;
+    margin-bottom: 14px;
 }
 
 .form-group:last-child {
@@ -107,7 +123,7 @@ header h1 {
 
 .form-row {
     display: flex;
-    gap: 15px;
+    gap: 16px;
 }
 
 .form-row .form-group {
@@ -116,13 +132,14 @@ header h1 {
 
 label {
     display: block;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     color: var(--text-color);
-    font-size: 0.9rem;
+    font-size: 13px;
+    font-weight: 500;
 }
 
 .required {
-    color: var(--accent-color);
+    color: var(--error-color);
 }
 
 input[type="text"],
@@ -131,12 +148,12 @@ select,
 textarea {
     width: 100%;
     padding: 10px 12px;
-    background: var(--secondary-color);
+    background: var(--bg-color);
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 6px;
     color: var(--text-color);
-    font-size: 1rem;
-    transition: border-color 0.2s;
+    font-size: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 input[type="text"]:focus,
@@ -145,6 +162,7 @@ select:focus,
 textarea:focus {
     outline: none;
     border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
 
 input::placeholder,
@@ -157,25 +175,25 @@ select {
 }
 
 select option {
-    background: var(--secondary-color);
+    background: var(--card-bg);
 }
 
-/* 标签选择器 */
+/* Tag Selector */
 .tag-container {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 5px;
+    margin-top: 8px;
 }
 
 .tag {
     display: inline-block;
-    padding: 6px 12px;
-    background: var(--secondary-color);
+    padding: 6px 14px;
+    background: var(--bg-color);
     border: 1px solid var(--border-color);
     border-radius: 20px;
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 13px;
     transition: all 0.2s;
 }
 
@@ -189,25 +207,26 @@ select option {
     color: white;
 }
 
-/* 提交按钮 */
+/* Buttons */
 .form-actions {
-    margin-top: 20px;
+    margin-top: 16px;
 }
 
 button[type="submit"] {
     width: 100%;
-    padding: 15px;
+    padding: 12px 20px;
     background: var(--accent-color);
     color: white;
     border: none;
-    border-radius: 4px;
-    font-size: 1.1rem;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
     transition: background 0.2s;
 }
 
 button[type="submit"]:hover {
-    background: #d13651;
+    background: #2980b9;
 }
 
 button[type="submit"]:disabled {
@@ -215,95 +234,88 @@ button[type="submit"]:disabled {
     cursor: not-allowed;
 }
 
-/* 结果显示 */
+.danger-btn {
+    width: 100%;
+    padding: 12px 20px;
+    background: var(--error-color);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.danger-btn:hover {
+    background: #a93226;
+}
+
+.danger-btn:disabled {
+    background: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    padding: 10px 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+/* Result & Error Messages */
 .result,
 .error {
     background: var(--card-bg);
     border-radius: 8px;
-    padding: 20px;
-    margin-top: 20px;
-    border: 1px solid var(--border-color);
+    padding: 14px;
+    margin-top: 16px;
+    border: 1px solid;
+    font-size: 14px;
 }
 
 .result {
     border-color: var(--success-color);
+    background: rgba(39, 174, 96, 0.05);
 }
 
 .result h3 {
     color: var(--success-color);
-    margin-bottom: 10px;
+    font-size: 14px;
+    margin-bottom: 8px;
 }
 
 .error {
     border-color: var(--error-color);
+    background: rgba(192, 57, 43, 0.05);
 }
 
 .error h3 {
     color: var(--error-color);
-    margin-bottom: 10px;
+    font-size: 14px;
+    margin-bottom: 8px;
 }
 
-#agent-id {
-    font-family: monospace;
-    background: var(--secondary-color);
-    padding: 2px 6px;
-    border-radius: 3px;
-    word-break: break-all;
-}
-
-.hidden {
-    display: none;
-}
-
-/* 响应式 */
-@media (max-width: 480px) {
-    .container {
-        padding: 15px;
-    }
-
-    header h1 {
-        font-size: 2rem;
-    }
-
-    .form-row {
-        flex-direction: column;
-        gap: 0;
-    }
-}
-
-/* 信息展示页面样式 */
-.loading {
-    text-align: center;
-    padding: 40px;
-    color: var(--text-muted);
-}
-
-.info-section {
-    background: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
-    border: 1px solid var(--border-color);
-}
-
-.info-section h2 {
-    font-size: 1.2rem;
-    color: var(--accent-color);
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
-}
-
+/* Info Section (character.html) */
 .info-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
+    gap: 12px;
 }
 
 .info-item {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
 }
 
 .info-item.full-width {
@@ -311,24 +323,26 @@ button[type="submit"]:disabled {
 }
 
 .info-item .label {
-    font-size: 0.85rem;
+    font-size: 11px;
     color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .info-item .value {
-    font-size: 1rem;
+    font-size: 14px;
     color: var(--text-color);
 }
 
 .info-tag {
     display: inline-block;
     padding: 4px 10px;
-    background: var(--secondary-color);
+    background: var(--bg-color);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    font-size: 0.85rem;
-    margin-right: 6px;
-    margin-bottom: 6px;
+    border-radius: 14px;
+    font-size: 12px;
+    margin-right: 4px;
+    margin-bottom: 4px;
 }
 
 .tag-list {
@@ -336,46 +350,48 @@ button[type="submit"]:disabled {
     flex-wrap: wrap;
 }
 
-/* 属性网格 */
+/* Attributes Grid */
 .attributes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
     gap: 10px;
 }
 
 .attr-item {
-    background: var(--secondary-color);
+    background: var(--bg-color);
     padding: 10px;
-    border-radius: 4px;
+    border-radius: 6px;
     text-align: center;
 }
 
 .attr-name {
     display: block;
-    font-size: 0.8rem;
+    font-size: 10px;
     color: var(--text-muted);
+    text-transform: uppercase;
     margin-bottom: 4px;
 }
 
 .attr-value {
     display: block;
-    font-size: 1.1rem;
-    font-weight: bold;
-    color: var(--success-color);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--primary-color);
 }
 
-/* 物品列表 */
+/* Inventory List */
 .inventory-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
 }
 
 .inv-item {
-    background: var(--secondary-color);
-    padding: 8px 12px;
-    border-radius: 4px;
+    background: var(--bg-color);
+    padding: 6px 12px;
+    border-radius: 6px;
     border: 1px solid var(--border-color);
+    font-size: 13px;
 }
 
 .inv-name {
@@ -384,61 +400,63 @@ button[type="submit"]:disabled {
 
 .inv-qty {
     color: var(--text-muted);
-    margin-left: 8px;
+    margin-left: 4px;
 }
 
-/* 经历列表 */
+/* Experience List */
 .experience-list {
     max-height: 400px;
     overflow-y: auto;
 }
 
 .exp-item {
-    padding: 12px;
-    background: var(--secondary-color);
-    border-radius: 4px;
-    margin-bottom: 10px;
+    padding: 12px 14px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    margin-bottom: 8px;
     border-left: 3px solid var(--accent-color);
 }
 
 .exp-header {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 
 .exp-tick {
-    font-size: 0.85rem;
+    font-size: 11px;
     color: var(--accent-color);
+    font-weight: 500;
 }
 
 .exp-content {
     color: var(--text-color);
-    font-size: 0.95rem;
+    font-size: 13px;
 }
 
-/* 意图摘要和 Observer 思维链 */
 .exp-thought,
 .exp-observer {
     margin-top: 8px;
     padding: 8px 10px;
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--card-bg);
     border-radius: 4px;
-    font-size: 0.85rem;
+    font-size: 12px;
 }
 
 .exp-thought {
-    border-left: 2px solid var(--success-color);
+    border-left: 3px solid var(--success-color);
 }
 
 .exp-observer {
-    border-left: 2px solid var(--accent-color);
+    border-left: 3px solid var(--warning-color);
 }
 
 .thought-label,
 .observer-label {
     color: var(--text-muted);
-    font-weight: bold;
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
     margin-right: 6px;
 }
 
@@ -447,82 +465,92 @@ button[type="submit"]:disabled {
 }
 
 .observer-content {
-    color: var(--accent-color);
+    color: var(--warning-color);
 }
 
-/* 状态显示 */
+/* Status */
 .status-alive {
     color: var(--success-color) !important;
+    font-weight: 500;
 }
 
 .status-dead {
     color: var(--error-color) !important;
+    font-weight: 500;
+}
+
+/* Loading */
+.loading {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
 }
 
 .load-more {
     text-align: center;
-    margin-top: 15px;
+    margin-top: 12px;
 }
 
 .load-more button {
     padding: 8px 20px;
-    background: var(--secondary-color);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
 }
 
 .load-more button:hover {
     border-color: var(--accent-color);
+    color: var(--accent-color);
 }
 
 .no-data {
     color: var(--text-muted);
     text-align: center;
     padding: 20px;
+    font-size: 13px;
 }
 
 .loading-text {
     color: var(--text-muted);
     text-align: center;
     padding: 20px;
+    font-size: 13px;
 }
 
 .error-text {
     color: var(--error-color);
     text-align: center;
     padding: 20px;
+    font-size: 13px;
 }
 
-/* 管理页面样式 */
-.section-desc {
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    margin-bottom: 15px;
-}
-
+/* Manage Page */
 .status-card {
-    background: var(--secondary-color);
-    border-radius: 8px;
-    padding: 15px;
-    margin-bottom: 15px;
+    background: var(--bg-color);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 14px;
     border: 1px solid var(--success-color);
 }
 
 .status-card h4 {
     color: var(--success-color);
-    margin-bottom: 8px;
+    font-size: 12px;
+    margin-bottom: 6px;
 }
 
 .status-card .remaining {
     color: var(--text-muted);
-    font-size: 0.85rem;
-    margin-top: 8px;
+    font-size: 12px;
+    margin-top: 6px;
 }
 
 .danger-zone {
-    border-color: var(--error-color);
+    border-color: rgba(192, 57, 43, 0.3);
 }
 
 .danger-zone h2 {
@@ -530,16 +558,17 @@ button[type="submit"]:disabled {
 }
 
 .warning-box {
-    background: rgba(233, 69, 96, 0.1);
-    border: 1px solid var(--error-color);
-    border-radius: 8px;
-    padding: 15px;
-    margin-bottom: 15px;
+    background: rgba(192, 57, 43, 0.05);
+    border: 1px solid rgba(192, 57, 43, 0.2);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 14px;
 }
 
 .warning-box h4 {
     color: var(--error-color);
-    margin-bottom: 10px;
+    font-size: 13px;
+    margin-bottom: 8px;
 }
 
 .warning-box ul {
@@ -548,35 +577,22 @@ button[type="submit"]:disabled {
 }
 
 .warning-box li {
-    padding: 4px 0;
+    padding: 3px 0;
     color: var(--text-muted);
-    font-size: 0.9rem;
+    font-size: 12px;
+    padding-left: 14px;
+    position: relative;
 }
 
-.warning-box li:before {
-    content: "• ";
-    color: var(--error-color);
-}
-
-.form-actions {
-    margin-top: 15px;
-}
-
-.danger-btn {
-    background: var(--error-color) !important;
-}
-
-.danger-btn:hover {
-    background: #c73a52 !important;
-}
-
-.result {
-    border-color: var(--success-color);
-    background: rgba(78, 204, 163, 0.1);
-}
-
-.result p {
-    margin-bottom: 10px;
+.warning-box li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 9px;
+    width: 5px;
+    height: 5px;
+    background: var(--error-color);
+    border-radius: 50%;
 }
 
 .nav-link {
@@ -585,28 +601,35 @@ button[type="submit"]:disabled {
     background: var(--accent-color);
     color: white;
     text-decoration: none;
-    border-radius: 4px;
+    border-radius: 6px;
+    font-size: 13px;
     margin-top: 10px;
+    transition: background 0.2s;
+}
+
+.nav-link:hover {
+    background: #2980b9;
 }
 
 .retry-btn {
-    padding: 8px 20px;
-    background: var(--secondary-color);
+    padding: 8px 16px;
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     margin-top: 10px;
+    font-size: 13px;
 }
 
-/* 确认对话框 */
+/* Dialog */
 .dialog-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -615,21 +638,24 @@ button[type="submit"]:disabled {
 
 .dialog {
     background: var(--card-bg);
-    border-radius: 8px;
-    padding: 24px;
-    max-width: 400px;
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 360px;
     width: 90%;
-    border: 1px solid var(--border-color);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
 }
 
 .dialog h3 {
     color: var(--error-color);
-    margin-bottom: 12px;
+    font-size: 16px;
+    margin-bottom: 10px;
 }
 
 .dialog p {
     color: var(--text-color);
+    font-size: 13px;
     margin-bottom: 20px;
+    line-height: 1.5;
 }
 
 .dialog-actions {
@@ -640,9 +666,61 @@ button[type="submit"]:disabled {
 
 .cancel-btn {
     padding: 8px 16px;
-    background: var(--secondary-color);
+    background: var(--bg-color);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+    border-color: var(--text-muted);
+}
+
+/* Utility */
+.hidden {
+    display: none !important;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .container {
+        max-width: 100%;
+    }
+
+    header {
+        padding: 0 16px;
+    }
+
+    header h1 {
+        font-size: 16px;
+    }
+
+    .nav-tab {
+        padding: 0 12px;
+        font-size: 13px;
+    }
+
+    main {
+        padding: 16px;
+    }
+
+    .form-section {
+        padding: 16px;
+    }
+
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .attributes-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }

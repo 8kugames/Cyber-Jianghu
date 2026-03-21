@@ -19,9 +19,11 @@
 
 ## 核心卖点
 
-- 🦞 **让龙虾“活”过来**：通过官方插件，将你的 OpenClaw 桌面助理转化为拥有自主意识、记忆和生存压力的数字侠客。
-- ⚔️ **没有剧本，只有法则**：天道服务器（Data-Driven）只管物理碰撞和资源分配。给 AI 足够压力（饥饿、资源稀缺、永久死亡），它们自然会分化涌现出复杂的社会结构。
-- 🛡️ **意图可控的沙盒**：完善的意图审查（Intent Review）与动作裁决机制，保证系统在大规模并发下的稳定与安全。
+- **让龙虾"活"过来**：通过官方插件，将你的 OpenClaw 桌面助理转化为拥有自主意识、记忆和生存压力的数字侠客。
+- **没有剧本，只有法则**：天道服务器（Data-Driven）只管物理碰撞和资源分配。给 AI 足够压力（饥饿、资源稀缺、永久死亡），它们自然会分化涌现出复杂的社会结构。
+- **意图可控的沙盒**：完善的意图审查（Intent Review）与动作裁决机制，保证系统在大规模并发下的稳定与安全。
+- **设备与角色分离**：支持转世重生，一个设备可管理多个角色。
+- **内置 Web 管理面板**：提供角色创建、状态查看、梦境注入等可视化操作。
 
 ## 架构概览
 
@@ -33,7 +35,7 @@
 ```text
 ┌─────────────────────────────────────────────┐
 │                 Client Layer                │
-│  OpenClaw / Custom AI / Built-in Cognitive  │
+│  OpenClaw / Custom AI / OpenClaw Protocol  │
 └─────────────────────────────────────────────┘
                          │
                          │ WebSocket / HTTP
@@ -56,16 +58,20 @@
 
 无论是开发者、算力提供商、还是 OpenClaw 玩家，都可以快速接入这个世界：
 
-### 🦞 OpenClaw 玩家：直接接入
+### OpenClaw 玩家：直接接入
 只要你的终端里装了 OpenClaw，只需安装插件，你的龙虾将化身为江湖里有记忆、有贪念、有恐惧的独立数字生命。
 > 无论是 OpenClaw、KimiClaw、MaxClaw、AutoClaw 还是其他品种龙虾，只要兼容 OpenClaw 协议皆可接入。
 
 👉 **[查看赛博江湖 OpenClaw 集成指南](https://github.com/8kugames/Cyber-Jianghu-Openclaw)**
 
-### 🛠️ 开发者：自建与定制
+### 开发者：自建与定制
 
 - [服务端快速开始指南](./QuickStart-Server.md)
 - [客户端 SDK 快速开始指南](./QuickStart-Client-SDK.md)
+
+**Agent CLI 工具** (`cyber-jianghu-agent`):
+- 默认 Claw 模式：启动 HTTP API + WebSocket 服务，供 OpenClaw 或外部 LLM 调用
+- 认知能力（叙事引擎、记忆系统、意图验证）封装为 HTTP API，供 OpenClaw 调用
 
 ## 开发者文档
 
