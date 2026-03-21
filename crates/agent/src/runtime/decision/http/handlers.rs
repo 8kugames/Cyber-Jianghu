@@ -941,7 +941,7 @@ pub struct CharacterRegisterRequest {
     pub system_prompt: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub(super) struct LanguageStyleRequest {
     #[serde(default)]
     tone: Option<String>,
@@ -949,7 +949,7 @@ pub(super) struct LanguageStyleRequest {
     speech_patterns: Vec<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub(super) struct GoalsRequest {
     #[serde(default)]
     short_term: Option<String>,
@@ -1113,13 +1113,41 @@ pub(super) async fn register_character_handler(
                 }
             }
 
-            // 8. 更新本地配置文件（添加注册时间、先天属性和游戏规则）
+            // 8. 更新本地配置文件（添加 agent_id、注册时间、先天属性和游戏规则）
             let mut config_warning = None;
             if let Ok(mut config) = crate::config::Config::from_file(&state.config_path) {
                 if let Some(ref game_rules) = result.game_rules {
                     config.update_game_rules(game_rules.clone());
                 }
+
+                // 如果 agent 不存在，创建新的 CharacterConfig
+                if config.agent.is_none() {
+                    config.agent = Some(crate::config::CharacterConfig {
+                        name: payload.name.clone(),
+                        age: payload.age,
+                        gender: payload.gender.clone(),
+                        appearance: payload.appearance.clone(),
+                        identity: payload.identity.clone(),
+                        personality: payload.personality.clone(),
+                        values: payload.values.clone(),
+                        language_style: crate::config::LanguageStyleConfig {
+                            tone: payload.language_style.tone.clone(),
+                            speech_patterns: payload.language_style.speech_patterns.clone(),
+                        },
+                        goals: crate::config::GoalsConfig {
+                            short_term: payload.goals.short_term.clone(),
+                            long_term: payload.goals.long_term.clone(),
+                        },
+                        system_prompt: Some(system_prompt.clone()),
+                        ..Default::default()
+                    });
+                }
+
                 if let Some(ref mut agent) = config.agent {
+                    // 保存服务器返回的 agent_id
+                    if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
+                        agent.agent_id = Some(agent_uuid);
+                    }
                     agent.registered_at = Some(chrono::Utc::now());
                     // 保存先天属性（只保存先天属性，不包含状态值）
                     if !result.initial_attributes.is_empty() {
