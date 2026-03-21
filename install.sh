@@ -79,6 +79,87 @@ check_dependencies() {
     fi
 }
 
+# ============================================================================
+# 生成随机密码
+# ============================================================================
+generate_random_password() {
+    openssl rand -hex 16 2>/dev/null || uuidgen | tr -d '-'
+}
+
+# ============================================================================
+# 确保数据库密码安全（生产环境）
+# ============================================================================
+ensure_secure_db_password() {
+    local mode="$1"
+    local server_dir="$PROJECT_ROOT/crates/server"
+    local env_file="$server_dir/.env"
+
+    # 只在生产环境检查
+    if [ "$mode" != "prod" ]; then
+        return 0
+    fi
+
+    # 检查 .env 文件是否存在
+    if [ ! -f "$env_file" ]; then
+        # 从 .env.example 复制
+        if [ -f "$server_dir/.env.example" ]; then
+            cp "$server_dir/.env.example" "$env_file"
+            info "已创建 .env 文件"
+        else
+            return 0
+        fi
+    fi
+
+    # 检查当前密码是否为 changeme
+    local current_password
+    current_password=$(grep -E "^DB_PASSWORD=" "$env_file" 2>/dev/null | cut -d'=' -f2 || echo "changeme")
+
+    if [ "$current_password" = "changeme" ] || [ -z "$current_password" ]; then
+        local new_password
+        new_password=$(generate_random_password)
+
+        # 更新或添加 DB_PASSWORD
+        if grep -q "^DB_PASSWORD=" "$env_file" 2>/dev/null; then
+            # macOS 和 Linux 兼容的 sed 语法
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s/^DB_PASSWORD=.*/DB_PASSWORD=$new_password/" "$env_file"
+            else
+                sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$new_password/" "$env_file"
+            fi
+        else
+            echo "DB_PASSWORD=$new_password" >> "$env_file"
+        fi
+
+        # 同时更新 DATABASE_URL（如果存在且包含 changeme）
+        if grep -q ":changeme@" "$env_file" 2>/dev/null; then
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                sed -i '' "s/:changeme@/:$new_password@/g" "$env_file"
+            else
+                sed -i "s/:changeme@/:$new_password@/g" "$env_file"
+            fi
+        fi
+
+        # 保存密码到临时文件供用户查看
+        local password_file="$server_dir/cyber_jianghu_db_password.tmp"
+        cat > "$password_file" << EOF
+========================================
+Cyber-Jianghu 数据库密码（已自动生成）
+========================================
+
+DB_PASSWORD=$new_password
+
+请妥善保管此密码！
+如需手动配置，请更新 crates/server/.env 文件。
+
+========================================
+EOF
+
+        success "已为生产环境生成安全的数据库密码"
+        info "密码已保存到: $password_file"
+        warn "请使用 'cat $password_file' 查看密码"
+    fi
+}
+
 resolve_mode() {
     local raw_mode="${1:-}"
     case "$raw_mode" in
@@ -116,6 +197,8 @@ ensure_network() {
 cmd_server_start() {
     local mode
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    # 确保生产环境有安全的数据库密码
+    ensure_secure_db_password "$mode"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
     enter_component_dir "server"
@@ -127,6 +210,12 @@ cmd_server_start() {
     echo "  - Dashboard: http://localhost:23333/admin"
     echo "  - WebSocket: ws://localhost:23333/ws"
     echo "  - Health:    http://localhost:23333/health"
+    # 提示用户查看生成的密码（如果有）
+    local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
+    if [ -f "$password_file" ]; then
+        echo ""
+        info "数据库密码已自动生成，查看: cat $password_file"
+    fi
 }
 
 cmd_server_stop() {
@@ -245,9 +334,17 @@ cmd_all_start() {
     local mode
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     show_banner
+    # 确保生产环境有安全的数据库密码（在启动服务前）
+    ensure_secure_db_password "$mode"
     cmd_server_start "$mode"
     echo ""
     cmd_agent_start "$mode"
+    # 提示用户查看生成的密码（如果有）
+    local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
+    if [ -f "$password_file" ]; then
+        echo ""
+        info "数据库密码已自动生成，查看: cat $password_file"
+    fi
 }
 cmd_all_stop() {
     cmd_server_stop
