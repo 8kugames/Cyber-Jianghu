@@ -352,6 +352,10 @@ pub(super) async fn get_state_handler(State(state): State<HttpApiState>) -> impl
 pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let current = state.current_state.read().await;
     let agent_id = *state.agent_id.read().await;
+
+    // 获取托梦内容（如果有），每次调用会减少剩余回合数
+    let dream_thought = state.consume_dream().await;
+
     match current.as_ref() {
         Some(world_state) => {
             // 使用叙事引擎生成上下文，不暴露原始数值
@@ -370,9 +374,9 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
                 });
 
             let context = if let Some(store) = &state.relationship_store {
-                generate_context_markdown(world_state, store, engine)
+                generate_context_markdown(world_state, store, engine, dream_thought.as_deref())
             } else {
-                generate_context_markdown_no_relationship(world_state, engine)
+                generate_context_markdown_no_relationship(world_state, engine, dream_thought.as_deref())
             };
             Json(ContextResponse {
                 context,
@@ -458,6 +462,7 @@ pub(super) async fn submit_intent_handler(
         .unwrap_or(state_agent_id);
 
     let action_type: ActionType = req.action_type.into();
+    let action_type_str = action_type.to_string();
     let intent = if let Some(id_str) = &req.intent_id {
         if let Ok(id) = Uuid::parse_str(id_str) {
             Intent::new_with_id(id, agent_id, tick_id, action_type, req.action_data)
@@ -467,6 +472,23 @@ pub(super) async fn submit_intent_handler(
     } else {
         Intent::new(agent_id, tick_id, action_type, req.action_data)
     };
+
+    // 添加 thought_log（如果有）
+    let intent = if let Some(ref thought) = req.thought_log {
+        intent.with_thought(thought.clone())
+    } else {
+        intent
+    };
+
+    // 记录到 IntentHistoryStore（用于经历日志查询）
+    if let Some(history) = &state.intent_history {
+        history.record_intent(
+            tick_id,
+            intent.intent_id,
+            action_type_str,
+            req.thought_log.clone(),
+        ).await;
+    }
 
     match state.intent_tx.send(intent).await {
         Ok(_) => (StatusCode::OK, "Intent submitted").into_response(),
@@ -1037,11 +1059,49 @@ pub(super) async fn register_character_handler(
     struct ServerRegisterResponse {
         agent_id: String,
         message: String,
+        game_rules: Option<cyber_jianghu_protocol::GameRules>,
+        narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
     }
 
     match response.json::<ServerRegisterResponse>().await {
         Ok(result) => {
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
+
+            // 6. 保存 narrative_config 到本地配置目录
+            if let Some(ref narrative_config) = result.narrative_config {
+                if let Some(home) = dirs::home_dir() {
+                    let config_dir = home.join(".cyber-jianghu").join("config");
+                    if let Err(e) = std::fs::create_dir_all(&config_dir) {
+                        error!("创建配置目录失败: {}", e);
+                    } else {
+                        let config_path = config_dir.join("narrative_config.json");
+                        match serde_json::to_string_pretty(narrative_config) {
+                            Ok(json) => {
+                                if let Err(e) = std::fs::write(&config_path, json) {
+                                    error!("保存 narrative_config 失败: {}", e);
+                                } else {
+                                    info!("已保存 narrative_config 到 {:?}", config_path);
+                                }
+                            }
+                            Err(e) => error!("序列化 narrative_config 失败: {}", e),
+                        }
+                    }
+                }
+            }
+
+            // 7. 更新本地配置文件（添加注册时间和游戏规则）
+            if let Ok(mut config) = crate::config::Config::from_file(&state.config_path) {
+                if let Some(ref game_rules) = result.game_rules {
+                    config.update_game_rules(game_rules.clone());
+                }
+                if let Some(ref mut agent) = config.agent {
+                    agent.registered_at = Some(chrono::Utc::now());
+                }
+                if let Err(e) = config.save_to_file(&state.config_path) {
+                    error!("保存配置文件失败: {}", e);
+                }
+            }
+
             (
                 StatusCode::OK,
                 Json(CharacterRegisterResponse {
@@ -1090,9 +1150,15 @@ pub struct CharacterInfoResponse {
     /// 核心价值观
     pub values: Vec<String>,
 
+    // === 注册信息 ===
+    /// 注册时间（ISO 8601 格式）
+    pub registered_at: Option<String>,
+
     // === WorldState 实时数据 ===
     /// 当前属性
     pub attributes: Option<serde_json::Value>,
+    /// 先天属性（注册时的属性值）
+    pub birth_attributes: Option<serde_json::Value>,
     /// 持有物品
     pub inventory: Option<serde_json::Value>,
     /// 当前位置
@@ -1101,6 +1167,10 @@ pub struct CharacterInfoResponse {
     pub tick_id: Option<i64>,
     /// 游戏时间
     pub world_time: Option<serde_json::Value>,
+
+    // === 状态 ===
+    /// 角色状态（alive, dead, etc.）
+    pub status: Option<String>,
 }
 
 /// 获取角色信息
@@ -1166,7 +1236,13 @@ pub(super) async fn get_character_handler(
         None => (character.agent_id.map(|id| id.to_string()), None, None, None, None, None),
     };
 
-    // 4. 构建响应
+    // 4. 计算角色状态（在 move attributes 之前）
+    let status = attributes.as_ref()
+        .and_then(|a| a.get("hp"))
+        .and_then(|hp| hp.as_i64())
+        .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
+
+    // 5. 构建响应
     let response = CharacterInfoResponse {
         agent_id,
         name: character.name.clone(),
@@ -1176,11 +1252,15 @@ pub(super) async fn get_character_handler(
         identity: character.identity.clone(),
         personality: character.personality.clone(),
         values: character.values.clone(),
+        registered_at: character.registered_at.map(|t| t.to_rfc3339()),
         attributes,
+        birth_attributes: character.birth_attributes.as_ref()
+            .and_then(|a| serde_json::to_value(a).ok()),
         inventory,
         location,
         tick_id,
         world_time,
+        status,
     };
 
     Json(response).into_response()
@@ -1220,8 +1300,10 @@ pub struct ExperiencesResponse {
 ///
 /// GET /api/v1/character/experiences?page=1&limit=20
 ///
-/// 当前实现：从 WorldState.events_log 获取
-/// 未来：从本地记忆系统获取更完整的历史记录
+/// 数据来源：
+/// - event: WorldState.events_log
+/// - observer_thought: IntentHistoryStore（Observer Agent 审查时记录）
+/// - intent_summary: IntentHistoryStore（Agent 提交 Intent 时的 thought_log）
 pub(super) async fn get_experiences_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -1237,17 +1319,48 @@ pub(super) async fn get_experiences_handler(
 
     // 从当前 WorldState 获取 events_log
     let current = state.current_state.read().await;
+
+    // 预加载 intent_history 数据（如果可用）
+    let history_entries = if let Some(ref history) = state.intent_history {
+        if let Some(ws) = current.as_ref() {
+            let tick_ids: Vec<i64> = ws
+                .events_log
+                .iter()
+                .enumerate()
+                .map(|(i, _)| ws.tick_id - (ws.events_log.len() - i - 1) as i64)
+                .collect();
+            Some(history.get_by_ticks(&tick_ids).await)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let experiences: Vec<ExperienceEntry> = match current.as_ref() {
         Some(ws) => ws
             .events_log
             .iter()
             .enumerate()
-            .map(|(i, event)| ExperienceEntry {
-                tick_id: ws.tick_id - (ws.events_log.len() - i - 1) as i64,
-                world_time: serde_json::to_value(&ws.world_time).ok(),
-                event: event.description.clone(),
-                observer_thought: None, // 未来从记忆系统获取
-                intent_summary: None,   // 未来从记忆系统获取
+            .map(|(i, event)| {
+                let tick_id = ws.tick_id - (ws.events_log.len() - i - 1) as i64;
+
+                // 从 history store 获取 observer_thought 和 intent_summary
+                let (observer_thought, intent_summary) = match &history_entries {
+                    Some(entries) => entries
+                        .get(&tick_id)
+                        .map(|e| (e.observer_thought.clone(), e.thought_log.clone()))
+                        .unwrap_or((None, None)),
+                    None => (None, None),
+                };
+
+                ExperienceEntry {
+                    tick_id,
+                    world_time: serde_json::to_value(&ws.world_time).ok(),
+                    event: event.description.clone(),
+                    observer_thought,
+                    intent_summary,
+                }
             })
             .collect(),
         None => vec![],

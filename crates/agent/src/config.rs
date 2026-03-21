@@ -154,6 +154,15 @@ pub struct CharacterConfig {
     // === 系统提示词（自动生成或自定义） ===
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+
+    // === 注册时服务器返回的信息 ===
+    /// 注册时间（注册成功时记录）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registered_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// 先天属性（注册时从服务器获取，用于对比成长）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birth_attributes: Option<std::collections::HashMap<String, i32>>,
 }
 
 fn default_age() -> u8 {
