@@ -30,8 +30,23 @@ impl super::Agent {
     ///
     /// 持续接收世界状态，做出决策，发送意图
     pub async fn run(&mut self) -> Result<()> {
-        // 连接服务端
-        self.client.connect().await?;
+        // 初始连接：无限重试（带日志采样）
+        let mut connect_attempt = 0u32;
+        loop {
+            connect_attempt += 1;
+            match self.client.connect().await {
+                Ok(()) => break,
+                Err(e) => {
+                    if should_log_retry(connect_attempt) {
+                        warn!(
+                            "连接游戏服务器失败 (尝试 {}): {}, 5秒后重试...",
+                            connect_attempt, e
+                        );
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                }
+            }
+        }
         info!("Agent '{}' connected to server", self.character_name());
 
         // 设置游戏规则更新回调
