@@ -426,6 +426,12 @@ impl AgentClient {
         client.set_identity(device_id, auth_token);
     }
 
+    /// 更新服务器 URL（用于热切换）
+    pub fn update_server_url(&self, ws_url: String, http_url: String) {
+        let mut client = self.client.write().unwrap();
+        client.update_server_url(ws_url, http_url);
+    }
+
     pub async fn connect(&self) -> Result<()> {
         let client = self.client.read().unwrap();
         client.connect().await
