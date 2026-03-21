@@ -4,15 +4,22 @@
 //
 // 连接赛博江湖游戏世界的 Agent CLI
 //
-// 使用方式：
+// ## 架构说明
+//
+// Agent 仅支持 Claw 模式：
+// - Agent 与 Server 保持 WebSocket 连接，接收 WorldState，提交 Intent
+// - Agent 为 OpenClaw（外部 LLM 调度器）提供 WebSocket + HTTP API 接口
+// - OpenClaw 通过 WebSocket 接收 Tick 信息，通过 HTTP API 查询状态
+// - OpenClaw 提交 Intent，Agent 转发给 Server
+// - OpenClaw 超时未提交 Intent 时，Agent 自动提交 idle Intent
+//
+// ## 使用方式
+//
 // 1. 首次运行：自动生成 device_id 并向服务器注册
 // 2. 后续运行：自动使用已保存的身份连接服务器
-// 3. 通过 Web 面板创建角色：http://localhost:23340/panel
-// 4. 通过 HTTP API 创建角色：POST /api/v1/character/register
-//
-// 支持的决策模式：
-// - cognitive: 使用内置多阶段认知引擎决策（直接调用 LLM API）
-// - http: 启动 HTTP API 服务，供外部程序（如 OpenClaw）控制
+// 3. OpenClaw 连接：ws://localhost:23340/ws
+// 4. Web 面板：http://localhost:23340/panel
+// 5. HTTP API：http://localhost:23340/api/v1/*
 // ============================================================================
 
 use anyhow::{Context, Result};
@@ -21,22 +28,15 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{Level, error, info, warn};
 use uuid::Uuid;
 
-use cyber_jianghu_agent::config::{
-    CharacterConfig, Config, IdentityConfig,
-};
+use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig};
 use cyber_jianghu_agent::{
     Agent, Intent, WorldState,
-    ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider},
-    ai::persona::DynamicPersona,
-    core::{CognitiveEngineConfig, MultiStageCognitiveEngine},
+    runtime::decision::ws::{WsDecisionState, WsSharedState, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
-    runtime::decision::ws::{
-        run_ws_server, WsDecisionState, WsSharedState,
-    },
 };
 
 // ============================================================================
@@ -55,34 +55,10 @@ struct Cli {
 enum Commands {
     /// 运行 Agent（默认命令）
     Run {
-        /// 决策模式：
-        /// - claw: 为 OpenClaw 等外部助手提供 WebSocket + HTTP API（默认）
-        /// - cognitive: 内置 LLM 决策（无外部接口）
-        #[arg(short, long, default_value = "claw")]
-        mode: String,
-
-        /// 监听端口（claw 模式）
+        /// 监听端口
         /// 0 = 在 23340~23349 范围内随机选择（推荐，避免与服务器端口 23333 冲突）
-        #[arg(long, default_value = "0")]
+        #[arg(short, long, default_value = "0")]
         port: u16,
-
-        /// === Cognitive 模式选项 ===
-
-        /// LLM Provider: openclaw、openai_compatible、ollama (默认: openclaw)
-        #[arg(long, default_value = "openclaw")]
-        llm_provider: String,
-
-        /// LLM API Key（仅 openai_compatible 需要）
-        #[arg(long)]
-        api_key: Option<String>,
-
-        /// LLM API Base URL（openai_compatible 必须指定）
-        #[arg(long)]
-        base_url: Option<String>,
-
-        /// LLM 模型名称（openai_compatible 必须指定）
-        #[arg(long)]
-        model: Option<String>,
     },
 
     /// 显示当前配置
@@ -228,10 +204,7 @@ struct CharacterRegisterResponse {
 /// 通过 Agent API 创建角色
 ///
 /// 将角色配置发送到 Agent HTTP API，由 Agent API 添加设备认证后转发到 Server
-async fn create_character_via_api(
-    agent_port: u16,
-    character: CharacterConfig,
-) -> Result<Uuid> {
+async fn create_character_via_api(agent_port: u16, character: CharacterConfig) -> Result<Uuid> {
     let client = Client::new();
     let url = format!("http://localhost:{}/api/v1/character/register", agent_port);
 
@@ -256,8 +229,7 @@ async fn create_character_via_api(
         .context("Failed to parse character response")?;
 
     info!("角色创建成功: {}", result.message);
-    Uuid::parse_str(&result.agent_id)
-        .context("Failed to parse agent_id as UUID")
+    Uuid::parse_str(&result.agent_id).context("Failed to parse agent_id as UUID")
 }
 
 // ============================================================================
@@ -290,18 +262,6 @@ async fn ensure_identity(config: &mut Config) -> Result<()> {
     info!("Agent 身份已创建并保存");
 
     Ok(())
-}
-
-// ============================================================================
-// 认知模式选项
-// ============================================================================
-
-#[derive(Debug, Clone, Default)]
-struct RunOptions {
-    pub llm_provider: String,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
 }
 
 // ============================================================================
@@ -338,25 +298,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run {
-            mode,
-            port,
-            llm_provider,
-            api_key,
-            base_url,
-            model,
-        }) => {
-            run_agent(
-                &mode,
-                port,
-                RunOptions {
-                    llm_provider,
-                    api_key,
-                    base_url,
-                    model,
-                },
-            )
-            .await?;
+        Some(Commands::Run { port }) => {
+            run_agent(port).await?;
         }
 
         Some(Commands::Show) => {
@@ -382,8 +325,8 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            // 默认运行 HTTP 模式
-            run_agent("http", 0, RunOptions::default()).await?;
+            // 默认运行 Claw 模式
+            run_agent(0).await?;
         }
     }
 
@@ -404,7 +347,10 @@ fn show_config() -> Result<()> {
 
     if let Some(ref identity) = config.identity {
         println!("Device ID: {}", identity.device_id);
-        println!("Auth Token: {}...", &identity.auth_token.chars().take(16).collect::<String>());
+        println!(
+            "Auth Token: {}...",
+            &identity.auth_token.chars().take(16).collect::<String>()
+        );
     } else {
         println!("Device ID: (未注册)");
     }
@@ -512,7 +458,7 @@ fn reset_agent() -> Result<()> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
+async fn run_agent(port: u16) -> Result<()> {
     // 1. 加载或创建配置
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
@@ -522,7 +468,10 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
     // 2. 确保 Agent 身份存在
     ensure_identity(&mut config).await?;
 
-    let identity = config.identity.as_ref().expect("Identity should exist after ensure_identity");
+    let identity = config
+        .identity
+        .as_ref()
+        .expect("Identity should exist after ensure_identity");
     info!("Device ID: {}", identity.device_id);
 
     // 3. 检查是否已创建角色
@@ -537,9 +486,8 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
     // 4. 创建共享的 device_id
     let device_id = Arc::new(RwLock::new(identity.device_id));
 
-    // 5. 如果是 claw 模式，启动混合服务（WebSocket + HTTP API）
-    let is_claw_mode = mode == "claw" || mode == "http";
-    let claw_decision_state = if is_claw_mode {
+    // 5. 启动 Claw 服务（WebSocket + HTTP API）
+    let claw_decision_state = {
         let actual_port = if port == 0 {
             use rand::RngExt;
             let random_port = rand::rng().random_range(23340..=23349);
@@ -549,16 +497,18 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
             port
         };
 
-        info!("启动 Claw 模式（WebSocket + HTTP API），端口: {}", actual_port);
+        info!(
+            "启动 Claw 模式（WebSocket + HTTP API），端口: {}",
+            actual_port
+        );
 
         // 打印启动 Banner
         let config_path_str = config_path().display().to_string();
         print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
 
         // 创建重连通道（用于热切换触发重连）
-        let (reconnect_tx, reconnect_rx) = mpsc::channel::<
-            cyber_jianghu_agent::runtime::decision::http::ReconnectRequest
-        >(10);
+        let (reconnect_tx, reconnect_rx) =
+            mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
         // 创建 HTTP API 状态（用于数据访问 API）
         let (http_decision_state, api_state) = create_http_state(
@@ -566,8 +516,8 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
             config.server.http_url.clone(),
             config.server.ws_url.clone(),
             Some(identity.clone()),
-            Some(reconnect_tx),  // 传递重连通道发送端
-            config_path(),  // 传入配置文件路径，确保与主程序一致
+            Some(reconnect_tx), // 传递重连通道发送端
+            config_path(),      // 传入配置文件路径，确保与主程序一致
         );
 
         // 创建 WebSocket 决策状态（用于实时决策）
@@ -583,124 +533,40 @@ async fn run_agent(mode: &str, port: u16, options: RunOptions) -> Result<()> {
         });
 
         // 返回 HTTP decision state 和 reconnect_rx（用于 http_decision 和 Agent）
-        Some((http_decision_state, reconnect_rx))
-    } else {
-        None
+        (http_decision_state, reconnect_rx)
     };
 
-    // 6. 选择决策模式 + 提取 reconnect_rx
-    let (decision, agent_reconnect_rx): (Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>, Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>) = match mode {
-        "claw" | "http" => {
-            let (state, rx) = claw_decision_state.expect("claw_decision_state should exist in claw mode");
-            (Arc::new(http_decision(device_id.clone(), state, 55)), Some(rx))
-        }
-        "cognitive" => {
-            info!("启动 Cognitive 模式");
-            info!("LLM Provider: {}", options.llm_provider);
-
-            let provider = LlmProvider::from_str(&options.llm_provider).context(format!(
-                "Unknown LLM provider: {}. Valid options: openclaw, openai_compatible, ollama",
-                options.llm_provider
-            ))?;
-
-            let api_key = if provider.requires_api_key() {
-                let key = options
-                    .api_key
-                    .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-                    .context(format!(
-                        "Missing API key for {}. Set --api-key or OPENAI_API_KEY",
-                        options.llm_provider
-                    ))?;
-                Some(key)
-            } else {
-                None
-            };
-
-            let mut client_config = DirectLlmClientConfig::new(provider, api_key);
-
-            if let Some(ref base_url) = options.base_url {
-                client_config = client_config.with_base_url(base_url);
-            }
-
-            if let Some(ref model) = options.model {
-                client_config = client_config.with_model(model);
-            }
-
-            let llm_client = Arc::new(DirectLlmClient::new(client_config)?);
-            info!("LLM 客户端创建成功，模型: {}", llm_client.model_name());
-
-            // 获取角色信息（如果已创建）
-            let (agent_name, system_prompt) = if let Some(ref character) = config.agent {
-                (character.name.clone(), character.generate_system_prompt())
-            } else {
-                ("未命名Agent".to_string(), "你是一个普通的江湖人物".to_string())
-            };
-
-            let dynamic_persona = DynamicPersona::new(identity.device_id, &agent_name, &system_prompt);
-            let engine_config = CognitiveEngineConfig {
-                agent_name,
-                persona: dynamic_persona,
-                temperature: 0.7,
-                max_tokens_per_stage: 1024,
-            };
-
-            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_client, engine_config));
-
-            (
-                Arc::new(move |world_state: &WorldState| {
-                    let engine = cognitive_engine.clone();
-                    let agent_id = world_state.agent_id.unwrap_or_default();
-                    let tick_id = world_state.tick_id;
-                    let world_state_clone = world_state.clone();
-
-                    Box::pin(async move {
-                        match engine.think(&world_state_clone).await {
-                            Ok(chain) => chain.final_intent,
-                            Err(e) => {
-                                error!("认知流程失败: {}", e);
-                                Intent::idle(agent_id, tick_id).with_thought(format!("认知失败: {}", e))
-                            }
-                        }
-                    })
-                }),
-                None,  // cognitive 模式不使用热切换
-            )
-        }
-        _ => {
-            let mode_string = mode.to_string();
-            (
-                Arc::new(move |world_state: &WorldState| {
-                    let tick_id = world_state.tick_id;
-                    let agent_id = world_state.agent_id.unwrap_or_default();
-                    let mode = mode_string.clone();
-                    Box::pin(async move {
-                        error!("Unknown mode: {}. Supported: claw, cognitive", mode);
-                        Intent::idle(agent_id, tick_id).with_thought(format!("未知模式: {}", mode))
-                    })
-                }),
-                None,  // 未知模式不使用热切换
-            )
-        }
+    // 6. 创建决策函数
+    let (decision, agent_reconnect_rx): (
+        Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
+        Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
+    ) = {
+        let (state, rx) = claw_decision_state;
+        (
+            Arc::new(http_decision(device_id.clone(), state, 55)),
+            Some(rx),
+        )
     };
 
     // 7. 创建并运行 Agent
     let mut agent = Agent::new(config, decision, agent_reconnect_rx);
 
-    // 设置注册回调（仅 claw 模式需要）
-    if is_claw_mode {
-        let device_id_clone = device_id.clone();
-        agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
-            let old_id = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(device_id_clone.read())
-            });
-            info!("更新 Claw API device_id: {} -> {}", *old_id, server_agent_id);
+    // 设置注册回调
+    let device_id_clone = device_id.clone();
+    agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
+        let old_id = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(device_id_clone.read())
+        });
+        info!(
+            "更新 Claw API device_id: {} -> {}",
+            *old_id, server_agent_id
+        );
 
-            let mut guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(device_id_clone.write())
-            });
-            *guard = server_agent_id;
-        }));
-    }
+        let mut guard = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(device_id_clone.write())
+        });
+        *guard = server_agent_id;
+    }));
 
     agent.run().await?;
     Ok(())

@@ -47,11 +47,8 @@ cargo build -p cyber-jianghu-agent --release
 ### 基本使用
 
 ```bash
-# Claw 模式（推荐 OpenClaw 集成）
-cyber-jianghu-agent run --mode claw --port 23340
-
-# Cognitive 模式（内置 AI 决策）
-cyber-jianghu-agent run --mode cognitive
+# 默认启动 Claw 模式（OpenClaw 集成）
+cyber-jianghu-agent run --port 23340
 
 # 查看当前配置
 cyber-jianghu-agent show
@@ -65,14 +62,14 @@ cyber-jianghu-agent reset
 
 ## 运行模式
 
-### Claw 模式（推荐）
+### Claw 模式（默认）
 
-**适用场景**: OpenClaw 集成、外部 LLM 调用、自定义决策逻辑
+**适用场景**: OpenClaw 集成、外部 LLM 调用
 
-启动混合服务（HTTP API + WebSocket），提供 RESTful 接口供外部调用。
+启动 HTTP API + WebSocket 服务，叙事引擎、记忆系统、意图验证等认知能力作为 API 供外部调用。
 
 ```bash
-cyber-jianghu-agent run --mode claw --port 23340
+cyber-jianghu-agent run --port 23340
 ```
 
 **服务组件**:
@@ -96,11 +93,17 @@ cyber-jianghu-agent run --mode claw --port 23340
 **角色管理**:
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1/character` | GET | 获取角色信息（含注册时间、状态、先天属性） |
+| `/api/v1/character` | GET | 获取当前角色信息（含注册时间、状态、先天属性） |
 | `/api/v1/character/experiences` | GET | 获取经历日志（含意图摘要、审查思维链） |
 | `/api/v1/character/dream` | GET/POST | 梦境注入（每游戏日 1 次） |
 | `/api/v1/character/rebirth` | POST | 转世重生（删除角色） |
 | `/api/v1/character/register` | POST | 创建角色 |
+
+**多角色管理**:
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/characters` | GET | 获取所有角色列表（含已故、归隐） |
+| `/api/v1/characters/switch` | POST | 切换当前活跃角色 |
 
 **记忆系统**:
 | 端点 | 方法 | 说明 |
@@ -147,36 +150,6 @@ cyber-jianghu-agent run --mode claw --port 23340
 ```json
 {"type": "intent", "tick_id": 105, "action_type": "move", "action_data": {...}, "thought_log": "..."}
 ```
-
-### WebSocket 模式
-
-**适用场景**: 实时交互、低延迟决策、流式处理
-
-启动 WebSocket 服务器，实时推送 tick 并接收意图。
-
-```bash
-cyber-jianghu-agent run --mode ws --port 23341
-```
-
-**特性**:
-- 实时 tick 广播
-- 自动意图过期处理（过期 tick_id 静默丢弃）
-- Ping/Pong 心跳
-- 优雅断开
-
-### Cognitive 模式
-
-**适用场景**: 独立运行、无外部依赖、完整 AI 体验
-
-Agent 内置完整认知流水线，自主决策。
-
-**认知流程**:
-1. **Perception（感知）**: 解析 WorldState，生成自然语言描述
-2. **Memory Retrieval（记忆检索）**: 检索相关情景与语义记忆
-3. **Motivation（动机）**: 结合 Persona 推断短期/长期动机
-4. **Planning（规划）**: 制定行动计划
-5. **Decision（决策）**: 组装 Prompt，调用 LLM 生成 Intent
-6. **Validation（验证）**: 检查幻觉/非法动作，必要时重试
 
 ## 连接机制
 
@@ -293,11 +266,18 @@ Claw 模式自带 Web 管理界面：
 
 | 页面 | 路径 | 功能 |
 |------|------|------|
-| 角色创建 | `/` 或 `/index.html` | 创建新角色 |
-| 角色信息 | `/character.html` | 查看属性、背包、经历（含意图摘要、审查思维链） |
-| 管理面板 | `/manage.html` | 梦境注入、转世重生 |
+| 首页 | `/` 或 `/index.html` | 智能路由（有角色→角色信息，无角色/服务器不可达→管理页） |
+| 角色创建 | `/index.html` | 创建新角色 |
+| 角色信息 | `/character.html` | 查看属性、背包、经历，支持多角色切换 |
+| 管理面板 | `/manage.html` | 服务器配置、梦境注入、转世重生 |
+
+**智能路由逻辑**:
+- 服务器不可达 → 显示管理页（提示配置服务器）
+- 服务器可达但无角色 → 显示管理页（提示创建角色）
+- 服务器可达且有存活角色 → 显示角色信息页
 
 **角色信息页面展示**:
+- 角色：多角色选择器（仅当有多个存活角色时显示）
 - 基本信息：姓名、年龄、性别、身份、状态、注册时间
 - 性格与价值观：性格特征、核心价值观
 - 当前状态：位置、Tick、游戏时间
@@ -318,6 +298,27 @@ server:
   ws_url: "ws://localhost:23333/ws"
   http_url: "http://localhost:23333"
 
+agent:
+  agent_id: "uuid"           # 当前角色 ID（注册后由服务器分配）
+  name: "张无忌"
+  age: 24
+  gender: "male"
+  appearance: "面如冠玉"
+  identity: "明教教主"
+  personality: ["仁义", "坚韧"]
+  values: ["侠义"]
+  status: "alive"            # alive | dead | retired
+  server_url: "http://..."   # 所属服务器（用于多服务器支持）
+  registered_at: "2026-03-21T..."
+
+# 所有角色历史（包括已故、归隐）
+characters:
+  - agent_id: "uuid"
+    name: "张无忌"
+    status: "alive"
+    server_url: "http://..."
+    # ... 其他字段同 agent
+
 runtime:
   mode: "claw"
   port: 23340
@@ -329,6 +330,12 @@ memory:
 
 role: "player"  # player | observer
 ```
+
+**多角色说明**:
+- `agent`: 当前活跃角色
+- `characters`: 所有角色历史记录
+- 每个角色关联到特定服务器（`server_url`）
+- 切换服务器时，自动查找该服务器上的存活角色
 
 ## Docker 部署
 
@@ -349,7 +356,7 @@ docker run -d \
 |------|------|
 | `SERVER_WS_URL` | 游戏服务器 WebSocket 地址 |
 | `SERVER_HTTP_URL` | 游戏服务器 HTTP 地址 |
-| `AGENT_MODE` | 运行模式（claw/cognitive） |
+| `AGENT_MODE` | 运行模式（仅支持 claw，默认） |
 | `AGENT_PORT` | HTTP API 端口 |
 
 ## 扩展开发

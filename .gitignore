@@ -117,3 +117,4 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
+agent.yaml
