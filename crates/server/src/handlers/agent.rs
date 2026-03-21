@@ -201,11 +201,15 @@ pub async fn agent_register(
     // 8. 获取叙事化配置（用于属性描述转换）
     let narrative_config = state.game_data.get().narrative.clone();
 
+    // 9. 获取初始属性（先天属性，用于 Agent 端存储 birth_attributes）
+    let initial_attributes = registration.initial_state.get_attributes_for_protocol();
+
     Ok(Json(AgentRegisterResponse {
         agent_id: agent.agent_id.to_string(),
         message: format!("Agent '{}' registered successfully", agent.name),
         game_rules,
         narrative_config,
+        initial_attributes,
     }))
 }
 

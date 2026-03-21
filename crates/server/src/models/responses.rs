@@ -147,4 +147,8 @@ pub struct AgentRegisterResponse {
 
     /// 叙事化配置（用于属性描述转换）
     pub narrative_config: protocol::NarrativeConfig,
+
+    /// 初始属性（先天属性，用于 Agent 端存储 birth_attributes）
+    #[serde(default)]
+    pub initial_attributes: std::collections::HashMap<String, i32>,
 }
