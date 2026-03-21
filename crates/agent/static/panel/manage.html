@@ -10,7 +10,6 @@
         <div class="container">
             <header>
                 <h1>赛博江湖</h1>
-                <p class="subtitle">角色管理</p>
                 <nav class="nav-tabs">
                     <a href="index.html" class="nav-tab">创建角色</a>
                     <a href="character.html" class="nav-tab">角色信息</a>
@@ -66,6 +65,11 @@
                         注入一个念头，将在接下来的回合中持续影响角色的思考。
                         此功能用于引导角色行为或注入特定剧情。
                     </p>
+
+                    <div class="info-item" style="margin-bottom: 12px;">
+                        <span class="label">目标角色</span>
+                        <span class="value" id="dream-target-character">加载中...</span>
+                    </div>
 
                     <div id="dream-status" class="status-card hidden">
                         <h4>当前托梦</h4>
@@ -144,7 +148,7 @@
         </div>
 
         <!-- 确认对话框 -->
-        <div id="confirm-dialog" class="dialog-overlay hidden">
+        <div id="confirm-dialog" class="dialog-overlay" style="display: none;">
             <div class="dialog">
                 <h3>确认转生</h3>
                 <p>你确定要让当前角色转生吗？此操作不可撤销。</p>
@@ -157,6 +161,23 @@
 
         <script>
             const API_BASE = `${window.location.protocol}//${window.location.host}`;
+
+            // DOM 元素引用
+            let dialog, confirmBtn, cancelBtn, rebirthBtn;
+
+            // 显示对话框
+            function showDialog() {
+                if (dialog) {
+                    dialog.style.display = 'flex';
+                }
+            }
+
+            // 隐藏对话框
+            function hideDialog() {
+                if (dialog) {
+                    dialog.style.display = 'none';
+                }
+            }
 
             // 加载当前服务器配置
             async function loadServerConfig() {
@@ -173,58 +194,21 @@
                 }
             }
 
-            // 服务器配置表单提交
-            document.getElementById('server-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-
-                const btn = document.getElementById('save-server-btn');
-                const resultEl = document.getElementById('server-result');
-                const errorEl = document.getElementById('server-error');
-
-                resultEl.classList.add('hidden');
-                errorEl.classList.add('hidden');
-
-                btn.disabled = true;
-                btn.textContent = '保存中...';
-
-                const ws_url = document.getElementById('server-ws-url').value.trim();
-                const http_url = document.getElementById('server-http-url').value.trim();
-
-                const body = { ws_url };
-                if (http_url) {
-                    body.http_url = http_url;
-                }
-
-                try {
-                    const response = await fetch(`${API_BASE}/api/v1/config/server`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
-
-                    const data = await response.json();
-
-                    if (response.ok && data.success) {
-                        document.getElementById('server-message').textContent = data.message;
-                        resultEl.classList.remove('hidden');
-                    } else {
-                        document.getElementById('server-error-msg').textContent =
-                            data.message || `服务器错误: ${response.status}`;
-                        errorEl.classList.remove('hidden');
-                    }
-                } catch (err) {
-                    document.getElementById('server-error-msg').textContent =
-                        `网络错误: ${err.message}`;
-                    errorEl.classList.remove('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '保存并重连';
-                }
-            });
-
             // 加载当前托梦状态
             async function loadDreamStatus() {
                 try {
+                    // 首先加载当前角色信息
+                    const charResponse = await fetch(`${API_BASE}/api/v1/character`);
+                    if (charResponse.ok) {
+                        const charData = await charResponse.json();
+                        const targetEl = document.getElementById('dream-target-character');
+                        if (charData.agent_id && charData.status === 'alive') {
+                            targetEl.textContent = charData.name || '当前角色';
+                        } else {
+                            targetEl.textContent = '无活跃角色';
+                        }
+                    }
+
                     const response = await fetch(`${API_BASE}/api/v1/character/dream`);
                     const data = await response.json();
 
@@ -238,79 +222,21 @@
                     }
                 } catch (err) {
                     console.error('加载托梦状态失败:', err);
+                    document.getElementById('dream-target-character').textContent = '加载失败';
                 }
             }
 
-            // 托梦表单提交
-            document.getElementById('dream-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-
-                const btn = document.getElementById('dream-btn');
-                const resultEl = document.getElementById('dream-result');
-                const errorEl = document.getElementById('dream-error');
-
-                resultEl.classList.add('hidden');
-                errorEl.classList.add('hidden');
-
-                btn.disabled = true;
-                btn.textContent = '注入中...';
-
-                const thought = document.getElementById('dream-thought').value.trim();
-                const duration = parseInt(document.getElementById('dream-duration').value) || 5;
-
-                try {
-                    const response = await fetch(`${API_BASE}/api/v1/character/dream`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ thought, duration })
-                    });
-
-                    const data = await response.json();
-
-                    if (response.ok) {
-                        document.getElementById('dream-message').textContent = data.message;
-                        resultEl.classList.remove('hidden');
-                        document.getElementById('dream-thought').value = '';
-                        loadDreamStatus();
-                    } else {
-                        document.getElementById('dream-error-msg').textContent =
-                            data.message || `服务器错误: ${response.status}`;
-                        errorEl.classList.remove('hidden');
-                    }
-                } catch (err) {
-                    document.getElementById('dream-error-msg').textContent =
-                        `网络错误: ${err.message}`;
-                    errorEl.classList.remove('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '注入托梦';
-                }
-            });
-
-            // 转生确认对话框
-            const dialog = document.getElementById('confirm-dialog');
-            const confirmBtn = document.getElementById('confirm-ok');
-            const cancelBtn = document.getElementById('confirm-cancel');
-
-            document.getElementById('rebirth-btn').addEventListener('click', () => {
-                dialog.classList.remove('hidden');
-            });
-
-            cancelBtn.addEventListener('click', () => {
-                dialog.classList.add('hidden');
-            });
-
-            confirmBtn.addEventListener('click', async () => {
+            // 执行转生
+            async function executeRebirth() {
                 const resultEl = document.getElementById('rebirth-result');
                 const errorEl = document.getElementById('rebirth-error');
-                const btn = document.getElementById('rebirth-btn');
 
-                dialog.classList.add('hidden');
+                hideDialog();
                 resultEl.classList.add('hidden');
                 errorEl.classList.add('hidden');
 
-                btn.disabled = true;
-                btn.textContent = '转生中...';
+                rebirthBtn.disabled = true;
+                rebirthBtn.textContent = '转生中...';
 
                 try {
                     const response = await fetch(`${API_BASE}/api/v1/character/rebirth`, {
@@ -324,27 +250,155 @@
                     if (response.ok && data.success) {
                         document.getElementById('rebirth-message').textContent = data.message;
                         resultEl.classList.remove('hidden');
-                        btn.textContent = '已转生';
+                        rebirthBtn.textContent = '已转生';
                     } else {
                         document.getElementById('rebirth-error-msg').textContent =
                             data.message || `服务器错误: ${response.status}`;
                         errorEl.classList.remove('hidden');
-                        btn.disabled = false;
-                        btn.textContent = '确认转生';
+                        rebirthBtn.disabled = false;
+                        rebirthBtn.textContent = '确认转生';
                     }
                 } catch (err) {
                     document.getElementById('rebirth-error-msg').textContent =
                         `网络错误: ${err.message}`;
                     errorEl.classList.remove('hidden');
-                    btn.disabled = false;
-                    btn.textContent = '确认转生';
+                    rebirthBtn.disabled = false;
+                    rebirthBtn.textContent = '确认转生';
                 }
-            });
+            }
 
-            // 页面加载时获取托梦状态和服务器配置
+            // 页面加载完成后初始化
             document.addEventListener('DOMContentLoaded', () => {
+                // 获取 DOM 元素引用
+                dialog = document.getElementById('confirm-dialog');
+                confirmBtn = document.getElementById('confirm-ok');
+                cancelBtn = document.getElementById('confirm-cancel');
+                rebirthBtn = document.getElementById('rebirth-btn');
+
+                // 确保对话框初始隐藏
+                if (dialog) {
+                    dialog.style.display = 'none';
+                }
+
+                // 绑定事件
+                if (rebirthBtn) {
+                    rebirthBtn.addEventListener('click', showDialog);
+                }
+
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', hideDialog);
+                }
+
+                if (confirmBtn) {
+                    confirmBtn.addEventListener('click', executeRebirth);
+                }
+
+                if (dialog) {
+                    dialog.addEventListener('click', (e) => {
+                        if (e.target === dialog) {
+                            hideDialog();
+                        }
+                    });
+                }
+
+                // 加载数据
                 loadDreamStatus();
                 loadServerConfig();
+
+                // 服务器配置表单提交
+                document.getElementById('server-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+
+                    const btn = document.getElementById('save-server-btn');
+                    const resultEl = document.getElementById('server-result');
+                    const errorEl = document.getElementById('server-error');
+
+                    resultEl.classList.add('hidden');
+                    errorEl.classList.add('hidden');
+
+                    btn.disabled = true;
+                    btn.textContent = '保存中...';
+
+                    const ws_url = document.getElementById('server-ws-url').value.trim();
+                    const http_url = document.getElementById('server-http-url').value.trim();
+
+                    const body = { ws_url };
+                    if (http_url) {
+                        body.http_url = http_url;
+                    }
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/v1/config/server`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok && data.success) {
+                            document.getElementById('server-message').textContent = data.message;
+                            resultEl.classList.remove('hidden');
+                        } else {
+                            document.getElementById('server-error-msg').textContent =
+                                data.message || `服务器错误: ${response.status}`;
+                            errorEl.classList.remove('hidden');
+                        }
+                    } catch (err) {
+                        document.getElementById('server-error-msg').textContent =
+                            `网络错误: ${err.message}`;
+                        errorEl.classList.remove('hidden');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = '保存并重连';
+                    }
+                });
+
+                // 托梦表单提交
+                document.getElementById('dream-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+
+                    const btn = document.getElementById('dream-btn');
+                    const resultEl = document.getElementById('dream-result');
+                    const errorEl = document.getElementById('dream-error');
+
+                    resultEl.classList.add('hidden');
+                    errorEl.classList.add('hidden');
+
+                    btn.disabled = true;
+                    btn.textContent = '注入中...';
+
+                    const thought = document.getElementById('dream-thought').value.trim();
+                    const duration = parseInt(document.getElementById('dream-duration').value) || 5;
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/v1/character/dream`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ thought, duration })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            document.getElementById('dream-message').textContent = data.message;
+                            resultEl.classList.remove('hidden');
+                            document.getElementById('dream-thought').value = '';
+                            loadDreamStatus();
+                        } else {
+                            document.getElementById('dream-error-msg').textContent =
+                                data.message || `服务器错误: ${response.status}`;
+                            errorEl.classList.remove('hidden');
+                        }
+                    } catch (err) {
+                        document.getElementById('dream-error-msg').textContent =
+                            `网络错误: ${err.message}`;
+                        errorEl.classList.remove('hidden');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = '注入托梦';
+                    }
+                });
             });
         </script>
     </body>

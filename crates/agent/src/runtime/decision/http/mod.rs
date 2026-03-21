@@ -327,6 +327,12 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/dream",
             post(handlers::dream_character_handler),
         ) // 托梦（持续 n 回合的念头注入）
+        // === 多角色管理端点 ===
+        .route("/api/v1/characters", get(handlers::list_characters_handler)) // 获取所有角色列表
+        .route(
+            "/api/v1/characters/switch",
+            post(handlers::switch_character_handler),
+        ) // 切换当前角色
         // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
         .route("/api/v1/review/pending", get(review::get_pending_reviews)) // 获取待审查意图
         .route("/api/v1/review/{intent_id}", post(review::submit_review)) // 提交审查结果
