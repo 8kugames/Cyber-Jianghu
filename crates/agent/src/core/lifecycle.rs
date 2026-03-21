@@ -11,6 +11,20 @@ use tracing::{debug, error, info, warn};
 
 use crate::models::Intent;
 
+/// 检查是否应该记录重试日志（日志采样策略）
+///
+/// 策略：
+/// - 前 5 次：每次都记录
+/// - 第 6 次后：仅当重试次数为完全平方数时记录（9, 16, 25, 36...）
+fn should_log_retry(attempt: u32) -> bool {
+    if attempt <= 5 {
+        return true;
+    }
+    // 检查是否为完全平方数
+    let sqrt = (attempt as f64).sqrt() as u32;
+    sqrt * sqrt == attempt
+}
+
 impl super::Agent {
     /// 运行 Agent 主循环
     ///
