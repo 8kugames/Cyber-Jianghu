@@ -176,21 +176,25 @@ impl AttributeComponent {
 
             let value = match metadata.attr_type {
                 AttributeType::Growable => {
-                    // 对于可成长属性，如果有 birth_range 则随机生成，否则使用 initial_value
-                    let val = metadata
+                    // 可成长属性（力量、敏捷、根骨、悟性）：
+                    // - birth_range: 随机产出成长极限（上限）
+                    // - initial_value: 进入游戏时的初始属性值
+                    let growth_limit = metadata
                         .birth_range
                         .map(|(min, max)| {
                             use rand::RngExt;
                             let mut rng = rand::rng();
                             rng.random_range(min..=max) as i32
                         })
-                        .unwrap_or_else(|| metadata.initial_value.unwrap_or(10) as i32);
+                        .unwrap_or(50);
+                    let initial = metadata.initial_value.unwrap_or(10) as i32;
                     AttributeValue::Growable {
-                        base: val as u8,
-                        current: val as u8,
+                        base: growth_limit as u8,  // 随机生成的成长极限
+                        current: initial as u8,    // 固定的初始值
                     }
                 }
                 AttributeType::Static => {
+                    // 静态属性（魅力）：出生随机，之后固定
                     let val = metadata
                         .birth_range
                         .map(|(min, max)| {
@@ -202,6 +206,7 @@ impl AttributeComponent {
                     AttributeValue::Static { value: val }
                 }
                 AttributeType::DailyRandom => {
+                    // 每日随机属性（福缘）：每游戏日随机刷新
                     let val = metadata
                         .birth_range
                         .map(|(min, max)| {
@@ -216,7 +221,7 @@ impl AttributeComponent {
                     }
                 }
                 _ => AttributeValue::Growable {
-                    base: 10,
+                    base: 50,
                     current: 10,
                 },
             };
