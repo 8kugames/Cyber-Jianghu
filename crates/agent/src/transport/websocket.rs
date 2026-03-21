@@ -84,6 +84,12 @@ impl WebSocketClient {
         self.identity = Some((device_id, auth_token));
     }
 
+    /// 更新服务器 URL（用于热切换）
+    pub fn update_server_url(&mut self, ws_url: String, http_url: String) {
+        self.config.ws_url = ws_url;
+        self.config.http_url = http_url;
+    }
+
     /// 连接到服务器
     pub async fn connect(&self) -> Result<()> {
         // 使用带 token 的 URL 进行连接
