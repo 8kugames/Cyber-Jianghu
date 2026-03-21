@@ -971,6 +971,9 @@ pub struct CharacterRegisterResponse {
     pub agent_id: String,
     /// 结果消息
     pub message: String,
+    /// 警告信息（如配置保存失败）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// 角色注册处理器
@@ -995,6 +998,7 @@ pub(super) async fn register_character_handler(
                 Json(CharacterRegisterResponse {
                     agent_id: String::new(),
                     message: "设备身份未初始化，请先启动 Agent".to_string(),
+                    warning: None,
                 }),
             )
                 .into_response();
@@ -1033,6 +1037,7 @@ pub(super) async fn register_character_handler(
                 Json(CharacterRegisterResponse {
                     agent_id: String::new(),
                     message: format!("连接服务器失败: {}", e),
+                    warning: None,
                 }),
             )
                 .into_response();
@@ -1049,6 +1054,7 @@ pub(super) async fn register_character_handler(
             Json(CharacterRegisterResponse {
                 agent_id: String::new(),
                 message: format!("服务器拒绝: {}", body),
+                warning: None,
             }),
         )
             .into_response();
@@ -1061,6 +1067,8 @@ pub(super) async fn register_character_handler(
         message: String,
         game_rules: Option<cyber_jianghu_protocol::GameRules>,
         narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
+        #[serde(default)]
+        initial_attributes: std::collections::HashMap<String, i32>,
     }
 
     match response.json::<ServerRegisterResponse>().await {
@@ -1089,16 +1097,22 @@ pub(super) async fn register_character_handler(
                 }
             }
 
-            // 7. 更新本地配置文件（添加注册时间和游戏规则）
+            // 7. 更新本地配置文件（添加注册时间、先天属性和游戏规则）
+            let mut config_warning = None;
             if let Ok(mut config) = crate::config::Config::from_file(&state.config_path) {
                 if let Some(ref game_rules) = result.game_rules {
                     config.update_game_rules(game_rules.clone());
                 }
                 if let Some(ref mut agent) = config.agent {
                     agent.registered_at = Some(chrono::Utc::now());
+                    // 保存先天属性（只保存先天属性，不包含状态值）
+                    if !result.initial_attributes.is_empty() {
+                        agent.birth_attributes = Some(result.initial_attributes.clone());
+                    }
                 }
                 if let Err(e) = config.save_to_file(&state.config_path) {
                     error!("保存配置文件失败: {}", e);
+                    config_warning = Some(format!("配置保存失败: {}", e));
                 }
             }
 
@@ -1107,6 +1121,7 @@ pub(super) async fn register_character_handler(
                 Json(CharacterRegisterResponse {
                     agent_id: result.agent_id,
                     message: result.message,
+                    warning: config_warning,
                 }),
             )
                 .into_response()
@@ -1118,6 +1133,7 @@ pub(super) async fn register_character_handler(
                 Json(CharacterRegisterResponse {
                     agent_id: String::new(),
                     message: format!("解析响应失败: {}", e),
+                    warning: None,
                 }),
             )
                 .into_response()
