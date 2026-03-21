@@ -53,6 +53,14 @@
                                 <span class="label">身份</span>
                                 <span class="value" id="identity">-</span>
                             </div>
+                            <div class="info-item">
+                                <span class="label">状态</span>
+                                <span class="value" id="status">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">注册时间</span>
+                                <span class="value" id="registered-at">-</span>
+                            </div>
                         </div>
                         <div class="info-item full-width">
                             <span class="label">外貌</span>
@@ -159,6 +167,21 @@
                     document.getElementById('location').textContent = data.location || '-';
                     document.getElementById('tick-id').textContent = data.tick_id || '-';
 
+                    // 状态（存活/死亡）
+                    if (data.status) {
+                        const statusEl = document.getElementById('status');
+                        statusEl.textContent = data.status === 'alive' ? '存活' :
+                                               data.status === 'dead' ? '死亡' : data.status;
+                        statusEl.className = `value status-${data.status}`;
+                    }
+
+                    // 注册时间
+                    if (data.registered_at) {
+                        const date = new Date(data.registered_at);
+                        document.getElementById('registered-at').textContent =
+                            date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                    }
+
                     // 游戏时间
                     if (data.world_time) {
                         const wt = data.world_time;
@@ -249,12 +272,36 @@
                         data.experiences.forEach(exp => {
                             const div = document.createElement('div');
                             div.className = 'exp-item';
-                            div.innerHTML = `
+
+                            // 构建经历条目 HTML
+                            let html = `
                                 <div class="exp-header">
                                     <span class="exp-tick">Tick ${exp.tick_id}</span>
                                 </div>
                                 <div class="exp-content">${exp.event}</div>
                             `;
+
+                            // 意图摘要（Agent 的思考）
+                            if (exp.intent_summary) {
+                                html += `
+                                    <div class="exp-thought">
+                                        <span class="thought-label">意图:</span>
+                                        <span class="thought-content">${exp.intent_summary}</span>
+                                    </div>
+                                `;
+                            }
+
+                            // Observer 思维链
+                            if (exp.observer_thought) {
+                                html += `
+                                    <div class="exp-observer">
+                                        <span class="observer-label">审查:</span>
+                                        <span class="observer-content">${exp.observer_thought}</span>
+                                    </div>
+                                `;
+                            }
+
+                            div.innerHTML = html;
                             expEl.appendChild(div);
                         });
                     } else if (page === 1) {

@@ -417,6 +417,48 @@ button[type="submit"]:disabled {
     font-size: 0.95rem;
 }
 
+/* 意图摘要和 Observer 思维链 */
+.exp-thought,
+.exp-observer {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.exp-thought {
+    border-left: 2px solid var(--success-color);
+}
+
+.exp-observer {
+    border-left: 2px solid var(--accent-color);
+}
+
+.thought-label,
+.observer-label {
+    color: var(--text-muted);
+    font-weight: bold;
+    margin-right: 6px;
+}
+
+.thought-content {
+    color: var(--success-color);
+}
+
+.observer-content {
+    color: var(--accent-color);
+}
+
+/* 状态显示 */
+.status-alive {
+    color: var(--success-color) !important;
+}
+
+.status-dead {
+    color: var(--error-color) !important;
+}
+
 .load-more {
     text-align: center;
     margin-top: 15px;

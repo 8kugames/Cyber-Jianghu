@@ -242,8 +242,8 @@ use super::builder::AgentBuilder;
 
 #### Character Management (Web Panel)
 
-- `GET /api/v1/character` - Get character info (name, age, gender, attributes, inventory)
-- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated)
+- `GET /api/v1/character` - Get character info (name, age, gender, status, registered_at, birth_attributes, attributes, inventory)
+- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated, with intent_summary and observer_thought)
 - `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
 - `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
 - `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)
@@ -252,7 +252,7 @@ use super::builder::AgentBuilder;
 ### Agent Web Panel
 
 - `GET /` or `GET /index.html` - Character creation page
-- `GET /character.html` - Character info page
+- `GET /character.html` - Character info page (displays status, registered_at, intent_summary, observer_thought)
 - `GET /manage.html` - Management page (dream injection, rebirth)
 
 ## Narrative Config Delivery
