@@ -46,6 +46,12 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
+/// 重连请求（通过 channel 发送给主循环）
+#[derive(Debug, Clone)]
+pub struct ReconnectRequest {
+    pub ws_url: String,
+}
+
 // 导入 handlers 中的 DreamState
 pub use handlers::DreamState;
 
@@ -106,7 +112,10 @@ pub struct HttpApiState {
 
     // === 服务器连接配置 ===
     /// Server HTTP URL（用于角色注册等 API 调用）
-    pub server_http_url: String,
+    /// 使用 RwLock 支持运行时热重载
+    pub server_http_url: Arc<RwLock<String>>,
+    /// Server WebSocket URL（用于实时通信）
+    pub server_ws_url: Arc<RwLock<String>>,
     /// 设备身份（device_id + auth_token）
     pub identity: Option<crate::config::IdentityConfig>,
     /// 配置文件路径（用于读取角色配置）
@@ -135,6 +144,8 @@ pub struct HttpApiState {
     pub review_store: Option<Arc<ReviewStore>>,
     /// 托梦存储，管理持续 n 回合的念头注入
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
+    /// 重连请求发送通道（用于热切换触发重连）
+    pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
 }
 
 /// HTTP 决策状态
@@ -315,6 +326,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/review/{intent_id}/status",
             get(review::get_review_status),
         ) // 获取审查状态
+        // === 配置管理端点 ===
+        .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
+        .route("/api/v1/config/reload", post(handlers::reload_config_handler)) // 热重载配置
+        .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -403,20 +418,22 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// # 注意
 /// agent_id 是共享的，WebSocket 注册后会更新为服务器分配的真正 ID
+///
+/// # Arguments
+/// * `config_path` - 配置文件完整路径（由调用者传入，确保与主程序一致）
 pub fn create_http_state(
     agent_id: Arc<RwLock<Uuid>>,
     server_http_url: String,
+    server_ws_url: String,
     identity: Option<crate::config::IdentityConfig>,
+    reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    config_path: PathBuf,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
-    // 初始化数据目录和配置目录
+    // 初始化数据目录
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let data_dir = home.join(".cyber-jianghu").join("data");
-    let config_path = dirs::config_dir()
-        .unwrap_or_else(|| home.join(".config"))
-        .join("cyber-jianghu")
-        .join("agent.yaml");
 
     // 读取 agent_id（使用 block_in_place 在同步上下文中读取异步锁）
     let current_agent_id = {
@@ -468,7 +485,8 @@ pub fn create_http_state(
         last_state_update: Arc::new(RwLock::new(None)),
         intent_tx: intent_tx.clone(),
         agent_id,
-        server_http_url,
+        server_http_url: Arc::new(RwLock::new(server_http_url)),
+        server_ws_url: Arc::new(RwLock::new(server_ws_url)),
         identity,
         config_path,
         dialogue_client,
@@ -481,6 +499,7 @@ pub fn create_http_state(
         narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
+        reconnect_tx,  // 重连请求发送通道
     };
 
     let decision_state = Arc::new(HttpDecisionState {

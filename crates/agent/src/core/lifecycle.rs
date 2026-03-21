@@ -124,90 +124,116 @@ impl super::Agent {
         self.config.update_game_rules(game_rules.clone());
 
         loop {
-            // 1. 接收世界状态
-            let world_state = match self.client.receive_world_state().await {
-                Ok(state) => state,
-                Err(e) => {
-                    error!("Failed to receive world state: {}", e);
-                    // 尝试重连
+            tokio::select! {
+                // 检查重连请求（热切换）
+                Some(req) = async {
+                    if let Some(ref mut rx) = self.reconnect_rx {
+                        rx.recv().await
+                    } else {
+                        // 非 Claw 模式，永远等待
+                        std::future::pending().await
+                    }
+                } => {
+                    info!("[main] 收到重连请求: {}", req.ws_url);
+                    // 推断 HTTP URL
+                    let http_url = req.ws_url
+                        .replace("ws://", "http://")
+                        .replace("wss://", "https://")
+                        .replace("/ws", "");
+                    // 更新客户端 URL
+                    self.client.update_server_url(req.ws_url.clone(), http_url);
+                    // 触发重连
                     self.reconnect().await?;
                     continue;
                 }
-            };
 
-            // 1.5 检查是否死亡
-            if let Some(death_event) = world_state.events_log.iter().find(|e| {
-                if let Some(cause) = e.metadata.get("cause")
-                    && let Some(cause_str) = cause.as_str() {
-                        return cause_str.starts_with("death");
+                // 接收世界状态
+                result = self.client.receive_world_state() => {
+                    let world_state = match result {
+                        Ok(state) => state,
+                        Err(e) => {
+                            error!("Failed to receive world state: {}", e);
+                            // 尝试重连
+                            self.reconnect().await?;
+                            continue;
+                        }
+                    };
+
+                    // 1.5 检查是否死亡
+                    if let Some(death_event) = world_state.events_log.iter().find(|e| {
+                        if let Some(cause) = e.metadata.get("cause")
+                            && let Some(cause_str) = cause.as_str() {
+                                return cause_str.starts_with("death");
+                            }
+                        if let Some(msg_type) = e.metadata.get("type")
+                            && let Some(type_str) = msg_type.as_str() {
+                                return type_str == "death_notification";
+                            }
+                        false
+                    }) {
+                        warn!(
+                            "Agent '{}' has died: {}",
+                            self.character_name(), death_event.description
+                        );
+                        // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
+                        // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
                     }
-                if let Some(msg_type) = e.metadata.get("type")
-                    && let Some(type_str) = msg_type.as_str() {
-                        return type_str == "death_notification";
+
+                    // 2. 处理事件并更新记忆
+                    if let Err(e) = self.process_events(&world_state.events_log).await {
+                        warn!("Failed to process events into memory: {}", e);
                     }
-                false
-            }) {
-                warn!(
-                    "Agent '{}' has died: {}",
-                    self.character_name(), death_event.description
-                );
-                // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
-                // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
-            }
 
-            // 2. 处理事件并更新记忆
-            if let Err(e) = self.process_events(&world_state.events_log).await {
-                warn!("Failed to process events into memory: {}", e);
-            }
+                    // 3. 每 84 tick 运行遗忘机制
+                    if world_state.tick_id % 84 == 0
+                        && let Err(e) = self.run_forgetting(world_state.tick_id).await {
+                            warn!("Failed to run forgetting mechanism: {}", e);
+                        }
 
-            // 3. 每 84 tick 运行遗忘机制
-            if world_state.tick_id % 84 == 0
-                && let Err(e) = self.run_forgetting(world_state.tick_id).await {
-                    warn!("Failed to run forgetting mechanism: {}", e);
+                    // 4. 构建增强的世界状态（包含记忆上下文）
+                    let memory_context = self.get_memory_context().await;
+                    if !memory_context.is_empty() {
+                        debug!("Memory context:\n{}", memory_context);
+                    }
+
+                    // 5. 调用决策回调（带验证和记忆上下文）
+                    let intent = if self.validator.is_some() {
+                        self.decide_with_validation(&world_state).await?
+                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                        // 优先使用带记忆上下文的回调
+                        memory_callback(&world_state, &memory_context).await
+                    } else {
+                        (self.decision_callback)(&world_state).await
+                    };
+
+                    // 6. 更新寿命状态（如果启用）
+                    if let Some(ref mut calculator) = self.lifespan_calculator {
+                        let status = calculator.process_tick();
+                        if status.is_deceased() {
+                            info!(
+                                "Agent '{}' has passed away at age {}",
+                                self.character_name(),
+                                status.age()
+                            );
+                            // 发送最后一个 idle 意图后退出
+                            self.client
+                                .send_intent(&Intent::idle(
+                                    self.client.agent_id().unwrap(),
+                                    world_state.tick_id,
+                                ))
+                                .await
+                                .ok();
+                            return Ok(());
+                        }
+                    }
+
+                    // 7. 发送意图
+                    if let Err(e) = self.client.send_intent(&intent).await {
+                        error!("Failed to send intent: {}", e);
+                        // 尝试重连
+                        self.reconnect().await?;
+                    }
                 }
-
-            // 4. 构建增强的世界状态（包含记忆上下文）
-            let memory_context = self.get_memory_context().await;
-            if !memory_context.is_empty() {
-                debug!("Memory context:\n{}", memory_context);
-            }
-
-            // 5. 调用决策回调（带验证和记忆上下文）
-            let intent = if self.validator.is_some() {
-                self.decide_with_validation(&world_state).await?
-            } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                // 优先使用带记忆上下文的回调
-                memory_callback(&world_state, &memory_context).await
-            } else {
-                (self.decision_callback)(&world_state).await
-            };
-
-            // 6. 更新寿命状态（如果启用）
-            if let Some(ref mut calculator) = self.lifespan_calculator {
-                let status = calculator.process_tick();
-                if status.is_deceased() {
-                    info!(
-                        "Agent '{}' has passed away at age {}",
-                        self.character_name(),
-                        status.age()
-                    );
-                    // 发送最后一个 idle 意图后退出
-                    self.client
-                        .send_intent(&Intent::idle(
-                            self.client.agent_id().unwrap(),
-                            world_state.tick_id,
-                        ))
-                        .await
-                        .ok();
-                    return Ok(());
-                }
-            }
-
-            // 7. 发送意图
-            if let Err(e) = self.client.send_intent(&intent).await {
-                error!("Failed to send intent: {}", e);
-                // 尝试重连
-                self.reconnect().await?;
             }
         }
     }

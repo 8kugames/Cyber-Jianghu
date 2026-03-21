@@ -19,6 +19,46 @@
             </header>
 
             <main>
+                <!-- 服务器配置 -->
+                <section class="form-section">
+                    <h2>服务器配置</h2>
+                    <p class="section-desc">
+                        配置游戏服务器地址。修改后 Agent 会自动重连。
+                    </p>
+
+                    <form id="server-form">
+                        <div class="form-group">
+                            <label for="server-ws-url">WebSocket 地址</label>
+                            <input
+                                type="text"
+                                id="server-ws-url"
+                                name="ws_url"
+                                placeholder="ws://your-server:23333/ws"
+                                required
+                            />
+                        </div>
+                        <div class="form-group">
+                            <label for="server-http-url">HTTP 地址（可选）</label>
+                            <input
+                                type="text"
+                                id="server-http-url"
+                                name="http_url"
+                                placeholder="http://your-server:23333"
+                            />
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="save-server-btn">保存并重连</button>
+                        </div>
+                    </form>
+
+                    <div id="server-result" class="result hidden">
+                        <p id="server-message"></p>
+                    </div>
+                    <div id="server-error" class="error hidden">
+                        <p id="server-error-msg"></p>
+                    </div>
+                </section>
+
                 <!-- 托梦功能 -->
                 <section class="form-section">
                     <h2>托梦</h2>
@@ -117,6 +157,70 @@
 
         <script>
             const API_BASE = `${window.location.protocol}//${window.location.host}`;
+
+            // 加载当前服务器配置
+            async function loadServerConfig() {
+                try {
+                    const response = await fetch(`${API_BASE}/api/v1/config`);
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        document.getElementById('server-ws-url').value = data.server_ws_url || '';
+                        document.getElementById('server-http-url').value = data.server_http_url || '';
+                    }
+                } catch (err) {
+                    console.error('加载服务器配置失败:', err);
+                }
+            }
+
+            // 服务器配置表单提交
+            document.getElementById('server-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const btn = document.getElementById('save-server-btn');
+                const resultEl = document.getElementById('server-result');
+                const errorEl = document.getElementById('server-error');
+
+                resultEl.classList.add('hidden');
+                errorEl.classList.add('hidden');
+
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+
+                const ws_url = document.getElementById('server-ws-url').value.trim();
+                const http_url = document.getElementById('server-http-url').value.trim();
+
+                const body = { ws_url };
+                if (http_url) {
+                    body.http_url = http_url;
+                }
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/v1/config/server`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        document.getElementById('server-message').textContent = data.message;
+                        resultEl.classList.remove('hidden');
+                    } else {
+                        document.getElementById('server-error-msg').textContent =
+                            data.message || `服务器错误: ${response.status}`;
+                        errorEl.classList.remove('hidden');
+                    }
+                } catch (err) {
+                    document.getElementById('server-error-msg').textContent =
+                        `网络错误: ${err.message}`;
+                    errorEl.classList.remove('hidden');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '保存并重连';
+                }
+            });
 
             // 加载当前托梦状态
             async function loadDreamStatus() {
@@ -237,8 +341,11 @@
                 }
             });
 
-            // 页面加载时获取托梦状态
-            document.addEventListener('DOMContentLoaded', loadDreamStatus);
+            // 页面加载时获取托梦状态和服务器配置
+            document.addEventListener('DOMContentLoaded', () => {
+                loadDreamStatus();
+                loadServerConfig();
+            });
         </script>
     </body>
 </html>

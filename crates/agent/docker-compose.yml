@@ -37,12 +37,6 @@ services:
     container_name: cyber-jianghu-agent
     restart: unless-stopped
     environment:
-      # 服务端连接配置
-      # Docker 网络：使用服务名
-      # 本机: 使用 localhost 或 host.docker.internal
-      CYBER_JIANGHU_SERVER_WS_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
-      CYBER_JIANGHU_SERVER_HTTP_URL: ${AGENT_SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
-
       # Agent 运行配置
       CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-claw}
       CYBER_JIANGHU_PORT: ${AGENT_PORT:-23340}
@@ -57,8 +51,8 @@ services:
       # 多 Agent 实例时，映射不同宿主机端口：23341:23340, 23342:23340 等
       - "${AGENT_PORT:-23340}:23340"
     volumes:
-      # 配置持久化（包含 narrative_config 等)
-      - agent_config:/app/config
+      # 配置文件 - 使用 bind mount 支持热修改
+      - ./config:/app/config
       # 数据持久化（SQLite 数据库、记忆存储等)
       - agent_data:/app/data
     healthcheck:
