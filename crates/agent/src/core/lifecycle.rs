@@ -212,44 +212,56 @@ impl super::Agent {
         }
     }
 
-    /// 重连服务端（指数退避策略）
+    /// 重连服务端（无限重试，逐步降频策略）
+    ///
+    /// 降频策略：
+    /// - 初始延迟 1 秒
+    /// - 每次失败后延迟翻倍
+    /// - 最大延迟为 tick_duration 的一半（确保每个 tick 至少尝试 2 次）
+    /// - 重连成功后重置退避计数器
     async fn reconnect(&mut self) -> Result<()> {
-        const MAX_RETRIES: u32 = 5;
         const INITIAL_DELAY_MS: u64 = 1000; // 1 秒
-        const MAX_DELAY_MS: u64 = 30000; // 30 秒
+
+        // 获取 tick 时长，计算最大延迟（tick 的一半）
+        let tick_duration_ms = self.get_tick_duration().as_millis() as u64;
+        let max_delay_ms = tick_duration_ms / 2;
 
         self.client.close().await;
 
-        for attempt in 1..=MAX_RETRIES {
-            // 计算指数退避延迟
-            let delay_ms = std::cmp::min(INITIAL_DELAY_MS * (1 << (attempt - 1)), MAX_DELAY_MS);
-
-            warn!(
-                "Reconnection attempt {}/{} (waiting {}ms)...",
-                attempt, MAX_RETRIES, delay_ms
+        loop {
+            // 计算当前延迟：初始延迟 * 2^backoff，但不超过最大延迟
+            let delay_ms = std::cmp::min(
+                INITIAL_DELAY_MS * (1u64 << self.reconnect_backoff.min(10)),
+                max_delay_ms
             );
+
+            let attempt = self.reconnect_backoff + 1;
+            if should_log_retry(attempt) {
+                warn!(
+                    "重连尝试 {} (等待 {}ms, 最大 {}ms)...",
+                    attempt, delay_ms, max_delay_ms
+                );
+            }
 
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
 
             match self.client.connect().await {
                 Ok(()) => {
-                    info!("Reconnected successfully after {} attempts", attempt);
+                    info!("重连成功，尝试次数: {}", attempt);
+                    // 重连成功，重置退避计数器
+                    self.reconnect_backoff = 0;
                     return Ok(());
                 }
-                Err(e) if attempt < MAX_RETRIES => {
-                    warn!("Reconnection attempt {} failed: {}", attempt, e);
-                }
                 Err(e) => {
-                    error!("All reconnection attempts failed: {}", e);
-                    return Err(anyhow::anyhow!("All reconnection attempts failed: {}", e));
+                    if should_log_retry(attempt) {
+                        warn!("重连尝试 {} 失败: {}", attempt, e);
+                    }
+                    // 增加退避计数器（逐步降低频率）
+                    self.reconnect_backoff = self.reconnect_backoff.saturating_add(1);
+                    // 继续循环，不退出
                 }
             }
         }
-
-        Err(anyhow::anyhow!(
-            "Failed to reconnect after {} attempts",
-            MAX_RETRIES
-        ))
     }
 
     /// 关闭连接

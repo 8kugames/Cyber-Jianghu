@@ -95,6 +95,9 @@ pub struct Agent {
 
     /// 注册成功回调（可选，用于更新外部状态如 HTTP API 的 agent_id）
     pub(crate) registration_callback: Option<std::sync::Arc<dyn Fn(Uuid) + Send + Sync>>,
+
+    /// 重连退避计数器（用于逐步降低重试频率）
+    pub(crate) reconnect_backoff: u32,
 }
 
 impl Agent {
@@ -108,6 +111,12 @@ impl Agent {
     /// 注意：此构造函数不初始化记忆系统。如需启用记忆系统，请使用 `Agent::builder()`。
     pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
         let client = AgentClient::new(config.server.clone());
+
+        // 设置设备身份（如果已存在）
+        if let Some(ref identity) = config.identity {
+            client.set_identity(identity.device_id, identity.auth_token.clone());
+        }
+
         Self {
             config,
             client,
@@ -121,6 +130,7 @@ impl Agent {
             lifespan_calculator: None,
             validator_config: ValidatorConfig::default(),
             registration_callback: None,
+            reconnect_backoff: 0,  // 初始为 0，重连成功后重置
         }
     }
 
