@@ -1,0 +1,48 @@
+# ============================================================================
+# Cyber-Jianghu Agent 配置模板
+# ============================================================================
+#
+# 首次启动时，Agent 会自动：
+#   1. 生成 device_id（如果为 null）
+#   2. 向服务器注册获取 auth_token（如果为 null）
+#   3. 保存完整配置到 agent.yaml
+#
+# 使用方式：
+#   cp agent.yaml.example agent.yaml
+#   # 编辑 server.ws_url 和 server.http_url 为实际服务器地址
+#   docker compose up -d
+#
+# ============================================================================
+
+identity:
+  # 设备唯一标识（首次启动自动生成）
+  device_id: null
+  # 认证令牌（首次启动自动向服务器注册获取）
+  auth_token: null
+
+server:
+  # 游戏服务器 WebSocket 地址
+  # 开发环境: ws://localhost:23333/ws
+  # 生产环境: wss://your-server.com/ws
+  ws_url: ws://47.102.120.116:23333/ws
+  # 游戏服务器 HTTP 地址
+  http_url: http://47.102.120.116:23333
+
+runtime:
+  # 运行模式: claw (HTTP API 供外部调用) | cognitive (内置 AI 决策)
+  mode: claw
+  # HTTP API 端口（容器内固定 23340）
+  port: 23340
+
+memory:
+  # 是否启用记忆系统
+  enabled: true
+  # 工作记忆容量
+  working_memory_size: 20
+  # 情节记忆阈值
+  episodic_threshold: 0.5
+  # 数据库路径（null 使用默认路径）
+  db_path: null
+
+# 角色类型: player | npc
+role: player
