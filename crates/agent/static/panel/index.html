@@ -10,7 +10,6 @@
         <div class="container">
             <header>
                 <h1>赛博江湖</h1>
-                <p class="subtitle">创建你的侠客</p>
                 <nav class="nav-tabs">
                     <a href="index.html" class="nav-tab active">创建角色</a>
                     <a href="character.html" class="nav-tab">角色信息</a>
@@ -24,9 +23,7 @@
                     <section class="form-section">
                         <h2>基本信息</h2>
                         <div class="form-group">
-                            <label for="name"
-                                >姓名 <span class="required">*</span></label
-                            >
+                            <label for="name">姓名 <span class="required">*</span></label>
                             <input
                                 type="text"
                                 id="name"
@@ -93,11 +90,7 @@
                                 <span class="tag" data-value="忠诚">忠诚</span>
                                 <span class="tag" data-value="狡猾">狡猾</span>
                             </div>
-                            <input
-                                type="hidden"
-                                id="personality"
-                                name="personality"
-                            />
+                            <input type="hidden" id="personality" name="personality" />
                         </div>
                     </section>
 
@@ -138,34 +131,15 @@
                         </div>
                         <div class="form-group">
                             <label>说话特点（可多选）</label>
-                            <div
-                                class="tag-container"
-                                id="speech-patterns-tags"
-                            >
-                                <span class="tag" data-value="喜欢引用古诗词"
-                                    >喜欢引用古诗词</span
-                                >
-                                <span class="tag" data-value="说话简洁"
-                                    >说话简洁</span
-                                >
-                                <span class="tag" data-value="喜欢用成语"
-                                    >喜欢用成语</span
-                                >
-                                <span class="tag" data-value="说话带方言"
-                                    >说话带方言</span
-                                >
-                                <span class="tag" data-value="喜欢开玩笑"
-                                    >喜欢开玩笑</span
-                                >
-                                <span class="tag" data-value="说话谨慎"
-                                    >说话谨慎</span
-                                >
+                            <div class="tag-container" id="speech-patterns-tags">
+                                <span class="tag" data-value="喜欢引用古诗词">喜欢引用古诗词</span>
+                                <span class="tag" data-value="说话简洁">说话简洁</span>
+                                <span class="tag" data-value="喜欢用成语">喜欢用成语</span>
+                                <span class="tag" data-value="说话带方言">说话带方言</span>
+                                <span class="tag" data-value="喜欢开玩笑">喜欢开玩笑</span>
+                                <span class="tag" data-value="说话谨慎">说话谨慎</span>
                             </div>
-                            <input
-                                type="hidden"
-                                id="speech_patterns"
-                                name="speech_patterns"
-                            />
+                            <input type="hidden" id="speech_patterns" name="speech_patterns" />
                         </div>
                     </section>
 
@@ -200,9 +174,10 @@
 
                 <!-- 结果显示 -->
                 <div id="result" class="result hidden">
-                    <h3>角色创建成功!</h3>
+                    <h3>角色创建成功</h3>
                     <p>角色 ID: <span id="agent-id"></span></p>
                     <p id="message"></p>
+                    <a href="character.html" class="nav-link">查看角色信息</a>
                 </div>
 
                 <!-- 错误显示 -->

@@ -1787,6 +1787,278 @@ pub struct DreamStatusResponse {
 }
 
 // ============================================================================
+// 多角色管理 API Handlers
+// ============================================================================
+
+/// 角色列表响应
+#[derive(Debug, Serialize)]
+pub struct CharacterListResponse {
+    /// 所有角色列表
+    pub characters: Vec<CharacterInfo>,
+    /// 当前活跃角色的 agent_id
+    pub current_agent_id: Option<String>,
+    /// 当前服务器 HTTP URL
+    pub current_server_url: String,
+}
+
+/// 角色详细信息（用于列表展示）
+#[derive(Debug, Serialize)]
+pub struct CharacterInfo {
+    /// 角色 ID
+    pub agent_id: Option<String>,
+    /// 姓名
+    pub name: String,
+    /// 年龄
+    pub age: u8,
+    /// 性别
+    pub gender: String,
+    /// 身份
+    pub identity: Option<String>,
+    /// 状态 (alive/dead/retired)
+    pub status: String,
+    /// 所属服务器 URL
+    pub server_url: Option<String>,
+    /// 注册时间
+    pub registered_at: Option<String>,
+    /// 是否为当前活跃角色
+    pub is_current: bool,
+}
+
+/// 获取所有角色列表
+///
+/// GET /api/v1/characters
+///
+/// 返回所有角色（包括已故、归隐的），标记当前活跃角色
+pub(super) async fn list_characters_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    // 从配置文件读取完整角色列表
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(CharacterListResponse {
+                    characters: vec![],
+                    current_agent_id: None,
+                    current_server_url: state.server_http_url.read().await.clone(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let current_server_url = state.server_http_url.read().await.clone();
+    let current_agent_id = config.agent.as_ref().and_then(|c| c.agent_id.map(|id| id.to_string()));
+
+    // 从 characters 数组构建列表
+    let mut characters: Vec<CharacterInfo> = config
+        .characters
+        .iter()
+        .map(|c| {
+            let is_current = c.agent_id.map(|id| id.to_string()) == current_agent_id;
+            CharacterInfo {
+                agent_id: c.agent_id.map(|id| id.to_string()),
+                name: c.name.clone(),
+                age: c.age,
+                gender: c.gender.clone(),
+                identity: c.identity.clone(),
+                status: match c.status {
+                    crate::config::CharacterStatus::Alive => "alive".to_string(),
+                    crate::config::CharacterStatus::Dead => "dead".to_string(),
+                    crate::config::CharacterStatus::Retired => "retired".to_string(),
+                },
+                server_url: c.server_url.clone(),
+                registered_at: c.registered_at.map(|t| t.to_rfc3339()),
+                is_current,
+            }
+        })
+        .collect();
+
+    // 如果当前 agent 不在 characters 数组中，单独添加
+    if let Some(ref current_char) = config.agent {
+        let current_char_id = current_char.agent_id.map(|id| id.to_string());
+        if !characters.iter().any(|c| c.agent_id == current_char_id) {
+            characters.push(CharacterInfo {
+                agent_id: current_char_id.clone(),
+                name: current_char.name.clone(),
+                age: current_char.age,
+                gender: current_char.gender.clone(),
+                identity: current_char.identity.clone(),
+                status: match current_char.status {
+                    crate::config::CharacterStatus::Alive => "alive".to_string(),
+                    crate::config::CharacterStatus::Dead => "dead".to_string(),
+                    crate::config::CharacterStatus::Retired => "retired".to_string(),
+                },
+                server_url: current_char.server_url.clone(),
+                registered_at: current_char.registered_at.map(|t| t.to_rfc3339()),
+                is_current: true,
+            });
+        }
+    }
+
+    Json(CharacterListResponse {
+        characters,
+        current_agent_id,
+        current_server_url,
+    })
+    .into_response()
+}
+
+/// 切换角色请求
+#[derive(Debug, Deserialize)]
+pub struct SwitchCharacterRequest {
+    /// 目标角色的 agent_id
+    pub agent_id: String,
+}
+
+/// 切换角色响应
+#[derive(Debug, Serialize)]
+pub struct SwitchCharacterResponse {
+    pub success: bool,
+    pub message: String,
+    /// 切换后的角色信息
+    pub character: Option<CharacterInfo>,
+}
+
+/// 切换当前活跃角色
+///
+/// POST /api/v1/characters/switch
+///
+/// 切换到指定的角色（必须是已存在的角色）
+pub(super) async fn switch_character_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<SwitchCharacterRequest>,
+) -> impl IntoResponse {
+    // 解析 agent_id
+    let agent_id = match Uuid::parse_str(&req.agent_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(SwitchCharacterResponse {
+                    success: false,
+                    message: "无效的 agent_id 格式".to_string(),
+                    character: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 读取配置文件
+    let mut config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(SwitchCharacterResponse {
+                    success: false,
+                    message: format!("读取配置文件失败: {}", e),
+                    character: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 查找目标角色
+    let target_character = config
+        .characters
+        .iter()
+        .find(|c| c.agent_id == Some(agent_id));
+
+    let character = match target_character {
+        Some(c) => c.clone(),
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(SwitchCharacterResponse {
+                    success: false,
+                    message: "未找到指定的角色".to_string(),
+                    character: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 检查角色状态
+    if character.status != crate::config::CharacterStatus::Alive {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(SwitchCharacterResponse {
+                success: false,
+                message: format!(
+                    "无法切换到{}角色",
+                    match character.status {
+                        crate::config::CharacterStatus::Dead => "已故",
+                        crate::config::CharacterStatus::Retired => "归隐",
+                        crate::config::CharacterStatus::Alive => "存活",
+                    }
+                ),
+                character: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 执行切换
+    if !config.switch_to_character(agent_id) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(SwitchCharacterResponse {
+                success: false,
+                message: "切换角色失败".to_string(),
+                character: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 保存配置
+    if let Err(e) = config.save_to_file(&state.config_path) {
+        error!("保存配置文件失败: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(SwitchCharacterResponse {
+                success: false,
+                message: format!("保存配置文件失败: {}", e),
+                character: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 更新内存中的 agent_id
+    {
+        let mut current_agent_id = state.agent_id.write().await;
+        *current_agent_id = agent_id;
+    }
+
+    info!("[character] 切换到角色: {} ({})", character.name, agent_id);
+
+    Json(SwitchCharacterResponse {
+        success: true,
+        message: format!("已切换到角色: {}", character.name),
+        character: Some(CharacterInfo {
+            agent_id: Some(agent_id.to_string()),
+            name: character.name.clone(),
+            age: character.age,
+            gender: character.gender.clone(),
+            identity: character.identity.clone(),
+            status: "alive".to_string(),
+            server_url: character.server_url.clone(),
+            registered_at: character.registered_at.map(|t| t.to_rfc3339()),
+            is_current: true,
+        }),
+    })
+    .into_response()
+}
+
+// ============================================================================
 // 配置管理 API Handlers
 // ============================================================================
 
@@ -1822,6 +2094,21 @@ pub struct SetServerResponse {
     pub success: bool,
     pub message: String,
     pub current: ServerConfigResponse,
+    /// 是否需要重新注册设备
+    pub needs_device_registration: bool,
+    /// 是否需要创建新角色
+    pub needs_character_creation: bool,
+    /// 该服务器上的历史角色
+    pub previous_characters: Vec<CharacterSummary>,
+}
+
+/// 角色摘要信息
+#[derive(Debug, Serialize)]
+pub struct CharacterSummary {
+    pub agent_id: String,
+    pub name: String,
+    pub status: String,
+    pub registered_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2010,17 +2297,65 @@ pub(super) async fn set_server_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<SetServerRequest>,
 ) -> impl IntoResponse {
-    // 1. 更新内存中的配置
-    {
-        let mut ws_url = state.server_ws_url.write().await;
-        *ws_url = req.ws_url.clone();
-    }
+    // 获取旧的服务器地址
+    let old_ws_url = state.server_ws_url.read().await.clone();
+
+    // 计算新的 http_url
     let http_url_value = req.http_url.clone().unwrap_or_else(|| {
         req.ws_url
             .replace("ws://", "http://")
             .replace("wss://", "https://")
             .replace("/ws", "")
     });
+
+    // 检查是否切换到了不同的服务器
+    let server_changed = old_ws_url != req.ws_url;
+
+    let mut needs_device_registration = false;
+    let mut needs_character_creation = false;
+    let mut previous_characters: Vec<CharacterSummary> = vec![];
+
+    // 如果服务器地址变化，检查设备注册状态和角色状态
+    if server_changed {
+        info!("[config] 检测到服务器地址变更: {} -> {}", old_ws_url, req.ws_url);
+
+        // 服务器变更后，设备需要重新注册（每个服务器有独立的设备表）
+        needs_device_registration = true;
+
+        // 检查是否有该服务器上的存活角色
+        let config = crate::config::Config::from_file(&state.config_path).ok();
+        if let Some(config) = config {
+            // 获取该服务器上的所有角色
+            let server_characters = config.get_characters_by_server(&http_url_value);
+            previous_characters = server_characters
+                .iter()
+                .map(|c| CharacterSummary {
+                    agent_id: c.agent_id.map(|id| id.to_string()).unwrap_or_default(),
+                    name: c.name.clone(),
+                    status: match c.status {
+                        crate::config::CharacterStatus::Alive => "alive".to_string(),
+                        crate::config::CharacterStatus::Dead => "dead".to_string(),
+                        crate::config::CharacterStatus::Retired => "retired".to_string(),
+                    },
+                    registered_at: c.registered_at.map(|t| t.to_rfc3339()),
+                })
+                .collect();
+
+            // 检查是否有存活角色
+            let has_alive = config.has_alive_character_for_server(&http_url_value);
+            if !has_alive {
+                needs_character_creation = true;
+            }
+        } else {
+            needs_character_creation = true;
+        }
+    }
+
+    // 1. 更新内存中的配置
+    {
+        let mut ws_url = state.server_ws_url.write().await;
+        *ws_url = req.ws_url.clone();
+    }
     {
         let mut url = state.server_http_url.write().await;
         *url = http_url_value.clone();
@@ -2030,7 +2365,7 @@ pub(super) async fn set_server_handler(
     if let Err(e) = save_server_config(
         &state.config_path,
         &req.ws_url,
-        req.http_url.as_deref(),
+        Some(&http_url_value),
     ) {
         error!("保存配置失败: {}", e);
         return (
@@ -2042,6 +2377,9 @@ pub(super) async fn set_server_handler(
                     ws_url: req.ws_url,
                     http_url: http_url_value,
                 },
+                needs_device_registration: false,
+                needs_character_creation: false,
+                previous_characters: vec![],
             }),
         );
     }
@@ -2058,13 +2396,25 @@ pub(super) async fn set_server_handler(
         }
     }
 
+    // 构建响应消息
+    let message = if needs_device_registration {
+        "服务器地址已更新，需要重新注册设备".to_string()
+    } else if needs_character_creation {
+        "服务器地址已更新，需要创建新角色".to_string()
+    } else {
+        "服务器地址已更新，正在重连...".to_string()
+    };
+
     let response = SetServerResponse {
         success: true,
-        message: "服务器地址已更新，正在重连...".to_string(),
+        message,
         current: ServerConfigResponse {
             ws_url: req.ws_url,
             http_url: http_url_value,
         },
+        needs_device_registration,
+        needs_character_creation,
+        previous_characters,
     };
 
     (StatusCode::OK, Json(response))
