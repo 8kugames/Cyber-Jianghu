@@ -331,6 +331,7 @@ async fn resolve_tick_id_or_reject(
 pub(super) async fn health_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let current = state.current_state.read().await;
     let agent_id = *state.agent_id.read().await;
+
     let response = HealthResponse {
         status: "ok".to_string(),
         agent_id: agent_id.to_string(),
