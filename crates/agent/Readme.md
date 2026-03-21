@@ -96,8 +96,8 @@ cyber-jianghu-agent run --mode claw --port 23340
 **角色管理**:
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/v1/character` | GET | 获取角色信息 |
-| `/api/v1/character/experiences` | GET | 获取经历日志（分页） |
+| `/api/v1/character` | GET | 获取角色信息（含注册时间、状态、先天属性） |
+| `/api/v1/character/experiences` | GET | 获取经历日志（含意图摘要、审查思维链） |
 | `/api/v1/character/dream` | GET/POST | 梦境注入（每游戏日 1 次） |
 | `/api/v1/character/rebirth` | POST | 转世重生（删除角色） |
 | `/api/v1/character/register` | POST | 创建角色 |
@@ -294,8 +294,16 @@ Claw 模式自带 Web 管理界面：
 | 页面 | 路径 | 功能 |
 |------|------|------|
 | 角色创建 | `/` 或 `/index.html` | 创建新角色 |
-| 角色信息 | `/character.html` | 查看属性、背包、经历 |
+| 角色信息 | `/character.html` | 查看属性、背包、经历（含意图摘要、审查思维链） |
 | 管理面板 | `/manage.html` | 梦境注入、转世重生 |
+
+**角色信息页面展示**:
+- 基本信息：姓名、年龄、性别、身份、状态、注册时间
+- 性格与价值观：性格特征、核心价值观
+- 当前状态：位置、Tick、游戏时间
+- 属性：当前属性值（叙事化显示）
+- 物品：持有物品列表
+- 经历日志：每 Tick 事件、意图摘要、Observer 审查思维链
 
 ## 配置
 

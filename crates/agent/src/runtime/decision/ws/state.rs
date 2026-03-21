@@ -307,7 +307,7 @@ impl WsSharedState {
 
         // 生成简化上下文（不包含关系信息）
         Some(super::super::http::generate_context_markdown_no_relationship(
-            world_state, engine,
+            world_state, engine, None, // WebSocket 状态不包含托梦
         ))
     }
 }
