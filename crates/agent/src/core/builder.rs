@@ -183,6 +183,7 @@ impl AgentBuilder {
             lifespan_calculator: self.lifespan_calculator,
             validator_config: self.validator_config,
             registration_callback: None,
+            reconnect_backoff: 0,
         }
     }
 }
