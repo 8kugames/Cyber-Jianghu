@@ -56,11 +56,11 @@ services:
       # 数据持久化（SQLite 数据库、记忆存储等)
       - agent_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
+      test: ["CMD", "curl", "-f", "--max-time", "10", "http://localhost:23340/api/v1/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 20s
+      start_period: 40s
     networks:
       - cyber-jianghu-network
 
