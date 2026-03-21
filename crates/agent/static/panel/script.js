@@ -3,6 +3,35 @@
 // 获取当前主机和端口
 const API_BASE = `${window.location.protocol}//${window.location.host}`;
 
+// 智能路由：检查服务器连接和角色状态
+async function checkAndRedirect() {
+    try {
+        // 检查服务器连通性和角色状态
+        const response = await fetch(`${API_BASE}/api/v1/character`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            // 如果有已注册的角色，跳转到角色信息页
+            if (data.agent_id && data.status === 'alive') {
+                window.location.href = 'character.html';
+                return;
+            }
+        }
+        // 其他情况（服务器不可达、无角色、角色非存活）保持在创建页
+    } catch (err) {
+        // 服务器不可达，保持在创建页
+        console.log('服务器连接检查失败，保持在创建页:', err.message);
+    }
+}
+
+// 页面加载时执行智能路由检查
+document.addEventListener('DOMContentLoaded', () => {
+    checkAndRedirect();
+});
+
 // 标签选择处理
 function setupTagSelection(containerId, hiddenInputId) {
     const container = document.getElementById(containerId);

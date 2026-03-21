@@ -105,6 +105,19 @@ pub struct GoalsConfig {
     pub long_term: Option<String>,
 }
 
+/// 角色状态
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CharacterStatus {
+    /// 存活
+    #[default]
+    Alive,
+    /// 死亡
+    Dead,
+    /// 归隐（转生）
+    Retired,
+}
+
 /// 角色配置（侠客）
 ///
 /// 通过 Web 面板或 HTTP API 创建。
@@ -163,6 +176,15 @@ pub struct CharacterConfig {
     /// 先天属性（注册时从服务器获取，用于对比成长）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub birth_attributes: Option<std::collections::HashMap<String, i32>>,
+
+    // === 服务器关联 ===
+    /// 所属服务器的 HTTP URL（用于区分不同服务器的角色）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
+
+    /// 角色状态
+    #[serde(default)]
+    pub status: CharacterStatus,
 }
 
 fn default_age() -> u8 {
@@ -414,6 +436,10 @@ pub struct Config {
     #[serde(skip_serializing_if = "Option::is_none", alias = "character")]
     pub agent: Option<CharacterConfig>,
 
+    /// 所有角色历史（包括已故、归隐的角色）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub characters: Vec<CharacterConfig>,
+
     /// 运行时配置
     #[serde(default)]
     pub runtime: RuntimeConfig,
@@ -498,6 +524,7 @@ impl Config {
             identity: None, // 身份必须从文件加载
             server,
             agent: None,
+            characters: vec![],
             runtime,
             memory: MemoryConfig::default(),
             role: AgentRole::default(),
@@ -527,6 +554,74 @@ impl Config {
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         self.game_rules = Some(game_rules);
+    }
+
+    /// 获取指定服务器的所有角色
+    pub fn get_characters_by_server(&self, server_url: &str) -> Vec<&CharacterConfig> {
+        self.characters
+            .iter()
+            .filter(|c| c.server_url.as_deref() == Some(server_url))
+            .collect()
+    }
+
+    /// 获取指定服务器的存活角色
+    pub fn get_alive_character_by_server(&self, server_url: &str) -> Option<&CharacterConfig> {
+        self.characters
+            .iter()
+            .find(|c| {
+                c.server_url.as_deref() == Some(server_url)
+                    && c.status == CharacterStatus::Alive
+                    && c.agent_id.is_some()
+            })
+    }
+
+    /// 添加或更新角色到历史记录
+    pub fn upsert_character(&mut self, character: CharacterConfig) {
+        if let Some(agent_id) = character.agent_id {
+            // 查找是否已存在
+            if let Some(existing) = self.characters.iter_mut().find(|c| c.agent_id == Some(agent_id)) {
+                *existing = character.clone();
+            } else {
+                self.characters.push(character.clone());
+            }
+        }
+        // 更新当前活跃角色
+        if character.status == CharacterStatus::Alive {
+            self.agent = Some(character);
+        }
+    }
+
+    /// 切换到指定角色
+    pub fn switch_to_character(&mut self, agent_id: Uuid) -> bool {
+        if let Some(character) = self.characters.iter().find(|c| c.agent_id == Some(agent_id)) {
+            self.agent = Some(character.clone());
+            return true;
+        }
+        false
+    }
+
+    /// 标记当前角色为归隐状态
+    pub fn retire_current_character(&mut self) {
+        if let Some(ref mut character) = self.agent {
+            character.status = CharacterStatus::Retired;
+            // 更新 characters 列表中的记录
+            if let Some(agent_id) = character.agent_id {
+                if let Some(existing) = self.characters.iter_mut().find(|c| c.agent_id == Some(agent_id)) {
+                    existing.status = CharacterStatus::Retired;
+                }
+            }
+        }
+    }
+
+    /// 检查指定服务器是否有存活角色
+    pub fn has_alive_character_for_server(&self, server_url: &str) -> bool {
+        self.characters
+            .iter()
+            .any(|c| {
+                c.server_url.as_deref() == Some(server_url)
+                    && c.status == CharacterStatus::Alive
+                    && c.agent_id.is_some()
+            })
     }
 }
 
