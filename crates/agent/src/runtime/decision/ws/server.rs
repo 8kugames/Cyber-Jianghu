@@ -81,7 +81,7 @@ async fn ws_handler(
 
 /// 处理 WebSocket 连接
 async fn handle_socket(socket: WebSocket, state: WsSharedState) {
-    info!("WebSocket client connected");
+    info!("OpenClaw WebSocket client connected");
 
     let (ws_tx, ws_rx) = socket.split();
     let ws_tx = Arc::new(Mutex::new(ws_tx));
@@ -90,6 +90,8 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     let mut state_rx = state.state_tx.subscribe();
     // 订阅 tick_closed 广播
     let mut tick_closed_rx = state.tick_closed_tx.subscribe();
+    // 订阅 Server 消息广播（用于透传）
+    let mut server_msg_rx = state.server_msg_tx.subscribe();
     let intent_tx = state.intent_tx.clone();
 
     // 使用 Arc<AtomicBool> 来共享活跃状态
@@ -227,6 +229,45 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
                             warn!("Client lagged {} tick_closed messages", n);
+                        }
+                    }
+                }
+                // 接收 Server 消息透传
+                result = server_msg_rx.recv() => {
+                    match result {
+                        Ok(msg) => {
+                            let json = match serde_json::to_string(&msg) {
+                                Ok(j) => j,
+                                Err(e) => {
+                                    error!("Failed to serialize server message: {}", e);
+                                    continue;
+                                }
+                            };
+
+                            let mut tx = ws_tx.lock().await;
+                            if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                debug!("Failed to send server message: {}", e);
+                                break;
+                            }
+
+                            debug!("Sent server message to OpenClaw");
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            debug!("server_msg channel closed");
+                            break;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("Client lagged {} server messages", n);
+
+                            // 发送 MissedMessages 通知
+                            let missed_msg = DownstreamMessage::MissedMessages {
+                                count: n,
+                                suggest_resync: n > 5,
+                            };
+                            if let Ok(json) = serde_json::to_string(&missed_msg) {
+                                let mut tx = ws_tx.lock().await;
+                                let _ = tx.send(Message::Text(json.into())).await;
+                            }
                         }
                     }
                 }
