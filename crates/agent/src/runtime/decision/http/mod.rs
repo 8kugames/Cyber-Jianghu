@@ -1,8 +1,11 @@
 // ============================================================================
-// HTTP Decision - HTTP API 服务器决策
+// HTTP Decision - HTTP API 服务器（辅助功能）
 // ============================================================================
 //
-// 启动 HTTP 服务器（headless 模式），供 OpenClaw 等"大脑"调用：
+// HTTP API 用于数据查询、Web 面板、调试等辅助功能。
+// OpenClaw（外置大脑）必须通过 WebSocket 连接 Agent，确保 Tick 实时同步。
+//
+// 可用端点：
 // - GET  /api/v1               - API 列表和使用规范（发现端点）
 // - GET  /api/v1/health        - 健康检查
 // - GET  /api/v1/state         - 获取当前 WorldState
@@ -23,7 +26,7 @@
 //
 // 架构设计：
 // - 数据驱动 COI 原则：AI 组件都是可选注入，按需初始化
-// - 服务器是 headless 模式：只提供 API，不做推理，由外部系统决策
+// - HTTP API 是辅助功能，WebSocket 是 OpenClaw 与 Agent 的主通道
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 mod context;
@@ -85,9 +88,9 @@ pub use cognitive_context::{
 // 核心类型定义
 // ============================================================================
 
-/// HTTP 决策配置
+/// HTTP API 配置
 ///
-/// 配置 HTTP 模式的运行参数
+/// 配置 HTTP API 服务器的运行参数（辅助功能）
 pub struct HttpDecisionConfig {
     /// 监听端口
     pub port: u16,
@@ -235,10 +238,13 @@ pub fn http_decision(
             // 等待外部决策
             let mut rx = state.intent_rx.lock().await;
 
-            // 计算动态超时时间：min(tick_duration_secs * 0.8, 10s)
+            // 计算动态超时时间：tick_duration_secs * 0.8
             // 从 GameRules 获取真实的 tick_duration_secs（默认 60 秒）
+            // 给 OpenClaw 足够的时间进行决策
             let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
-            let dynamic_timeout = std::cmp::min((tick_duration as f64 * 0.8) as u64, 10);
+            let dynamic_timeout = (tick_duration as f64 * 0.8) as u64;
+
+            tracing::info!("[http] Waiting for intent, tick={}, timeout={}s", world_state.tick_id, dynamic_timeout);
 
             // 消费队列中过期的意图
             loop {
@@ -249,6 +255,7 @@ pub fn http_decision(
                     }
                     Ok(intent) => {
                         // 发现当前或未来 tick 的意图，直接返回
+                        tracing::info!("[http] Found queued intent for tick {}, action={}", intent.tick_id, intent.action_type);
                         return intent;
                     }
                     Err(_) => break,
@@ -256,7 +263,10 @@ pub fn http_decision(
             }
 
             match tokio::time::timeout(Duration::from_secs(dynamic_timeout), rx.recv()).await {
-                Ok(Some(intent)) => intent,
+                Ok(Some(intent)) => {
+                    tracing::info!("[http] Received intent for tick {}, action={}", intent.tick_id, intent.action_type);
+                    intent
+                },
                 Ok(None) => {
                     error!("[http] Channel closed, defaulting to idle");
                     let guard = agent_id_clone.read().await;
@@ -411,8 +421,8 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
 
 /// 空操作对话处理器
 ///
-/// 用于 HTTP 模式下的默认初始化，所有事件处理器都是空操作
-/// 实际处理由外部系统通过 API 完成
+/// 用于 Claw 模式下的默认初始化，所有事件处理器都是空操作
+/// 实际处理由外部系统（OpenClaw）通过 WebSocket + HTTP API 完成
 #[derive(Debug, Default)]
 struct NoopDialogueHandler;
 

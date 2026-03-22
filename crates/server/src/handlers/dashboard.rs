@@ -220,7 +220,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
     let mut more_than_7d = 0;
 
     let offline_rows = sqlx::query(
-        "SELECT EXTRACT(EPOCH FROM (NOW() - last_tick_online)) as offline_secs 
+        "SELECT EXTRACT(EPOCH FROM (NOW() - last_tick_online))::FLOAT8 as offline_secs
          FROM agents WHERE last_tick_online IS NOT NULL",
     )
     .fetch_all(&state.db_pool)

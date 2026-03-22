@@ -385,7 +385,7 @@ async fn handle_intent(
         return Err("Agent 已死亡，无法执行此动作。请重新转生入世。".into());
     }
 
-    // tick_id 校验：只接受当前 tick 的意图
+    // tick_id 校验：只接受当前 tick 的意图（硬性要求）
     let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);

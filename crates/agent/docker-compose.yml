@@ -1,6 +1,6 @@
 # ============================================================================
 # Cyber-Jianghu Agent Docker Compose (Development)
-# Agent 开发环境配置 - HTTP 模式， 供 OpenClaw 调用
+# Agent 开发环境配置 - WebSocket（主通道）+ HTTP API（辅助）
 # ============================================================================
 #
 # 使用方式：
@@ -28,7 +28,7 @@
 
 services:
   # ============================================================================
-  # Agent（HTTP 模式 - 供 OpenClaw 调用）
+  # Agent（WebSocket 主通道 + HTTP API 辅助）
   # ============================================================================
   agent:
     build:
@@ -47,7 +47,7 @@ services:
       # 日志级别
       RUST_LOG: ${RUST_LOG:-info}
     ports:
-      # HTTP API 端口 - 供本机或外部 OpenClaw 访问
+      # WebSocket + HTTP API 端口 - OpenClaw 通过 WebSocket 连接，HTTP API 用于辅助功能
       # 多 Agent 实例时，映射不同宿主机端口：23341:23340, 23342:23340 等
       - "${AGENT_PORT:-23340}:23340"
     volumes:

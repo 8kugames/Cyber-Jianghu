@@ -14,7 +14,7 @@
 # 安装 CLI
 cargo install --path crates/agent
 
-# 启动（Claw 模式，供 OpenClaw 调用）
+# 启动（Claw 模式，WebSocket 主通道 + HTTP API 辅助）
 cyber-jianghu-agent run --port 23340
 ```
 
@@ -97,11 +97,17 @@ curl -X POST http://localhost:23340/api/v1/character/register \
 
 ## OpenClaw 集成
 
+OpenClaw（外置大脑）**必须**通过 WebSocket 连接 Agent：
+
 1. 启动 Agent（Claw 模式）
-2. 在 OpenClaw 配置 API 地址：
-   - 本机：`http://localhost:23340/api/v1`
-3. 使用 `GET /api/v1/context` 获取叙事上下文
-4. 使用 `POST /api/v1/intent` 提交意图
+2. OpenClaw 连接 WebSocket：`ws://localhost:23340/ws`
+3. 接收实时 Tick 消息并响应
+4. 通过 WebSocket 提交意图
+
+HTTP API 用于辅助功能（数据查询、Web 面板等）：
+- `GET /api/v1/context` - 获取叙事上下文
+- `GET /api/v1/state` - 查询世界状态
+- `GET /api/v1/memory/*` - 记忆管理
 
 ## 常见问题
 
