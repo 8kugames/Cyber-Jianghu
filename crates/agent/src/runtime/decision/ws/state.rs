@@ -257,6 +257,29 @@ pub struct WsSharedState {
     pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
 }
 
+impl WsSharedState {
+    pub fn broadcast_tick(&self, world_state: &WorldState, deadline: Instant) {
+        self.current_tick.store(world_state.tick_id, Ordering::Relaxed);
+
+        let now = Instant::now();
+        if deadline > now {
+            let duration_ms = (deadline - now).as_millis() as u64;
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            self.deadline_ms.store(now_ms + duration_ms, Ordering::Relaxed);
+        }
+
+        let state = Arc::new(world_state.clone());
+
+        match self.state_tx.send(state) {
+            Ok(n) => debug!("Broadcast tick {} to {} clients", world_state.tick_id, n),
+            Err(_) => debug!("No clients connected for tick {}", world_state.tick_id),
+        }
+    }
+}
+
 impl From<&WsDecisionState> for WsSharedState {
     fn from(state: &WsDecisionState) -> Self {
         Self {

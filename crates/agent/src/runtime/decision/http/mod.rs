@@ -43,7 +43,7 @@ use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -165,10 +165,9 @@ pub struct HttpApiState {
 
 /// HTTP 决策状态
 pub struct HttpDecisionState {
-    /// 共享 API 状态
     pub api_state: HttpApiState,
-    /// Intent 接收通道
     pub intent_rx: Arc<Mutex<mpsc::Receiver<Intent>>>,
+    pub ws_shared_state: Option<Arc<super::ws::WsSharedState>>,
 }
 
 /// Intent 提交请求（数据驱动）
@@ -226,6 +225,12 @@ pub fn http_decision(
 
             // 触发叙事更新（异步，不阻塞）
             state.api_state.maybe_update_narratives(&world_state).await;
+
+            if let Some(ref ws_state) = state.ws_shared_state {
+                let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
+                let deadline = Instant::now() + Duration::from_secs((tick_duration as f64 * 0.9) as u64);
+                ws_state.broadcast_tick(&world_state, deadline);
+            }
 
             // 等待外部决策
             let mut rx = state.intent_rx.lock().await;
@@ -451,6 +456,7 @@ pub fn create_http_state(
     identity: Option<crate::config::IdentityConfig>,
     reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
     config_path: PathBuf,
+    ws_shared_state: Option<Arc<super::ws::WsSharedState>>,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
@@ -530,6 +536,7 @@ pub fn create_http_state(
     let decision_state = Arc::new(HttpDecisionState {
         api_state: api_state.clone(),
         intent_rx: Arc::new(Mutex::new(intent_rx)),
+        ws_shared_state,
     });
 
     (decision_state, api_state)

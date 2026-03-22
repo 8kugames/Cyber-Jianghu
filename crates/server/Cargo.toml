@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-server"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "AGPL-3.0"
@@ -8,7 +8,7 @@ description = "MVP server for Cyber-Jianghu MMO-MAS"
 
 [dependencies]
 # 内部 crates
-cyber-jianghu-protocol = { path = "../protocol", version = "0.0.5", version = "0.0.4", features = ["sqlx-support"] }
+cyber-jianghu-protocol = { path = "../protocol", version = "0.0.5", features = ["sqlx-support"] }
 
 # Web 框架
 axum = { version = "0.8.8", features = ["ws"] }

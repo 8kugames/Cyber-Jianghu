@@ -510,24 +510,22 @@ async fn run_agent(port: u16) -> Result<()> {
         let (reconnect_tx, reconnect_rx) =
             mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
-        // 创建 HTTP API 状态（用于数据访问 API）
+        let ws_state = WsDecisionState::new();
+        let shared_state = Arc::new(WsSharedState::from(&ws_state));
+
         let (http_decision_state, api_state) = create_http_state(
             device_id.clone(),
             config.server.http_url.clone(),
             config.server.ws_url.clone(),
             Some(identity.clone()),
-            Some(reconnect_tx), // 传递重连通道发送端
-            config_path(),      // 传入配置文件路径，确保与主程序一致
+            Some(reconnect_tx),
+            config_path(),
+            Some(shared_state.clone()),
         );
 
-        // 创建 WebSocket 决策状态（用于实时决策）
-        let ws_state = WsDecisionState::new();
-        let shared_state = WsSharedState::from(&ws_state);
-
-        // 启动混合服务（WebSocket + HTTP API）
         let api_state_clone = api_state.clone();
         tokio::spawn(async move {
-            if let Err(e) = run_ws_server(actual_port, shared_state, api_state_clone).await {
+            if let Err(e) = run_ws_server(actual_port, (*shared_state).clone(), api_state_clone).await {
                 error!("Claw server error: {}", e);
             }
         });
