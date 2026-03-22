@@ -23,10 +23,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::ai::cognitive::narrative::NarrativeEngine;
 use crate::ai::lifespan::LifespanStatus;
 use crate::ai::validator::{PersonaInfo, ValidationRequest, ValidationResult};
 use cyber_jianghu_protocol::{ActionType, Intent};
 
+use super::cognitive_context::{CognitiveContext, CognitiveContextBuilder};
 use super::context::{
     ContextResponse, create_attributes_glimpse, generate_context_markdown,
     generate_context_markdown_no_relationship,
@@ -137,6 +139,22 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
             })),
             response_example: Some(serde_json::json!({
                 "status": "submitted"
+            })),
+        },
+        ApiEndpoint {
+            path: "/api/v1/cognitive".to_string(),
+            method: "GET".to_string(),
+            description: "结构化认知上下文（引导 OpenClaw 四阶段推理）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "cognitive_context": {
+                    "perception": { "self_status": "...", "environment": "...", "key_observations": [] },
+                    "motivation": { "active_drives": [], "dominant_drive": "..." },
+                    "planning": { "current_goals": [], "available_actions": [] },
+                    "decision": { "requires_reasoning": true, "thinking_prompt": "..." }
+                },
+                "persona": { "name": "柳蕴娘", "personality": [], "description": "..." },
+                "world_state": { "attributes": {}, "nearby_entities_count": 0, "time": { "hour": 12, "weather": "晴" } }
             })),
         },
         // === 关系端点 ===
@@ -2418,4 +2436,102 @@ pub(super) async fn set_server_handler(
     };
 
     (StatusCode::OK, Json(response))
+}
+
+// ============================================================================
+// 认知上下文端点
+// ============================================================================
+
+/// 认知端点返回的人设信息（从 DynamicPersona 提取）
+#[derive(Debug, Serialize)]
+pub struct CognitivePersonaInfo {
+    pub name: String,
+    pub personality: Vec<String>,
+    pub description: String,
+}
+
+/// 简化的世界状态（用于认知上下文）
+#[derive(Debug, Serialize)]
+pub struct SimplifiedWorldState {
+    pub agent_id: Option<String>,
+    pub attributes: std::collections::HashMap<String, i32>,
+    pub nearby_entities_count: usize,
+    pub time: SimplifiedTime,
+}
+
+/// 简化的时间
+#[derive(Debug, Serialize)]
+pub struct SimplifiedTime {
+    pub hour: i32,
+    pub weather: String,
+}
+
+/// 认知上下文响应
+#[derive(Debug, Serialize)]
+pub struct CognitiveContextResponse {
+    pub cognitive_context: CognitiveContext,
+    pub persona: Option<CognitivePersonaInfo>,
+    pub world_state: SimplifiedWorldState,
+}
+
+/// GET /api/v1/cognitive - 获取结构化认知上下文
+///
+/// 返回引导 OpenClaw LLM 进行四阶段推理的结构化上下文
+pub(super) async fn get_cognitive_context_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let current = state.current_state.read().await;
+
+    match current.as_ref() {
+        Some(world_state) => {
+            let narrative_engine = NarrativeEngine::default();
+            let builder = CognitiveContextBuilder::new(narrative_engine, Default::default());
+
+            let (persona_info, persona_ref): (Option<CognitivePersonaInfo>, Option<crate::ai::persona::dynamic_persona::DynamicPersona>) =
+                if let Some(ref persona_arc) = state.dynamic_persona {
+                    persona_arc.read(|p| {
+                        let info = CognitivePersonaInfo {
+                            name: p.name.clone(),
+                            personality: p.traits.keys().take(3).cloned().collect(),
+                            description: p.base_description.chars().take(100).collect(),
+                        };
+                        (Some(info), Some(p.clone()))
+                    })
+                } else {
+                    (None, None)
+                };
+
+            let relationship_store = state.relationship_store.as_ref().map(|v| &**v);
+            let cognitive_context = builder.build_with_persona(
+                world_state,
+                persona_ref.as_ref(),
+                relationship_store,
+            );
+
+            let simplified_world_state = SimplifiedWorldState {
+                agent_id: world_state.agent_id.map(|id| id.to_string()),
+                attributes: world_state.self_state.attributes.clone(),
+                nearby_entities_count: world_state.entities.len(),
+                time: SimplifiedTime {
+                    hour: world_state.world_time.hour,
+                    weather: world_state.world_time.weather.clone(),
+                },
+            };
+
+            let response = CognitiveContextResponse {
+                cognitive_context,
+                persona: persona_info,
+                world_state: simplified_world_state,
+            };
+
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        None => {
+            let error = ErrorResponse {
+                error_code: "NO_WORLD_STATE".to_string(),
+                message: "No world state available".to_string(),
+            };
+            (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response()
+        }
+    }
 }
