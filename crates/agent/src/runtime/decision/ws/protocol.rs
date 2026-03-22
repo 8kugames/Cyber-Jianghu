@@ -14,8 +14,31 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::models::WorldState;
+
+// ============================================================================
+// Server 错误码
+// ============================================================================
+
+/// 结构化 Server 错误码
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerErrorCode {
+    /// Agent 已死亡
+    AgentDead,
+    /// 速率限制
+    RateLimited,
+    /// Tick 已过期
+    TickExpired,
+    /// 无效动作
+    InvalidAction,
+    /// 验证失败
+    ValidationFailed,
+    /// 未知错误
+    Unknown,
+}
 
 // ============================================================================
 // 下行消息（Agent → 外部调度器）
@@ -60,6 +83,65 @@ pub enum DownstreamMessage {
         world_context: String,
         /// 审核截止时间（Unix timestamp, 毫秒）
         deadline_ms: u64,
+    },
+
+    // === Server 消息透传 ===
+
+    /// Server 错误消息
+    ServerError {
+        /// 结构化错误码
+        code: ServerErrorCode,
+        /// 人类可读的错误消息
+        message: String,
+        /// 关联的 Tick ID（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tick_id: Option<i64>,
+    },
+
+    /// Server 转发对话消息
+    ServerDialogue {
+        /// 对话类型: request, accept, reject, content, end
+        dialogue_type: String,
+        /// 发起者 Agent ID
+        from_agent_id: Uuid,
+        /// 目标 Agent ID（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        to_agent_id: Option<Uuid>,
+        /// 会话 ID（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
+        /// 开场白（request 时有值）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opening_remark: Option<String>,
+        /// 对话内容（content 时有值）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+    },
+
+    /// Server 游戏规则热更新
+    ServerGameRulesUpdate {
+        /// Tick 持续时间（秒）
+        tick_duration_secs: u64,
+        /// 规则版本
+        version: String,
+        /// 最后更新时间
+        last_updated: String,
+    },
+
+    /// Server 世界观规则热更新
+    ServerWorldBuildingRulesUpdate {
+        /// 规则版本
+        version: String,
+        /// 最后更新时间
+        last_updated: String,
+    },
+
+    /// 消息丢失通知（Lagged 恢复）
+    MissedMessages {
+        /// 丢失的消息数量
+        count: u64,
+        /// 是否建议重新同步
+        suggest_resync: bool,
     },
 }
 
@@ -182,6 +264,77 @@ impl From<UpstreamMessage> for Option<WsIntent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_serialize_server_error_agent_dead() {
+        let msg = DownstreamMessage::ServerError {
+            code: ServerErrorCode::AgentDead,
+            message: "Agent 已死亡，无法执行此动作。".to_string(),
+            tick_id: Some(105),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_error""#));
+        assert!(json.contains(r#""code":"agent_dead""#));
+        assert!(json.contains(r#""tick_id":105"#));
+    }
+
+    #[test]
+    fn test_serialize_server_error_rate_limited() {
+        let msg = DownstreamMessage::ServerError {
+            code: ServerErrorCode::RateLimited,
+            message: "Rate limit exceeded.".to_string(),
+            tick_id: None,
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_error""#));
+        assert!(json.contains(r#""code":"rate_limited""#));
+        assert!(!json.contains(r#""tick_id""#)); // None 时不序列化
+    }
+
+    #[test]
+    fn test_serialize_server_dialogue_request() {
+        let msg = DownstreamMessage::ServerDialogue {
+            dialogue_type: "request".to_string(),
+            from_agent_id: Uuid::nil(),
+            to_agent_id: Some(Uuid::nil()),
+            session_id: None,
+            opening_remark: Some("少侠，可否借一步说话？".to_string()),
+            content: None,
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_dialogue""#));
+        assert!(json.contains(r#""dialogue_type":"request""#));
+        assert!(json.contains(r#""opening_remark""#));
+    }
+
+    #[test]
+    fn test_serialize_server_game_rules_update() {
+        let msg = DownstreamMessage::ServerGameRulesUpdate {
+            tick_duration_secs: 60,
+            version: "0.0.5".to_string(),
+            last_updated: "2024-03-22T10:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"server_game_rules_update""#));
+        assert!(json.contains(r#""tick_duration_secs":60"#));
+    }
+
+    #[test]
+    fn test_serialize_missed_messages() {
+        let msg = DownstreamMessage::MissedMessages {
+            count: 3,
+            suggest_resync: false,
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""type":"missed_messages""#));
+        assert!(json.contains(r#""count":3"#));
+        assert!(json.contains(r#""suggest_resync":false"#));
+    }
 
     fn create_test_world_state() -> WorldState {
         // 使用 JSON 构造测试数据，避免直接构造复杂结构
