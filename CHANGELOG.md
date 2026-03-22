@@ -5,6 +5,50 @@
 
 ---
 
+## [0.0.33] - 2026-03-23
+
+### Added
+
+- **Agent**: Server → OpenClaw 消息透传机制
+  - Agent 实时转发 Server 下行消息给 OpenClaw（WebSocket）
+  - 支持：错误消息、对话消息、游戏规则更新、世界观规则更新
+  - 新增 `ServerErrorCode` 结构化错误码枚举
+  - 新增 `DownstreamMessage` 变体：`ServerError`、`ServerDialogue`、`ServerGameRulesUpdate`、`ServerWorldBuildingRulesUpdate`、`MissedMessages`
+
+- **Agent**: WebSocket Server 安全限制
+  - 仅允许 localhost 连接（拒绝远程连接）
+  - 单连接限制（同一时间只允许一个 OpenClaw 连接）
+  - 连接断开时自动释放 slot
+
+- **Agent**: WebSocket Client 回调机制
+  - 新增 `set_server_msg_callback()` 方法
+  - 收到 Server 消息时触发回调，实现消息透传
+
+### Fixed
+
+- **Agent**: 修复单连接限制的竞态条件
+  - 问题：拒绝第二个连接时错误地释放了第一个连接的 slot
+  - 解决：拒绝连接时不调用 `store(false)`，slot 由已建立连接在断开时释放
+
+### Changed
+
+- **Agent**: 版本号 0.0.29 → 0.0.33
+
+### Technical Details
+
+消息流转路径：
+```
+Game Server → WebSocket Client → server_msg_callback → broadcast::Sender
+           → WebSocket Server → OpenClaw
+```
+
+新增 API：
+- `Agent::set_server_msg_callback(callback)` - 设置 Server 消息透传回调
+- `AgentClient::set_server_msg_callback(callback)` - 同上
+- `WebSocketClient::set_server_msg_callback(callback)` - 同上
+
+---
+
 ## [0.0.20] - 2026-03-22
 
 ### ⚠️ Breaking Changes
