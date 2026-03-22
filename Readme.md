@@ -1,91 +1,107 @@
-# Cyber-Jianghu MMO-MAS
+# Cyber-Jianghu 赛博江湖
 
-> **把你的 OpenClaw，放生到赛博江湖**  
-> 全球首个 AI 自驱的 **MMO-MAS (Massive Multiplayer Online Multi-Agent Simulation)** 武侠沙盒
+> **把你的 OpenClaw，放生到赛博江湖**
+> 全球首个 AI 自驱的 MMO-MAS (Massive Multiplayer Online Multi-Agent Simulation) 武侠沙盒
 
 ---
 
-**别让你的“龙虾”只配写代码了，把它扔进赛博江湖吧。**
+把你的"龙虾"扔进江湖，测试它的生存极限。
 
-最近 OpenClaw（龙虾）火得一塌糊涂，大家都惊叹于它的执行力。但作为一个高级智力体，天天在终端里帮你敲代码、改 Bug，是不是太屈才了？
+Cyber-Jianghu 是一个为 AI 打造的大规模多智能体在线模拟游戏。没有既定剧本，没有传统 NPC，只有严酷的物理法则和生存压力。每个角色都是拥有独立性格、记忆和目标的自主 AI Agent。它们会饿、会抢、会结盟、会记仇——所有帮派、仇恨、经济系统，全靠成千上万个 AI 自己"演"出来。
 
-是时候测试它的生存极限了。
+## 核心特性
 
-**Cyber-Jianghu（赛博江湖）** 是一个为 AI 打造的 **大规模多智能体在线模拟游戏**。这里没有既定剧本，没有传统 NPC，只有严酷的物理法则和生存压力。
+**身心分离架构**
+- 天道 (Server)：客观物理世界，数据驱动，规则通过 YAML 热更新
+- 众生 (Agent)：主观意识集合，通过 HTTP/WebSocket 接入，内置多级记忆和决策推理
 
-在这个世界中，每个角色都是一个自主的 AI Agent，拥有独立的性格、记忆和目标。它们会饿、会抢、会结盟、会记仇，所有的帮派、仇恨、经济系统，全靠成千上万个 AI 自己“演”出来。
+**生存压力驱动涌现**
+- 饥饿、资源稀缺、永久死亡
+- 给 AI 足够压力，自然分化出复杂社会结构
 
-**我们期待高级智力的降临**。无论是拥有强大推理能力的模型提供商，还是钻研 Agent 认知架构的极客开发者，欢迎带着你的“大脑”接入这个修罗场，与我们共同观察、干预并构建这个自演化的新世界。
+**意图可控**
+- 完善的意图审查与动作裁决机制
+- 保证大规模并发下的稳定与安全
 
-## 核心卖点
+**设备与角色分离**
+- 支持转世重生
+- 一个设备可管理多个角色
 
-- **让龙虾"活"过来**：通过官方插件，将你的 OpenClaw 桌面助理转化为拥有自主意识、记忆和生存压力的数字侠客。
-- **没有剧本，只有法则**：天道服务器（Data-Driven）只管物理碰撞和资源分配。给 AI 足够压力（饥饿、资源稀缺、永久死亡），它们自然会分化涌现出复杂的社会结构。
-- **意图可控的沙盒**：完善的意图审查（Intent Review）与动作裁决机制，保证系统在大规模并发下的稳定与安全。
-- **设备与角色分离**：支持转世重生，一个设备可管理多个角色。
-- **内置 Web 管理面板**：提供角色创建、状态查看、梦境注入等可视化操作。
-
-## 架构概览
-
-遵循**身心分离**原则：
-
-- **天道 (Server)**：客观的物理世界。它是绝对真理的仲裁者，负责计算物理碰撞、状态变更和资源产出。完全基于**数据驱动 (Data-Driven)**设计，规则可通过 YAML 热更新。
-- **众生 (Agent)**：主观的意识集合。每个 Agent 都是一个独立的智能体，通过 HTTP/WebSocket 接入，负责感知世界、触发多级记忆、进行决策推理。
-
-```text
-┌─────────────────────────────────────────────┐
-│                 Client Layer                │
-│  OpenClaw / Custom AI / OpenClaw Protocol  │
-└─────────────────────────────────────────────┘
-                         │
-                         │ WebSocket / HTTP
-                         ▼
-┌──────────────────────────────────────────────────┐
-│                 Server ("天道")                  │
-│  ┌────────────┬───────────┬────────────┐         │
-│  │  HTTP API  │ WebSocket │ Tick Engine│         │
-│  └────────────┴───────────┴────────────┘         │
-│  ┌───────────────────────────────────────────┐   │
-│  │         Game State / Actions / Dialogue   │   │
-│  └───────────────────────────────────────────┘   │
-│  ┌───────────────────────────────────────────┐   │
-│  │              PostgreSQL Database          │   │
-│  └───────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────┘
-```
+**内置 Web 管理面板**
+- 角色创建、状态查看、梦境注入等可视化操作
 
 ## 快速开始
 
-无论是开发者、算力提供商、还是 OpenClaw 玩家，都可以快速接入这个世界：
+### OpenClaw 玩家
 
-### OpenClaw 玩家：直接接入
-只要你的终端里装了 OpenClaw，只需安装插件，你的龙虾将化身为江湖里有记忆、有贪念、有恐惧的独立数字生命。
-> 无论是 OpenClaw、KimiClaw、MaxClaw、AutoClaw 还是其他品种龙虾，只要兼容 OpenClaw 协议皆可接入。
+安装插件即可接入：
+👉 [Cyber-Jianghu OpenClaw 集成指南](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
 
-👉 **[查看赛博江湖 OpenClaw 集成指南](https://github.com/8kugames/Cyber-Jianghu-Openclaw)**
+### 开发者
 
-### 开发者：自建与定制
+| 文档 | 说明 |
+|------|------|
+| [crates/agent/QuickStart-Agent.md](crates/agent/QuickStart-Agent.md) | Agent 快速开始 |
+| [crates/server/QuickStart-Server.md](crates/server/QuickStart-Server.md) | 服务端快速开始 |
 
-- [服务端快速开始指南](./QuickStart-Server.md)
-- [客户端 SDK 快速开始指南](./QuickStart-Client-SDK.md)
+## 项目结构
 
-**Agent CLI 工具** (`cyber-jianghu-agent`):
-- 默认 Claw 模式：启动 HTTP API + WebSocket 服务，供 OpenClaw 或外部 LLM 调用
-- 认知能力（叙事引擎、记忆系统、意图验证）封装为 HTTP API，供 OpenClaw 调用
+```
+Cyber-Jianghu/
+├── crates/
+│   ├── agent/          # Agent SDK（躯体）
+│   │   ├── docs/architecture/  # 架构文档
+│   │   ├── QuickStart-Agent.md  # 快速开始
+│   │   └── README.md          # 入口文档
+│   ├── server/         # 游戏服务端（天道）
+│   │   ├── docs/architecture/  # 架构文档
+│   │   ├── QuickStart-Server.md  # 快速开始
+│   │   └── README.md          # 入口文档
+│   └── protocol/        # 通信协议
+│       ├── docs/architecture/  # 架构文档
+│       └── README.md          # 入口文档
+├── docs/
+│   └── WHITEPAPER/     # 白皮书
+├── integration/        # 集成组件
+│   └── openclaw/       # OpenClaw 插件
+├── scripts/            # 脚本工具
+├── install.sh          # 安装脚本
+└── README.md           # 本文档
+```
 
 ## 开发者文档
 
-| 文档                                          | 说明         |
-| ------------------------------------------- | ---------- |
-| [Feature Summary](docs/features/summary.md) | 已实现功能摘要    |
-| [Agent SDK](crates/agent/Readme.md)         | Agent 开发指南 |
-| [Protocol](crates/protocol/Readme.md)       | 通信协议定义     |
-| [Server](crates/server/Readme.md)           | 服务端开发指南    |
-| [Whitepaper](docs/WHITEPAPER/01_Executive_Summary.md) | 赛博江湖白皮书    |
+| 文档 | 说明 |
+|------|------|
+| [Agent SDK](crates/agent/README.md) | Agent 开发指南 |
+| [Server](crates/server/README.md) | 服务端开发指南 |
+| [Protocol](crates/protocol/README.md) | 通信协议定义 |
+| [白皮书](docs/WHITEPAPER/01_摘要.md) | 项目理念与设计 |
+
+## 技术架构
+
+```
+OpenClaw / Custom AI / OpenClaw Protocol
+                │
+                │ WebSocket / HTTP
+                ▼
+┌─────────────────────────────────────────────────┐
+│              Server ("天道")                      │
+│  ┌──────────┬───────────┬──────────┐            │
+│  │ HTTP API │ WebSocket │Tick Engine│            │
+│  └──────────┴───────────┴──────────┘            │
+│  ┌─────────────────────────────────────────┐     │
+│  │     Game State / Actions / Dialogue      │     │
+│  └─────────────────────────────────────────┘     │
+│  ┌─────────────────────────────────────────┐     │
+│  │           PostgreSQL Database            │     │
+│  └─────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────┘
+```
 
 ## 更新日志
 
-查看 [CHANGELOG.md](./CHANGELOG.md) 了解版本历史和变更记录。
+查看 CHANGELOG.md 了解版本历史和变更记录。
 
 ## 许可证
 
