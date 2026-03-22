@@ -530,6 +530,18 @@ impl AgentClient {
         client.set_world_building_rules_callback(callback);
     }
 
+    /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
+    ///
+    /// 当收到 Server 下行消息时，此回调会被调用，允许将消息
+    /// 转发到外部系统（如 OpenClaw）
+    pub async fn set_server_msg_callback(
+        &self,
+        callback: Arc<dyn Fn(ServerMessage) + Send + Sync>,
+    ) {
+        let client = self.client.read().await;
+        client.set_server_msg_callback(callback);
+    }
+
     /// 等待注册响应
     pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
         let client = self.client.read().await;

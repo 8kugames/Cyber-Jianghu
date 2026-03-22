@@ -247,6 +247,21 @@ impl Agent {
         );
     }
 
+    /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
+    ///
+    /// 当收到 Server 下行消息时，此回调会被调用，允许将消息
+    /// 转发到外部系统（如 OpenClaw）
+    pub async fn set_server_msg_callback(
+        &self,
+        callback: std::sync::Arc<dyn Fn(cyber_jianghu_protocol::ServerMessage) + Send + Sync>,
+    ) {
+        self.client.set_server_msg_callback(callback).await;
+        info!(
+            "Server message callback set for agent '{}'",
+            self.character_name()
+        );
+    }
+
     /// 检查是否启用验证器
     pub fn has_validator(&self) -> bool {
         self.validator.is_some()
