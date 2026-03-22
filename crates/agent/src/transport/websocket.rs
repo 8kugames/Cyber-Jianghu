@@ -409,97 +409,99 @@ impl WebSocketClient {
 // ============================================================================
 
 /// Agent 客户端（兼容旧接口）
+///
+/// 使用 tokio::sync::RwLock 替代 std::sync::RwLock，避免跨 await 持有同步锁导致死锁
 pub struct AgentClient {
-    client: std::sync::RwLock<WebSocketClient>,
+    client: RwLock<WebSocketClient>,
 }
 
 impl AgentClient {
     pub fn new(config: ServerConfig) -> Self {
         Self {
-            client: std::sync::RwLock::new(WebSocketClient::new(config)),
+            client: RwLock::new(WebSocketClient::new(config)),
         }
     }
 
     /// 设置设备身份
-    pub fn set_identity(&self, device_id: Uuid, auth_token: String) {
-        let mut client = self.client.write().unwrap();
+    pub async fn set_identity(&self, device_id: Uuid, auth_token: String) {
+        let mut client = self.client.write().await;
         client.set_identity(device_id, auth_token);
     }
 
     /// 更新服务器 URL（用于热切换）
-    pub fn update_server_url(&self, ws_url: String, http_url: String) {
-        let mut client = self.client.write().unwrap();
+    pub async fn update_server_url(&self, ws_url: String, http_url: String) {
+        let mut client = self.client.write().await;
         client.update_server_url(ws_url, http_url);
     }
 
     pub async fn connect(&self) -> Result<()> {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.connect().await
     }
 
     pub async fn receive_world_state(&self) -> Result<WorldState> {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.receive_world_state().await
     }
 
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.send_intent(intent).await
     }
 
     pub async fn is_connected(&self) -> bool {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.is_connected().await
     }
 
     /// 获取 Agent ID
-    pub fn agent_id(&self) -> Option<Uuid> {
-        let client = self.client.read().unwrap();
+    pub async fn agent_id(&self) -> Option<Uuid> {
+        let client = self.client.read().await;
         client.agent_id()
     }
 
     /// 等待 Agent ID 可用（注册后）
     pub async fn wait_for_agent_id(&self) -> Result<Uuid> {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.wait_for_agent_id().await
     }
 
     /// 设置游戏规则回调
-    pub fn set_game_rules_callback(&self, callback: Arc<dyn Fn(GameRules) + Send + Sync>) {
-        let client = self.client.read().unwrap();
+    pub async fn set_game_rules_callback(&self, callback: Arc<dyn Fn(GameRules) + Send + Sync>) {
+        let client = self.client.read().await;
         client.set_game_rules_callback(callback);
     }
 
     /// 设置对话消息回调
-    pub fn set_dialogue_callback(&self, callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>) {
-        let client = self.client.read().unwrap();
+    pub async fn set_dialogue_callback(&self, callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>) {
+        let client = self.client.read().await;
         client.set_dialogue_callback(callback);
     }
 
     /// 设置世界观规则回调
-    pub fn set_world_building_rules_callback(
+    pub async fn set_world_building_rules_callback(
         &self,
         callback: Arc<dyn Fn(WorldBuildingRules) + Send + Sync>,
     ) {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.set_world_building_rules_callback(callback);
     }
 
     /// 等待注册响应
     pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.wait_for_registration().await
     }
 
     /// 获取游戏规则
-    pub fn game_rules(&self) -> Option<GameRules> {
-        let client = self.client.read().unwrap();
+    pub async fn game_rules(&self) -> Option<GameRules> {
+        let client = self.client.read().await;
         client.game_rules()
     }
 
     /// 关闭连接
     pub async fn close(&self) {
-        let client = self.client.read().unwrap();
+        let client = self.client.read().await;
         client.disconnect().await
     }
 }
