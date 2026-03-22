@@ -85,9 +85,10 @@ cyber-jianghu-agent run --port 23340
 | `/api/v1/health` | GET | 健康检查 |
 | `/api/v1/state` | GET | 获取当前 WorldState |
 | `/api/v1/context` | GET | 获取叙事上下文（Markdown，推荐 LLM 使用） |
+| `/api/v1/cognitive` | GET | 获取认知上下文（四阶段推理结构） |
 | `/api/v1/attributes` | GET | 梦境一瞥：获取属性值（禁止存储！） |
 | `/api/v1/tick` | GET | 获取当前 tick 状态（用于轮询） |
-| `/api/v1/intent` | POST | 提交决策意图 |
+| `/api/v1/intent` | POST | 提交决策意图（返回 JSON） |
 | `/api/v1/validate` | POST | 预验证动作合法性 |
 
 **角色管理**:
@@ -137,6 +138,28 @@ cyber-jianghu-agent run --port 23340
 | `/api/v1/review/pending` | GET | 获取待审核意图 |
 | `/api/v1/review/{id}` | POST | 提交审核结果 |
 | `/api/v1/review/{id}/status` | GET | 获取审核状态 |
+
+#### Intent API 响应格式
+
+`POST /api/v1/intent` 返回 JSON 格式：
+
+```json
+// 成功响应
+{
+  "status": "submitted",
+  "intent_id": "d5c31f42-105b-46fd-8554-77fbc14d0392",
+  "tick_id": 112890,
+  "action_type": "idle"
+}
+
+// 错误响应 - Intent 过期
+{
+  "error": "intent_expired",
+  "message": "Intent tick 100 is older than current tick 105",
+  "current_tick": 105,
+  "retry_suggestion": "Please fetch the latest state and submit intent for the new tick."
+}
+```
 
 #### WebSocket 协议
 

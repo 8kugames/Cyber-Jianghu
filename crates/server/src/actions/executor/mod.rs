@@ -32,7 +32,7 @@ impl ActionExecutor {
     /// 根据意图执行对应的动作
     /// 注意：验证逻辑已在调用前由 validator.rs 完成
     pub fn execute(&self, intent: &Intent, agent_state: &mut AgentState) -> ActionExecutionResult {
-        // 0. 死亡检查：死亡的 Agent 不能执行 idle 和 speak
+        // 0. 死亡检查：死亡的 Agent 将会被拒绝进入游戏
         if !agent_state.is_alive {
             return ActionExecutionResult::failure(
                 "Agent 已死亡，无法执行此动作。请重新转生入世。".to_string(),
