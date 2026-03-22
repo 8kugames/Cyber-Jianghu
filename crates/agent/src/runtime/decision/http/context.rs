@@ -155,16 +155,18 @@ pub fn generate_context_markdown(
     state: &WorldState,
     relationship_store: &RelationshipStore,
     engine: &NarrativeEngine,
+    dream_thought: Option<&str>,
 ) -> String {
-    generate_impl(state, Some(relationship_store), engine)
+    generate_impl(state, Some(relationship_store), engine, dream_thought)
 }
 
 /// 生成无关系存储的简化上下文
 pub fn generate_context_markdown_no_relationship(
     state: &WorldState,
     engine: &NarrativeEngine,
+    dream_thought: Option<&str>,
 ) -> String {
-    generate_impl(state, None, engine)
+    generate_impl(state, None, engine, dream_thought)
 }
 
 /// 内部实现
@@ -172,6 +174,7 @@ fn generate_impl(
     state: &WorldState,
     relationship_store: Option<&RelationshipStore>,
     engine: &NarrativeEngine,
+    dream_thought: Option<&str>,
 ) -> String {
     let mut sections: Vec<String> = Vec::new();
 
@@ -180,6 +183,15 @@ fn generate_impl(
     sections.push("".to_string());
     sections.push(format!("> 生成时间: Tick {}", state.tick_id));
     sections.push("".to_string());
+
+    // 托梦（如果有）
+    if let Some(thought) = dream_thought {
+        sections.push("## 托梦".to_string());
+        sections.push("> 此念头在心中萦绕，挥之不去...".to_string());
+        sections.push("".to_string());
+        sections.push(format!("**{}**", thought));
+        sections.push("".to_string());
+    }
 
     // Tick & Agent
     sections.push("## 当前状态".to_string());

@@ -77,6 +77,8 @@ ENV/
 .venv
 
 # IDE配置文件
+.claude/
+docs/superpowers/*
 .trae/
 .vscode/
 *.swp
@@ -116,4 +118,4 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
-
+agent.yaml

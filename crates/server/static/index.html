@@ -535,6 +535,13 @@
                                 >
                                     刷新
                                 </button>
+                                <button
+                                    class="btn btn-secondary"
+                                    onclick="cleanupOfflineAgents()"
+                                    style="margin-left: 10px"
+                                >
+                                    清理离线
+                                </button>
                             </div>
                         </div>
 
@@ -663,12 +670,6 @@
                                 选择文件
                             </div>
                             <div style="display: flex; gap: 10px">
-                                <button
-                                    class="btn btn-secondary"
-                                    onclick="formatJson()"
-                                >
-                                    格式化 JSON
-                                </button>
                                 <button
                                     class="btn btn-success"
                                     onclick="saveConfig()"
@@ -889,8 +890,8 @@
                         ),
                         renderCard(
                             "游戏时间",
-                            `${formatGameTimeDate(data.game_time)}<br>${data.game_time.season} | Tick: ${data.current_tick_id}`,
-                            "",
+                            formatGameTimeDate(data.game_time),
+                            `${data.game_time.season} | Tick: ${data.current_tick_id}`,
                             "game-time-card", // ID for smooth update
                         ),
                         renderCard("日活跃用户 (DAU)", data.dau),
@@ -986,8 +987,12 @@
                     const card = document.getElementById("game-time-card");
                     if (card) {
                         const valueEl = card.querySelector(".stat-value");
+                        const subEl = card.querySelector(".stat-sub");
                         if (valueEl) {
-                            valueEl.innerHTML = `${dateStr}<br>${seasonStr} | Tick: ${tickStr}`;
+                            valueEl.textContent = dateStr;
+                        }
+                        if (subEl) {
+                            subEl.textContent = `${seasonStr} | Tick: ${tickStr}`;
                         }
                     }
 
@@ -1075,23 +1080,8 @@
 
                     const data = await res.json();
                     document.getElementById("code-editor").value = data.content;
-                    // Auto format on load if it's JSON
-                    if (filename.endsWith(".json")) {
-                        formatJson(true); // silent format
-                    }
                 } catch (e) {
                     showToast("加载文件内容失败", "error");
-                }
-            }
-
-            function formatJson(silent = false) {
-                const editor = document.getElementById("code-editor");
-                try {
-                    const val = JSON.parse(editor.value);
-                    editor.value = JSON.stringify(val, null, 2);
-                    if (!silent) showToast("JSON 格式化成功", "success");
-                } catch (e) {
-                    if (!silent) showToast("无效的 JSON 格式", "error");
                 }
             }
 
@@ -1219,6 +1209,36 @@
                 }
             }
 
+            async function cleanupOfflineAgents() {
+                if (!confirm("确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。")) {
+                    return;
+                }
+                
+                try {
+                    const res = await fetch("/api/dashboard/agents/cleanup", {
+                        method: "POST",
+                        headers: getAuthHeaders(),
+                    });
+
+                    if (handleAuthError(res)) return;
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        showToast(`清理成功！共删除了 ${data.deleted_count} 个离线 Agent。`, "success");
+                        loadStats();
+                        if (currentAgentTab === "offline") {
+                            loadOfflineAgents();
+                        }
+                    } else {
+                        const errorText = await res.text();
+                        showToast(`清理失败: ${errorText}`, "error");
+                    }
+                } catch (e) {
+                    console.error("Failed to cleanup agents", e);
+                    showToast("网络请求失败", "error");
+                }
+            }
+
             function renderAgents() {
                 const listEl = document.getElementById("agents-list");
                 const filterText = document
@@ -1331,10 +1351,22 @@
                         <div class="detail-section">
                             <div class="detail-title">生理状态</div>
                             <div class="detail-grid">
-                                <div class="detail-item"><span class="detail-label">生命值 (HP):</span> ${agent.hp}/100</div>
-                                <div class="detail-item"><span class="detail-label">体力 (Stamina):</span> ${agent.stamina}/100</div>
-                                <div class="detail-item"><span class="detail-label">饱食度 (Hunger):</span> ${agent.hunger}/100</div>
-                                <div class="detail-item"><span class="detail-label">口渴度 (Thirst):</span> ${agent.thirst}/100</div>
+                                <div class="detail-item"><span class="detail-label">生命值 (HP):</span> ${agent.hp}/${agent.max_hp}</div>
+                                <div class="detail-item"><span class="detail-label">体力 (Stamina):</span> ${agent.stamina}/${agent.max_stamina}</div>
+                                <div class="detail-item"><span class="detail-label">饱食度 (Hunger):</span> ${agent.hunger}/${agent.max_hunger}</div>
+                                <div class="detail-item"><span class="detail-label">口渴度 (Thirst):</span> ${agent.thirst}/${agent.max_thirst}</div>
+                            </div>
+                        </div>
+
+                        <div class="detail-section">
+                            <div class="detail-title">先天属性</div>
+                            <div class="detail-grid">
+                                <div class="detail-item"><span class="detail-label">力量 (STR):</span> ${agent.attributes?.strength ?? 0}/${agent.attributes?.strength_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">敏捷 (AGI):</span> ${agent.attributes?.agility ?? 0}/${agent.attributes?.agility_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">根骨 (CON):</span> ${agent.attributes?.constitution ?? 0}/${agent.attributes?.constitution_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">悟性 (INT):</span> ${agent.attributes?.intelligence ?? 0}/${agent.attributes?.intelligence_max ?? 100}</div>
+                                <div class="detail-item"><span class="detail-label">魅力 (CHA):</span> ${agent.attributes?.charisma ?? 0}</div>
+                                <div class="detail-item"><span class="detail-label">福缘 (LUK):</span> ${agent.attributes?.luck ?? 0}</div>
                             </div>
                         </div>
 

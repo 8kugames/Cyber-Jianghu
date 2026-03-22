@@ -168,6 +168,19 @@ pub struct GameRulesData {
 
     /// 验证配置
     pub validation: ValidationRulesData,
+
+    /// 运维与监控配置
+    pub ops: OpsRulesData,
+}
+
+/// 运维与监控规则数据
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OpsRulesData {
+    /// 单个 Tick 自然死亡人数告警阈值
+    pub death_threshold: usize,
+
+    /// 离线多久（天）的 Agent 会被清理脚本删除
+    pub offline_cleanup_days: i32,
 }
 
 /// Agent状态规则数据

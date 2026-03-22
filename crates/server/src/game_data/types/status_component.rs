@@ -173,7 +173,7 @@ impl StatusComponent {
     }
 
     /// 辅助方法：解析最大值公式
-    fn evaluate_max_value(
+    pub fn evaluate_max_value(
         formula: &Option<String>,
         default_max: i32,
         context: &std::collections::HashMap<String, i32>,

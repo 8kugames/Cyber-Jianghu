@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>赛博江湖 - 管理</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <h1>赛博江湖</h1>
+                <nav class="nav-tabs">
+                    <a href="index.html" class="nav-tab">创建角色</a>
+                    <a href="character.html" class="nav-tab">角色信息</a>
+                    <a href="manage.html" class="nav-tab active">管理</a>
+                </nav>
+            </header>
+
+            <main>
+                <!-- 服务器配置 -->
+                <section class="form-section">
+                    <h2>服务器配置</h2>
+                    <p class="section-desc">
+                        配置游戏服务器地址。修改后 Agent 会自动重连。
+                    </p>
+
+                    <form id="server-form">
+                        <div class="form-group">
+                            <label for="server-ws-url">WebSocket 地址</label>
+                            <input
+                                type="text"
+                                id="server-ws-url"
+                                name="ws_url"
+                                placeholder="ws://your-server:23333/ws"
+                                required
+                            />
+                        </div>
+                        <div class="form-group">
+                            <label for="server-http-url">HTTP 地址（可选）</label>
+                            <input
+                                type="text"
+                                id="server-http-url"
+                                name="http_url"
+                                placeholder="http://your-server:23333"
+                            />
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="save-server-btn">保存并重连</button>
+                        </div>
+                    </form>
+
+                    <div id="server-result" class="result hidden">
+                        <p id="server-message"></p>
+                    </div>
+                    <div id="server-error" class="error hidden">
+                        <p id="server-error-msg"></p>
+                    </div>
+                </section>
+
+                <!-- 托梦功能 -->
+                <section class="form-section">
+                    <h2>托梦</h2>
+                    <p class="section-desc">
+                        注入一个念头，将在接下来的回合中持续影响角色的思考。
+                        此功能用于引导角色行为或注入特定剧情。
+                    </p>
+
+                    <div class="info-item" style="margin-bottom: 12px;">
+                        <span class="label">目标角色</span>
+                        <span class="value" id="dream-target-character">加载中...</span>
+                    </div>
+
+                    <div id="dream-status" class="status-card hidden">
+                        <h4>当前托梦</h4>
+                        <p id="current-dream"></p>
+                        <p class="remaining">剩余 <span id="remaining-ticks">0</span> 回合</p>
+                    </div>
+
+                    <form id="dream-form">
+                        <div class="form-group">
+                            <label for="dream-thought">念头内容</label>
+                            <textarea
+                                id="dream-thought"
+                                name="thought"
+                                rows="3"
+                                required
+                                placeholder="输入要注入的念头，如：'你突然想起一个多年未见的老友'"
+                            ></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="dream-duration">持续回合数</label>
+                            <input
+                                type="number"
+                                id="dream-duration"
+                                name="duration"
+                                min="1"
+                                max="100"
+                                value="5"
+                            />
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="dream-btn">注入托梦</button>
+                        </div>
+                    </form>
+
+                    <div id="dream-result" class="result hidden">
+                        <p id="dream-message"></p>
+                    </div>
+                    <div id="dream-error" class="error hidden">
+                        <p id="dream-error-msg"></p>
+                    </div>
+                </section>
+
+                <!-- 转生功能 -->
+                <section class="form-section danger-zone">
+                    <h2>转生</h2>
+                    <p class="section-desc">
+                        强制当前角色归隐，然后可以创建新角色。
+                        <strong>此操作不可逆！</strong>角色的所有进度和物品都将丢失。
+                    </p>
+
+                    <div class="warning-box">
+                        <h4>注意事项</h4>
+                        <ul>
+                            <li>角色将被标记为"归隐"状态</li>
+                            <li>所有物品和属性将被清除</li>
+                            <li>可以创建新角色继续游戏</li>
+                            <li>设备身份保持不变</li>
+                        </ul>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" id="rebirth-btn" class="danger-btn">
+                            确认转生
+                        </button>
+                    </div>
+
+                    <div id="rebirth-result" class="result hidden">
+                        <p id="rebirth-message"></p>
+                        <a href="index.html" class="nav-link">创建新角色</a>
+                    </div>
+                    <div id="rebirth-error" class="error hidden">
+                        <p id="rebirth-error-msg"></p>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- 确认对话框 -->
+        <div id="confirm-dialog" class="dialog-overlay" style="display: none;">
+            <div class="dialog">
+                <h3>确认转生</h3>
+                <p>你确定要让当前角色转生吗？此操作不可撤销。</p>
+                <div class="dialog-actions">
+                    <button id="confirm-cancel" class="cancel-btn">取消</button>
+                    <button id="confirm-ok" class="danger-btn">确认转生</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const API_BASE = `${window.location.protocol}//${window.location.host}`;
+
+            // DOM 元素引用
+            let dialog, confirmBtn, cancelBtn, rebirthBtn;
+
+            // 显示对话框
+            function showDialog() {
+                if (dialog) {
+                    dialog.style.display = 'flex';
+                }
+            }
+
+            // 隐藏对话框
+            function hideDialog() {
+                if (dialog) {
+                    dialog.style.display = 'none';
+                }
+            }
+
+            // 加载当前服务器配置
+            async function loadServerConfig() {
+                try {
+                    const response = await fetch(`${API_BASE}/api/v1/config`);
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        document.getElementById('server-ws-url').value = data.server_ws_url || '';
+                        document.getElementById('server-http-url').value = data.server_http_url || '';
+                    }
+                } catch (err) {
+                    console.error('加载服务器配置失败:', err);
+                }
+            }
+
+            // 加载当前托梦状态
+            async function loadDreamStatus() {
+                try {
+                    // 首先加载当前角色信息
+                    const charResponse = await fetch(`${API_BASE}/api/v1/character`);
+                    if (charResponse.ok) {
+                        const charData = await charResponse.json();
+                        const targetEl = document.getElementById('dream-target-character');
+                        if (charData.agent_id && charData.status === 'alive') {
+                            targetEl.textContent = charData.name || '当前角色';
+                        } else {
+                            targetEl.textContent = '无活跃角色';
+                        }
+                    }
+
+                    const response = await fetch(`${API_BASE}/api/v1/character/dream`);
+                    const data = await response.json();
+
+                    const statusEl = document.getElementById('dream-status');
+                    if (data.thought && data.remaining_ticks > 0) {
+                        document.getElementById('current-dream').textContent = data.thought;
+                        document.getElementById('remaining-ticks').textContent = data.remaining_ticks;
+                        statusEl.classList.remove('hidden');
+                    } else {
+                        statusEl.classList.add('hidden');
+                    }
+                } catch (err) {
+                    console.error('加载托梦状态失败:', err);
+                    document.getElementById('dream-target-character').textContent = '加载失败';
+                }
+            }
+
+            // 执行转生
+            async function executeRebirth() {
+                const resultEl = document.getElementById('rebirth-result');
+                const errorEl = document.getElementById('rebirth-error');
+
+                hideDialog();
+                resultEl.classList.add('hidden');
+                errorEl.classList.add('hidden');
+
+                rebirthBtn.disabled = true;
+                rebirthBtn.textContent = '转生中...';
+
+                try {
+                    const response = await fetch(`${API_BASE}/api/v1/character/rebirth`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ confirm: true })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        document.getElementById('rebirth-message').textContent = data.message;
+                        resultEl.classList.remove('hidden');
+                        rebirthBtn.textContent = '已转生';
+                    } else {
+                        document.getElementById('rebirth-error-msg').textContent =
+                            data.message || `服务器错误: ${response.status}`;
+                        errorEl.classList.remove('hidden');
+                        rebirthBtn.disabled = false;
+                        rebirthBtn.textContent = '确认转生';
+                    }
+                } catch (err) {
+                    document.getElementById('rebirth-error-msg').textContent =
+                        `网络错误: ${err.message}`;
+                    errorEl.classList.remove('hidden');
+                    rebirthBtn.disabled = false;
+                    rebirthBtn.textContent = '确认转生';
+                }
+            }
+
+            // 页面加载完成后初始化
+            document.addEventListener('DOMContentLoaded', () => {
+                // 获取 DOM 元素引用
+                dialog = document.getElementById('confirm-dialog');
+                confirmBtn = document.getElementById('confirm-ok');
+                cancelBtn = document.getElementById('confirm-cancel');
+                rebirthBtn = document.getElementById('rebirth-btn');
+
+                // 确保对话框初始隐藏
+                if (dialog) {
+                    dialog.style.display = 'none';
+                }
+
+                // 绑定事件
+                if (rebirthBtn) {
+                    rebirthBtn.addEventListener('click', showDialog);
+                }
+
+                if (cancelBtn) {
+                    cancelBtn.addEventListener('click', hideDialog);
+                }
+
+                if (confirmBtn) {
+                    confirmBtn.addEventListener('click', executeRebirth);
+                }
+
+                if (dialog) {
+                    dialog.addEventListener('click', (e) => {
+                        if (e.target === dialog) {
+                            hideDialog();
+                        }
+                    });
+                }
+
+                // 加载数据
+                loadDreamStatus();
+                loadServerConfig();
+
+                // 服务器配置表单提交
+                document.getElementById('server-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+
+                    const btn = document.getElementById('save-server-btn');
+                    const resultEl = document.getElementById('server-result');
+                    const errorEl = document.getElementById('server-error');
+
+                    resultEl.classList.add('hidden');
+                    errorEl.classList.add('hidden');
+
+                    btn.disabled = true;
+                    btn.textContent = '保存中...';
+
+                    const ws_url = document.getElementById('server-ws-url').value.trim();
+                    const http_url = document.getElementById('server-http-url').value.trim();
+
+                    const body = { ws_url };
+                    if (http_url) {
+                        body.http_url = http_url;
+                    }
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/v1/config/server`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok && data.success) {
+                            document.getElementById('server-message').textContent = data.message;
+                            resultEl.classList.remove('hidden');
+                        } else {
+                            document.getElementById('server-error-msg').textContent =
+                                data.message || `服务器错误: ${response.status}`;
+                            errorEl.classList.remove('hidden');
+                        }
+                    } catch (err) {
+                        document.getElementById('server-error-msg').textContent =
+                            `网络错误: ${err.message}`;
+                        errorEl.classList.remove('hidden');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = '保存并重连';
+                    }
+                });
+
+                // 托梦表单提交
+                document.getElementById('dream-form').addEventListener('submit', async (e) => {
+                    e.preventDefault();
+
+                    const btn = document.getElementById('dream-btn');
+                    const resultEl = document.getElementById('dream-result');
+                    const errorEl = document.getElementById('dream-error');
+
+                    resultEl.classList.add('hidden');
+                    errorEl.classList.add('hidden');
+
+                    btn.disabled = true;
+                    btn.textContent = '注入中...';
+
+                    const thought = document.getElementById('dream-thought').value.trim();
+                    const duration = parseInt(document.getElementById('dream-duration').value) || 5;
+
+                    try {
+                        const response = await fetch(`${API_BASE}/api/v1/character/dream`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ thought, duration })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok) {
+                            document.getElementById('dream-message').textContent = data.message;
+                            resultEl.classList.remove('hidden');
+                            document.getElementById('dream-thought').value = '';
+                            loadDreamStatus();
+                        } else {
+                            document.getElementById('dream-error-msg').textContent =
+                                data.message || `服务器错误: ${response.status}`;
+                            errorEl.classList.remove('hidden');
+                        }
+                    } catch (err) {
+                        document.getElementById('dream-error-msg').textContent =
+                            `网络错误: ${err.message}`;
+                        errorEl.classList.remove('hidden');
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = '注入托梦';
+                    }
+                });
+            });
+        </script>
+    </body>
+</html>

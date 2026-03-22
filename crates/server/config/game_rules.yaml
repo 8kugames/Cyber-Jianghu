@@ -35,7 +35,7 @@ data:
     # Tick 调度配置（现实时间 → Tick 转换）
     tick:
       # 服务器每多少秒执行一个 tick
-      real_seconds_per_tick: 15
+      real_seconds_per_tick: 60
 
     # 出生点配置
     location:
@@ -56,3 +56,10 @@ data:
     max_agent_name_length: 100
     max_system_prompt_length: 102400
     max_speak_content_length: 500
+
+  # 运维与监控配置
+  ops:
+    # 单个 Tick 自然死亡人数告警阈值
+    death_threshold: 10
+    # 离线多久（天）的 Agent 会被清理脚本删除
+    offline_cleanup_days: 30

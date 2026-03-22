@@ -27,8 +27,10 @@
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 mod context;
+pub mod cognitive_context;
 mod dto;
 mod handlers;
+pub mod intent_history;
 pub mod review;
 pub mod service;
 
@@ -46,6 +48,15 @@ use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
+/// 重连请求（通过 channel 发送给主循环）
+#[derive(Debug, Clone)]
+pub struct ReconnectRequest {
+    pub ws_url: String,
+}
+
+// 导入 handlers 中的 DreamState
+pub use handlers::DreamState;
+
 // 导入 AI 模块类型
 use crate::ai::cognitive::narrative::NarrativeEngine;
 use crate::ai::dialogue::{DialogueClient, DialogueEventHandler};
@@ -61,6 +72,13 @@ pub use review::{PendingReviewEntry, ReviewState, ReviewStore};
 // 重导出 context 模块的公共 API
 pub use context::{
     AttributesGlimpse, ContextResponse, create_attributes_glimpse, create_narrative_engine,
+    generate_context_markdown_no_relationship,
+};
+
+// 重导出 cognitive_context 模块的公共 API
+pub use cognitive_context::{
+    AvailableActionInfo, CognitiveContext, CognitiveContextBuilder, CognitiveContextConfig,
+    DecisionContext, Drive, MotivationContext, PerceptionContext, PlanningContext,
 };
 
 // ============================================================================
@@ -94,10 +112,27 @@ impl Default for HttpDecisionConfig {
 pub struct HttpApiState {
     /// 当前游戏世界状态
     pub current_state: Arc<RwLock<Option<WorldState>>>,
+    /// 状态最后更新时间
+    pub last_state_update: Arc<RwLock<Option<std::time::Instant>>>,
     /// Intent 发送通道，将外部提交的 Intent 发送给决策函数
     pub intent_tx: mpsc::Sender<Intent>,
     /// 当前 Agent ID (共享，WebSocket 注册后会更新)
     pub agent_id: Arc<RwLock<Uuid>>,
+
+    // === Tick 时序信息 ===
+    /// Tick 持续时间（秒），从 GameRules 获取
+    pub tick_duration_secs: Arc<std::sync::atomic::AtomicU64>,
+
+    // === 服务器连接配置 ===
+    /// Server HTTP URL（用于角色注册等 API 调用）
+    /// 使用 RwLock 支持运行时热重载
+    pub server_http_url: Arc<RwLock<String>>,
+    /// Server WebSocket URL（用于实时通信）
+    pub server_ws_url: Arc<RwLock<String>>,
+    /// 设备身份（device_id + auth_token）
+    pub identity: Option<crate::config::IdentityConfig>,
+    /// 配置文件路径（用于读取角色配置）
+    pub config_path: PathBuf,
 
     // AI 组件（全部可选，支持按需注入）
     /// 对话客户端，处理 Agent 间对话
@@ -120,6 +155,12 @@ pub struct HttpApiState {
     pub narrative_engine: Option<Arc<NarrativeEngine>>,
     /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
     pub review_store: Option<Arc<ReviewStore>>,
+    /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
+    pub intent_history: Option<Arc<intent_history::IntentHistoryStore>>,
+    /// 托梦存储，管理持续 n 回合的念头注入
+    pub dream_store: Option<Arc<RwLock<DreamState>>>,
+    /// 重连请求发送通道（用于热切换触发重连）
+    pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
 }
 
 /// HTTP 决策状态
@@ -136,6 +177,8 @@ pub struct HttpDecisionState {
 /// 添加新的 action type 不需要修改服务端代码。
 #[derive(Deserialize)]
 pub struct IntentRequest {
+    /// Intent 唯一 ID（可选，如果未提供则自动生成）
+    pub intent_id: Option<String>,
     /// 动作类型（如 "idle", "speak", "move" 等）
     pub action_type: String,
     /// Agent ID（可选，默认使用服务端配置的 agent_id）
@@ -164,7 +207,7 @@ pub struct IntentRequest {
 pub fn http_decision(
     agent_id: Arc<RwLock<Uuid>>,
     state: Arc<HttpDecisionState>,
-    timeout_secs: u64,
+    _timeout_secs: u64, // 废弃固定值，改用动态计算
 ) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
     move |world_state: &WorldState| {
         let world_state = world_state.clone();
@@ -176,6 +219,9 @@ pub fn http_decision(
             {
                 let mut current = state.api_state.current_state.write().await;
                 *current = Some(world_state.clone());
+
+                let mut last_update = state.api_state.last_state_update.write().await;
+                *last_update = Some(std::time::Instant::now());
             }
 
             // 触发叙事更新（异步，不阻塞）
@@ -184,7 +230,27 @@ pub fn http_decision(
             // 等待外部决策
             let mut rx = state.intent_rx.lock().await;
 
-            match tokio::time::timeout(Duration::from_secs(timeout_secs), rx.recv()).await {
+            // 计算动态超时时间：min(tick_duration_secs * 0.8, 10s)
+            // 从 GameRules 获取真实的 tick_duration_secs（默认 60 秒）
+            let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
+            let dynamic_timeout = std::cmp::min((tick_duration as f64 * 0.8) as u64, 10);
+
+            // 消费队列中过期的意图
+            loop {
+                match rx.try_recv() {
+                    Ok(intent) if intent.tick_id < world_state.tick_id => {
+                        tracing::warn!("[http] Dropped expired intent for tick {}", intent.tick_id);
+                        continue;
+                    }
+                    Ok(intent) => {
+                        // 发现当前或未来 tick 的意图，直接返回
+                        return intent;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            match tokio::time::timeout(Duration::from_secs(dynamic_timeout), rx.recv()).await {
                 Ok(Some(intent)) => intent,
                 Ok(None) => {
                     error!("[http] Channel closed, defaulting to idle");
@@ -207,13 +273,11 @@ pub fn http_decision(
 // HTTP Server
 // ============================================================================
 
-/// 启动 HTTP API 服务器
+/// 创建 HTTP API Router（供 claw 模式复用）
 ///
-/// 启动后监听指定端口，提供 RESTful API 供外部系统调用
-/// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
-/// 则返回 503 SERVICE_UNAVAILABLE 错误
-pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
-    let app = Router::new()
+/// 返回包含所有数据访问 API 的 Router，需要调用者提供 HttpApiState
+pub fn create_api_router() -> Router<HttpApiState> {
+    Router::new()
         // === API 发现端点 ===
         .route("/api/v1", get(handlers::api_list_handler)) // API 列表和使用规范
         // === 基础端点 ===
@@ -223,6 +287,8 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
         .route("/api/v1/intent", post(handlers::submit_intent_handler)) // 提交决策意图
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
+        // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
+        .route("/api/v1/cognitive", get(handlers::get_cognitive_context_handler)) // 结构化认知上下文
         // === 关系管理端点 ===
         .route(
             "/api/v1/relationship/list",
@@ -250,26 +316,85 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         .route("/api/v1/memory", post(handlers::store_memory_handler)) // 存储记忆
         // === 意图验证端点 ===
         .route("/api/v1/validate", post(handlers::validate_intent_handler)) // 验证意图是否符合人设
+        // === 角色注册端点 ===
+        .route(
+            "/api/v1/character/register",
+            post(handlers::register_character_handler),
+        ) // 创建新角色（转发到 Server）
+        // === 角色信息端点 ===
+        .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
+        .route(
+            "/api/v1/character/experiences",
+            get(handlers::get_experiences_handler),
+        ) // 获取经历日志（分页）
+        .route(
+            "/api/v1/character/rebirth",
+            post(handlers::rebirth_character_handler),
+        ) // 转生（强制归隐重新注册）
+        .route("/api/v1/character/dream", get(handlers::get_dream_handler)) // 获取托梦状态
+        .route(
+            "/api/v1/character/dream",
+            post(handlers::dream_character_handler),
+        ) // 托梦（持续 n 回合的念头注入）
+        // === 多角色管理端点 ===
+        .route("/api/v1/characters", get(handlers::list_characters_handler)) // 获取所有角色列表
+        .route(
+            "/api/v1/characters/switch",
+            post(handlers::switch_character_handler),
+        ) // 切换当前角色
         // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
-        .route(
-            "/api/v1/review/pending",
-            get(review::get_pending_reviews),
-        ) // 获取待审查意图
-        .route(
-            "/api/v1/review/{intent_id}",
-            post(review::submit_review),
-        ) // 提交审查结果
+        .route("/api/v1/review/pending", get(review::get_pending_reviews)) // 获取待审查意图
+        .route("/api/v1/review/{intent_id}", post(review::submit_review)) // 提交审查结果
         .route(
             "/api/v1/review/{intent_id}/status",
             get(review::get_review_status),
         ) // 获取审查状态
-        .with_state(api_state.clone());
+        // === 配置管理端点 ===
+        .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
+        .route("/api/v1/config/reload", post(handlers::reload_config_handler)) // 热重载配置
+        .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
+}
+
+/// 获取静态文件服务目录（供 claw 模式复用）
+pub fn get_static_serve_dir() -> PathBuf {
+    let panel_path = PathBuf::from("crates/agent/static/panel");
+    let panel_path_alt = PathBuf::from("static/panel");
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default();
+    let exe_panel_path = exe_dir.join("static/panel");
+
+    if panel_path.exists() {
+        panel_path
+    } else if panel_path_alt.exists() {
+        panel_path_alt
+    } else {
+        exe_panel_path
+    }
+}
+
+/// 启动 HTTP API 服务器
+///
+/// 启动后监听指定端口，提供 RESTful API 供外部系统调用
+/// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
+/// 则返回 503 SERVICE_UNAVAILABLE 错误
+pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
+    let app = create_api_router().with_state(api_state.clone());
+
+    // 添加静态文件服务（用于 Web 面板）
+    let serve_dir = get_static_serve_dir();
+    let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     let local_addr = listener.local_addr()?;
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
+    info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
+    info!("[http] - Create character: http://127.0.0.1:{}/index.html", local_addr.port());
+    info!("[http] - Character info:  http://127.0.0.1:{}/character.html", local_addr.port());
+    info!("[http] - Management:      http://127.0.0.1:{}/manage.html", local_addr.port());
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -299,6 +424,8 @@ impl DialogueEventHandler for NoopDialogueHandler {
 /// # 参数
 ///
 /// - `agent_id`: 当前 Agent ID (共享引用，注册后会被更新)
+/// - `server_http_url`: Server HTTP URL（用于角色注册等 API 调用）
+/// - `identity`: 设备身份（device_id + auth_token）
 ///
 /// # 返回值
 ///
@@ -314,7 +441,17 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// # 注意
 /// agent_id 是共享的，WebSocket 注册后会更新为服务器分配的真正 ID
-pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>, HttpApiState) {
+///
+/// # Arguments
+/// * `config_path` - 配置文件完整路径（由调用者传入，确保与主程序一致）
+pub fn create_http_state(
+    agent_id: Arc<RwLock<Uuid>>,
+    server_http_url: String,
+    server_ws_url: String,
+    identity: Option<crate::config::IdentityConfig>,
+    reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    config_path: PathBuf,
+) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
     // 初始化数据目录
@@ -330,9 +467,10 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
     }; // guard 在这里释放
 
     // 初始化关系存储
-    let relationship_store = RelationshipStore::open(current_agent_id, &data_dir.join("relationships.db"))
-        .ok()
-        .map(Arc::new);
+    let relationship_store =
+        RelationshipStore::open(current_agent_id, &data_dir.join("relationships.db"))
+            .ok()
+            .map(Arc::new);
 
     // 初始化记忆管理器（无 LLM 版本，基础功能可用）
     // TODO: 语义搜索功能下一阶段实现，需要 LLM Client 提供嵌入能力
@@ -353,7 +491,10 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
     // 初始化对话客户端（使用空操作处理器）
     // 实际对话事件处理由外部系统通过 API 完成
     let dialogue_handler = Arc::new(NoopDialogueHandler);
-    let dialogue_client = Some(Arc::new(DialogueClient::new(current_agent_id, dialogue_handler)));
+    let dialogue_client = Some(Arc::new(DialogueClient::new(
+        current_agent_id,
+        dialogue_handler,
+    )));
 
     // 初始化意图验证器（使用默认规则引擎验证器）
     let intent_validator =
@@ -364,8 +505,14 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
 
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
+        last_state_update: Arc::new(RwLock::new(None)),
         intent_tx: intent_tx.clone(),
         agent_id,
+        tick_duration_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)), // 默认 60 秒，注册后更新
+        server_http_url: Arc::new(RwLock::new(server_http_url)),
+        server_ws_url: Arc::new(RwLock::new(server_ws_url)),
+        identity,
+        config_path,
         dialogue_client,
         relationship_store,
         lifespan_calculator,
@@ -375,6 +522,9 @@ pub fn create_http_state(agent_id: Arc<RwLock<Uuid>>) -> (Arc<HttpDecisionState>
         dynamic_persona: None,
         narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
+        intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
+        dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
+        reconnect_tx,  // 重连请求发送通道
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -439,6 +589,41 @@ impl HttpApiState {
     pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
         self.review_store = Some(store);
         self
+    }
+
+    /// 设置托梦存储
+    pub fn with_dream_store(mut self, store: Arc<RwLock<DreamState>>) -> Self {
+        self.dream_store = Some(store);
+        self
+    }
+
+    /// 更新 Tick 持续时间（从 GameRules 获取后调用）
+    pub fn set_tick_duration(&self, secs: u64) {
+        use std::sync::atomic::Ordering;
+        self.tick_duration_secs.store(secs, Ordering::Relaxed);
+        tracing::info!("[http] Updated tick_duration to {}s", secs);
+    }
+
+    /// 获取当前托梦内容（如果有）
+    /// 每次调用会减少剩余回合数
+    pub async fn consume_dream(&self) -> Option<String> {
+        let dream_store = self.dream_store.as_ref()?;
+        let mut dream = dream_store.write().await;
+
+        if dream.remaining_ticks > 0 {
+            let thought = dream.thought.clone();
+            dream.remaining_ticks = dream.remaining_ticks.saturating_sub(1);
+
+            if dream.remaining_ticks == 0 {
+                info!("[dream] 托梦效果已结束");
+                dream.thought = None;
+            }
+
+            thought
+        } else {
+            dream.thought = None;
+            None
+        }
     }
 
     /// 在 Tick 处理后异步更新关系描述
