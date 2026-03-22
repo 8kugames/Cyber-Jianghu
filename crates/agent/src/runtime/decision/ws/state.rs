@@ -8,17 +8,17 @@
 // - Tick 时序管理
 // ============================================================================
 
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::models::{Intent, WorldState};
 use uuid::Uuid;
 
-use super::protocol::{DownstreamMessage, WsIntent};
+use super::protocol::{DownstreamMessage, ServerErrorCode, WsIntent};
 
 // ============================================================================
 // 常量
@@ -44,6 +44,9 @@ pub struct WsDecisionState {
     /// tick_closed 广播通道（容量 16）
     pub tick_closed_tx: broadcast::Sender<DownstreamMessage>,
 
+    /// Server 消息广播通道（容量 32，用于透传 Server 下行消息）
+    pub server_msg_tx: broadcast::Sender<DownstreamMessage>,
+
     /// Intent 接收通道
     pub intent_rx: mpsc::Receiver<WsIntent>,
 
@@ -68,11 +71,13 @@ impl WsDecisionState {
     pub fn new() -> Self {
         let (state_tx, _) = broadcast::channel(1);
         let (tick_closed_tx, _) = broadcast::channel(16);
+        let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, intent_rx) = mpsc::channel(16);
 
         Self {
             state_tx,
             tick_closed_tx,
+            server_msg_tx,
             intent_rx,
             intent_tx,
             current_tick: Arc::new(AtomicI64::new(0)),
@@ -238,6 +243,9 @@ pub struct WsSharedState {
     /// tick_closed 广播通道
     pub tick_closed_tx: broadcast::Sender<DownstreamMessage>,
 
+    /// Server 消息广播通道（用于透传 Server 下行消息）
+    pub server_msg_tx: broadcast::Sender<DownstreamMessage>,
+
     /// Intent 发送通道
     pub intent_tx: mpsc::Sender<WsIntent>,
 
@@ -255,6 +263,9 @@ pub struct WsSharedState {
 
     /// 叙事引擎（可选，用于生成上下文）
     pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
+
+    /// OpenClaw 连接状态（单连接限制）
+    pub openclaw_connected: Arc<AtomicBool>,
 }
 
 impl WsSharedState {
@@ -285,12 +296,14 @@ impl From<&WsDecisionState> for WsSharedState {
         Self {
             state_tx: state.state_tx.clone(),
             tick_closed_tx: state.tick_closed_tx.clone(),
+            server_msg_tx: state.server_msg_tx.clone(),
             intent_tx: state.intent_tx.clone(),
             current_tick: state.current_tick.clone(),
             deadline_ms: state.deadline_ms.clone(),
             tick_duration_ms: state.tick_duration_ms.clone(),
             agent_id: state.agent_id.clone(),
             narrative_engine: None,
+            openclaw_connected: Arc::new(AtomicBool::new(false)),
         }
     }
 }
