@@ -120,7 +120,7 @@ impl Agent {
     /// * `config` - Agent 配置
     /// * `decision_callback` - 决策回调函数
     /// * `reconnect_rx` - 重连请求接收通道（Claw 模式下用于热切换）
-    pub fn new(
+    pub async fn new(
         config: Config,
         decision_callback: DecisionCallback,
         reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
@@ -129,7 +129,7 @@ impl Agent {
 
         // 设置设备身份（如果已存在）
         if let Some(ref identity) = config.identity {
-            client.set_identity(identity.device_id, identity.auth_token.clone());
+            client.set_identity(identity.device_id, identity.auth_token.clone()).await;
         }
 
         Self {
@@ -182,8 +182,8 @@ impl Agent {
     }
 
     /// 获取 Agent ID
-    pub fn agent_id(&self) -> Option<Uuid> {
-        self.client.agent_id()
+    pub async fn agent_id(&self) -> Option<Uuid> {
+        self.client.agent_id().await
     }
 
     /// 等待 Agent ID 可用（注册后）
@@ -351,9 +351,10 @@ impl Agent {
     }
 
     /// 获取 tick 持续时间
-    pub(crate) fn get_tick_duration(&self) -> Duration {
+    pub(crate) async fn get_tick_duration(&self) -> Duration {
         self.client
             .game_rules()
+            .await
             .map(|r| Duration::from_secs(r.tick_duration_secs))
             .unwrap_or(Duration::from_secs(60))
     }
@@ -440,7 +441,7 @@ impl Agent {
         use tracing::warn;
 
         let tick_start = Instant::now();
-        let tick_duration = self.get_tick_duration();
+        let tick_duration = self.get_tick_duration().await;
         let min_retry_time =
             std::time::Duration::from_secs(self.validator_config.min_retry_time_secs);
         let max_attempts = self.validator_config.max_retry_attempts;
@@ -458,16 +459,18 @@ impl Agent {
 
             if remaining < min_retry_time {
                 warn!("Tick time exhausted, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
                 return Ok(Intent::idle(
-                    self.client.agent_id().unwrap_or_default(),
+                    agent_id,
                     world_state.tick_id,
                 ));
             }
 
             if attempt > max_attempts {
                 warn!("Max validation attempts reached, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
                 return Ok(Intent::idle(
-                    self.client.agent_id().unwrap_or_default(),
+                    agent_id,
                     world_state.tick_id,
                 ));
             }
@@ -527,8 +530,9 @@ impl Agent {
                         >= self.validator_config.consecutive_rejection_threshold
                     {
                         warn!("Too many consecutive rejections, forcing idle");
+                        let agent_id = self.client.agent_id().await.unwrap_or_default();
                         return Ok(Intent::idle(
-                            self.client.agent_id().unwrap_or_default(),
+                            agent_id,
                             world_state.tick_id,
                         ));
                     }
