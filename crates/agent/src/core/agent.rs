@@ -102,7 +102,7 @@ pub struct Agent {
     pub(crate) reconnect_backoff: u32,
 
     /// 重连请求接收通道（可选，用于热切换触发重连）
-    /// Claw 模式下由 HTTP API 触发重连，其他模式为 None
+    /// Claw 模式下由 HTTP API 触发重连，WebSocket 模式为 None
     pub(crate) reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
 }
 

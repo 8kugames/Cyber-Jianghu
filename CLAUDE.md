@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Cyber-Jianghu (赛博江湖)** is a Rust workspace implementing an MMO-MAS game where every character is an AI agent. The architecture follows **data-driven COI (Composition Over Inheritance)** principles.
 
+### Core Philosophy: Body-Mind Separation (身心分离)
+
+- **Server ("天道" / Physics Engine)**: Objective world state, authoritative game logic, tick-based time progression
+- **Agent ("众生" / Consciousness)**: Subjective AI decision-making with memory, persona, and cognitive capabilities
+- **"天道无为，万物自化"**: The server provides objective physics; agents create emergent behavior through autonomous decisions
+
 ## Common Commands
 
 ### Development
@@ -43,6 +49,9 @@ cargo install --path crates/agent
 
 # Run agent in Claw mode (for OpenClaw integration)
 cyber-jianghu-agent run --port 23340
+
+# Run with debug logging
+RUST_LOG=debug cargo run -p cyber-jianghu-server
 ```
 
 ### Service Management
@@ -79,15 +88,13 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 crates/
 ├── protocol/        # Communication protocol (ServerMessage, ClientMessage, WorldState)
 ├── server/          # Game server ("天道" - physics engine)
-└── agent/           # Agent SDK with HTTP API for OpenClaw integration
+└── agent/           # Agent SDK (WebSocket + HTTP API for OpenClaw integration)
 
-integration/
-└── openclaw/        # OpenClaw hooks and templates
-    ├── hooks/       # TypeScript hooks (bootstrap, validator, memory)
-    ├── tools/       # TypeScript tools (jianghu_act action execution)
-    ├── plugins/     # OpenClaw plugins (memory integration)
-    └── skills/      # OpenClaw skill definitions
+docs/                # Architecture docs and whitepapers
+scripts/             # Utility scripts
 ```
+
+**OpenClaw Integration**: See separate repository [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
 
 ### Server Architecture
 
@@ -97,30 +104,48 @@ The server is the authoritative "physics engine" of the world:
 - **WebSocket/HTTP**: Handles Agent connections via Axum
 - **Game Data System**: Loads YAML configs from `crates/server/config/*.yaml` (JSON fallback)
 - **Action System**: Data-driven action validation and execution
+- **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
+
+**Tick Processing Flow**:
+1. Collect intents from all connected agents
+2. Validate each intent against game rules and action constraints
+3. Execute valid intents in deterministic order
+4. Update world state (positions, attributes, inventory)
+5. Broadcast new WorldState to all agents
 
 Key server modules:
 - `src/tick/` - Tick loop and intent processing
 - `src/actions/` - Action execution with data-driven ActionType
-- `src/game_data/` - Config loading and caching
+- `src/game_data/` - Config loading, caching, and formula evaluation
 - `src/websocket/` - WebSocket connection management
 - `src/handlers/` - HTTP API endpoints
 
 ### Agent Architecture
 
-The agent crate provides HTTP API mode for OpenClaw integration:
+The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
-1. **HTTP Mode** (recommended for OpenClaw):
-   - Runs headless with HTTP API on port 23340-23349
-   - OpenClaw communicates via `fetch()` calls
-   - No FFI compilation needed
-   - Cognitive capabilities (narrative engine, memory, validation) exposed as HTTP API
+1. **WebSocket (Required)**:
+   - OpenClaw **must** connect via WebSocket to ensure Tick synchronization
+   - Agent provides WebSocket server at `ws://localhost:23340/ws`
+   - Real-time Tick notifications and Intent submission
+
+2. **HTTP API (Auxiliary)**:
+   - Runs with HTTP API on port 23340-23349
+   - Used for data queries, Web panel, debugging
+   - **NOT** a replacement for WebSocket
+
+**Memory System** (Three-Tier Architecture):
+- **Working Memory**: Short-term context, recent events
+- **Episodic Memory**: Event-based memories with timestamps
+- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance)
+- All tiers use SQLite backends with Ebbinghaus forgetting curve implementation
 
 Key agent modules:
 - `src/core/` - WebSocket client to game server
-- `src/runtime/decision/` - Decision modes (http / ws)
+- `src/runtime/decision/` - Decision modes (ws required, http auxiliary)
 - `src/ai/` - AI components:
   - `cognitive/` - Narrative engine for attribute descriptions
-  - `memory/` - Working, episodic, semantic memory with SQLite backends
+  - `memory/` - Three-tier memory system with SQLite backends
   - `relationship/` - Relationship store with AI narrative descriptions
   - `persona/` - Dynamic persona with trait evolution
   - `validator/` - Intent validation against persona
@@ -151,6 +176,12 @@ All game mechanics are configured via YAML files in `crates/server/config/` (JSO
 - `network.yaml` - WebSocket and network settings
 - `world-building-rules.yaml` - World setting constraints
 - `display_messages.yaml` - UI display message templates
+
+**Formula Engine**: Dynamic calculations use `evalexpr` syntax:
+```yaml
+# Example: damage calculation formula
+damage: "base_damage + strength * 0.5 + weapon_bonus"
+```
 
 ## Code Style Conventions
 
@@ -214,6 +245,19 @@ use super::builder::AgentBuilder;
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
 
+## Key Dependencies
+
+| Crate | Purpose |
+|-------|---------|
+| `axum` | Web framework with WebSocket support |
+| `sqlx` | PostgreSQL async driver |
+| `tokio` | Async runtime |
+| `evalexpr` | Formula/expression evaluation |
+| `tokio-tungstenite` | WebSocket client (agent) |
+| `rusqlite` | Local SQLite storage (agent memory) |
+| `candle-*` | Local ML/embeddings (agent) |
+| `instant-distance` | HNSW vector index (agent semantic memory) |
+
 ## Key Configuration Files
 
 | Purpose | Path |
@@ -236,7 +280,7 @@ use super::builder::AgentBuilder;
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
 
-### Agent HTTP API (port 23340-23349 in HTTP mode)
+### Agent HTTP API (port 23340-23349, auxiliary to WebSocket)
 
 - `GET /api/v1` - API discovery endpoint (returns all available APIs with examples)
 - `GET /api/v1/health` - Health check
@@ -299,3 +343,9 @@ This ensures agent can function in production without accessing server's develop
 - WebSocket is used for real-time communication (use WSS in production)
 - The tick system drives game time forward
 - Server Admin dashboard is available at `http://localhost:23333/admin` (requires token from logs or .env)
+
+## Quick Start Guides
+
+- Server: `crates/server/QuickStart-Server.md`
+- Agent: `crates/agent/QuickStart-Agent.md`
+- Architecture docs: `crates/server/docs/architecture/` and `crates/agent/docs/architecture/`

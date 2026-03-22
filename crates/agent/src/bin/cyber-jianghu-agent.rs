@@ -9,8 +9,8 @@
 // Agent 仅支持 Claw 模式：
 // - Agent 与 Server 保持 WebSocket 连接，接收 WorldState，提交 Intent
 // - Agent 为 OpenClaw（外部 LLM 调度器）提供 WebSocket + HTTP API 接口
-// - OpenClaw 通过 WebSocket 接收 Tick 信息，通过 HTTP API 查询状态
-// - OpenClaw 提交 Intent，Agent 转发给 Server
+// - OpenClaw **必须**通过 WebSocket 连接 Agent，确保 Tick 实时同步
+// - HTTP API 用于数据查询、Web 面板等辅助功能（不是 WebSocket 的替代）
 // - OpenClaw 超时未提交 Intent 时，Agent 自动提交 idle Intent
 //
 // ## 使用方式
@@ -424,7 +424,7 @@ async fn create_character_cli(
         }
         Err(e) => {
             warn!("无法连接到 Agent API: {}", e);
-            warn!("请确保 Agent 已在 HTTP 模式下运行");
+            warn!("请确保 Agent 已在 Claw 模式下运行（默认模式）");
             warn!("或通过 Web 面板创建角色: http://localhost:23340/panel");
             return Err(e);
         }
