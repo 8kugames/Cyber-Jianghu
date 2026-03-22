@@ -78,18 +78,22 @@ pub async fn websocket_handler(
         warn!("Failed to update device last_seen: {}", e);
     }
 
-    // 3. 获取该设备的角色信息（如果有）
-    // TODO: 需要实现 get_agent_by_device_id
-    // 暂时使用 agent_id 从 query 获取（后续可改为从数据库查询）
-    let agent_id = match query.agent_id {
-        Some(id) => id,
-        None => {
+    // 3. 获取该设备的角色信息（从数据库查询）
+    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
+        Ok(Some(agent)) => {
+            info!("Device {} has agent '{}' ({})", query.device_id, agent.name, agent.agent_id);
+            agent.agent_id
+        }
+        Ok(None) => {
             // 设备验证通过但没有角色，允许连接但标记为待注册状态
             info!(
-                "Device {} connected without agent_id, waiting for character registration",
+                "Device {} connected without agent, waiting for character registration",
                 query.device_id
             );
-            // 使用 device_id 作为临时标识
+            uuid::Uuid::nil()
+        }
+        Err(e) => {
+            warn!("Failed to query agent by device_id: {}", e);
             uuid::Uuid::nil()
         }
     };
