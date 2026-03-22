@@ -58,6 +58,8 @@ struct ConnectionState {
     dialogue_callback: Option<Arc<dyn Fn(DialogueMessage) + Send + Sync>>,
     /// 世界观规则回调
     world_building_rules_callback: Option<Arc<dyn Fn(WorldBuildingRules) + Send + Sync>>,
+    /// Server 消息透传回调（用于 OpenClaw 集成）
+    server_msg_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
 }
 
 impl WebSocketClient {
@@ -75,6 +77,7 @@ impl WebSocketClient {
                 game_rules_callback: None,
                 dialogue_callback: None,
                 world_building_rules_callback: None,
+                server_msg_callback: None,
             })),
         }
     }
@@ -168,6 +171,20 @@ impl WebSocketClient {
         });
     }
 
+    /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
+    ///
+    /// 当收到 Server 下行消息时，此回调会被调用，允许 OpenClaw
+    /// 实时接收 Server 的所有消息（错误、对话、规则更新等）
+    pub fn set_server_msg_callback(&self, callback: Arc<dyn Fn(ServerMessage) + Send + Sync>) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.server_msg_callback = Some(callback);
+            });
+        });
+    }
+
     /// 等待注册响应
     pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
         let mut state = self.state.write().await;
@@ -240,12 +257,13 @@ impl WebSocketClient {
     /// 接收消息并处理
     async fn receive_and_handle_message(&self) -> Result<Option<WorldState>> {
         // 先获取回调的克隆，避免在循环中同时持有可变和不可变借用
-        let (game_rules_cb, dialogue_cb, world_building_rules_cb) = {
+        let (game_rules_cb, dialogue_cb, world_building_rules_cb, server_msg_cb) = {
             let state = self.state.read().await;
             (
                 state.game_rules_callback.clone(),
                 state.dialogue_callback.clone(),
                 state.world_building_rules_callback.clone(),
+                state.server_msg_callback.clone(),
             )
         };
 
@@ -263,54 +281,79 @@ impl WebSocketClient {
                     match serde_json::from_str::<ServerMessage>(&text) {
                         Ok(ServerMessage::WorldState { data }) => {
                             debug!("Received WorldState: tick_id={}", data.tick_id);
+                            // WorldState 不透传（已有专门的 Tick 处理）
                             return Ok(Some(data));
                         }
-                        Ok(ServerMessage::GameRulesUpdate { game_rules }) => {
-                            info!("Received game rules update: version {}", game_rules.version);
-                            // 更新状态
-                            {
-                                let mut state = self.state.write().await;
-                                state.game_rules = Some(game_rules.clone());
+                        Ok(msg @ ServerMessage::GameRulesUpdate { .. }) => {
+                            if let ServerMessage::GameRulesUpdate { ref game_rules } = msg {
+                                info!("Received game rules update: version {}", game_rules.version);
+                                // 更新状态
+                                {
+                                    let mut state = self.state.write().await;
+                                    state.game_rules = Some(game_rules.clone());
+                                }
+                                // 使用之前克隆的回调
+                                if let Some(ref callback) = game_rules_cb {
+                                    callback(game_rules.clone());
+                                }
                             }
-                            // 使用之前克隆的回调
-                            if let Some(ref callback) = game_rules_cb {
-                                callback(game_rules);
-                            }
-                            // 继续等待 WorldState
-                        }
-                        Ok(ServerMessage::WorldBuildingRulesUpdate { rules }) => {
-                            info!(
-                                "Received world building rules update: version {}",
-                                rules.version
-                            );
-                            // 更新状态
-                            {
-                                let mut state = self.state.write().await;
-                                state.world_building_rules = Some(rules.clone());
-                            }
-                            // 使用之前克隆的回调
-                            if let Some(ref callback) = world_building_rules_cb {
-                                callback(rules);
+                            // 透传给 OpenClaw
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
                             }
                             // 继续等待 WorldState
                         }
-                        Ok(ServerMessage::Dialogue { message }) => {
+                        Ok(msg @ ServerMessage::WorldBuildingRulesUpdate { .. }) => {
+                            if let ServerMessage::WorldBuildingRulesUpdate { ref rules } = msg {
+                                info!(
+                                    "Received world building rules update: version {}",
+                                    rules.version
+                                );
+                                // 更新状态
+                                {
+                                    let mut state = self.state.write().await;
+                                    state.world_building_rules = Some(rules.clone());
+                                }
+                                // 使用之前克隆的回调
+                                if let Some(ref callback) = world_building_rules_cb {
+                                    callback(rules.clone());
+                                }
+                            }
+                            // 透传给 OpenClaw
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
+                            }
+                            // 继续等待 WorldState
+                        }
+                        Ok(msg @ ServerMessage::Dialogue { .. }) => {
                             debug!("Received dialogue message");
                             // 使用之前克隆的回调
-                            if let Some(ref callback) = dialogue_cb {
-                                callback(message);
+                            if let ServerMessage::Dialogue { ref message } = msg {
+                                if let Some(ref callback) = dialogue_cb {
+                                    callback(message.clone());
+                                }
+                            }
+                            // 透传给 OpenClaw
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
                             }
                             // 继续等待 WorldState
                         }
-                        Ok(ServerMessage::Pong { .. }) => {
-                            // 心跳响应，忽略
-                        }
-                        Ok(ServerMessage::Error { message }) => {
-                            warn!("Server error: {}", message);
+                        Ok(msg @ ServerMessage::Error { .. }) => {
+                            if let ServerMessage::Error { ref message } = msg {
+                                warn!("Server error: {}", message);
+                            }
+                            // 透传给 OpenClaw（错误消息很重要）
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
+                            }
                             // 继续等待
                         }
+                        Ok(ServerMessage::Pong { .. }) => {
+                            // 心跳响应，不透传
+                        }
                         Ok(ServerMessage::Registered { .. }) => {
-                            // 已经注册过了，忽略
+                            // 已经注册过了，不透传
                             debug!("Received duplicate registration message");
                         }
                         Err(e) => {
