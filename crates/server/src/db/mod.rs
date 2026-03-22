@@ -37,7 +37,7 @@ pub use common::init_db_pool;
 
 // 导出公共API - Agent操作
 pub use agent_ops::{
-    connect_device, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
+    connect_device, get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
     register_agent_transactional, rebirth_agent, update_agent_location, update_agent_online,
     update_device_last_seen, verify_device_token, DeviceConnectResult, RebirthResult,
 };
