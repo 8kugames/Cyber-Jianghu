@@ -35,9 +35,10 @@ use uuid::Uuid;
 use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig};
 use cyber_jianghu_agent::{
     Agent, Intent, WorldState,
-    runtime::decision::ws::{WsDecisionState, WsSharedState, run_ws_server},
+    runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
 };
+use cyber_jianghu_protocol::ServerMessage;
 
 // ============================================================================
 // CLI 定义
@@ -524,25 +525,28 @@ async fn run_agent(port: u16) -> Result<()> {
         );
 
         let api_state_clone = api_state.clone();
+        let server_msg_tx = shared_state.server_msg_tx.clone(); // 提取用于回调
         tokio::spawn(async move {
             if let Err(e) = run_ws_server(actual_port, (*shared_state).clone(), api_state_clone).await {
                 error!("Claw server error: {}", e);
             }
         });
 
-        // 返回 HTTP decision state 和 reconnect_rx（用于 http_decision 和 Agent）
-        (http_decision_state, reconnect_rx)
+        // 返回 HTTP decision state、reconnect_rx 和 server_msg_tx（用于 http_decision、Agent 和消息透传）
+        (http_decision_state, reconnect_rx, server_msg_tx)
     };
 
     // 6. 创建决策函数
-    let (decision, agent_reconnect_rx): (
+    let (decision, agent_reconnect_rx, server_msg_tx): (
         Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
         Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
+        tokio::sync::broadcast::Sender<DownstreamMessage>,
     ) = {
-        let (state, rx) = claw_decision_state;
+        let (state, rx, tx) = claw_decision_state;
         (
             Arc::new(http_decision(device_id.clone(), state, 55)),
             Some(rx),
+            tx,
         )
     };
 
@@ -569,6 +573,18 @@ async fn run_agent(port: u16) -> Result<()> {
         });
         *guard = server_agent_id;
     }));
+
+    // 设置 Server 消息透传回调（用于 OpenClaw 集成）
+    // 当收到 Server 下行消息时，转换为 DownstreamMessage 并广播给 OpenClaw
+    let server_msg_tx_clone = server_msg_tx.clone();
+    agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+        // 使用当前 tick（从消息中推断或使用 0）
+        let current_tick = 0; // 简化：无法从回调中获取当前 tick
+        if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick) {
+            // 广播给 OpenClaw（忽略发送失败，因为可能没有连接）
+            let _ = server_msg_tx_clone.send(downstream);
+        }
+    })).await;
 
     agent.run().await?;
     Ok(())
