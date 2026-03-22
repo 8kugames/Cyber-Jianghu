@@ -509,9 +509,29 @@ pub(super) async fn submit_intent_handler(
         ).await;
     }
 
+    let intent_id = intent.intent_id;
+    let submitted_tick = tick_id;
+    let submitted_action = intent.action_type.to_string();
+
     match state.intent_tx.send(intent).await {
-        Ok(_) => (StatusCode::OK, "Intent submitted").into_response(),
-        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "Failed to submit intent").into_response(),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "submitted",
+                "intent_id": intent_id,
+                "tick_id": submitted_tick,
+                "action_type": submitted_action
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "channel_closed",
+                "message": format!("Failed to submit intent: {}", e)
+            })),
+        )
+            .into_response(),
     }
 }
 
