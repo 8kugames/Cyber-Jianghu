@@ -258,12 +258,188 @@ impl From<UpstreamMessage> for Option<WsIntent> {
 }
 
 // ============================================================================
+// ServerMessage 转换函数
+// ============================================================================
+
+use cyber_jianghu_protocol::{DialogueMessage, ServerMessage};
+
+impl DownstreamMessage {
+    /// 从 ServerMessage 转换为 DownstreamMessage
+    ///
+    /// 返回 None 表示该消息类型不需要透传（如 WorldState 已通过 Tick 处理）
+    pub fn from_server_message(msg: ServerMessage, _current_tick: i64) -> Option<Self> {
+        match msg {
+            ServerMessage::Error { message } => {
+                let code = Self::parse_error_code(&message);
+                let tick_id = Self::parse_tick_id(&message);
+                Some(DownstreamMessage::ServerError {
+                    code,
+                    message,
+                    tick_id,
+                })
+            }
+            ServerMessage::Dialogue { message } => match message {
+                DialogueMessage::Request {
+                    from_agent_id,
+                    to_agent_id,
+                    opening_remark,
+                } => Some(DownstreamMessage::ServerDialogue {
+                    dialogue_type: "request".to_string(),
+                    from_agent_id,
+                    to_agent_id: Some(to_agent_id),
+                    session_id: None,
+                    opening_remark: Some(opening_remark),
+                    content: None,
+                }),
+                DialogueMessage::Accept {
+                    from_agent_id,
+                    session_id,
+                } => Some(DownstreamMessage::ServerDialogue {
+                    dialogue_type: "accept".to_string(),
+                    from_agent_id,
+                    to_agent_id: None,
+                    session_id: Some(session_id),
+                    opening_remark: None,
+                    content: None,
+                }),
+                DialogueMessage::Reject {
+                    from_agent_id,
+                    session_id,
+                    reason,
+                } => Some(DownstreamMessage::ServerDialogue {
+                    dialogue_type: "reject".to_string(),
+                    from_agent_id,
+                    to_agent_id: None,
+                    session_id: Some(session_id),
+                    opening_remark: reason,
+                    content: None,
+                }),
+                DialogueMessage::Content {
+                    from_agent_id,
+                    session_id,
+                    content,
+                } => Some(DownstreamMessage::ServerDialogue {
+                    dialogue_type: "content".to_string(),
+                    from_agent_id,
+                    to_agent_id: None,
+                    session_id: Some(session_id),
+                    opening_remark: None,
+                    content: Some(content),
+                }),
+                DialogueMessage::End {
+                    from_agent_id,
+                    session_id,
+                } => Some(DownstreamMessage::ServerDialogue {
+                    dialogue_type: "end".to_string(),
+                    from_agent_id,
+                    to_agent_id: None,
+                    session_id: Some(session_id),
+                    opening_remark: None,
+                    content: None,
+                }),
+            },
+            ServerMessage::GameRulesUpdate { game_rules } => {
+                Some(DownstreamMessage::ServerGameRulesUpdate {
+                    tick_duration_secs: game_rules.tick_duration_secs,
+                    version: game_rules.version,
+                    last_updated: game_rules.last_updated,
+                })
+            }
+            ServerMessage::WorldBuildingRulesUpdate { rules } => {
+                Some(DownstreamMessage::ServerWorldBuildingRulesUpdate {
+                    version: rules.version,
+                    last_updated: rules.last_updated,
+                })
+            }
+            // 其他消息类型不透传
+            _ => None,
+        }
+    }
+
+    /// 解析错误消息推断错误码
+    fn parse_error_code(message: &str) -> ServerErrorCode {
+        if message.contains("已死亡") || message.contains("dead") || message.contains("死亡") {
+            ServerErrorCode::AgentDead
+        } else if message.contains("Rate limit")
+            || message.contains("速率")
+            || message.contains("limit exceeded")
+        {
+            ServerErrorCode::RateLimited
+        } else if message.contains("tick") && (message.contains("too far") || message.contains("过期"))
+        {
+            ServerErrorCode::TickExpired
+        } else if message.contains("Invalid") || message.contains("无效") {
+            ServerErrorCode::InvalidAction
+        } else if message.contains("Validation") || message.contains("验证") {
+            ServerErrorCode::ValidationFailed
+        } else {
+            ServerErrorCode::Unknown
+        }
+    }
+
+    /// 从消息中提取 tick_id
+    fn parse_tick_id(message: &str) -> Option<i64> {
+        // 尝试匹配 "tick_id 100" 或 "tick_id: 100" 或 "tick 100"
+        let patterns = [r"tick_id[:\s]+(\d+)", r"tick[:\s]+(\d+)"];
+
+        for pattern in patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(caps) = re.captures(message) {
+                    if let Some(m) = caps.get(1) {
+                        if let Ok(n) = m.as_str().parse::<i64>() {
+                            return Some(n);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+// ============================================================================
 // 单元测试
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn create_test_world_state() -> WorldState {
+        // 使用 JSON 构造测试数据，避免直接构造复杂结构
+        let json = serde_json::json!({
+            "event_type": "world_state",
+            "tick_id": 105,
+            "agent_id": "00000000-0000-0000-0000-000000000000",
+            "world_time": {
+                "year": 2024,
+                "month": 1,
+                "day": 1,
+                "hour": 12,
+                "minute": 0,
+                "second": 0,
+                "weather": "晴"
+            },
+            "location": {
+                "node_id": "test",
+                "name": "测试地点",
+                "type": "indoor",
+                "adjacent_nodes": []
+            },
+            "self_state": {
+                "attributes": {},
+                "attribute_descriptions": {},
+                "status_effects": []
+            },
+            "entities": [],
+            "nearby_items": [],
+            "events_log": [],
+            "available_actions": []
+        });
+        serde_json::from_value(json).unwrap()
+    }
+
+    // === 新增消息类型测试 ===
 
     #[test]
     fn test_serialize_server_error_agent_dead() {
@@ -336,39 +512,7 @@ mod tests {
         assert!(json.contains(r#""suggest_resync":false"#));
     }
 
-    fn create_test_world_state() -> WorldState {
-        // 使用 JSON 构造测试数据，避免直接构造复杂结构
-        let json = serde_json::json!({
-            "event_type": "world_state",
-            "tick_id": 105,
-            "agent_id": "00000000-0000-0000-0000-000000000000",
-            "world_time": {
-                "year": 2024,
-                "month": 1,
-                "day": 1,
-                "hour": 12,
-                "minute": 0,
-                "second": 0,
-                "weather": "晴"
-            },
-            "location": {
-                "node_id": "test",
-                "name": "测试地点",
-                "type": "indoor",
-                "adjacent_nodes": []
-            },
-            "self_state": {
-                "attributes": {},
-                "attribute_descriptions": {},
-                "status_effects": []
-            },
-            "entities": [],
-            "nearby_items": [],
-            "events_log": [],
-            "available_actions": []
-        });
-        serde_json::from_value(json).unwrap()
-    }
+    // === 原有测试 ===
 
     #[test]
     fn test_serialize_tick_message() {
