@@ -161,6 +161,31 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
     Ok(agent)
 }
 
+/// 根据设备ID获取Agent
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备ID
+///
+/// # 返回
+/// - Ok(Agent): 查询到的Agent
+/// - Err: 查询失败或未找到
+pub async fn get_agent_by_device_id(pool: &PgPool, device_id: Uuid) -> Result<Option<Agent>> {
+    debug!("查询Agent by device_id: {}", device_id);
+
+    let agent = sqlx::query_as::<Postgres, Agent>(
+        r#"
+        SELECT * FROM agents WHERE device_id = $1
+        "#,
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await
+    .context("根据 device_id 查询 Agent 失败")?;
+
+    Ok(agent)
+}
+
 /// 获取所有Agent
 ///
 /// # 参数
