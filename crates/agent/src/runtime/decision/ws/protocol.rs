@@ -256,7 +256,7 @@ mod tests {
         let msg = DownstreamMessage::TickClosed {
             tick_id: 105,
             reason: "timeout".to_string(),
-            next_tick_in_ms: 15000,
+            next_tick_in_ms: 60000,
         };
 
         let json = serde_json::to_string(&msg).unwrap();

@@ -109,5 +109,5 @@ ENV RUST_LOG=info \
 # 容器入口点
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# 默认启动 Claw 模式（用于 OpenClaw 等外部助手集成）
-CMD ["./agent", "run", "--mode", "claw", "--port", "23340"]
+# 默认启动（用于 OpenClaw 等外部助手集成）
+CMD ["./agent", "run", "--port", "23340"]

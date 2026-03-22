@@ -27,6 +27,7 @@
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 mod context;
+pub mod cognitive_context;
 mod dto;
 mod handlers;
 pub mod intent_history;
@@ -72,6 +73,12 @@ pub use review::{PendingReviewEntry, ReviewState, ReviewStore};
 pub use context::{
     AttributesGlimpse, ContextResponse, create_attributes_glimpse, create_narrative_engine,
     generate_context_markdown_no_relationship,
+};
+
+// 重导出 cognitive_context 模块的公共 API
+pub use cognitive_context::{
+    AvailableActionInfo, CognitiveContext, CognitiveContextBuilder, CognitiveContextConfig,
+    DecisionContext, Drive, MotivationContext, PerceptionContext, PlanningContext,
 };
 
 // ============================================================================
@@ -280,6 +287,8 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
         .route("/api/v1/intent", post(handlers::submit_intent_handler)) // 提交决策意图
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
+        // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
+        .route("/api/v1/cognitive", get(handlers::get_cognitive_context_handler)) // 结构化认知上下文
         // === 关系管理端点 ===
         .route(
             "/api/v1/relationship/list",
