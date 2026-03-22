@@ -548,8 +548,8 @@ mod tests {
             .unwrap()
             .timestamp();
 
-        // 假设 15 秒一个 tick
-        let tick_duration_secs: u64 = 15;
+        // 假设 60 秒一个 tick
+        let tick_duration_secs: u64 = 60;
 
         // 在北京时间 2026-03-03 00:00:00，tick_id 应该是 0
         let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;
