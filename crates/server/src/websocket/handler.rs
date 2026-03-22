@@ -358,10 +358,6 @@ async fn handle_client_message(
     }
 }
 
-/// Intent tick_id 校验窗口大小
-/// 允许当前 tick 或未来 ±TICK_WINDOW_SIZE 个 tick
-const TICK_WINDOW_SIZE: i64 = 2;
-
 /// 处理意图上报
 ///
 /// 将 Intent 保存到 IntentManager（临时缓存）
@@ -389,23 +385,19 @@ async fn handle_intent(
         return Err("Agent 已死亡，无法执行此动作。请重新转生入世。".into());
     }
 
-    // tick_id 校验：获取当前服务器 tick
+    // tick_id 校验：只接受当前 tick 的意图
     let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);
 
-    let tick_diff = tick_id - current_tick;
-    if !(-TICK_WINDOW_SIZE..=TICK_WINDOW_SIZE).contains(&tick_diff) {
+    if tick_id != current_tick {
         warn!(
-            "Intent tick_id out of window: agent={}, intent_tick={}, current_tick={}, diff={}",
-            agent_id, tick_id, current_tick, tick_diff
+            "Intent tick_id mismatch: agent={}, intent_tick={}, current_tick={}",
+            agent_id, tick_id, current_tick
         );
         return Err(format!(
-            "Intent tick_id {} is too far from current tick {}. Window: [{}, {}]",
-            tick_id,
-            current_tick,
-            current_tick - TICK_WINDOW_SIZE,
-            current_tick + TICK_WINDOW_SIZE
+            "Intent tick_id {} 不匹配当前 tick {}。请提交当前 tick 的意图。",
+            tick_id, current_tick
         )
         .into());
     }
