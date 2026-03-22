@@ -63,8 +63,10 @@ async fn ws_handler(
     // 安全：单连接限制
     if state.openclaw_connected.swap(true, Ordering::Acquire) {
         warn!("Rejected second WebSocket connection (only one allowed)");
-        // 立即恢复为 false，因为 swap 返回的是之前的值
-        state.openclaw_connected.store(false, Ordering::Release);
+        // 注意：不要在这里 store(false)，因为：
+        // 1. swap(true) 返回 true 说明已经有连接
+        // 2. 我们没有成功建立连接，所以不应该释放 slot
+        // 3. slot 由已建立的连接在断开时释放
         return Response::builder()
             .status(StatusCode::CONFLICT)
             .body("Only one OpenClaw connection allowed".into())
