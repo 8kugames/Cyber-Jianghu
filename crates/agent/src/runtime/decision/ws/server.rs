@@ -4,16 +4,22 @@
 //
 // 提供 Agent 与外部调度器（OpenClaw）之间的 WebSocket 通信
 // 同时保留 HTTP API 用于数据访问
+//
+// 安全限制：
+// - 仅允许 localhost 连接
+// - 每个 Agent 只允许一个 OpenClaw 连接
 // ============================================================================
 
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        ConnectInfo, State,
     },
+    http::StatusCode,
     response::Response,
     routing::get,
     Router,
@@ -39,12 +45,33 @@ pub fn ws_router(shared_state: WsSharedState) -> Router<WsSharedState> {
         .with_state(shared_state)
 }
 
-/// WebSocket 处理器
+/// WebSocket 处理器（带 localhost 限制和单连接限制）
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<WsSharedState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Response {
-    debug!("WebSocket connection request");
+    // 安全：仅允许 localhost 连接
+    if !addr.ip().is_loopback() {
+        warn!("Rejected WebSocket connection from non-localhost: {}", addr);
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body("Only localhost connections allowed".into())
+            .unwrap();
+    }
+
+    // 安全：单连接限制
+    if state.openclaw_connected.swap(true, Ordering::Acquire) {
+        warn!("Rejected second WebSocket connection (only one allowed)");
+        // 立即恢复为 false，因为 swap 返回的是之前的值
+        state.openclaw_connected.store(false, Ordering::Release);
+        return Response::builder()
+            .status(StatusCode::CONFLICT)
+            .body("Only one OpenClaw connection allowed".into())
+            .unwrap();
+    }
+
+    debug!("WebSocket connection request from {}", addr);
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -213,7 +240,11 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
         _ = write_task => debug!("Write task ended"),
     }
 
-    info!("WebSocket client disconnected");
+    // 重置连接标志
+    state.openclaw_connected.store(false, Ordering::Release);
+    debug!("OpenClaw connection slot released");
+
+    info!("OpenClaw WebSocket client disconnected");
 }
 
 // ============================================================================
@@ -226,6 +257,10 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 /// - WebSocket `/ws` 用于实时决策
 /// - HTTP API `/api/v1/*` 用于数据访问
 /// - 静态文件服务 `/panel` 用于 Web 面板
+///
+/// 安全限制：
+/// - WebSocket 仅接受 localhost 连接
+/// - 每个 Agent 只允许一个 OpenClaw WebSocket 连接
 pub async fn run_ws_server(
     port: u16,
     ws_state: WsSharedState,
@@ -256,10 +291,14 @@ pub async fn run_ws_server(
 
     info!("[claw] Mixed Server listening on {}", local_addr);
     info!("[claw] HTTP_PORT={}", local_addr.port());
-    info!("[claw] WebSocket: ws://0.0.0.0:{}/ws", local_addr.port());
-    info!("[claw] HTTP API: http://0.0.0.0:{}/api/v1", local_addr.port());
+    info!("[claw] WebSocket: ws://127.0.0.1:{}/ws (localhost only)", local_addr.port());
+    info!("[claw] HTTP API: http://127.0.0.1:{}/api/v1", local_addr.port());
 
-    axum::serve(listener, app).await?;
+    // 使用 into_make_service_with_connect_info 来获取客户端地址
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    ).await?;
 
     Ok(())
 }
