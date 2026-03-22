@@ -267,24 +267,27 @@ pub async fn run_ws_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicI64, AtomicU64};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
     use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn test_ws_shared_state() {
         let (state_tx, _) = broadcast::channel(1);
         let (tick_closed_tx, _) = broadcast::channel(16);
+        let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, _) = mpsc::channel(16);
 
         let shared = WsSharedState {
             state_tx,
             tick_closed_tx,
+            server_msg_tx,
             intent_tx,
             current_tick: Arc::new(AtomicI64::new(100)),
             deadline_ms: Arc::new(AtomicU64::new(1710937800000)),
             tick_duration_ms: Arc::new(AtomicU64::new(60000)),
             agent_id: Arc::new(AtomicI64::new(0)),
             narrative_engine: None,
+            openclaw_connected: Arc::new(AtomicBool::new(false)),
         };
 
         assert_eq!(shared.get_current_tick(), 100);
