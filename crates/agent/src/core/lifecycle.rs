@@ -58,7 +58,7 @@ impl super::Agent {
                     agent_name_for_callback, game_rules.version
                 );
                 // 注意：配置持久化由外部配置管理系统处理
-            }));
+            })).await;
 
         // 设置对话消息回调（如果启用了对话系统）
         if self.dialogue_client.is_some() {
@@ -72,7 +72,7 @@ impl super::Agent {
                 if let Some(ref dc) = dialogue_client {
                     dc.handle_message(message);
                 }
-            }));
+            })).await;
             info!(
                 "Dialogue callback set for agent '{}'",
                 self.character_name()
@@ -97,7 +97,7 @@ impl super::Agent {
                             v_clone.update_rules(rules_clone).await;
                         });
                     }
-                }));
+                })).await;
             info!(
                 "World building rules callback set for agent '{}'",
                 self.character_name()
@@ -141,7 +141,7 @@ impl super::Agent {
                         .replace("wss://", "https://")
                         .replace("/ws", "");
                     // 更新客户端 URL
-                    self.client.update_server_url(req.ws_url.clone(), http_url);
+                    self.client.update_server_url(req.ws_url.clone(), http_url).await;
                     // 触发重连
                     self.reconnect().await?;
                     continue;
@@ -216,9 +216,10 @@ impl super::Agent {
                                 status.age()
                             );
                             // 发送最后一个 idle 意图后退出
+                            let agent_id = self.client.agent_id().await.unwrap_or_default();
                             self.client
                                 .send_intent(&Intent::idle(
-                                    self.client.agent_id().unwrap(),
+                                    agent_id,
                                     world_state.tick_id,
                                 ))
                                 .await
@@ -249,7 +250,7 @@ impl super::Agent {
         const INITIAL_DELAY_MS: u64 = 1000; // 1 秒
 
         // 获取 tick 时长，计算最大延迟（tick 的一半）
-        let tick_duration_ms = self.get_tick_duration().as_millis() as u64;
+        let tick_duration_ms = self.get_tick_duration().await.as_millis() as u64;
         let max_delay_ms = tick_duration_ms / 2;
 
         self.client.close().await;

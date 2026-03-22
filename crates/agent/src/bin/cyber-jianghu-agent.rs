@@ -549,11 +549,12 @@ async fn run_agent(port: u16) -> Result<()> {
     };
 
     // 7. 创建并运行 Agent
-    let mut agent = Agent::new(config, decision, agent_reconnect_rx);
+    let mut agent = Agent::new(config, decision, agent_reconnect_rx).await;
 
     // 设置注册回调
     let device_id_clone = device_id.clone();
     agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
+        // 注意：必须先释放读锁再获取写锁，否则会死锁
         let old_id = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(device_id_clone.read())
         });
@@ -561,7 +562,10 @@ async fn run_agent(port: u16) -> Result<()> {
             "更新 Claw API device_id: {} -> {}",
             *old_id, server_agent_id
         );
+        // 显式释放读锁
+        drop(old_id);
 
+        // 获取写锁更新 agent_id
         let mut guard = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(device_id_clone.write())
         });
