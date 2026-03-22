@@ -31,6 +31,17 @@ data:
   # ------------------------------------------------------------------
   # 先天属性
   # ------------------------------------------------------------------
+  # 属性类型说明：
+  #   - growable: 可成长属性（力量、敏捷、根骨、悟性）
+  #       * birth_range: 随机产出成长极限（上限），如 [10, 50] 表示上限在 10~50 之间随机
+  #       * initial_value: 进入游戏时的初始属性值（固定为 10）
+  #       * 需要通过经历、锻炼、学习才能从初始值增长至随机生成的上限
+  #   - static: 静态属性（魅力）
+  #       * 出生时随机（birth_range 范围内）
+  #       * 之后几乎固定不变
+  #   - dailyrandom: 每日随机属性（福缘）
+  #       * 每游戏日随机刷新
+  # ------------------------------------------------------------------
   primary:
     description: "先天属性（出生时决定，部分可成长）"
     attributes:
@@ -39,8 +50,8 @@ data:
         display_name: 力量
         description: "负重能力、外功物理伤害"
         type: growable
-        birth_range: [10, 50]
-        initial_value: 10
+        birth_range: [10, 50]  # 成长上限随机范围
+        initial_value: 10      # 初始属性值
         growth_rate: 1.0
         affects:
           - max_carry_weight
@@ -51,8 +62,8 @@ data:
         display_name: 敏捷
         description: "反应能力、洞察能力、神经与肌体敏感度"
         type: growable
-        birth_range: [10, 50]
-        initial_value: 10
+        birth_range: [10, 50]  # 成长上限随机范围
+        initial_value: 10      # 初始属性值
         growth_rate: 1.0
         affects:
           - dodge_rate
@@ -64,8 +75,8 @@ data:
         display_name: 根骨
         description: "生存韧性、环境适应力、内气速度与容量"
         type: growable
-        birth_range: [10, 50]
-        initial_value: 10
+        birth_range: [10, 50]  # 成长上限随机范围
+        initial_value: 10      # 初始属性值
         growth_rate: 0.8
         affects:
           - max_hp
@@ -77,8 +88,8 @@ data:
         display_name: 悟性
         description: "学习速度与深度、理智上限"
         type: growable
-        birth_range: [10, 50]
-        initial_value: 10
+        birth_range: [10, 50]  # 成长上限随机范围
+        initial_value: 10      # 初始属性值
         growth_rate: 1.2
         affects:
           - skill_learning_speed
@@ -88,8 +99,8 @@ data:
         name: charisma
         display_name: 魅力
         description: "人际关系第一印象、事件解决难易度"
-        type: static
-        birth_range: [10, 50]
+        type: static           # 出生随机，之后固定
+        birth_range: [10, 50]  # 随机范围
         affects:
           - social_interaction
           - event_difficulty
@@ -98,8 +109,8 @@ data:
         name: luck
         display_name: 福缘
         description: "突发事件几率、意外收获或损失几率"
-        type: dailyrandom
-        birth_range: [10, 50]
+        type: dailyrandom      # 每游戏日随机刷新
+        birth_range: [10, 50]  # 随机范围
         affects:
           - event_probability
           - surprise_gain_loss

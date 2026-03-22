@@ -80,7 +80,10 @@ pub use actions::{ActionResult, ActionType, AgentAction};
 pub use tick::TickLog;
 
 // API 响应相关
-pub use responses::{AgentRegisterRequest, AgentRegisterResponse, GameRules, HealthResponse};
+pub use responses::{
+    AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,
+    GameRules, HealthResponse,
+};
 
 // ============================================================================
 // 验证模块重导出

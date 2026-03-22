@@ -1,0 +1,88 @@
+# ============================================================================
+# Cyber-Jianghu Agent Docker Compose (Production)
+# Agent 生产环境配置 - 使用预构建镜像
+# ============================================================================
+#
+# 部署步骤：
+#
+# 1. 确保服务端已启动
+#    docker compose -f ../server/docker-compose.prod.yml up -d
+#
+# 2. 首次启动 Agent 时，会自动：
+#    - 生成设备 ID (device_id)
+#    - 向服务端注册设备并获取 auth_token
+#    - 身份信息保存到 ~/.cyber-jianghu/agent.yaml
+#
+# 3. 启动 Agent
+#    docker compose -f docker-compose.prod.yml up -d
+#
+# 4. 创建角色（两种方式）：
+#    - Web 面板: http://localhost:23340/panel/
+#    - CLI 命令: cyber-jianghu-agent character create <name>
+#
+# 5. 查看日志
+#    docker compose -f docker-compose.prod.yml logs -f agent
+#
+# 多 Agent 实例：
+# 复制 docker-compose.prod.yml 为 docker-compose.instance.yml
+# 修改 container_name、 ports、 environment
+# docker compose -f docker-compose.instance.yml up -d
+#
+# 注意：
+# - Agent 需要先登录 GHCR 获取私有镜像
+# ============================================================================
+
+services:
+  # ============================================================================
+  # Agent（HTTP 模式 - 供 OpenClaw 调用）
+  # ============================================================================
+  agent:
+    build:
+      context: ../..
+      dockerfile: ./crates/agent/Dockerfile
+    container_name: cyber-jianghu-agent
+    restart: unless-stopped
+    environment:
+      # 服务端连接配置
+      CYBER_JIANGHU_SERVER_WS_URL: ${AGENT_SERVER_URL:-ws://cyber-jianghu-server:23333/ws}
+      CYBER_JIANGHU_SERVER_HTTP_URL: ${AGENT_SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
+
+      # Agent 运行配置
+      CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-claw}
+      CYBER_JIANGHU_PORT: ${AGENT_PORT:-23340}
+
+      # 日志级别
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      # HTTP API 端口
+      - "${AGENT_PORT:-23340}:23340"
+    volumes:
+      # 配置持久化
+      - agent_config:/app/config
+      # 数据持久化
+      - agent_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - cyber-jianghu-network
+
+# ============================================================================
+# 网络配置
+# ============================================================================
+networks:
+  cyber-jianghu-network:
+    external: true
+    name: cyber-jianghu-network
+
+# ============================================================================
+# 数据卷配置
+# ============================================================================
+volumes:
+  agent_config:
+    name: cyber-jianghu-agent-config
+  agent_data:
+    name: cyber-jianghu-agent-data

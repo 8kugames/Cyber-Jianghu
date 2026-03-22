@@ -99,6 +99,7 @@ pub async fn validate_action(
 
     // Build intent for validation (not actually used in this simplified version)
     let _intent = Intent {
+        intent_id: Uuid::new_v4(),
         agent_id,
         tick_id: current_tick_id,
         thought_log: None,

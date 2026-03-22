@@ -132,7 +132,8 @@ impl StateProcessor {
                 // 应用状态变更
                 let mut all_changes_applied = true;
                 for change in &result.state_changes {
-                    let mut ctx = MutationContext::new(&self.db_pool, tick_id, &mut events);
+                    let mut ctx =
+                        MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
 
                     // 尝试使用 mutator 处理状态变更
                     let mut applied = false;
@@ -150,6 +151,7 @@ impl StateProcessor {
                             &self.db_pool,
                             tick_id,
                             change,
+                            result.intent_id,
                             &mut agent_states,
                             &mut events,
                         )
@@ -171,6 +173,18 @@ impl StateProcessor {
                     "动作执行失败: agent={}, error={}",
                     intent.agent_id, result.message
                 );
+                let event = WorldEvent {
+                    event_type: "action_result".to_string(),
+                    tick_id,
+                    description: format!("动作执行失败: {}", result.message),
+                    metadata: serde_json::json!({
+                        "action": result.action_type,
+                        "intent_id": intent.intent_id,
+                        "result": "failed",
+                        "reason": result.message,
+                    }),
+                };
+                events.push((intent.agent_id, event));
             }
 
             action_logs.push(action_log);

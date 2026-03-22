@@ -12,10 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Start development environment (Docker)
-./scripts/cyber-jianghu.sh start
+./install.sh all start
 
 # Start production environment
-./scripts/cyber-jianghu.sh start --prod
+./install.sh all start --prod
 
 # Build server (debug)
 cargo build -p cyber-jianghu-server
@@ -32,27 +32,33 @@ cargo test --workspace
 # Run single test
 cargo test -p cyber-jianghu-server test_name
 
+# Run clippy linter
+cargo clippy --workspace --all-targets
+
+# Run clippy with auto-fix
+cargo clippy --workspace --all-targets --fix --allow-dirty
+
 # Build agent with cargo install
 cargo install --path crates/agent
 
-# Run agent in HTTP mode (for OpenClaw integration)
-cyber-jianghu-agent run --mode http --port 23340
+# Run agent in Claw mode (for OpenClaw integration)
+cyber-jianghu-agent run --port 23340
 ```
 
 ### Service Management
 
 ```bash
 # View status
-./scripts/cyber-jianghu.sh status
+./install.sh all status
 
 # View logs
-./scripts/cyber-jianghu.sh logs
+./install.sh all logs
 
 # Stop services
-./scripts/cyber-jianghu.sh stop
+./install.sh all stop
 
 # Reset all data (destructive)
-./scripts/cyber-jianghu.sh reset
+./install.sh all reset
 ```
 
 ### Database
@@ -101,20 +107,17 @@ Key server modules:
 
 ### Agent Architecture
 
-The agent crate provides two integration modes:
+The agent crate provides HTTP API mode for OpenClaw integration:
 
 1. **HTTP Mode** (recommended for OpenClaw):
    - Runs headless with HTTP API on port 23340-23349
    - OpenClaw communicates via `fetch()` calls
    - No FFI compilation needed
-
-2. **Cognitive Mode** (built-in AI):
-   - Multi-stage cognitive pipeline: perception → motivation → planning → decision
-   - Built-in memory systems (working, episodic, semantic)
+   - Cognitive capabilities (narrative engine, memory, validation) exposed as HTTP API
 
 Key agent modules:
 - `src/core/` - WebSocket client to game server
-- `src/runtime/decision/` - Decision modes (http / cognitive)
+- `src/runtime/decision/` - Decision modes (http / ws)
 - `src/ai/` - AI components:
   - `cognitive/` - Narrative engine for attribute descriptions
   - `memory/` - Working, episodic, semantic memory with SQLite backends
@@ -147,6 +150,7 @@ All game mechanics are configured via YAML files in `crates/server/config/` (JSO
 - `initial_inventory.yaml` - Starting items for new agents
 - `network.yaml` - WebSocket and network settings
 - `world-building-rules.yaml` - World setting constraints
+- `display_messages.yaml` - UI display message templates
 
 ## Code Style Conventions
 
@@ -192,6 +196,14 @@ use super::builder::AgentBuilder;
 #[serde(skip_serializing_if = "Option::is_none")]  // optional fields
 ```
 
+### Rust Best Practices
+
+- **Zero-cost abstractions**: Prefer compile-time abstractions over runtime checks
+- **No panic in library code**: Use explicit error handling with `Result`
+- **Iterators over loops**: Use iterator methods instead of manual loops
+- **Follow clippy**: Run `cargo clippy` before commits
+- **Doc comments**: Include examples in documentation comments
+
 ## Important Rules
 
 1. **Server is authoritative**: Clients submit intents, server validates and executes
@@ -200,6 +212,7 @@ use super::builder::AgentBuilder;
 4. **Bugfix Rule**: Fix minimally, NEVER refactor while fixing bugs
 5. **File size limit**: Keep .rs files under 500 lines
 6. **No emoji** in code or documentation
+7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
 
 ## Key Configuration Files
 
@@ -216,7 +229,9 @@ use super::builder::AgentBuilder;
 ### Server (port 23333)
 
 - `GET /health` - Health check
+- `POST /api/v1/agent/connect` - Connect device (register/get auth token)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
+- `POST /api/v1/agent/rebirth` - Delete agent (CASCADE delete states/inventory)
 - `GET /api/dashboard/stats` - Dashboard statistics (requires admin token)
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
@@ -237,6 +252,34 @@ use super::builder::AgentBuilder;
 - `GET /api/v1/memory/recent` - Get recent memories
 - `POST /api/v1/memory/search` - Search memories
 - `POST /api/v1/memory` - Store memory
+- `GET /api/v1/tick` - Get tick status (for polling, returns tick_id, tick_duration_secs, last_update)
+
+#### Character Management (Web Panel)
+
+- `GET /api/v1/character` - Get character info (name, age, gender, status, registered_at, birth_attributes, attributes, inventory)
+- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated, with intent_summary and observer_thought)
+- `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
+- `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
+- `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)
+- `POST /api/v1/character/register` - Register new character (forward to server)
+
+#### Review System (Observer Agent)
+
+- `GET /api/v1/review/pending` - Get pending reviews (Observer Agent polls this endpoint)
+- `POST /api/v1/review/{intent_id}` - Submit review result (approved/rejected with reason)
+- `GET /api/v1/review/{intent_id}/status` - Get review status
+
+#### Configuration Management
+
+- `GET /api/v1/config` - Get current configuration (server URLs, runtime mode, port)
+- `POST /api/v1/config/reload` - Hot reload configuration from file
+- `POST /api/v1/config/server` - Set server address (triggers WebSocket reconnection)
+
+### Agent Web Panel
+
+- `GET /` or `GET /index.html` - Character creation page
+- `GET /character.html` - Character info page (displays status, registered_at, intent_summary, observer_thought)
+- `GET /manage.html` - Management page (dream injection, rebirth)
 
 ## Narrative Config Delivery
 

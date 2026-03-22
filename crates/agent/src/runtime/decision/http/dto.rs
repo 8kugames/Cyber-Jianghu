@@ -114,6 +114,12 @@ pub struct TickStatusResponse {
     pub has_new_state: bool,
     /// 距离下次 Tick 的预计秒数（如果已知）
     pub seconds_until_next_tick: Option<u64>,
-    /// 最后更新时间戳（ISO 8601）
+    /// 最后更新时间戳（ISO 8601，系统当前时间）
     pub last_updated_at: String,
+    /// 状态的 tick_id（可能与 tick_id 相同，或者没有时为 null）
+    pub state_tick_id: Option<i64>,
+    /// 状态的最后更新时间戳（ISO 8601）
+    pub state_updated_at: Option<String>,
+    /// 状态的存在时间（毫秒）
+    pub state_age_ms: Option<u64>,
 }

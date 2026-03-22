@@ -116,6 +116,11 @@ async fn main() -> Result<()> {
         let guard = game_data_cache.get();
         items::init_item_cache_from_config(&guard.items.data)?;
         info!("物品系统初始化完成，共 {} 种物品", guard.items.data.len());
+
+        // 同步物品到数据库（用于外键约束）
+        if let Err(e) = db::sync_items_from_config(&db_pool, &guard.items.data).await {
+            error!("同步物品到数据库失败: {}", e);
+        }
     }
 
     // 7. 初始化 WebSocket 连接管理器、Intent 管理器和速率限制器
@@ -225,9 +230,20 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(handlers::system::root))
         .route("/health", get(handlers::system::health_check))
+        // 设备连接（Phase 3）- 首次启动时注册设备身份
+        .route(
+            "/api/v1/agent/connect",
+            post(handlers::agent::agent_connect),
+        )
+        // 角色注册（Phase 4）- 创建游戏角色
         .route(
             "/api/v1/agent/register",
             post(handlers::agent::agent_register),
+        )
+        // 角色转生（Phase 4）- 删除角色，保留设备身份
+        .route(
+            "/api/v1/agent/rebirth",
+            post(handlers::agent::agent_rebirth),
         )
         .route(
             "/api/v1/agent/{id}/context",
@@ -279,6 +295,15 @@ async fn main() -> Result<()> {
                 axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents/cleanup",
+            post(handlers::dashboard::cleanup_offline_agents).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
                 ),
             ),
         )

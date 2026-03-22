@@ -32,17 +32,17 @@ impl ActionExecutor {
     /// 根据意图执行对应的动作
     /// 注意：验证逻辑已在调用前由 validator.rs 完成
     pub fn execute(&self, intent: &Intent, agent_state: &mut AgentState) -> ActionExecutionResult {
-        // 0. 死亡检查：死亡的 Agent 不能执行 idle 和 speak
+        // 0. 死亡检查：死亡的 Agent 将会被拒绝进入游戏
         if !agent_state.is_alive {
             return ActionExecutionResult::failure(
                 "Agent 已死亡，无法执行此动作。请重新转生入世。".to_string(),
-                intent.action_type.to_string(),
+                intent.action_type.to_string(), Some(intent.intent_id),
             );
         }
 
         // 1. 处理通用消耗
         if let Err(e) = self.consume_requirements(intent, agent_state) {
-            return ActionExecutionResult::failure(e, intent.action_type.to_string());
+            return ActionExecutionResult::failure(e, intent.action_type.to_string(), Some(intent.intent_id));
         }
 
         // 2. 执行特定逻辑（数据驱动：字符串匹配）
@@ -83,12 +83,12 @@ impl ActionExecutor {
                     // 有配置但无特殊逻辑，返回通用成功
                     ActionExecutionResult::success(
                         config.description.clone(),
-                        intent.action_type.to_string(),
+                        intent.action_type.to_string(), Some(intent.intent_id),
                     )
                 } else {
                     ActionExecutionResult::failure(
                         format!("未知的动作类型: {}", intent.action_type.as_str()),
-                        intent.action_type.to_string(),
+                        intent.action_type.to_string(), Some(intent.intent_id),
                     )
                 }
             }

@@ -1,16 +1,23 @@
 // ============================================================================
 // 物品相关数据结构
 // ============================================================================
+//
+// 注意：物品定义主要来自配置文件 (items.yaml)
+// 数据库 items 表用于 FK 约束，数据结构与之对应
+// ============================================================================
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-/// 物品类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+/// 物品类型（业务逻辑枚举）
+///
+/// 用于业务逻辑判断，数据库存储为字符串
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[sqlx(type_name = "text", rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum ItemType {
     /// 消耗品（如馒头、水）
     Consumable,
@@ -20,27 +27,31 @@ pub enum ItemType {
 
     /// 货币（如银子）
     Currency,
+
+    /// 材料（如面粉、木材）
+    Material,
+
+    /// 工具（制作时需要，不消耗）
+    Tool,
 }
 
-/// 物品效果类型（预留：物品效果系统）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[serde(rename_all = "snake_case")]
-#[sqlx(type_name = "text", rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum EffectType {
-    /// 恢复饥饿值
-    RestoreHunger,
-
-    /// 恢复口渴值
-    RestoreThirst,
-
-    /// 增加攻击力
-    IncreaseAttack,
+impl ItemType {
+    /// 从字符串解析
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "consumable" => ItemType::Consumable,
+            "weapon" => ItemType::Weapon,
+            "currency" => ItemType::Currency,
+            "material" => ItemType::Material,
+            "tool" => ItemType::Tool,
+            _ => ItemType::Consumable, // 默认值
+        }
+    }
 }
 
-/// 物品模板（预留：物品数据库表）
+/// 物品模板（数据库模型）
 ///
-/// 定义物品的基本属性和效果
+/// 对应 items 表，使用 JSONB 存储 effects 数组
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[allow(dead_code)]
 pub struct Item {
@@ -50,23 +61,34 @@ pub struct Item {
     /// 物品名称（如：馒头、水、银子、刀）
     pub name: String,
 
-    /// 物品类型
-    pub item_type: ItemType,
+    /// 物品类型 (consumable/weapon/currency/material/tool)
+    pub item_type: String,
 
-    /// 效果类型（可选）
-    pub effect_type: Option<EffectType>,
+    /// 效果列表（JSONB 数组）
+    #[sqlx(json)]
+    pub effects: Vec<ItemEffect>,
 
-    /// 效果值（如：馒头恢复饥饿值30点）
-    pub effect_value: i32,
+    /// 可堆叠数量
+    pub stack_size: i32,
 
     /// 物品描述
-    pub description: String,
+    pub description: Option<String>,
+}
 
-    /// 最大耐久度（默认 -1 表示无限）
-    pub max_durability: i32,
+/// 物品效果（数据库模型）
+///
+/// 与配置文件的 ItemEffect 结构对应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct ItemEffect {
+    /// 目标属性
+    pub attribute: String,
 
-    /// 自然衰减速率（每Tick减少的耐久度，默认 0）
-    pub decay_rate: i32,
+    /// 操作类型（add/subtract/multiply/set）
+    pub operation: String,
+
+    /// 效果值
+    pub value: JsonValue,
 }
 
 /// Agent背包中的物品（预留：背包物品查询）

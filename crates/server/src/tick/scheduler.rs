@@ -193,7 +193,9 @@ impl TickScheduler {
             .with_context(|| format!("无效的时区偏移量: {}", timezone_offset))?;
 
         let datetime = date.and_hms_opt(0, 0, 0).unwrap();
-        let datetime_with_tz = datetime.and_local_timezone(offset).single()
+        let datetime_with_tz = datetime
+            .and_local_timezone(offset)
+            .single()
             .with_context(|| format!("无法创建时区感知时间: {}", start_date_str))?;
 
         let timestamp = datetime_with_tz.timestamp();
@@ -254,9 +256,6 @@ impl TickScheduler {
         _tick_log: &mut TickLog,
     ) -> Result<(i32, i32)> {
         let start_time = Instant::now();
-
-        
-        
 
         self.event_manager.clear();
 
@@ -384,6 +383,20 @@ impl TickScheduler {
             phase2_duration
         );
 
+        // Bug #5: 告警阈值 - 单 tick 自然死亡数量异常升高时触发告警
+        let death_threshold = crate::game_data::registry::registry()
+            .map(|r| r.get().game_rules.data.ops.death_threshold)
+            .expect("game_rules 中缺失 ops.death_threshold 配置");
+
+        if dead_agents.len() > death_threshold {
+            tracing::error!(
+                "🚨 告警: 单 tick 自然死亡数量异常升高! Tick: {}, 死亡人数: {} (阈值: {})",
+                tick_id,
+                dead_agents.len(),
+                death_threshold
+            );
+        }
+
         let phase3_start = Instant::now();
         let intents = self
             .intent_collector
@@ -501,8 +514,10 @@ mod tests {
 
         // 验证：北京时间 2026-03-03 00:00:00 = UTC 2026-03-02 16:00:00
         // 预期的 UTC 时间戳
-        let expected_utc = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap()
-            .and_hms_opt(16, 0, 0).unwrap()
+        let expected_utc = NaiveDate::from_ymd_opt(2026, 3, 2)
+            .unwrap()
+            .and_hms_opt(16, 0, 0)
+            .unwrap()
             .and_utc()
             .timestamp();
 
@@ -527,10 +542,14 @@ mod tests {
         let date = NaiveDate::parse_from_str(start_date_str, "%Y-%m-%d").unwrap();
         let offset = FixedOffset::east_opt(8 * 3600).unwrap();
         let datetime = date.and_hms_opt(0, 0, 0).unwrap();
-        let game_epoch = datetime.and_local_timezone(offset).single().unwrap().timestamp();
+        let game_epoch = datetime
+            .and_local_timezone(offset)
+            .single()
+            .unwrap()
+            .timestamp();
 
-        // 假设 15 秒一个 tick
-        let tick_duration_secs: u64 = 15;
+        // 假设 60 秒一个 tick
+        let tick_duration_secs: u64 = 60;
 
         // 在北京时间 2026-03-03 00:00:00，tick_id 应该是 0
         let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;

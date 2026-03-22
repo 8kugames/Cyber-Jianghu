@@ -95,8 +95,8 @@ impl Config {
                 .unwrap_or_else(|_| "23333".to_string())
                 .parse()
                 .context("SERVER_PORT must be a valid port number")?,
-            admin_read_token: std::env::var("ADMIN_READ_TOKEN").ok(),
-            admin_write_token: std::env::var("ADMIN_WRITE_TOKEN").ok(),
+            admin_read_token: std::env::var("ADMIN_READ_TOKEN").ok().filter(|s| !s.is_empty()),
+            admin_write_token: std::env::var("ADMIN_WRITE_TOKEN").ok().filter(|s| !s.is_empty()),
         };
 
         // 从环境变量读取数据库配置（必需）
@@ -125,10 +125,19 @@ impl Config {
             anyhow::bail!("Database URL must start with 'postgres://'");
         }
 
-        // 检查是否使用默认密码"changeme"
-        if self.database.url.contains(":changeme@") || self.database.url.contains(":changeme/") {
+        // 检查是否在生产环境使用默认密码"changeme"
+        // 只在生产环境(ENVIRONMENT=production)时检查，否则允许开发环境使用默认密码
+        let is_production = std::env::var("ENVIRONMENT")
+            .map(|v| v == "production")
+            .unwrap_or(false);
+
+        if is_production && (self.database.url.contains(":changeme@") || self.database.url.contains(":changeme/")) {
             anyhow::bail!(
-                "Database password 'changeme' is not allowed in production. Please set a secure password using DATABASE_URL environment variable."
+                "Database password 'changeme' is not allowed in production.\n\
+                Solutions:\n\
+                1. Use './install.sh server start --prod' which auto-generates a secure password\n\
+                2. Or manually set DB_PASSWORD in crates/server/.env file\n\
+                3. Or set DATABASE_URL environment variable with a secure password"
             );
         }
 

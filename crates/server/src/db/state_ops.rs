@@ -20,50 +20,6 @@ use crate::models::{AgentAction, AgentState, TickLog};
 // AgentState 相关操作
 // ============================================================================
 
-/// 创建Agent状态记录
-///
-/// 已废弃：请使用 `register_agent_transactional` 替代，它在单个事务中创建 Agent 和状态
-///
-/// # 参数
-/// - pool: 数据库连接池
-/// - state: Agent状态
-///
-/// # 返回
-/// - Ok(AgentState): 创建的状态记录
-/// - Err: 创建失败
-#[deprecated(since = "0.1.0", note = "请使用 `register_agent_transactional` 替代")]
-#[allow(dead_code)]
-pub async fn create_agent_state(pool: &PgPool, state: &AgentState) -> Result<AgentState> {
-    debug!(
-        "创建Agent状态: agent={}, tick={}",
-        state.agent_id, state.tick_id
-    );
-
-    // 将组件化的 attributes 序列化为 JSONB
-    let attributes_json =
-        serde_json::to_value(state.get_attributes_for_protocol()).context("序列化属性失败")?;
-
-    let state = sqlx::query_as::<Postgres, AgentState>(
-        r#"
-        INSERT INTO agent_states (
-            agent_id, tick_id, attributes, node_id, is_alive
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
-        "#,
-    )
-    .bind(state.agent_id)
-    .bind(state.tick_id)
-    .bind(attributes_json)
-    .bind(&state.node_id)
-    .bind(state.is_alive)
-    .fetch_one(pool)
-    .await
-    .context("创建 Agent 状态失败")?;
-
-    Ok(state)
-}
-
 /// 获取所有存活Agent的最新状态
 ///
 /// 这是Tick引擎在阶段2（加载Agent状态）时使用的核心函数

@@ -180,6 +180,9 @@ pub enum ServerMessage {
 pub enum ClientMessage {
     /// 意图上报
     Intent {
+        /// Intent 唯一 ID（可选，如果未提供则服务端自动生成）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        intent_id: Option<Uuid>,
         /// Tick 编号
         tick_id: i64,
         /// 思考日志
@@ -219,6 +222,7 @@ impl ClientMessage {
     /// 从 Intent 创建 ClientMessage
     pub fn from_intent(intent: crate::types::Intent) -> Self {
         ClientMessage::Intent {
+            intent_id: Some(intent.intent_id),
             tick_id: intent.tick_id,
             thought_log: intent.thought_log,
             action_type: intent.action_type.to_string(),

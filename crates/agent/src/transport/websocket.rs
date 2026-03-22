@@ -37,6 +37,8 @@ pub use crate::config::ServerConfig;
 /// WebSocket 客户端（纯 I/O）
 pub struct WebSocketClient {
     config: ServerConfig,
+    /// 设备身份（device_id + auth_token）
+    identity: Option<(Uuid, String)>,
     state: Arc<RwLock<ConnectionState>>,
 }
 
@@ -44,7 +46,7 @@ pub struct WebSocketClient {
 struct ConnectionState {
     ws: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     connected: bool,
-    /// Agent ID（注册后设置）
+    /// Agent ID（注册后设置，即角色ID）
     agent_id: Option<Uuid>,
     /// 游戏规则
     game_rules: Option<GameRules>,
@@ -63,6 +65,7 @@ impl WebSocketClient {
     pub fn new(config: ServerConfig) -> Self {
         Self {
             config,
+            identity: None,
             state: Arc::new(RwLock::new(ConnectionState {
                 ws: None,
                 connected: false,
@@ -76,10 +79,24 @@ impl WebSocketClient {
         }
     }
 
+    /// 设置设备身份
+    pub fn set_identity(&mut self, device_id: Uuid, auth_token: String) {
+        self.identity = Some((device_id, auth_token));
+    }
+
+    /// 更新服务器 URL（用于热切换）
+    pub fn update_server_url(&mut self, ws_url: String, http_url: String) {
+        self.config.ws_url = ws_url;
+        self.config.http_url = http_url;
+    }
+
     /// 连接到服务器
     pub async fn connect(&self) -> Result<()> {
         // 使用带 token 的 URL 进行连接
-        let url_with_token = self.config.ws_url_with_token();
+        let (device_id, auth_token) = self.identity.as_ref()
+            .context("Identity not set. Call set_identity() first.")?;
+
+        let url_with_token = self.config.ws_url_with_token(*device_id, auth_token);
         let url = Url::parse(&url_with_token).context("Invalid WebSocket URL")?;
 
         info!("Connecting to {}", self.config.ws_url);
@@ -392,73 +409,99 @@ impl WebSocketClient {
 // ============================================================================
 
 /// Agent 客户端（兼容旧接口）
+///
+/// 使用 tokio::sync::RwLock 替代 std::sync::RwLock，避免跨 await 持有同步锁导致死锁
 pub struct AgentClient {
-    client: WebSocketClient,
+    client: RwLock<WebSocketClient>,
 }
 
 impl AgentClient {
     pub fn new(config: ServerConfig) -> Self {
         Self {
-            client: WebSocketClient::new(config),
+            client: RwLock::new(WebSocketClient::new(config)),
         }
     }
 
+    /// 设置设备身份
+    pub async fn set_identity(&self, device_id: Uuid, auth_token: String) {
+        let mut client = self.client.write().await;
+        client.set_identity(device_id, auth_token);
+    }
+
+    /// 更新服务器 URL（用于热切换）
+    pub async fn update_server_url(&self, ws_url: String, http_url: String) {
+        let mut client = self.client.write().await;
+        client.update_server_url(ws_url, http_url);
+    }
+
     pub async fn connect(&self) -> Result<()> {
-        self.client.connect().await
+        let client = self.client.read().await;
+        client.connect().await
     }
 
     pub async fn receive_world_state(&self) -> Result<WorldState> {
-        self.client.receive_world_state().await
+        let client = self.client.read().await;
+        client.receive_world_state().await
     }
 
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
-        self.client.send_intent(intent).await
+        let client = self.client.read().await;
+        client.send_intent(intent).await
     }
 
     pub async fn is_connected(&self) -> bool {
-        self.client.is_connected().await
+        let client = self.client.read().await;
+        client.is_connected().await
     }
 
     /// 获取 Agent ID
-    pub fn agent_id(&self) -> Option<Uuid> {
-        self.client.agent_id()
+    pub async fn agent_id(&self) -> Option<Uuid> {
+        let client = self.client.read().await;
+        client.agent_id()
     }
 
     /// 等待 Agent ID 可用（注册后）
     pub async fn wait_for_agent_id(&self) -> Result<Uuid> {
-        self.client.wait_for_agent_id().await
+        let client = self.client.read().await;
+        client.wait_for_agent_id().await
     }
 
     /// 设置游戏规则回调
-    pub fn set_game_rules_callback(&self, callback: Arc<dyn Fn(GameRules) + Send + Sync>) {
-        self.client.set_game_rules_callback(callback);
+    pub async fn set_game_rules_callback(&self, callback: Arc<dyn Fn(GameRules) + Send + Sync>) {
+        let client = self.client.read().await;
+        client.set_game_rules_callback(callback);
     }
 
     /// 设置对话消息回调
-    pub fn set_dialogue_callback(&self, callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>) {
-        self.client.set_dialogue_callback(callback);
+    pub async fn set_dialogue_callback(&self, callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>) {
+        let client = self.client.read().await;
+        client.set_dialogue_callback(callback);
     }
 
     /// 设置世界观规则回调
-    pub fn set_world_building_rules_callback(
+    pub async fn set_world_building_rules_callback(
         &self,
         callback: Arc<dyn Fn(WorldBuildingRules) + Send + Sync>,
     ) {
-        self.client.set_world_building_rules_callback(callback);
+        let client = self.client.read().await;
+        client.set_world_building_rules_callback(callback);
     }
 
     /// 等待注册响应
     pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
-        self.client.wait_for_registration().await
+        let client = self.client.read().await;
+        client.wait_for_registration().await
     }
 
     /// 获取游戏规则
-    pub fn game_rules(&self) -> Option<GameRules> {
-        self.client.game_rules()
+    pub async fn game_rules(&self) -> Option<GameRules> {
+        let client = self.client.read().await;
+        client.game_rules()
     }
 
     /// 关闭连接
     pub async fn close(&self) {
-        self.client.disconnect().await
+        let client = self.client.read().await;
+        client.disconnect().await
     }
 }

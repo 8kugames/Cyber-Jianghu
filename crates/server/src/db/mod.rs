@@ -29,6 +29,7 @@
 mod agent_ops;
 mod common;
 mod ground_item_ops;
+mod item_ops;
 mod state_ops;
 
 // 导出公共API - 连接池初始化和工具函数
@@ -36,8 +37,9 @@ pub use common::init_db_pool;
 
 // 导出公共API - Agent操作
 pub use agent_ops::{
-    get_agent_by_token, get_all_agents, get_intent_timeout_stats, register_agent_transactional,
-    update_agent_location, update_agent_online,
+    connect_device, get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
+    register_agent_transactional, rebirth_agent, update_agent_location, update_agent_online,
+    update_device_last_seen, verify_device_token, DeviceConnectResult, RebirthResult,
 };
 
 // 导出公共API - AgentState操作
@@ -54,6 +56,9 @@ pub use state_ops::batch_insert_action_logs;
 
 // 导出公共API - 地面物品操作
 pub use ground_item_ops::{add_ground_item, get_ground_items_by_node, remove_ground_item};
+
+// 导出公共API - 物品操作
+pub use item_ops::sync_items_from_config;
 
 // 数据库连接池类型别名
 pub type DbPool = sqlx::PgPool;

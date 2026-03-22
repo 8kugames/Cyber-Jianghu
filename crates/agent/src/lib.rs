@@ -100,7 +100,10 @@ pub use ai::validator::{
 };
 
 // 配置
-pub use config::{AgentConfig, Config, ServerConfig};
+pub use config::{
+    AgentRole, CharacterConfig, Config, GoalsConfig, IdentityConfig, LanguageStyleConfig,
+    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig,
+};
 pub use models::{ActionType, Intent, WorldEvent, WorldState};
 
 // 错误类型（从 common 合并)

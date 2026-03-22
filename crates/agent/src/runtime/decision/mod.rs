@@ -10,18 +10,38 @@
 // - 无副作用
 // - 可组合
 //
-// ## 可用模式
-// - `http`: HTTP API 服务器（用于 OpenClaw 集成）
-// - `cognitive`: 多阶段认知引擎（内置 LLM 决策）
+// ## Agent 架构说明
+//
+// Agent 仅支持 Claw 模式，外部调度器（如 OpenClaw）通过 WebSocket + HTTP API
+// 与 Agent 通信。Agent 不内置 LLM 调用，LLM 决策由外部调度器负责。
+//
+// ### 通信协议
+// - WebSocket `/ws`: OpenClaw 连接，Agent 推送 Tick，OpenClaw 提交 Intent
+// - HTTP `/api/v1/*`: 数据查询接口（状态、属性、记忆等）
+//
+// ### 超时处理
+// - Tick 截止时间到达时，OpenClaw 未提交 Intent → Agent 自动提交 idle Intent
+//
+// ### Cognitive 阶段参考
+// - 四阶段认知框架（Perception → Motivation → Planning → Decision）定义在
+//   `core/cognitive/stages.rs`，作为 OpenClaw 实现者的参考文档
+// - Agent 通过 `ai/cognitive/narrative.rs` 生成叙事化上下文，引导 OpenClaw 的 LLM 推理
 
 pub mod cognitive;
 pub mod http;
+pub mod ws;
 
-// 重导出
+// 重导出 cognitive
 pub use cognitive::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_retry};
+// 重导出 http
 pub use http::{
     HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest, create_http_state,
     http_decision, run_http_server,
+};
+// 重导出 ws
+pub use ws::{
+    WsDecisionConfig, WsDecisionState, WsSharedState, ws_decision, ws_router,
+    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO,
 };
 
 use cyber_jianghu_protocol::{Intent, WorldState};

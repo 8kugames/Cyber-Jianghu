@@ -7,6 +7,7 @@
 
 use anyhow::Result;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -20,6 +21,7 @@ use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{PersonaInfo, Validator};
 use crate::config::Config;
 use crate::models::{Intent, WorldState};
+use crate::runtime::decision::http::ReconnectRequest;
 use crate::transport::websocket::AgentClient;
 
 use super::builder::AgentBuilder;
@@ -95,6 +97,13 @@ pub struct Agent {
 
     /// 注册成功回调（可选，用于更新外部状态如 HTTP API 的 agent_id）
     pub(crate) registration_callback: Option<std::sync::Arc<dyn Fn(Uuid) + Send + Sync>>,
+
+    /// 重连退避计数器（用于逐步降低重试频率）
+    pub(crate) reconnect_backoff: u32,
+
+    /// 重连请求接收通道（可选，用于热切换触发重连）
+    /// Claw 模式下由 HTTP API 触发重连，其他模式为 None
+    pub(crate) reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
 }
 
 impl Agent {
@@ -106,8 +115,23 @@ impl Agent {
     /// 创建新的 Agent（简单构造函数）
     ///
     /// 注意：此构造函数不初始化记忆系统。如需启用记忆系统，请使用 `Agent::builder()`。
-    pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
+    ///
+    /// # Arguments
+    /// * `config` - Agent 配置
+    /// * `decision_callback` - 决策回调函数
+    /// * `reconnect_rx` - 重连请求接收通道（Claw 模式下用于热切换）
+    pub async fn new(
+        config: Config,
+        decision_callback: DecisionCallback,
+        reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+    ) -> Self {
         let client = AgentClient::new(config.server.clone());
+
+        // 设置设备身份（如果已存在）
+        if let Some(ref identity) = config.identity {
+            client.set_identity(identity.device_id, identity.auth_token.clone()).await;
+        }
+
         Self {
             config,
             client,
@@ -121,13 +145,22 @@ impl Agent {
             lifespan_calculator: None,
             validator_config: ValidatorConfig::default(),
             registration_callback: None,
+            reconnect_backoff: 0,  // 初始为 0，重连成功后重置
+            reconnect_rx,
         }
+    }
+
+    /// 获取角色名称（如果已创建）
+    pub(crate) fn character_name(&self) -> &str {
+        self.config.agent.as_ref()
+            .map(|c| c.name.as_str())
+            .unwrap_or("(未创建)")
     }
 
     /// 连接服务端
     pub async fn connect(&mut self) -> Result<()> {
         self.client.connect().await?;
-        info!("Agent '{}' connected to server", self.config.agent.name);
+        info!("Agent '{}' connected to server", self.character_name());
         Ok(())
     }
 
@@ -136,7 +169,7 @@ impl Agent {
     /// 必须在连接之后调用，因为需要 agent_id
     pub fn set_dialogue_client(&mut self, dialogue_client: DialogueClient) {
         self.dialogue_client = Some(dialogue_client);
-        info!("Dialogue client set for agent '{}'", self.config.agent.name);
+        info!("Dialogue client set for agent '{}'", self.character_name());
     }
 
     /// 设置关系存储
@@ -144,13 +177,13 @@ impl Agent {
         self.relationship_store = Some(relationship_store);
         info!(
             "Relationship store set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
     /// 获取 Agent ID
-    pub fn agent_id(&self) -> Option<Uuid> {
-        self.client.agent_id()
+    pub async fn agent_id(&self) -> Option<Uuid> {
+        self.client.agent_id().await
     }
 
     /// 等待 Agent ID 可用（注册后）
@@ -176,7 +209,7 @@ impl Agent {
     /// 设置验证器
     pub fn set_validator(&mut self, validator: std::sync::Arc<dyn Validator>) {
         self.validator = Some(validator);
-        info!("Validator set for agent '{}'", self.config.agent.name);
+        info!("Validator set for agent '{}'", self.character_name());
     }
 
     /// 设置带反馈的决策回调
@@ -184,7 +217,7 @@ impl Agent {
         self.decision_with_feedback_callback = Some(callback);
         info!(
             "Decision with feedback callback set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -193,7 +226,7 @@ impl Agent {
         self.lifespan_calculator = Some(calculator);
         info!(
             "Lifespan calculator set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -210,7 +243,7 @@ impl Agent {
         self.registration_callback = Some(callback);
         info!(
             "Registration callback set for agent '{}'",
-            self.config.agent.name
+            self.character_name()
         );
     }
 
@@ -263,7 +296,7 @@ impl Agent {
     /// 设置记忆管理器
     pub fn set_memory_manager(&mut self, manager: MemoryManager) {
         self.memory_manager = Some(manager);
-        info!("Memory manager set for agent '{}'", self.config.agent.name);
+        info!("Memory manager set for agent '{}'", self.character_name());
     }
 
     /// 获取记忆管理器的可变引用
@@ -318,25 +351,38 @@ impl Agent {
     }
 
     /// 获取 tick 持续时间
-    pub(crate) fn get_tick_duration(&self) -> Duration {
+    pub(crate) async fn get_tick_duration(&self) -> Duration {
         self.client
             .game_rules()
+            .await
             .map(|r| Duration::from_secs(r.tick_duration_secs))
             .unwrap_or(Duration::from_secs(60))
     }
 
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
-        let persona_config = &self.config.agent.persona;
-        PersonaInfo {
-            gender: persona_config.gender.clone(),
-            age: self
-                .lifespan_calculator
-                .as_ref()
-                .map(|c| c.current_age())
-                .unwrap_or(persona_config.initial_age),
-            personality: persona_config.personality.clone(),
-            values: persona_config.values.clone(),
+        match &self.config.agent {
+            Some(character) => {
+                PersonaInfo {
+                    gender: character.gender.clone(),
+                    age: self
+                        .lifespan_calculator
+                        .as_ref()
+                        .map(|c| c.current_age())
+                        .unwrap_or(character.age),
+                    personality: character.personality.clone(),
+                    values: character.values.clone(),
+                }
+            }
+            None => {
+                // 未创建角色时的默认人设
+                PersonaInfo {
+                    gender: "未知".to_string(),
+                    age: 25,
+                    personality: vec![],
+                    values: vec![],
+                }
+            }
         }
     }
 
@@ -395,7 +441,7 @@ impl Agent {
         use tracing::warn;
 
         let tick_start = Instant::now();
-        let tick_duration = self.get_tick_duration();
+        let tick_duration = self.get_tick_duration().await;
         let min_retry_time =
             std::time::Duration::from_secs(self.validator_config.min_retry_time_secs);
         let max_attempts = self.validator_config.max_retry_attempts;
@@ -413,16 +459,18 @@ impl Agent {
 
             if remaining < min_retry_time {
                 warn!("Tick time exhausted, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
                 return Ok(Intent::idle(
-                    self.client.agent_id().unwrap_or_default(),
+                    agent_id,
                     world_state.tick_id,
                 ));
             }
 
             if attempt > max_attempts {
                 warn!("Max validation attempts reached, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
                 return Ok(Intent::idle(
-                    self.client.agent_id().unwrap_or_default(),
+                    agent_id,
                     world_state.tick_id,
                 ));
             }
@@ -482,8 +530,9 @@ impl Agent {
                         >= self.validator_config.consecutive_rejection_threshold
                     {
                         warn!("Too many consecutive rejections, forcing idle");
+                        let agent_id = self.client.agent_id().await.unwrap_or_default();
                         return Ok(Intent::idle(
-                            self.client.agent_id().unwrap_or_default(),
+                            agent_id,
                             world_state.tick_id,
                         ));
                     }

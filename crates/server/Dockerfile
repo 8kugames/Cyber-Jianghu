@@ -38,16 +38,17 @@ COPY crates/agent/Cargo.toml ./crates/agent/
 
 RUN mkdir -p ./.cargo \
     && echo '[source.crates-io]\n\
-replace-with = "aliyun"\n\
-\n\
-[source.aliyun]\n\
-registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
+    replace-with = "aliyun"\n\
+    \n\
+    [source.aliyun]\n\
+    registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
 # 创建空的 src 目录，用于下载依赖（仅 server 需要的依赖）
-RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src && \
+RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
     echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
     echo "fn main() {}" > crates/server/src/main.rs && \
-    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs
+    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
+    echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
 # 构建依赖（这一步会被缓存）
 RUN cargo build --release -p cyber-jianghu-server
@@ -76,6 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libssl3 \
     libpq5 \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非root用户
@@ -94,6 +96,9 @@ COPY crates/server/config /app/config
 
 # 复制静态文件（Dashboard 管理面板）
 COPY crates/server/static /app/static
+
+# 复制数据库迁移文件
+COPY crates/server/migrations/*.sql /app/migrations/
 
 # 复制 entrypoint 脚本并设置权限
 COPY crates/server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
