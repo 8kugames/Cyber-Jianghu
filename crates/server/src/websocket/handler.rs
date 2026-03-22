@@ -365,7 +365,7 @@ const TICK_WINDOW_SIZE: i64 = 2;
 /// 处理意图上报
 ///
 /// 将 Intent 保存到 IntentManager（临时缓存）
-/// 包含速率限制检查和 tick_id 校验
+/// 包含速率限制检查、Agent 存活检查和 tick_id 校验
 async fn handle_intent(
     agent_id: uuid::Uuid,
     req_intent_id: Option<uuid::Uuid>,
@@ -380,6 +380,13 @@ async fn handle_intent(
     if !crate::state::check_rate_limit(&state.rate_limiter, agent_id).await {
         warn!("Rate limit exceeded for agent {}", agent_id);
         return Err("Rate limit exceeded. Please wait before sending another intent.".into());
+    }
+
+    // Agent 存活检查：死亡的 Agent 不允许提交意图
+    let agent_state = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await?;
+    if !agent_state.is_alive {
+        warn!("Intent rejected: agent {} is dead", agent_id);
+        return Err("Agent 已死亡，无法执行此动作。请重新转生入世。".into());
     }
 
     // tick_id 校验：获取当前服务器 tick
