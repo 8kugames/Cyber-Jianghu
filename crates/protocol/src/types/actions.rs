@@ -104,6 +104,10 @@ impl FromStr for ActionType {
 /// 每个 Tick，Agent 通过 WebSocket 上报意图，包含要执行的动作
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Intent {
+    /// Intent 唯一 ID，用于全链路追踪
+    #[serde(default = "uuid::Uuid::new_v4")]
+    pub intent_id: Uuid,
+
     /// Agent ID
     pub agent_id: Uuid,
 
@@ -141,6 +145,26 @@ impl Intent {
         action_data: Option<serde_json::Value>,
     ) -> Self {
         Self {
+            intent_id: Uuid::new_v4(),
+            agent_id,
+            tick_id,
+            thought_log: None,
+            action_type: action_type.into(),
+            action_data,
+            priority: 5,
+        }
+    }
+
+    /// 创建带 intent_id 的通用意图（数据驱动）
+    pub fn new_with_id(
+        intent_id: Uuid,
+        agent_id: Uuid,
+        tick_id: i64,
+        action_type: impl Into<ActionType>,
+        action_data: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            intent_id,
             agent_id,
             tick_id,
             thought_log: None,

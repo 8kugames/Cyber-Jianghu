@@ -14,4 +14,9 @@ impl StateRegistry {
             .map(|r| r.get().game_rules.data.validation.clone())
             .expect("配置未初始化，请确保 game_rules.json 已正确加载")
     }
+
+    /// 获取属性配置
+    pub fn get_attributes_config() -> Option<crate::game_data::types::UnifiedAttributesConfig> {
+        registry().map(|r| r.get().attributes.clone())
+    }
 }

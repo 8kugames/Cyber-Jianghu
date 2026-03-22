@@ -17,16 +17,24 @@ pub struct MutationContext<'a> {
     pub db_pool: &'a DbPool,
     /// 当前 Tick ID
     pub tick_id: i64,
+    /// 触发此变更的 Intent ID
+    pub intent_id: Option<Uuid>,
     /// 事件收集器
     pub events: &'a mut Vec<(Uuid, WorldEvent)>,
 }
 
 impl<'a> MutationContext<'a> {
     /// 创建新的变更上下文
-    pub fn new(db_pool: &'a DbPool, tick_id: i64, events: &'a mut Vec<(Uuid, WorldEvent)>) -> Self {
+    pub fn new(
+        db_pool: &'a DbPool,
+        tick_id: i64,
+        intent_id: Option<Uuid>,
+        events: &'a mut Vec<(Uuid, WorldEvent)>,
+    ) -> Self {
         Self {
             db_pool,
             tick_id,
+            intent_id,
             events,
         }
     }
@@ -194,7 +202,7 @@ mod tests {
     async fn test_mutation_context() {
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
         let mut events = vec![];
-        let ctx = MutationContext::new(&db_pool, 1, &mut events);
+        let ctx = MutationContext::new(&db_pool, 1, None, &mut events);
 
         assert_eq!(ctx.tick_id, 1);
     }
@@ -207,7 +215,7 @@ mod tests {
         let mut states = vec![make_test_agent(agent_id)];
         let mut events = vec![];
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let mut ctx = MutationContext::new(&db_pool, 1, &mut events);
+        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
 
         let change = StateChange::LocationChanged {
             agent_id,

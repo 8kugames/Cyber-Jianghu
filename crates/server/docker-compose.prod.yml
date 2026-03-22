@@ -1,13 +1,13 @@
 # ============================================================================
-# Cyber-Jianghu Production Docker Compose
-# Uses pre-built images from GitHub Container Registry
+# Cyber-Jianghu Server Docker Compose (Production)
+# 服务端生产环境配置 - 使用预构建镜像
 # ============================================================================
 #
 # 部署步骤：
 #
 # 1. 首次部署（在服务器上）
 #    git clone https://github.com/8kugames/cyber-jianghu.git
-#    cd cyber-jianghu
+#    cd cyber-jianghu/crates/server
 #    cp .env.example .env
 #    # 编辑 .env，修改 DB_PASSWORD 等敏感配置
 #
@@ -25,12 +25,13 @@
 #    docker compose -f docker-compose.prod.yml up -d
 #
 # 注意：
-# - 数据库端口不对外暴露，仅容器内部访问
-# - 日志持久化到 ./logs 目录
-# - 首次启动会自动执行数据库迁移
+# - 数据库端口不对外暴露， 仅容器内部访问
 # ============================================================================
 
 services:
+  # ============================================================================
+  # PostgreSQL 数据库
+  # ============================================================================
   postgres:
     image: postgres:15-alpine
     container_name: cyber-jianghu-postgres
@@ -41,14 +42,7 @@ services:
       POSTGRES_DB: cyber_jianghu
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # 挂载所有迁移文件（按文件名排序执行）
-      - ./crates/server/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
-      - ./crates/server/migrations/002_jsonb_attributes.sql:/docker-entrypoint-initdb.d/002_jsonb_attributes.sql:ro
-      - ./crates/server/migrations/003_ground_items.sql:/docker-entrypoint-initdb.d/003_ground_items.sql:ro
-      - ./crates/server/migrations/004_drop_legacy_columns.sql:/docker-entrypoint-initdb.d/004_drop_legacy_columns.sql:ro
-    # 生产环境不暴露数据库端口，仅容器内部访问
-    # ports:
-    #   - "5432:5432"
+    # 生产环境不暴露数据库端口
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -57,8 +51,13 @@ services:
     networks:
       - cyber-jianghu-network
 
+  # ============================================================================
+  # Rust 服务端
+  # ============================================================================
   server:
-    image: ghcr.io/8kugames/cyber-jianghu-server
+    build:
+      context: ../..
+      dockerfile: ./crates/server/Dockerfile
     container_name: cyber-jianghu-server
     restart: unless-stopped
     depends_on:
@@ -71,11 +70,12 @@ services:
       - TICK_DURATION_SECS=${TICK_DURATION_SECS:-60}
       - ADMIN_READ_TOKEN=${ADMIN_READ_TOKEN:-}
       - ADMIN_WRITE_TOKEN=${ADMIN_WRITE_TOKEN:-}
+      - ENVIRONMENT=production
     ports:
       - "${SERVER_PORT:-23333}:23333"
     volumes:
-      # 配置文件挂载（数据驱动架构 - 支持热插拔）
-      - ./crates/server/config:/app/config:ro
+      # 配置文件挂载
+      - ./config:/app/config
       # 日志持久化
       - ./logs:/app/logs
     healthcheck:
