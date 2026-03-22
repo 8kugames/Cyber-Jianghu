@@ -404,6 +404,7 @@ impl DownstreamMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cyber_jianghu_protocol::GameRules;
 
     fn create_test_world_state() -> WorldState {
         // 使用 JSON 构造测试数据，避免直接构造复杂结构
@@ -643,5 +644,203 @@ mod tests {
             }
             _ => panic!("Expected ReviewResult message"),
         }
+    }
+
+    // === from_server_message 转换测试 ===
+
+    #[test]
+    fn test_from_server_message_error() {
+        let server_msg = ServerMessage::Error {
+            message: "Agent 已死亡，无法执行此动作。".to_string(),
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_some());
+
+        match result.unwrap() {
+            DownstreamMessage::ServerError { code, message, tick_id } => {
+                assert_eq!(code, ServerErrorCode::AgentDead);
+                assert!(message.contains("死亡"));
+                assert!(tick_id.is_none()); // 消息中没有 tick_id
+            }
+            _ => panic!("Expected ServerError"),
+        }
+    }
+
+    #[test]
+    fn test_from_server_message_error_with_tick() {
+        let server_msg = ServerMessage::Error {
+            message: "tick 105: invalid action".to_string(),
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_some());
+
+        match result.unwrap() {
+            DownstreamMessage::ServerError { code, message, tick_id } => {
+                assert_eq!(tick_id, Some(105));
+                assert!(message.contains("tick 105"));
+            }
+            _ => panic!("Expected ServerError"),
+        }
+    }
+
+    #[test]
+    fn test_from_server_message_dialogue_request() {
+        let from_id = Uuid::new_v4();
+        let to_id = Uuid::new_v4();
+
+        let server_msg = ServerMessage::Dialogue {
+            message: DialogueMessage::Request {
+                from_agent_id: from_id,
+                to_agent_id: to_id,
+                opening_remark: "少侠，可否借一步说话？".to_string(),
+            },
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_some());
+
+        match result.unwrap() {
+            DownstreamMessage::ServerDialogue {
+                dialogue_type,
+                from_agent_id,
+                to_agent_id,
+                session_id,
+                opening_remark,
+                content,
+            } => {
+                assert_eq!(dialogue_type, "request");
+                assert_eq!(from_agent_id, from_id);
+                assert_eq!(to_agent_id, Some(to_id));
+                assert!(session_id.is_none());
+                assert_eq!(opening_remark, Some("少侠，可否借一步说话？".to_string()));
+                assert!(content.is_none());
+            }
+            _ => panic!("Expected ServerDialogue"),
+        }
+    }
+
+    #[test]
+    fn test_from_server_message_dialogue_content() {
+        let from_id = Uuid::new_v4();
+
+        let server_msg = ServerMessage::Dialogue {
+            message: DialogueMessage::Content {
+                from_agent_id: from_id,
+                session_id: "session-123".to_string(),
+                content: "今天天气不错。".to_string(),
+            },
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_some());
+
+        match result.unwrap() {
+            DownstreamMessage::ServerDialogue {
+                dialogue_type,
+                from_agent_id,
+                to_agent_id,
+                session_id,
+                opening_remark,
+                content,
+            } => {
+                assert_eq!(dialogue_type, "content");
+                assert_eq!(from_agent_id, from_id);
+                assert!(to_agent_id.is_none());
+                assert_eq!(session_id, Some("session-123".to_string()));
+                assert!(opening_remark.is_none());
+                assert_eq!(content, Some("今天天气不错。".to_string()));
+            }
+            _ => panic!("Expected ServerDialogue"),
+        }
+    }
+
+    #[test]
+    fn test_from_server_message_game_rules_update() {
+        let server_msg = ServerMessage::GameRulesUpdate {
+            game_rules: GameRules {
+                tick_duration_secs: 30,
+                available_actions: vec![],
+                initial_items: vec![],
+                version: "0.0.6".to_string(),
+                last_updated: "2024-03-22T12:00:00Z".to_string(),
+            },
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_some());
+
+        match result.unwrap() {
+            DownstreamMessage::ServerGameRulesUpdate {
+                tick_duration_secs,
+                version,
+                last_updated,
+            } => {
+                assert_eq!(tick_duration_secs, 30);
+                assert_eq!(version, "0.0.6");
+                assert_eq!(last_updated, "2024-03-22T12:00:00Z");
+            }
+            _ => panic!("Expected ServerGameRulesUpdate"),
+        }
+    }
+
+    #[test]
+    fn test_from_server_message_world_state_skipped() {
+        // WorldState 不应该被转换（已有专门的 Tick 处理）
+        let server_msg = ServerMessage::WorldState {
+            data: create_test_world_state(),
+        };
+
+        let result = DownstreamMessage::from_server_message(server_msg, 100);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_error_code_agent_dead() {
+        assert_eq!(
+            DownstreamMessage::parse_error_code("Agent 已死亡"),
+            ServerErrorCode::AgentDead
+        );
+        assert_eq!(
+            DownstreamMessage::parse_error_code("Agent is dead"),
+            ServerErrorCode::AgentDead
+        );
+        assert_eq!(
+            DownstreamMessage::parse_error_code("角色死亡"),
+            ServerErrorCode::AgentDead
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_rate_limited() {
+        assert_eq!(
+            DownstreamMessage::parse_error_code("Rate limit exceeded"),
+            ServerErrorCode::RateLimited
+        );
+        assert_eq!(
+            DownstreamMessage::parse_error_code("速率限制"),
+            ServerErrorCode::RateLimited
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_tick_expired() {
+        assert_eq!(
+            DownstreamMessage::parse_error_code("tick too far in future"),
+            ServerErrorCode::TickExpired
+        );
+        assert_eq!(
+            DownstreamMessage::parse_error_code("tick 已过期"),
+            ServerErrorCode::TickExpired
+        );
+    }
+
+    #[test]
+    fn test_parse_error_code_unknown() {
+        assert_eq!(
+            DownstreamMessage::parse_error_code("Some unknown error"),
+            ServerErrorCode::Unknown
+        );
     }
 }
