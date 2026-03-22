@@ -9,7 +9,7 @@
 // - `notify/` - 通知机制
 
 pub mod decision;
-pub mod notify;
+// notify module removed (OpenClaw notifier dead code)
 
 // 重导出常用的决策类型和函数
 pub use decision::{
@@ -19,4 +19,4 @@ pub use decision::{
     run_http_server,
 };
 
-pub use notify::OpenClawNotifier;
+// OpenClawNotifier removed

@@ -7,10 +7,9 @@
 
 mod client;
 mod direct_client;
-mod openclaw_client;
+// openclaw_client removed (dead code)
 
 pub use client::mock;
 pub use client::mock::MockLlmClient;
 pub use client::{LlmClient, LlmClientExt};
 pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
-pub use openclaw_client::OpenClawLLMClient;
