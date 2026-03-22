@@ -81,6 +81,34 @@ pub async fn get_latest_state_tick_id(pool: &PgPool) -> Result<i64> {
     Ok(tick_id)
 }
 
+/// 获取指定 Agent 的最新状态
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - agent_id: Agent ID
+///
+/// # 返回
+/// - Ok(AgentState): Agent 的最新状态
+/// - Err: 查询失败或 Agent 不存在
+pub async fn get_latest_agent_state(pool: &PgPool, agent_id: uuid::Uuid) -> Result<AgentState> {
+    debug!("获取 Agent {} 的最新状态", agent_id);
+
+    let state = sqlx::query_as::<Postgres, AgentState>(
+        r#"
+        SELECT * FROM agent_states
+        WHERE agent_id = $1
+        ORDER BY tick_id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_one(pool)
+    .await
+    .context(format!("获取 Agent {} 最新状态失败", agent_id))?;
+
+    Ok(state)
+}
+
 /// 获取最后一次Tick的时间戳
 ///
 /// 用于计算当前Tick的进度，实现平滑时间插值。

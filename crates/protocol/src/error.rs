@@ -9,7 +9,7 @@ use uuid::Uuid;
 pub enum GameError {
     // ========== 动作相关错误 (原 ActionError) ==========
     /// Agent 已死亡
-    #[error("Agent {agent_id} is dead")]
+    #[error("Agent 已死亡，无法执行此动作。请重新转生入世。")]
     AgentDead { agent_id: Uuid },
 
     /// 目标 Agent 未找到
@@ -170,7 +170,7 @@ mod tests {
     fn test_game_error_agent_dead() {
         let agent_id = Uuid::new_v4();
         let err = GameError::AgentDead { agent_id };
-        assert!(err.to_string().contains("is dead"));
+        assert!(err.to_string().contains("已死亡"));
     }
 
     #[test]
