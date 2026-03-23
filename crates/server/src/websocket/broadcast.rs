@@ -64,3 +64,40 @@ pub async fn forward_dialogue_message(
 
     Ok(())
 }
+
+/// 向指定 Agent 发送死亡通知
+///
+/// 通过 WebSocket 连接发送 AgentDied 消息
+pub async fn send_agent_died_notification(
+    agent_id: uuid::Uuid,
+    cause: String,
+    description: String,
+    location: String,
+    tick_id: i64,
+    died_at: i64,
+    connection_manager: &ConnectionManager,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let connections = connection_manager.read().await;
+
+    if let Some(connection) = connections.get(&agent_id) {
+        let msg = ServerMessage::AgentDied {
+            agent_id,
+            cause,
+            description,
+            location,
+            tick_id,
+            died_at,
+            rebirth_delay_ticks: 0, // Current design: immediate rebirth
+        };
+        let json = serde_json::to_string(&msg)?;
+        connection.send(Message::Text(json.into())).await?;
+        debug!("AgentDied notification sent to agent {}", agent_id);
+    } else {
+        warn!(
+            "Agent {} is not online, cannot send AgentDied notification",
+            agent_id
+        );
+    }
+
+    Ok(())
+}
