@@ -141,3 +141,12 @@ pub struct InitialItem {
     /// 物品描述
     pub description: String,
 }
+
+/// 死亡信息（用于内部传递）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeathInfo {
+    /// 死亡原因代码
+    pub cause: String,
+    /// 死亡描述
+    pub message: String,
+}
