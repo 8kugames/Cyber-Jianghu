@@ -164,6 +164,8 @@ data:
         death_condition:
           operator: equals
           value: 0
+        death_cause: "hunger"
+        death_message: "你因长期饥饿而倒下，意识逐渐模糊..."
         primary_attribute_deps: []
 
       thirst:
@@ -179,6 +181,8 @@ data:
         death_condition:
           operator: equals
           value: 0
+        death_cause: "thirst"
+        death_message: "你因严重脱水而倒下，眼前一片黑暗..."
         primary_attribute_deps: []
 
       qi:
