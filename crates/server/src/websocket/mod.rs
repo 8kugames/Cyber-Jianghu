@@ -42,7 +42,7 @@ pub use connection::{
 pub use handler::websocket_handler;
 
 // 广播功能
-pub use broadcast::send_world_state;
+pub use broadcast::{send_agent_died_notification, send_world_state};
 
 // ============================================================================
 // 测试
