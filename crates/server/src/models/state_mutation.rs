@@ -45,9 +45,11 @@ impl AgentState {
     /// 2. recovery_formula: 恢复公式（如 stamina 每tick恢复 5 + constitution * 0.1）
     ///
     /// 季节修饰系数从 time.json 的季节配置中读取（数据驱动）
-    pub fn apply_decay(&mut self, tick_id: i64) {
+    ///
+    /// 返回值：如果Agent死亡，返回 Some(attr_name) 表示触发死亡的属性名；否则返回 None
+    pub fn apply_decay(&mut self, tick_id: i64) -> Option<String> {
         if !self.is_alive {
-            return;
+            return None;
         }
 
         let context = self.get_formula_context();
@@ -87,14 +89,15 @@ impl AgentState {
                         attr_name,
                         tick_id
                     );
-                    break;
+                    // 返回触发死亡的属性名
+                    return Some(attr_name);
                 }
             }
         }
 
         // 如果已死亡，不再处理恢复
         if !self.is_alive {
-            return;
+            return None;
         }
 
         // 2. 处理恢复属性 (recovery_formula)
@@ -141,6 +144,8 @@ impl AgentState {
                 }
             }
         }
+
+        None
     }
 
     /// 恢复属性值（通用方法，委托给 StatusComponent）

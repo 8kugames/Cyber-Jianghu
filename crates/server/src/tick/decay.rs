@@ -48,7 +48,8 @@ pub fn apply_decay_and_environmental_damage(
 
         // 应用基础生理值衰减
         // 传递 tick_id，以便 apply_decay 可以获取季节信息
-        state.apply_decay(tick_id);
+        // TODO: Task 3.2 will use the death_attr_name for enhanced death notifications
+        let _death_attr_name = state.apply_decay(tick_id);
 
         // 应用环境压力伤害
         // 只有存活时才应用
@@ -135,7 +136,7 @@ mod tests {
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 初始体力值
 
         // 应用衰减（饥饿 -5, 口渴 -5, 体力 +5）
-        state.apply_decay(1);
+        let _ = state.apply_decay(1);
         assert_eq!(state.status.get("hunger").unwrap_or(0), 45); // 50 - 5
         assert_eq!(state.status.get("thirst").unwrap_or(0), 45); // 50 - 5
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，保持 100
