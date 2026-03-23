@@ -349,8 +349,28 @@ impl TickScheduler {
         // 2. 处理自然衰减和环境伤害（在意图处理之后）
         // 修复: 衰减在意图处理之后执行，这样物品效果可以先生效
         let phase2_2_start = Instant::now();
-        let (mut updated_states, dead_agents, mut decay_events, _death_notifications) =
+        let (mut updated_states, dead_agents, mut decay_events, death_notifications) =
             decay::apply_decay_and_environmental_damage(tick_id, intent_processed_states);
+
+
+        // Push death notifications immediately to agents
+        for notification in death_notifications {
+            if let Err(e) = crate::websocket::send_agent_died_notification(
+                notification.agent_id,
+                notification.cause,
+                notification.description,
+                notification.location,
+                notification.tick_id,
+                notification.died_at,
+                &self.connection_manager,
+            ).await
+            {
+                warn!(
+                    "Failed to send death notification to agent {}: {}",
+                    notification.agent_id, e
+                );
+            }
+        }
 
         // 将时间事件合并到衰减事件中
         decay_events.extend(time_events);
