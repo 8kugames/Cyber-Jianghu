@@ -44,6 +44,10 @@ pub fn create_test_config_dir() -> TempDir {
                     "max_system_prompt_length": 102400,
                     "max_speak_content_length": 500
                 },
+                "ops": {
+                    "death_threshold": 10,
+                    "offline_cleanup_days": 30
+                },
                 "world": {
                     "name": "赛博江湖",
                     "description": "一个充满武侠与科技的世界"

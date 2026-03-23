@@ -104,6 +104,9 @@ pub struct Agent {
     /// 重连请求接收通道（可选，用于热切换触发重连）
     /// Claw 模式下由 HTTP API 触发重连，WebSocket 模式为 None
     pub(crate) reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+
+    /// 死亡是否已报告（避免重复日志）
+    pub(crate) death_reported: bool,
 }
 
 impl Agent {
@@ -145,8 +148,9 @@ impl Agent {
             lifespan_calculator: None,
             validator_config: ValidatorConfig::default(),
             registration_callback: None,
-            reconnect_backoff: 0,  // 初始为 0，重连成功后重置
+            reconnect_backoff: 0,
             reconnect_rx,
+            death_reported: false,
         }
     }
 
