@@ -145,6 +145,27 @@ pub enum ServerMessage {
         #[serde(flatten)]
         message: DialogueMessage,
     },
+
+    /// Agent 死亡通知
+    ///
+    /// 当 Agent 因任何原因死亡时，Server 立即推送此消息。
+    /// Agent 收到后透传给 OpenClaw，触发重生流程。
+    AgentDied {
+        /// 死亡的 Agent ID
+        agent_id: Uuid,
+        /// 死亡原因代码（来自配置：hunger, thirst, environmental, combat, etc.）
+        cause: String,
+        /// 死亡描述（来自配置，叙事化文本）
+        description: String,
+        /// 死亡位置（node_id）
+        location: String,
+        /// 当前 tick
+        tick_id: i64,
+        /// 死亡时间戳（Unix timestamp, 毫秒）
+        died_at: i64,
+        /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
+        rebirth_delay_ticks: i32,
+    },
 }
 
 // ============================================================================
@@ -452,5 +473,54 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "registered");
         assert!(parsed.get("world_building_rules").is_some());
+    }
+
+    #[test]
+    fn test_server_message_agent_died() {
+        let msg = ServerMessage::AgentDied {
+            agent_id: Uuid::nil(),
+            cause: "hunger".to_string(),
+            description: "因饥饿而死".to_string(),
+            location: "tavern".to_string(),
+            tick_id: 42,
+            died_at: 1234567890000,
+            rebirth_delay_ticks: 10,
+        };
+
+        let json = msg.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Verify type is serialized as "agent_died" (snake_case)
+        assert_eq!(parsed["type"], "agent_died");
+        assert_eq!(parsed["agent_id"], "00000000-0000-0000-0000-000000000000");
+        assert_eq!(parsed["cause"], "hunger");
+        assert_eq!(parsed["description"], "因饥饿而死");
+        assert_eq!(parsed["location"], "tavern");
+        assert_eq!(parsed["tick_id"], 42);
+        assert_eq!(parsed["died_at"], 1234567890000_i64);
+        assert_eq!(parsed["rebirth_delay_ticks"], 10);
+
+        // Verify round-trip deserialization
+        let deserialized: ServerMessage = ServerMessage::from_json(&json).unwrap();
+        match deserialized {
+            ServerMessage::AgentDied {
+                agent_id,
+                cause,
+                description,
+                location,
+                tick_id,
+                died_at,
+                rebirth_delay_ticks,
+            } => {
+                assert_eq!(agent_id, Uuid::nil());
+                assert_eq!(cause, "hunger");
+                assert_eq!(description, "因饥饿而死");
+                assert_eq!(location, "tavern");
+                assert_eq!(tick_id, 42);
+                assert_eq!(died_at, 1234567890000);
+                assert_eq!(rebirth_delay_ticks, 10);
+            }
+            _ => panic!("Unexpected message type"),
+        }
     }
 }
