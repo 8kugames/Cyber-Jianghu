@@ -24,7 +24,7 @@ mod tests {
         assert_eq!(state.is_alive);
 
         // 应用衰减（饥饿 -5, 口渴 -5, 体力 +5）
-        state.apply_decay(1);
+        let _ = state.apply_decay(1);
         assert_eq!(state.status.get("hunger").unwrap_or(0), 45);
         assert_eq!(state.status.get("thirst").unwrap_or(0), 45);
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，不再增加
@@ -41,7 +41,7 @@ mod tests {
         let mut loop_count = 0;
         for _ in 0..20 {
             if state.is_alive {
-                state.apply_decay(1);
+                let _ = state.apply_decay(1);
                 loop_count += 1;
             }
         }
@@ -71,7 +71,7 @@ mod tests {
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
         // 应用衰减
-        state.apply_decay(1);
+        let _ = state.apply_decay(1);
         assert_eq!(state.status.get("hunger").unwrap_or(0), 45);
         assert_eq!(state.status.get("thirst").unwrap_or(0), 45);
 
@@ -154,7 +154,7 @@ mod tests {
         println!("Initial stamina: {:?}", state.status.get("stamina"));
 
         // 应用衰减（stamina 应该 +5）
-        state.apply_decay(1);
+        let _ = state.apply_decay(1);
 
         println!("After decay stamina: {:?}", state.status.get("stamina"));
 
