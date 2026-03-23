@@ -349,7 +349,7 @@ impl TickScheduler {
         // 2. 处理自然衰减和环境伤害（在意图处理之后）
         // 修复: 衰减在意图处理之后执行，这样物品效果可以先生效
         let phase2_2_start = Instant::now();
-        let (mut updated_states, dead_agents, mut decay_events) =
+        let (mut updated_states, dead_agents, mut decay_events, _death_notifications) =
             decay::apply_decay_and_environmental_damage(tick_id, intent_processed_states);
 
         // 将时间事件合并到衰减事件中
