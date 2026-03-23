@@ -402,4 +402,55 @@ mod tests {
         assert!(registry.is_connected("lobby", "kitchen"));
         assert_eq!(registry.get_travel_cost("lobby", "kitchen"), Some(1));
     }
+
+    // ========================================================================
+    // get_death_info tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_death_info_returns_cause_and_message() {
+        use crate::game_data::test_utils::init_test_registry;
+
+        // Initialize test registry with death info configured
+        init_test_registry();
+        let cache = super::super::registry::registry().expect("test registry should be initialized");
+
+        // Test hunger death info
+        let info = cache.get_death_info("hunger");
+        assert!(info.is_some(), "hunger should have death info");
+        let info = info.unwrap();
+        assert_eq!(info.cause, "hunger");
+        assert!(info.message.contains("饥饿"), "death message should mention hunger");
+
+        // Test thirst death info
+        let info = cache.get_death_info("thirst");
+        assert!(info.is_some(), "thirst should have death info");
+        let info = info.unwrap();
+        assert_eq!(info.cause, "thirst");
+        assert!(info.message.contains("脱水"), "death message should mention dehydration");
+    }
+
+    #[test]
+    fn test_get_death_info_returns_none_for_non_death_attribute() {
+        use crate::game_data::test_utils::init_test_registry;
+
+        init_test_registry();
+        let cache = super::super::registry::registry().expect("test registry should be initialized");
+
+        // Non-death attribute should return None
+        let info = cache.get_death_info("hp");
+        assert!(info.is_none(), "hp should not have death info");
+    }
+
+    #[test]
+    fn test_get_death_info_returns_none_for_unknown_attribute() {
+        use crate::game_data::test_utils::init_test_registry;
+
+        init_test_registry();
+        let cache = super::super::registry::registry().expect("test registry should be initialized");
+
+        // Unknown attribute should return None
+        let info = cache.get_death_info("nonexistent");
+        assert!(info.is_none(), "unknown attribute should return None");
+    }
 }
