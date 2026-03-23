@@ -127,6 +127,12 @@ pub struct StatusAttributeDefinition {
     /// 死亡条件
     pub death_condition: Option<DeathCondition>,
 
+    /// 死亡原因代码（数据驱动）
+    pub death_cause: Option<String>,
+
+    /// 死亡描述（叙事化文本）
+    pub death_message: Option<String>,
+
     /// 依赖的主属性列表
     pub primary_attribute_deps: Option<Vec<String>>,
 }
