@@ -8,6 +8,7 @@
 // - 应用基础生理值衰减（饥饿、口渴、体力）
 // - 应用环境压力伤害
 // - 处理死亡Agent的检测和清理
+// - 生成死亡通知用于立即推送
 // ============================================================================
 
 use tracing::{debug, warn};
@@ -16,6 +17,47 @@ use uuid::Uuid;
 use crate::models::AgentState;
 
 use crate::game_data::registry_or_panic;
+use cyber_jianghu_protocol::DeathInfo;
+
+/// 死亡通知（用于立即推送）
+///
+/// 当Agent死亡时创建，包含死亡相关的完整信息
+/// 用于通过WebSocket立即推送给Agent
+#[derive(Debug, Clone)]
+pub struct DeathNotification {
+    /// 死亡Agent的ID
+    pub agent_id: Uuid,
+    /// 死亡原因代码（如 "hunger", "thirst", "hp"）
+    pub cause: String,
+    /// 死亡描述信息
+    pub description: String,
+    /// 死亡地点
+    pub location: String,
+    /// 死亡发生的Tick ID
+    pub tick_id: i64,
+    /// 死亡时间戳（毫秒）
+    pub died_at: i64,
+}
+
+impl DeathNotification {
+    /// 创建新的死亡通知
+    pub fn new(
+        agent_id: Uuid,
+        cause: String,
+        description: String,
+        location: String,
+        tick_id: i64,
+    ) -> Self {
+        Self {
+            agent_id,
+            cause,
+            description,
+            location,
+            tick_id,
+            died_at: chrono::Utc::now().timestamp_millis(),
+        }
+    }
+}
 
 /// 应用生理值衰减和环境压力伤害
 ///
@@ -26,7 +68,7 @@ use crate::game_data::registry_or_panic;
 /// - 基于当前位置的 environmental_damage 配置
 /// - 如果 > 0，则扣除相应 HP
 ///
-/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表)
+/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
 pub fn apply_decay_and_environmental_damage(
     tick_id: i64,
     mut agent_states: Vec<AgentState>,
@@ -34,9 +76,11 @@ pub fn apply_decay_and_environmental_damage(
     Vec<AgentState>,
     Vec<Uuid>,
     Vec<(Uuid, crate::models::WorldEvent)>,
+    Vec<DeathNotification>,
 ) {
     let mut dead_agents = Vec::new();
     let mut events = Vec::new();
+    let mut death_notifications = Vec::new();
 
     // 获取位置注册表
     let registry = registry_or_panic();
@@ -45,11 +89,55 @@ pub fn apply_decay_and_environmental_damage(
     for state in &mut agent_states {
         let was_alive = state.is_alive;
         let agent_id = state.agent_id;
+        let location = state.node_id.clone();
 
         // 应用基础生理值衰减
         // 传递 tick_id，以便 apply_decay 可以获取季节信息
-        // TODO: Task 3.2 will use the death_attr_name for enhanced death notifications
-        let _death_attr_name = state.apply_decay(tick_id);
+        // 返回触发死亡的属性名（如果有）
+        let death_attr_name = state.apply_decay(tick_id);
+
+        // 如果Agent因衰减死亡，创建死亡通知
+        if let Some(attr_name) = death_attr_name {
+            if was_alive {
+                dead_agents.push(agent_id);
+
+                // 获取死亡信息
+                let death_info = registry.get_death_info(&attr_name);
+
+                let (cause, description) = match death_info {
+                    Some(DeathInfo { cause, message }) => (cause, message),
+                    None => ("unknown".to_string(), "你死了...".to_string()),
+                };
+
+                warn!(
+                    "Agent {} 已死亡（{}），将清空背包",
+                    agent_id, cause
+                );
+
+                // 创建死亡事件
+                let death_event = crate::models::WorldEvent {
+                    event_type: "action_result".to_string(),
+                    tick_id,
+                    description: description.clone(),
+                    metadata: serde_json::json!({
+                        "cause": &cause,
+                        "location": &location,
+                    }),
+                };
+                events.push((agent_id, death_event));
+
+                // 创建死亡通知
+                let notification = DeathNotification::new(
+                    agent_id,
+                    cause,
+                    description,
+                    location,
+                    tick_id,
+                );
+                death_notifications.push(notification);
+            }
+            continue; // 已死亡，跳过环境伤害检查
+        }
 
         // 应用环境压力伤害
         // 只有存活时才应用
@@ -75,35 +163,54 @@ pub fn apply_decay_and_environmental_damage(
                     description: format!("你在 {} 受到环境伤害，HP 减少 {}", state.node_id, damage),
                     metadata: serde_json::json!({
                         "cause": "environmental_damage",
-                        "location": state.node_id,
+                        "location": state.node_id.clone(),
                         "damage": damage,
                     }),
                 };
                 events.push((agent_id, event));
+
+                // 检查环境伤害是否导致死亡
+                if was_alive && !state.is_alive {
+                    dead_agents.push(agent_id);
+
+                    // 环境伤害死亡使用 hp 作为原因
+                    let death_info = registry.get_death_info("hp");
+
+                    let (cause, description) = match death_info {
+                        Some(DeathInfo { cause, message }) => (cause, message),
+                        None => ("environmental_damage".to_string(), "你因环境伤害而死亡".to_string()),
+                    };
+
+                    warn!(
+                        "Agent {} 已死亡（{}），将清空背包",
+                        agent_id, cause
+                    );
+
+                    // 创建死亡事件
+                    let death_event = crate::models::WorldEvent {
+                        event_type: "action_result".to_string(),
+                        tick_id,
+                        description: description.clone(),
+                        metadata: serde_json::json!({
+                            "cause": &cause,
+                            "location": &state.node_id,
+                        }),
+                    };
+                    events.push((agent_id, death_event));
+
+                    // 创建死亡通知
+                    let notification = DeathNotification::new(
+                        agent_id,
+                        cause,
+                        description,
+                        state.node_id.clone(),
+                        tick_id,
+                    );
+                    death_notifications.push(notification);
+                }
             }
-        }
-
-        // 如果Agent刚刚死亡（从存活变为死亡），记录下来
-        if was_alive && !state.is_alive {
-            warn!(
-                "Agent {} 已死亡（饥饿、口渴或环境伤害），将清空背包",
-                agent_id
-            );
-            dead_agents.push(agent_id);
-
-            // 记录死亡事件
-            let death_event = crate::models::WorldEvent {
-                event_type: "action_result".to_string(),
-                tick_id,
-                description: "你因饥饿、口渴或环境伤害而死亡".to_string(),
-                metadata: serde_json::json!({
-                    "cause": "death_by_natural_causes",
-                    "location": state.node_id,
-                }),
-            };
-            events.push((agent_id, death_event));
-        } else if !state.is_alive {
-            // 已经死亡的Agent
+        } else if !was_alive {
+            // 已经死亡的Agent（在本次tick开始前就已死亡）
             debug!("Agent {} 已经死亡", agent_id);
         }
     }
@@ -117,7 +224,7 @@ pub fn apply_decay_and_environmental_damage(
     // 3. 如果 durability <= 0，则移除物品
     // 4. 发送物品损坏通知
 
-    (agent_states, dead_agents, events)
+    (agent_states, dead_agents, events, death_notifications)
 }
 
 #[cfg(test)]
