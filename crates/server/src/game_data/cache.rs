@@ -6,7 +6,7 @@
 // ============================================================================
 
 use super::types::GameData;
-use cyber_jianghu_protocol::{LocationEdge, LocationGraph, LocationNode};
+use cyber_jianghu_protocol::{DeathInfo, LocationEdge, LocationGraph, LocationNode};
 use std::sync::Arc;
 
 /// 配置缓存
@@ -81,6 +81,19 @@ impl GameDataCache {
     #[allow(dead_code)]
     pub fn clone_arc(&self) -> Arc<std::sync::RwLock<GameData>> {
         Arc::clone(&self.data)
+    }
+
+    /// 获取属性的死亡信息
+    ///
+    /// 从统一属性配置中获取死亡原因和描述
+    pub fn get_death_info(&self, attr_name: &str) -> Option<DeathInfo> {
+        let config = self.get();
+        let status_def = config.attributes.data.status.attributes.get(attr_name)?;
+
+        let cause = status_def.death_cause.clone()?;
+        let message = status_def.death_message.clone()?;
+
+        Some(DeathInfo { cause, message })
     }
 }
 
