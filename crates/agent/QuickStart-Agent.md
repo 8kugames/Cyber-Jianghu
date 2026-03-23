@@ -102,7 +102,25 @@ OpenClaw（外置大脑）**必须**通过 WebSocket 连接 Agent：
 1. 启动 Agent（Claw 模式）
 2. OpenClaw 连接 WebSocket：`ws://localhost:23340/ws`
 3. 接收实时 Tick 消息并响应
-4. 通过 WebSocket 提交意图
+4. **通过 WebSocket 提交意图**（禁止使用 HTTP API）
+
+> ⚠️ **禁止使用 HTTP API 提交意图**
+>
+> `POST /api/v1/intent` 仅用于调试，存在时序问题。
+> Server 只接受当前 tick 的意图，HTTP 轮询无法保证实时性。
+
+### WebSocket 消息格式
+
+```json
+// 接收 Tick
+{"type": "tick", "tick_id": 123, "deadline_ms": 50000, "state": {...}}
+
+// 提交意图
+{"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "思考..."}
+
+// 接收错误
+{"type": "server_error", "code": "agent_dead", "message": "Agent 已死亡"}
+```
 
 HTTP API 用于辅助功能（数据查询、Web 面板等）：
 - `GET /api/v1/context` - 获取叙事上下文

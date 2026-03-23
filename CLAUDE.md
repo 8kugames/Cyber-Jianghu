@@ -106,12 +106,18 @@ The server is the authoritative "physics engine" of the world:
 - **Action System**: Data-driven action validation and execution
 - **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
 
-**Tick Processing Flow**:
-1. Collect intents from all connected agents
-2. Validate each intent against game rules and action constraints
-3. Execute valid intents in deterministic order
-4. Update world state (positions, attributes, inventory)
-5. Broadcast new WorldState to all agents
+**Tick Processing Flow** (60-second configurable cycle):
+```
+意图收集 --> 验证 --> 冲突解析 --> 执行 --> 状态更新 --> 衰减处理 --> 广播 --> 持久化
+```
+1. **Collect intents** - Only accept intents with current tick_id
+2. **Validate** - Check agent alive, action legal, resources sufficient
+3. **Resolve conflicts** - Priority ordering, position/resource conflicts
+4. **Execute** - Apply actions in deterministic order
+5. **Update state** - Apply attribute changes, generate events
+6. **Decay** - Hunger, thirst, item durability
+7. **Broadcast** - Push WorldState to all agents
+8. **Persist** - Save to PostgreSQL
 
 Key server modules:
 - `src/tick/` - Tick loop and intent processing
@@ -123,6 +129,15 @@ Key server modules:
 ### Agent Architecture
 
 The agent crate provides WebSocket + HTTP API for OpenClaw integration:
+
+> ⚠️ **CRITICAL: WebSocket is REQUIRED for intent submission**
+>
+> OpenClaw **must** use WebSocket (`ws://localhost:23340/ws`) to submit intents.
+> HTTP API `POST /api/v1/intent` is for debugging only and has timing issues.
+>
+> **Why**: Server only accepts intents with the *current* tick_id. HTTP polling
+> cannot guarantee real-time tick synchronization. WebSocket provides immediate
+> tick notifications.
 
 1. **WebSocket (Required)**:
    - OpenClaw **must** connect via WebSocket to ensure Tick synchronization
@@ -159,6 +174,18 @@ The `protocol` crate defines all shared types:
 - `WorldState` - Complete world snapshot sent each tick
 - `Intent` - Agent decision structure
 - `NarrativeConfig` - Attribute threshold descriptions (shared between server and agent)
+
+**OpenClaw WebSocket Message Format** (Agent <-> OpenClaw):
+```json
+// Downstream: Tick notification
+{"type": "tick", "tick_id": 123, "deadline_ms": 50000, "state": {...}, "context": "..."}
+
+// Upstream: Intent submission (MUST match current tick_id)
+{"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "..."}
+
+// Downstream: Server error
+{"type": "server_error", "code": "agent_dead", "message": "...", "tick_id": 123}
+```
 
 ### Data-Driven Design
 
@@ -282,12 +309,14 @@ use super::builder::AgentBuilder;
 
 ### Agent HTTP API (port 23340-23349, auxiliary to WebSocket)
 
+> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws`) 提交意图，HTTP API 仅用于调试和数据查询。
+
 - `GET /api/v1` - API discovery endpoint (returns all available APIs with examples)
 - `GET /api/v1/health` - Health check
 - `GET /api/v1/state` - Get current WorldState
 - `GET /api/v1/context` - Get narrative context (Markdown format, recommended for LLM)
 - `GET /api/v1/attributes` - Dream glimpse: get attribute values (forbidden to store in memory)
-- `POST /api/v1/intent` - Submit intent to game server
+- `POST /api/v1/intent` - ⚠️ Submit intent (debugging only, use WebSocket for production)
 - `POST /api/v1/validate` - Validate action before submission
 - `GET /api/v1/relationship/list` - Get all relationships
 - `GET /api/v1/relationship/{id}` - Get specific relationship
@@ -343,6 +372,8 @@ This ensures agent can function in production without accessing server's develop
 - WebSocket is used for real-time communication (use WSS in production)
 - The tick system drives game time forward
 - Server Admin dashboard is available at `http://localhost:23333/admin` (requires token from logs or .env)
+- Agent config stored at `~/.cyber-jianghu/agent.yaml` (or `$CYBER_JIANGHU_CONFIG_DIR/agent.yaml`)
+- Agent auto-detects server URL changes and re-registers identity
 
 ## Quick Start Guides
 

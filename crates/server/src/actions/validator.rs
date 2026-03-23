@@ -385,6 +385,7 @@ mod tests {
         action_data: Option<serde_json::Value>,
     ) -> Intent {
         Intent {
+            intent_id: Uuid::new_v4(),
             agent_id: Uuid::new_v4(),
             tick_id: 1,
             thought_log: None,
