@@ -29,8 +29,9 @@
 ### 重要说明
 
 - 错误消息通过 WebSocket 传递
-- Agent 的 HTTP API (`POST /api/v1/intent`) 返回 `{"status": "submitted"}` 后立即结束
-- OpenClaw 需要通过其他方式感知错误（如检查 WorldState 中的死亡事件）
+- **OpenClaw 必须通过 WebSocket 提交意图**，不能使用 HTTP API
+- Agent 的 HTTP API `POST /api/v1/intent` **仅用于调试**，存在时序问题
+- OpenClaw 通过 Agent 的 WebSocket 接收 `server_error` 消息感知错误
 
 ## 转生流程
 

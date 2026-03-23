@@ -159,24 +159,27 @@ impl super::Agent {
                         }
                     };
 
-                    // 1.5 检查是否死亡
-                    if let Some(death_event) = world_state.events_log.iter().find(|e| {
-                        if let Some(cause) = e.metadata.get("cause")
-                            && let Some(cause_str) = cause.as_str() {
-                                return cause_str.starts_with("death");
-                            }
-                        if let Some(msg_type) = e.metadata.get("type")
-                            && let Some(type_str) = msg_type.as_str() {
-                                return type_str == "death_notification";
-                            }
-                        false
-                    }) {
-                        warn!(
-                            "Agent '{}' has died: {}",
-                            self.character_name(), death_event.description
-                        );
-                        // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
-                        // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
+                    // 1.5 检查是否死亡（只报告一次）
+                    if !self.death_reported {
+                        if let Some(death_event) = world_state.events_log.iter().find(|e| {
+                            if let Some(cause) = e.metadata.get("cause")
+                                && let Some(cause_str) = cause.as_str() {
+                                    return cause_str.starts_with("death");
+                                }
+                            if let Some(msg_type) = e.metadata.get("type")
+                                && let Some(type_str) = msg_type.as_str() {
+                                    return type_str == "death_notification";
+                                }
+                            false
+                        }) {
+                            warn!(
+                                "Agent '{}' has died: {}",
+                                self.character_name(), death_event.description
+                            );
+                            self.death_reported = true;
+                            // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
+                            // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
+                        }
                     }
 
                     // 2. 处理事件并更新记忆
@@ -233,6 +236,11 @@ impl super::Agent {
                         error!("Failed to send intent: {}", e);
                         // 尝试重连
                         self.reconnect().await?;
+                    } else {
+                        info!(
+                            "Intent sent successfully: tick={}, action={}, agent={}",
+                            intent.tick_id, intent.action_type, intent.agent_id
+                        );
                     }
                 }
             }

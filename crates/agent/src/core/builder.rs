@@ -185,6 +185,7 @@ impl AgentBuilder {
             registration_callback: None,
             reconnect_backoff: 0,
             reconnect_rx: None,  // Builder 创建的 Agent 不使用热切换
+            death_reported: false,
         }
     }
 }

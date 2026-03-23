@@ -36,7 +36,7 @@ pub fn load_game_rules<P: AsRef<Path>>(config_dir: P) -> Result<UnifiedGameRules
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_data::loaders::config_format::{ConfigFormat, parse_config};
+    use crate::game_data::loaders::config_format::{parse_config, ConfigFormat};
     use std::fs;
     use tempfile::TempDir;
 
@@ -70,6 +70,10 @@ mod tests {
                         "max_agent_name_length": 100,
                         "max_system_prompt_length": 102400,
                         "max_speak_content_length": 500
+                    },
+                    "ops": {
+                        "death_threshold": 10,
+                        "offline_cleanup_days": 30
                     }
                 }
             }"#,
@@ -101,6 +105,9 @@ data:
     max_agent_name_length: 100
     max_system_prompt_length: 102400
     max_speak_content_length: 500
+  ops:
+    death_threshold: 10
+    offline_cleanup_days: 30
 "#;
 
         let config: UnifiedGameRulesConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();

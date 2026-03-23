@@ -35,6 +35,19 @@ pub struct IdentityConfig {
 
     /// Server 返回的认证令牌
     pub auth_token: String,
+
+    /// 注册时的服务器 HTTP URL（用于检测服务器切换）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
+}
+
+impl IdentityConfig {
+    /// 检查身份是否匹配当前服务器
+    ///
+    /// 如果身份中没有记录 server_url（旧版本配置），则认为不匹配
+    pub fn matches_server(&self, server_url: &str) -> bool {
+        self.server_url.as_deref() == Some(server_url)
+    }
 }
 
 // ============================================================================
@@ -543,6 +556,26 @@ impl Config {
     /// 检查 Agent 是否已注册身份
     pub fn has_identity(&self) -> bool {
         self.identity.is_some()
+    }
+
+    /// 检查身份是否匹配当前服务器
+    ///
+    /// 返回 (has_identity, needs_reset):
+    /// - has_identity: 是否有身份
+    /// - needs_reset: 是否需要重置（服务器地址变化）
+    pub fn check_identity_server_match(&self) -> (bool, bool) {
+        match &self.identity {
+            None => (false, false),
+            Some(identity) => {
+                let matches = identity.matches_server(&self.server.http_url);
+                (true, !matches)
+            }
+        }
+    }
+
+    /// 清除身份（用于服务器切换时重新注册）
+    pub fn clear_identity(&mut self) {
+        self.identity = None;
     }
 
     /// 检查是否已创建角色

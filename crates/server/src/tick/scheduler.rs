@@ -270,8 +270,6 @@ impl TickScheduler {
             phase1_duration
         );
 
-        let phase2_start = Instant::now();
-
         // 1. 记录系统事件：当前时间/季节广播
         let mut time_events = Vec::new();
         if let Some(time_display) =
@@ -314,9 +312,45 @@ impl TickScheduler {
             }
         }
 
-        // 2. 处理自然衰减和环境伤害
+        // 2. 先处理意图（物品效果），再处理衰减
+        // 修复: 物品效果应该先于衰减执行，避免玩家使用物品后仍然死亡的问题
+        let phase2_1_start = Instant::now();
+        let intents = self
+            .intent_collector
+            .collect_intents(&self.intent_manager, tick_id, &agent_states)
+            .await
+            .context("收集意图失败")?;
+        let (intent_processed_states, executed_actions, processor_events, action_logs) = self
+            .state_processor
+            .process_intents(tick_id, agent_states, &intents)
+            .await
+            .context("结算意图失败")?;
+
+        for (agent_id, event) in processor_events {
+            self.event_manager.add_event_for_agent(agent_id, event);
+        }
+
+        if !action_logs.is_empty() {
+            if let Err(e) = crate::db::batch_insert_action_logs(&self.db_pool, &action_logs).await {
+                warn!("批量插入动作日志失败: {}", e);
+            } else {
+                debug!("动作日志已保存: {} 条", action_logs.len());
+            }
+        }
+
+        let phase2_1_duration = phase2_1_start.elapsed();
+        info!(
+            "阶段2.1完成 - 结算意图: {}个意图, {}个动作, 耗时: {:?}",
+            intents.len(),
+            executed_actions,
+            phase2_1_duration
+        );
+
+        // 2. 处理自然衰减和环境伤害（在意图处理之后）
+        // 修复: 衰减在意图处理之后执行，这样物品效果可以先生效
+        let phase2_2_start = Instant::now();
         let (mut updated_states, dead_agents, mut decay_events) =
-            decay::apply_decay_and_environmental_damage(tick_id, agent_states);
+            decay::apply_decay_and_environmental_damage(tick_id, intent_processed_states);
 
         // 将时间事件合并到衰减事件中
         decay_events.extend(time_events);
@@ -376,11 +410,12 @@ impl TickScheduler {
             }
         }
 
-        let phase2_duration = phase2_start.elapsed();
+        let phase2_2_duration = phase2_2_start.elapsed();
+        let _phase2_duration = phase2_1_duration + phase2_2_duration;
         info!(
-            "阶段2完成 - 应用衰减+环境压力, 死亡Agent: {}, 耗时: {:?}",
+            "阶段2.2完成 - 应用衰减+环境压力, 死亡Agent: {}, 耗时: {:?}",
             dead_agents.len(),
-            phase2_duration
+            phase2_2_duration
         );
 
         // Bug #5: 告警阈值 - 单 tick 自然死亡数量异常升高时触发告警
@@ -398,31 +433,7 @@ impl TickScheduler {
         }
 
         let phase3_start = Instant::now();
-        let intents = self
-            .intent_collector
-            .collect_intents(&self.intent_manager, tick_id, &updated_states)
-            .await
-            .context("收集意图失败")?;
-        let (resolved_states, executed_actions, processor_events, action_logs) = self
-            .state_processor
-            .process_intents(tick_id, updated_states, &intents)
-            .await
-            .context("结算意图失败")?;
-
-        for (agent_id, event) in processor_events {
-            self.event_manager.add_event_for_agent(agent_id, event);
-        }
-
-        if !action_logs.is_empty() {
-            if let Err(e) = crate::db::batch_insert_action_logs(&self.db_pool, &action_logs).await {
-                warn!("批量插入动作日志失败: {}", e);
-            } else {
-                debug!("动作日志已保存: {} 条", action_logs.len());
-            }
-        }
-
-        let phase3_duration = phase3_start.elapsed();
-        let agents_processed = resolved_states.len() as i32;
+        let agents_processed = updated_states.len() as i32;
         let actions_executed = executed_actions as i32;
 
         // 跟踪意图超时统计（每10个tick记录一次，避免日志过多）
@@ -442,16 +453,16 @@ impl TickScheduler {
             }
         }
 
+        let phase3_duration = phase3_start.elapsed();
         info!(
-            "阶段3完成 - 结算意图: {}个意图, {}个Agent, {}个动作, 耗时: {:?}",
-            intents.len(),
+            "阶段3完成 - 统计和超时跟踪, {}个Agent, {}个动作, 耗时: {:?}",
             agents_processed,
             actions_executed,
             phase3_duration
         );
 
         let phase4_start = Instant::now();
-        persistence::persist_states(&self.db_pool, tick_id, &resolved_states)
+        persistence::persist_states(&self.db_pool, tick_id, &updated_states)
             .await
             .context("持久化状态失败")?;
         let phase4_duration = phase4_start.elapsed();
@@ -461,7 +472,7 @@ impl TickScheduler {
         self.broadcaster
             .broadcast_states(
                 tick_id,
-                &resolved_states,
+                &updated_states,
                 &self.db_pool,
                 &self.connection_manager,
                 &self.event_manager,

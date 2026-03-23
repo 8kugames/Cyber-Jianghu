@@ -9,7 +9,7 @@
 
 use anyhow::{Context, Result};
 use sqlx::{PgPool, Postgres, Row};
-use tracing::debug;
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::models::{Agent, AgentState};
@@ -454,6 +454,23 @@ pub async fn register_agent_transactional(
     }
 
     debug!("事务中分配初始物品成功: {} 件", initial_items.len());
+
+    // 验证：查询实际插入的物品数量
+    let check: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1")
+        .bind(agent_id)
+        .fetch_one(&mut *tx)
+        .await
+        .context("验证初始物品插入失败")?;
+    
+    if check.0 != initial_items.len() as i64 {
+        error!(
+            "初始物品数量不匹配！预期: {}, 实际: {}",
+            initial_items.len(), check.0
+        );
+        // 注意：不强制失败，因为可能是有意为之（如配置为空）
+    } else {
+        info!("初始物品验证通过: {} 件", check.0);
+    }
 
     // 提交事务
     tx.commit().await.context("提交注册事务失败")?;

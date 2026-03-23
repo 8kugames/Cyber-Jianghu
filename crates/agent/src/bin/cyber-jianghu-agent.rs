@@ -238,7 +238,20 @@ async fn create_character_via_api(agent_port: u16, character: CharacterConfig) -
 // ============================================================================
 
 async fn ensure_identity(config: &mut Config) -> Result<()> {
-    if config.identity.is_some() {
+    // 检查是否需要重置身份（服务器地址变化）
+    let (has_identity, needs_reset) = config.check_identity_server_match();
+
+    if needs_reset {
+        warn!(
+            "检测到服务器地址变化: {} -> {}",
+            config.identity.as_ref().and_then(|i| i.server_url.as_deref()).unwrap_or("(未知)"),
+            config.server.http_url
+        );
+        warn!("将清除旧身份并重新注册...");
+        config.clear_identity();
+    }
+
+    if has_identity && !needs_reset {
         info!("使用已有 Agent 身份");
         return Ok(());
     }
@@ -252,10 +265,11 @@ async fn ensure_identity(config: &mut Config) -> Result<()> {
     // 2. 向服务器注册
     let auth_token = register_agent_identity(&config.server.http_url, device_id).await?;
 
-    // 3. 保存身份
+    // 3. 保存身份（包含服务器 URL）
     config.identity = Some(IdentityConfig {
         device_id,
         auth_token,
+        server_url: Some(config.server.http_url.clone()),
     });
 
     // 4. 持久化

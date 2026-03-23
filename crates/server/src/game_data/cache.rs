@@ -200,6 +200,10 @@ mod tests {
                         max_system_prompt_length: 102400,
                         max_speak_content_length: 500,
                     },
+                    ops: OpsRulesData {
+                        death_threshold: 10,
+                        offline_cleanup_days: 30,
+                    },
                 },
             },
             items: UnifiedItemsConfig {
