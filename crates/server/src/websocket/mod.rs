@@ -35,7 +35,8 @@ pub use types::IntentManager;
 
 // 连接管理
 pub use connection::{
-    ConnectionManager, create_connection_manager, create_intent_manager, take_intents_for_tick,
+    AgentToDeviceMap, ConnectionManager, create_agent_to_device_map,
+    create_connection_manager, create_intent_manager, take_intents_for_tick,
 };
 
 // WebSocket 处理器

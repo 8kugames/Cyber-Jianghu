@@ -32,14 +32,20 @@ cargo build -p cyber-jianghu-server --release
 # Build agent
 cargo build -p cyber-jianghu-agent
 
-# Run tests
+# Run tests (CI uses nextest)
 cargo test --workspace
+
+# Run tests with nextest (faster, used in CI)
+cargo nextest run --workspace
 
 # Run single test
 cargo test -p cyber-jianghu-server test_name
 
-# Run clippy linter
-cargo clippy --workspace --all-targets
+# Format check (CI enforces this)
+cargo fmt --check
+
+# Run clippy linter (CI treats warnings as errors)
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Run clippy with auto-fix
 cargo clippy --workspace --all-targets --fix --allow-dirty
@@ -79,6 +85,16 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu
 # Run migrations (handled automatically on startup)
 # Migration files: crates/server/migrations/*.sql
 ```
+
+### CI/CD Requirements
+
+PR checks enforce these before merge:
+1. `cargo fmt --check` - Format verification
+2. `cargo clippy --all-targets -- -D warnings` - Lint with warnings as errors
+3. `cargo nextest run --workspace` - All tests pass
+
+CI builds for 5 platforms: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64.
+Docker images published to `ghcr.io/8kugames/cyber-jianghu-server`.
 
 ## Architecture
 
@@ -125,6 +141,7 @@ Key server modules:
 - `src/game_data/` - Config loading, caching, and formula evaluation
 - `src/websocket/` - WebSocket connection management
 - `src/handlers/` - HTTP API endpoints
+- `src/state.rs` - Shared AppState and rate limiting
 
 ### Agent Architecture
 
@@ -158,6 +175,7 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 Key agent modules:
 - `src/core/` - WebSocket client to game server
 - `src/runtime/decision/` - Decision modes (ws required, http auxiliary)
+- `src/transport/` - WebSocket communication layer
 - `src/ai/` - AI components:
   - `cognitive/` - Narrative engine for attribute descriptions
   - `memory/` - Three-tier memory system with SQLite backends
@@ -165,6 +183,12 @@ Key agent modules:
   - `persona/` - Dynamic persona with trait evolution
   - `validator/` - Intent validation against persona
   - `lifespan/` - Age and aging effects calculation
+  - `llm/` - LLM client for AI decision-making
+
+**Runtime modes** (decision module):
+- `ws` - WebSocket server for OpenClaw integration (required for production)
+- `http` - HTTP API server (auxiliary, debugging only)
+- `cognitive` - Multi-stage cognitive engine with built-in LLM
 
 ### Protocol Layer
 
@@ -261,6 +285,13 @@ use super::builder::AgentBuilder;
 - **Iterators over loops**: Use iterator methods instead of manual loops
 - **Follow clippy**: Run `cargo clippy` before commits
 - **Doc comments**: Include examples in documentation comments
+
+### Testing Conventions
+
+- Integration tests go in `crates/*/tests/` directories
+- Shared test fixtures in `tests/common/fixtures.rs`
+- Unit tests in `#[cfg(test)] mod tests` within source files
+- CI uses `cargo-nextest` for faster parallel test execution
 
 ## Important Rules
 

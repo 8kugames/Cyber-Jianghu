@@ -13,30 +13,46 @@ use axum::extract::ws::Message;
 use cyber_jianghu_protocol::{DialogueMessage, ServerMessage};
 use tracing::{debug, warn};
 
-use super::connection::ConnectionManager;
+use super::connection::{AgentToDeviceMap, ConnectionManager};
 
 // ============================================================================
 // 消息广播函数
 // ============================================================================
 
 /// 向指定 Agent 发送 WorldState
+///
+/// 通过 agent_id 查找对应的 device_id，再找到 WebSocket 连接并发送
 pub async fn send_world_state(
     agent_id: uuid::Uuid,
     world_state: crate::models::WorldState,
     connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let connections = connection_manager.read().await;
 
-    if let Some(connection) = connections.get(&agent_id) {
+    let device_id = if let Some(conn) = connections.get(&agent_id) {
+        conn.device_id
+    } else {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&agent_id) {
+            Some(&device_id) => device_id,
+            None => {
+                warn!("Agent {} is not online and no device mapping found", agent_id);
+                return Ok(());
+            }
+        }
+    };
+
+    if let Some(connection) = connections.get(&device_id) {
         let protocol_world_state = world_state;
         let msg = ServerMessage::WorldState {
             data: protocol_world_state,
         };
         let json = serde_json::to_string(&msg)?;
         connection.send(Message::Text(json.into())).await?;
-        debug!("WorldState sent to agent {}", agent_id);
+        debug!("WorldState sent to agent {} via device {}", agent_id, device_id);
     } else {
-        warn!("Agent {} is not online, cannot send WorldState", agent_id);
+        warn!("Agent {} is not online (device {} not connected)", agent_id, device_id);
     }
 
     Ok(())

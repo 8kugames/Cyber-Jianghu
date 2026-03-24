@@ -23,7 +23,7 @@ use tracing::{debug, error, info, warn};
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
 use crate::models::TickLog;
-use crate::websocket::{ConnectionManager, IntentManager};
+use crate::websocket::{AgentToDeviceMap, ConnectionManager, IntentManager};
 
 use super::super::inventory::InventoryManager;
 use super::broadcaster::Broadcaster;
@@ -51,6 +51,9 @@ pub struct TickScheduler {
     /// WebSocket 连接管理器
     connection_manager: ConnectionManager,
 
+    /// agent_id → device_id 反向映射
+    agent_to_device_map: AgentToDeviceMap,
+
     /// Intent 管理器（临时缓存）
     intent_manager: IntentManager,
 
@@ -73,6 +76,7 @@ impl TickScheduler {
         game_data_cache: Arc<GameDataCache>,
         db_pool: DbPool,
         connection_manager: ConnectionManager,
+        agent_to_device_map: AgentToDeviceMap,
         intent_manager: IntentManager,
     ) -> Self {
         Self {
@@ -81,6 +85,7 @@ impl TickScheduler {
             is_running: false,
             db_pool: db_pool.clone(),
             connection_manager,
+            agent_to_device_map,
             intent_manager,
             event_manager: EventManager::new(),
             intent_collector: IntentCollector::new(),
@@ -495,6 +500,7 @@ impl TickScheduler {
                 &updated_states,
                 &self.db_pool,
                 &self.connection_manager,
+                &self.agent_to_device_map,
                 &self.event_manager,
                 &self.game_data_cache,
             )

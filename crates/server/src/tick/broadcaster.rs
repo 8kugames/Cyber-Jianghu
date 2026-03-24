@@ -24,7 +24,7 @@ use crate::db::DbPool;
 use crate::game_data::GameDataCache;
 use crate::game_data::registry::{ActionRegistry, ItemRegistry};
 use crate::models::{AgentState, WorldEvent, WorldState};
-use crate::websocket::{ConnectionManager, send_world_state};
+use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
 use cyber_jianghu_protocol::AdjacentNode;
 
 use super::event_manager::EventManager;
@@ -49,6 +49,7 @@ impl Broadcaster {
         agent_states: &[AgentState],
         db_pool: &DbPool,
         connection_manager: &ConnectionManager,
+        agent_to_device_map: &AgentToDeviceMap,
         event_manager: &EventManager,
         game_data_cache: &Arc<GameDataCache>,
     ) -> anyhow::Result<()> {
@@ -124,7 +125,7 @@ impl Broadcaster {
 
             // 向该Agent发送其专属的WorldState
             if let Err(e) =
-                send_world_state(agent_state.agent_id, world_state, connection_manager).await
+                send_world_state(agent_state.agent_id, world_state, connection_manager, agent_to_device_map).await
             {
                 warn!("向Agent {} 发送WorldState失败: {}", agent_state.agent_id, e);
             } else {
