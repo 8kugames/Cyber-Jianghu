@@ -166,6 +166,16 @@ pub async fn agent_register(
         agent.name
     );
 
+    // 7.5 更新 agent_id → device_id 反向映射（用于 WebSocket 广播）
+    {
+        let mut agent_to_device = state.agent_to_device_map.write().await;
+        agent_to_device.insert(agent.agent_id, payload.device_id);
+        info!(
+            "Updated agent_to_device_map: {} → {}",
+            agent.agent_id, payload.device_id
+        );
+    }
+
     // 7. 构建游戏规则（从配置动态获取）
     let tick_duration_secs = {
         let gd = state.game_data.get();

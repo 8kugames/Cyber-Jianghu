@@ -11,7 +11,7 @@
 // - GET  /api/v1/state         - 获取当前 WorldState
 // - GET  /api/v1/context       - 获取格式化的上下文（Markdown）
 // - GET  /api/v1/attributes    - 梦中一瞥：获取属性数值（禁止存储到记忆）
-// - POST /api/v1/intent        - 提交 Intent
+// - POST /api/v1/intent        - 提交 Intent (已禁用，强制使用 WebSocket)
 // - GET  /api/v1/relationship/list  - 获取所有关系
 // - GET  /api/v1/relationship/{id}   - 获取特定关系
 // - POST /api/v1/relationship       - 更新关系
@@ -204,7 +204,7 @@ pub struct IntentRequest {
 ///
 /// 工作流程：
 /// 1. 收到 WorldState 后更新到 shared_state.current_state
-/// 2. 等待外部通过 /api/v1/intent 提交决策
+/// 2. 已禁用 HTTP intent 入口，强制使用 WebSocket
 /// 3. 超时返回 idle 意图，不阻塞游戏循环
 pub fn http_decision(
     agent_id: Arc<RwLock<Uuid>>,
@@ -300,7 +300,6 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/state", get(handlers::get_state_handler)) // 获取当前世界状态
         .route("/api/v1/context", get(handlers::get_context_handler)) // 获取格式化上下文
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
-        .route("/api/v1/intent", post(handlers::submit_intent_handler)) // 提交决策意图
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
         // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
         .route("/api/v1/cognitive", get(handlers::get_cognitive_context_handler)) // 结构化认知上下文

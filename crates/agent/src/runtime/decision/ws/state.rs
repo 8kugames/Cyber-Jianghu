@@ -264,6 +264,9 @@ pub struct WsSharedState {
     /// 叙事引擎（可选，用于生成上下文）
     pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
 
+    /// 认知上下文构建器（可选，用于生成四阶段认知上下文）
+    pub cognitive_context_builder: Option<Arc<crate::runtime::decision::http::cognitive_context::CognitiveContextBuilder>>,
+
     /// OpenClaw 连接状态（单连接限制）
     pub openclaw_connected: Arc<AtomicBool>,
 
@@ -313,6 +316,7 @@ impl From<&WsDecisionState> for WsSharedState {
             tick_duration_ms: state.tick_duration_ms.clone(),
             agent_id: state.agent_id.clone(),
             narrative_engine: None,
+            cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
             allow_external_connections,
         }
@@ -356,6 +360,36 @@ impl WsSharedState {
         Some(super::super::http::generate_context_markdown_no_relationship(
             world_state, engine, None, // WebSocket 状态不包含托梦
         ))
+    }
+
+    /// 生成四阶段认知上下文
+    ///
+    /// 如果配置了认知上下文构建器，使用构建器生成；否则返回 None
+    ///
+    /// 认知上下文用于引导 OpenClaw 进行四阶段推理：
+    /// 1. Perception (感知): 理解当前世界状态
+    /// 2. Motivation (动机): 基于人设生成内在驱动力
+    /// 3. Planning (规划): 制定行动计划
+    /// 4. Decision (决策): 选择最终行动
+    pub fn generate_cognitive_context(
+        &self,
+        world_state: &WorldState,
+    ) -> Option<super::super::http::cognitive_context::CognitiveContext> {
+        use super::super::http::cognitive_context::CognitiveContextBuilder;
+
+        // 获取认知上下文构建器（配置的或默认的）
+        let builder: &CognitiveContextBuilder = self
+            .cognitive_context_builder
+            .as_deref()
+            .unwrap_or_else(|| {
+                // 使用静态默认构建器
+                static DEFAULT_BUILDER: std::sync::OnceLock<CognitiveContextBuilder> =
+                    std::sync::OnceLock::new();
+                DEFAULT_BUILDER.get_or_init(CognitiveContextBuilder::default)
+            });
+
+        // 生成认知上下文（不包含人设和关系信息）
+        Some(builder.build(world_state))
     }
 }
 

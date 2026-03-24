@@ -148,15 +148,27 @@ async fn handle_websocket(
     // 创建消息通道（用于向 Agent 发送消息），限制容量以提供背压
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
 
-    // 添加到连接管理器
+    // 添加到连接管理器（使用 device_id 作为 key）
     {
         let mut connections = state.connection_manager.write().await;
         let connection = Connection::new(agent_id, device_id, agent_name.clone(), tx.clone());
-        connections.insert(agent_id, connection);
+        connections.insert(device_id, connection);
         info!(
-            "Agent '{}' added to online list. Total online: {}",
+            "Agent '{}' added to online list (device={}). Total online: {}",
             agent_name,
+            device_id,
             connections.len()
+        );
+    }
+
+    // 更新 agent_id → device_id 反向映射（用于 WebSocket 广播）
+    // 重要：WebSocket 重连时需要更新映射，因为 agent_register 只在首次注册时调用
+    if agent_id != uuid::Uuid::nil() {
+        let mut agent_to_device = state.agent_to_device_map.write().await;
+        agent_to_device.insert(agent_id, device_id);
+        info!(
+            "Updated agent_to_device_map on WebSocket connect: {} → {}",
+            agent_id, device_id
         );
     }
 
