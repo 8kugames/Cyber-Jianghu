@@ -95,6 +95,44 @@ impl GameDataCache {
 
         Some(DeathInfo { cause, message })
     }
+
+    /// 获取未知死亡的默认信息
+    ///
+    /// 从游戏规则配置中获取未知死亡的默认原因和描述
+    pub fn get_unknown_death_info(&self) -> DeathInfo {
+        let config = self.get();
+        if let Some(defaults) = &config.game_rules.data.death_defaults {
+            DeathInfo {
+                cause: defaults.unknown.cause.clone(),
+                message: defaults.unknown.message.clone(),
+            }
+        } else {
+            // 如果配置未提供，使用硬编码的最终兜底值
+            DeathInfo {
+                cause: "unknown".to_string(),
+                message: "你死了...".to_string(),
+            }
+        }
+    }
+
+    /// 获取环境伤害死亡的默认信息
+    ///
+    /// 从游戏规则配置中获取环境伤害死亡的默认原因和描述
+    pub fn get_environmental_death_info(&self) -> DeathInfo {
+        let config = self.get();
+        if let Some(defaults) = &config.game_rules.data.death_defaults {
+            DeathInfo {
+                cause: defaults.environmental.cause.clone(),
+                message: defaults.environmental.message.clone(),
+            }
+        } else {
+            // 如果配置未提供，使用硬编码的最终兜底值
+            DeathInfo {
+                cause: "environmental".to_string(),
+                message: "你被恶劣的环境吞噬...".to_string(),
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -217,6 +255,7 @@ mod tests {
                         death_threshold: 10,
                         offline_cleanup_days: 30,
                     },
+                    death_defaults: None,
                 },
             },
             items: UnifiedItemsConfig {

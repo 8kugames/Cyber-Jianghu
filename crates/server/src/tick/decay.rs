@@ -106,7 +106,11 @@ pub fn apply_decay_and_environmental_damage(
 
                 let (cause, description) = match death_info {
                     Some(DeathInfo { cause, message }) => (cause, message),
-                    None => ("unknown".to_string(), "你死了...".to_string()),
+                    None => {
+                        // 使用配置的默认值，而非硬编码
+                        let defaults = registry.get_unknown_death_info();
+                        (defaults.cause, defaults.message)
+                    }
                 };
 
                 warn!(
@@ -178,7 +182,11 @@ pub fn apply_decay_and_environmental_damage(
 
                     let (cause, description) = match death_info {
                         Some(DeathInfo { cause, message }) => (cause, message),
-                        None => ("environmental_damage".to_string(), "你因环境伤害而死亡".to_string()),
+                        None => {
+                            // 使用配置的环境伤害默认值，而非硬编码
+                            let defaults = registry.get_environmental_death_info();
+                            (defaults.cause, defaults.message)
+                        }
                     };
 
                     warn!(
