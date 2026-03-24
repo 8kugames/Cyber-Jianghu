@@ -205,12 +205,18 @@ cmd_server_start() {
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
 
-    success "服务端已启动"
-    echo ""
-    info "访问地址:"
-    echo "  - Dashboard: http://localhost:23333/admin"
-    echo "  - WebSocket: ws://localhost:23333/ws"
-    echo "  - Health:    http://localhost:23333/health"
+    # 尝试读取 admin token 并拼接到 URL
+    local admin_token_file="$PROJECT_ROOT/crates/server/cyber_jianghu_admin.tmp"
+    local read_token=""
+    local write_token=""
+    if [ -f "$admin_token_file" ]; then
+        echo ""
+        info "管理员令牌已生成，查看: cat $admin_token_file"
+        # 提取 Read Token（在 "Read Token" 行的下一行）
+        read_token=$(grep -A1 "Read Token" "$admin_token_file" | tail -1 | tr -d ' ')
+        # 提取 Write Token（在 "Write Token" 行的下一行）
+        write_token=$(grep -A1 "Write Token" "$admin_token_file" | tail -1 | tr -d ' ')
+    fi
 
     # 提示用户查看生成的密码和令牌（如果有）
     local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
@@ -218,12 +224,20 @@ cmd_server_start() {
         echo ""
         info "数据库密码已自动生成，查看: cat $password_file"
     fi
-    local admin_token_file="$PROJECT_ROOT/crates/server/cyber_jianghu_admin.tmp"
-    if [ -f "$admin_token_file" ]; then
-        echo ""
-        info "管理员令牌已生成，查看: cat $admin_token_file"
-        echo "       (文件中包含带 Token 的完整 URL，可直接点击访问)"
+
+    success "服务端已启动"
+    echo ""
+    info "访问地址:"
+    if [ -n "$read_token" ]; then
+        echo "  - Dashboard (只读): http://localhost:23333/admin?token=$read_token"
+    else
+        echo "  - Dashboard (只读): http://localhost:23333/admin"
     fi
+    if [ -n "$write_token" ]; then
+        echo "  - Dashboard (读写): http://localhost:23333/admin?token=$write_token"
+    fi
+    echo "  - WebSocket: ws://localhost:23333/ws"
+    echo "  - Health:    http://localhost:23333/health"
 }
 
 cmd_server_stop() {
