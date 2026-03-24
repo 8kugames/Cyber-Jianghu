@@ -248,4 +248,174 @@ mod tests {
         assert_eq!(state.status.get("thirst").unwrap_or(0), 45); // 50 - 5
         assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，保持 100
     }
+
+    // ============================================================================
+    // 死亡通知集成测试
+    // ============================================================================
+
+    /// 测试饥饿死亡时创建死亡通知
+    #[test]
+    fn test_hunger_death_creates_notification() {
+        crate::game_data::init_test_registry();
+
+        // 创建一个饥饿值极低的 Agent
+        let mut agent = AgentState::new(Uuid::new_v4(), 1);
+        agent.is_alive = true;
+        agent.node_id = "test_location".to_string();
+
+        // 设置饥饿值为 0（触发死亡条件）
+        // 根据配置，hunger 的 death_condition 是 equals 0
+        agent.status.set("hunger", 0).unwrap();
+
+        let tick_id = 100;
+        let agents = vec![agent];
+
+        // 执行衰减
+        let (updated_agents, dead_agents, events, death_notifications) =
+            apply_decay_and_environmental_damage(tick_id, agents);
+
+        // 验证死亡通知
+        assert_eq!(death_notifications.len(), 1, "应该创建一个死亡通知");
+
+        let notification = &death_notifications[0];
+        assert_eq!(notification.cause, "hunger", "死亡原因应该是 hunger");
+        assert!(
+            notification.description.contains("饥饿"),
+            "描述应该包含饥饿相关文字，实际描述: {}",
+            notification.description
+        );
+        assert_eq!(notification.location, "test_location");
+        assert_eq!(notification.tick_id, tick_id);
+
+        // 验证 agent 已标记为死亡
+        assert_eq!(dead_agents.len(), 1);
+        assert!(!updated_agents[0].is_alive);
+
+        // 验证创建了死亡事件
+        assert_eq!(events.len(), 1);
+        let (event_agent_id, event) = &events[0];
+        assert_eq!(*event_agent_id, updated_agents[0].agent_id);
+        assert_eq!(event.event_type, "action_result");
+    }
+
+    /// 测试口渴死亡时创建死亡通知
+    #[test]
+    fn test_thirst_death_creates_notification() {
+        crate::game_data::init_test_registry();
+
+        let mut agent = AgentState::new(Uuid::new_v4(), 1);
+        agent.is_alive = true;
+        agent.node_id = "test_location".to_string();
+
+        // 设置口渴值为 0（触发死亡条件）
+        agent.status.set("thirst", 0).unwrap();
+
+        let tick_id = 200;
+        let agents = vec![agent];
+
+        let (updated_agents, dead_agents, events, death_notifications) =
+            apply_decay_and_environmental_damage(tick_id, agents);
+
+        // 验证死亡通知
+        assert_eq!(death_notifications.len(), 1);
+        let notification = &death_notifications[0];
+        assert_eq!(notification.cause, "thirst");
+        assert!(
+            notification.description.contains("脱水"),
+            "描述应该包含脱水相关文字，实际描述: {}",
+            notification.description
+        );
+        assert_eq!(notification.location, "test_location");
+        assert_eq!(notification.tick_id, tick_id);
+
+        // 验证 agent 已标记为死亡
+        assert_eq!(dead_agents.len(), 1);
+        assert!(!updated_agents[0].is_alive);
+
+        // 验证创建了死亡事件
+        assert_eq!(events.len(), 1);
+    }
+
+    /// 测试存活 Agent 不产生死亡通知
+    #[test]
+    fn test_alive_agent_no_notification() {
+        crate::game_data::init_test_registry();
+
+        let mut agent = AgentState::new(Uuid::new_v4(), 1);
+        agent.is_alive = true;
+        agent.node_id = "test_location".to_string();
+
+        // 设置健康值（高于死亡阈值）
+        agent.status.set("hunger", 50).unwrap();
+        agent.status.set("thirst", 50).unwrap();
+
+        let agents = vec![agent];
+
+        let (_, _, _, death_notifications) = apply_decay_and_environmental_damage(1, agents);
+
+        assert!(
+            death_notifications.is_empty(),
+            "存活 Agent 不应产生死亡通知"
+        );
+    }
+
+    /// 测试多个 Agent 同时死亡时创建多个死亡通知
+    #[test]
+    fn test_multiple_deaths_create_multiple_notifications() {
+        crate::game_data::init_test_registry();
+
+        // 创建两个饥饿值极低的 Agent
+        let mut agent1 = AgentState::new(Uuid::new_v4(), 1);
+        agent1.is_alive = true;
+        agent1.node_id = "location_a".to_string();
+        agent1.status.set("hunger", 0).unwrap();
+
+        let mut agent2 = AgentState::new(Uuid::new_v4(), 1);
+        agent2.is_alive = true;
+        agent2.node_id = "location_b".to_string();
+        agent2.status.set("thirst", 0).unwrap();
+
+        let tick_id = 300;
+        let agents = vec![agent1, agent2];
+
+        let (updated_agents, dead_agents, events, death_notifications) =
+            apply_decay_and_environmental_damage(tick_id, agents);
+
+        // 验证死亡通知
+        assert_eq!(death_notifications.len(), 2, "应该创建两个死亡通知");
+        assert_eq!(dead_agents.len(), 2, "应该有两个死亡 Agent");
+        assert_eq!(events.len(), 2, "应该创建两个死亡事件");
+
+        // 验证所有 agent 都已死亡
+        for agent in &updated_agents {
+            assert!(!agent.is_alive, "Agent {} 应该已死亡", agent.agent_id);
+        }
+
+        // 验证死亡原因
+        let causes: Vec<&str> = death_notifications.iter().map(|n| n.cause.as_str()).collect();
+        assert!(causes.contains(&"hunger"), "应该包含饥饿死亡");
+        assert!(causes.contains(&"thirst"), "应该包含口渴死亡");
+    }
+
+    /// 测试已死亡的 Agent 不会再次触发死亡通知
+    #[test]
+    fn test_already_dead_agent_no_notification() {
+        crate::game_data::init_test_registry();
+
+        // 创建一个已经死亡的 Agent
+        let mut agent = AgentState::new(Uuid::new_v4(), 1);
+        agent.is_alive = false; // 已死亡
+        agent.node_id = "test_location".to_string();
+        agent.status.set("hunger", 0).unwrap();
+
+        let agents = vec![agent];
+
+        let (_, _, _, death_notifications) = apply_decay_and_environmental_damage(1, agents);
+
+        // 已死亡的 Agent 不应再次产生死亡通知
+        assert!(
+            death_notifications.is_empty(),
+            "已死亡的 Agent 不应再次产生死亡通知"
+        );
+    }
 }
