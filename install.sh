@@ -13,10 +13,10 @@
 # 命令:
 #   start [--prod]     启动服务
 #   stop               停止服务
-#   restart            重启服务
+#   restart [--prod]   重启服务
 #   status             查看状态
 #   logs               查看日志
-#   build             构建镜像
+#   build [--no-cache] 构建镜像
 #   reset              重置数据（慎用）
 #
 # 示例:
@@ -76,6 +76,16 @@ check_dependencies() {
 
     if ! docker compose version &> /dev/null 2>&1; then
         error "Docker Compose 未安装"
+    fi
+
+    # 检查 Docker 版本并启用 BuildKit（Dockerfile 使用了 BuildKit 缓存挂载）
+    local docker_version
+    docker_version=$(docker version --format '{{.Server.Version}}' 2>/dev/null | cut -d'.' -f1)
+    if [ -n "$docker_version" ] && [ "$docker_version" -lt 23 ]; then
+        warn "Docker 版本 < 23.0，建议升级以获得更好的 BuildKit 支持"
+        # 为旧版本 Docker 显式启用 BuildKit
+        export DOCKER_BUILDKIT=1
+        export COMPOSE_DOCKER_CLI_BUILD=1
     fi
 }
 
@@ -266,9 +276,12 @@ cmd_server_logs() {
     docker compose logs -f
 }
 cmd_server_build() {
+    local no_cache="${1:-}"
     enter_component_dir "server"
     info "构建服务端镜像..."
-    docker compose build
+    local build_args=""
+    [ "$no_cache" = "--no-cache" ] && build_args="--no-cache"
+    docker compose build $build_args
     success "构建完成"
 }
 cmd_server_reset() {
@@ -331,10 +344,13 @@ cmd_agent_logs() {
     docker compose logs -f
 }
 cmd_agent_build() {
+    local no_cache="${1:-}"
     ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "构建 Agent 镜像..."
-    docker compose build
+    local build_args=""
+    [ "$no_cache" = "--no-cache" ] && build_args="--no-cache"
+    docker compose build $build_args
     success "构建完成"
 }
 cmd_agent_reset() {
@@ -393,8 +409,9 @@ cmd_all_logs() {
     cmd_agent_logs
 }
 cmd_all_build() {
-    cmd_server_build
-    cmd_agent_build
+    local no_cache="${1:-}"
+    cmd_server_build "$no_cache"
+    cmd_agent_build "$no_cache"
 }
 cmd_all_reset() {
     warn "将删除所有数据（服务端 + Agent）!"
@@ -433,6 +450,7 @@ show_help() {
     echo "  $0 agent start --prod     # 生产环境启动 Agent"
     echo "  $0 all start              # 开发环境启动全部"
     echo "  $0 all start --prod       # 生产环境启动全部"
+    echo "  $0 all build --no-cache   # 强制重新构建（忽略缓存）"
     echo ""
 }
 
@@ -462,7 +480,7 @@ main() {
                 restart)    cmd_server_restart "${3:-}" ;;
                 status)     cmd_server_status ;;
                 logs)       cmd_server_logs ;;
-                build)      cmd_server_build ;;
+                build)      cmd_server_build "${3:-}" ;;
                 reset)      cmd_server_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
@@ -474,7 +492,7 @@ main() {
                 restart)    cmd_agent_restart "${3:-}" ;;
                 status)     cmd_agent_status ;;
                 logs)       cmd_agent_logs ;;
-                build)      cmd_agent_build ;;
+                build)      cmd_agent_build "${3:-}" ;;
                 reset)      cmd_agent_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
@@ -486,7 +504,7 @@ main() {
                 restart)    cmd_all_restart "${3:-}" ;;
                 status)     cmd_all_status ;;
                 logs)       cmd_all_logs ;;
-                build)      cmd_all_build ;;
+                build)      cmd_all_build "${3:-}" ;;
                 reset)      cmd_all_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
