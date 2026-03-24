@@ -16,6 +16,7 @@ use axum::{
     },
     response::Response,
 };
+use anyhow::Context;
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
@@ -114,7 +115,7 @@ pub async fn websocket_handler(
     );
 
     // 升级到 WebSocket
-    ws.on_upgrade(move |socket| handle_websocket(socket, agent_id, agent_name, state))
+    ws.on_upgrade(move |socket| handle_websocket(socket, agent_id, query.device_id, agent_name, state))
 }
 
 // ============================================================================
@@ -131,6 +132,7 @@ pub async fn websocket_handler(
 async fn handle_websocket(
     socket: WebSocket,
     agent_id: uuid::Uuid,
+    device_id: uuid::Uuid,
     agent_name: String,
     state: Arc<crate::state::AppState>,
 ) {
@@ -148,7 +150,7 @@ async fn handle_websocket(
     // 添加到连接管理器
     {
         let mut connections = state.connection_manager.write().await;
-        let connection = Connection::new(agent_id, agent_name.clone(), tx.clone());
+        let connection = Connection::new(agent_id, device_id, agent_name.clone(), tx.clone());
         connections.insert(agent_id, connection);
         info!(
             "Agent '{}' added to online list. Total online: {}",
@@ -206,6 +208,7 @@ async fn handle_websocket(
     // Clone values for use in recv_task
     let state_for_recv = state.clone();
     let agent_name_for_recv = agent_name.clone();
+    let device_id_for_recv = device_id;
 
     let recv_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
@@ -236,7 +239,7 @@ async fn handle_websocket(
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(client_msg) => {
                                 if let Err(e) =
-                                    handle_client_message(&agent_id, client_msg, &state_for_recv)
+                                    handle_client_message(&agent_id, device_id_for_recv, client_msg, &state_for_recv)
                                         .await
                                 {
                                     error!(
@@ -328,6 +331,7 @@ async fn handle_websocket(
 /// 根据消息类型进行相应的处理
 async fn handle_client_message(
     agent_id: &uuid::Uuid,
+    device_id: uuid::Uuid,
     msg: ClientMessage,
     state: &Arc<crate::state::AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -335,6 +339,7 @@ async fn handle_client_message(
         ClientMessage::Intent {
             intent_id,
             tick_id,
+            agent_id: msg_agent_id,
             thought_log,
             action_type,
             action_data,
@@ -342,6 +347,8 @@ async fn handle_client_message(
         } => {
             handle_intent(
                 *agent_id,
+                device_id,
+                msg_agent_id,
                 intent_id,
                 tick_id,
                 thought_log,
@@ -363,7 +370,9 @@ async fn handle_client_message(
 /// 将 Intent 保存到 IntentManager（临时缓存）
 /// 包含速率限制检查、Agent 存活检查和 tick_id 校验
 async fn handle_intent(
-    agent_id: uuid::Uuid,
+    connection_agent_id: uuid::Uuid,
+    device_id: uuid::Uuid,
+    msg_agent_id: Option<uuid::Uuid>,
     req_intent_id: Option<uuid::Uuid>,
     tick_id: i64,
     thought_log: Option<String>,
@@ -372,6 +381,36 @@ async fn handle_intent(
     priority: i32,
     state: &Arc<crate::state::AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 确定最终的 agent_id
+    // 如果客户端指定了 agent_id，验证其属于该 device
+    let agent_id = match msg_agent_id {
+        Some(id) => {
+            // 使用 query_scalar 只查询 device_id，避免 SELECT *
+            let owner_device_id: Option<uuid::Uuid> = sqlx::query_scalar(
+                "SELECT device_id FROM agents WHERE agent_id = $1"
+            )
+            .bind(id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .context("查询 Agent 归属失败")?;
+
+            match owner_device_id {
+                Some(owner) if owner == device_id => {
+                    tracing::debug!("Agent {} ownership verified for device {}", id, device_id);
+                    id
+                }
+                Some(_) => {
+                    tracing::warn!("Agent ownership mismatch: agent={}, device={}", id, device_id);
+                    return Err("无权操作此角色".into());
+                }
+                None => {
+                    return Err("Agent 不存在".into());
+                }
+            }
+        }
+        None => connection_agent_id,
+    };
+
     // 速率限制检查
     if !crate::state::check_rate_limit(&state.rate_limiter, agent_id).await {
         warn!("Rate limit exceeded for agent {}", agent_id);

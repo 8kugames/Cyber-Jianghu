@@ -206,6 +206,10 @@ pub enum ClientMessage {
         intent_id: Option<Uuid>,
         /// Tick 编号
         tick_id: i64,
+        /// Agent ID（可选，不提供则使用连接关联的 agent）
+        /// 用于支持同一设备上的多角色切换
+        #[serde(skip_serializing_if = "Option::is_none")]
+        agent_id: Option<Uuid>,
         /// 思考日志
         #[serde(skip_serializing_if = "Option::is_none")]
         thought_log: Option<String>,
@@ -245,6 +249,7 @@ impl ClientMessage {
         ClientMessage::Intent {
             intent_id: Some(intent.intent_id),
             tick_id: intent.tick_id,
+            agent_id: Some(intent.agent_id),
             thought_log: intent.thought_log,
             action_type: intent.action_type.to_string(),
             action_data: intent.action_data,

@@ -3,8 +3,6 @@ use super::registry::*;
 #[cfg(test)]
 use super::system::*;
 #[cfg(test)]
-use super::types::*;
-#[cfg(test)]
 use crate::game_data::{ItemConfigEntry, ItemEffect};
 #[cfg(test)]
 use crate::models::{AgentState, ItemType};

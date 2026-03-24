@@ -38,9 +38,9 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::config::Config;
-    use crate::tick::scheduler::TickScheduler;
+    
 
     /// 创建测试用的配置
     /// 注意：这个函数创建了测试用的配置，仅用于单元测试

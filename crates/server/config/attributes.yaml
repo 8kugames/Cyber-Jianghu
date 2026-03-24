@@ -134,6 +134,10 @@ data:
         death_condition:
           operator: equals
           value: 0
+        # HP 归零的默认死因（用于战斗等直接伤害）
+        # 注意：环境伤害等特殊情况需要追踪伤害来源
+        death_cause: "hp_depleted"
+        death_message: "你的生命之火熄灭了..."
         primary_attribute_deps:
           - constitution
 

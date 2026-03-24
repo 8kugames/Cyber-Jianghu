@@ -89,14 +89,14 @@ pub enum ValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AgentState;
-    use cyber_jianghu_protocol::ActionType;
-    use uuid::Uuid;
+    
+    
+    
 
     #[test]
     fn test_resolver_creation() {
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
-        let resolver = IntentResolver::new(db_pool);
+        let _resolver = IntentResolver::new(db_pool);
         // 测试创建成功
     }
 }
