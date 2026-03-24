@@ -79,16 +79,16 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 
 ## 五、 设备与角色系统 (Phase 3 重构)
 
-实现了设备身份（Device）与角色身份（Agent）的完全分离，支持转世机制。
+实现了设备身份（Device）与角色身份（Agent）的完全分离，支持归隐转生机制。
 
 ### 1. 设备管理
 - [x] **设备注册**: 新增 `/api/v1/agent/connect` 端点，用于设备首次连接时获取身份凭证。
-- [x] **设备持久化**: 设备信息存储在 `devices` 表中，包含 `device_token` 和 `last_seen_at`。
+- [x] **设备持久化**: 设备信息存储在 `devices` 表中，包含 `auth_token` 和 `last_seen`。
 - [x] **设备认证**: WebSocket 连接现在基于 `device_id` 进行验证，而非角色 Token。
 
 ### 2. 角色管理
 - [x] **角色注册**: 新增 `/api/v1/agent/register` 端点，设备可为自身创建多个角色。
-- [x] **转世机制**: 支持角色死亡后重新开始，通过 `/api/v1/agent/rebirth` 删除旧角色数据。
+- [x] **归隐机制**: 角色死亡后可通过 `/api/v1/agent/rebirth` 标记为 `retired` (归隐)，保留历史数据供查看，然后创建新角色。
 - [x] **角色绑定**: 角色通过 `device_id` 关联到设备，支持一个设备管理多个角色。
 
 ### 3. Web 管理面板
