@@ -140,33 +140,14 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                                     continue;
                                 }
 
-                                // 检查是否已提交（去重）
-                                let submitted_tick = state.submitted_tick.load(Ordering::Acquire);
-                                if submitted_tick == intent.tick_id {
-                                    let error_msg = DownstreamMessage::ServerError {
-                                        code: ServerErrorCode::TickExpired,
-                                        message: "Intent already submitted for this tick".to_string(),
-                                        tick_id: Some(intent.tick_id),
-                                        current_tick: Some(current_tick),
-                                    };
-
-                                    if let Ok(json) = serde_json::to_string(&error_msg) {
-                                        let mut tx = ws_tx.lock().await;
-                                        let _ = tx.send(Message::Text(json.into())).await;
-                                    }
-
-                                    warn!("Rejected duplicate intent for tick {}", intent.tick_id);
-                                    continue;
-                                }
-
                                 // 保存 tick_id 用于错误消息
                                 let intent_tick_id = intent.tick_id;
 
                                 // 发送验证请求（非阻塞）
+                                // 注意：去重检查在验证任务中通过 CAS 操作原子性完成
                                 let validation_req = ValidationRequest {
                                     intent,
                                     ws_tx: ws_tx.clone(),
-                                    tick_at_send: current_tick,
                                 };
 
                                 // 使用 try_send 避免阻塞
