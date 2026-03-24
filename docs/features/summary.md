@@ -51,10 +51,11 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 - [x] **动态人设与社交**:
   - [x] 角色性格 (`Persona`) 能够根据外界反馈（被攻击、被治愈）进行动态偏移。
   - [x] 支持建立与其他 Agent 的好感度/信任度关系图谱，并支持查询与修改。
-- [x] **意图验证器** (HTTP API 可用，WebSocket 链路未自动集成):
+- [x] **意图验证器** (HTTP API 可用，WebSocket 链路已自动集成):
   - [x] 基于规则引擎和 LLM 二次校验的拦截器已实现 (`ai/validator/`)
   - [x] HTTP API `POST /api/v1/validate` 可供 OpenClaw 主动调用
-  - [ ] WebSocket intent 提交链路未自动调用验证器（当前直接透传）
+  - [x] WebSocket intent 提交链路自动调用验证器（10秒超时降级策略）
+  - [x] 验证失败返回 `ServerError{ValidationFailed}` 允许在剩余 tick 时间内重试
   - [ ] Observer Agent 审查系统未接入 intent 提交链路
 
 - [x] **Observer Agent 审查系统** (API 已实现，独立于 intent 链路):
