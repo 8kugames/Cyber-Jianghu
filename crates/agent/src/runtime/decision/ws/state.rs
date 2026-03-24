@@ -43,8 +43,6 @@ pub struct ValidationRequest {
     pub intent: WsIntent,
     /// WebSocket 发送端（用于返回验证错误）
     pub ws_tx: Arc<tokio::sync::Mutex<SplitSink<WebSocket, axum::extract::ws::Message>>>,
-    /// 发送时的 tick（用于检测验证期间 tick 推进）
-    pub tick_at_send: i64,
 }
 
 // ============================================================================
@@ -266,6 +264,7 @@ impl WsDecisionState {
         let persona = shared_state.persona.clone();
 
         tokio::spawn(async move {
+            use axum::extract::ws::Message;
             debug!("Validation task started");
 
             while let Some(req) = validation_rx.recv().await {
@@ -285,7 +284,6 @@ impl WsDecisionState {
 
                     if let Ok(json) = serde_json::to_string(&error_msg) {
                         let mut tx = req.ws_tx.lock().await;
-                        use axum::extract::ws::Message;
                         let _ = tx.send(Message::Text(json.into())).await;
                     }
 
@@ -296,19 +294,30 @@ impl WsDecisionState {
                     continue;
                 }
 
-                // 2. 检查该 tick 是否已提交（防止重复）
-                let submitted = submitted_tick.load(Ordering::Acquire);
-                if submitted == req.intent.tick_id {
+                // 2. 使用 CAS 操作原子性地检查并声明该 tick
+                // 这解决了 TOCTOU 竞态条件
+                let cas_result = submitted_tick.compare_exchange(
+                    -1,  // 期望值：-1 表示该 tick 尚未提交
+                    req.intent.tick_id,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+
+                if cas_result != Ok(-1) {
+                    // 已经有其他意图被提交了
+                    let prev_tick = cas_result.unwrap_or(req.intent.tick_id);
                     let error_msg = DownstreamMessage::ServerError {
-                        code: super::protocol::ServerErrorCode::TickExpired,
-                        message: "Intent already submitted for this tick".to_string(),
+                        code: super::protocol::ServerErrorCode::DuplicateSubmission,
+                        message: format!(
+                            "Intent already submitted for tick {} (submitted: {})",
+                            req.intent.tick_id, prev_tick
+                        ),
                         tick_id: Some(req.intent.tick_id),
                         current_tick: Some(current_tick_value),
                     };
 
                     if let Ok(json) = serde_json::to_string(&error_msg) {
                         let mut tx = req.ws_tx.lock().await;
-                        use axum::extract::ws::Message;
                         let _ = tx.send(Message::Text(json.into())).await;
                     }
 
@@ -323,10 +332,12 @@ impl WsDecisionState {
                 match (validator_guard.as_ref(), persona_guard.as_ref()) {
                     (None, _) | (_, None) => {
                         // 无验证器或无 persona，直接转发
+                        // submitted_tick 已通过 CAS 设置
                         debug!("No validator or persona, forwarding directly");
-                        submitted_tick.store(req.intent.tick_id, Ordering::Release);
                         if let Err(e) = intent_tx.send(req.intent).await {
                             error!("Failed to send intent: {}", e);
+                            // 发送失败，重置 submitted_tick 允许重试
+                            submitted_tick.store(-1, Ordering::Release);
                         }
                     }
                     (Some(validator), Some(persona)) => {
@@ -348,13 +359,17 @@ impl WsDecisionState {
                             validator.validate(validation_req)
                         ).await {
                             Ok(Ok(crate::ai::validator::ValidationResult::Approved { .. })) => {
-                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
+                                // submitted_tick 已通过 CAS 设置
                                 if let Err(e) = intent_tx.send(req.intent).await {
                                     error!("Failed to send intent: {}", e);
+                                    submitted_tick.store(-1, Ordering::Release);
                                 }
                                 debug!("Intent approved and forwarded");
                             }
                             Ok(Ok(crate::ai::validator::ValidationResult::Rejected { reason, .. })) => {
+                                // 验证失败，重置 submitted_tick 允许客户端重试
+                                submitted_tick.store(-1, Ordering::Release);
+
                                 let error_msg = DownstreamMessage::ServerError {
                                     code: super::protocol::ServerErrorCode::ValidationFailed,
                                     message: reason.clone(),
@@ -364,7 +379,6 @@ impl WsDecisionState {
 
                                 if let Ok(json) = serde_json::to_string(&error_msg) {
                                     let mut tx = req.ws_tx.lock().await;
-                                    use axum::extract::ws::Message;
                                     let _ = tx.send(Message::Text(json.into())).await;
                                 }
 
@@ -373,17 +387,17 @@ impl WsDecisionState {
                             Ok(Err(e)) => {
                                 // LLM 错误：允许通过（降级策略）
                                 warn!("Validation error, allowing: {}", e);
-                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
                                 if let Err(e) = intent_tx.send(req.intent).await {
                                     error!("Failed to send intent: {}", e);
+                                    submitted_tick.store(-1, Ordering::Release);
                                 }
                             }
                             Err(_) => {
                                 // 超时：允许通过（降级策略）
                                 warn!("Validation timeout, allowing");
-                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
                                 if let Err(e) = intent_tx.send(req.intent).await {
                                     error!("Failed to send intent: {}", e);
+                                    submitted_tick.store(-1, Ordering::Release);
                                 }
                             }
                         }
@@ -463,6 +477,9 @@ pub struct WsSharedState {
 
 impl WsSharedState {
     pub fn broadcast_tick(&self, world_state: &WorldState, deadline: Instant) {
+        // 新 tick 开始，重置 submitted_tick 允许新提交
+        self.submitted_tick.store(-1, Ordering::Release);
+
         self.current_tick.store(world_state.tick_id, Ordering::Relaxed);
 
         let now = Instant::now();
