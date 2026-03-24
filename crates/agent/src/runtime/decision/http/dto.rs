@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
-    pub agent_id: String,
+    /// Agent ID (null 表示尚未注册角色)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     pub tick_id: Option<i64>,
 }
 
@@ -108,8 +110,9 @@ pub struct ValidateResponse {
 pub struct TickStatusResponse {
     /// 当前 Tick ID
     pub tick_id: i64,
-    /// Agent ID
-    pub agent_id: String,
+    /// Agent ID (null 表示尚未注册角色)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     /// 是否有新的 WorldState（自上次调用后）
     pub has_new_state: bool,
     /// 距离下次 Tick 的预计秒数（如果已知）

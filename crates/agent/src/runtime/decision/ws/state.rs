@@ -266,6 +266,10 @@ pub struct WsSharedState {
 
     /// OpenClaw 连接状态（单连接限制）
     pub openclaw_connected: Arc<AtomicBool>,
+
+    /// 是否允许非 localhost 连接
+    /// Docker 部署时需要设为 true，允许宿主机访问
+    pub allow_external_connections: bool,
 }
 
 impl WsSharedState {
@@ -293,6 +297,12 @@ impl WsSharedState {
 
 impl From<&WsDecisionState> for WsSharedState {
     fn from(state: &WsDecisionState) -> Self {
+        // 从环境变量读取是否允许外部连接
+        // Docker 部署时需要允许宿主机访问
+        let allow_external_connections = std::env::var("CYBER_JIANGHU_WS_ALLOW_EXTERNAL")
+            .map(|v| v == "1" || v == "true" || v == "yes")
+            .unwrap_or(false);
+
         Self {
             state_tx: state.state_tx.clone(),
             tick_closed_tx: state.tick_closed_tx.clone(),
@@ -304,6 +314,7 @@ impl From<&WsDecisionState> for WsSharedState {
             agent_id: state.agent_id.clone(),
             narrative_engine: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
+            allow_external_connections,
         }
     }
 }

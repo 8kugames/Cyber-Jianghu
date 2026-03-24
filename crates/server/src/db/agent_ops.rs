@@ -8,7 +8,9 @@
 // - 更新Agent状态（在线时间、位置）
 
 use anyhow::{Context, Result};
-use sqlx::{PgPool, Postgres, Row};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgPool, Postgres, Row};
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -173,9 +175,10 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
 pub async fn get_agent_by_device_id(pool: &PgPool, device_id: Uuid) -> Result<Option<Agent>> {
     debug!("查询Agent by device_id: {}", device_id);
 
+    // 只返回活跃状态的 Agent
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        SELECT * FROM agents WHERE device_id = $1
+        SELECT * FROM agents WHERE device_id = $1 AND status = 'active'
         "#,
     )
     .bind(device_id)
@@ -389,11 +392,26 @@ pub async fn register_agent_transactional(
     // 开始事务
     let mut tx = pool.begin().await.context("开始事务失败")?;
 
-    // 步骤1: 创建Agent（关联设备）
+    // 步骤0: 检查是否已有活跃角色
+    let active_count: (i64,) = sqlx::query_as(
+        r#"
+        SELECT COUNT(*) FROM agents WHERE device_id = $1 AND status = 'active'
+        "#,
+    )
+    .bind(device_id)
+    .fetch_one(&mut *tx)
+    .await
+    .context("检查活跃角色失败")?;
+
+    if active_count.0 > 0 {
+        anyhow::bail!("该设备已有活跃角色，请先归隐当前角色后再创建新角色");
+    }
+
+    // 步骤1: 创建Agent（关联设备，默认状态为 active）
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        INSERT INTO agents (device_id, name, system_prompt)
-        VALUES ($1, $2, $3)
+        INSERT INTO agents (device_id, name, system_prompt, status)
+        VALUES ($1, $2, $3, 'active')
         RETURNING *
         "#,
     )
@@ -508,9 +526,10 @@ pub struct RebirthResult {
 /// - Err: 数据库错误或认证失败
 ///
 /// # 注意
-/// 由于 agents 表有 ON DELETE CASCADE，删除 agent 会自动删除：
-/// - agent_states 表中的所有状态记录
-/// - agent_inventory 表中的所有物品记录
+/// 转生时标记 Agent 为归隐状态，保留历史记录：
+/// - agent_states 表中的所有状态记录保留
+/// - agent_inventory 表中的所有物品记录保留
+/// - 归隐后可查看历史角色
 pub async fn rebirth_agent(
     pool: &PgPool,
     device_id: Uuid,
@@ -524,10 +543,10 @@ pub async fn rebirth_agent(
         anyhow::bail!("设备认证失败");
     }
 
-    // 2. 获取当前设备的 Agent 信息（删除前记录）
+    // 2. 获取当前设备的活跃 Agent 信息
     let agent_info: Option<(Uuid, String)> = sqlx::query_as(
         r#"
-        SELECT agent_id, name FROM agents WHERE device_id = $1
+        SELECT agent_id, name FROM agents WHERE device_id = $1 AND status = 'active'
         "#,
     )
     .bind(device_id)
@@ -538,28 +557,30 @@ pub async fn rebirth_agent(
     let (agent_id, name) = match agent_info {
         Some(info) => info,
         None => {
-            anyhow::bail!("该设备没有已注册的角色");
+            anyhow::bail!("该设备没有活跃的角色，无需归隐");
         }
     };
 
-    // 3. 删除 Agent（级联删除状态和物品）
-    let deleted = sqlx::query(
+    // 3. 标记 Agent 为归隐状态（保留历史数据）
+    let updated = sqlx::query(
         r#"
-        DELETE FROM agents WHERE agent_id = $1 AND device_id = $2
+        UPDATE agents
+        SET status = 'retired', retired_at = CURRENT_TIMESTAMP
+        WHERE agent_id = $1 AND device_id = $2 AND status = 'active'
         "#,
     )
     .bind(agent_id)
     .bind(device_id)
     .execute(pool)
     .await
-    .context("删除 Agent 失败")?;
+    .context("更新 Agent 状态失败")?;
 
-    if deleted.rows_affected() == 0 {
-        anyhow::bail!("删除 Agent 失败：未找到匹配记录");
+    if updated.rows_affected() == 0 {
+        anyhow::bail!("归隐失败：角色状态已变更");
     }
 
     tracing::info!(
-        "Agent 转生成功: {} ({}) 已归隐",
+        "Agent 归隐成功: {} ({}) 已归隐，可创建新角色",
         name,
         agent_id
     );
@@ -568,4 +589,42 @@ pub async fn rebirth_agent(
         retired_agent_id: agent_id,
         retired_name: name,
     })
+}
+
+/// 历史角色信息（用于归隐角色列表）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RetiredAgentInfo {
+    /// Agent ID
+    pub agent_id: Uuid,
+    /// 角色名称
+    pub name: String,
+    /// 创建时间
+    pub created_at: DateTime<Utc>,
+    /// 归隐时间
+    pub retired_at: Option<DateTime<Utc>>,
+    /// 最后在线时间
+    pub last_tick_online: Option<DateTime<Utc>>,
+}
+
+/// 查询设备的归隐角色列表
+///
+/// 用于 Web 面板查看历史角色
+pub async fn list_retired_agents(pool: &PgPool, device_id: Uuid) -> Result<Vec<RetiredAgentInfo>> {
+    debug!("查询归隐角色列表: device_id={}", device_id);
+
+    let agents = sqlx::query_as::<Postgres, RetiredAgentInfo>(
+        r#"
+        SELECT agent_id, name, created_at, retired_at, last_tick_online
+        FROM agents
+        WHERE device_id = $1 AND status = 'retired'
+        ORDER BY retired_at DESC NULLS LAST
+        "#,
+    )
+    .bind(device_id)
+    .fetch_all(pool)
+    .await
+    .context("查询归隐角色列表失败")?;
+
+    debug!("查询到 {} 个归隐角色", agents.len());
+    Ok(agents)
 }
