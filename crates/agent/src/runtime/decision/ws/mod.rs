@@ -18,6 +18,7 @@
 pub mod protocol;
 pub mod server;
 pub mod state;
+pub mod validation;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

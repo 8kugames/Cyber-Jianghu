@@ -29,7 +29,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, error, info, warn};
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, UpstreamMessage, WsIntent};
-use super::state::{ValidationRequest, WsSharedState};
+use super::state::{WsSharedState, WsValidationRequest};
 use crate::runtime::decision::http::{create_api_router, get_static_serve_dir, HttpApiState};
 
 // ============================================================================
@@ -145,7 +145,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
                                 // 发送验证请求（非阻塞）
                                 // 注意：去重检查在验证任务中通过 CAS 操作原子性完成
-                                let validation_req = ValidationRequest {
+                                let validation_req = WsValidationRequest {
                                     intent,
                                     ws_tx: ws_tx.clone(),
                                 };
