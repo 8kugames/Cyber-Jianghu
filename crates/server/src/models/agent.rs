@@ -31,6 +31,12 @@ pub struct Agent {
 
     /// 最后一次上报意图的时间
     pub last_tick_online: Option<DateTime<Utc>>,
+
+    /// Agent 状态（active/retired）
+    pub status: String,
+
+    /// 归隐时间（转生时设置）
+    pub retired_at: Option<DateTime<Utc>>,
 }
 
 /// Agent状态

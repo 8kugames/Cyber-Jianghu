@@ -185,16 +185,13 @@ async fn main() -> Result<()> {
         writeln!(file, "========================================")?;
         writeln!(file, "🔐 Cyber-Jianghu 管理员访问凭证")?;
         writeln!(file, "========================================")?;
-        writeln!(file)?;
         writeln!(file, "Read Token (只读): [{}]", read_token_source)?;
         writeln!(file, "  {}", admin_read_token)?;
-        writeln!(file)?;
         writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
         writeln!(file, "  {}", admin_write_token)?;
         writeln!(file)?;
         writeln!(file, "可直接写入 .env:")?;
-        writeln!(file, "ADMIN_READ_TOKEN={}", admin_read_token)?;
-        writeln!(file, "ADMIN_WRITE_TOKEN={}", admin_write_token)?;
+        writeln!(file, "ADMIN_READ_TOKEN={} ADMIN_WRITE_TOKEN={}", admin_read_token, admin_write_token)?;
         writeln!(file, "========================================")?;
 
         info!("管理员访问凭证已保存到: {}", token_path.display());
