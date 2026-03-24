@@ -272,6 +272,7 @@ impl SemanticSearchable for SemanticMemoryBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
     use crate::ai::memory::local_embedder::LocalEmbedder;
 
     // 注意：完整测试需要 mock LlmClient
