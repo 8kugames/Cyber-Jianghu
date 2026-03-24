@@ -44,7 +44,8 @@ RUN mkdir -p ./.cargo \
     registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
 # 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
-COPY Cargo.toml Cargo.lock ./
+# Cargo.lock 可选（如果存在则使用 --locked，否则正常构建）
+COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
 COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
@@ -60,7 +61,11 @@ RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    cargo build --release --locked -p cyber-jianghu-server
+    if [ -f Cargo.lock ]; then \
+        cargo build --release --locked -p cyber-jianghu-server; \
+    else \
+        cargo build --release -p cyber-jianghu-server; \
+    fi
 
 # 复制实际源代码（server 仅依赖 protocol）
 COPY crates/protocol/src ./crates/protocol/src
@@ -71,8 +76,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     touch crates/protocol/src/lib.rs && \
-    cargo build --release --locked -p cyber-jianghu-server && \
-    # 将最终二进制文件移出缓存目录
+    if [ -f Cargo.lock ]; then \
+        cargo build --release --locked -p cyber-jianghu-server; \
+    else \
+        cargo build --release -p cyber-jianghu-server; \
+    fi && \
     cp /app/target/release/cyber-jianghu-server /app/server-bin
 
 # ============================================================================
