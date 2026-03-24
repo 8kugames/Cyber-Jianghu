@@ -50,8 +50,8 @@ data:
         display_name: 力量
         description: "负重能力、外功物理伤害"
         type: growable
-        birth_range: [10, 50]  # 成长上限随机范围
-        initial_value: 10      # 初始属性值
+        birth_range: [10, 50] # 成长上限随机范围
+        initial_value: 10 # 初始属性值
         growth_rate: 1.0
         affects:
           - max_carry_weight
@@ -62,8 +62,8 @@ data:
         display_name: 敏捷
         description: "反应能力、洞察能力、神经与肌体敏感度"
         type: growable
-        birth_range: [10, 50]  # 成长上限随机范围
-        initial_value: 10      # 初始属性值
+        birth_range: [10, 50] # 成长上限随机范围
+        initial_value: 10 # 初始属性值
         growth_rate: 1.0
         affects:
           - dodge_rate
@@ -75,8 +75,8 @@ data:
         display_name: 根骨
         description: "生存韧性、环境适应力、内气速度与容量"
         type: growable
-        birth_range: [10, 50]  # 成长上限随机范围
-        initial_value: 10      # 初始属性值
+        birth_range: [10, 50] # 成长上限随机范围
+        initial_value: 10 # 初始属性值
         growth_rate: 0.8
         affects:
           - max_hp
@@ -88,8 +88,8 @@ data:
         display_name: 悟性
         description: "学习速度与深度、理智上限"
         type: growable
-        birth_range: [10, 50]  # 成长上限随机范围
-        initial_value: 10      # 初始属性值
+        birth_range: [10, 50] # 成长上限随机范围
+        initial_value: 10 # 初始属性值
         growth_rate: 1.2
         affects:
           - skill_learning_speed
@@ -99,8 +99,8 @@ data:
         name: charisma
         display_name: 魅力
         description: "人际关系第一印象、事件解决难易度"
-        type: static           # 出生随机，之后固定
-        birth_range: [10, 50]  # 随机范围
+        type: static # 出生随机，之后固定
+        birth_range: [10, 50] # 随机范围
         affects:
           - social_interaction
           - event_difficulty
@@ -109,14 +109,38 @@ data:
         name: luck
         display_name: 福缘
         description: "突发事件几率、意外收获或损失几率"
-        type: dailyrandom      # 每游戏日随机刷新
-        birth_range: [10, 50]  # 随机范围
+        type: dailyrandom # 每游戏日随机刷新
+        birth_range: [10, 50] # 随机范围
         affects:
           - event_probability
           - surprise_gain_loss
 
   # ------------------------------------------------------------------
   # 状态值
+  # ------------------------------------------------------------------
+  # 状态值字段说明：
+  #   - decay_per_tick: 每 tick 自然衰减值（0 表示不衰减）
+  #   - recovery_formula: 每 tick 恢复公式（可选）
+  #   - death_condition: 死亡触发条件（可选）
+  #       * operator: 比较运算符（equals, less_than, greater_than 等）
+  #       * value: 比较值
+  #       * 当属性值满足条件时，Agent 死亡
+  #   - death_cause: 死亡原因代码（可选，配合 death_condition 使用）
+  #       * 用于标识死亡类型，如 "hunger", "thirst", "combat", "environmental"
+  #       * 系统会根据此代码进行死亡统计和后续处理
+  #   - death_message: 死亡描述文本（可选，配合 death_condition 使用）
+  #       * 叙事化的死亡描述，会发送给 Agent 和 OpenClaw
+  #       * 支持中文叙事风格
+  #
+  # 死亡信息优先级：
+  #   1. 属性配置的 death_cause/death_message（本文件）
+  #   2. 全局默认配置（game_rules.yaml 中的 death_defaults）
+  #   3. 代码中的最终兜底值（仅在配置损坏时使用）
+  #
+  # 注意：
+  #   - 多种原因可能导致同一属性归零时（如 HP 可因战斗、环境、中毒归零）
+  #     当前设计使用该属性的默认 death_cause
+  #   - 未来可通过追踪伤害来源实现更精确的死因判定
   # ------------------------------------------------------------------
   status:
     description: "状态值（生理/精神状态，会随时间衰减或恢复）"
@@ -134,8 +158,7 @@ data:
         death_condition:
           operator: equals
           value: 0
-        # HP 归零的默认死因（用于战斗等直接伤害）
-        # 注意：环境伤害等特殊情况需要追踪伤害来源
+        # HP 归零的默认死因
         death_cause: "hp_depleted"
         death_message: "你的生命之火熄灭了..."
         primary_attribute_deps:
