@@ -241,14 +241,14 @@ pub struct RebirthResponse {
 ///
 /// POST /api/v1/agent/rebirth
 ///
-/// 删除当前设备的角色，保留设备身份，允许重新创建新角色。
-/// 由于 agents 表有 ON DELETE CASCADE，会自动删除：
-/// - agent_states 表中的所有状态记录
-/// - agent_inventory 表中的所有物品记录
+/// 将当前设备的角色标记为归隐状态，保留设备身份和历史数据，允许重新创建新角色。
+/// - 角色状态从 active 变为 retired
+/// - 保留所有历史数据（agent_states, agent_inventory）
+/// - 可通过 Web 面板查看历史角色
 pub async fn agent_rebirth(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<RebirthRequest>,
-) -> Result<Json<RebirthResponse>, StatusCode> {
+) -> Result<Json<RebirthResponse>, (StatusCode, Json<RebirthResponse>)> {
     info!("Agent 转生请求: device_id={}", payload.device_id);
 
     // 调用数据库操作
@@ -266,8 +266,23 @@ pub async fn agent_rebirth(
             }))
         }
         Err(e) => {
-            error!("Agent 转生失败: {}", e);
-            Err(StatusCode::BAD_REQUEST)
+            let error_msg = format!("{}", e);
+            error!("Agent 转生失败: {}", error_msg);
+
+            // 根据错误类型确定状态码
+            let status = if error_msg.contains("认证失败") || error_msg.contains("auth") {
+                StatusCode::UNAUTHORIZED
+            } else if error_msg.contains("没有活跃的角色") || error_msg.contains("无需归隐") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+
+            Err((status, Json(RebirthResponse {
+                success: false,
+                message: error_msg,
+                retired_agent_id: None,
+            })))
         }
     }
 }

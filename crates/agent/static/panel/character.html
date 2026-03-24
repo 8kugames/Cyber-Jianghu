@@ -301,16 +301,69 @@
                         ? data.values.map(v => `<span class="info-tag">${v}</span>`).join('')
                         : '-';
 
-                    // 属性
+                    // 属性 - 按类别分组显示（参考服务端详细面板）
                     const attrsEl = document.getElementById('attributes');
                     if (data.attributes) {
-                        const attrs = Object.entries(data.attributes);
-                        attrsEl.innerHTML = attrs.map(([key, value]) => `
-                            <div class="attr-item">
-                                <span class="attr-name">${key}</span>
-                                <span class="attr-value">${value}</span>
-                            </div>
-                        `).join('');
+                        // 定义属性分组
+                        const statusAttrs = ['hp', 'stamina', 'hunger', 'thirst'];
+                        const innateAttrs = ['strength', 'agility', 'constitution', 'intelligence', 'charisma', 'luck'];
+
+                        let html = '';
+
+                        // 生理状态
+                        html += '<div class="attr-section"><h4>生理状态</h4><div class="attr-group">';
+                        statusAttrs.forEach(key => {
+                            const attr = data.attributes[key];
+                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                                const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                                const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
+                                html += `
+                                    <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
+                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                                        <span class="attr-value">${attr.current}/${attr.max}</span>
+                                    </div>
+                                `;
+                            }
+                        });
+                        html += '</div></div>';
+
+                        // 先天属性
+                        html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+                        innateAttrs.forEach(key => {
+                            const attr = data.attributes[key];
+                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                                html += `
+                                    <div class="attr-item" title="${escapeHtml(attr.description || '')}">
+                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                                        <span class="attr-value">${attr.current}/${attr.max}</span>
+                                    </div>
+                                `;
+                            }
+                        });
+                        html += '</div></div>';
+
+                        // 其他属性（不在已知分类中的）
+                        const knownAttrs = [...statusAttrs, ...innateAttrs];
+                        const otherAttrs = Object.keys(data.attributes).filter(k => !knownAttrs.includes(k) && data.attributes[k] && typeof data.attributes[k] === 'object');
+                        if (otherAttrs.length > 0) {
+                            html += '<div class="attr-section"><h4>其他属性</h4><div class="attr-group">';
+                            otherAttrs.forEach(key => {
+                                const attr = data.attributes[key];
+                                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                                    const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                                    const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
+                                    html += `
+                                        <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
+                                            <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                                            <span class="attr-value">${attr.current}/${attr.max}</span>
+                                        </div>
+                                    `;
+                                }
+                            });
+                            html += '</div></div>';
+                        }
+
+                        attrsEl.innerHTML = html;
                     } else {
                         attrsEl.innerHTML = '<p class="no-data">暂无属性数据</p>';
                     }

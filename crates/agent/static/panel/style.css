@@ -352,29 +352,93 @@ button[type="submit"]:disabled {
 
 /* Attributes Grid */
 .attributes-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Attribute Section */
+.attr-section {
+    background: var(--bg-color);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.attr-section h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin: 0 0 10px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.attr-group {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
 }
 
 .attr-item {
-    background: var(--bg-color);
-    padding: 10px;
+    background: var(--card-bg);
+    padding: 8px 10px;
     border-radius: 6px;
     text-align: center;
+    cursor: help;
+    position: relative;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 1px solid var(--border-color);
+}
+
+.attr-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Attribute status colors */
+.attr-item.attr-high {
+    border-left: 3px solid #27ae60;
+}
+
+.attr-item.attr-medium {
+    border-left: 3px solid #f39c12;
+}
+
+.attr-item.attr-low {
+    border-left: 3px solid #e74c3c;
+}
+
+/* Tooltip */
+.attr-item[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    font-size: 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+    max-width: 250px;
+    white-space: normal;
+    text-align: center;
+    z-index: 100;
+    margin-bottom: 8px;
+    pointer-events: none;
 }
 
 .attr-name {
     display: block;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
-    text-transform: uppercase;
     margin-bottom: 4px;
 }
 
 .attr-value {
     display: block;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--primary-color);
 }

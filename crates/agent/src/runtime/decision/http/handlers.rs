@@ -352,7 +352,7 @@ pub(super) async fn health_handler(State(state): State<HttpApiState>) -> impl In
 
     let response = HealthResponse {
         status: "ok".to_string(),
-        agent_id: agent_id.to_string(),
+        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
         tick_id: current.as_ref().map(|s| s.tick_id),
     };
     Json(response)
@@ -932,7 +932,7 @@ pub(super) async fn get_tick_status_handler(
 
     Json(dto::TickStatusResponse {
         tick_id,
-        agent_id: agent_id.to_string(),
+        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
         has_new_state: has_state,
         seconds_until_next_tick: None, // 服务端未提供此信息
         last_updated_at: chrono::Utc::now().to_rfc3339(),
@@ -1261,7 +1261,7 @@ pub struct CharacterInfoResponse {
     pub registered_at: Option<String>,
 
     // === WorldState 实时数据 ===
-    /// 当前属性
+    /// 当前属性（带叙事描述）
     pub attributes: Option<serde_json::Value>,
     /// 先天属性（注册时的属性值）
     pub birth_attributes: Option<serde_json::Value>,
@@ -1320,12 +1320,15 @@ pub(super) async fn get_character_handler(
         }
     };
 
-    // 3. 从当前 WorldState 获取实时状态
+    // 3. 加载叙事配置（用于属性描述）
+    let narrative_config = load_narrative_config(&state.config_path);
+
+    // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
     let (
         agent_id,
-        attributes,
+        raw_attributes,
         inventory,
         location,
         tick_id,
@@ -1342,13 +1345,16 @@ pub(super) async fn get_character_handler(
         None => (character.agent_id.map(|id| id.to_string()), None, None, None, None, None),
     };
 
-    // 4. 计算角色状态（在 move attributes 之前）
-    let status = attributes.as_ref()
+    // 5. 计算角色状态（在 move attributes 之前）
+    let status = raw_attributes.as_ref()
         .and_then(|a| a.get("hp"))
         .and_then(|hp| hp.as_i64())
         .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
 
-    // 5. 构建响应
+    // 6. 丰富属性数据（添加叙事描述）
+    let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
+
+    // 7. 构建响应
     let response = CharacterInfoResponse {
         agent_id,
         name: character.name.clone(),
@@ -1370,6 +1376,81 @@ pub(super) async fn get_character_handler(
     };
 
     Json(response).into_response()
+}
+
+/// 加载叙事配置
+fn load_narrative_config(config_path: &std::path::Path) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
+    let config_dir = config_path.parent()?;
+    let narrative_path = config_dir.join("narrative_config.json");
+
+    if narrative_path.exists() {
+        match crate::ai::cognitive::narrative::NarrativeConfig::from_file(&narrative_path) {
+            Ok(config) => {
+                info!("已加载叙事配置: {:?}", narrative_path);
+                return Some(config);
+            }
+            Err(e) => {
+                error!("加载叙事配置失败: {}", e);
+            }
+        }
+    }
+    None
+}
+
+/// 丰富属性数据，添加叙事描述
+fn enrich_attributes_with_descriptions(
+    raw_attributes: Option<serde_json::Value>,
+    narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
+) -> Option<serde_json::Value> {
+    let attrs = raw_attributes?;
+
+    // 将属性转换为带描述的格式
+    let enriched: serde_json::Map<String, serde_json::Value> = attrs
+        .as_object()?
+        .iter()
+        .filter_map(|(key, value)| {
+            // 获取当前值
+            let current = match value.as_i64() {
+                Some(v) => v,
+                None => return None,
+            };
+
+            // 从叙事配置获取属性信息
+            let (display_name, description) = narrative_config
+                .as_ref()
+                .and_then(|cfg| cfg.attributes.get(key))
+                .map(|attr_cfg| {
+                    let name = attr_cfg.display_name.clone();
+                    let current_i32 = current as i32;
+                    let desc = attr_cfg.thresholds.iter()
+                        .rev()
+                        .find(|t| current_i32 >= t.min && current_i32 <= t.max)
+                        .map(|t| t.description.clone())
+                        .unwrap_or_else(|| format!("{}: {}", name, current));
+                    (name, desc)
+                })
+                .unwrap_or_else(|| (key.clone(), format!("{}: {}", key, current)));
+
+            // 从叙事配置获取最大值（取最大 threshold 的 max）
+            let max = narrative_config
+                .as_ref()
+                .and_then(|cfg| cfg.attributes.get(key))
+                .and_then(|attr_cfg| attr_cfg.thresholds.iter().map(|t| t.max as i64).max())
+                .unwrap_or(100);
+
+            // 构建属性对象
+            let attr_obj = serde_json::json!({
+                "name": display_name,
+                "current": current,
+                "max": max,
+                "description": description
+            });
+
+            Some((key.clone(), attr_obj))
+        })
+        .collect();
+
+    Some(serde_json::Value::Object(enriched))
 }
 
 /// 经历日志条目
@@ -2131,6 +2212,10 @@ pub struct SetServerRequest {
     pub ws_url: String,
     /// HTTP URL（可选）
     pub http_url: Option<String>,
+    /// 确认标记（切换服务器需要二次确认）
+    /// 当为 true 时执行切换，否则只返回预览信息和警告
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 /// 设置服务器地址响应
@@ -2145,6 +2230,11 @@ pub struct SetServerResponse {
     pub needs_character_creation: bool,
     /// 该服务器上的历史角色
     pub previous_characters: Vec<CharacterSummary>,
+    /// 是否需要二次确认（当 confirm=false 且服务器变化时为 true）
+    pub requires_confirmation: bool,
+    /// 切换警告信息（当 requires_confirmation=true 时返回）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// 角色摘要信息
@@ -2338,6 +2428,10 @@ fn save_server_config(
 ///
 /// 设置服务器地址并触发重连。
 /// 配置会持久化到 `config_path` 文件。
+///
+/// 服务器切换需要二次确认（防止误操作）：
+/// 1. 第一次调用（confirm=false）返回预览信息和警告
+/// 2. 第二次调用（confirm=true）执行切换
 pub(super) async fn set_server_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<SetServerRequest>,
@@ -2396,6 +2490,30 @@ pub(super) async fn set_server_handler(
         }
     }
 
+    // 如果服务器变化但未确认，返回预览和警告（不执行）
+    if server_changed && !req.confirm {
+        let warning = format!(
+            "切换服务器 {} -> {} 需要二次确认。当前角色状态将被保留，但需要重新连接。",
+            old_ws_url, req.ws_url
+        );
+        return (
+            StatusCode::OK,
+            Json(SetServerResponse {
+                success: true,
+                message: "请确认服务器切换".to_string(),
+                current: ServerConfigResponse {
+                    ws_url: old_ws_url,
+                    http_url: state.server_http_url.read().await.clone(),
+                },
+                needs_device_registration,
+                needs_character_creation,
+                previous_characters,
+                requires_confirmation: true,
+                warning: Some(warning),
+            }),
+        );
+    }
+
     // 1. 更新内存中的配置
     {
         let mut ws_url = state.server_ws_url.write().await;
@@ -2425,6 +2543,8 @@ pub(super) async fn set_server_handler(
                 needs_device_registration: false,
                 needs_character_creation: false,
                 previous_characters: vec![],
+                requires_confirmation: false,
+                warning: None,
             }),
         );
     }
@@ -2460,6 +2580,8 @@ pub(super) async fn set_server_handler(
         needs_device_registration,
         needs_character_creation,
         previous_characters,
+        requires_confirmation: false,
+        warning: None,
     };
 
     (StatusCode::OK, Json(response))

@@ -204,17 +204,25 @@ cmd_server_start() {
     enter_component_dir "server"
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
+
     success "服务端已启动"
     echo ""
     info "访问地址:"
     echo "  - Dashboard: http://localhost:23333/admin"
     echo "  - WebSocket: ws://localhost:23333/ws"
     echo "  - Health:    http://localhost:23333/health"
-    # 提示用户查看生成的密码（如果有）
+
+    # 提示用户查看生成的密码和令牌（如果有）
     local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
     if [ -f "$password_file" ]; then
         echo ""
         info "数据库密码已自动生成，查看: cat $password_file"
+    fi
+    local admin_token_file="$PROJECT_ROOT/crates/server/cyber_jianghu_admin.tmp"
+    if [ -f "$admin_token_file" ]; then
+        echo ""
+        info "管理员令牌已生成，查看: cat $admin_token_file"
+        echo "       (文件中包含带 Token 的完整 URL，可直接点击访问)"
     fi
 }
 

@@ -51,12 +51,12 @@ async fn ws_handler(
     State(state): State<WsSharedState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Response {
-    // 安全：仅允许 localhost 连接
-    if !addr.ip().is_loopback() {
-        warn!("Rejected WebSocket connection from non-localhost: {}", addr);
+    // 安全检查：仅允许 localhost 连接，除非配置允许外部连接
+    if !addr.ip().is_loopback() && !state.allow_external_connections {
+        warn!("Rejected WebSocket connection from non-localhost: {} (allow_external_connections=false)", addr);
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
-            .body("Only localhost connections allowed".into())
+            .body("Only localhost connections allowed (set CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 to allow)".into())
             .unwrap();
     }
 

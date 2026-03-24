@@ -10,6 +10,7 @@
 // ============================================================================
 
 use axum::{
+    body::Bytes,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -204,6 +205,23 @@ async fn handle_websocket(
         }
     });
 
+    // 心跳任务（主动发送 Ping 检测连接活性）
+    let tx_for_heartbeat = tx.clone();
+    let agent_name_for_heartbeat = agent_name.clone();
+    let heartbeat_task = tokio::spawn(async move {
+        // 每 30 秒发送一次 Ping
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            // 发送 Ping 消息
+            if tx_for_heartbeat.send(Message::Ping(Bytes::new())).await.is_err() {
+                debug!("Heartbeat failed for agent '{}', connection likely closed", agent_name_for_heartbeat);
+                break;
+            }
+            debug!("Sent heartbeat Ping to agent '{}'", agent_name_for_heartbeat);
+        }
+    });
+
     // 接收消息循环
     // Clone values for use in recv_task
     let state_for_recv = state.clone();
@@ -306,6 +324,7 @@ async fn handle_websocket(
     tokio::select! {
         _ = send_task => {},
         _ = recv_task => {},
+        _ = heartbeat_task => {},
     }
 
     // 清理连接

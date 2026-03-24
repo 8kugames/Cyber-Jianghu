@@ -53,13 +53,17 @@ services:
 
       # 日志级别
       RUST_LOG: ${RUST_LOG:-info}
+
+      # WebSocket 连接配置
+      # 允许非 localhost 连接（Docker 部署时允许宿主机访问）
+      CYBER_JIANGHU_WS_ALLOW_EXTERNAL: ${AGENT_WS_ALLOW_EXTERNAL:-1}
     ports:
       # HTTP API 端口
       - "${AGENT_PORT:-23340}:23340"
     volumes:
-      # 配置持久化
-      - agent_config:/app/config
-      # 数据持久化
+      # 配置持久化 - 使用 bind mount 确保重启后 identity 不丢失
+      - ./config:/app/config
+      # 数据持久化 - SQLite 数据库和记忆存储
       - agent_data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
