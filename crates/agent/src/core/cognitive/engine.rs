@@ -289,7 +289,7 @@ impl MultiStageCognitiveEngine {
         let content = format!(
             "思考: {}\n行动: {}",
             response.thought_process,
-            format!("{:?}", intent.action_type)
+            format!("{:#?}", intent.action_type)
         );
 
         let metadata = serde_json::to_value(&response)?;

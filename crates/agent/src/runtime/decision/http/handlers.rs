@@ -443,6 +443,7 @@ pub(super) async fn get_attributes_handler(State(state): State<HttpApiState>) ->
 }
 
 /// Submit intent handler (完全数据驱动)
+#[allow(dead_code)]
 pub(super) async fn submit_intent_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<IntentRequest>,

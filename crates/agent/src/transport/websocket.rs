@@ -328,10 +328,10 @@ impl WebSocketClient {
                         Ok(msg @ ServerMessage::Dialogue { .. }) => {
                             debug!("Received dialogue message");
                             // 使用之前克隆的回调
-                            if let ServerMessage::Dialogue { ref message } = msg {
-                                if let Some(ref callback) = dialogue_cb {
-                                    callback(message.clone());
-                                }
+                            if let ServerMessage::Dialogue { ref message } = msg
+                                && let Some(ref callback) = dialogue_cb
+                            {
+                                callback(message.clone());
                             }
                             // 透传给 OpenClaw
                             if let Some(ref callback) = server_msg_cb {
