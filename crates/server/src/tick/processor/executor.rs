@@ -175,10 +175,9 @@ pub async fn apply_state_change(
                             _ => effect.value,
                         };
 
-                        if let Ok(_) =
-                            state
+                        if state
                                 .status
-                                .apply_change(&effect.attribute, value_to_apply, &context)
+                                .apply_change(&effect.attribute, value_to_apply, &context).is_ok()
                         {
                             attribute_delta.insert(
                                 effect.attribute.clone(),
@@ -871,7 +870,7 @@ mod tests {
             .unwrap();
         let tick_id = 1i64;
         let agent_id = uuid::Uuid::new_v4();
-        let mut agent_state = AgentState::new(agent_id, tick_id);
+        let agent_state = AgentState::new(agent_id, tick_id);
         let mut events = Vec::new();
 
         let change = StateChange::HungerChanged {

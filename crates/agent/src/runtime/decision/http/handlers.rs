@@ -1199,6 +1199,13 @@ pub(super) async fn register_character_handler(
                 }
             }
 
+            // 9. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
+            if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
+                let mut id = state.agent_id.write().await;
+                *id = agent_uuid;
+                info!("[character] Updated runtime agent_id to {} ({})", agent_uuid, payload.name);
+            }
+
             (
                 StatusCode::OK,
                 Json(CharacterRegisterResponse {

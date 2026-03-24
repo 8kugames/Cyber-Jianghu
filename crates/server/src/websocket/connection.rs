@@ -36,6 +36,10 @@ pub struct Connection {
     #[allow(dead_code)]
     pub agent_id: Uuid,
 
+    /// Device ID（用于归属验证）
+    #[allow(dead_code)]
+    pub device_id: Uuid,
+
     /// Agent 名称
     #[allow(dead_code)]
     pub agent_name: String,
@@ -49,11 +53,13 @@ impl Connection {
     /// 创建新连接
     pub fn new(
         agent_id: Uuid,
+        device_id: Uuid,
         agent_name: String,
         sender: tokio::sync::mpsc::Sender<Message>,
     ) -> Self {
         Self {
             agent_id,
+            device_id,
             agent_name,
             sender,
         }

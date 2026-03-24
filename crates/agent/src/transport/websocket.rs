@@ -349,6 +349,16 @@ impl WebSocketClient {
                             }
                             // 继续等待
                         }
+                        Ok(msg @ ServerMessage::AgentDied { .. }) => {
+                            if let ServerMessage::AgentDied { agent_id, ref cause, ref description, .. } = msg {
+                                warn!("Agent {} died: {} - {}", agent_id, cause, description);
+                            }
+                            // 透传给 OpenClaw（触发重生流程）
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
+                            }
+                            // 继续等待
+                        }
                         Ok(ServerMessage::Pong { .. }) => {
                             // 心跳响应，不透传
                         }

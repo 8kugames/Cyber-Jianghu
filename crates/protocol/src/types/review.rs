@@ -15,8 +15,10 @@ use super::Intent;
 /// 审查状态
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ReviewStatus {
     /// 等待审查
+    #[default]
     Pending,
     /// 已批准
     Approved,
@@ -26,11 +28,6 @@ pub enum ReviewStatus {
     TimeoutApproved,
 }
 
-impl Default for ReviewStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
-}
 
 // ============================================================================
 // 审查请求/响应

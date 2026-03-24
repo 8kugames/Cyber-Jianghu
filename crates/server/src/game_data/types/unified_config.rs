@@ -171,6 +171,10 @@ pub struct GameRulesData {
 
     /// 运维与监控配置
     pub ops: OpsRulesData,
+
+    /// 死亡默认配置（当属性未配置 death_cause/death_message 时使用）
+    #[serde(default)]
+    pub death_defaults: Option<DeathDefaultsData>,
 }
 
 /// 运维与监控规则数据
@@ -181,6 +185,26 @@ pub struct OpsRulesData {
 
     /// 离线多久（天）的 Agent 会被清理脚本删除
     pub offline_cleanup_days: i32,
+}
+
+/// 死亡默认配置（当属性未配置 death_cause/death_message 时使用）
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DeathDefaultsData {
+    /// 未知原因死亡的默认配置
+    pub unknown: DeathDefaultEntry,
+
+    /// 环境伤害死亡的默认配置
+    pub environmental: DeathDefaultEntry,
+}
+
+/// 单个死亡默认配置项
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DeathDefaultEntry {
+    /// 死亡原因代码
+    pub cause: String,
+
+    /// 死亡描述
+    pub message: String,
 }
 
 /// Agent状态规则数据
