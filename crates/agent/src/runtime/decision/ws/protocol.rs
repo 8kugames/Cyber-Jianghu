@@ -100,6 +100,9 @@ pub enum DownstreamMessage {
         /// 关联的 Tick ID（可选）
         #[serde(skip_serializing_if = "Option::is_none")]
         tick_id: Option<i64>,
+        /// 当前 Tick ID（帮助客户端同步）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_tick: Option<i64>,
     },
 
     /// Server 转发对话消息
@@ -271,7 +274,7 @@ impl DownstreamMessage {
     /// 从 ServerMessage 转换为 DownstreamMessage
     ///
     /// 返回 None 表示该消息类型不需要透传（如 WorldState 已通过 Tick 处理）
-    pub fn from_server_message(msg: ServerMessage, _current_tick: i64) -> Option<Self> {
+    pub fn from_server_message(msg: ServerMessage, current_tick: i64) -> Option<Self> {
         match msg {
             ServerMessage::Error { message } => {
                 let code = Self::parse_error_code(&message);
@@ -280,6 +283,7 @@ impl DownstreamMessage {
                     code,
                     message,
                     tick_id,
+                    current_tick: Some(current_tick),
                 })
             }
             ServerMessage::Dialogue { message } => match message {
@@ -452,12 +456,14 @@ mod tests {
             code: ServerErrorCode::AgentDead,
             message: "Agent 已死亡，无法执行此动作。".to_string(),
             tick_id: Some(105),
+            current_tick: Some(110),
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"server_error""#));
         assert!(json.contains(r#""code":"agent_dead""#));
         assert!(json.contains(r#""tick_id":105"#));
+        assert!(json.contains(r#""current_tick":110"#));
     }
 
     #[test]
@@ -466,12 +472,14 @@ mod tests {
             code: ServerErrorCode::RateLimited,
             message: "Rate limit exceeded.".to_string(),
             tick_id: None,
+            current_tick: Some(100),
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"server_error""#));
         assert!(json.contains(r#""code":"rate_limited""#));
         assert!(!json.contains(r#""tick_id""#)); // None 时不序列化
+        assert!(json.contains(r#""current_tick":100"#));
     }
 
     #[test]
@@ -695,10 +703,11 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code, message, tick_id } => {
+            DownstreamMessage::ServerError { code, message, tick_id, current_tick } => {
                 assert_eq!(code, ServerErrorCode::AgentDead);
                 assert!(message.contains("死亡"));
                 assert!(tick_id.is_none()); // 消息中没有 tick_id
+                assert_eq!(current_tick, Some(100)); // 传入的 current_tick
             }
             _ => panic!("Expected ServerError"),
         }
@@ -714,9 +723,10 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code, message, tick_id } => {
+            DownstreamMessage::ServerError { code: _, message, tick_id, current_tick } => {
                 assert_eq!(tick_id, Some(105));
                 assert!(message.contains("tick 105"));
+                assert_eq!(current_tick, Some(100)); // 传入的 current_tick
             }
             _ => panic!("Expected ServerError"),
         }

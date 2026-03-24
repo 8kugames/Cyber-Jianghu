@@ -12,13 +12,16 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use axum::extract::ws::WebSocket;
+use futures_util::stream::SplitSink;
+use tokio::sync::{broadcast, mpsc, RwLock};
+use futures_util::SinkExt;
+use tracing::{debug, error, info, warn};
 
 use crate::models::{Intent, WorldState};
 use uuid::Uuid;
 
-use super::protocol::{DownstreamMessage, ServerErrorCode, WsIntent};
+use super::protocol::{DownstreamMessage, WsIntent};
 
 // ============================================================================
 // 常量
@@ -29,6 +32,20 @@ pub const DEFAULT_TICK_DURATION_SECS: u64 = 60;
 
 /// Tick 超时缓冲比例（实际截止时间 = tick_duration * 0.9）
 pub const TICK_TIMEOUT_RATIO: f64 = 0.9;
+
+// ============================================================================
+// 验证请求
+// ============================================================================
+
+/// 验证请求（从读任务发送到验证任务）
+pub struct ValidationRequest {
+    /// 待验证的意图
+    pub intent: WsIntent,
+    /// WebSocket 发送端（用于返回验证错误）
+    pub ws_tx: Arc<tokio::sync::Mutex<SplitSink<WebSocket, axum::extract::ws::Message>>>,
+    /// 发送时的 tick（用于检测验证期间 tick 推进）
+    pub tick_at_send: i64,
+}
 
 // ============================================================================
 // WebSocket 决策状态
@@ -53,6 +70,12 @@ pub struct WsDecisionState {
     /// Intent 发送通道（用于 server.rs）
     pub intent_tx: mpsc::Sender<WsIntent>,
 
+    /// 验证请求接收通道（容量 1）
+    pub validation_rx: mpsc::Receiver<ValidationRequest>,
+
+    /// 验证请求发送通道（用于 server.rs）
+    pub validation_tx: mpsc::Sender<ValidationRequest>,
+
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
@@ -73,6 +96,7 @@ impl WsDecisionState {
         let (tick_closed_tx, _) = broadcast::channel(16);
         let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, intent_rx) = mpsc::channel(16);
+        let (validation_tx, validation_rx) = mpsc::channel(1); // 容量 1，强制背压
 
         Self {
             state_tx,
@@ -80,6 +104,8 @@ impl WsDecisionState {
             server_msg_tx,
             intent_rx,
             intent_tx,
+            validation_rx,
+            validation_tx,
             current_tick: Arc::new(AtomicI64::new(0)),
             deadline_ms: Arc::new(AtomicU64::new(0)),
             tick_duration_ms: Arc::new(AtomicU64::new(DEFAULT_TICK_DURATION_SECS * 1000)),
@@ -222,6 +248,152 @@ impl WsDecisionState {
             Err(_) => debug!("No clients connected for tick_closed"),
         }
     }
+
+    /// 启动验证任务（后台运行）
+    ///
+    /// 验证任务从 validation_rx 接收验证请求，处理后：
+    /// - 通过：转发到 intent_tx
+    /// - 拒绝：通过 ws_tx 发送 ServerError
+    pub fn spawn_validation_task(
+        &mut self,
+        shared_state: WsSharedState,
+    ) -> tokio::task::JoinHandle<()> {
+        let mut validation_rx = std::mem::replace(&mut self.validation_rx, mpsc::channel(1).1);
+        let intent_tx = shared_state.intent_tx.clone();
+        let current_tick = self.current_tick.clone();
+        let submitted_tick = shared_state.submitted_tick.clone();
+        let intent_validator = shared_state.intent_validator.clone();
+        let persona = shared_state.persona.clone();
+
+        tokio::spawn(async move {
+            debug!("Validation task started");
+
+            while let Some(req) = validation_rx.recv().await {
+                let current_tick_value = current_tick.load(Ordering::Relaxed);
+
+                // 1. 检查验证期间 tick 是否推进
+                if req.intent.tick_id != current_tick_value {
+                    let error_msg = DownstreamMessage::ServerError {
+                        code: super::protocol::ServerErrorCode::TickExpired,
+                        message: format!(
+                            "Validation expired: intent tick {} != current tick {}",
+                            req.intent.tick_id, current_tick_value
+                        ),
+                        tick_id: Some(req.intent.tick_id),
+                        current_tick: Some(current_tick_value),
+                    };
+
+                    if let Ok(json) = serde_json::to_string(&error_msg) {
+                        let mut tx = req.ws_tx.lock().await;
+                        use axum::extract::ws::Message;
+                        let _ = tx.send(Message::Text(json.into())).await;
+                    }
+
+                    warn!(
+                        "Validation rejected: tick {} != current {}",
+                        req.intent.tick_id, current_tick_value
+                    );
+                    continue;
+                }
+
+                // 2. 检查该 tick 是否已提交（防止重复）
+                let submitted = submitted_tick.load(Ordering::Acquire);
+                if submitted == req.intent.tick_id {
+                    let error_msg = DownstreamMessage::ServerError {
+                        code: super::protocol::ServerErrorCode::TickExpired,
+                        message: "Intent already submitted for this tick".to_string(),
+                        tick_id: Some(req.intent.tick_id),
+                        current_tick: Some(current_tick_value),
+                    };
+
+                    if let Ok(json) = serde_json::to_string(&error_msg) {
+                        let mut tx = req.ws_tx.lock().await;
+                        use axum::extract::ws::Message;
+                        let _ = tx.send(Message::Text(json.into())).await;
+                    }
+
+                    warn!("Rejected duplicate intent for tick {}", req.intent.tick_id);
+                    continue;
+                }
+
+                // 3. 获取验证器和 persona
+                let validator_guard = intent_validator.read().await;
+                let persona_guard = persona.read().await;
+
+                match (validator_guard.as_ref(), persona_guard.as_ref()) {
+                    (None, _) | (_, None) => {
+                        // 无验证器或无 persona，直接转发
+                        debug!("No validator or persona, forwarding directly");
+                        submitted_tick.store(req.intent.tick_id, Ordering::Release);
+                        if let Err(e) = intent_tx.send(req.intent).await {
+                            error!("Failed to send intent: {}", e);
+                        }
+                    }
+                    (Some(validator), Some(persona)) => {
+                        // 4. 构建验证请求
+                        let validation_req = crate::ai::validator::ValidationRequest {
+                            intent: cyber_jianghu_protocol::Intent::new(
+                                uuid::Uuid::nil(), // agent_id 暂时用 nil
+                                req.intent.tick_id,
+                                req.intent.action_type.clone(),
+                                req.intent.action_data.clone(),
+                            ),
+                            persona: persona.clone(),
+                            world_context: format!("tick: {}", req.intent.tick_id),
+                        };
+
+                        // 5. 带超时的验证（10 秒）
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(10),
+                            validator.validate(validation_req)
+                        ).await {
+                            Ok(Ok(crate::ai::validator::ValidationResult::Approved { .. })) => {
+                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
+                                if let Err(e) = intent_tx.send(req.intent).await {
+                                    error!("Failed to send intent: {}", e);
+                                }
+                                debug!("Intent approved and forwarded");
+                            }
+                            Ok(Ok(crate::ai::validator::ValidationResult::Rejected { reason, .. })) => {
+                                let error_msg = DownstreamMessage::ServerError {
+                                    code: super::protocol::ServerErrorCode::ValidationFailed,
+                                    message: reason.clone(),
+                                    tick_id: Some(req.intent.tick_id),
+                                    current_tick: Some(current_tick_value),
+                                };
+
+                                if let Ok(json) = serde_json::to_string(&error_msg) {
+                                    let mut tx = req.ws_tx.lock().await;
+                                    use axum::extract::ws::Message;
+                                    let _ = tx.send(Message::Text(json.into())).await;
+                                }
+
+                                info!("Intent rejected: {}", reason);
+                            }
+                            Ok(Err(e)) => {
+                                // LLM 错误：允许通过（降级策略）
+                                warn!("Validation error, allowing: {}", e);
+                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
+                                if let Err(e) = intent_tx.send(req.intent).await {
+                                    error!("Failed to send intent: {}", e);
+                                }
+                            }
+                            Err(_) => {
+                                // 超时：允许通过（降级策略）
+                                warn!("Validation timeout, allowing");
+                                submitted_tick.store(req.intent.tick_id, Ordering::Release);
+                                if let Err(e) = intent_tx.send(req.intent).await {
+                                    error!("Failed to send intent: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            debug!("Validation task ended");
+        })
+    }
 }
 
 impl Default for WsDecisionState {
@@ -273,6 +445,20 @@ pub struct WsSharedState {
     /// 是否允许非 localhost 连接
     /// Docker 部署时需要设为 true，允许宿主机访问
     pub allow_external_connections: bool,
+
+    // === 意图验证相关字段 ===
+
+    /// 意图验证器（RwLock 支持运行时更新）
+    pub intent_validator: Arc<RwLock<Option<Arc<dyn crate::ai::validator::Validator>>>>,
+
+    /// 人设信息（RwLock 支持运行时更新）
+    pub persona: Arc<RwLock<Option<crate::ai::validator::PersonaInfo>>>,
+
+    /// 已提交的 tick_id（防止重复提交）
+    pub submitted_tick: Arc<AtomicI64>,
+
+    /// 验证请求发送通道（容量 1，强制背压）
+    pub validation_tx: mpsc::Sender<ValidationRequest>,
 }
 
 impl WsSharedState {
@@ -319,6 +505,11 @@ impl From<&WsDecisionState> for WsSharedState {
             cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
             allow_external_connections,
+            // 新增验证相关字段
+            intent_validator: Arc::new(RwLock::new(None)),
+            persona: Arc::new(RwLock::new(None)),
+            submitted_tick: Arc::new(AtomicI64::new(-1)), // -1 表示未提交
+            validation_tx: state.validation_tx.clone(),
         }
     }
 }

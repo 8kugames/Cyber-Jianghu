@@ -525,8 +525,11 @@ async fn run_agent(port: u16) -> Result<()> {
         let (reconnect_tx, reconnect_rx) =
             mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
-        let ws_state = WsDecisionState::new();
+        let mut ws_state = WsDecisionState::new();
         let shared_state = Arc::new(WsSharedState::from(&ws_state));
+
+        // 启动验证任务（后台运行）
+        ws_state.spawn_validation_task((*shared_state).clone());
 
         let (http_decision_state, api_state) = create_http_state(
             device_id.clone(),
@@ -540,35 +543,54 @@ async fn run_agent(port: u16) -> Result<()> {
 
         let api_state_clone = api_state.clone();
         let server_msg_tx = shared_state.server_msg_tx.clone(); // 提取用于回调
+        let shared_state_for_callback = shared_state.clone(); // 用于注册回调
+        let api_state_for_callback = api_state.clone(); // 用于获取 validator
         tokio::spawn(async move {
             if let Err(e) = run_ws_server(actual_port, (*shared_state).clone(), api_state_clone).await {
                 error!("Claw server error: {}", e);
             }
         });
 
-        // 返回 HTTP decision state、reconnect_rx 和 server_msg_tx（用于 http_decision、Agent 和消息透传）
-        (http_decision_state, reconnect_rx, server_msg_tx)
+        // 返回 HTTP decision state、reconnect_rx、server_msg_tx、shared_state 和 api_state
+        (http_decision_state, reconnect_rx, server_msg_tx, shared_state_for_callback, api_state_for_callback)
     };
 
     // 6. 创建决策函数
-    let (decision, agent_reconnect_rx, server_msg_tx): (
+    let (decision, agent_reconnect_rx, server_msg_tx, shared_state_for_callback, api_state_for_callback): (
         Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
         Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
         tokio::sync::broadcast::Sender<DownstreamMessage>,
+        Arc<WsSharedState>,
+        cyber_jianghu_agent::runtime::decision::http::HttpApiState,
     ) = {
-        let (state, rx, tx) = claw_decision_state;
+        let (state, rx, tx, ws_state, api_state) = claw_decision_state;
         (
             Arc::new(http_decision(device_id.clone(), state, 55)),
             Some(rx),
             tx,
+            ws_state,
+            api_state,
         )
     };
+
+    // 6.5 提取 persona 信息（在 config 被移动之前）
+    let persona_info = config.agent.as_ref().map(|c| {
+        cyber_jianghu_agent::ai::validator::PersonaInfo {
+            gender: c.gender.clone(),
+            age: c.age,
+            personality: c.personality.clone(),
+            values: c.values.clone(),
+        }
+    });
 
     // 7. 创建并运行 Agent
     let mut agent = Agent::new(config, decision, agent_reconnect_rx).await;
 
     // 设置注册回调
     let device_id_clone = device_id.clone();
+    let shared_state_clone = shared_state_for_callback.clone();
+    let api_state_clone = api_state_for_callback.clone();
+    let persona_clone = persona_info.clone();
     agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
         // 注意：必须先释放读锁再获取写锁，否则会死锁
         let old_id = tokio::task::block_in_place(|| {
@@ -586,6 +608,24 @@ async fn run_agent(port: u16) -> Result<()> {
             tokio::runtime::Handle::current().block_on(device_id_clone.write())
         });
         *guard = server_agent_id;
+
+        // 注入 validator 到 WsSharedState
+        if let Some(ref validator) = api_state_clone.intent_validator {
+            let mut validator_guard = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(shared_state_clone.intent_validator.write())
+            });
+            *validator_guard = Some(validator.clone());
+            info!("Validator injected into WsSharedState");
+        }
+
+        // 注入 persona 到 WsSharedState
+        if let Some(ref persona) = persona_clone {
+            let mut persona_guard = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(shared_state_clone.persona.write())
+            });
+            *persona_guard = Some(persona.clone());
+            info!("Persona injected into WsSharedState");
+        }
     }));
 
     // 设置 Server 消息透传回调（用于 OpenClaw 集成）
