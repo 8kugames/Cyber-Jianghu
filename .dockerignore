@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Rust build artifacts (not needed in build context)
+target/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+**/tests/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Docker (avoid recursive builds)
+docker-compose*.yml
+Dockerfile*
+
+# Environment files (should be passed via docker-compose)
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Agent data directory (local development)
+.claude/
+.cyber-jianghu/
+
+# Integration test directories
+integration/
