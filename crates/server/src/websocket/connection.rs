@@ -88,6 +88,21 @@ pub fn create_intent_manager() -> IntentManager {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
+// ============================================================================
+// agent_id → device_id 反向映射
+// ============================================================================
+
+/// agent_id → device_id 反向映射
+///
+/// 用于在角色注册后，通过 agent_id 找到对应的 device_id，
+/// 从而找到正确的 WebSocket 连接
+pub type AgentToDeviceMap = Arc<RwLock<HashMap<Uuid, Uuid>>>;
+
+/// 创建 agent_id → device_id 映射表
+pub fn create_agent_to_device_map() -> AgentToDeviceMap {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
 /// 原子性地获取指定 tick 的 Intent
 ///
 /// # 参数

@@ -59,6 +59,10 @@ pub enum DownstreamMessage {
         /// 叙事化上下文（Markdown 格式，供 LLM 推理使用）
         #[serde(skip_serializing_if = "Option::is_none")]
         context: Option<String>,
+        /// 四阶段认知上下文（结构化 JSON，引导 OpenClaw 四阶段推理）
+        /// 包含：Perception → Motivation → Planning → Decision
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cognitive_context: Option<crate::runtime::decision::http::cognitive_context::CognitiveContext>,
     },
 
     /// Tick 关闭通知（超时未收到 Intent 时发送）
@@ -524,29 +528,62 @@ mod tests {
             deadline_ms: 1710937800000,
             state,
             context: None,
+            cognitive_context: None,
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tick""#));
         assert!(json.contains(r#""tick_id":105"#));
         assert!(!json.contains(r#""context""#)); // None 时不序列化
+        assert!(!json.contains(r#""cognitive_context""#)); // None 时不序列化
     }
 
     #[test]
     fn test_serialize_tick_message_with_context() {
+        use crate::runtime::decision::http::cognitive_context::{
+            CognitiveContext, PerceptionContext, MotivationContext, PlanningContext, DecisionContext,
+        };
+
         let state = create_test_world_state();
+
+        // 创建结构化认知上下文
+        let cognitive_context = CognitiveContext {
+            perception: PerceptionContext {
+                self_status: "身体状态良好".to_string(),
+                environment: "长安城东市".to_string(),
+                key_observations: vec!["附近有商人".to_string()],
+            },
+            motivation: MotivationContext {
+                active_drives: vec![],
+                dominant_drive: "保持现状".to_string(),
+            },
+            planning: PlanningContext {
+                current_goals: vec!["继续当前活动".to_string()],
+                available_actions: vec![],
+            },
+            decision: DecisionContext {
+                requires_reasoning: true,
+                thinking_prompt: "请决定下一步行动".to_string(),
+            },
+        };
 
         let msg = DownstreamMessage::Tick {
             tick_id: 105,
             deadline_ms: 1710937800000,
             state,
             context: Some("## 游戏状态上下文\n\n测试上下文".to_string()),
+            cognitive_context: Some(cognitive_context),
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""type":"tick""#));
         assert!(json.contains(r#""tick_id":105"#));
         assert!(json.contains(r#""context""#)); // 有 context 字段
+        assert!(json.contains(r#""cognitive_context""#)); // 有 cognitive_context 字段
+        assert!(json.contains(r#""perception""#));
+        assert!(json.contains(r#""motivation""#));
+        assert!(json.contains(r#""planning""#));
+        assert!(json.contains(r#""decision""#));
     }
 
     #[test]

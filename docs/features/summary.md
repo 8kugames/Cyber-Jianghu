@@ -15,6 +15,7 @@
 - [x] **Agent 生命周期**: 支持新 Agent 降生（注册）、属性初始化、存活状态维护以及寿命自然衰减与死亡判定。
 - [x] **持久化系统**: 集成 PostgreSQL 数据库，实现 Agent 基础数据、实时状态（Health/Energy等）、以及场景掉落物的持久化读写。
 - [x] **状态广播**: 实现了基于 WebSocket 的高性能 `WorldState` 广播机制，将局部或全局世界快照实时同步给各 Agent 客户端。
+- [x] **agent_id → device_id 反向映射**: 维护角色到设备的映射关系，确保广播消息能正确路由到 WebSocket 连接。
 
 ### 3. 动作与交互系统
 - [x] **基础行为**: 实现了 `Idle` (空闲)、`Move` (基于地理图节点的移动校验)。
@@ -27,11 +28,12 @@
 
 ## 二、 客户端 SDK (Agent) 功能
 
-Agent SDK 是接入世界的"躯壳"和"大脑"。
+Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑"。
 
 ### 1. 接入与运行模式
 - [x] **Claw 模式**: Agent 默认模式，为 OpenClaw 和其他外部 LLM 编排框架提供 WebSocket + HTTP API 接口。内置叙事引擎、记忆系统、意图验证等认知能力作为 API 供外部调用。
 - [x] **网络通信容错**: 实现了 WebSocket 自动断线重连、指数退避策略以及注册流的自动恢复。
+- [x] **强制 WebSocket Intent 提交**: HTTP `/api/v1/intent` 已禁用，必须通过 WebSocket 提交意图以确保 Tick 同步。
 
 ### 2. AI 与认知核心 (内置模块)
 - [x] **多级记忆系统**:
@@ -41,6 +43,11 @@ Agent SDK 是接入世界的"躯壳"和"大脑"。
 - [x] **认知感知流水线**:
   - [x] **叙事翻译**: 将生硬的数值（如 `health: 30%`）转化为自然语言描述（如"你感到头晕目眩，身负重伤"），方便 LLM 理解。
   - [x] **动机推演**: 基于当前状态和性格，自动推断出下一步应当采取的短期动机。
+- [x] **四阶段认知上下文**: WebSocket Tick 消息内置结构化认知引导
+  - [x] **Perception (感知)**: 理解当前世界状态、自身状态、环境观察
+  - [x] **Motivation (动机)**: 基于人设生成内在驱动力
+  - [x] **Planning (规划)**: 制定行动计划和可用动作
+  - [x] **Decision (决策)**: 引导最终决策的思考提示
 - [x] **动态人设与社交**:
   - [x] 角色性格 (`Persona`) 能够根据外界反馈（被攻击、被治愈）进行动态偏移。
   - [x] 支持建立与其他 Agent 的好感度/信任度关系图谱，并支持查询与修改。
@@ -55,6 +62,7 @@ Agent SDK 是接入世界的"躯壳"和"大脑"。
 ## 四、 扩展支持 (OpenClaw 集成)
 - [x] OpenClaw 集成已独立发布为 npm 包 `@8kugames/cyber-jianghu-openclaw`。
 - [x] 实现了 `jianghu_act` 动作执行工具、注册 Hook 以及内存插件，支持外部 AI Agent 零代码接入赛博江湖。
+- [x] WebSocket Tick 消息内置四阶段认知上下文，引导 OpenClaw 进行结构化推理。
 - [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)。
 
 ---

@@ -109,6 +109,9 @@ pub struct AppState {
     /// WebSocket 连接管理器
     pub connection_manager: websocket::ConnectionManager,
 
+    /// agent_id → device_id 反向映射
+    pub agent_to_device_map: websocket::AgentToDeviceMap,
+
     /// Intent 管理器（临时缓存）
     pub intent_manager: websocket::IntentManager,
 
@@ -141,6 +144,7 @@ impl AppState {
         config: Config,
         db_pool: DbPool,
         connection_manager: websocket::ConnectionManager,
+        agent_to_device_map: websocket::AgentToDeviceMap,
         intent_manager: websocket::IntentManager,
         rate_limiter: RateLimiter,
         game_data: Arc<game_data::GameDataCache>,
@@ -153,6 +157,7 @@ impl AppState {
             config,
             db_pool,
             connection_manager,
+            agent_to_device_map,
             intent_manager,
             rate_limiter,
             game_data,

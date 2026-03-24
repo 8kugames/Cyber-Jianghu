@@ -5,6 +5,44 @@
 
 ---
 
+## [Unreleased]
+
+### ⚠️ Breaking Changes
+
+- **Agent**: HTTP Intent API 禁用
+  - 移除 `POST /api/v1/intent` 路由
+  - 强制使用 WebSocket 提交 Intent（确保 Tick 同步）
+  - 原因：HTTP 轮询无法保证 tick_id 实时同步，会导致意图被拒绝
+
+### Added
+
+- **Server**: agent_id → device_id 反向映射系统
+  - 新增 `AgentToDeviceMap` 类型维护角色到设备的映射
+  - 在 `agent_register` 和 WebSocket 连接时自动更新映射
+  - 解决设备与角色分离后，WorldState 广播找不到正确连接的问题
+
+- **Agent**: WebSocket Tick 消息集成四阶段认知上下文
+  - `DownstreamMessage::Tick` 新增 `cognitive_context` 字段
+  - 结构化四阶段推理引导：Perception → Motivation → Planning → Decision
+  - OpenClaw 可直接使用认知上下文进行推理，无需额外 API 调用
+
+### Changed
+
+- **Server**: WebSocket 连接管理改用 device_id 作为 key
+  - 连接管理器现在以 device_id 而非 agent_id 存储连接
+  - 支持同一设备管理多角色的场景
+
+### Removed
+
+- 删除过时的设计文档：
+  - `docs/openclaw-cognitive-integration.md`
+  - `docs/superpowers/plans/2026-03-23-agent-death-notification.md`
+  - `docs/superpowers/specs/2026-03-22-agent-openclaw-error-forwarding-design.md`
+  - `docs/superpowers/specs/2026-03-23-agent-death-notification-design.md`
+  - `联调测试.md`
+
+---
+
 ## [0.0.33] - 2026-03-23
 
 ### Added

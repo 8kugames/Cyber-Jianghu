@@ -44,11 +44,12 @@ fn start_tick_engine(
     game_data_cache: Arc<game_data::GameDataCache>,
     db_pool: DbPool,
     connection_manager: websocket::ConnectionManager,
+    agent_to_device_map: websocket::AgentToDeviceMap,
     intent_manager: websocket::IntentManager,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler =
-            TickScheduler::new(game_data_cache, db_pool, connection_manager, intent_manager);
+            TickScheduler::new(game_data_cache, db_pool, connection_manager, agent_to_device_map, intent_manager);
 
         info!("启动Tick引擎（后台任务）");
 
@@ -123,8 +124,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // 7. 初始化 WebSocket 连接管理器、Intent 管理器和速率限制器
+    // 7. 初始化 WebSocket 连接管理器、Intent 管理器、agent→device 映射器和速率限制器
     let connection_manager = websocket::create_connection_manager();
+    let agent_to_device_map = websocket::create_agent_to_device_map();
     let intent_manager = websocket::create_intent_manager();
     let rate_limiter = create_rate_limiter();
     info!("WebSocket、Intent 管理器和速率限制器初始化成功");
@@ -203,6 +205,7 @@ async fn main() -> Result<()> {
         config.clone(),
         db_pool.clone(),
         connection_manager.clone(),
+        agent_to_device_map.clone(),
         intent_manager.clone(),
         rate_limiter.clone(),
         game_data_cache.clone(),
@@ -217,6 +220,7 @@ async fn main() -> Result<()> {
         game_data_cache.clone(),
         db_pool,
         connection_manager.clone(),
+        agent_to_device_map.clone(),
         intent_manager.clone(),
     );
 
