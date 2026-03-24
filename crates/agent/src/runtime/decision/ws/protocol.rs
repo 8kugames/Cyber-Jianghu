@@ -32,6 +32,8 @@ pub enum ServerErrorCode {
     RateLimited,
     /// Tick 已过期
     TickExpired,
+    /// 重复提交（同一 tick 已提交过意图）
+    DuplicateSubmission,
     /// 无效动作
     InvalidAction,
     /// 验证失败
