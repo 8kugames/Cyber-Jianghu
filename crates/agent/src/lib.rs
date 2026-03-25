@@ -75,6 +75,7 @@ pub use runtime::{
     DecisionWithMemoryCallback, HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest,
     cognitive_decision, cognitive_decision_with_retry, create_http_state, http_decision,
     run_http_server,
+    claw,
 };
 
 // AI 模块
