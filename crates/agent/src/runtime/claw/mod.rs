@@ -11,7 +11,11 @@
 // 3. 自控：完全控制 context 管理
 
 mod history;
+mod turn_cycle;
 
 pub use history::{
     ChatMessage, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager, HealthStatus,
+};
+pub use turn_cycle::{
+    Intent, ToolCall, ToolResult, TurnCycle, TurnCycleConfig, TurnCycleServices,
 };
