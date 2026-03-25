@@ -28,10 +28,8 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::models::WorldState;
-
-use super::protocol::{DownstreamMessage, UpstreamMessage, WsIntent};
-use super::state::WsSharedState;
+use super::protocol::{DownstreamMessage, ServerErrorCode, UpstreamMessage, WsIntent};
+use super::state::{WsSharedState, WsValidationRequest};
 use crate::runtime::decision::http::{create_api_router, get_static_serve_dir, HttpApiState};
 
 // ============================================================================
@@ -115,21 +113,71 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                             // 使用 From trait 转换
                             let intent_opt: Option<WsIntent> = upstream.into();
                             if let Some(intent) = intent_opt {
-                                // 校验 tick_id
                                 let current_tick = state.get_current_tick();
 
-                                if intent.tick_id < current_tick {
-                                    // 过期 Intent，静默丢弃
+                                // 严格检查：tick_id 必须等于 current_tick
+                                if intent.tick_id != current_tick {
+                                    // 发送 ServerError{TickExpired}
+                                    let error_msg = DownstreamMessage::ServerError {
+                                        code: ServerErrorCode::TickExpired,
+                                        message: format!(
+                                            "Intent tick {} != current tick {}",
+                                            intent.tick_id, current_tick
+                                        ),
+                                        tick_id: Some(intent.tick_id),
+                                        current_tick: Some(current_tick),
+                                    };
+
+                                    if let Ok(json) = serde_json::to_string(&error_msg) {
+                                        let mut tx = ws_tx.lock().await;
+                                        let _ = tx.send(Message::Text(json.into())).await;
+                                    }
+
                                     warn!(
-                                        "Dropped expired intent: tick {} < current {}",
+                                        "Rejected intent: tick {} != current {}",
                                         intent.tick_id, current_tick
                                     );
                                     continue;
                                 }
 
-                                // 发送到 Intent 通道
-                                if let Err(e) = intent_tx.send(intent).await {
-                                    error!("Failed to send intent: {}", e);
+                                // 保存 tick_id 用于错误消息
+                                let intent_tick_id = intent.tick_id;
+
+                                // 发送验证请求（非阻塞）
+                                // 注意：去重检查在验证任务中通过 CAS 操作原子性完成
+                                let validation_req = WsValidationRequest {
+                                    intent,
+                                    ws_tx: ws_tx.clone(),
+                                };
+
+                                // 使用 try_send 避免阻塞
+                                match state.validation_tx.try_send(validation_req) {
+                                    Ok(()) => {
+                                        debug!("Sent intent to validation task");
+                                    }
+                                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                        // 验证通道繁忙，发送错误
+                                        let error_msg = DownstreamMessage::ServerError {
+                                            code: ServerErrorCode::RateLimited,
+                                            message: "Validation busy, please retry".to_string(),
+                                            tick_id: Some(intent_tick_id),
+                                            current_tick: Some(current_tick),
+                                        };
+
+                                        if let Ok(json) = serde_json::to_string(&error_msg) {
+                                            let mut tx = ws_tx.lock().await;
+                                            let _ = tx.send(Message::Text(json.into())).await;
+                                        }
+
+                                        warn!("Validation channel full, intent rejected");
+                                    }
+                                    Err(tokio::sync::mpsc::error::TrySendError::Closed(req)) => {
+                                        // 验证通道已关闭，降级直接转发
+                                        warn!("Validation channel closed, forwarding directly");
+                                        if let Err(e) = intent_tx.send(req.intent).await {
+                                            error!("Failed to send intent: {}", e);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -353,7 +401,7 @@ pub async fn run_ws_server(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
-    use tokio::sync::mpsc;
+    use tokio::sync::{mpsc, RwLock};
 
     #[tokio::test]
     async fn test_ws_shared_state() {
@@ -361,6 +409,7 @@ mod tests {
         let (tick_closed_tx, _) = broadcast::channel(16);
         let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, _) = mpsc::channel(16);
+        let (validation_tx, _) = mpsc::channel(1);
 
         let shared = WsSharedState {
             state_tx,
@@ -372,7 +421,13 @@ mod tests {
             tick_duration_ms: Arc::new(AtomicU64::new(60000)),
             agent_id: Arc::new(AtomicI64::new(0)),
             narrative_engine: None,
+            cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
+            allow_external_connections: false,
+            intent_validator: Arc::new(RwLock::new(None)),
+            persona: Arc::new(RwLock::new(None)),
+            submitted_tick: Arc::new(AtomicI64::new(-1)),
+            validation_tx,
         };
 
         assert_eq!(shared.get_current_tick(), 100);

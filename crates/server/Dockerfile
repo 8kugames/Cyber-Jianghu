@@ -1,6 +1,9 @@
 # ============================================================================
 # OpenClaw Cyber-Jianghu MVP Server Dockerfile
-# 多阶段构建 - 优化镜像大小和构建速度
+# 多阶段构建 + BuildKit 缓存优化
+# ============================================================================
+# 启用 BuildKit: DOCKER_BUILDKIT=1 docker build ...
+# 或在 docker-compose.yml 中设置: DOCKER_BUILDKIT=1
 # ============================================================================
 
 # ============================================================================
@@ -23,25 +26,29 @@ ENV CARGO_REGISTRIES_ALIYUN_INDEX=https://mirrors.aliyun.com/crates.io-index/ \
 # 设置工作目录
 WORKDIR /app
 
-# 安装构建依赖
-RUN apt-get update && apt-get install -y \
+# 安装构建依赖（使用缓存挂载）
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
-COPY Cargo.toml ./
-COPY crates/protocol/Cargo.toml ./crates/protocol/
-COPY crates/server/Cargo.toml ./crates/server/
-COPY crates/agent/Cargo.toml ./crates/agent/
-
+# 配置 cargo 镜像源
 RUN mkdir -p ./.cargo \
     && echo '[source.crates-io]\n\
     replace-with = "aliyun"\n\
     \n\
     [source.aliyun]\n\
     registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
+
+# 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
+# Cargo.lock 可选（如果存在则使用 --locked，否则正常构建）
+COPY Cargo.toml Cargo.lock* ./
+COPY crates/protocol/Cargo.toml ./crates/protocol/
+COPY crates/server/Cargo.toml ./crates/server/
+COPY crates/agent/Cargo.toml ./crates/agent/
 
 # 创建空的 src 目录，用于下载依赖（仅 server 需要的依赖）
 RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
@@ -50,17 +57,31 @@ RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
     echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
     echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
-# 构建依赖（这一步会被缓存）
-RUN cargo build --release -p cyber-jianghu-server
+# 构建依赖（使用 BuildKit 缓存挂载，依赖会被持久化）
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    if [ -f Cargo.lock ]; then \
+        cargo build --release --locked -p cyber-jianghu-server; \
+    else \
+        cargo build --release -p cyber-jianghu-server; \
+    fi
 
-# 复制实际源代码（server 依赖 protocol）
+# 复制实际源代码（server 仅依赖 protocol）
 COPY crates/protocol/src ./crates/protocol/src
 COPY crates/server/src ./crates/server/src
-COPY crates/agent/src ./crates/agent/src
 
 # 重新构建（只编译源代码，依赖已缓存）
-RUN touch crates/protocol/src/lib.rs && \
-    cargo build --release -p cyber-jianghu-server
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    touch crates/protocol/src/lib.rs && \
+    if [ -f Cargo.lock ]; then \
+        cargo build --release --locked -p cyber-jianghu-server; \
+    else \
+        cargo build --release -p cyber-jianghu-server; \
+    fi && \
+    cp /app/target/release/cyber-jianghu-server /app/server-bin
 
 # ============================================================================
 # Stage 2: 运行阶段 - 最小化镜像
@@ -88,7 +109,7 @@ RUN groupadd -g 1000 cyberjianghu && \
 WORKDIR /app
 
 # 从构建阶段复制编译后的二进制文件
-COPY --from=builder /app/target/release/cyber-jianghu-server /app/server
+COPY --from=builder /app/server-bin /app/server
 
 # 复制默认配置文件（数据驱动架构 - 支持降级）
 # 运行时可通过 volume 挂载覆盖这些配置
