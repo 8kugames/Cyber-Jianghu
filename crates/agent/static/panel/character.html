@@ -307,25 +307,17 @@
                         // 定义属性分组
                         const statusAttrs = ['hp', 'stamina', 'hunger', 'thirst'];
                         const innateAttrs = ['strength', 'agility', 'constitution', 'intelligence', 'charisma', 'luck'];
+                        const is_redundant_attr = (key, attributes) => {
+                            if (typeof key !== 'string') return false;
+                            if (!key.endsWith('_max')) return false;
+                            const base_key = key.slice(0, -4);
+                            if (statusAttrs.includes(base_key) || innateAttrs.includes(base_key)) return true;
+                            const base_attr = attributes ? attributes[base_key] : undefined;
+                            if (!base_attr || typeof base_attr !== 'object') return false;
+                            return base_attr.max !== undefined;
+                        };
 
                         let html = '';
-
-                        // 生理状态
-                        html += '<div class="attr-section"><h4>生理状态</h4><div class="attr-group">';
-                        statusAttrs.forEach(key => {
-                            const attr = data.attributes[key];
-                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                                const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                                const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
-                                html += `
-                                    <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
-                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                                        <span class="attr-value">${attr.current}/${attr.max}</span>
-                                    </div>
-                                `;
-                            }
-                        });
-                        html += '</div></div>';
 
                         // 先天属性
                         html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
@@ -342,12 +334,32 @@
                         });
                         html += '</div></div>';
 
-                        // 其他属性（不在已知分类中的）
+                        // 状态属性
+                        html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+                        statusAttrs.forEach(key => {
+                            const attr = data.attributes[key];
+                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                                const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                                const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
+                                html += `
+                                    <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
+                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                                        <span class="attr-value">${attr.current}/${attr.max}</span>
+                                    </div>
+                                `;
+                            }
+                        });
+                        html += '</div></div>';
+
+                        // 派生属性（排除已展示的先天/状态，以及明显冗余的 *_max）
                         const knownAttrs = [...statusAttrs, ...innateAttrs];
-                        const otherAttrs = Object.keys(data.attributes).filter(k => !knownAttrs.includes(k) && data.attributes[k] && typeof data.attributes[k] === 'object');
-                        if (otherAttrs.length > 0) {
-                            html += '<div class="attr-section"><h4>其他属性</h4><div class="attr-group">';
-                            otherAttrs.forEach(key => {
+                        const derivedAttrs = Object.keys(data.attributes)
+                            .filter(k => !knownAttrs.includes(k))
+                            .filter(k => !is_redundant_attr(k, data.attributes))
+                            .filter(k => data.attributes[k] && typeof data.attributes[k] === 'object');
+                        if (derivedAttrs.length > 0) {
+                            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+                            derivedAttrs.forEach(key => {
                                 const attr = data.attributes[key];
                                 if (attr && typeof attr === 'object' && attr.current !== undefined) {
                                     const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;

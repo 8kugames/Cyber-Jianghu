@@ -314,7 +314,7 @@ mod tests {
             metadata: serde_json::Value::Object(metadata),
         };
 
-        let context = EventContext::from_world_event(&event, 1);
+        let _context = EventContext::from_world_event(&event, 1);
         let event_type = EventContext::classify_event(&event);
 
         assert_eq!(event_type, EventType::Attacked);

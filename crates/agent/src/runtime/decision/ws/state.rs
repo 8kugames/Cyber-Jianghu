@@ -12,13 +12,13 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use tokio::sync::{broadcast, mpsc, RwLock};
+use tracing::{debug, warn};
 
 use crate::models::{Intent, WorldState};
 use uuid::Uuid;
 
-use super::protocol::{DownstreamMessage, ServerErrorCode, WsIntent};
+use super::protocol::{DownstreamMessage, WsIntent};
 
 // ============================================================================
 // 常量
@@ -29,6 +29,12 @@ pub const DEFAULT_TICK_DURATION_SECS: u64 = 60;
 
 /// Tick 超时缓冲比例（实际截止时间 = tick_duration * 0.9）
 pub const TICK_TIMEOUT_RATIO: f64 = 0.9;
+
+// ============================================================================
+// 重导出验证模块
+// ============================================================================
+
+pub use super::validation::{spawn_validation_task, ValidationTaskParams, WsValidationRequest};
 
 // ============================================================================
 // WebSocket 决策状态
@@ -53,6 +59,12 @@ pub struct WsDecisionState {
     /// Intent 发送通道（用于 server.rs）
     pub intent_tx: mpsc::Sender<WsIntent>,
 
+    /// 验证请求接收通道（容量 1）
+    pub validation_rx: mpsc::Receiver<WsValidationRequest>,
+
+    /// 验证请求发送通道（用于 server.rs）
+    pub validation_tx: mpsc::Sender<WsValidationRequest>,
+
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
@@ -73,6 +85,7 @@ impl WsDecisionState {
         let (tick_closed_tx, _) = broadcast::channel(16);
         let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, intent_rx) = mpsc::channel(16);
+        let (validation_tx, validation_rx) = mpsc::channel(1); // 容量 1，强制背压
 
         Self {
             state_tx,
@@ -80,6 +93,8 @@ impl WsDecisionState {
             server_msg_tx,
             intent_rx,
             intent_tx,
+            validation_rx,
+            validation_tx,
             current_tick: Arc::new(AtomicI64::new(0)),
             deadline_ms: Arc::new(AtomicU64::new(0)),
             tick_duration_ms: Arc::new(AtomicU64::new(DEFAULT_TICK_DURATION_SECS * 1000)),
@@ -222,6 +237,27 @@ impl WsDecisionState {
             Err(_) => debug!("No clients connected for tick_closed"),
         }
     }
+
+    /// 启动验证任务（后台运行）
+    ///
+    /// 验证任务从 validation_rx 接收验证请求，处理后：
+    /// - 通过：转发到 intent_tx
+    /// - 拒绝：通过 ws_tx 发送 ServerError
+    pub fn spawn_validation_task(
+        &mut self,
+        shared_state: WsSharedState,
+    ) -> tokio::task::JoinHandle<()> {
+        let params = ValidationTaskParams {
+            validation_rx: std::mem::replace(&mut self.validation_rx, mpsc::channel(1).1),
+            intent_tx: shared_state.intent_tx.clone(),
+            current_tick: self.current_tick.clone(),
+            submitted_tick: shared_state.submitted_tick.clone(),
+            intent_validator: shared_state.intent_validator.clone(),
+            persona: shared_state.persona.clone(),
+        };
+
+        spawn_validation_task(params)
+    }
 }
 
 impl Default for WsDecisionState {
@@ -273,10 +309,60 @@ pub struct WsSharedState {
     /// 是否允许非 localhost 连接
     /// Docker 部署时需要设为 true，允许宿主机访问
     pub allow_external_connections: bool,
+
+    // === 意图验证相关字段 ===
+
+    /// 意图验证器
+    ///
+    /// 用于验证 OpenClaw 提交的意图是否符合人设和世界观规则。
+    /// 使用 `RwLock<Option<...>>` 支持运行时动态更新验证器。
+    ///
+    /// # 验证流程
+    /// 1. OpenClaw 通过 WebSocket 提交意图
+    /// 2. 验证任务检查意图是否符合人设（persona）
+    /// 3. 通过则转发到 intent_tx，否则返回 ServerError{ValidationFailed}
+    ///
+    /// # 降级策略
+    /// - 无验证器（None）：直接转发
+    /// - 验证超时（10秒）：允许通过
+    /// - LLM 错误：允许通过
+    ///
+    /// # 更新方式
+    /// 通过 `POST /api/v1/config` 或 Agent 初始化时设置
+    pub intent_validator: Arc<RwLock<Option<Arc<dyn crate::ai::validator::Validator>>>>,
+
+    /// 人设信息
+    ///
+    /// 存储角色的性别、年龄、性格特点、三观倾向等信息，
+    /// 用于意图验证器判断行为是否符合人设。
+    /// 使用 `RwLock<Option<...>>` 支持运行时动态更新。
+    ///
+    /// # 字段说明
+    /// - `gender`: 性别（如 "男"、"女"）
+    /// - `age`: 年龄（0-255）
+    /// - `personality`: 性格特点列表（如 ["沉稳", "重情义"]）
+    /// - `values`: 三观倾向（如 ["江湖道义为先"]）
+    ///
+    /// # 更新时机
+    /// - 角色注册时初始化
+    /// - 角色性格演变时更新（通过事件反馈）
+    pub persona: Arc<RwLock<Option<crate::ai::validator::PersonaInfo>>>,
+
+    /// 已提交的 tick_id（CAS 去重，-1 表示未提交）
+    ///
+    /// 使用 CAS (Compare-And-Swap) 操作原子性地防止同一 tick 重复提交。
+    /// 新 tick 开始时重置为 -1。
+    pub submitted_tick: Arc<AtomicI64>,
+
+    /// 验证请求发送通道（容量 1，强制背压）
+    pub validation_tx: mpsc::Sender<WsValidationRequest>,
 }
 
 impl WsSharedState {
     pub fn broadcast_tick(&self, world_state: &WorldState, deadline: Instant) {
+        // 新 tick 开始，重置 submitted_tick 允许新提交
+        self.submitted_tick.store(-1, Ordering::Release);
+
         self.current_tick.store(world_state.tick_id, Ordering::Relaxed);
 
         let now = Instant::now();
@@ -319,6 +405,11 @@ impl From<&WsDecisionState> for WsSharedState {
             cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
             allow_external_connections,
+            // 新增验证相关字段
+            intent_validator: Arc::new(RwLock::new(None)),
+            persona: Arc::new(RwLock::new(None)),
+            submitted_tick: Arc::new(AtomicI64::new(-1)), // -1 表示未提交
+            validation_tx: state.validation_tx.clone(),
         }
     }
 }
