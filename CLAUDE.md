@@ -53,8 +53,11 @@ cargo clippy --workspace --all-targets --fix --allow-dirty
 # Build agent with cargo install
 cargo install --path crates/agent
 
+# Run agent in Cognitive mode (default, uses built-in LLM)
+cyber-jianghu-agent run
+
 # Run agent in Claw mode (for OpenClaw integration)
-cyber-jianghu-agent run --port 23340
+cyber-jianghu-agent run --mode claw --port 23340
 
 # Run with debug logging
 RUST_LOG=debug cargo run -p cyber-jianghu-server
@@ -186,9 +189,8 @@ Key agent modules:
   - `llm/` - LLM client for AI decision-making
 
 **Runtime modes** (decision module):
-- `ws` - WebSocket server for OpenClaw integration (required for production)
-- `http` - HTTP API server (auxiliary, debugging only)
-- `cognitive` - Multi-stage cognitive engine with built-in LLM
+- `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
+- `claw` - WebSocket server for OpenClaw/external scheduler integration
 
 ### Protocol Layer
 
