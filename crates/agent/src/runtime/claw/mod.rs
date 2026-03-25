@@ -11,10 +11,12 @@
 // 3. 自控：完全控制 context 管理
 
 mod context;
+mod decision;
 mod history;
 mod turn_cycle;
 
 pub use context::ContextBuilder;
+pub use decision::{ClawDecisionState, claw_decision, create_claw_decision_callback};
 pub use history::{
     ChatMessage, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager, HealthStatus,
 };
