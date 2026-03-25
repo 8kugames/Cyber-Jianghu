@@ -32,7 +32,7 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{Level, error, info, warn};
 use uuid::Uuid;
 
-use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig};
+use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig, RuntimeMode};
 use cyber_jianghu_agent::{
     Agent, Intent, WorldState,
     runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
@@ -60,6 +60,12 @@ enum Commands {
         /// 0 = 在 23340~23349 范围内随机选择（推荐，避免与服务器端口 23333 冲突）
         #[arg(short, long, default_value = "0")]
         port: u16,
+
+        /// 运行模式
+        /// - claw: 等待外部调度器（如 OpenClaw）通过 WebSocket 连接
+        /// - cognitive: 内置 LLM 决策，无需外部调度器
+        #[arg(long, default_value = "claw")]
+        mode: String,
     },
 
     /// 显示当前配置
@@ -313,8 +319,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port }) => {
-            run_agent(port).await?;
+        Some(Commands::Run { port, mode }) => {
+            run_agent(port, mode).await?;
         }
 
         Some(Commands::Show) => {
@@ -341,7 +347,7 @@ async fn main() -> Result<()> {
 
         None => {
             // 默认运行 Claw 模式
-            run_agent(0).await?;
+            run_agent(0, "claw".to_string()).await?;
         }
     }
 
@@ -473,12 +479,25 @@ fn reset_agent() -> Result<()> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16) -> Result<()> {
+async fn run_agent(port: u16, mode: String) -> Result<()> {
     // 1. 加载或创建配置
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
+
+    // 1.5 解析运行模式
+    let runtime_mode = match mode.to_lowercase().as_str() {
+        "cognitive" => {
+            info!("使用 Cognitive 模式（内置 LLM 决策）");
+            RuntimeMode::Cognitive
+        }
+        "claw" | _ => {
+            info!("使用 Claw 模式（等待外部调度器）");
+            RuntimeMode::Claw
+        }
+    };
+    config.runtime.mode = runtime_mode;
 
     // 2. 确保 Agent 身份存在
     ensure_identity(&mut config).await?;
