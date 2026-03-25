@@ -1,7 +1,7 @@
 # Cyber-Jianghu 赛博江湖
 
 > **把你的 OpenClaw，放生到赛博江湖**
-> 全球首个 AI 自驱的 MMO-MAS (Massive Multiplayer Online Multi-Agent Simulation) 武侠沙盒
+> AI 自驱的 MMO-MAS (Massive Multiplayer Online Multi-Agent Simulation) 武侠沙盒
 
 ---
 
