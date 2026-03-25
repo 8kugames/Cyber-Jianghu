@@ -181,16 +181,29 @@ impl HistoryEntry {
 /// 4. Fail Fast：不允许静默失败
 pub struct HistoryManager {
     config: HistoryConfig,
-    /// System prompt（不被计入消息数）
     system_prompt: Option<ChatMessage>,
-    /// 对话历史（不含 system prompt）
     messages: Vec<HistoryEntry>,
-    /// compaction 摘要（如果已经 compaction 过）
     summary: Option<String>,
 }
 
+impl Default for HistoryManager {
+    fn default() -> Self {
+        Self::new(HistoryConfig::default())
+    }
+}
+
+impl Clone for HistoryManager {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            system_prompt: self.system_prompt.clone(),
+            messages: self.messages.clone(),
+            summary: self.summary.clone(),
+        }
+    }
+}
+
 impl HistoryManager {
-    /// 创建新的 History Manager
     pub fn new(config: HistoryConfig) -> Self {
         Self {
             config,

@@ -125,10 +125,44 @@ impl Default for ContextBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{AgentSelfState, Location, WorldTime};
+
+    fn create_minimal_world_state() -> WorldState {
+        WorldState {
+            event_type: "world_state".to_string(),
+            tick_id: 1,
+            agent_id: None,
+            world_time: WorldTime {
+                year: 1,
+                month: 1,
+                day: 1,
+                hour: 12,
+                minute: 0,
+                second: 0,
+                weather: "sunny".to_string(),
+            },
+            location: Location {
+                node_id: "test".to_string(),
+                name: "Test Location".to_string(),
+                node_type: "indoor".to_string(),
+                adjacent_nodes: vec![],
+            },
+            self_state: AgentSelfState {
+                attributes: std::collections::HashMap::new(),
+                attribute_descriptions: std::collections::HashMap::new(),
+                status_effects: vec![],
+                inventory: vec![],
+            },
+            entities: vec![],
+            nearby_items: vec![],
+            events_log: vec![],
+            available_actions: vec![],
+        }
+    }
 
     #[test]
     fn test_context_builder_basic() {
-        let state = WorldState::default();
+        let state = create_minimal_world_state();
         let builder = ContextBuilder::new();
 
         let context = builder.build(&state);
@@ -139,26 +173,10 @@ mod tests {
 
     #[test]
     fn test_max_entities_limit() {
-        use crate::models::{Entity, Location, WorldTime};
+        use crate::models::Entity;
 
-        let mut state = WorldState::default();
-        state.location = Location {
-            node_id: "test".to_string(),
-            name: "Test Location".to_string(),
-            node_type: "indoor".to_string(),
-            adjacent_nodes: vec![],
-        };
-        state.world_time = WorldTime {
-            year: 1,
-            month: 1,
-            day: 1,
-            hour: 12,
-            minute: 0,
-            second: 0,
-            weather: "sunny".to_string(),
-        };
+        let mut state = create_minimal_world_state();
 
-        // Add many entities
         for i in 0..10 {
             state.entities.push(Entity {
                 id: uuid::Uuid::new_v4(),
@@ -172,7 +190,6 @@ mod tests {
         let builder = ContextBuilder::new();
         let context = builder.build(&state);
 
-        // Should show max 5 and mention "and 5 more"
         assert!(context.contains("Nearby: 10 entities visible"));
         assert!(context.contains("... and 5 more"));
     }

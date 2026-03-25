@@ -225,6 +225,7 @@ pub trait TurnCycleServices: Send + Sync {
 mod tests {
     use super::*;
     use crate::ai::llm::mock::MockLlmClient;
+    use crate::models::{AgentSelfState, Location, WorldTime};
 
     struct MockServices {
         responses: Vec<String>,
@@ -258,6 +259,34 @@ mod tests {
         }
     }
 
+    fn create_test_world_state() -> WorldState {
+        WorldState {
+            event_type: "world_state".to_string(),
+            tick_id: 1,
+            agent_id: None,
+            world_time: WorldTime {
+                year: 1, month: 1, day: 1, hour: 12,
+                minute: 0, second: 0, weather: "sunny".to_string(),
+            },
+            location: Location {
+                node_id: "test".to_string(),
+                name: "Test".to_string(),
+                node_type: "indoor".to_string(),
+                adjacent_nodes: vec![],
+            },
+            self_state: AgentSelfState {
+                attributes: std::collections::HashMap::new(),
+                attribute_descriptions: std::collections::HashMap::new(),
+                status_effects: vec![],
+                inventory: vec![],
+            },
+            entities: vec![],
+            nearby_items: vec![],
+            events_log: vec![],
+            available_actions: vec![],
+        }
+    }
+
     #[tokio::test]
     async fn test_single_response_intent() {
         let turn_cycle = TurnCycle::default();
@@ -269,7 +298,7 @@ mod tests {
             "thought": "I should move north"
         }"#.to_string()]);
 
-        let ws = WorldState::default();
+        let ws = create_test_world_state();
         let intent = turn_cycle.run(&services, &ws, &mut history.clone()).await.unwrap();
 
         assert_eq!(intent.action_type, "move");
@@ -286,7 +315,7 @@ mod tests {
         ];
 
         let services = MockServices::new(responses);
-        let ws = WorldState::default();
+        let ws = create_test_world_state();
         let intent = turn_cycle.run(&services, &ws, &mut history.clone()).await.unwrap();
 
         assert_eq!(intent.action_type, "idle");
@@ -308,7 +337,7 @@ mod tests {
         ];
 
         let services = MockServices::new(responses);
-        let ws = WorldState::default();
+        let ws = create_test_world_state();
         let result = turn_cycle.run(&services, &ws, &mut history.clone()).await;
 
         assert!(result.is_err());
