@@ -8,8 +8,8 @@
 // - `decision/` - 各种决策模式（simple, idle, stdio, tcp, http, cognitive）
 // - `notify/` - 通知机制
 
+pub mod claw;
 pub mod decision;
-// notify module removed (OpenClaw notifier dead code)
 
 // 重导出常用的决策类型和函数
 pub use decision::{
