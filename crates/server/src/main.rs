@@ -192,8 +192,8 @@ async fn main() -> Result<()> {
         writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
         writeln!(file, "  {}", admin_write_token)?;
         writeln!(file)?;
-        writeln!(file, "可直接写入 .env:")?;
-        writeln!(file, "ADMIN_READ_TOKEN={} ADMIN_WRITE_TOKEN={}", admin_read_token, admin_write_token)?;
+        // writeln!(file, "可直接写入 .env:")?;
+        // writeln!(file, "ADMIN_READ_TOKEN={} ADMIN_WRITE_TOKEN={}", admin_read_token, admin_write_token)?;
         writeln!(file, "========================================")?;
 
         info!("管理员访问凭证已保存到: {}", token_path.display());
