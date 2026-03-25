@@ -14,26 +14,29 @@ pub struct ClawDecisionState {
     pub system_prompt: String,
 }
 
-impl ClawDecisionState {
-    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
-        Self {
-            llm,
-            context_builder: ContextBuilder::new(),
-            system_prompt: r#"你是一个武侠游戏中的角色。你需要根据当前状态做出合理的决策。
-
-决策规则：
+const DEFAULT_DECISION_RULES: &str = r#"决策规则：
 1. 优先满足生理需求（饥饿、口渴）
 2. 如果状态良好，可以考虑探索、社交或赚钱
 3. 保持角色人设一致
 4. 只返回 JSON 格式的决策结果
 
 决策格式：
-{"action_type": "动作类型", "action_data": {"参数": "值"}, "thought": "思考过程"}"#.to_string(),
+{"action_type": "动作类型", "action_data": {"参数": "值"}, "thought": "思考过程"}"#;
+
+impl ClawDecisionState {
+    pub fn new(llm: Arc<dyn LlmClient>) -> Self {
+        Self {
+            llm,
+            context_builder: ContextBuilder::new(),
+            system_prompt: format!(
+                "你是一个武侠游戏中的角色。你需要根据当前状态做出合理的决策。\n\n{}",
+                DEFAULT_DECISION_RULES
+            ),
         }
     }
 
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.system_prompt = prompt.into();
+        self.system_prompt = format!("{}\n\n{}", prompt.into(), DEFAULT_DECISION_RULES);
         self
     }
 }

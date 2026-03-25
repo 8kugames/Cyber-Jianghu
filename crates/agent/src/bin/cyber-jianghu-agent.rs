@@ -33,7 +33,7 @@ use uuid::Uuid;
 use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode};
 use cyber_jianghu_agent::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use cyber_jianghu_agent::{
-    Agent, Intent, WorldState,
+    Agent, AgentBuilder, Intent, WorldState,
     runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
     runtime::claw::{ClawDecisionState, create_claw_decision_callback},
@@ -66,6 +66,11 @@ enum Commands {
         /// - cognitive: 内置 LLM 决策，无需外部调度器
         #[arg(long, default_value = "cognitive")]
         mode: String,
+
+        /// 自动创建角色（如果不存在）
+        /// 提供角色姓名即可自动创建并注册角色
+        #[arg(long)]
+        character_name: Option<String>,
     },
 
     /// 显示当前配置
@@ -319,8 +324,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port, mode }) => {
-            run_agent(port, mode).await?;
+        Some(Commands::Run { port, mode, character_name }) => {
+            run_agent(port, mode, character_name).await?;
         }
 
         Some(Commands::Show) => {
@@ -346,7 +351,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string()).await?;
+            run_agent(0, "cognitive".to_string(), None).await?;
         }
     }
 
@@ -497,7 +502,7 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16, mode: String) -> Result<()> {
+async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
@@ -521,21 +526,48 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
     ensure_identity(&mut config).await?;
 
-    let identity = config
+    let identity_clone = config
         .identity
         .as_ref()
-        .expect("Identity should exist after ensure_identity");
-    info!("Device ID: {}", identity.device_id);
+        .expect("Identity should exist after ensure_identity")
+        .clone();
+    let device_id_value = identity_clone.device_id;
+    info!("Device ID: {}", device_id_value);
 
-    if !config.has_character() {
-        warn!("尚未创建角色");
+    if let Some(ref name) = character_name {
+        if !config.has_character() {
+            info!("自动创建角色: {}", name);
+            let character = CharacterConfig {
+                name: name.clone(),
+                ..Default::default()
+            };
+            let actual_port = if port == 0 { 23340 } else { port };
+            match create_character_via_api(actual_port, character).await {
+                Ok(agent_id) => {
+                    info!("角色创建成功，Agent ID: {}", agent_id);
+                    config = load_config()?.unwrap_or_else(|| {
+                        warn!("重新加载配置失败，使用内存中的配置");
+                        config.clone()
+                    });
+                }
+                Err(e) => {
+                    error!("自动创建角色失败: {}", e);
+                    error!("请先通过 'cyber-jianghu-agent create-character --name {}' 创建角色", name);
+                    return Err(e);
+                }
+            }
+        } else {
+            info!("角色已存在: {}", config.agent.as_ref().map(|c| c.name.as_str()).unwrap_or("(未知)"));
+        }
+    } else if !config.has_character() {
+        warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
         warn!("请通过以下方式创建角色:");
         warn!("  1. Web 面板: http://localhost:23340/panel");
         warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
-        warn!("  3. HTTP API: POST /api/v1/character/register");
+        warn!("  3. 使用 --character-name 参数: cyber-jianghu-agent run --character-name 你的名字");
     }
 
-    let device_id = Arc::new(RwLock::new(identity.device_id));
+    let device_id = Arc::new(RwLock::new(device_id_value));
 
     let persona_info = config.agent.as_ref().map(|c| {
         cyber_jianghu_agent::ai::validator::PersonaInfo {
@@ -547,11 +579,9 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
     });
 
     // 根据模式创建决策回调和相关组件
-    let (decision, agent_reconnect_rx, maybe_callback_setup): (
-        Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
-        Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
-        Option<ClawCallbackSetup>,
-    ) = match runtime_mode {
+    let maybe_callback_setup: Option<ClawCallbackSetup>;
+    
+    let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
             info!("创建 Cognitive 模式组件...");
             let llm_client = create_llm_client(&config.llm)?;
@@ -560,30 +590,39 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 config.llm.provider,
                 config.llm.model.as_deref().unwrap_or("default")
             );
-            let claw_state = ClawDecisionState::new(Arc::new(llm_client));
+            let claw_state = if let Some(ref character) = config.agent {
+                info!("使用角色 persona: {}", character.name);
+                ClawDecisionState::new(Arc::new(llm_client))
+                    .with_system_prompt(character.generate_system_prompt())
+            } else {
+                info!("使用默认系统提示词（无角色配置）");
+                ClawDecisionState::new(Arc::new(llm_client))
+            };
             let decision = create_claw_decision_callback(claw_state);
-            (decision, None, None)
+            maybe_callback_setup = None;
+            
+            AgentBuilder::new(config, decision).build()
         }
         RuntimeMode::Claw => {
-            let setup = start_claw_server(port, device_id.clone(), &config, identity)?;
+            info!("创建 Claw 模式组件...");
+            let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
             let http_state = setup.http_state.clone();
-            let callback_setup = ClawCallbackSetup {
+            maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
                 api_state: setup.api_state.clone(),
                 server_msg_tx: setup.server_msg_tx.clone(),
                 device_id: device_id.clone(),
                 persona_info: persona_info.clone(),
-            };
+            });
             let decision = Arc::new(http_decision(
                 device_id.clone(),
                 http_state,
                 55,
             ));
-            (decision, Some(setup.reconnect_rx), Some(callback_setup))
+            
+            Agent::new(config, decision, Some(setup.reconnect_rx)).await
         }
     };
-
-    let mut agent = Agent::new(config, decision, agent_reconnect_rx).await;
 
     if let Some(setup) = maybe_callback_setup {
         let shared_state_clone = setup.shared_state.clone();
@@ -591,6 +630,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         let server_msg_tx_clone = setup.server_msg_tx.clone();
         let device_id_clone = setup.device_id.clone();
         let persona_clone = setup.persona_info.clone();
+        
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
             let old_id = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(device_id_clone.read())
