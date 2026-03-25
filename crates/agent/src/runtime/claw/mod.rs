@@ -10,9 +10,11 @@
 // 2. Fail Fast：不允许静默失败
 // 3. 自控：完全控制 context 管理
 
+mod context;
 mod history;
 mod turn_cycle;
 
+pub use context::ContextBuilder;
 pub use history::{
     ChatMessage, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager, HealthStatus,
 };
