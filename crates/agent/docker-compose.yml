@@ -50,6 +50,12 @@ services:
       # WebSocket 连接配置
       # 允许非 localhost 连接（Docker 部署时允许宿主机访问）
       CYBER_JIANGHU_WS_ALLOW_EXTERNAL: ${AGENT_WS_ALLOW_EXTERNAL:-1}
+
+      # 游戏服务器 WebSocket URL
+      CYBER_JIANGHU_SERVER_WS_URL: ${SERVER_WS_URL:-ws://cyber-jianghu-server:23333/ws}
+
+      # 游戏服务器 HTTP URL
+      CYBER_JIANGHU_SERVER_HTTP_URL: ${SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
     ports:
       # WebSocket + HTTP API 端口 - OpenClaw 通过 WebSocket 连接，HTTP API 用于辅助功能
       # 多 Agent 实例时，映射不同宿主机端口：23341:23340, 23342:23340 等
