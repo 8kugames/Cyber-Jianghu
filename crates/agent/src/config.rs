@@ -86,7 +86,10 @@ impl Default for ServerConfig {
 impl ServerConfig {
     /// 生成带认证参数的 WebSocket URL
     pub fn ws_url_with_token(&self, device_id: Uuid, auth_token: &str) -> String {
-        format!("{}?device_id={}&token={}", self.ws_url, device_id, auth_token)
+        format!(
+            "{}?device_id={}&token={}",
+            self.ws_url, device_id, auth_token
+        )
     }
 }
 
@@ -220,7 +223,10 @@ impl CharacterConfig {
         let mut parts = vec![];
 
         // 基本信息
-        parts.push(format!("你是{}，一位{}岁的{}。", self.name, self.age, self.gender));
+        parts.push(format!(
+            "你是{}，一位{}岁的{}。",
+            self.name, self.age, self.gender
+        ));
 
         // 外貌
         if let Some(ref appearance) = self.appearance {
@@ -247,7 +253,10 @@ impl CharacterConfig {
             parts.push(format!("说话风格{}。", tone));
         }
         if !self.language_style.speech_patterns.is_empty() {
-            parts.push(format!("语言特点：{}。", self.language_style.speech_patterns.join("，")));
+            parts.push(format!(
+                "语言特点：{}。",
+                self.language_style.speech_patterns.join("，")
+            ));
         }
 
         // 目标
@@ -272,21 +281,16 @@ impl CharacterConfig {
 // ============================================================================
 
 /// 运行模式
-///
-/// Agent 仅支持 Claw 模式：外部调度器（如 OpenClaw）通过 WebSocket + HTTP API
-/// 连接到 Agent，Agent 提供 WorldState 并等待外部提交 Intent。
-///
-/// ## 架构说明
-/// - Agent 不内置 LLM 调用
-/// - Agent 与 Server 保持 WebSocket 连接，接收 WorldState，提交 Intent
-/// - Agent 为 OpenClaw 提供 WebSocket 接口，推送 Tick 信息并接收决策
-/// - OpenClaw 超时未提交 Intent 时，Agent 自动提交 idle Intent
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
     /// Claw 模式（默认）- 为 OpenClaw 等外部助手提供 WebSocket + HTTP API
+    /// Agent 不内置 LLM 调用，被动等待外部决策
     #[default]
     Claw,
+    /// Cognitive 模式 - 内置 LLM 决策，无需外部调度器
+    /// Agent 内部调用 LLM 直接进行决策
+    Cognitive,
 }
 
 /// 运行时配置
@@ -506,8 +510,9 @@ impl Config {
 
         // 确保目录存在
         if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory: {}", parent.display())
+            })?;
         }
 
         fs::write(&path, yaml)
@@ -580,13 +585,19 @@ impl Config {
 
     /// 检查是否已创建角色
     pub fn has_character(&self) -> bool {
-        self.agent.as_ref().map(|c| c.is_registered()).unwrap_or(false)
+        self.agent
+            .as_ref()
+            .map(|c| c.is_registered())
+            .unwrap_or(false)
     }
 
     /// 生成 WebSocket URL（带认证）
     pub fn ws_url_with_token(&self) -> Option<String> {
         self.identity.as_ref().map(|id| {
-            format!("{}?device_id={}&token={}", self.server.ws_url, id.device_id, id.auth_token)
+            format!(
+                "{}?device_id={}&token={}",
+                self.server.ws_url, id.device_id, id.auth_token
+            )
         })
     }
 
@@ -605,20 +616,22 @@ impl Config {
 
     /// 获取指定服务器的存活角色
     pub fn get_alive_character_by_server(&self, server_url: &str) -> Option<&CharacterConfig> {
-        self.characters
-            .iter()
-            .find(|c| {
-                c.server_url.as_deref() == Some(server_url)
-                    && c.status == CharacterStatus::Alive
-                    && c.agent_id.is_some()
-            })
+        self.characters.iter().find(|c| {
+            c.server_url.as_deref() == Some(server_url)
+                && c.status == CharacterStatus::Alive
+                && c.agent_id.is_some()
+        })
     }
 
     /// 添加或更新角色到历史记录
     pub fn upsert_character(&mut self, character: CharacterConfig) {
         if let Some(agent_id) = character.agent_id {
             // 查找是否已存在
-            if let Some(existing) = self.characters.iter_mut().find(|c| c.agent_id == Some(agent_id)) {
+            if let Some(existing) = self
+                .characters
+                .iter_mut()
+                .find(|c| c.agent_id == Some(agent_id))
+            {
                 *existing = character.clone();
             } else {
                 self.characters.push(character.clone());
@@ -632,7 +645,11 @@ impl Config {
 
     /// 切换到指定角色
     pub fn switch_to_character(&mut self, agent_id: Uuid) -> bool {
-        if let Some(character) = self.characters.iter().find(|c| c.agent_id == Some(agent_id)) {
+        if let Some(character) = self
+            .characters
+            .iter()
+            .find(|c| c.agent_id == Some(agent_id))
+        {
             self.agent = Some(character.clone());
             return true;
         }
@@ -645,7 +662,11 @@ impl Config {
             character.status = CharacterStatus::Retired;
             // 更新 characters 列表中的记录
             if let Some(agent_id) = character.agent_id {
-                if let Some(existing) = self.characters.iter_mut().find(|c| c.agent_id == Some(agent_id)) {
+                if let Some(existing) = self
+                    .characters
+                    .iter_mut()
+                    .find(|c| c.agent_id == Some(agent_id))
+                {
                     existing.status = CharacterStatus::Retired;
                 }
             }
@@ -654,13 +675,11 @@ impl Config {
 
     /// 检查指定服务器是否有存活角色
     pub fn has_alive_character_for_server(&self, server_url: &str) -> bool {
-        self.characters
-            .iter()
-            .any(|c| {
-                c.server_url.as_deref() == Some(server_url)
-                    && c.status == CharacterStatus::Alive
-                    && c.agent_id.is_some()
-            })
+        self.characters.iter().any(|c| {
+            c.server_url.as_deref() == Some(server_url)
+                && c.status == CharacterStatus::Alive
+                && c.agent_id.is_some()
+        })
     }
 }
 
