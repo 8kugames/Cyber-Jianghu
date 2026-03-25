@@ -115,4 +115,4 @@ Cyber-Jianghu/
 
 ## 许可证
 
-AGPL-3.0 License
+MIT OR Apache-2.0
