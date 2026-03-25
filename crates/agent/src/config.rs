@@ -309,8 +309,77 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            mode: RuntimeMode::Claw,
+            mode: RuntimeMode::Cognitive,
             port: 0,
+        }
+    }
+}
+
+// ============================================================================
+// LLM 配置（仅 Cognitive 模式使用）
+// ============================================================================
+
+const DEFAULT_LLM_PROVIDER: &str = "ollama";
+const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
+const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    #[serde(default = "default_llm_provider")]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default = "default_llm_temperature")]
+    pub temperature: f32,
+    #[serde(default = "default_llm_max_tokens")]
+    pub max_tokens: u32,
+}
+
+fn default_llm_provider() -> String {
+    DEFAULT_LLM_PROVIDER.to_string()
+}
+
+fn default_llm_temperature() -> f32 {
+    DEFAULT_LLM_TEMPERATURE
+}
+
+fn default_llm_max_tokens() -> u32 {
+    DEFAULT_LLM_MAX_TOKENS
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: DEFAULT_LLM_PROVIDER.to_string(),
+            base_url: None,
+            api_key: None,
+            model: None,
+            temperature: DEFAULT_LLM_TEMPERATURE,
+            max_tokens: DEFAULT_LLM_MAX_TOKENS,
+        }
+    }
+}
+
+impl LlmConfig {
+    pub fn from_env() -> Self {
+        Self {
+            provider: std::env::var("CYBER_JIANGHU_LLM_PROVIDER")
+                .unwrap_or_else(|_| DEFAULT_LLM_PROVIDER.to_string()),
+            base_url: std::env::var("CYBER_JIANGHU_LLM_BASE_URL").ok(),
+            api_key: std::env::var("CYBER_JIANGHU_LLM_API_KEY").ok(),
+            model: std::env::var("CYBER_JIANGHU_LLM_MODEL").ok(),
+            temperature: std::env::var("CYBER_JIANGHU_LLM_TEMPERATURE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_LLM_TEMPERATURE),
+            max_tokens: std::env::var("CYBER_JIANGHU_LLM_MAX_TOKENS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
         }
     }
 }
@@ -468,6 +537,10 @@ pub struct Config {
     #[serde(default)]
     pub runtime: RuntimeConfig,
 
+    /// LLM 配置（仅 Cognitive 模式使用）
+    #[serde(default)]
+    pub llm: LlmConfig,
+
     /// 记忆系统配置
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -535,6 +608,7 @@ impl Config {
                 .ok()
                 .and_then(|m| match m.to_lowercase().as_str() {
                     "claw" => Some(RuntimeMode::Claw),
+                    "cognitive" => Some(RuntimeMode::Cognitive),
                     _ => None,
                 })
                 .unwrap_or_default(),
@@ -545,11 +619,12 @@ impl Config {
         };
 
         Ok(Config {
-            identity: None, // 身份必须从文件加载
+            identity: None,
             server,
             agent: None,
             characters: vec![],
             runtime,
+            llm: LlmConfig::from_env(),
             memory: MemoryConfig::default(),
             role: AgentRole::default(),
             review: None,
@@ -724,6 +799,6 @@ mod tests {
         let config = Config::default();
         assert!(config.identity.is_none());
         assert!(config.agent.is_none());
-        assert_eq!(config.runtime.mode, RuntimeMode::Claw);
+        assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
     }
 }

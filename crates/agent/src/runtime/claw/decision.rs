@@ -141,14 +141,23 @@ mod tests {
 
 pub fn create_claw_decision_callback(
     state: ClawDecisionState,
-) -> impl Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Intent>> + Send>> + Send + Sync + 'static {
+) -> Arc<dyn Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Intent> + Send>> + Send + Sync> {
     let state = Arc::new(state);
     
-    move |world_state: &WorldState| {
+    Arc::new(move |world_state: &WorldState| {
         let state = state.clone();
         let world_state = world_state.clone();
         Box::pin(async move {
-            claw_decision(&state, &world_state).await
+            match claw_decision(&state, &world_state).await {
+                Ok(intent) => intent,
+                Err(e) => {
+                    error!("Claw decision failed: {}", e);
+                    Intent::idle(
+                        world_state.agent_id.unwrap_or_default(),
+                        world_state.tick_id,
+                    )
+                }
+            }
         })
-    }
+    })
 }
