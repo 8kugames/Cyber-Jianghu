@@ -32,11 +32,13 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{Level, error, info, warn};
 use uuid::Uuid;
 
-use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig, RuntimeMode};
+use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode};
+use cyber_jianghu_agent::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use cyber_jianghu_agent::{
     Agent, Intent, WorldState,
     runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
+    runtime::claw::{ClawDecisionState, create_claw_decision_callback},
 };
 use cyber_jianghu_protocol::ServerMessage;
 
@@ -64,7 +66,7 @@ enum Commands {
         /// 运行模式
         /// - claw: 等待外部调度器（如 OpenClaw）通过 WebSocket 连接
         /// - cognitive: 内置 LLM 决策，无需外部调度器
-        #[arg(long, default_value = "claw")]
+        #[arg(long, default_value = "cognitive")]
         mode: String,
     },
 
@@ -475,31 +477,51 @@ fn reset_agent() -> Result<()> {
     Ok(())
 }
 
+fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
+    let provider = LlmProvider::from_str(&llm_config.provider)
+        .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
+
+    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
+
+    if let Some(url) = &llm_config.base_url {
+        client_config = client_config.with_base_url(url);
+    }
+    if let Some(model) = &llm_config.model {
+        client_config = client_config.with_model(model);
+    }
+    client_config = client_config
+        .with_temperature(llm_config.temperature)
+        .with_max_tokens(llm_config.max_tokens);
+
+    DirectLlmClient::new(client_config)
+}
+
 // ============================================================================
 // 运行 Agent
 // ============================================================================
 
 async fn run_agent(port: u16, mode: String) -> Result<()> {
-    // 1. 加载或创建配置
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
 
-    // 1.5 解析运行模式
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {
             info!("使用 Cognitive 模式（内置 LLM 决策）");
             RuntimeMode::Cognitive
         }
-        "claw" | _ => {
+        "claw" => {
             info!("使用 Claw 模式（等待外部调度器）");
             RuntimeMode::Claw
+        }
+        _ => {
+            info!("未知模式 '{}'，使用 Cognitive 模式", mode);
+            RuntimeMode::Cognitive
         }
     };
     config.runtime.mode = runtime_mode;
 
-    // 2. 确保 Agent 身份存在
     ensure_identity(&mut config).await?;
 
     let identity = config
@@ -508,7 +530,6 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         .expect("Identity should exist after ensure_identity");
     info!("Device ID: {}", identity.device_id);
 
-    // 3. 检查是否已创建角色
     if !config.has_character() {
         warn!("尚未创建角色");
         warn!("请通过以下方式创建角色:");
@@ -517,82 +538,8 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         warn!("  3. HTTP API: POST /api/v1/character/register");
     }
 
-    // 4. 创建共享的 device_id
     let device_id = Arc::new(RwLock::new(identity.device_id));
 
-    // 5. 启动 Claw 服务（WebSocket + HTTP API）
-    let claw_decision_state = {
-        let actual_port = if port == 0 {
-            use rand::RngExt;
-            let random_port = rand::rng().random_range(23340..=23349);
-            info!("随机选择端口: {} (范围: 23340-23349)", random_port);
-            random_port
-        } else {
-            port
-        };
-
-        info!(
-            "启动 Claw 模式（WebSocket + HTTP API），端口: {}",
-            actual_port
-        );
-
-        // 打印启动 Banner
-        let config_path_str = config_path().display().to_string();
-        print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
-
-        // 创建重连通道（用于热切换触发重连）
-        let (reconnect_tx, reconnect_rx) =
-            mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
-
-        let mut ws_state = WsDecisionState::new();
-        let shared_state = Arc::new(WsSharedState::from(&ws_state));
-
-        // 启动验证任务（后台运行）
-        ws_state.spawn_validation_task((*shared_state).clone());
-
-        let (http_decision_state, api_state) = create_http_state(
-            device_id.clone(),
-            config.server.http_url.clone(),
-            config.server.ws_url.clone(),
-            Some(identity.clone()),
-            Some(reconnect_tx),
-            config_path(),
-            Some(shared_state.clone()),
-        );
-
-        let api_state_clone = api_state.clone();
-        let server_msg_tx = shared_state.server_msg_tx.clone(); // 提取用于回调
-        let shared_state_for_callback = shared_state.clone(); // 用于注册回调
-        let api_state_for_callback = api_state.clone(); // 用于获取 validator
-        tokio::spawn(async move {
-            if let Err(e) = run_ws_server(actual_port, (*shared_state).clone(), api_state_clone).await {
-                error!("Claw server error: {}", e);
-            }
-        });
-
-        // 返回 HTTP decision state、reconnect_rx、server_msg_tx、shared_state 和 api_state
-        (http_decision_state, reconnect_rx, server_msg_tx, shared_state_for_callback, api_state_for_callback)
-    };
-
-    // 6. 创建决策函数
-    let (decision, agent_reconnect_rx, server_msg_tx, shared_state_for_callback, api_state_for_callback): (
-        Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
-        Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
-        tokio::sync::broadcast::Sender<DownstreamMessage>,
-        Arc<WsSharedState>,
-        cyber_jianghu_agent::runtime::decision::http::HttpApiState,
-    ) = {
-        let (state, rx, tx, ws_state, api_state) = claw_decision_state;
-        (
-            Arc::new(http_decision(device_id.clone(), state, 55)),
-            Some(rx),
-            tx,
-            ws_state,
-            api_state,
-        )
-    };
-
-    // 6.5 提取 persona 信息（在 config 被移动之前）
     let persona_info = config.agent.as_ref().map(|c| {
         cyber_jianghu_agent::ai::validator::PersonaInfo {
             gender: c.gender.clone(),
@@ -602,63 +549,160 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         }
     });
 
-    // 7. 创建并运行 Agent
+    // 根据模式创建决策回调和相关组件
+    let (decision, agent_reconnect_rx, maybe_callback_setup): (
+        Arc<dyn Fn(&WorldState) -> futures_util::future::BoxFuture<'static, Intent> + Send + Sync>,
+        Option<mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>>,
+        Option<ClawCallbackSetup>,
+    ) = match runtime_mode {
+        RuntimeMode::Cognitive => {
+            info!("创建 Cognitive 模式组件...");
+            let llm_client = create_llm_client(&config.llm)?;
+            info!(
+                "LLM 配置: provider={}, model={}",
+                config.llm.provider,
+                config.llm.model.as_deref().unwrap_or("default")
+            );
+            let claw_state = ClawDecisionState::new(Arc::new(llm_client));
+            let decision = create_claw_decision_callback(claw_state);
+            (decision, None, None)
+        }
+        RuntimeMode::Claw => {
+            let setup = start_claw_server(port, device_id.clone(), &config, identity)?;
+            let http_state = setup.http_state.clone();
+            let callback_setup = ClawCallbackSetup {
+                shared_state: setup.shared_state.clone(),
+                api_state: setup.api_state.clone(),
+                server_msg_tx: setup.server_msg_tx.clone(),
+                device_id: device_id.clone(),
+                persona_info: persona_info.clone(),
+            };
+            let decision = Arc::new(http_decision(
+                device_id.clone(),
+                http_state,
+                55,
+            ));
+            (decision, Some(setup.reconnect_rx), Some(callback_setup))
+        }
+    };
+
     let mut agent = Agent::new(config, decision, agent_reconnect_rx).await;
 
-    // 设置注册回调
-    let device_id_clone = device_id.clone();
-    let shared_state_clone = shared_state_for_callback.clone();
-    let api_state_clone = api_state_for_callback.clone();
-    let persona_clone = persona_info.clone();
-    agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
-        // 注意：必须先释放读锁再获取写锁，否则会死锁
-        let old_id = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(device_id_clone.read())
-        });
-        info!(
-            "更新 Claw API device_id: {} -> {}",
-            *old_id, server_agent_id
-        );
-        // 显式释放读锁
-        drop(old_id);
-
-        // 获取写锁更新 agent_id
-        let mut guard = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(device_id_clone.write())
-        });
-        *guard = server_agent_id;
-
-        // 注入 validator 到 WsSharedState
-        if let Some(ref validator) = api_state_clone.intent_validator {
-            let mut validator_guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(shared_state_clone.intent_validator.write())
+    if let Some(setup) = maybe_callback_setup {
+        let shared_state_clone = setup.shared_state.clone();
+        let api_state_clone = setup.api_state.clone();
+        let server_msg_tx_clone = setup.server_msg_tx.clone();
+        let device_id_clone = setup.device_id.clone();
+        let persona_clone = setup.persona_info.clone();
+        agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
+            let old_id = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(device_id_clone.read())
             });
-            *validator_guard = Some(validator.clone());
-            info!("Validator injected into WsSharedState");
-        }
+            info!("更新 Claw API device_id: {} -> {}", *old_id, server_agent_id);
+            drop(old_id);
 
-        // 注入 persona 到 WsSharedState
-        if let Some(ref persona) = persona_clone {
-            let mut persona_guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(shared_state_clone.persona.write())
+            let mut guard = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(device_id_clone.write())
             });
-            *persona_guard = Some(persona.clone());
-            info!("Persona injected into WsSharedState");
-        }
-    }));
+            *guard = server_agent_id;
 
-    // 设置 Server 消息透传回调（用于 OpenClaw 集成）
-    // 当收到 Server 下行消息时，转换为 DownstreamMessage 并广播给 OpenClaw
-    let server_msg_tx_clone = server_msg_tx.clone();
-    agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
-        // 使用当前 tick（从消息中推断或使用 0）
-        let current_tick = 0; // 简化：无法从回调中获取当前 tick
-        if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick) {
-            // 广播给 OpenClaw（忽略发送失败，因为可能没有连接）
-            let _ = server_msg_tx_clone.send(downstream);
-        }
-    })).await;
+            if let Some(ref validator) = api_state_clone.intent_validator {
+                let mut validator_guard = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(shared_state_clone.intent_validator.write())
+                });
+                *validator_guard = Some(validator.clone());
+                info!("Validator injected into WsSharedState");
+            }
+
+            if let Some(ref persona) = persona_clone {
+                let mut persona_guard = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(shared_state_clone.persona.write())
+                });
+                *persona_guard = Some(persona.clone());
+                info!("Persona injected into WsSharedState");
+            }
+        }));
+
+        agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+            let current_tick = 0;
+            if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick) {
+                let _ = server_msg_tx_clone.send(downstream);
+            }
+        })).await;
+    }
 
     agent.run().await?;
     Ok(())
+}
+
+struct ServerSetup {
+    reconnect_rx: mpsc::Receiver<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>,
+    server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
+    shared_state: Arc<WsSharedState>,
+    api_state: cyber_jianghu_agent::runtime::decision::http::HttpApiState,
+    http_state: Arc<cyber_jianghu_agent::runtime::decision::http::HttpDecisionState>,
+}
+
+struct ClawCallbackSetup {
+    shared_state: Arc<WsSharedState>,
+    api_state: cyber_jianghu_agent::runtime::decision::http::HttpApiState,
+    server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
+    device_id: Arc<RwLock<Uuid>>,
+    persona_info: Option<cyber_jianghu_agent::ai::validator::PersonaInfo>,
+}
+
+fn start_claw_server(
+    port: u16,
+    device_id: Arc<RwLock<Uuid>>,
+    config: &Config,
+    identity: &IdentityConfig,
+) -> Result<ServerSetup> {
+    let actual_port = if port == 0 {
+        use rand::RngExt;
+        let random_port = rand::rng().random_range(23340..=23349);
+        info!("随机选择端口: {} (范围: 23340-23349)", random_port);
+        random_port
+    } else {
+        port
+    };
+
+    info!("启动 Claw 模式（WebSocket + HTTP API），端口: {}", actual_port);
+
+    let config_path_str = config_path().display().to_string();
+    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+
+    let (reconnect_tx, reconnect_rx) =
+        mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
+
+    let mut ws_state = WsDecisionState::new();
+    let shared_state = Arc::new(WsSharedState::from(&ws_state));
+    ws_state.spawn_validation_task((*shared_state).clone());
+
+    let (http_decision_state, api_state) = create_http_state(
+        device_id,
+        config.server.http_url.clone(),
+        config.server.ws_url.clone(),
+        Some(identity.clone()),
+        Some(reconnect_tx),
+        config_path(),
+        Some(shared_state.clone()),
+    );
+
+    let api_state_clone = api_state.clone();
+    let server_msg_tx = shared_state.server_msg_tx.clone();
+    let shared_state_for_callback = shared_state.clone();
+    let api_state_for_callback = api_state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = run_ws_server(actual_port, (*shared_state).clone(), api_state_clone).await {
+            error!("Claw server error: {}", e);
+        }
+    });
+
+    Ok(ServerSetup {
+        reconnect_rx,
+        server_msg_tx,
+        shared_state: shared_state_for_callback,
+        api_state: api_state_for_callback,
+        http_state: http_decision_state,
+    })
 }
