@@ -8,4 +8,9 @@ This project is dual-licensed under either:
 
 You may choose either license to govern your use of this project.
 
+| 许可证 | 适用场景 |
+|--------|----------|
+| **MIT** | 开源项目、研究、学术、个人使用 |
+| **Apache 2.0** | 专利保护、机构使用、商业部署 |
+
 SPDX-License-Identifier: MIT OR Apache-2.0
