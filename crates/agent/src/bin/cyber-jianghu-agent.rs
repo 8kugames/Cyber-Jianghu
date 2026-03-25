@@ -6,20 +6,18 @@
 //
 // ## 架构说明
 //
-// Agent 仅支持 Claw 模式：
-// - Agent 与 Server 保持 WebSocket 连接，接收 WorldState，提交 Intent
-// - Agent 为 OpenClaw（外部 LLM 调度器）提供 WebSocket + HTTP API 接口
-// - OpenClaw **必须**通过 WebSocket 连接 Agent，确保 Tick 实时同步
-// - HTTP API 用于数据查询、Web 面板等辅助功能（不是 WebSocket 的替代）
-// - OpenClaw 超时未提交 Intent 时，Agent 自动提交 idle Intent
+// Agent 支持两种运行模式：
+// - Cognitive 模式（默认）：内置 LLM 决策，Agent 自主做出决策
+// - Claw 模式：等待外部 OpenClaw 调度器通过 WebSocket 提交 Intent
 //
 // ## 使用方式
 //
 // 1. 首次运行：自动生成 device_id 并向服务器注册
 // 2. 后续运行：自动使用已保存的身份连接服务器
-// 3. OpenClaw 连接：ws://localhost:23340/ws
-// 4. Web 面板：http://localhost:23340/panel
-// 5. HTTP API：http://localhost:23340/api/v1/*
+// 3. Cognitive 模式（默认）：cyber-jianghu-agent run --mode cognitive
+// 4. Claw 模式：cyber-jianghu-agent run --mode claw
+// 5. Web 面板：http://localhost:23340/panel
+// 6. HTTP API：http://localhost:23340/api/v1/*
 // ============================================================================
 
 use anyhow::{Context, Result};
@@ -348,8 +346,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            // 默认运行 Claw 模式
-            run_agent(0, "claw".to_string()).await?;
+            run_agent(0, "cognitive".to_string()).await?;
         }
     }
 
