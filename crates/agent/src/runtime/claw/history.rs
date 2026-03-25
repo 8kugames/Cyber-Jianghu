@@ -13,7 +13,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::ai::llm::LlmClient;
 
@@ -294,9 +294,10 @@ impl HistoryManager {
         // 保留最近的 N 条消息 + 摘要
         let recent_count = self.config.keep_recent_messages;
         let messages_to_keep: Vec<_> = self.messages
-            .into_iter()
+            .iter()
             .rev()
             .take(recent_count)
+            .cloned()
             .collect();
 
         self.messages = messages_to_keep.into_iter().rev().collect();
