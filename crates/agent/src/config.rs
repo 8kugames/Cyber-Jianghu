@@ -281,22 +281,15 @@ impl CharacterConfig {
 // ============================================================================
 
 /// 运行模式
-///
-/// Agent 仅支持 Claw 模式：外部调度器（如 OpenClaw）通过 WebSocket + HTTP API
-/// 连接到 Agent，Agent 提供 WorldState 并等待外部提交 Intent。
-///
-/// ## 架构说明
-/// - Agent 不内置 LLM 调用
-/// - Agent 与 Server 保持 WebSocket 连接，接收 WorldState，提交 Intent
-/// - Agent 为 OpenClaw 提供 WebSocket 接口，推送 Tick 信息并接收决策
-/// - OpenClaw 超时未提交 Intent 时，Agent 自动提交 idle Intent
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
     /// Claw 模式（默认）- 为 OpenClaw 等外部助手提供 WebSocket + HTTP API
+    /// Agent 不内置 LLM 调用，被动等待外部决策
     #[default]
     Claw,
     /// Cognitive 模式 - 内置 LLM 决策，无需外部调度器
+    /// Agent 内部调用 LLM 直接进行决策
     Cognitive,
 }
 
