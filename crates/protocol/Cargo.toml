@@ -1,9 +1,9 @@
 [package]
 name = "cyber-jianghu-protocol"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
-license = "AGPL-3.0"
+license = "MIT OR Apache-2.0"
 description = "Shared protocol types for Cyber-Jianghu MMO-MAS"
 
 [dependencies]
