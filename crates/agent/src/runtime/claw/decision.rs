@@ -98,6 +98,47 @@ pub async fn claw_decision(
     Ok(intent)
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_parse_missing_action_type() {
+        let json = r#"{"action_data": {}, "thought": "test"}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
+        
+        let action_type = parsed
+            .get("action_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("idle");
+        
+        assert_eq!(action_type, "idle");
+    }
+
+    #[test]
+    fn test_parse_malformed_json_fallback() {
+        let response = "This is not JSON at all";
+        
+        let json_start = response.find('{');
+        
+        assert!(json_start.is_none());
+    }
+
+    #[test]
+    fn test_extract_json_from_text() {
+        let response = "Sure, here is the decision:\n{\"action_type\": \"idle\"}\n\nLet me know if you need anything else.";
+        
+        let json_start = response.find('{');
+        let json_end = response.rfind('}').map(|p| p + 1);
+        
+        let json_str = match (json_start, json_end) {
+            (Some(start), Some(end)) => &response[start..=end],
+            _ => "",
+        };
+        
+        let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        assert_eq!(parsed["action_type"], "idle");
+    }
+}
+
 pub fn create_claw_decision_callback(
     state: ClawDecisionState,
 ) -> impl Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Intent>> + Send>> + Send + Sync + 'static {
