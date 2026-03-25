@@ -11,12 +11,11 @@
 // 超时控制：最大迭代次数和总超时时间
 
 use anyhow::{Context, Result};
-use tracing::{debug, warn};
+use tracing::debug;
 
-use crate::ai::llm::LlmClient;
 use crate::models::WorldState;
 
-use super::history::{ChatMessage, HistoryManager};
+use super::history::HistoryManager;
 
 // ============================================================================
 // 常量
@@ -110,7 +109,7 @@ impl TurnCycle {
     pub async fn run<S: TurnCycleServices>(
         &self,
         services: &S,
-        world_state: &WorldState,
+        _world_state: &WorldState,
         history: &mut HistoryManager,
     ) -> Result<Intent> {
         let start_time = std::time::Instant::now();
@@ -137,11 +136,16 @@ impl TurnCycle {
                     let tool_result = match result {
                         Ok(r) => ToolResult::success(&call.id, &call.name, &r),
                         Err(e) => {
-                            warn!("Tool {} failed: {}", call.name, e);
+                            tracing::warn!("Tool {} failed: {}", call.name, e);
                             ToolResult::failure(&call.id, &call.name, e.to_string())
                         }
                     };
-                    history.add_tool_message(&call.id, &call.name, &tool_result.to_string());
+                    let result_str = if let Some(ref err) = tool_result.error {
+                        format!("error: {}", err)
+                    } else {
+                        tool_result.result.clone()
+                    };
+                    history.add_tool_message(&call.id, &call.name, &result_str);
                 }
             } else {
                 return self.parse_intent(&response);

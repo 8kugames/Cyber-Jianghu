@@ -10,7 +10,6 @@ use crate::models::WorldState;
 // 常量
 // ============================================================================
 
-const INDENT: &str = "  ";
 const MAX_ENTITIES_SHOWN: usize = 5;
 const MAX_RECENT_EVENTS: usize = 3;
 
@@ -70,7 +69,7 @@ impl ContextBuilder {
                 .available_actions
                 .iter()
                 .take(5)
-                .map(|a| &a.action)
+                .map(|a| a.action.as_str())
                 .collect();
             parts.push(format!("Available: {}", actions.join(", ")));
         }
