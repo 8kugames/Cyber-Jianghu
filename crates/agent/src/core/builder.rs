@@ -212,6 +212,8 @@ impl AgentBuilder {
             death_reported: false,
             review_store: self.review_store,
             review_config: self.review_config,
+            actor_llm_client: None,
+            config_reload_rx: None,
         }
     }
 }

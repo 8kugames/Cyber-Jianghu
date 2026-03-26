@@ -7,12 +7,13 @@
 
 use anyhow::Result;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::ai::dialogue::DialogueClient;
 use crate::ai::lifespan::LifespanCalculator;
+use crate::ai::llm::LlmClient;
 use crate::ai::memory::MemoryManager;
 use crate::ai::memory::backend::MemoryBackend;
 use crate::ai::memory::tools::{MemoryToolDefinition, MemoryToolResult};
@@ -113,6 +114,12 @@ pub struct Agent {
 
     /// 审查配置
     pub(crate) review_config: ReviewConfig,
+
+    /// ActorSoul 当前 LLM Client
+    pub(crate) actor_llm_client: Option<std::sync::Arc<dyn LlmClient>>,
+
+    /// 配置重载通知接收通道
+    pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
 }
 
 impl Agent {
@@ -162,6 +169,8 @@ impl Agent {
             death_reported: false,
             review_store: None,
             review_config,
+            actor_llm_client: None,
+            config_reload_rx: None,
         }
     }
 
