@@ -33,21 +33,20 @@ async function loadCharacterList() {
         const aliveCharacters = allCharacters.filter(c => c.status === 'alive');
         if (aliveCharacters.length <= 1) {
             selectorSection.classList.add('hidden');
-            return;
+        } else {
+            selectEl.innerHTML = allCharacters.map(c => {
+                const statusText = c.status === 'alive' ? '' :
+                                  c.status === 'dead' ? ' [已故]' : ' [归隐]';
+                const serverInfo = c.server_url
+                    ? ` (${c.server_url.replace(/^https?:\/\//, '').split('/')[0]})`
+                    : '';
+                const selected = c.is_current ? 'selected' : '';
+                const disabled = c.status !== 'alive' ? 'disabled' : '';
+                return `<option value="${c.agent_id || ''}" ${selected} ${disabled}>${escapeHtml(c.name)}${statusText}${serverInfo}</option>`;
+            }).join('');
+
+            selectorSection.classList.remove('hidden');
         }
-
-        selectEl.innerHTML = allCharacters.map(c => {
-            const statusText = c.status === 'alive' ? '' :
-                              c.status === 'dead' ? ' [已故]' : ' [归隐]';
-            const serverInfo = c.server_url
-                ? ` (${c.server_url.replace(/^https?:\/\//, '').split('/')[0]})`
-                : '';
-            const selected = c.is_current ? 'selected' : '';
-            const disabled = c.status !== 'alive' ? 'disabled' : '';
-            return `<option value="${c.agent_id || ''}" ${selected} ${disabled}>${escapeHtml(c.name)}${statusText}${serverInfo}</option>`;
-        }).join('');
-
-        selectorSection.classList.remove('hidden');
 
         renderWorldTree();
     } catch (err) {
@@ -634,8 +633,25 @@ document.addEventListener('DOMContentLoaded', () => {
         return div;
     }
 
-    loadAttributeMeta().then(() => {
-        loadCharacterList();
+    loadAttributeMeta().then(async () => {
+        await loadCharacterList();
+        // 当前角色非存活时，在当前角色 tab 显示创建入口
+        const currentChar = allCharacters.find(c => c.is_current);
+        if (!currentChar || currentChar.status !== 'alive') {
+            hide('#loading');
+            const infoEl = document.getElementById('character-info');
+            infoEl.innerHTML = `
+                <div class="form-section">
+                    <h2>当前无活跃角色</h2>
+                    <p class="section-desc">角色已归隐或尚未创建。</p>
+                    <div class="form-actions">
+                        <a href="create.html" class="nav-link">创建新角色</a>
+                    </div>
+                </div>
+            `;
+            show('#character-info');
+            return;
+        }
         loadCharacter();
     });
 
