@@ -187,7 +187,9 @@ pub enum ServerMessage {
 /// use serde_json::json;
 ///
 /// let msg = ClientMessage::Intent {
+///     intent_id: None,
 ///     tick_id: 1,
+///     agent_id: None,
 ///     thought_log: Some("思考过程".to_string()),
 ///     action_type: "speak".to_string(),
 ///     action_data: Some(json!({"content": "你好"})),
