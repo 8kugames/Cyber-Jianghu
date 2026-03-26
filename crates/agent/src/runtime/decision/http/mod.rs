@@ -168,6 +168,8 @@ pub struct HttpApiState {
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
     pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    /// 运行时模式（Claw/Cognitive）
+    pub runtime_mode: crate::config::RuntimeMode,
 }
 
 /// HTTP 决策状态
@@ -396,6 +398,13 @@ pub fn create_api_router() -> Router<HttpApiState> {
             post(handlers::reload_config_handler),
         ) // 热重载配置
         .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
+        // === LLM 配置端点 ===
+        .route(
+            "/api/v1/config/llm/providers",
+            get(handlers::get_llm_providers_handler),
+        ) // 获取支持的 LLM Provider 列表
+        .route("/api/v1/config/llm", get(handlers::get_llm_config_handler)) // 获取当前 LLM 配置
+        .route("/api/v1/config/llm", post(handlers::update_llm_config_handler)) // 更新 LLM 配置
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -578,6 +587,7 @@ pub fn create_http_state(
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx, // 重连请求发送通道
+        runtime_mode: crate::config::RuntimeMode::default(), // 默认 Cognitive 模式
     };
 
     let decision_state = Arc::new(HttpDecisionState {
