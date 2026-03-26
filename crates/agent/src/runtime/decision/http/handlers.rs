@@ -2289,6 +2289,43 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
+/// GET /api/v1/setup/status - 返回引导状态
+pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(_) => {
+            return Json(dto::SetupStatusResponse {
+                needs_setup: true,
+                has_server: false,
+                has_llm: false,
+                has_character: false,
+                current_character: None,
+            })
+            .into_response();
+        }
+    };
+
+    let has_server =
+        !config.server.ws_url.is_empty() && config.server.ws_url != "ws://localhost:23333/ws";
+    let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
+    let has_character = config.agent.as_ref().map_or(false, |c| c.is_registered());
+    let current_character = config
+        .agent
+        .as_ref()
+        .filter(|c| c.is_registered())
+        .map(|c| c.name.clone());
+    let needs_setup = !has_server || !has_llm;
+
+    Json(dto::SetupStatusResponse {
+        needs_setup,
+        has_server,
+        has_llm,
+        has_character,
+        current_character,
+    })
+    .into_response()
+}
+
 /// 配置重载请求
 #[derive(Debug, Deserialize)]
 pub struct ConfigReloadRequest {
