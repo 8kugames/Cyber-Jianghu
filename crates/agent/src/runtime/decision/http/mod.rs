@@ -405,6 +405,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/config/llm/providers",
             get(handlers::get_llm_providers_handler),
         ) // 获取支持的 LLM Provider 列表
+        .route(
+            "/api/v1/config/llm/providers/openclaw/defaults",
+            get(handlers::get_openclaw_defaults_handler),
+        ) // 获取 OpenClaw 默认配置（仅当选择 openclaw 时调用）
         .route("/api/v1/config/llm", get(handlers::get_llm_config_handler)) // 获取当前 LLM 配置
         .route(
             "/api/v1/config/llm",
@@ -518,6 +522,7 @@ pub fn create_http_state(
     reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
     config_path: PathBuf,
     ws_shared_state: Option<Arc<super::ws::WsSharedState>>,
+    runtime_mode: crate::config::RuntimeMode,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
@@ -592,7 +597,7 @@ pub fn create_http_state(
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx,                                        // 重连请求发送通道
-        runtime_mode: crate::config::RuntimeMode::default(), // 默认 Cognitive 模式
+        runtime_mode, // 从调用者传入
     };
 
     let decision_state = Arc::new(HttpDecisionState {

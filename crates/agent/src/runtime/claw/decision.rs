@@ -2,14 +2,23 @@
 
 use anyhow::Result;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
 use crate::ai::llm::LlmClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::ContextBuilder;
 
+/// LLM Client 容器（支持热重载）
+///
+/// 使用 `RwLock` 包装，允许运行时动态切换 LLM Client
+pub type LlmClientContainer = Arc<RwLock<Arc<dyn LlmClient>>>;
+
 pub struct ClawDecisionState {
-    pub llm: Arc<dyn LlmClient>,
+    /// LLM Client（支持热重载）
+    ///
+    /// 使用 `RwLock` 包装，决策时动态读取，热重载时更新
+    pub llm: LlmClientContainer,
     pub context_builder: ContextBuilder,
     pub system_prompt: String,
 }
@@ -24,7 +33,22 @@ const DEFAULT_DECISION_RULES: &str = r#"决策规则：
 {"action_type": "动作类型", "action_data": {"参数": "值"}, "thought": "思考过程"}"#;
 
 impl ClawDecisionState {
+    /// 创建新的决策状态
+    ///
+    /// LLM Client 会被包装在 `RwLock` 中以支持热重载
     pub fn new(llm: Arc<dyn LlmClient>) -> Self {
+        Self {
+            llm: Arc::new(RwLock::new(llm)),
+            context_builder: ContextBuilder::new(),
+            system_prompt: format!(
+                "你是一个武侠游戏中的角色。你需要根据当前状态做出合理的决策。\n\n{}",
+                DEFAULT_DECISION_RULES
+            ),
+        }
+    }
+
+    /// 从已有的 LLM 容器创建（用于热重载场景）
+    pub fn from_container(llm: LlmClientContainer) -> Self {
         Self {
             llm,
             context_builder: ContextBuilder::new(),
@@ -38,6 +62,15 @@ impl ClawDecisionState {
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = format!("{}\n\n{}", prompt.into(), DEFAULT_DECISION_RULES);
         self
+    }
+
+    /// 更新 LLM Client（热重载）
+    ///
+    /// 此方法用于运行时动态切换 LLM Client
+    pub async fn update_llm(&self, new_llm: Arc<dyn LlmClient>) {
+        let mut guard = self.llm.write().await;
+        *guard = new_llm;
+        info!("ClawDecisionState LLM Client 已更新（热重载）");
     }
 }
 
@@ -53,8 +86,9 @@ pub async fn claw_decision(state: &ClawDecisionState, world_state: &WorldState) 
         state.system_prompt, context
     );
 
-    let response = state
-        .llm
+    // 动态读取当前 LLM Client（支持热重载）
+    let llm = state.llm.read().await;
+    let response = llm
         .complete(&prompt)
         .await
         .map_err(|e| anyhow::anyhow!("LLM call failed: {}", e))?;

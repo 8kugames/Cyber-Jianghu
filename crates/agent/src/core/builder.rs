@@ -17,6 +17,7 @@ use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
 use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{IntentValidator, Validator};
 use crate::config::{Config, ReviewConfig};
+use crate::runtime::claw::LlmClientContainer;
 use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
 use cyber_jianghu_protocol::WorldBuildingRules;
@@ -35,6 +36,10 @@ pub struct AgentBuilder {
     enable_memory: bool,
     memory_config: Option<MemoryManagerConfig>,
     llm_client: Option<Arc<dyn LlmClient>>,
+    /// LLM Client 容器（支持热重载）
+    ///
+    /// 与 ClawDecisionState 共享，用于运行时动态切换 LLM Client
+    llm_container: Option<LlmClientContainer>,
     dialogue_client: Option<DialogueClient>,
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
@@ -62,6 +67,7 @@ impl AgentBuilder {
             enable_memory: true,
             memory_config: None,
             llm_client: None,
+            llm_container: None,
             dialogue_client: None,
             relationship_store: None,
             validator: None,
@@ -128,6 +134,16 @@ impl AgentBuilder {
         let validator = Arc::new(IntentValidator::new(rules, llm_client.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
+        self
+    }
+
+    /// 设置 LLM Client 容器（支持热重载）
+    ///
+    /// 此方法用于设置共享的 LLM Client 容器，当配置变更时，
+    /// 可以通过更新容器内容来实现 LLM Client 的动态切换。
+    /// 决策回调会自动使用最新的 LLM Client。
+    pub fn with_llm_container(mut self, container: LlmClientContainer) -> Self {
+        self.llm_container = Some(container);
         self
     }
 
@@ -222,6 +238,7 @@ impl AgentBuilder {
             review_store: self.review_store,
             review_config: self.review_config,
             actor_llm_client: None,
+            actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
         }
     }
