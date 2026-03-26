@@ -16,7 +16,7 @@
 // 2. 后续运行：自动使用已保存的身份连接服务器
 // 3. Cognitive 模式（默认）：cyber-jianghu-agent run --mode cognitive
 // 4. Claw 模式：cyber-jianghu-agent run --mode claw
-// 5. Web 面板：http://localhost:23340/panel
+// 5. Web 面板：http://localhost:23340/manage.html
 // 6. HTTP API：http://localhost:23340/api/v1/*
 // ============================================================================
 
@@ -124,9 +124,10 @@ fn config_path() -> PathBuf {
         return PathBuf::from(config_dir).join("agent.yaml");
     }
 
-    dirs::config_dir()
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("cyber-jianghu")
+        .join(".cyber-jianghu")
+        .join("config")
         .join("agent.yaml")
 }
 
@@ -400,7 +401,7 @@ fn show_config() -> Result<()> {
         }
     } else {
         println!("\n当前角色: (未创建)");
-        println!("  通过 Web 面板创建: http://localhost:23340/panel");
+        println!("  通过 Web 面板创建: http://localhost:23340/manage.html");
         println!("  或通过 CLI: cyber-jianghu-agent create-character --name 名字");
     }
 
@@ -453,7 +454,7 @@ async fn create_character_cli(
         Err(e) => {
             warn!("无法连接到 Agent API: {}", e);
             warn!("请确保 Agent 已在 Claw 模式下运行（默认模式）");
-            warn!("或通过 Web 面板创建角色: http://localhost:23340/panel");
+            warn!("或通过 Web 面板创建角色: http://localhost:23340/manage.html");
             return Err(e);
         }
     }
@@ -545,7 +546,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
     if !config.has_character() {
         warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
         warn!("请通过以下方式创建角色:");
-        warn!("  1. Web 面板: http://localhost:23340/panel");
+        warn!("  1. Web 面板: http://localhost:23340/manage.html");
         warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
     }
 
@@ -574,13 +575,21 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 config.llm.provider,
                 config.llm.model.as_deref().unwrap_or("default")
             );
+
+            // 创建 LLM Client 容器（支持热重载）
+            // 容器会被 ClawDecisionState 和 Agent 共享
+            // 注意：需要显式转换为 Arc<dyn LlmClient> 以支持动态分发
+            let llm_arc: Arc<dyn LlmClient> = Arc::new(llm_client);
+            let llm_container = Arc::new(RwLock::new(llm_arc));
+            info!("LLM Client 容器已创建（支持热重载）");
+
             let claw_state = if let Some(ref character) = config.agent {
                 info!("使用角色 persona: {}", character.name);
-                ClawDecisionState::new(Arc::new(llm_client))
+                ClawDecisionState::from_container(llm_container.clone())
                     .with_system_prompt(character.generate_system_prompt())
             } else {
                 info!("使用默认系统提示词（无角色配置）");
-                ClawDecisionState::new(Arc::new(llm_client))
+                ClawDecisionState::from_container(llm_container.clone())
             };
             let decision = create_claw_decision_callback(claw_state);
 
@@ -618,9 +627,10 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             // 启动 ReflectorSoul 任务（默认启用，与 ActorSoul 同步热重载）
             let reflector_config_watcher = config_watcher.clone();
 
-            // 注入 Agent
+            // 注入 Agent（包含 LLM 容器用于热重载）
             let agent = AgentBuilder::new(config, decision)
                 .with_review_store(review_store.clone())
+                .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .build();
             tokio::spawn(async move {
@@ -786,6 +796,7 @@ fn start_claw_server(
         Some(reconnect_tx),
         config_path(),
         Some(shared_state.clone()),
+        config.runtime.mode,
     );
 
     let api_state_clone = api_state.clone();
@@ -841,6 +852,7 @@ fn start_http_api_server(
             None,
             config_path(),
             None,
+            config.runtime.mode,
         );
 
     let api_state_clone = api_state.clone();

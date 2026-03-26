@@ -191,7 +191,19 @@ impl super::Agent {
 
                             match llm_client_result {
                                 Ok(client) => {
-                                    self.actor_llm_client = Some(std::sync::Arc::new(client));
+                                    let new_client = std::sync::Arc::new(client);
+
+                                    // 更新 actor_llm_client（向后兼容）
+                                    self.actor_llm_client = Some(new_client.clone());
+
+                                    // 更新 actor_llm_container（真正热重载）
+                                    // 决策回调会自动使用新的 LLM Client
+                                    if let Some(ref container) = self.actor_llm_container {
+                                        let mut guard = container.write().await;
+                                        *guard = new_client.clone();
+                                        info!("ActorSoul LLM 容器已更新（真正热重载）");
+                                    }
+
                                     self.config = new_config;
                                     info!("ActorSoul LLM 已重载");
                                 }

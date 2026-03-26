@@ -137,12 +137,34 @@ pub struct LlmProviderInfo {
     pub value: String,
     pub label: String,
     pub requires_base_url: bool,
+    /// Provider 是否可用
+    ///
+    /// - `true`: 可选择
+    /// - `false`: 禁选（如 OpenClaw 配置文件不存在）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    /// 禁选原因（当 disabled=true 时显示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
 }
 
 /// Provider 列表响应
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LlmProvidersResponse {
     pub providers: Vec<LlmProviderInfo>,
+}
+
+/// OpenClaw 默认配置响应
+///
+/// 仅当用户选择 openclaw provider 时请求此接口
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenClawDefaultsResponse {
+    /// Gateway URL（从 `~/.openclaw/openclaw.json` 读取）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// 默认模型（OpenClaw 配置中通常没有此字段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// LLM 配置信息（不含 API Key）

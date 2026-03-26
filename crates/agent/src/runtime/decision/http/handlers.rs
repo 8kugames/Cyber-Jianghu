@@ -2649,35 +2649,73 @@ pub(super) async fn set_server_handler(
 // ============================================================================
 
 /// GET /api/v1/config/llm/providers - 返回支持的 LLM Provider 列表
+///
+/// 注意：此接口不读取 OpenClaw 配置内容，仅检查配置文件是否存在。
+/// 遵循"仅当用户选择 openclaw provider 时读取一次"的原则。
+/// 如果 OpenClaw 配置文件不存在，则禁选该 Provider。
 pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
+    // 仅检查 OpenClaw 配置文件是否存在，不读取内容
+    // 遵循"仅当用户选择 openclaw provider 时读取一次"的原则
+    let openclaw_config_path = crate::ai::llm::direct_client::OpenClawConfig::config_path();
+    let has_openclaw_config = openclaw_config_path
+        .as_ref()
+        .map_or(false, |path| path.exists());
+
     let providers = vec![
         dto::LlmProviderInfo {
             value: "ollama".to_string(),
             label: "Ollama".to_string(),
             requires_base_url: false,
+            disabled: None,
+            disabled_reason: None,
         },
         dto::LlmProviderInfo {
-            value: "openai".to_string(),
-            label: "OpenAI".to_string(),
-            requires_base_url: true,
-        },
-        dto::LlmProviderInfo {
-            value: "anthropic".to_string(),
-            label: "Anthropic".to_string(),
-            requires_base_url: true,
-        },
-        dto::LlmProviderInfo {
-            value: "deepseek".to_string(),
-            label: "DeepSeek".to_string(),
-            requires_base_url: true,
+            value: "openclaw".to_string(),
+            label: "OpenClaw Gateway".to_string(),
+            requires_base_url: false,
+            // 如果配置文件不存在，禁选该 Provider
+            disabled: Some(!has_openclaw_config),
+            disabled_reason: if !has_openclaw_config {
+                Some("OpenClaw 不存在".to_string())
+            } else {
+                None
+            },
         },
         dto::LlmProviderInfo {
             value: "openai_compatible".to_string(),
-            label: "OpenAI Compatible (GLM/Kimi/Minimax等)".to_string(),
+            label: "OpenAI Compatible (DeepSeek/GLM/Kimi/Minimax等)".to_string(),
             requires_base_url: true,
+            disabled: None,
+            disabled_reason: None,
         },
     ];
     Json(dto::LlmProvidersResponse { providers })
+}
+
+/// GET /api/v1/config/llm/providers/openclaw/defaults - 返回 OpenClaw 默认配置
+///
+/// **仅当用户选择 openclaw provider 时调用此接口**
+/// 读取 `~/.openclaw/openclaw.json` 获取 gateway_url
+/// 注意：不读取 api_key，api_key 必须由用户手动输入
+pub(super) async fn get_openclaw_defaults_handler() -> impl IntoResponse {
+    use crate::ai::llm::direct_client::OpenClawConfig;
+
+    match OpenClawConfig::load() {
+        Ok(config) => {
+            let base_url = config.gateway_url().map(|s| s.to_string());
+            Json(dto::OpenClawDefaultsResponse {
+                base_url,
+                model: None, // OpenClaw 配置中没有默认模型
+            })
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load OpenClaw config: {}", e);
+            Json(dto::OpenClawDefaultsResponse {
+                base_url: None,
+                model: None,
+            })
+        }
+    }
 }
 
 /// GET /api/v1/config/llm - 返回当前 LLM 配置
@@ -2755,7 +2793,7 @@ fn validate_llm_config(
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
     match provider {
-        "openai" | "anthropic" | "deepseek" | "openai_compatible" => {
+        "openai_compatible" => {
             if base_url.is_none() || base_url.map_or(true, |u| u.is_empty()) {
                 anyhow::bail!("{} 需要提供 base_url", provider);
             }
