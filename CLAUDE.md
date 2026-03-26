@@ -96,7 +96,7 @@ PR checks enforce these before merge:
 2. `cargo clippy --all-targets -- -D warnings` - Lint with warnings as errors
 3. `cargo nextest run --workspace` - All tests pass
 
-CI builds for 5 platforms: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64.
+CI builds for 4 platforms: linux-x86_64 (musl), linux-arm64 (musl), macos-arm64, windows-x86_64.
 Docker images published to `ghcr.io/8kugames/cyber-jianghu-server`.
 
 ## Architecture
@@ -191,6 +191,26 @@ Key agent modules:
 **Runtime modes** (decision module):
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
+
+**Dual Soul Architecture** (Cognitive mode):
+The agent uses a dual-soul design for intent generation and moral review:
+
+```
+ActorSoul (行动之魂/本我)     ReflectorSoul (反思之魂/超我)
+       │                              │
+       │  submit_for_review()        │  poll ReviewStore
+       │  ─────────────────────────> │
+       │                              │  LLM review
+       │  <─────────────────────────  │  submit_review()
+       │  await approval              │
+       ▼
+   send_intent()
+```
+
+- **ActorSoul**: Generates intents, pursues immediate goals (id/本我)
+- **ReflectorSoul**: Reviews intents against moral values, approves/rejects (superego/超我)
+- **ReviewStore**: In-memory shared state for pending reviews and results
+- **Timeout**: Default 30s, auto-approves on timeout to prevent tick expiry
 
 ### Protocol Layer
 
@@ -291,9 +311,20 @@ use super::builder::AgentBuilder;
 ### Testing Conventions
 
 - Integration tests go in `crates/*/tests/` directories
-- Shared test fixtures in `tests/common/fixtures.rs`
+- Shared test fixtures in `crates/*/tests/common/fixtures.rs`
 - Unit tests in `#[cfg(test)] mod tests` within source files
 - CI uses `cargo-nextest` for faster parallel test execution
+
+**Test Fixture Pattern**:
+```rust
+// crates/server/tests/common/fixtures.rs
+pub fn make_test_agent(agent_id: Uuid, location: &str) -> AgentState { ... }
+pub fn make_test_intent(agent_id: Uuid, tick_id: i64, action: ActionType) -> Intent { ... }
+
+// Usage in tests
+let agent = make_test_agent(uuid, "village_center");
+let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
+```
 
 ## Important Rules
 
