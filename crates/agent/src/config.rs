@@ -637,9 +637,8 @@ impl Config {
 
         // 原子写入：先写临时文件，再 rename
         let tmp_path = path.with_extension("tmp");
-        fs::write(&tmp_path, &yaml).with_context(|| {
-            format!("Failed to write temp config file: {}", tmp_path.display())
-        })?;
+        fs::write(&tmp_path, &yaml)
+            .with_context(|| format!("Failed to write temp config file: {}", tmp_path.display()))?;
 
         if let Err(e) = fs::rename(&tmp_path, path) {
             let _ = fs::remove_file(&tmp_path);
