@@ -14,9 +14,75 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 use tracing::{debug, error};
 
 use super::LlmClient;
+
+// ============================================================================
+// Token Usage Tracking
+// ============================================================================
+
+/// LLM Token 累计使用统计
+///
+/// 使用 AtomicU64 实现无锁并发累加，通过全局单例共享。
+/// 适用于单进程 Agent 场景。
+pub struct TokenUsageTracker {
+    /// 累计 Prompt Tokens
+    pub total_prompt_tokens: AtomicU64,
+    /// 累计 Completion Tokens
+    pub total_completion_tokens: AtomicU64,
+    /// 累计 API 调用次数
+    pub total_calls: AtomicU64,
+}
+
+impl TokenUsageTracker {
+    fn new() -> Self {
+        Self {
+            total_prompt_tokens: AtomicU64::new(0),
+            total_completion_tokens: AtomicU64::new(0),
+            total_calls: AtomicU64::new(0),
+        }
+    }
+
+    /// 记录一次 API 调用的 token 使用量
+    pub fn record(&self, prompt_tokens: u64, completion_tokens: u64) {
+        self.total_prompt_tokens
+            .fetch_add(prompt_tokens, Ordering::Relaxed);
+        self.total_completion_tokens
+            .fetch_add(completion_tokens, Ordering::Relaxed);
+        self.total_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 获取当前统计数据
+    pub fn snapshot(&self) -> TokenUsageSnapshot {
+        let prompt = self.total_prompt_tokens.load(Ordering::Relaxed);
+        let completion = self.total_completion_tokens.load(Ordering::Relaxed);
+        TokenUsageSnapshot {
+            total_prompt_tokens: prompt,
+            total_completion_tokens: completion,
+            total_tokens: prompt + completion,
+            total_calls: self.total_calls.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Token 使用统计快照
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenUsageSnapshot {
+    pub total_prompt_tokens: u64,
+    pub total_completion_tokens: u64,
+    pub total_tokens: u64,
+    pub total_calls: u64,
+}
+
+static TOKEN_USAGE: OnceLock<TokenUsageTracker> = OnceLock::new();
+
+/// 获取全局 Token 使用统计追踪器
+pub fn token_usage_tracker() -> &'static TokenUsageTracker {
+    TOKEN_USAGE.get_or_init(TokenUsageTracker::new)
+}
 
 /// OpenClaw 配置文件格式
 #[derive(Debug, Deserialize)]
@@ -418,6 +484,15 @@ impl DirectLlmClient {
             .await
             .context("Failed to parse LLM response")?;
 
+        // 记录 token 使用量
+        if let Some(ref usage) = response_data.usage {
+            token_usage_tracker().record(usage.prompt_tokens, usage.completion_tokens);
+            debug!(
+                "Token usage: prompt={}, completion={}",
+                usage.prompt_tokens, usage.completion_tokens
+            );
+        }
+
         if let Some(choice) = response_data.choices.first() {
             let content = choice.message.content.trim().to_string();
             debug!("LLM response length: {} chars", content.len());
@@ -459,6 +534,16 @@ struct ChatMessage {
 #[derive(Debug, Deserialize)]
 struct OpenAIResponse {
     choices: Vec<OpenAIChoice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 #[derive(Debug, Deserialize)]

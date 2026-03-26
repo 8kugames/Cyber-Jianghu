@@ -11,7 +11,7 @@
             <header>
                 <h1>赛博江湖</h1>
                 <nav class="nav-tabs">
-                    <a href="index.html" class="nav-tab">创建角色</a>
+                    <a href="welcome.html" class="nav-tab">首页</a>
                     <a href="character.html" class="nav-tab">角色信息</a>
                     <a href="manage.html" class="nav-tab active">管理</a>
                 </nav>
@@ -58,64 +58,30 @@
                     </div>
                 </section>
 
-                <!-- 托梦功能 -->
-                <section class="form-section">
-                    <h2>托梦</h2>
-                    <p class="section-desc">
-                        注入一个念头，将在接下来的回合中持续影响角色的思考。
-                        此功能用于引导角色行为或注入特定剧情。
-                    </p>
-
-                    <div class="info-item" style="margin-bottom: 12px;">
-                        <span class="label">目标角色</span>
-                        <span class="value" id="dream-target-character">加载中...</span>
-                    </div>
-
-                    <div id="dream-status" class="status-card hidden">
-                        <h4>当前托梦</h4>
-                        <p id="current-dream"></p>
-                        <p class="remaining">剩余 <span id="remaining-ticks">0</span> 回合</p>
-                    </div>
-
-                    <form id="dream-form">
-                        <div class="form-group">
-                            <label for="dream-thought">念头内容</label>
-                            <textarea
-                                id="dream-thought"
-                                name="thought"
-                                rows="3"
-                                required
-                                placeholder="输入要注入的念头，如：'你突然想起一个多年未见的老友'"
-                            ></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="dream-duration">持续回合数</label>
-                            <input
-                                type="number"
-                                id="dream-duration"
-                                name="duration"
-                                min="1"
-                                max="100"
-                                value="5"
-                            />
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" id="dream-btn">注入托梦</button>
-                        </div>
-                    </form>
-
-                    <div id="dream-result" class="result hidden">
-                        <p id="dream-message"></p>
-                    </div>
-                    <div id="dream-error" class="error hidden">
-                        <p id="dream-error-msg"></p>
-                    </div>
-                </section>
-
                 <!-- LLM 配置 -->
                 <section class="form-section" id="llm-config-section">
                     <h2>LLM 配置</h2>
                     <p class="section-desc">配置 ActorSoul 和 ReflectorSoul 使用的 LLM 模型。</p>
+
+                    <!-- Token 使用统计 -->
+                    <div class="token-stats" id="token-stats">
+                        <div class="token-stat-item">
+                            <span class="token-stat-label">API 调用</span>
+                            <span class="token-stat-value" id="stat-total-calls">--</span>
+                        </div>
+                        <div class="token-stat-item">
+                            <span class="token-stat-label">Prompt Tokens</span>
+                            <span class="token-stat-value" id="stat-prompt-tokens">--</span>
+                        </div>
+                        <div class="token-stat-item">
+                            <span class="token-stat-label">Completion Tokens</span>
+                            <span class="token-stat-value" id="stat-completion-tokens">--</span>
+                        </div>
+                        <div class="token-stat-item">
+                            <span class="token-stat-label">Total Tokens</span>
+                            <span class="token-stat-value" id="stat-total-tokens">--</span>
+                        </div>
+                    </div>
 
                     <!-- ActorSoul 配置 -->
                     <div class="subsection">
@@ -188,51 +154,7 @@
                     <div id="llm-config-error" class="error hidden"></div>
                 </section>
 
-                <!-- 转生功能 -->
-                <section class="form-section danger-zone">
-                    <h2>转生</h2>
-                    <p class="section-desc">
-                        强制当前角色归隐，然后可以创建新角色。
-                        <strong>此操作不可逆！</strong>角色的所有进度和物品都将丢失。
-                    </p>
-
-                    <div class="warning-box">
-                        <h4>注意事项</h4>
-                        <ul>
-                            <li>角色将被标记为"归隐"状态</li>
-                            <li>所有物品和属性将被清除</li>
-                            <li>可以创建新角色继续游戏</li>
-                            <li>设备身份保持不变</li>
-                        </ul>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="button" id="rebirth-btn" class="danger-btn">
-                            确认转生
-                        </button>
-                    </div>
-
-                    <div id="rebirth-result" class="result hidden">
-                        <p id="rebirth-message"></p>
-                        <a href="index.html" class="nav-link">创建新角色</a>
-                    </div>
-                    <div id="rebirth-error" class="error hidden">
-                        <p id="rebirth-error-msg"></p>
-                    </div>
-                </section>
             </main>
-        </div>
-
-        <!-- 确认对话框 -->
-        <div id="confirm-dialog" class="dialog-overlay" style="display: none;">
-            <div class="dialog">
-                <h3>确认转生</h3>
-                <p>你确定要让当前角色转生吗？此操作不可撤销。</p>
-                <div class="dialog-actions">
-                    <button id="confirm-cancel" class="cancel-btn">取消</button>
-                    <button id="confirm-ok" class="danger-btn">确认转生</button>
-                </div>
-            </div>
         </div>
 
         <script src="js/shared.js"></script>
