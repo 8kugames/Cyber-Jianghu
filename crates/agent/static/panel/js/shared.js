@@ -27,14 +27,14 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
     }
 }
 
-async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
+async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES, timeoutMs = DEFAULT_TIMEOUT_MS) {
     try {
-        return await fetchWithTimeout(url, options);
+        return await fetchWithTimeout(url, options, timeoutMs);
     } catch (error) {
         if (retries > 0 && isNetworkError(error)) {
             console.warn(`网络错误，${MAX_RETRIES - retries + 1} 秒后重试...`);
             await new Promise(r => setTimeout(r, (MAX_RETRIES - retries + 1) * 1000));
-            return fetchWithRetry(url, options, retries - 1);
+            return fetchWithRetry(url, options, retries - 1, timeoutMs);
         }
         throw error;
     }
@@ -91,7 +91,7 @@ async function apiGet(endpoint, options = {}) {
     const response = await fetchWithRetry(`${API_BASE}${endpoint}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
-    }, retries);
+    }, retries, timeout);
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || `服务器错误: ${response.status}`);
     return data;
@@ -104,7 +104,7 @@ async function apiPost(endpoint, body, options = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-    }, retries);
+    }, retries, timeout);
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || `服务器错误: ${response.status}`);
     return data;
