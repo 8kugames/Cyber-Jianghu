@@ -9,6 +9,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -149,6 +150,61 @@ impl super::Agent {
                     // 触发重连
                     self.reconnect().await?;
                     continue;
+                }
+
+                // 配置文件变更通知
+                _ = async {
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    info!("检测到配置变更，重新加载...");
+                    let old_config = self.config.clone();
+
+                    match crate::config::Config::from_file(&self.config.config_path) {
+                        Ok(new_config) => {
+                            // 创建新的 LLM 客户端
+                            let provider = LlmProvider::from_str(&new_config.llm.provider);
+                            let llm_client_result = match provider {
+                                Some(provider) => {
+                                    let mut client_config = DirectLlmClientConfig::new(
+                                        provider,
+                                        new_config.llm.api_key.clone(),
+                                    );
+                                    if let Some(ref url) = new_config.llm.base_url {
+                                        client_config = client_config.with_base_url(url);
+                                    }
+                                    if let Some(ref model) = new_config.llm.model {
+                                        client_config = client_config.with_model(model);
+                                    }
+                                    client_config = client_config
+                                        .with_temperature(new_config.llm.temperature)
+                                        .with_max_tokens(new_config.llm.max_tokens);
+                                    DirectLlmClient::new(client_config)
+                                }
+                                None => {
+                                    Err(anyhow::anyhow!("Unknown LLM provider: {}", new_config.llm.provider))
+                                }
+                            };
+
+                            match llm_client_result {
+                                Ok(client) => {
+                                    self.actor_llm_client = Some(std::sync::Arc::new(client));
+                                    self.config = new_config;
+                                    info!("ActorSoul LLM 已重载");
+                                }
+                                Err(e) => {
+                                    warn!("ActorSoul LLM 重载失败: {}，保持旧配置", e);
+                                    self.config = old_config;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("配置读取失败: {}，保持旧配置", e);
+                        }
+                    }
                 }
 
                 // 接收世界状态
