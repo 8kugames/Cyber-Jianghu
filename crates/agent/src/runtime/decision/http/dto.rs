@@ -126,3 +126,56 @@ pub struct TickStatusResponse {
     /// 状态的存在时间（毫秒）
     pub state_age_ms: Option<u64>,
 }
+
+// ============================================================================
+// LLM 配置 API DTOs
+// ============================================================================
+
+/// LLM Provider 信息
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmProviderInfo {
+    pub value: String,
+    pub label: String,
+    pub requires_base_url: bool,
+}
+
+/// Provider 列表响应
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmProvidersResponse {
+    pub providers: Vec<LlmProviderInfo>,
+}
+
+/// LLM 配置信息（不含 API Key）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmConfigInfo {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub has_api_key: bool,
+}
+
+/// LLM 配置响应
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmConfigResponse {
+    pub actor: LlmConfigInfo,
+    pub reflector: Option<LlmConfigInfo>,
+    pub reflector_inherits_actor: bool,
+    pub runtime_mode: String,
+}
+
+/// LLM 配置更新请求
+#[derive(Debug, Deserialize)]
+pub struct LlmConfigUpdate {
+    pub actor: LlmConfigUpdateDetails,
+    pub reflector: Option<LlmConfigUpdateDetails>,
+    pub reflector_inherits_actor: bool,
+}
+
+/// LLM 配置更新详情
+#[derive(Debug, Deserialize)]
+pub struct LlmConfigUpdateDetails {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key: String,
+}
