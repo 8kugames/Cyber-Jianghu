@@ -150,3 +150,21 @@ A: Docker Volume 或 ~/.cyber-jianghu/
 
 **Q: 设备 ID 与角色 ID 区别？**
 A: 设备 ID 标识客户端（持久化），角色 ID 标识游戏侠客（可转世重建）
+
+## 配置管理
+
+### LLM 配置
+
+Agent 支持配置不同的 LLM 模型给 ActorSoul 和 ReflectorSoul：
+
+```yaml
+# ~/.cyber-jianghu/agent.yaml
+llm:
+  provider: ollama
+  model: qwen2.5:14b
+
+llm_reflector:  # 可选
+  model: qwen2.5:32b
+```
+
+配置可通过 Web 面板修改：http://localhost:23340/panel/manage.html
