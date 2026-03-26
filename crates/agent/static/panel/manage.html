@@ -123,23 +123,23 @@
                         <form id="actor-llm-form">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Provider</label>
+                                    <label for="actor-provider">Provider</label>
                                     <select id="actor-provider" name="provider" required>
                                         <!-- 动态加载 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Model</label>
+                                    <label for="actor-model">Model</label>
                                     <input type="text" id="actor-model" name="model" required />
                                 </div>
                             </div>
                             <div class="form-group" id="actor-base-url-group">
-                                <label>Base URL</label>
+                                <label for="actor-base-url">Base URL</label>
                                 <input type="url" id="actor-base-url" name="base_url" />
                             </div>
                             <div class="form-group" id="actor-api-key-group">
-                                <label>API Key</label>
-                                <input type="password" name="api_key" />
+                                <label for="actor-api-key">API Key</label>
+                                <input type="password" id="actor-api-key" name="api_key" />
                                 <small>留空表示不修改当前值</small>
                             </div>
                         </form>
@@ -158,23 +158,23 @@
                         <form id="reflector-llm-form" class="disabled-form">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label>Provider</label>
+                                    <label for="reflector-provider">Provider</label>
                                     <select id="reflector-provider" name="provider" required>
                                         <!-- 动态加载 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Model</label>
+                                    <label for="reflector-model">Model</label>
                                     <input type="text" id="reflector-model" name="model" required />
                                 </div>
                             </div>
                             <div class="form-group" id="reflector-base-url-group">
-                                <label>Base URL</label>
+                                <label for="reflector-base-url">Base URL</label>
                                 <input type="url" id="reflector-base-url" name="base_url" />
                             </div>
                             <div class="form-group" id="reflector-api-key-group">
-                                <label>API Key</label>
-                                <input type="password" name="api_key" />
+                                <label for="reflector-api-key">API Key</label>
+                                <input type="password" id="reflector-api-key" name="api_key" />
                                 <small>留空表示不修改当前值</small>
                             </div>
                         </form>
