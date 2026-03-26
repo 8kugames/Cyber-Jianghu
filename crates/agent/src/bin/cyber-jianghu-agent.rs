@@ -83,6 +83,11 @@ enum Commands {
         /// 提供角色姓名即可自动创建并注册角色
         #[arg(long)]
         character_name: Option<String>,
+
+        /// 启用观察者 Agent（同时启动 Observer 审查本 Agent）
+        /// 注意：仅在 Claw 模式下可用
+        #[arg(long)]
+        with_observer: bool,
     },
 
     /// 显示当前配置
@@ -336,8 +341,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port, mode, role, target_endpoint, character_name }) => {
-            run_agent(port, mode, role, target_endpoint, character_name).await?;
+        Some(Commands::Run { port, mode, role, target_endpoint, character_name, with_observer }) => {
+            run_agent(port, mode, role, target_endpoint, character_name, with_observer).await?;
         }
 
         Some(Commands::Show) => {
@@ -363,7 +368,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string(), "player".to_string(), None, None).await?;
+            run_agent(0, "cognitive".to_string(), "player".to_string(), None, None, false).await?;
         }
     }
 
@@ -520,11 +525,13 @@ async fn run_agent(
     role: String,
     target_endpoint: Option<String>,
     character_name: Option<String>,
+    with_observer: bool,
 ) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
+    let config_for_observer = if with_observer { Some(config.clone()) } else { None };
 
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {
@@ -708,6 +715,20 @@ async fn run_agent(
                 let _ = server_msg_tx_clone.send(downstream);
             }
         })).await;
+    }
+
+    if with_observer && runtime_mode == RuntimeMode::Claw {
+        let observer_endpoint = format!("http://localhost:{}", port);
+        info!("启动 Observer Agent 审查本 Player...");
+        if let Some(observer_config) = config_for_observer {
+            tokio::spawn(async move {
+                if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
+                    error!("Observer 模式异常退出: {}", e);
+                }
+            });
+        }
+    } else if with_observer {
+        warn!("--with-observer 仅在 Claw 模式下可用，Cognitive 模式不支持内置 Observer");
     }
 
     agent.run().await?;
