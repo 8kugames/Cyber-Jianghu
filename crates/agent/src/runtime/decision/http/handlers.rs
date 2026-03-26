@@ -2671,6 +2671,11 @@ pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
             label: "DeepSeek".to_string(),
             requires_base_url: true,
         },
+        dto::LlmProviderInfo {
+            value: "openai_compatible".to_string(),
+            label: "OpenAI Compatible (GLM/Kimi/Minimax等)".to_string(),
+            requires_base_url: true,
+        },
     ];
     Json(dto::LlmProvidersResponse { providers })
 }
@@ -2750,7 +2755,7 @@ fn validate_llm_config(
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
     match provider {
-        "openai" | "anthropic" | "deepseek" => {
+        "openai" | "anthropic" | "deepseek" | "openai_compatible" => {
             if base_url.is_none() || base_url.map_or(true, |u| u.is_empty()) {
                 anyhow::bail!("{} 需要提供 base_url", provider);
             }

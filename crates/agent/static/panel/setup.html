@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>赛博江湖 - 初始配置</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <h1>赛博江湖</h1>
+                <nav class="nav-tabs">
+                    <span class="nav-tab active">初始配置</span>
+                </nav>
+            </header>
+
+            <main>
+                <div class="setup-progress">
+                    <div class="progress-step active" id="step-indicator-1">
+                        <span class="step-num">1</span>
+                        <span class="step-label">服务器</span>
+                    </div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step-indicator-2">
+                        <span class="step-num">2</span>
+                        <span class="step-label">LLM</span>
+                    </div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step-indicator-3">
+                        <span class="step-num">3</span>
+                        <span class="step-label">完成</span>
+                    </div>
+                </div>
+
+                <!-- Step 1: Server Config -->
+                <section class="setup-step" id="step-1">
+                    <div class="setup-step-header">
+                        <h2>第一步：服务器配置</h2>
+                        <p>配置游戏服务器地址（默认 localhost:23333）</p>
+                    </div>
+                    <form id="server-form">
+                        <div class="form-group">
+                            <label for="server-ws-url">WebSocket 地址</label>
+                            <input type="text" id="server-ws-url" value="ws://localhost:23333/ws" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="server-http-url">HTTP 地址</label>
+                            <input type="text" id="server-http-url" value="http://localhost:23333" />
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="server-next-btn">下一步</button>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Step 2: LLM Config -->
+                <section class="setup-step hidden" id="step-2">
+                    <div class="setup-step-header">
+                        <h2>第二步：LLM 配置</h2>
+                        <p>选择 LLM Provider 并配置连接信息</p>
+                    </div>
+                    <form id="llm-form">
+                        <div class="form-group">
+                            <label for="llm-provider">Provider</label>
+                            <select id="llm-provider">
+                                <option value="ollama">Ollama（本地）</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="deepseek">DeepSeek</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-model">模型</label>
+                            <input type="text" id="llm-model" placeholder="如: qwen2.5:14b 或 gpt-4o" required />
+                        </div>
+                        <div class="form-group" id="base-url-group">
+                            <label for="llm-base-url">Base URL</label>
+                            <input type="text" id="llm-base-url" placeholder="如: http://localhost:11434" />
+                        </div>
+                        <div class="form-group" id="api-key-group" class="hidden">
+                            <label for="llm-api-key">API Key</label>
+                            <input type="password" id="llm-api-key" placeholder="输入 API Key" />
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="llm-back-btn" class="btn-secondary">上一步</button>
+                            <button type="submit" id="llm-next-btn">下一步</button>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Step 3: Done -->
+                <section class="setup-step hidden" id="step-3">
+                    <div class="setup-step-header">
+                        <h2>配置完成</h2>
+                        <p>服务器和 LLM 配置已保存，正在热重载...</p>
+                    </div>
+                    <div id="setup-success">
+                        <div class="success-icon">&#10003;</div>
+                        <p id="setup-message">保存成功</p>
+                    </div>
+                    <div id="setup-error" class="error hidden">
+                        <p id="setup-error-msg"></p>
+                    </div>
+                    <div class="form-actions">
+                        <a href="index.html" class="nav-link" id="go-create">前往创建角色</a>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <script src="js/shared.js"></script>
+        <script>
+            let currentStep = 1;
+            const totalSteps = 3;
+
+            function showStep(n) {
+                document.querySelectorAll('.setup-step').forEach(s => s.classList.add('hidden'));
+                document.getElementById(`step-${n}`).classList.remove('hidden');
+
+                for (let i = 1; i <= totalSteps; i++) {
+                    const indicator = document.getElementById(`step-indicator-${i}`);
+                    indicator.classList.toggle('active', i <= n);
+                    indicator.classList.toggle('completed', i < n);
+                }
+
+                currentStep = n;
+            }
+
+            // Provider change handler
+            document.getElementById('llm-provider').addEventListener('change', function() {
+                const isLocal = this.value === 'ollama';
+                document.getElementById('base-url-group').classList.toggle('hidden', isLocal);
+                document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
+
+                if (isLocal) {
+                    document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
+                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b';
+                } else {
+                    document.getElementById('llm-base-url').placeholder = '如: https://api.openai.com/v1';
+                    document.getElementById('llm-model').placeholder = '如: gpt-4o';
+                }
+            });
+
+            // Step 1: Server form
+            document.getElementById('server-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('server-next-btn');
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+
+                try {
+                    const ws_url = document.getElementById('server-ws-url').value.trim();
+                    const http_url = document.getElementById('server-http-url').value.trim();
+                    await apiPost('/api/v1/config/server', { ws_url, http_url });
+                    showStep(2);
+                } catch (err) {
+                    showError(err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '下一步';
+                }
+            });
+
+            // Step 2: LLM form
+            document.getElementById('llm-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById('llm-next-btn');
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+
+                try {
+                    const provider = document.getElementById('llm-provider').value;
+                    const model = document.getElementById('llm-model').value.trim();
+                    const base_url = document.getElementById('llm-base-url').value.trim() || null;
+                    const api_key = document.getElementById('llm-api-key').value || null;
+
+                    await apiPost('/api/v1/config/llm', {
+                        actor: { provider, model, base_url, api_key },
+                        reflector: null,
+                        reflector_inherits_actor: true
+                    });
+
+                    showStep(3);
+                    document.getElementById('setup-message').textContent = '配置已保存，Agent 正在热重载...';
+                } catch (err) {
+                    showError(err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '下一步';
+                }
+            });
+
+            // Step 2 back button
+            document.getElementById('llm-back-btn').addEventListener('click', () => showStep(1));
+
+            // Preload current config
+            async function preloadConfig() {
+                try {
+                    const serverData = await apiGet('/api/v1/config');
+                    document.getElementById('server-ws-url').value = serverData.server_ws_url || 'ws://localhost:23333/ws';
+                    document.getElementById('server-http-url').value = serverData.server_http_url || 'http://localhost:23333';
+
+                    const llmData = await apiGet('/api/v1/config/llm');
+                    if (llmData && llmData.actor) {
+                        document.getElementById('llm-provider').value = llmData.actor.provider;
+                        document.getElementById('llm-model').value = llmData.actor.model || '';
+                        document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
+                    }
+                } catch (err) {
+                    console.log('加载已有配置失败，继续使用默认值');
+                }
+            }
+            preloadConfig();
+        </script>
+    </body>
+</html>

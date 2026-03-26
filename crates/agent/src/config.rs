@@ -22,7 +22,8 @@ use zeroize::Zeroize;
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
 
 /// 支持的 LLM Provider
-pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "deepseek"];
+pub const SUPPORTED_PROVIDERS: &[&str] =
+    &["ollama", "openai", "anthropic", "deepseek", "openai_compatible"];
 
 // ============================================================================
 // Agent 身份配置（持久化）
