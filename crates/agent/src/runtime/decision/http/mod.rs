@@ -404,7 +404,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             get(handlers::get_llm_providers_handler),
         ) // 获取支持的 LLM Provider 列表
         .route("/api/v1/config/llm", get(handlers::get_llm_config_handler)) // 获取当前 LLM 配置
-        .route("/api/v1/config/llm", post(handlers::update_llm_config_handler)) // 更新 LLM 配置
+        .route(
+            "/api/v1/config/llm",
+            post(handlers::update_llm_config_handler),
+        ) // 更新 LLM 配置
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -586,7 +589,7 @@ pub fn create_http_state(
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
-        reconnect_tx, // 重连请求发送通道
+        reconnect_tx,                                        // 重连请求发送通道
         runtime_mode: crate::config::RuntimeMode::default(), // 默认 Cognitive 模式
     };
 

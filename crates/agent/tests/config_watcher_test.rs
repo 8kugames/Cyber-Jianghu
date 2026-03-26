@@ -5,7 +5,7 @@
 use cyber_jianghu_agent::runtime::decision::http::ConfigWatcher;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 #[tokio::test]
 async fn test_config_watcher_detects_changes() {
@@ -16,7 +16,9 @@ async fn test_config_watcher_detects_changes() {
     let mut rx = watcher.subscribe();
 
     // 写入内容触发变更
-    tokio::fs::write(&config_path, b"test: value").await.unwrap();
+    tokio::fs::write(&config_path, b"test: value")
+        .await
+        .unwrap();
 
     // 等待通知
     let result = timeout(Duration::from_secs(2), rx.recv()).await;
@@ -33,7 +35,9 @@ async fn test_config_watcher_multiple_subscribers() {
     let mut rx2 = watcher.subscribe();
 
     // 写入内容触发变更
-    tokio::fs::write(&config_path, b"test: value").await.unwrap();
+    tokio::fs::write(&config_path, b"test: value")
+        .await
+        .unwrap();
 
     // 两个订阅者都应该收到通知
     let result1 = timeout(Duration::from_secs(2), rx1.recv()).await;
@@ -52,12 +56,16 @@ async fn test_config_watcher_multiple_changes() {
     let mut rx = watcher.subscribe();
 
     // 第一次变更
-    tokio::fs::write(&config_path, b"test: value1").await.unwrap();
+    tokio::fs::write(&config_path, b"test: value1")
+        .await
+        .unwrap();
     let result1 = timeout(Duration::from_secs(2), rx.recv()).await;
     assert!(result1.is_ok(), "未收到第一次文件变更通知");
 
     // 第二次变更
-    tokio::fs::write(&config_path, b"test: value2").await.unwrap();
+    tokio::fs::write(&config_path, b"test: value2")
+        .await
+        .unwrap();
     let result2 = timeout(Duration::from_secs(2), rx.recv()).await;
     assert!(result2.is_ok(), "未收到第二次文件变更通知");
 }

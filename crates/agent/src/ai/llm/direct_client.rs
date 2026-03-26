@@ -77,6 +77,15 @@ pub enum LlmProvider {
 }
 
 impl LlmProvider {
+    /// 获取 provider 的字符串表示
+    pub fn as_str(&self) -> &str {
+        match self {
+            LlmProvider::OpenClaw => "openclaw",
+            LlmProvider::OpenAICompatible => "openai_compatible",
+            LlmProvider::Ollama => "ollama",
+        }
+    }
+
     /// 从字符串解析
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -303,6 +312,11 @@ impl DirectLlmClient {
     /// 获取当前使用的模型名称
     pub fn model_name(&self) -> String {
         self.config.get_model_with_default()
+    }
+
+    /// 获取当前使用的 provider 名称
+    pub fn provider_name(&self) -> String {
+        self.config.provider.as_str().to_string()
     }
 
     /// 便捷方法：创建 OpenClaw 客户端（自动读取配置文件）
