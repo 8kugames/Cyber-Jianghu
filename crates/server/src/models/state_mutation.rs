@@ -64,7 +64,7 @@ impl AgentState {
 
             // 获取季节修饰系数（数据驱动）
             let season_modifier = self.get_season_modifier(&attr_name, tick_id);
-            let delta = (base_delta as f32 * season_modifier).floor() as i32;
+            let delta = (base_delta * season_modifier).floor() as i32;
 
             // 记录衰减前的值
             let before_value = self.status.get(&attr_name).unwrap_or(-1);
