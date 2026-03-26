@@ -90,8 +90,8 @@ pub enum ValidationError {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_resolver_creation() {
+    #[tokio::test]
+    async fn test_resolver_creation() {
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
         let _resolver = IntentResolver::new(db_pool);
         // 测试创建成功

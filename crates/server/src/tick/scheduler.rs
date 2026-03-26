@@ -590,17 +590,17 @@ mod tests {
         let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;
         assert_eq!(tick_at_epoch, 0, "纪元时刻的 tick_id 应该是 0");
 
-        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 4
-        // 1 分钟 = 60 秒 = 4 个 tick
+        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 1
+        // 1 分钟 = 60 秒 = 1 个 tick
         let one_minute_later = game_epoch + 60;
         let tick_after_1min = (one_minute_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1min, 4, "1分钟后的 tick_id 应该是 4");
+        assert_eq!(tick_after_1min, 1, "1分钟后的 tick_id 应该是 1");
 
-        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 240
-        // 1 小时 = 3600 秒 = 240 个 tick
+        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 60
+        // 1 小时 = 3600 秒 = 60 个 tick
         let one_hour_later = game_epoch + 3600;
         let tick_after_1hour = (one_hour_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1hour, 240, "1小时后的 tick_id 应该是 240");
+        assert_eq!(tick_after_1hour, 60, "1小时后的 tick_id 应该是 60");
     }
 
     /// 测试时间戳转换的一致性
