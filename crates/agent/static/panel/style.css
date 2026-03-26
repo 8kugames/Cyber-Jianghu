@@ -153,6 +153,8 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="password"],
+input[type="url"],
 select,
 textarea {
     width: 100%;
@@ -837,4 +839,62 @@ button[type="submit"]:disabled {
     .attr-group {
         grid-template-columns: repeat(2, 1fr);
     }
+}
+
+/* LLM 配置 subsection 样式 */
+.subsection {
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background-color: #f9fafb;
+    border-radius: 0.5rem;
+}
+
+.subsection h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: #374151;
+}
+
+/* Checkbox 样式 */
+.checkbox-group {
+    margin-bottom: 1rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+}
+
+/* 禁用表单样式 */
+.disabled-form {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.disabled-form input,
+.disabled-form select {
+    background-color: #f5f5f5;
+}
+
+/* Claw 模式禁用样式 */
+.claw-mode-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.claw-mode-disabled .section-desc::after {
+    content: " (当前为 Claw 模式，LLM 配置不可用)";
+    display: block;
+    color: #f59e0b;
+    font-size: 0.9em;
+    margin-top: 0.5em;
 }
