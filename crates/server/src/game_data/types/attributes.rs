@@ -180,7 +180,7 @@ impl StatusComponentExt for StatusComponent {
         for attr in self.collection.attributes.values_mut() {
             if let Some(decay) = attr.metadata.decay_per_tick {
                 let current = attr.get_value();
-                let new_value = (current + decay).max(0).min(255);
+                let new_value = (current as f32 + decay).floor().max(0.0).min(255.0) as i32;
                 attr.set_value(new_value);
             }
         }
