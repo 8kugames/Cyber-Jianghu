@@ -635,6 +635,16 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
 
+            // 自动打开浏览器（Cognitive 模式）
+            let browser_url = format!("http://localhost:{}/welcome.html", actual_port);
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                match open::that_detached(&browser_url) {
+                    Ok(_) => info!("浏览器已打开: {}", browser_url),
+                    Err(e) => warn!("无法自动打开浏览器: {}，请手动访问: {}", e, browser_url),
+                }
+            });
+
             // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
             let review_store =
                 Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
