@@ -13,7 +13,7 @@
 # 命令:
 #   start [--prod]     启动服务
 #   stop               停止服务
-#   restart [--prod]   重启服务
+#   restart [--prod] [--no-cache]   重启服务（重建容器 + 可选重新构建镜像）
 #   status             查看状态
 #   logs               查看日志
 #   build [--no-cache] 构建镜像
@@ -257,13 +257,18 @@ cmd_server_stop() {
     success "服务端已停止"
 }
 cmd_server_restart() {
-    local mode
-    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    local mode=""
+    local no_cache=""
+    for arg in "$1" "$2"; do
+        [ "$arg" = "--prod" ] && mode="prod"
+        [ "$arg" = "--no-cache" ] && no_cache="yes"
+    done
     enter_component_dir "server"
-    info "重启服务端..."
+    info "重建服务端镜像并重启..."
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    docker compose -f "$compose_file" restart
+    [ -n "$no_cache" ] && docker compose -f "$compose_file" build --no-cache || docker compose -f "$compose_file" build
+    docker compose -f "$compose_file" up -d --force-recreate
     success "服务端已重启"
 }
 cmd_server_status() {
@@ -326,14 +331,19 @@ cmd_agent_stop() {
     success "Agent 已停止"
 }
 cmd_agent_restart() {
-    local mode
-    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
+    local mode=""
+    local no_cache=""
+    for arg in "$1" "$2"; do
+        [ "$arg" = "--prod" ] && mode="prod"
+        [ "$arg" = "--no-cache" ] && no_cache="yes"
+    done
     ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
-    info "重启 Agent..."
+    info "重建 Agent 镜像并重启..."
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    docker compose -f "$compose_file" restart
+    [ -n "$no_cache" ] && docker compose -f "$compose_file" build --no-cache || docker compose -f "$compose_file" build
+    docker compose -f "$compose_file" up -d --force-recreate
     success "Agent 已重启"
 }
 cmd_agent_status() {
@@ -393,10 +403,14 @@ cmd_all_stop() {
     cmd_agent_stop
 }
 cmd_all_restart() {
-    local mode
-    mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
-    cmd_server_restart "$mode"
-    cmd_agent_restart "$mode"
+    local mode=""
+    local no_cache=""
+    for arg in "$1" "$2"; do
+        [ "$arg" = "--prod" ] && mode="prod"
+        [ "$arg" = "--no-cache" ] && no_cache="yes"
+    done
+    cmd_server_restart "$mode" "$no_cache"
+    cmd_agent_restart "$mode" "$no_cache"
 }
 cmd_all_status() {
     echo "=== 服务端 ==="
@@ -441,7 +455,7 @@ show_help() {
     echo -e "${GREEN}命令:${NC}"
     echo "  start [--prod]     启动服务"
     echo "  stop               停止服务"
-    echo "  restart [--prod]   重启服务"
+    echo "  restart [--prod] [--no-cache]   重启服务"
     echo "  status             查看状态"
     echo "  logs               查看日志"
     echo "  build             构建镜像"
@@ -455,6 +469,7 @@ show_help() {
     echo "  $0 all start              # 开发环境启动全部"
     echo "  $0 all start --prod       # 生产环境启动全部"
     echo "  $0 all build --no-cache   # 强制重新构建（忽略缓存）"
+    echo "  $0 server restart --no-cache  # 重建服务端容器 + 重新构建镜像"
     echo ""
 }
 
@@ -481,7 +496,7 @@ main() {
             case "$cmd" in
                 start)     cmd_server_start "${3:-}" ;;
                 stop)       cmd_server_stop ;;
-                restart)    cmd_server_restart "${3:-}" ;;
+                restart)    cmd_server_restart "${3:-}" "${4:-}" ;;
                 status)     cmd_server_status ;;
                 logs)       cmd_server_logs ;;
                 build)      cmd_server_build "${3:-}" ;;
@@ -493,7 +508,7 @@ main() {
             case "$cmd" in
                 start)     cmd_agent_start "${3:-}" ;;
                 stop)       cmd_agent_stop ;;
-                restart)    cmd_agent_restart "${3:-}" ;;
+                restart)    cmd_agent_restart "${3:-}" "${4:-}" ;;
                 status)     cmd_agent_status ;;
                 logs)       cmd_agent_logs ;;
                 build)      cmd_agent_build "${3:-}" ;;
@@ -505,7 +520,7 @@ main() {
             case "$cmd" in
                 start)     cmd_all_start "${3:-}" ;;
                 stop)       cmd_all_stop ;;
-                restart)    cmd_all_restart "${3:-}" ;;
+                restart)    cmd_all_restart "${3:-}" "${4:-}" ;;
                 status)     cmd_all_status ;;
                 logs)       cmd_all_logs ;;
                 build)      cmd_all_build "${3:-}" ;;

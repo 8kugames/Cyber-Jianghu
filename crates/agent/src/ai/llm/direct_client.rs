@@ -14,8 +14,8 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, error};
 
 use super::LlmClient;
@@ -183,9 +183,9 @@ impl LlmProvider {
     /// 是否需要 API Key
     pub fn requires_api_key(&self) -> bool {
         match self {
-            Self::OpenClaw => true,         // OpenClaw 读取 Gateway 配置，但 API Key 需用户输入
+            Self::OpenClaw => true, // OpenClaw 读取 Gateway 配置，但 API Key 需用户输入
             Self::OpenAICompatible => true, // OpenAI 兼容接口通常需要 key
-            Self::Ollama => false,          // Ollama 本地通常不需要
+            Self::Ollama => false,  // Ollama 本地通常不需要
         }
     }
 
