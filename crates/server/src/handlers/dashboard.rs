@@ -302,6 +302,7 @@ pub struct OnlineAgent {
     pub name: String,
     pub location: String,
     pub hp: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_active: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -327,6 +328,7 @@ pub async fn get_online_agents(State(state): State<Arc<AppState>>) -> Json<Vec<O
             a.name,
             COALESCE(s.node_id, 'unknown') as location,
             COALESCE((s.attributes->>'hp')::int, 100) as hp,
+            a.created_at,
             a.last_tick_online
         FROM agents a
         INNER JOIN agent_states s ON a.agent_id = s.agent_id AND s.tick_id = $1
@@ -347,6 +349,7 @@ pub async fn get_online_agents(State(state): State<Arc<AppState>>) -> Json<Vec<O
             name: row.get("name"),
             location: row.get("location"),
             hp: row.get("hp"),
+            created_at: row.get("created_at"),
             last_active: row.get("last_tick_online"),
         })
         .filter(|a| connected_agents.contains(&a.id))
@@ -363,6 +366,7 @@ pub struct OfflineAgent {
     pub name: String,
     pub location: String,
     pub hp: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_active: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -385,6 +389,7 @@ pub async fn get_offline_agents(State(state): State<Arc<AppState>>) -> Json<Vec<
             a.name,
             COALESCE(s.node_id, 'unknown') as location,
             COALESCE((s.attributes->>'hp')::int, 100) as hp,
+            a.created_at,
             a.last_tick_online
         FROM agents a
         INNER JOIN LatestStates s ON a.agent_id = s.agent_id
@@ -405,6 +410,7 @@ pub async fn get_offline_agents(State(state): State<Arc<AppState>>) -> Json<Vec<
             name: row.get("name"),
             location: row.get("location"),
             hp: row.get("hp"),
+            created_at: row.get("created_at"),
             last_active: row.get("last_tick_online"),
         })
         .filter(|a| !connected_agents.contains(&a.id))
@@ -421,7 +427,9 @@ pub struct DeadAgent {
     pub name: String,
     pub location: String,
     pub hp: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
     pub last_active: Option<chrono::DateTime<chrono::Utc>>,
+    pub is_alive: bool,
 }
 
 /// 已死亡 Agent：返回已死亡的 agent 列表
@@ -438,7 +446,9 @@ pub async fn get_dead_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Dea
             a.name,
             COALESCE(s.node_id, 'unknown') as location,
             COALESCE((s.attributes->>'hp')::int, 0) as hp,
-            a.last_tick_online
+            a.created_at,
+            a.last_tick_online,
+            s.is_alive
         FROM agents a
         INNER JOIN LatestStates s ON a.agent_id = s.agent_id
         WHERE s.is_alive = false
@@ -458,7 +468,9 @@ pub async fn get_dead_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Dea
             name: row.get("name"),
             location: row.get("location"),
             hp: row.get("hp"),
+            created_at: row.get("created_at"),
             last_active: row.get("last_tick_online"),
+            is_alive: row.get("is_alive"),
         })
         .collect();
 

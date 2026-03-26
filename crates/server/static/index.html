@@ -882,7 +882,6 @@
           } else {
             await loadOfflineAgents();
           }
-          await loadWorldOverview();
         } catch (e) {
           console.error("Failed to load stats", e);
         }
@@ -1368,6 +1367,7 @@
                                     <span style="color: ${agent.is_alive ? "green" : "red"}">${agent.is_alive ? "存活" : "死亡"}</span>
                                 </div>
                                 <div class="detail-item"><span class="detail-label">创建时间:</span> ${new Date(agent.created_at).toLocaleString()}</div>
+                                <div class="detail-item"><span class="detail-label">最后活跃:</span> ${agent.last_active ? new Date(agent.last_active).toLocaleString() : "从未"}</div>
                             </div>
                         </div>
 
