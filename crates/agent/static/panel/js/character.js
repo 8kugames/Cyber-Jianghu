@@ -215,8 +215,27 @@ async function loadCharacter() {
 
     } catch (err) {
         hide('#loading');
-        document.getElementById('error-message').textContent = err.message;
-        show('.error');
+        // 角色未注册（转生后或首次访问），显示提示并切到世界树
+        if (err.message.includes('角色尚未注册') || err.message.includes('412')) {
+            document.getElementById('character-info').innerHTML = `
+                <div class="form-section">
+                    <h2>当前无活跃角色</h2>
+                    <p class="section-desc">角色已归隐或尚未创建。</p>
+                    <div class="form-actions">
+                        <a href="create.html" class="nav-link">创建新角色</a>
+                    </div>
+                </div>
+            `;
+            show('#character-info');
+            // 切到世界树 tab
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="worldtree"]').classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-worldtree').classList.add('active');
+        } else {
+            document.getElementById('error-message').textContent = err.message;
+            show('.error');
+        }
     }
 }
 

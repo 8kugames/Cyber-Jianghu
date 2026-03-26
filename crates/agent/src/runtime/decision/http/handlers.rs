@@ -2604,10 +2604,10 @@ pub(super) async fn reload_config_handler(
     }
 }
 
-/// 保存服务器配置到文件
+/// 保存服务器配置到文件（使用类型化 Config，避免 serde_yaml::Value 破坏其他字段）
 ///
 /// # Arguments
-/// * `config_path` - 配置文件完整路径（如 `~/.config/cyber-jianghu/agent.yaml`）
+/// * `config_path` - 配置文件完整路径
 /// * `ws_url` - WebSocket URL
 /// * `http_url` - HTTP URL（可选）
 fn save_server_config(
@@ -2615,42 +2615,18 @@ fn save_server_config(
     ws_url: &str,
     http_url: Option<&str>,
 ) -> anyhow::Result<()> {
-    use std::io::Write;
-
-    // 读取现有配置
-    let existing_content = std::fs::read_to_string(config_path).unwrap_or_else(|_| String::new());
-
-    // 解析或创建 YAML
-    let mut config: serde_yaml::Value = if existing_content.is_empty() {
-        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    let mut config = if config_path.exists() {
+        crate::config::Config::from_file(config_path)?
     } else {
-        serde_yaml::from_str(&existing_content)?
+        crate::config::Config::default()
     };
 
-    // 更新 server 部分
-    if let Some(mapping) = config.as_mapping_mut() {
-        let mut server_mapping = serde_yaml::Mapping::new();
-        server_mapping.insert(
-            serde_yaml::Value::String("ws_url".to_string()),
-            serde_yaml::Value::String(ws_url.to_string()),
-        );
-        if let Some(http) = http_url {
-            server_mapping.insert(
-                serde_yaml::Value::String("http_url".to_string()),
-                serde_yaml::Value::String(http.to_string()),
-            );
-        }
-        mapping.insert(
-            serde_yaml::Value::String("server".to_string()),
-            serde_yaml::Value::Mapping(server_mapping),
-        );
+    config.server.ws_url = ws_url.to_string();
+    if let Some(http) = http_url {
+        config.server.http_url = http.to_string();
     }
 
-    // 写回文件
-    let yaml_content = serde_yaml::to_string(&config)?;
-    let mut file = std::fs::File::create(config_path)?;
-    file.write_all(yaml_content.as_bytes())?;
-
+    config.save_to_file(config_path)?;
     Ok(())
 }
 
