@@ -16,7 +16,9 @@ mod history;
 mod turn_cycle;
 
 pub use context::ContextBuilder;
-pub use decision::{ClawDecisionState, claw_decision, create_claw_decision_callback};
+pub use decision::{
+    claw_decision, create_claw_decision_callback, ClawDecisionState, LlmClientContainer,
+};
 pub use history::{
     ChatMessage, HealthStatus, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager,
 };

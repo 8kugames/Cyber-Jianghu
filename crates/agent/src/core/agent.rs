@@ -22,6 +22,7 @@ use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{PersonaInfo, Validator};
 use crate::config::{Config, ReviewConfig};
 use crate::models::{Intent, WorldState};
+use crate::runtime::claw::LlmClientContainer;
 use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
 
@@ -118,6 +119,12 @@ pub struct Agent {
     /// ActorSoul 当前 LLM Client
     pub(crate) actor_llm_client: Option<std::sync::Arc<dyn LlmClient>>,
 
+    /// ActorSoul LLM Client 容器（支持热重载）
+    ///
+    /// 与 `ClawDecisionState.llm` 共享同一个 `RwLock`，
+    /// 允许热重载时更新 LLM Client，决策回调会自动使用新配置
+    pub(crate) actor_llm_container: Option<LlmClientContainer>,
+
     /// 配置重载通知接收通道
     pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
 }
@@ -170,6 +177,7 @@ impl Agent {
             review_store: None,
             review_config,
             actor_llm_client: None,
+            actor_llm_container: None,
             config_reload_rx: None,
         }
     }
