@@ -21,6 +21,16 @@
 
 ### Added
 
+- **Agent**: ActorSoul 和 ReflectorSoul LLM 独立配置
+  - 新增 `llm_reflector` 配置字段，支持独立配置 ReflectorSoul LLM
+  - 新增 GET /api/v1/config/llm/providers 端点
+  - 新增 GET /api/v1/config/llm 端点获取当前配置
+  - 新增 POST /api/v1/config/llm 端点更新配置
+  - Web 面板新增 LLM 配置界面
+  - 配置变更通过文件监听自动热重载
+  - API Key 格式验证和内存安全（zeroize）
+  - 配置更新原子替换 + 备份回滚机制
+
 - **Agent**: ActorSoul + ReflectorSoul 双 Soul 架构
   - 新增 `ReviewStore` 共享内存用于进程内审查通信
   - ActorSoul (行动之魂)：生成意图，执行行动
@@ -48,6 +58,8 @@
   - OpenClaw 可直接使用认知上下文进行推理，无需额外 API 调用
 
 ### Changed
+
+- **Agent**: 配置文件新增 `config_path` 字段
 
 - **Server**: WebSocket 连接管理改用 device_id 作为 key
   - 连接管理器现在以 device_id 而非 agent_id 存储连接
