@@ -2639,9 +2639,7 @@ pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
 }
 
 /// GET /api/v1/config/llm - 返回当前 LLM 配置
-pub(super) async fn get_llm_config_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_llm_config_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let config = match crate::config::Config::from_file(&state.config_path) {
         Ok(c) => c,
         Err(e) => {
@@ -2661,11 +2659,7 @@ pub(super) async fn get_llm_config_handler(
         provider: config.llm.provider.clone(),
         model: config.llm.model.clone().unwrap_or_default(),
         base_url: config.llm.base_url.clone(),
-        has_api_key: config
-            .llm
-            .api_key
-            .as_ref()
-            .map_or(false, |k| !k.is_empty()),
+        has_api_key: config.llm.api_key.as_ref().map_or(false, |k| !k.is_empty()),
     };
 
     let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
@@ -2834,9 +2828,15 @@ pub(super) async fn update_llm_config_handler(
     };
 
     // 测试 LLM 连接
-    match test_client.complete("Hello, this is a connection test. Reply with 'OK'.").await {
+    match test_client
+        .complete("Hello, this is a connection test. Reply with 'OK'.")
+        .await
+    {
         Ok(_) => {
-            info!("[llm] LLM 连接测试成功: provider={}, model={}", req.actor.provider, req.actor.model);
+            info!(
+                "[llm] LLM 连接测试成功: provider={}, model={}",
+                req.actor.provider, req.actor.model
+            );
         }
         Err(e) => {
             return (
@@ -2951,7 +2951,10 @@ pub(super) async fn update_llm_config_handler(
             .into_response();
     }
 
-    info!("[llm] LLM 配置已更新: provider={}, model={}", req.actor.provider, req.actor.model);
+    info!(
+        "[llm] LLM 配置已更新: provider={}, model={}",
+        req.actor.provider, req.actor.model
+    );
 
     // 8. 返回更新后的配置
     let actor = dto::LlmConfigInfo {
