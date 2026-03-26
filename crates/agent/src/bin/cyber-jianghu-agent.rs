@@ -648,13 +648,33 @@ async fn run_agent(
                 ClawDecisionState::new(Arc::new(llm_client))
             };
             let decision = create_claw_decision_callback(claw_state);
-            maybe_callback_setup = None;
             
-            AgentBuilder::new(config, decision).build()
+            let (_api_state, actual_port) = start_http_api_server(port, device_id.clone(), &config)?;
+            info!("HTTP API 已启动: http://localhost:{}", actual_port);
+            info!("Web 面板: http://localhost:{}/", actual_port);
+            info!("角色管理: http://localhost:{}/index.html", actual_port);
+            
+            let agent = AgentBuilder::new(config, decision).build();
+            
+            if with_observer {
+                let observer_endpoint = format!("http://localhost:{}", actual_port);
+                info!("启动 Observer Agent 审查本 Player...");
+                if let Some(observer_config) = config_for_observer {
+                    tokio::spawn(async move {
+                        if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
+                            error!("Observer 模式异常退出: {}", e);
+                        }
+                    });
+                }
+            }
+            
+            maybe_callback_setup = None;
+            agent
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
             let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
+            let setup_port = setup.port;
             let http_state = setup.http_state.clone();
             maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
@@ -669,7 +689,21 @@ async fn run_agent(
                 55,
             ));
             
-            Agent::new(config, decision, Some(setup.reconnect_rx)).await
+            let agent = Agent::new(config, decision, Some(setup.reconnect_rx)).await;
+            
+            if with_observer {
+                let observer_endpoint = format!("http://localhost:{}", setup_port);
+                info!("启动 Observer Agent 审查本 Player...");
+                if let Some(observer_config) = config_for_observer {
+                    tokio::spawn(async move {
+                        if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
+                            error!("Observer 模式异常退出: {}", e);
+                        }
+                    });
+                }
+            }
+            
+            agent
         }
     };
 
@@ -717,20 +751,6 @@ async fn run_agent(
         })).await;
     }
 
-    if with_observer && runtime_mode == RuntimeMode::Claw {
-        let observer_endpoint = format!("http://localhost:{}", port);
-        info!("启动 Observer Agent 审查本 Player...");
-        if let Some(observer_config) = config_for_observer {
-            tokio::spawn(async move {
-                if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
-                    error!("Observer 模式异常退出: {}", e);
-                }
-            });
-        }
-    } else if with_observer {
-        warn!("--with-observer 仅在 Claw 模式下可用，Cognitive 模式不支持内置 Observer");
-    }
-
     agent.run().await?;
     Ok(())
 }
@@ -741,6 +761,7 @@ struct ServerSetup {
     shared_state: Arc<WsSharedState>,
     api_state: cyber_jianghu_agent::runtime::decision::http::HttpApiState,
     http_state: Arc<cyber_jianghu_agent::runtime::decision::http::HttpDecisionState>,
+    port: u16,
 }
 
 struct ClawCallbackSetup {
@@ -804,7 +825,47 @@ fn start_claw_server(
         shared_state: shared_state_for_callback,
         api_state: api_state_for_callback,
         http_state: http_decision_state,
+        port: actual_port,
     })
+}
+
+fn start_http_api_server(
+    port: u16,
+    device_id: Arc<RwLock<Uuid>>,
+    config: &Config,
+) -> Result<(Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>, u16)> {
+    let actual_port = if port == 0 {
+        use rand::RngExt;
+        let random_port = rand::rng().random_range(23340..=23349);
+        info!("随机选择 HTTP API 端口: {} (范围: 23340-23349)", random_port);
+        random_port
+    } else {
+        port
+    };
+
+    info!("启动 HTTP API 服务器，端口: {}", actual_port);
+
+    let config_path_str = config_path().display().to_string();
+    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+
+    let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::decision::create_http_state(
+        device_id,
+        config.server.http_url.clone(),
+        config.server.ws_url.clone(),
+        config.identity.clone(),
+        None,
+        config_path(),
+        None,
+    );
+
+    let api_state_clone = api_state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = cyber_jianghu_agent::runtime::decision::run_http_server(actual_port, api_state_clone).await {
+            error!("HTTP API server error: {}", e);
+        }
+    });
+
+    Ok((Arc::new(api_state), actual_port))
 }
 
 // ============================================================================
