@@ -10,14 +10,23 @@
         <div class="container">
             <header>
                 <h1>赛博江湖</h1>
-                <nav class="nav-tabs">
-                    <a href="index.html" class="nav-tab active">创建角色</a>
-                    <a href="character.html" class="nav-tab">角色信息</a>
-                    <a href="manage.html" class="nav-tab">管理</a>
-                </nav>
+                <p class="header-subtitle">角色创建</p>
             </header>
 
             <main>
+                <!-- 一键生成 -->
+                <div class="generate-bar">
+                    <button type="button" id="generate-btn" class="btn-secondary">一键生成</button>
+                    <span id="generate-hint" class="hint"></span>
+                </div>
+
+                <!-- 角色已存在提示 -->
+                <div id="character-blocked" class="result hidden">
+                    <h3>已有存活角色</h3>
+                    <p>当前设备已注册角色，请访问角色信息页管理现有角色。</p>
+                    <a href="character.html" class="nav-link">查看角色信息</a>
+                </div>
+
                 <form id="character-form">
                     <!-- 基本信息 -->
                     <section class="form-section">
@@ -68,7 +77,8 @@
                                 type="text"
                                 id="identity"
                                 name="identity"
-                                placeholder="如：江湖游侠、商人、书生"
+                                maxlength="300"
+                                placeholder="如：江湖游侠、商人、书生（不超过300字）"
                             />
                         </div>
                     </section>
@@ -152,7 +162,8 @@
                                 type="text"
                                 id="short_term_goal"
                                 name="short_term_goal"
-                                placeholder="如：学习一门武功"
+                                maxlength="100"
+                                placeholder="如：学习一门武功（不超过100字）"
                             />
                         </div>
                         <div class="form-group">
@@ -161,7 +172,8 @@
                                 type="text"
                                 id="long_term_goal"
                                 name="long_term_goal"
-                                placeholder="如：成为武林盟主"
+                                maxlength="100"
+                                placeholder="如：成为武林盟主（不超过100字）"
                             />
                         </div>
                     </section>
@@ -189,6 +201,6 @@
         </div>
 
         <script src="js/shared.js"></script>
-        <script src="script.js"></script>
+        <script src="js/create.js"></script>
     </body>
 </html>

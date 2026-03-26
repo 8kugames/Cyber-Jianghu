@@ -98,7 +98,7 @@
                         <p id="setup-error-msg"></p>
                     </div>
                     <div class="form-actions">
-                        <a href="index.html" class="nav-link" id="go-create">前往创建角色</a>
+                        <a href="create.html" class="nav-link" id="go-create">前往创建角色</a>
                     </div>
                 </section>
             </main>
@@ -268,6 +268,8 @@
                         document.getElementById('llm-provider').value = llmData.actor.provider;
                         document.getElementById('llm-model').value = llmData.actor.model || '';
                         document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
+                        // 触发 change 事件以更新 UI（显示/隐藏 base_url 和 api_key 字段）
+                        document.getElementById('llm-provider').dispatchEvent(new Event('change'));
                     }
                 } catch (err) {
                     console.log('加载已有配置失败，继续使用默认值');
@@ -275,8 +277,11 @@
             }
 
             // 初始化
-            loadProviders();
-            preloadConfig();
+            async function init() {
+                await loadProviders();
+                await preloadConfig();
+            }
+            init();
         </script>
     </body>
 </html>
