@@ -42,7 +42,7 @@ let agent = AgentBuilder::new(config, decision)
 cargo install --path crates/agent
 
 # Cognitive 模式（默认，ReflectorSoul 内置启用）
-cyber-jianghu-agent run --character-name 张三
+cyber-jianghu-agent run
 
 # Claw 模式
 cyber-jianghu-agent run --mode claw
