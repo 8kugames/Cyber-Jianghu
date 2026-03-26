@@ -2,9 +2,11 @@
 
 let currentPage = 1;
 let memoryPage = 1;
+let dreamRecordPage = 1;
 const PAGE_LIMIT = 20;
 let hasMore = false;
 let hasMoreMemories = false;
+let hasMoreDreamRecords = false;
 let allCharacters = [];
 
 // 加载所有角色列表
@@ -36,9 +38,98 @@ async function loadCharacterList() {
         }).join('');
 
         selectorSection.classList.remove('hidden');
+
+        renderWorldTree();
     } catch (err) {
         console.error('加载角色列表失败:', err);
     }
+}
+
+// 渲染世界树
+function renderWorldTree() {
+    const listEl = document.getElementById('world-tree-list');
+    if (!allCharacters || allCharacters.length === 0) {
+        listEl.innerHTML = '<p class="no-data">暂无角色记录</p>';
+        return;
+    }
+
+    listEl.innerHTML = allCharacters.map(c => {
+        const statusClass = c.status === 'alive' ? 'alive' : c.status === 'dead' ? 'dead' : 'retired';
+        const statusText = c.status === 'alive' ? '存活' : c.status === 'dead' ? '已故' : '归隐';
+        const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
+        const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
+        return `
+            <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
+                <div class="char-name">
+                    ${escapeHtml(c.name || '未知')}
+                    ${currentLabel}
+                </div>
+                <div class="char-status ${statusClass}">${statusText}</div>
+                <div class="char-meta">${registeredAt}</div>
+            </div>
+        `;
+    }).join('');
+
+    listEl.querySelectorAll('.world-tree-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const agentId = card.dataset.agentId;
+            const char = allCharacters.find(c => c.agent_id === agentId);
+            if (!char) return;
+            if (char.is_current) {
+                document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+                document.querySelector('[data-tab="current"]').classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.getElementById('tab-current').classList.add('active');
+            } else {
+                showCharacterDetail(char);
+            }
+        });
+    });
+}
+
+// 显示角色详情对话框
+function showCharacterDetail(char) {
+    const dialog = document.getElementById('character-detail-dialog');
+    const content = document.getElementById('character-detail-content');
+    const statusClass = char.status === 'alive' ? 'alive' : char.status === 'dead' ? 'dead' : 'retired';
+    const statusText = char.status === 'alive' ? '存活' : char.status === 'dead' ? '已故' : '归隐';
+    const registeredAt = char.registered_at ? new Date(char.registered_at).toLocaleString('zh-CN') : '未知';
+
+    content.innerHTML = `
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="label">姓名</span>
+                <span class="value">${escapeHtml(char.name || '未知')}</span>
+            </div>
+            <div class="info-item">
+                <span class="label">状态</span>
+                <span class="value status-${statusClass}">${statusText}</span>
+            </div>
+            <div class="info-item">
+                <span class="label">年龄</span>
+                <span class="value">${char.age || '-'}</span>
+            </div>
+            <div class="info-item">
+                <span class="label">性别</span>
+                <span class="value">${escapeHtml(char.gender || '-')}</span>
+            </div>
+            <div class="info-item">
+                <span class="label">身份</span>
+                <span class="value">${escapeHtml(char.identity || '-')}</span>
+            </div>
+            <div class="info-item">
+                <span class="label">注册时间</span>
+                <span class="value">${registeredAt}</span>
+            </div>
+        </div>
+    `;
+    dialog.style.display = 'flex';
+    document.getElementById('character-detail-close').onclick = () => {
+        dialog.style.display = 'none';
+    };
+    dialog.onclick = (e) => {
+        if (e.target === dialog) dialog.style.display = 'none';
+    };
 }
 
 // 切换角色
@@ -352,13 +443,233 @@ function loadMoreMemories() {
 
 // 页面加载
 document.addEventListener('DOMContentLoaded', () => {
+    // SSE 连接：实时接收死亡事件
+    let deathEventSource = null;
+    function connectDeathEvents() {
+        deathEventSource = new EventSource('/api/v1/events');
+        deathEventSource.addEventListener('connected', () => {
+            console.log('SSE connected');
+        });
+        deathEventSource.addEventListener('agent_died', (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                showError('角色已死亡：' + (data.description || '你已经死亡'));
+                showDeathModal(data);
+            } catch (err) {
+                showError('角色已死亡');
+                showDeathModal(null);
+            }
+        });
+        deathEventSource.addEventListener('heartbeat', () => {
+            // 连接存活，无需操作
+        });
+        deathEventSource.onerror = () => {
+            console.warn('SSE connection lost, reconnecting...');
+            deathEventSource.close();
+            setTimeout(connectDeathEvents, 5000);
+        };
+    }
+    connectDeathEvents();
+
+    // 死亡通知弹窗
+    function showDeathModal(data) {
+        const modal = document.getElementById('death-notification-modal') || createDeathModal();
+        document.getElementById('death-cause').textContent = data ? (data.description || '你已经死亡') : '你已经死亡';
+        modal.style.display = 'flex';
+    }
+    function createDeathModal() {
+        const div = document.createElement('div');
+        div.id = 'death-notification-modal';
+        div.className = 'dialog-overlay';
+        div.innerHTML = `
+            <div class="dialog">
+                <h3>角色死亡</h3>
+                <p id="death-cause">你已经死亡</p>
+                <div class="dialog-actions">
+                    <button id="death-goto-rebirth" class="btn-primary">前往转生</button>
+                    <button id="death-close" class="cancel-btn">关闭</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(div);
+        div.querySelector('#death-goto-rebirth').addEventListener('click', () => {
+            div.style.display = 'none';
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="current"]').classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-current').classList.add('active');
+            document.querySelectorAll('.vertical-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-vertical-tab="rebirth"]').classList.add('active');
+            document.querySelectorAll('.vertical-tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('vertical-tab-rebirth').classList.add('active');
+        });
+        div.querySelector('#death-close').addEventListener('click', () => {
+            div.style.display = 'none';
+        });
+        div.addEventListener('click', (e) => {
+            if (e.target === div) div.style.display = 'none';
+        });
+        return div;
+    }
+
     loadCharacterList();
     loadCharacter();
 
     document.getElementById('load-more-experiences-btn').addEventListener('click', loadMoreExperiences);
     document.getElementById('load-more-memories-btn').addEventListener('click', loadMoreMemories);
+    document.getElementById('load-more-dream-records-btn').addEventListener('click', loadMoreDreamRecords);
     document.getElementById('character-select').addEventListener('change', switchCharacter);
 
     loadRelationships();
     loadMemories();
+    loadDreamStatus();
+
+    // 横向标签页切换
+    document.querySelectorAll('.page-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.tab;
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-' + targetTab).classList.add('active');
+        });
+    });
+
+    // 加载托梦状态
+    async function loadDreamStatus() {
+        try {
+            const data = await apiGet('/api/v1/character/dream');
+            const statusEl = document.getElementById('dream-status');
+            if (data.thought && data.remaining_ticks > 0) {
+                document.getElementById('current-dream').textContent = data.thought;
+                document.getElementById('remaining-ticks').textContent = data.remaining_ticks;
+                show(statusEl);
+            } else {
+                hide(statusEl);
+            }
+        } catch (err) {
+            console.error('加载托梦状态失败:', err);
+        }
+    }
+
+    // 加载托梦记录
+    async function loadDreamRecords(page = 1) {
+        const recordsEl = document.getElementById('dream-records');
+        const loadMoreEl = document.getElementById('load-more-dream-records');
+
+        if (page === 1) {
+            recordsEl.innerHTML = '<p class="loading-text">加载中...</p>';
+        }
+
+        try {
+            const data = await apiGet(`/api/v1/character/dream/records?page=${page}&limit=${PAGE_LIMIT}`);
+            hasMoreDreamRecords = data.has_more;
+            dreamRecordPage = page;
+
+            if (page === 1) recordsEl.innerHTML = '';
+
+            if (data.records && data.records.length > 0) {
+                data.records.forEach(record => {
+                    const div = document.createElement('div');
+                    div.className = 'exp-item';
+
+                    let html = `
+                        <div class="exp-header">
+                            <span class="exp-tick">${formatDateTime(record.injected_at)}</span>
+                        </div>
+                        <div class="exp-content">${escapeHtml(record.thought)}</div>
+                        <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
+                            持续: ${record.duration} 回合
+                        </div>
+                    `;
+                    div.innerHTML = html;
+                    recordsEl.appendChild(div);
+                });
+            } else if (page === 1) {
+                recordsEl.innerHTML = '<p class="no-data">暂无托梦记录</p>';
+            }
+
+            setVisible(loadMoreEl, hasMoreDreamRecords);
+
+        } catch (err) {
+            recordsEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
+        }
+    }
+
+    function loadMoreDreamRecords() {
+        loadDreamRecords(dreamRecordPage + 1);
+    }
+
+    // 垂直标签页切换
+    document.querySelectorAll('.vertical-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.verticalTab;
+            document.querySelectorAll('.vertical-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            document.querySelectorAll('.vertical-tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('vertical-tab-' + targetTab).classList.add('active');
+        });
+    });
+
+    // 转生按钮
+    const rebirthBtn = document.getElementById('rebirth-btn');
+    if (rebirthBtn) {
+        rebirthBtn.addEventListener('click', async () => {
+            if (!confirm('确定要让当前角色转生吗？此操作不可撤销。')) return;
+            rebirthBtn.disabled = true;
+            rebirthBtn.textContent = '转生中...';
+            try {
+                const data = await apiPost('/api/v1/character/rebirth', { confirm: true });
+                if (data.success) {
+                    document.getElementById('rebirth-message').textContent = data.message;
+                    show(document.getElementById('rebirth-result'));
+                    rebirthBtn.textContent = '已转生';
+                } else {
+                    document.getElementById('rebirth-error-msg').textContent = data.message || '服务器错误';
+                    show(document.getElementById('rebirth-error'));
+                    rebirthBtn.disabled = false;
+                    rebirthBtn.textContent = '确认转生';
+                }
+            } catch (err) {
+                document.getElementById('rebirth-error-msg').textContent = '网络错误: ' + err.message;
+                show(document.getElementById('rebirth-error'));
+                rebirthBtn.disabled = false;
+                rebirthBtn.textContent = '确认转生';
+            }
+        });
+    }
+
+    // 托梦表单
+    const dreamForm = document.getElementById('dream-form');
+    if (dreamForm) {
+        dreamForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('dream-btn');
+            const resultEl = document.getElementById('dream-result');
+            const errorEl = document.getElementById('dream-error');
+
+            hide(resultEl);
+            hide(errorEl);
+            btn.disabled = true;
+            btn.textContent = '注入中...';
+
+            const thought = document.getElementById('dream-thought').value.trim();
+            const duration = parseInt(document.getElementById('dream-duration').value) || 5;
+
+            try {
+                const data = await apiPost('/api/v1/character/dream', { thought, duration });
+                showSuccess(data.message);
+                show(resultEl);
+                document.getElementById('dream-thought').value = '';
+                loadDreamStatus();
+                loadDreamRecords();
+            } catch (err) {
+                showError(err.message);
+                show(errorEl);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '注入托梦';
+            }
+        });
+    }
 });
