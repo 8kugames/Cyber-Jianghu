@@ -15,14 +15,22 @@
 
             <main class="welcome-main">
                 <div class="welcome-cards">
-                    <a href="setup.html" class="welcome-card welcome-card-primary" id="card-new">
-                        <div class="card-icon">入世</div>
+                    <a
+                        href="setup.html"
+                        class="welcome-card welcome-card-primary"
+                        id="card-new"
+                    >
+                        <div class="card-icon">初</div>
                         <h2>初次入世</h2>
                         <p>全新旅程，配置服务器与 LLM，创建你的第一个角色</p>
                     </a>
 
-                    <a href="character.html" class="welcome-card" id="card-return">
-                        <div class="card-icon">降临</div>
+                    <a
+                        href="character.html"
+                        class="welcome-card"
+                        id="card-return"
+                    >
+                        <div class="card-icon">再</div>
                         <h2>再次降临</h2>
                         <p>返回江湖，继续你的武侠人生</p>
                     </a>
@@ -38,24 +46,30 @@
         <script>
             async function checkSetup() {
                 try {
-                    const data = await apiGet('/api/v1/setup/status');
-                    const cardNew = document.getElementById('card-new');
-                    const cardReturn = document.getElementById('card-return');
-                    const statusText = document.getElementById('status-text');
+                    const data = await apiGet("/api/v1/setup/status");
+                    const cardNew = document.getElementById("card-new");
+                    const cardReturn = document.getElementById("card-return");
+                    const statusText = document.getElementById("status-text");
 
                     if (data.needs_setup) {
-                        cardReturn.classList.add('disabled');
-                        cardReturn.removeAttribute('href');
-                        statusText.textContent = '尚未配置服务器或 LLM，请先完成引导配置';
+                        cardReturn.classList.add("disabled");
+                        cardReturn.removeAttribute("href");
+                        statusText.textContent =
+                            "尚未配置服务器或 LLM，请先完成引导配置";
                     } else if (data.has_character) {
-                        statusText.textContent = `当前角色: ${data.current_character || '未知'} | 已配置`;
+                        statusText.textContent =
+                            "当前角色: " +
+                            (data.current_character || "未知") +
+                            " | 已配置";
                     } else {
-                        cardReturn.classList.add('disabled');
-                        cardReturn.removeAttribute('href');
-                        statusText.textContent = '已配置服务器和 LLM，请创建角色';
+                        cardReturn.classList.add("disabled");
+                        cardReturn.removeAttribute("href");
+                        statusText.textContent =
+                            "已配置服务器和 LLM，请创建角色";
                     }
                 } catch (err) {
-                    document.getElementById('status-text').textContent = '无法连接 Agent，请确保服务已启动';
+                    document.getElementById("status-text").textContent =
+                        "无法连接 Agent，请确保服务已启动";
                 }
             }
             checkSetup();
