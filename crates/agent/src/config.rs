@@ -867,4 +867,50 @@ mod tests {
         assert!(config.agent.is_none());
         assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
     }
+
+    #[test]
+    fn test_reflector_llm_inheritance() {
+        let mut llm = LlmConfig::default();
+        llm.provider = "ollama".to_string();
+        llm.model = Some("qwen2.5:14b".to_string());
+
+        let config = Config {
+            llm,
+            llm_reflector: None,
+            config_path: PathBuf::from("/test/config.yaml"),
+            ..Default::default()
+        };
+        assert_eq!(config.get_reflector_llm_config().model, Some("qwen2.5:14b".to_string()));
+    }
+
+    #[test]
+    fn test_reflector_llm_override() {
+        let mut llm = LlmConfig::default();
+        llm.provider = "ollama".to_string();
+        llm.model = Some("qwen2.5:14b".to_string());
+
+        let mut llm_reflector = LlmConfig::default();
+        llm_reflector.provider = "ollama".to_string();
+        llm_reflector.model = Some("qwen2.5:32b".to_string());
+
+        let config = Config {
+            llm,
+            llm_reflector: Some(llm_reflector),
+            config_path: PathBuf::from("/test/config.yaml"),
+            ..Default::default()
+        };
+        assert_eq!(config.get_reflector_llm_config().model, Some("qwen2.5:32b".to_string()));
+    }
+
+    #[test]
+    fn test_api_key_validation_openai() {
+        assert!(LlmConfig::validate_api_key("openai", "sk-1234567890abcdef1234567890abcdef").is_ok());
+        assert!(LlmConfig::validate_api_key("openai", "invalid").is_err());
+    }
+
+    #[test]
+    fn test_api_key_validation_anthropic() {
+        assert!(LlmConfig::validate_api_key("anthropic", "sk-ant-api123").is_ok());
+        assert!(LlmConfig::validate_api_key("anthropic", "invalid").is_err());
+    }
 }
