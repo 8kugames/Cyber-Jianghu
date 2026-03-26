@@ -903,3 +903,321 @@ button[type="submit"]:disabled {
     font-size: 12px;
     margin-top: 8px;
 }
+
+/* ============================================================================
+   Welcome Page
+   ============================================================================ */
+
+.welcome-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.welcome-header {
+    text-align: center;
+    padding: 60px 24px 20px;
+}
+
+.welcome-header h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    letter-spacing: 4px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
+
+.welcome-subtitle {
+    font-size: 16px;
+    color: rgba(255,255,255,0.8);
+    letter-spacing: 2px;
+}
+
+.welcome-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 24px;
+}
+
+.welcome-cards {
+    display: flex;
+    gap: 32px;
+    max-width: 700px;
+    width: 100%;
+}
+
+.welcome-card {
+    flex: 1;
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 40px 32px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.welcome-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+}
+
+.welcome-card.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.welcome-card-primary {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: #fff;
+}
+
+.welcome-card-primary h2,
+.welcome-card-primary p {
+    color: #fff;
+}
+
+.card-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+}
+
+.welcome-card h2 {
+    font-size: 22px;
+    margin-bottom: 12px;
+}
+
+.welcome-card p {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
+.welcome-footer {
+    text-align: center;
+    padding: 24px;
+    color: rgba(255,255,255,0.7);
+    font-size: 13px;
+}
+
+@media (max-width: 600px) {
+    .welcome-cards {
+        flex-direction: column;
+    }
+    .welcome-header h1 {
+        font-size: 36px;
+    }
+}
+
+/* ============================================================================
+   Setup Wizard
+   ============================================================================ */
+
+.setup-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 0;
+    gap: 0;
+}
+
+.progress-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.step-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: all 0.2s;
+}
+
+.progress-step.active .step-num {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.progress-step.completed .step-num {
+    background: var(--success);
+    border-color: var(--success);
+    color: #fff;
+}
+
+.step-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.progress-step.active .step-label {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.progress-line {
+    width: 60px;
+    height: 2px;
+    background: var(--border);
+    margin: 0 8px;
+    margin-bottom: 20px;
+}
+
+.setup-step {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 0 0 40px;
+}
+
+.setup-step-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.setup-step-header h2 {
+    font-size: 22px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.setup-step-header p {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+#setup-success {
+    text-align: center;
+    padding: 32px 0;
+}
+
+.success-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--success);
+    color: #fff;
+    font-size: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 16px;
+}
+
+#setup-success p {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+/* ============================================================================
+   Character Page Tabs
+   ============================================================================ */
+
+.page-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 16px;
+    border-bottom: 2px solid var(--border);
+}
+
+.page-tab {
+    padding: 12px 24px;
+    font-size: 14px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+    cursor: pointer;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+.page-tab:hover {
+    color: var(--text-primary);
+}
+
+.page-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* World Tree */
+.world-tree-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.world-tree-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.world-tree-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px var(--shadow);
+}
+
+.world-tree-card.current {
+    border-color: var(--accent);
+    border-width: 2px;
+}
+
+.world-tree-card .char-name {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.world-tree-card .char-status {
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+.world-tree-card .char-status.alive { color: var(--success); }
+.world-tree-card .char-status.dead { color: var(--danger); }
+.world-tree-card .char-status.retired { color: var(--text-muted); }
+
+.world-tree-card .char-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.world-tree-card .char-server {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
