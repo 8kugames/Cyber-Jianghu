@@ -843,12 +843,15 @@ fn start_http_api_server(
     Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
     u16,
 )> {
+    let port_range_start = 23340u16;
+    let port_range_end = 23349u16;
+
     let actual_port = if port == 0 {
         use rand::RngExt;
-        let random_port = rand::rng().random_range(23340..=23349);
+        let random_port = rand::rng().random_range(port_range_start..=port_range_end);
         info!(
-            "随机选择 HTTP API 端口: {} (范围: 23340-23349)",
-            random_port
+            "随机选择 HTTP API 端口: {} (范围: {}-{})",
+            random_port, port_range_start, port_range_end
         );
         random_port
     } else {
@@ -873,16 +876,46 @@ fn start_http_api_server(
         );
 
     let api_state_clone = api_state.clone();
+    let is_auto_port = port == 0;
+    let resolved_port = Arc::new(tokio::sync::Mutex::new(actual_port));
+    let resolved_port_clone = resolved_port.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            cyber_jianghu_agent::runtime::decision::run_http_server(actual_port, api_state_clone)
+        let mut try_port = actual_port;
+
+        loop {
+            match cyber_jianghu_agent::runtime::decision::run_http_server(try_port, api_state_clone.clone())
                 .await
-        {
-            error!("HTTP API server error: {}", e);
+            {
+                Ok(()) => return,
+                Err(e) if is_auto_port => {
+                    let mut next = try_port + 1;
+                    if next > port_range_end {
+                        next = port_range_start;
+                    }
+                    if next == actual_port {
+                        error!(
+                            "HTTP API server error: 所有端口 {}-{} 均被占用: {}",
+                            port_range_start, port_range_end, e
+                        );
+                        return;
+                    }
+                    warn!(
+                        "HTTP API server error: 端口 {} 被占用 ({})，尝试端口 {}",
+                        try_port, e, next
+                    );
+                    *resolved_port_clone.lock().await = next;
+                    try_port = next;
+                }
+                Err(e) => {
+                    error!("HTTP API server error: {}", e);
+                    return;
+                }
+            }
         }
     });
 
-    Ok((Arc::new(api_state), actual_port))
+    let final_port = actual_port;
+    Ok((Arc::new(api_state), final_port))
 }
 
 // ============================================================================
