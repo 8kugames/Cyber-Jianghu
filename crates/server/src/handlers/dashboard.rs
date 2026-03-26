@@ -331,7 +331,7 @@ pub async fn get_online_agents(State(state): State<Arc<AppState>>) -> Json<Vec<O
         FROM agents a
         INNER JOIN agent_states s ON a.agent_id = s.agent_id AND s.tick_id = $1
         WHERE s.is_alive = true
-        ORDER BY a.last_tick_online DESC NULLS LAST
+        ORDER BY a.created_at DESC
     ";
 
     let rows = sqlx::query(query)
@@ -389,7 +389,7 @@ pub async fn get_offline_agents(State(state): State<Arc<AppState>>) -> Json<Vec<
         FROM agents a
         INNER JOIN LatestStates s ON a.agent_id = s.agent_id
         WHERE s.is_alive = true
-        ORDER BY a.last_tick_online DESC NULLS LAST
+        ORDER BY a.created_at DESC
         LIMIT 200;
     ";
 
@@ -442,7 +442,7 @@ pub async fn get_dead_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Dea
         FROM agents a
         INNER JOIN LatestStates s ON a.agent_id = s.agent_id
         WHERE s.is_alive = false
-        ORDER BY a.last_tick_online DESC NULLS LAST
+        ORDER BY a.created_at DESC
         LIMIT 200;
     ";
 
