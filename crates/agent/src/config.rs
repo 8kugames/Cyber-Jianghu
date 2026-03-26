@@ -8,17 +8,21 @@
 // 3. Character - 当前角色（通过 Web/API 创建）
 // ============================================================================
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 // ============================================================================
 // 导入 protocol 类型
 // ============================================================================
 
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
+
+/// 支持的 LLM Provider
+pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "deepseek"];
 
 // ============================================================================
 // Agent 身份配置（持久化）
@@ -382,6 +386,44 @@ impl LlmConfig {
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
         }
     }
+
+    /// API Key 格式验证
+    pub fn validate_api_key(provider: &str, api_key: &str) -> Result<()> {
+        if api_key.is_empty() {
+            return Ok(());
+        }
+        match provider {
+            "openai" => {
+                if !api_key.starts_with("sk-") {
+                    return Err(anyhow!("OpenAI API Key 必须以 sk- 开头"));
+                }
+                if api_key.len() < 20 {
+                    return Err(anyhow!("OpenAI API Key 长度不足"));
+                }
+            }
+            "anthropic" => {
+                if !api_key.starts_with("sk-ant-") {
+                    return Err(anyhow!("Anthropic API Key 必须以 sk-ant- 开头"));
+                }
+            }
+            "deepseek" => {
+                if !api_key.starts_with("sk-") {
+                    return Err(anyhow!("DeepSeek API Key 必须以 sk- 开头"));
+                }
+            }
+            "ollama" => {}
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+impl Drop for LlmConfig {
+    fn drop(&mut self) {
+        if let Some(ref mut key) = self.api_key {
+            key.zeroize();
+        }
+    }
 }
 
 // ============================================================================
@@ -541,6 +583,10 @@ pub struct Config {
     #[serde(default)]
     pub llm: LlmConfig,
 
+    /// ReflectorSoul LLM 配置（可选，未配置时继承 llm）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_reflector: Option<LlmConfig>,
+
     /// 记忆系统配置
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -560,6 +606,10 @@ pub struct Config {
     /// 游戏规则（从服务器获取）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub game_rules: Option<GameRules>,
+
+    /// 配置文件路径（运行时设置，不序列化）
+    #[serde(skip)]
+    pub config_path: PathBuf,
 }
 
 impl Config {
@@ -625,11 +675,13 @@ impl Config {
             characters: vec![],
             runtime,
             llm: LlmConfig::from_env(),
+            llm_reflector: None,
             memory: MemoryConfig::default(),
             role: AgentRole::default(),
             review: None,
             observer: None,
             game_rules: None,
+            config_path: PathBuf::new(),
         })
     }
 
@@ -755,6 +807,11 @@ impl Config {
                 && c.status == CharacterStatus::Alive
                 && c.agent_id.is_some()
         })
+    }
+
+    /// 获取 ReflectorSoul LLM 配置（带回退逻辑）
+    pub fn get_reflector_llm_config(&self) -> &LlmConfig {
+        self.llm_reflector.as_ref().unwrap_or(&self.llm)
     }
 }
 
