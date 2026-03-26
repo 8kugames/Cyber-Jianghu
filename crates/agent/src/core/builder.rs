@@ -6,7 +6,7 @@
 // ============================================================================
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 use uuid::Uuid;
 
@@ -46,6 +46,8 @@ pub struct AgentBuilder {
     review_config: ReviewConfig,
     /// 重连请求接收通道（Claw 模式）
     reconnect_rx: Option<mpsc::Receiver<crate::runtime::decision::http::ReconnectRequest>>,
+    /// 配置重载通知接收通道
+    config_reload_rx: Option<broadcast::Receiver<()>>,
 }
 
 impl AgentBuilder {
@@ -68,6 +70,7 @@ impl AgentBuilder {
             review_store: None,
             review_config,
             reconnect_rx: None,
+            config_reload_rx: None,
         }
     }
 
@@ -152,6 +155,12 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置配置重载通知接收通道
+    pub fn with_config_reload_rx(mut self, rx: broadcast::Receiver<()>) -> Self {
+        self.config_reload_rx = Some(rx);
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -213,7 +222,7 @@ impl AgentBuilder {
             review_store: self.review_store,
             review_config: self.review_config,
             actor_llm_client: None,
-            config_reload_rx: None,
+            config_reload_rx: self.config_reload_rx,
         }
     }
 }
