@@ -624,6 +624,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('rebirth-message').textContent = data.message;
                     show(document.getElementById('rebirth-result'));
                     rebirthBtn.textContent = '已转生';
+                    // 直接跳转到创建页面
+                    setTimeout(() => { window.location.href = 'create.html'; }, 1000);
                 } else {
                     document.getElementById('rebirth-error-msg').textContent = data.message || '服务器错误';
                     show(document.getElementById('rebirth-error'));
