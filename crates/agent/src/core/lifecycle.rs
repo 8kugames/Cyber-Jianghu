@@ -231,6 +231,18 @@ impl super::Agent {
                         }
                     };
 
+                    // 更新 HTTP API 状态（供 Web Panel 查询）
+                    if let Some(ref api_state) = self.http_api_state {
+                        let mut current = api_state.current_state.write().await;
+                        *current = Some(world_state.clone());
+
+                        let mut last_update = api_state.last_state_update.write().await;
+                        *last_update = Some(std::time::Instant::now());
+
+                        // 异步更新关系叙事（不阻塞）
+                        api_state.maybe_update_narratives(&world_state).await;
+                    }
+
                     // 1.5 检查是否死亡（只报告一次）
                     if !self.death_reported {
                         if let Some(death_event) = world_state.events_log.iter().find(|e| {
@@ -287,6 +299,20 @@ impl super::Agent {
                     } else {
                         intent
                     };
+
+                    // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
+                    if let Some(ref api_state) = self.http_api_state {
+                        if let Some(ref history) = api_state.intent_history {
+                            history
+                                .record_intent(
+                                    final_intent.tick_id,
+                                    final_intent.intent_id,
+                                    final_intent.action_type.to_string(),
+                                    final_intent.thought_log.clone(),
+                                )
+                                .await;
+                        }
+                    }
 
                     // 6. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {

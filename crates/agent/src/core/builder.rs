@@ -19,7 +19,7 @@ use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{IntentValidator, Validator};
 use crate::config::{Config, ReviewConfig};
 use crate::runtime::claw::LlmClientContainer;
-use crate::runtime::decision::http::{review::ReviewStore, ReconnectRequest};
+use crate::runtime::decision::http::{HttpApiState, ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
@@ -54,6 +54,8 @@ pub struct AgentBuilder {
     reconnect_rx: Option<mpsc::Receiver<crate::runtime::decision::http::ReconnectRequest>>,
     /// 配置重载通知接收通道
     config_reload_rx: Option<broadcast::Receiver<()>>,
+    /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
+    http_api_state: Option<Arc<HttpApiState>>,
 }
 
 impl AgentBuilder {
@@ -78,6 +80,7 @@ impl AgentBuilder {
             review_config,
             reconnect_rx: None,
             config_reload_rx: None,
+            http_api_state: None,
         }
     }
 
@@ -178,6 +181,12 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置 HTTP API 状态（用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
+    pub fn with_http_api_state(mut self, state: Arc<HttpApiState>) -> Self {
+        self.http_api_state = Some(state);
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -252,6 +261,7 @@ impl AgentBuilder {
             actor_llm_client: None,
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
+            http_api_state: self.http_api_state,
         }
     }
 }
