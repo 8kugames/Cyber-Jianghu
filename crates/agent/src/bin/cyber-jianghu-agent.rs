@@ -22,23 +22,24 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use tracing::{Level, error, info, warn};
+use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
+use chrono::Duration;
+use reqwest::Client;
 
-use cyber_jianghu_agent::config::{CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode};
-use cyber_jianghu_agent::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use cyber_jianghu_agent::config::{AgentRole, CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode};
+use cyber_jianghu_agent::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider};
 use cyber_jianghu_agent::{
-    Agent, AgentBuilder, Intent, WorldState,
+    Agent, AgentBuilder,
     runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
     runtime::claw::{ClawDecisionState, create_claw_decision_callback},
 };
-use cyber_jianghu_protocol::ServerMessage;
+use cyber_jianghu_protocol::{ServerMessage, PendingReview, ReviewDecision, ReviewSubmission};
 
 // ============================================================================
 // CLI 定义
@@ -66,6 +67,17 @@ enum Commands {
         /// - cognitive: 内置 LLM 决策，无需外部调度器
         #[arg(long, default_value = "cognitive")]
         mode: String,
+
+        /// Agent 角色
+        /// - player: 玩家 Agent，主动决策
+        /// - observer: 观察者 Agent，审查玩家意图
+        #[arg(long, default_value = "player")]
+        role: String,
+
+        /// 观察者模式：目标 Player Agent 的 HTTP 端点
+        /// 例如：http://localhost:23340
+        #[arg(long, requires = "role")]
+        target_endpoint: Option<String>,
 
         /// 自动创建角色（如果不存在）
         /// 提供角色姓名即可自动创建并注册角色
@@ -324,8 +336,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port, mode, character_name }) => {
-            run_agent(port, mode, character_name).await?;
+        Some(Commands::Run { port, mode, role, target_endpoint, character_name }) => {
+            run_agent(port, mode, role, target_endpoint, character_name).await?;
         }
 
         Some(Commands::Show) => {
@@ -351,7 +363,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string(), None).await?;
+            run_agent(0, "cognitive".to_string(), "player".to_string(), None, None).await?;
         }
     }
 
@@ -502,7 +514,13 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> Result<()> {
+async fn run_agent(
+    port: u16,
+    mode: String,
+    role: String,
+    target_endpoint: Option<String>,
+    character_name: Option<String>,
+) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
@@ -523,6 +541,22 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
         }
     };
     config.runtime.mode = runtime_mode;
+
+    // 检查是否为 Observer 模式
+    let agent_role = match role.to_lowercase().as_str() {
+        "observer" => {
+            if target_endpoint.is_none() {
+                anyhow::bail!("Observer 模式需要 --target-endpoint 参数指定目标 Player Agent");
+            }
+            info!("使用 Observer 角色，审查目标: {}", target_endpoint.as_ref().unwrap());
+            AgentRole::Observer
+        }
+        _ => {
+            info!("使用 Player 角色");
+            AgentRole::Player
+        }
+    };
+    config.role = agent_role;
 
     ensure_identity(&mut config).await?;
 
@@ -565,6 +599,14 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
         warn!("  1. Web 面板: http://localhost:23340/panel");
         warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
         warn!("  3. 使用 --character-name 参数: cyber-jianghu-agent run --character-name 你的名字");
+    }
+
+    // Observer 模式：启动观察者主循环
+    if agent_role == AgentRole::Observer {
+        let endpoint = target_endpoint.expect("Observer endpoint must be set");
+        info!("启动 Observer 模式，审查目标: {}", endpoint);
+        run_observer_mode(&config, &endpoint).await?;
+        return Ok(());
     }
 
     let device_id = Arc::new(RwLock::new(device_id_value));
@@ -742,4 +784,112 @@ fn start_claw_server(
         api_state: api_state_for_callback,
         http_state: http_decision_state,
     })
+}
+
+// ============================================================================
+// Observer 模式
+// ============================================================================
+
+async fn run_observer_mode(config: &Config, target_endpoint: &str) -> Result<()> {
+    info!("Observer 模式启动，审查目标: {}", target_endpoint);
+    
+    let llm_client = create_llm_client(&config.llm)?;
+    info!(
+        "Observer LLM 配置: provider={}, model={}",
+        config.llm.provider,
+        config.llm.model.as_deref().unwrap_or("default")
+    );
+    
+    let client = Client::new();
+    let poll_interval = Duration::seconds(5);
+    
+    loop {
+        match fetch_pending_reviews(&client, target_endpoint).await {
+            Ok(reviews) if reviews.is_empty() => {
+                debug!("暂无待审查意图，{} 秒后再次检查", poll_interval.num_seconds());
+            }
+            Ok(reviews) => {
+                info!("发现 {} 个待审查意图", reviews.len());
+                for review in reviews {
+                    if let Err(e) = process_review(&client, target_endpoint, &review, &llm_client).await {
+                        warn!("审查失败 {}: {}", review.intent_id, e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("获取待审查意图失败: {}，{} 秒后重试", e, poll_interval.num_seconds());
+            }
+        }
+        
+        tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval.num_seconds() as u64)).await;
+    }
+}
+
+async fn fetch_pending_reviews(client: &Client, endpoint: &str) -> Result<Vec<PendingReview>> {
+    let url = format!("{}/api/v1/review/pending", endpoint.trim_end_matches('/'));
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .context("Failed to fetch pending reviews")?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to fetch reviews: {} - {}", status, body);
+    }
+    
+    let reviews: Vec<PendingReview> = response
+        .json()
+        .await
+        .context("Failed to parse reviews response")?;
+    
+    Ok(reviews)
+}
+
+async fn process_review(
+    client: &Client,
+    endpoint: &str,
+    review: &PendingReview,
+    llm_client: &DirectLlmClient,
+) -> Result<()> {
+    info!("审查意图 {}: action={}", review.intent_id, review.intent.action_type);
+    
+    let validation_prompt = format!(
+        "审查以下意图是否符合角色人设和世界观规则：\n\n意图: {}\n人设: {:?}\n世界上下文: {}",
+        serde_json::to_string(&review.intent)?,
+        review.persona_summary,
+        review.world_context
+    );
+    
+    let response_text = llm_client.complete(&validation_prompt).await?;
+    
+    let result = if response_text.to_lowercase().contains("approve") || response_text.to_lowercase().contains("通过") {
+        ReviewDecision::Approved
+    } else {
+        ReviewDecision::Rejected
+    };
+    
+    let submission = ReviewSubmission {
+        result,
+        reason: response_text,
+        narrative: None,
+    };
+    
+    let url = format!("{}/api/v1/review/{}", endpoint.trim_end_matches('/'), review.intent_id);
+    let response = client
+        .post(&url)
+        .json(&submission)
+        .send()
+        .await
+        .context("Failed to submit review")?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Failed to submit review: {} - {}", status, body);
+    }
+    
+    info!("审查结果已提交: {} -> {:?}", review.intent_id, submission.result);
+    Ok(())
 }
