@@ -565,6 +565,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
     // 根据模式创建决策回调和相关组件
     let maybe_callback_setup: Option<ClawCallbackSetup>;
+    let cognitive_death_event_tx: Option<tokio::sync::broadcast::Sender<ServerMessage>>;
 
     let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
@@ -593,7 +594,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             };
             let decision = create_claw_decision_callback(claw_state);
 
-            let (_api_state, actual_port) =
+            let (api_state, actual_port) =
                 start_http_api_server(port, device_id.clone(), &config)?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
@@ -644,12 +645,14 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             info!("ReflectorSoul 任务已启动（反思之魂）");
 
             maybe_callback_setup = None;
+            cognitive_death_event_tx = Some(api_state.death_event_tx.clone());
             agent
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
             let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
             let http_state = setup.http_state.clone();
+            cognitive_death_event_tx = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
                 api_state: setup.api_state.clone(),
@@ -686,6 +689,16 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             agent
         }
     };
+
+    // Cognitive 模式：设置死亡事件回调
+    if let Some(death_tx) = cognitive_death_event_tx {
+        let death_tx_clone = death_tx.clone();
+        agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+            if matches!(msg, ServerMessage::AgentDied { .. }) {
+                let _ = death_tx_clone.send(msg);
+            }
+        })).await;
+    }
 
     if let Some(setup) = maybe_callback_setup {
         let shared_state_clone = setup.shared_state.clone();
@@ -729,6 +742,10 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
         agent
             .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+                // 广播死亡事件到 SSE 订阅者
+                if matches!(msg, ServerMessage::AgentDied { .. }) {
+                    let _ = api_state_clone.death_event_tx.send(msg.clone());
+                }
                 let current_tick = 0;
                 if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick)
                 {

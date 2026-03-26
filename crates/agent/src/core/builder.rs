@@ -6,6 +6,7 @@
 // ============================================================================
 
 use std::sync::Arc;
+use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{IntentValidator, Validator};
 use crate::config::{Config, ReviewConfig};
 use crate::runtime::claw::LlmClientContainer;
-use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
+use crate::runtime::decision::http::{review::ReviewStore, ReconnectRequest};
 use crate::transport::websocket::AgentClient;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
@@ -180,6 +181,17 @@ impl AgentBuilder {
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
+
+        // 设置设备身份（如果已存在）
+        if let Some(ref identity) = self.config.identity {
+            let device_id = identity.device_id;
+            let auth_token = identity.auth_token.clone();
+            tokio::task::block_in_place(|| {
+                Handle::current().block_on(async {
+                    client.set_identity(device_id, auth_token).await;
+                });
+            });
+        }
 
         // 初始化记忆系统
         let memory_manager = if self.enable_memory {
