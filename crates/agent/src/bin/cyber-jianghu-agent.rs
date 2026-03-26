@@ -644,8 +644,8 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
             let config_watcher = Arc::new(ConfigWatcher::new(config_path.clone())?);
             info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
 
-            // 启动 ReflectorSoul 任务（默认启用）
-            let reflector_config = config.clone();
+            // 启动 ReflectorSoul 任务（默认启用，与 ActorSoul 同步热重载）
+            let reflector_config_watcher = config_watcher.clone();
 
             // 注入 Agent
             let agent = AgentBuilder::new(config, decision)
@@ -653,7 +653,10 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
                 .with_config_reload_rx(config_watcher.subscribe())
                 .build();
             tokio::spawn(async move {
-                if let Err(e) = run_reflector_soul_task(&reflector_config, review_store).await {
+                if let Err(e) =
+                    run_reflector_soul_task(reflector_config_watcher.subscribe(), review_store)
+                        .await
+                {
                     error!("ReflectorSoul 任务异常退出: {}", e);
                 }
             });
@@ -680,8 +683,9 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
                 Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
             info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
 
-            // 启动 ReflectorSoul 任务（默认启用）
-            let reflector_config = config.clone();
+            // 启动 ReflectorSoul 任务（Claw 模式无配置热重载）
+            let (_reflector_config_reload_tx, reflector_config_reload_rx) =
+                tokio::sync::broadcast::channel(1);
 
             // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
             let agent = AgentBuilder::new(config, decision)
@@ -690,7 +694,9 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
                 .build();
 
             tokio::spawn(async move {
-                if let Err(e) = run_reflector_soul_task(&reflector_config, review_store).await {
+                if let Err(e) =
+                    run_reflector_soul_task(reflector_config_reload_rx, review_store).await
+                {
                     error!("ReflectorSoul 任务异常退出: {}", e);
                 }
             });
@@ -887,10 +893,16 @@ fn start_http_api_server(
 ///
 /// ReflectorSoul 作为反思之魂（超我），审查 ActorSoul 生成的意图
 /// 通过 ReviewStore 共享内存进行通信（进程内双 Soul 架构）
-async fn run_reflector_soul_task(config: &Config, review_store: Arc<ReviewStore>) -> Result<()> {
+async fn run_reflector_soul_task(
+    mut config_reload_rx: tokio::sync::broadcast::Receiver<()>,
+    review_store: Arc<ReviewStore>,
+) -> Result<()> {
     info!("ReflectorSoul 启动（反思之魂），审查 ActorSoul 意图");
 
+    let config_path = config_path();
+    let config = Config::from_file(&config_path)?;
     let llm_client = create_llm_client(config.get_reflector_llm_config())?;
+    let mut llm_client = Arc::new(llm_client);
     info!(
         "ReflectorSoul LLM 配置: provider={}, model={}",
         llm_client.provider_name(),
@@ -900,16 +912,47 @@ async fn run_reflector_soul_task(config: &Config, review_store: Arc<ReviewStore>
     let poll_interval = tokio::time::Duration::from_secs(5);
 
     loop {
-        tokio::time::sleep(poll_interval).await;
-        let reviews = review_store.get_pending().await;
-        if reviews.is_empty() {
-            debug!("[ReflectorSoul] 暂无待审查意图");
-        } else {
-            info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
-            for review in reviews {
-                if let Err(e) = process_review_with_store(&llm_client, &review_store, &review).await
-                {
-                    warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
+        tokio::select! {
+            // 配置变更通知（与 ActorSoul 同步热重载）
+            Ok(()) = config_reload_rx.recv() => {
+                info!("ReflectorSoul 检测到配置变更...");
+                let old_client = llm_client.clone();
+                match Config::from_file(&config_path) {
+                    Ok(new_config) => {
+                        match create_llm_client(new_config.get_reflector_llm_config()) {
+                            Ok(client) => {
+                                llm_client = Arc::new(client);
+                                info!(
+                                    "ReflectorSoul LLM 已重载: provider={}, model={}",
+                                    llm_client.provider_name(),
+                                    llm_client.model_name()
+                                );
+                            }
+                            Err(e) => {
+                                warn!("ReflectorSoul LLM 重载失败: {}，保持旧配置", e);
+                                llm_client = old_client;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("ReflectorSoul 配置读取失败: {}，保持旧配置", e);
+                    }
+                }
+            }
+            // 定期轮询待审查意图
+            _ = tokio::time::sleep(poll_interval) => {
+                let reviews = review_store.get_pending().await;
+                if reviews.is_empty() {
+                    debug!("[ReflectorSoul] 暂无待审查意图");
+                } else {
+                    info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
+                    for review in reviews {
+                        if let Err(e) =
+                            process_review_with_store(&llm_client, &review_store, &review).await
+                        {
+                            warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
+                        }
+                    }
                 }
             }
         }

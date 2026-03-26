@@ -398,6 +398,8 @@ pub fn create_api_router() -> Router<HttpApiState> {
             post(handlers::reload_config_handler),
         ) // 热重载配置
         .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
+        // === 引导状态端点 ===
+        .route("/api/v1/setup/status", get(handlers::setup_status_handler)) // 获取引导状态
         // === LLM 配置端点 ===
         .route(
             "/api/v1/config/llm/providers",
