@@ -48,7 +48,7 @@ pub use world::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use uuid::Uuid;
 
     #[test]

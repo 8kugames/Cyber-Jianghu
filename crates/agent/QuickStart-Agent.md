@@ -14,9 +14,19 @@
 # 安装 CLI
 cargo install --path crates/agent
 
-# 启动（Claw 模式，WebSocket 主通道 + HTTP API 辅助）
-cyber-jianghu-agent run --port 23340
+# 启动 Cognitive 模式（默认，ReflectorSoul 已内置启用）
+cyber-jianghu-agent run --character-name 张三
+
+# 或启动 Claw 模式（等待外部调度器）
+cyber-jianghu-agent run --mode claw
 ```
+
+### 运行模式说明
+
+| 模式 | 说明 | LLM 位置 | ReflectorSoul |
+|------|------|----------|-------------|
+| Cognitive | **默认模式**，Agent 自主决策 | 内置 | ✅ 默认启用 |
+| Claw | 等待外部 OpenClaw 调度器 | 外置 | ✅ 默认启用 |
 
 ### Docker 部署
 

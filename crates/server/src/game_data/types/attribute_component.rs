@@ -131,12 +131,13 @@ impl AttributeComponent {
 
         for attr in self.collection.attributes.values_mut() {
             if matches!(attr.value, AttributeValue::DailyRandom { .. })
-                && let Some((min, max)) = attr.metadata.birth_range {
-                    attr.value = AttributeValue::DailyRandom {
-                        value: rng.random_range(min..=max),
-                        range: (min, max),
-                    };
-                }
+                && let Some((min, max)) = attr.metadata.birth_range
+            {
+                attr.value = AttributeValue::DailyRandom {
+                    value: rng.random_range(min..=max),
+                    range: (min, max),
+                };
+            }
         }
     }
 
@@ -189,8 +190,8 @@ impl AttributeComponent {
                         .unwrap_or(50);
                     let initial = metadata.initial_value.unwrap_or(10) as i32;
                     AttributeValue::Growable {
-                        base: growth_limit as u8,  // 随机生成的成长极限
-                        current: initial as u8,    // 固定的初始值
+                        base: growth_limit as u8, // 随机生成的成长极限
+                        current: initial as u8,   // 固定的初始值
                     }
                 }
                 AttributeType::Static => {

@@ -48,13 +48,14 @@ fn load_narrative_from_path(path: &Path, format: ConfigFormat) -> Result<Narrati
     // 首先尝试解析带包装的格式
     if let Ok(wrapped) =
         crate::game_data::loaders::config_format::parse_config::<WrappedConfig>(&content, format)
-        && let Some(data) = wrapped.data {
-            tracing::info!(
-                "[narrative_loader] Loaded narrative config from {}",
-                path.display()
-            );
-            return Ok(data);
-        }
+        && let Some(data) = wrapped.data
+    {
+        tracing::info!(
+            "[narrative_loader] Loaded narrative config from {}",
+            path.display()
+        );
+        return Ok(data);
+    }
 
     // 尝试直接解析为 NarrativeConfig
     match crate::game_data::loaders::config_format::parse_config(&content, format) {

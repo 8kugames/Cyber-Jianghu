@@ -3,12 +3,12 @@ use axum::{Json, extract::State, http::StatusCode};
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::db::{self, verify_device_token, DeviceConnectResult};
+use crate::db::{self, DeviceConnectResult, verify_device_token};
 use crate::game_data;
 use crate::models::{
-    get_max_agent_name_length, get_max_system_prompt_length, AgentConnectRequest,
-    AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse, AvailableAction,
-    GameRules, InitialItem,
+    AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,
+    AvailableAction, GameRules, InitialItem, get_max_agent_name_length,
+    get_max_system_prompt_length,
 };
 use crate::state::AppState;
 
@@ -186,7 +186,8 @@ pub async fn agent_register(
         available_actions: game_data::ActionRegistry::all_action_names()
             .into_iter()
             .map(|action_name| {
-                let description = game_data::ActionRegistry::get(&action_name).map(|config| config.description)
+                let description = game_data::ActionRegistry::get(&action_name)
+                    .map(|config| config.description)
                     .unwrap_or_default();
                 AvailableAction {
                     action: action_name,
@@ -266,8 +267,7 @@ pub async fn agent_rebirth(
         Ok(result) => {
             info!(
                 "Agent 转生成功: {} ({}) 已归隐",
-                result.retired_name,
-                result.retired_agent_id
+                result.retired_name, result.retired_agent_id
             );
             Ok(Json(RebirthResponse {
                 success: true,
@@ -282,17 +282,21 @@ pub async fn agent_rebirth(
             // 根据错误类型确定状态码
             let status = if error_msg.contains("认证失败") || error_msg.contains("auth") {
                 StatusCode::UNAUTHORIZED
-            } else if error_msg.contains("没有活跃的角色") || error_msg.contains("无需归隐") {
+            } else if error_msg.contains("没有活跃的角色") || error_msg.contains("无需归隐")
+            {
                 StatusCode::NOT_FOUND
             } else {
                 StatusCode::BAD_REQUEST
             };
 
-            Err((status, Json(RebirthResponse {
-                success: false,
-                message: error_msg,
-                retired_agent_id: None,
-            })))
+            Err((
+                status,
+                Json(RebirthResponse {
+                    success: false,
+                    message: error_msg,
+                    retired_agent_id: None,
+                }),
+            ))
         }
     }
 }

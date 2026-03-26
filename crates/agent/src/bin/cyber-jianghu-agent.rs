@@ -22,24 +22,28 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
-use chrono::Duration;
-use reqwest::Client;
 
-use cyber_jianghu_agent::config::{AgentRole, CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode};
-use cyber_jianghu_agent::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider};
-use cyber_jianghu_agent::{
-    Agent, AgentBuilder,
-    runtime::decision::ws::{WsDecisionState, WsSharedState, DownstreamMessage, run_ws_server},
-    runtime::decision::{create_http_state, http_decision},
-    runtime::claw::{ClawDecisionState, create_claw_decision_callback},
+use cyber_jianghu_agent::ai::llm::{
+    DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider,
 };
-use cyber_jianghu_protocol::{ServerMessage, PendingReview, ReviewDecision, ReviewSubmission};
+use cyber_jianghu_agent::config::{
+    CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode,
+};
+use cyber_jianghu_agent::{
+    AgentBuilder,
+    runtime::claw::{ClawDecisionState, create_claw_decision_callback},
+    runtime::decision::http::review::ReviewStore,
+    runtime::decision::ws::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
+    runtime::decision::{create_http_state, http_decision},
+};
+use cyber_jianghu_protocol::ServerMessage;
 
 // ============================================================================
 // CLI 定义
@@ -68,26 +72,10 @@ enum Commands {
         #[arg(long, default_value = "cognitive")]
         mode: String,
 
-        /// Agent 角色
-        /// - player: 玩家 Agent，主动决策
-        /// - observer: 观察者 Agent，审查玩家意图
-        #[arg(long, default_value = "player")]
-        role: String,
-
-        /// 观察者模式：目标 Player Agent 的 HTTP 端点
-        /// 例如：http://localhost:23340
-        #[arg(long, requires = "role")]
-        target_endpoint: Option<String>,
-
         /// 自动创建角色（如果不存在）
         /// 提供角色姓名即可自动创建并注册角色
         #[arg(long)]
         character_name: Option<String>,
-
-        /// 启用观察者 Agent（同时启动 Observer 审查本 Agent）
-        /// 注意：仅在 Claw 模式下可用
-        #[arg(long)]
-        with_observer: bool,
     },
 
     /// 显示当前配置
@@ -272,7 +260,11 @@ async fn ensure_identity(config: &mut Config) -> Result<()> {
     if needs_reset {
         warn!(
             "检测到服务器地址变化: {} -> {}",
-            config.identity.as_ref().and_then(|i| i.server_url.as_deref()).unwrap_or("(未知)"),
+            config
+                .identity
+                .as_ref()
+                .and_then(|i| i.server_url.as_deref())
+                .unwrap_or("(未知)"),
             config.server.http_url
         );
         warn!("将清除旧身份并重新注册...");
@@ -341,8 +333,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port, mode, role, target_endpoint, character_name, with_observer }) => {
-            run_agent(port, mode, role, target_endpoint, character_name, with_observer).await?;
+        Some(Commands::Run {
+            port,
+            mode,
+            character_name,
+        }) => {
+            run_agent(port, mode, character_name).await?;
         }
 
         Some(Commands::Show) => {
@@ -368,7 +364,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string(), "player".to_string(), None, None, false).await?;
+            run_agent(0, "cognitive".to_string(), None).await?;
         }
     }
 
@@ -519,19 +515,11 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(
-    port: u16,
-    mode: String,
-    role: String,
-    target_endpoint: Option<String>,
-    character_name: Option<String>,
-    with_observer: bool,
-) -> Result<()> {
+async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
-    let config_for_observer = if with_observer { Some(config.clone()) } else { None };
 
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {
@@ -548,22 +536,6 @@ async fn run_agent(
         }
     };
     config.runtime.mode = runtime_mode;
-
-    // 检查是否为 Observer 模式
-    let agent_role = match role.to_lowercase().as_str() {
-        "observer" => {
-            if target_endpoint.is_none() {
-                anyhow::bail!("Observer 模式需要 --target-endpoint 参数指定目标 Player Agent");
-            }
-            info!("使用 Observer 角色，审查目标: {}", target_endpoint.as_ref().unwrap());
-            AgentRole::Observer
-        }
-        _ => {
-            info!("使用 Player 角色");
-            AgentRole::Player
-        }
-    };
-    config.role = agent_role;
 
     ensure_identity(&mut config).await?;
 
@@ -593,12 +565,22 @@ async fn run_agent(
                 }
                 Err(e) => {
                     error!("自动创建角色失败: {}", e);
-                    error!("请先通过 'cyber-jianghu-agent create-character --name {}' 创建角色", name);
+                    error!(
+                        "请先通过 'cyber-jianghu-agent create-character --name {}' 创建角色",
+                        name
+                    );
                     return Err(e);
                 }
             }
         } else {
-            info!("角色已存在: {}", config.agent.as_ref().map(|c| c.name.as_str()).unwrap_or("(未知)"));
+            info!(
+                "角色已存在: {}",
+                config
+                    .agent
+                    .as_ref()
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("(未知)")
+            );
         }
     } else if !config.has_character() {
         warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
@@ -608,28 +590,22 @@ async fn run_agent(
         warn!("  3. 使用 --character-name 参数: cyber-jianghu-agent run --character-name 你的名字");
     }
 
-    // Observer 模式：启动观察者主循环
-    if agent_role == AgentRole::Observer {
-        let endpoint = target_endpoint.expect("Observer endpoint must be set");
-        info!("启动 Observer 模式，审查目标: {}", endpoint);
-        run_observer_mode(&config, &endpoint).await?;
-        return Ok(());
-    }
-
     let device_id = Arc::new(RwLock::new(device_id_value));
 
-    let persona_info = config.agent.as_ref().map(|c| {
-        cyber_jianghu_agent::ai::validator::PersonaInfo {
-            gender: c.gender.clone(),
-            age: c.age,
-            personality: c.personality.clone(),
-            values: c.values.clone(),
-        }
-    });
+    let persona_info =
+        config
+            .agent
+            .as_ref()
+            .map(|c| cyber_jianghu_agent::ai::validator::PersonaInfo {
+                gender: c.gender.clone(),
+                age: c.age,
+                personality: c.personality.clone(),
+                values: c.values.clone(),
+            });
 
     // 根据模式创建决策回调和相关组件
     let maybe_callback_setup: Option<ClawCallbackSetup>;
-    
+
     let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
             info!("创建 Cognitive 模式组件...");
@@ -648,33 +624,38 @@ async fn run_agent(
                 ClawDecisionState::new(Arc::new(llm_client))
             };
             let decision = create_claw_decision_callback(claw_state);
-            
-            let (_api_state, actual_port) = start_http_api_server(port, device_id.clone(), &config)?;
+
+            let (_api_state, actual_port) =
+                start_http_api_server(port, device_id.clone(), &config)?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
-            
-            let agent = AgentBuilder::new(config, decision).build();
-            
-            if with_observer {
-                let observer_endpoint = format!("http://localhost:{}", actual_port);
-                info!("启动 Observer Agent 审查本 Player...");
-                if let Some(observer_config) = config_for_observer {
-                    tokio::spawn(async move {
-                        if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
-                            error!("Observer 模式异常退出: {}", e);
-                        }
-                    });
+
+            // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
+            let review_store =
+                Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
+            info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
+
+            // 启动 ReflectorSoul 任务（默认启用）
+            let reflector_config = config.clone();
+
+            // 注入 Agent
+            let agent = AgentBuilder::new(config, decision)
+                .with_review_store(review_store.clone())
+                .build();
+            tokio::spawn(async move {
+                if let Err(e) = run_reflector_soul_task(&reflector_config, review_store).await {
+                    error!("ReflectorSoul 任务异常退出: {}", e);
                 }
-            }
-            
+            });
+            info!("ReflectorSoul 任务已启动（反思之魂）");
+
             maybe_callback_setup = None;
             agent
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
             let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
-            let setup_port = setup.port;
             let http_state = setup.http_state.clone();
             maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
@@ -683,26 +664,29 @@ async fn run_agent(
                 device_id: device_id.clone(),
                 persona_info: persona_info.clone(),
             });
-            let decision = Arc::new(http_decision(
-                device_id.clone(),
-                http_state,
-                55,
-            ));
-            
-            let agent = Agent::new(config, decision, Some(setup.reconnect_rx)).await;
-            
-            if with_observer {
-                let observer_endpoint = format!("http://localhost:{}", setup_port);
-                info!("启动 Observer Agent 审查本 Player...");
-                if let Some(observer_config) = config_for_observer {
-                    tokio::spawn(async move {
-                        if let Err(e) = run_observer_mode(&observer_config, &observer_endpoint).await {
-                            error!("Observer 模式异常退出: {}", e);
-                        }
-                    });
+            let decision = Arc::new(http_decision(device_id.clone(), http_state, 55));
+
+            // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
+            let review_store =
+                Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
+            info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
+
+            // 启动 ReflectorSoul 任务（默认启用）
+            let reflector_config = config.clone();
+
+            // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
+            let agent = AgentBuilder::new(config, decision)
+                .with_reconnect_rx(setup.reconnect_rx)
+                .with_review_store(review_store.clone())
+                .build();
+
+            tokio::spawn(async move {
+                if let Err(e) = run_reflector_soul_task(&reflector_config, review_store).await {
+                    error!("ReflectorSoul 任务异常退出: {}", e);
                 }
-            }
-            
+            });
+            info!("ReflectorSoul 任务已启动（反思之魂）");
+
             agent
         }
     };
@@ -713,12 +697,15 @@ async fn run_agent(
         let server_msg_tx_clone = setup.server_msg_tx.clone();
         let device_id_clone = setup.device_id.clone();
         let persona_clone = setup.persona_info.clone();
-        
+
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
             let old_id = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(device_id_clone.read())
             });
-            info!("更新 Claw API device_id: {} -> {}", *old_id, server_agent_id);
+            info!(
+                "更新 Claw API device_id: {} -> {}",
+                *old_id, server_agent_id
+            );
             drop(old_id);
 
             let mut guard = tokio::task::block_in_place(|| {
@@ -728,7 +715,8 @@ async fn run_agent(
 
             if let Some(ref validator) = api_state_clone.intent_validator {
                 let mut validator_guard = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(shared_state_clone.intent_validator.write())
+                    tokio::runtime::Handle::current()
+                        .block_on(shared_state_clone.intent_validator.write())
                 });
                 *validator_guard = Some(validator.clone());
                 info!("Validator injected into WsSharedState");
@@ -743,12 +731,15 @@ async fn run_agent(
             }
         }));
 
-        agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
-            let current_tick = 0;
-            if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick) {
-                let _ = server_msg_tx_clone.send(downstream);
-            }
-        })).await;
+        agent
+            .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+                let current_tick = 0;
+                if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick)
+                {
+                    let _ = server_msg_tx_clone.send(downstream);
+                }
+            }))
+            .await;
     }
 
     agent.run().await?;
@@ -761,7 +752,6 @@ struct ServerSetup {
     shared_state: Arc<WsSharedState>,
     api_state: cyber_jianghu_agent::runtime::decision::http::HttpApiState,
     http_state: Arc<cyber_jianghu_agent::runtime::decision::http::HttpDecisionState>,
-    port: u16,
 }
 
 struct ClawCallbackSetup {
@@ -787,7 +777,10 @@ fn start_claw_server(
         port
     };
 
-    info!("启动 Claw 模式（WebSocket + HTTP API），端口: {}", actual_port);
+    info!(
+        "启动 Claw 模式（WebSocket + HTTP API），端口: {}",
+        actual_port
+    );
 
     let config_path_str = config_path().display().to_string();
     print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
@@ -825,7 +818,6 @@ fn start_claw_server(
         shared_state: shared_state_for_callback,
         api_state: api_state_for_callback,
         http_state: http_decision_state,
-        port: actual_port,
     })
 }
 
@@ -833,11 +825,17 @@ fn start_http_api_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
     config: &Config,
-) -> Result<(Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>, u16)> {
+) -> Result<(
+    Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
+    u16,
+)> {
     let actual_port = if port == 0 {
         use rand::RngExt;
         let random_port = rand::rng().random_range(23340..=23349);
-        info!("随机选择 HTTP API 端口: {} (范围: 23340-23349)", random_port);
+        info!(
+            "随机选择 HTTP API 端口: {} (范围: 23340-23349)",
+            random_port
+        );
         random_port
     } else {
         port
@@ -848,19 +846,23 @@ fn start_http_api_server(
     let config_path_str = config_path().display().to_string();
     print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
 
-    let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::decision::create_http_state(
-        device_id,
-        config.server.http_url.clone(),
-        config.server.ws_url.clone(),
-        config.identity.clone(),
-        None,
-        config_path(),
-        None,
-    );
+    let (_http_decision_state, api_state) =
+        cyber_jianghu_agent::runtime::decision::create_http_state(
+            device_id,
+            config.server.http_url.clone(),
+            config.server.ws_url.clone(),
+            config.identity.clone(),
+            None,
+            config_path(),
+            None,
+        );
 
     let api_state_clone = api_state.clone();
     tokio::spawn(async move {
-        if let Err(e) = cyber_jianghu_agent::runtime::decision::run_http_server(actual_port, api_state_clone).await {
+        if let Err(e) =
+            cyber_jianghu_agent::runtime::decision::run_http_server(actual_port, api_state_clone)
+                .await
+        {
             error!("HTTP API server error: {}", e);
         }
     });
@@ -869,109 +871,90 @@ fn start_http_api_server(
 }
 
 // ============================================================================
-// Observer 模式
+// ReflectorSoul (反思之魂)
 // ============================================================================
 
-async fn run_observer_mode(config: &Config, target_endpoint: &str) -> Result<()> {
-    info!("Observer 模式启动，审查目标: {}", target_endpoint);
-    
+/// 运行 ReflectorSoul 任务（默认启用）
+///
+/// ReflectorSoul 作为反思之魂（超我），审查 ActorSoul 生成的意图
+/// 通过 ReviewStore 共享内存进行通信（进程内双 Soul 架构）
+async fn run_reflector_soul_task(config: &Config, review_store: Arc<ReviewStore>) -> Result<()> {
+    info!("ReflectorSoul 启动（反思之魂），审查 ActorSoul 意图");
+
     let llm_client = create_llm_client(&config.llm)?;
     info!(
-        "Observer LLM 配置: provider={}, model={}",
+        "ReflectorSoul LLM 配置: provider={}, model={}",
         config.llm.provider,
         config.llm.model.as_deref().unwrap_or("default")
     );
-    
-    let client = Client::new();
-    let poll_interval = Duration::seconds(5);
-    
+
+    let poll_interval = tokio::time::Duration::from_secs(5);
+
     loop {
-        match fetch_pending_reviews(&client, target_endpoint).await {
-            Ok(reviews) if reviews.is_empty() => {
-                debug!("暂无待审查意图，{} 秒后再次检查", poll_interval.num_seconds());
-            }
-            Ok(reviews) => {
-                info!("发现 {} 个待审查意图", reviews.len());
-                for review in reviews {
-                    if let Err(e) = process_review(&client, target_endpoint, &review, &llm_client).await {
-                        warn!("审查失败 {}: {}", review.intent_id, e);
-                    }
+        let reviews = review_store.get_pending().await;
+        if reviews.is_empty() {
+            debug!("[ReflectorSoul] 暂无待审查意图，5 秒后再次检查");
+        } else {
+            info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
+            for review in reviews {
+                if let Err(e) = process_review_with_store(&llm_client, &review_store, &review).await
+                {
+                    warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
                 }
             }
-            Err(e) => {
-                warn!("获取待审查意图失败: {}，{} 秒后重试", e, poll_interval.num_seconds());
-            }
         }
-        
-        tokio::time::sleep(tokio::time::Duration::from_secs(poll_interval.num_seconds() as u64)).await;
+
+        tokio::time::sleep(poll_interval).await;
     }
 }
 
-async fn fetch_pending_reviews(client: &Client, endpoint: &str) -> Result<Vec<PendingReview>> {
-    let url = format!("{}/api/v1/review/pending", endpoint.trim_end_matches('/'));
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .context("Failed to fetch pending reviews")?;
-    
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to fetch reviews: {} - {}", status, body);
-    }
-    
-    let reviews: Vec<PendingReview> = response
-        .json()
-        .await
-        .context("Failed to parse reviews response")?;
-    
-    Ok(reviews)
-}
-
-async fn process_review(
-    client: &Client,
-    endpoint: &str,
-    review: &PendingReview,
+/// 处理单个审查请求（ReflectorSoul）
+async fn process_review_with_store(
     llm_client: &DirectLlmClient,
+    review_store: &Arc<ReviewStore>,
+    review: &cyber_jianghu_agent::runtime::decision::http::review::PendingReview,
 ) -> Result<()> {
-    info!("审查意图 {}: action={}", review.intent_id, review.intent.action_type);
-    
+    use cyber_jianghu_agent::runtime::decision::http::review::ReviewDecision;
+    use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
+
+    info!(
+        "[ReflectorSoul] 审查意图 {}: action={}",
+        review.intent_id, review.intent.action_type
+    );
+
     let validation_prompt = format!(
         "审查以下意图是否符合角色人设和世界观规则：\n\n意图: {}\n人设: {:?}\n世界上下文: {}",
         serde_json::to_string(&review.intent)?,
         review.persona_summary,
         review.world_context
     );
-    
+
     let response_text = llm_client.complete(&validation_prompt).await?;
-    
-    let result = if response_text.to_lowercase().contains("approve") || response_text.to_lowercase().contains("通过") {
+
+    let result = if response_text.to_lowercase().contains("approve")
+        || response_text.to_lowercase().contains("通过")
+    {
         ReviewDecision::Approved
     } else {
         ReviewDecision::Rejected
     };
-    
-    let submission = ReviewSubmission {
+
+    // 使用 protocol 的 ReviewSubmission（reason 是 String 不是 Option）
+    let submission = ProtocolReviewSubmission {
         result,
-        reason: response_text,
+        reason: response_text.clone(),
         narrative: None,
     };
-    
-    let url = format!("{}/api/v1/review/{}", endpoint.trim_end_matches('/'), review.intent_id);
-    let response = client
-        .post(&url)
-        .json(&submission)
-        .send()
+
+    // submit_review 需要拥有的值，不是引用
+    review_store
+        .submit_review(review.intent_id, submission)
         .await
-        .context("Failed to submit review")?;
-    
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to submit review: {} - {}", status, body);
-    }
-    
-    info!("审查结果已提交: {} -> {:?}", review.intent_id, submission.result);
+        .map_err(|e| anyhow::anyhow!("ReflectorSoul submit_review failed: {:?}", e))?;
+
+    info!(
+        "[ReflectorSoul] 审查结果已提交: {} -> {:?}",
+        review.intent_id, result
+    );
     Ok(())
 }

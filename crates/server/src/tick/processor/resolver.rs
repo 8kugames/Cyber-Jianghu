@@ -89,9 +89,6 @@ pub enum ValidationError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
-    
 
     #[test]
     fn test_resolver_creation() {

@@ -11,26 +11,26 @@
 // ============================================================================
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::Response,
     routing::get,
-    Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, error, info, warn};
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, UpstreamMessage, WsIntent};
 use super::state::{WsSharedState, WsValidationRequest};
-use crate::runtime::decision::http::{create_api_router, get_static_serve_dir, HttpApiState};
+use crate::runtime::decision::http::{HttpApiState, create_api_router, get_static_serve_dir};
 
 // ============================================================================
 // WebSocket 路由
@@ -51,7 +51,10 @@ async fn ws_handler(
 ) -> Response {
     // 安全检查：仅允许 localhost 连接，除非配置允许外部连接
     if !addr.ip().is_loopback() && !state.allow_external_connections {
-        warn!("Rejected WebSocket connection from non-localhost: {} (allow_external_connections=false)", addr);
+        warn!(
+            "Rejected WebSocket connection from non-localhost: {} (allow_external_connections=false)",
+            addr
+        );
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body("Only localhost connections allowed (set CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 to allow)".into())
@@ -371,9 +374,7 @@ pub async fn run_ws_server(
     let api_router = create_api_router().with_state(api_state);
 
     // 合并路由
-    let app = Router::new()
-        .merge(ws_router)
-        .merge(api_router);
+    let app = Router::new().merge(ws_router).merge(api_router);
 
     // 添加静态文件服务（用于 Web 面板）
     let serve_dir = get_static_serve_dir();
@@ -385,14 +386,21 @@ pub async fn run_ws_server(
 
     info!("[claw] Mixed Server listening on {}", local_addr);
     info!("[claw] HTTP_PORT={}", local_addr.port());
-    info!("[claw] WebSocket: ws://127.0.0.1:{}/ws (localhost only)", local_addr.port());
-    info!("[claw] HTTP API: http://127.0.0.1:{}/api/v1", local_addr.port());
+    info!(
+        "[claw] WebSocket: ws://127.0.0.1:{}/ws (localhost only)",
+        local_addr.port()
+    );
+    info!(
+        "[claw] HTTP API: http://127.0.0.1:{}/api/v1",
+        local_addr.port()
+    );
 
     // 使用 into_make_service_with_connect_info 来获取客户端地址
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }
@@ -401,7 +409,7 @@ pub async fn run_ws_server(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{RwLock, mpsc};
 
     #[tokio::test]
     async fn test_ws_shared_state() {

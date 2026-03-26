@@ -113,10 +113,7 @@ pub fn apply_decay_and_environmental_damage(
                     }
                 };
 
-                warn!(
-                    "Agent {} 已死亡（{}），将清空背包",
-                    agent_id, cause
-                );
+                warn!("Agent {} 已死亡（{}），将清空背包", agent_id, cause);
 
                 // 创建死亡事件
                 let death_event = crate::models::WorldEvent {
@@ -131,13 +128,8 @@ pub fn apply_decay_and_environmental_damage(
                 events.push((agent_id, death_event));
 
                 // 创建死亡通知
-                let notification = DeathNotification::new(
-                    agent_id,
-                    cause,
-                    description,
-                    location,
-                    tick_id,
-                );
+                let notification =
+                    DeathNotification::new(agent_id, cause, description, location, tick_id);
                 death_notifications.push(notification);
             }
             continue; // 已死亡，跳过环境伤害检查
@@ -189,10 +181,7 @@ pub fn apply_decay_and_environmental_damage(
                         }
                     };
 
-                    warn!(
-                        "Agent {} 已死亡（{}），将清空背包",
-                        agent_id, cause
-                    );
+                    warn!("Agent {} 已死亡（{}），将清空背包", agent_id, cause);
 
                     // 创建死亡事件
                     let death_event = crate::models::WorldEvent {
@@ -400,7 +389,10 @@ mod tests {
         }
 
         // 验证死亡原因
-        let causes: Vec<&str> = death_notifications.iter().map(|n| n.cause.as_str()).collect();
+        let causes: Vec<&str> = death_notifications
+            .iter()
+            .map(|n| n.cause.as_str())
+            .collect();
         assert!(causes.contains(&"hunger"), "应该包含饥饿死亡");
         assert!(causes.contains(&"thirst"), "应该包含口渴死亡");
     }

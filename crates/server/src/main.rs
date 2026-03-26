@@ -48,8 +48,13 @@ fn start_tick_engine(
     intent_manager: websocket::IntentManager,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut tick_scheduler =
-            TickScheduler::new(game_data_cache, db_pool, connection_manager, agent_to_device_map, intent_manager);
+        let mut tick_scheduler = TickScheduler::new(
+            game_data_cache,
+            db_pool,
+            connection_manager,
+            agent_to_device_map,
+            intent_manager,
+        );
 
         info!("启动Tick引擎（后台任务）");
 

@@ -102,7 +102,7 @@ async fn main() -> Result<()> {
     println!("创建 Agent...");
 
     // 创建 Agent(使用 Arc 包装决策函数)
-    let mut agent = Agent::new(config, Arc::new(make_decision), None);
+    let mut agent = Agent::new(config, Arc::new(make_decision), None).await;
 
     // 运行 Agent
     agent.run().await?;

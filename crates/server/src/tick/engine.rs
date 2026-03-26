@@ -38,9 +38,8 @@
 
 #[cfg(test)]
 mod tests {
-    
+
     use crate::config::Config;
-    
 
     /// 创建测试用的配置
     /// 注意：这个函数创建了测试用的配置，仅用于单元测试

@@ -58,21 +58,24 @@ impl super::Agent {
                     agent_name_for_callback, game_rules.version
                 );
                 // 注意：配置持久化由外部配置管理系统处理
-            })).await;
+            }))
+            .await;
 
         // 设置对话消息回调（如果启用了对话系统）
         if self.dialogue_client.is_some() {
             let dialogue_client = self.dialogue_client.clone();
             let agent_name_for_dialogue = self.character_name().to_string();
-            self.client.set_dialogue_callback(Arc::new(move |message| {
-                debug!(
-                    "Agent '{}' received dialogue message",
-                    agent_name_for_dialogue
-                );
-                if let Some(ref dc) = dialogue_client {
-                    dc.handle_message(message);
-                }
-            })).await;
+            self.client
+                .set_dialogue_callback(Arc::new(move |message| {
+                    debug!(
+                        "Agent '{}' received dialogue message",
+                        agent_name_for_dialogue
+                    );
+                    if let Some(ref dc) = dialogue_client {
+                        dc.handle_message(message);
+                    }
+                }))
+                .await;
             info!(
                 "Dialogue callback set for agent '{}'",
                 self.character_name()
@@ -97,7 +100,8 @@ impl super::Agent {
                             v_clone.update_rules(rules_clone).await;
                         });
                     }
-                })).await;
+                }))
+                .await;
             info!(
                 "World building rules callback set for agent '{}'",
                 self.character_name()
@@ -209,6 +213,13 @@ impl super::Agent {
                         (self.decision_callback)(&world_state).await
                     };
 
+                    // 5.5 审查（ReflectorSoul - 反思之魂）
+                    let final_intent = if let Some(ref store) = self.review_store {
+                        self.submit_for_review(intent, &world_state, store).await?
+                    } else {
+                        intent
+                    };
+
                     // 6. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {
                         let status = calculator.process_tick();
@@ -232,14 +243,14 @@ impl super::Agent {
                     }
 
                     // 7. 发送意图
-                    if let Err(e) = self.client.send_intent(&intent).await {
+                    if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
                         // 尝试重连
                         self.reconnect().await?;
                     } else {
                         info!(
                             "Intent sent successfully: tick={}, action={}, agent={}",
-                            intent.tick_id, intent.action_type, intent.agent_id
+                            final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                         );
                     }
                 }
@@ -267,7 +278,7 @@ impl super::Agent {
             // 计算当前延迟：初始延迟 * 2^backoff，但不超过最大延迟
             let delay_ms = std::cmp::min(
                 INITIAL_DELAY_MS * (1u64 << self.reconnect_backoff.min(10)),
-                max_delay_ms
+                max_delay_ms,
             );
 
             let attempt = self.reconnect_backoff + 1;
@@ -283,6 +294,30 @@ impl super::Agent {
             match self.client.connect().await {
                 Ok(()) => {
                     info!("重连成功，尝试次数: {}", attempt);
+
+                    // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
+                    match self.client.wait_for_registration().await {
+                        Ok((agent_id, game_rules)) => {
+                            info!("重连后注册确认: agent_id={}", agent_id);
+
+                            // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
+                            if let Some(ref callback) = self.registration_callback {
+                                callback(agent_id);
+                            }
+
+                            // 更新游戏规则
+                            self.config.update_game_rules(game_rules);
+                        }
+                        Err(e) => {
+                            // 注册确认失败，可能需要重新建立连接
+                            error!("重连后注册确认失败: {}", e);
+                            self.client.close().await;
+                            // 增加退避计数器并继续重试
+                            self.reconnect_backoff = self.reconnect_backoff.saturating_add(1);
+                            continue;
+                        }
+                    }
+
                     // 重连成功，重置退避计数器
                     self.reconnect_backoff = 0;
                     return Ok(());

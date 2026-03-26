@@ -7,7 +7,7 @@
 
 #[cfg(test)]
 mod tests {
-    
+
     use serde_json::json;
     use std::collections::HashMap;
 

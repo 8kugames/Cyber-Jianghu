@@ -18,8 +18,6 @@ mod turn_cycle;
 pub use context::ContextBuilder;
 pub use decision::{ClawDecisionState, claw_decision, create_claw_decision_callback};
 pub use history::{
-    ChatMessage, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager, HealthStatus,
+    ChatMessage, HealthStatus, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager,
 };
-pub use turn_cycle::{
-    Intent, ToolCall, ToolResult, TurnCycle, TurnCycleConfig, TurnCycleServices,
-};
+pub use turn_cycle::{Intent, ToolCall, ToolResult, TurnCycle, TurnCycleConfig, TurnCycleServices};

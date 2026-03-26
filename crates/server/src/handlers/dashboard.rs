@@ -570,13 +570,14 @@ pub async fn get_agent_details(
         let config = crate::game_data::registry::StateRegistry::get_attributes_config();
         let get_max = |name: &str| -> i32 {
             if let Some(cfg) = &config
-                && let Some(attr_def) = cfg.data.status.attributes.get(name) {
-                    return crate::game_data::types::StatusComponent::evaluate_max_value(
-                        &attr_def.max_value_formula,
-                        100,
-                        &attributes_map,
-                    );
-                }
+                && let Some(attr_def) = cfg.data.status.attributes.get(name)
+            {
+                return crate::game_data::types::StatusComponent::evaluate_max_value(
+                    &attr_def.max_value_formula,
+                    100,
+                    &attributes_map,
+                );
+            }
             100
         };
 

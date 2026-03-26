@@ -171,5 +171,7 @@ fn test_narrative_engine_integrated() {
     let builder = CognitiveContextBuilder::default();
     let ctx = builder.build(&world_state);
 
-    assert!(ctx.perception.self_status.contains("饥饿") || ctx.perception.self_status.contains("口渴"));
+    assert!(
+        ctx.perception.self_status.contains("饥饿") || ctx.perception.self_status.contains("口渴")
+    );
 }

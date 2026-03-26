@@ -35,19 +35,15 @@ pub use types::IntentManager;
 
 // 连接管理
 pub use connection::{
-    AgentToDeviceMap, ConnectionManager, create_agent_to_device_map,
-    create_connection_manager, create_intent_manager, take_intents_for_tick,
+    AgentToDeviceMap, ConnectionManager, create_agent_to_device_map, create_connection_manager,
+    create_intent_manager, take_intents_for_tick,
 };
 
 // WebSocket 处理器
 pub use handler::websocket_handler;
 
 // 广播功能
-pub use broadcast::{
-    forward_dialogue_message,
-    send_agent_died_notification,
-    send_world_state,
-};
+pub use broadcast::{forward_dialogue_message, send_agent_died_notification, send_world_state};
 
 // ============================================================================
 // 测试
@@ -55,7 +51,7 @@ pub use broadcast::{
 
 #[cfg(test)]
 mod tests {
-    
+
     use cyber_jianghu_protocol::ServerMessage;
 
     #[test]

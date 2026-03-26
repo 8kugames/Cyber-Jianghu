@@ -3,9 +3,9 @@
 //! 用于 Observer Agent 审查 Player Agent 意图的 API 端点。
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
-    Json,
 };
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
@@ -21,8 +21,8 @@ use super::HttpApiState;
 
 // Re-export protocol types
 pub use cyber_jianghu_protocol::{
-    PendingReview, PersonaSummary, ReviewDecision, ReviewError, ReviewErrorResponse,
-    ReviewResult, ReviewStatus, ReviewSubmission,
+    PendingReview, PersonaSummary, ReviewDecision, ReviewError, ReviewErrorResponse, ReviewResult,
+    ReviewStatus, ReviewSubmission,
 };
 
 // ============================================================================
@@ -290,12 +290,17 @@ pub async fn submit_review(
     // 获取 pending entry 以获取 tick_id（用于更新 intent_history）
     let tick_id = review_store.get_tick_id(intent_id).await;
 
-    match review_store.submit_review(intent_id, submission.clone()).await {
+    match review_store
+        .submit_review(intent_id, submission.clone())
+        .await
+    {
         Ok(result) => {
             // 更新 intent_history 中的 observer_thought
             if let (Some(tick_id), Some(history)) = (tick_id, &api_state.intent_history) {
                 // 使用 reason 作为 observer_thought（审查原因即 Observer 的思维链）
-                history.update_observer_thought(tick_id, submission.reason.clone()).await;
+                history
+                    .update_observer_thought(tick_id, submission.reason.clone())
+                    .await;
                 info!(
                     "[review] Updated observer thought for tick {} in intent_history",
                     tick_id

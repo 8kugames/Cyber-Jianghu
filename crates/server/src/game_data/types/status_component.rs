@@ -86,9 +86,10 @@ impl StatusComponent {
         let mut result = Vec::new();
         for (name, attr) in &self.collection.attributes {
             if let Some(decay) = attr.metadata.decay_per_tick
-                && decay != 0 {
-                    result.push((name.clone(), decay));
-                }
+                && decay != 0
+            {
+                result.push((name.clone(), decay));
+            }
         }
 
         // Ensure consistent ordering for tests (e.g. hunger, thirst, stamina)
@@ -126,12 +127,13 @@ impl StatusComponent {
     pub fn check_death_conditions(&self) -> Option<String> {
         for attr in self.collection.attributes.values() {
             if let Some(death_condition) = &attr.metadata.death_condition
-                && death_condition.check_int(attr.value.get()) {
-                    return Some(format!(
-                        "Death condition met for attribute '{}'",
-                        attr.metadata.name
-                    ));
-                }
+                && death_condition.check_int(attr.value.get())
+            {
+                return Some(format!(
+                    "Death condition met for attribute '{}'",
+                    attr.metadata.name
+                ));
+            }
         }
         None
     }

@@ -1,7 +1,7 @@
 // Claw Decision - 内部调度器决策函数
 
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::ai::llm::LlmClient;
@@ -41,30 +41,29 @@ impl ClawDecisionState {
     }
 }
 
-pub async fn claw_decision(
-    state: &ClawDecisionState,
-    world_state: &WorldState,
-) -> Result<Intent> {
+pub async fn claw_decision(state: &ClawDecisionState, world_state: &WorldState) -> Result<Intent> {
     let tick_id = world_state.tick_id;
     let agent_id = world_state.agent_id.unwrap_or_default();
-    
+
     let context = state.context_builder.build(world_state);
     debug!("Context for tick {}: {} chars", tick_id, context.len());
-    
+
     let prompt = format!(
         "[系统]\n{}\n\n[当前状态]\n{}\n\n[助手]",
-        state.system_prompt,
-        context
+        state.system_prompt, context
     );
-    
-    let response = state.llm.complete(&prompt).await
+
+    let response = state
+        .llm
+        .complete(&prompt)
+        .await
         .map_err(|e| anyhow::anyhow!("LLM call failed: {}", e))?;
-    
+
     debug!("LLM response: {} chars", response.len());
-    
+
     let json_start = response.find('{');
     let json_end = response.rfind('}').map(|p| p + 1);
-    
+
     let json_str = match (json_start, json_end) {
         (Some(start), Some(end)) => &response[start..end],
         _ => {
@@ -72,7 +71,7 @@ pub async fn claw_decision(
             return Ok(Intent::idle(agent_id, tick_id));
         }
     };
-    
+
     let parsed: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
         Err(e) => {
@@ -80,20 +79,20 @@ pub async fn claw_decision(
             return Ok(Intent::idle(agent_id, tick_id));
         }
     };
-    
+
     let action_type = parsed
         .get("action_type")
         .and_then(|v| v.as_str())
         .unwrap_or("idle");
-    
+
     let action_data = parsed.get("action_data").cloned();
     let thought = parsed
         .get("thought")
         .and_then(|v| v.as_str())
         .map(String::from);
-    
+
     info!("Claw decision for tick {}: {}", tick_id, action_type);
-    
+
     let mut intent = Intent::new(agent_id, tick_id, action_type, action_data);
     if let Some(t) = thought {
         intent = intent.with_thought(t);
@@ -107,36 +106,36 @@ mod tests {
     fn test_parse_missing_action_type() {
         let json = r#"{"action_data": {}, "thought": "test"}"#;
         let parsed: serde_json::Value = serde_json::from_str(json).unwrap();
-        
+
         let action_type = parsed
             .get("action_type")
             .and_then(|v| v.as_str())
             .unwrap_or("idle");
-        
+
         assert_eq!(action_type, "idle");
     }
 
     #[test]
     fn test_parse_malformed_json_fallback() {
         let response = "This is not JSON at all";
-        
+
         let json_start = response.find('{');
-        
+
         assert!(json_start.is_none());
     }
 
     #[test]
     fn test_extract_json_from_text() {
         let response = "Sure, here is the decision:\n{\"action_type\": \"idle\"}\n\nLet me know if you need anything else.";
-        
+
         let json_start = response.find('{');
         let json_end = response.rfind('}').map(|p| p + 1);
-        
+
         let json_str = match (json_start, json_end) {
             (Some(start), Some(end)) => &response[start..=end],
             _ => "",
         };
-        
+
         let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
         assert_eq!(parsed["action_type"], "idle");
     }
@@ -144,9 +143,13 @@ mod tests {
 
 pub fn create_claw_decision_callback(
     state: ClawDecisionState,
-) -> Arc<dyn Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Intent> + Send>> + Send + Sync> {
+) -> Arc<
+    dyn Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Intent> + Send>>
+        + Send
+        + Sync,
+> {
     let state = Arc::new(state);
-    
+
     Arc::new(move |world_state: &WorldState| {
         let state = state.clone();
         let world_state = world_state.clone();

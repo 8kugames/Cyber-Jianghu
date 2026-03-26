@@ -51,7 +51,8 @@ pub fn build_game_rules_from_config(tick_duration_secs: u64, version: String) ->
         .into_iter()
         .map(|action_name| {
             // 从配置获取描述
-            let description = ActionRegistry::get(&action_name).map(|config| config.description)
+            let description = ActionRegistry::get(&action_name)
+                .map(|config| config.description)
                 .unwrap_or_default();
 
             AvailableAction {

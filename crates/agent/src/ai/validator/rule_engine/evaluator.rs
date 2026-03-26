@@ -55,11 +55,7 @@ impl DefaultEvaluator {
     /// - "intent.action_data.xxx" -> intent.action_data["xxx"]
     /// - "attributes.xxx" -> context.attributes["xxx"]
     /// - "tick_id" -> context.tick_id
-    fn get_field_value(
-        &self,
-        field_path: &str,
-        context: &RuleValidationContext,
-    ) -> Option<Value> {
+    fn get_field_value(&self, field_path: &str, context: &RuleValidationContext) -> Option<Value> {
         let parts: Vec<&str> = field_path.split('.').collect();
 
         match parts.first() {
@@ -116,15 +112,17 @@ impl DefaultEvaluator {
                 match (&actual, expected) {
                     (Value::String(a_str), Value::Number(_)) => {
                         if let Ok(a_num) = a_str.parse::<f64>()
-                            && let Some(exp_num) = expected.as_f64() {
-                                return (a_num - exp_num).abs() < f64::EPSILON;
-                            }
+                            && let Some(exp_num) = expected.as_f64()
+                        {
+                            return (a_num - exp_num).abs() < f64::EPSILON;
+                        }
                     }
                     (Value::Number(_), Value::String(e_str)) => {
                         if let Ok(e_num) = e_str.parse::<f64>()
-                            && let Some(act_num) = actual.as_f64() {
-                                return (act_num - e_num).abs() < f64::EPSILON;
-                            }
+                            && let Some(act_num) = actual.as_f64()
+                        {
+                            return (act_num - e_num).abs() < f64::EPSILON;
+                        }
                     }
                     _ => {}
                 }

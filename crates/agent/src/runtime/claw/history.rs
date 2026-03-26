@@ -67,7 +67,8 @@ impl Default for HistoryConfig {
     fn default() -> Self {
         Self {
             max_messages: DEFAULT_MAX_MESSAGES,
-            compaction_threshold: (DEFAULT_MAX_MESSAGES as f64 * DEFAULT_COMPACTION_THRESHOLD_RATIO) as usize,
+            compaction_threshold: (DEFAULT_MAX_MESSAGES as f64 * DEFAULT_COMPACTION_THRESHOLD_RATIO)
+                as usize,
             max_system_prompt_len: DEFAULT_MAX_SYSTEM_PROMPT_LEN,
             keep_recent_messages: DEFAULT_KEEP_RECENT_MESSAGES,
         }
@@ -132,7 +133,11 @@ impl ChatMessage {
     }
 
     /// 创建 tool 消息
-    pub fn tool(tool_call_id: impl Into<String>, tool_name: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn tool(
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             role: "tool".to_string(),
             content: content.into(),
@@ -241,7 +246,12 @@ impl HistoryManager {
     }
 
     /// 添加工具结果消息
-    pub fn add_tool_message(&mut self, tool_call_id: impl Into<String>, tool_name: impl Into<String>, content: impl Into<String>) {
+    pub fn add_tool_message(
+        &mut self,
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: impl Into<String>,
+    ) {
         self.add_message(ChatMessage::tool(tool_call_id, tool_name, content));
     }
 
@@ -253,7 +263,10 @@ impl HistoryManager {
 
     /// 获取当前消息数（不含 system prompt）
     pub fn message_count(&self) -> usize {
-        self.messages.iter().filter(|e| e.message.is_countable()).count()
+        self.messages
+            .iter()
+            .filter(|e| e.message.is_countable())
+            .count()
     }
 
     /// 检查是否需要 compaction
@@ -306,7 +319,8 @@ impl HistoryManager {
 
         // 保留最近的 N 条消息 + 摘要
         let recent_count = self.config.keep_recent_messages;
-        let messages_to_keep: Vec<_> = self.messages
+        let messages_to_keep: Vec<_> = self
+            .messages
             .iter()
             .rev()
             .take(recent_count)
@@ -335,7 +349,8 @@ impl HistoryManager {
 
         // 添加所有消息
         for entry in &self.messages {
-            lines.push(format!("[{}] {}: {}", 
+            lines.push(format!(
+                "[{}] {}: {}",
                 entry.timestamp.elapsed().as_secs(),
                 entry.message.role,
                 entry.message.content
@@ -436,7 +451,9 @@ mod tests {
         let mut manager = HistoryManager::new(config);
 
         // 设置 system prompt
-        manager.set_system_prompt("You are a helpful assistant").unwrap();
+        manager
+            .set_system_prompt("You are a helpful assistant")
+            .unwrap();
 
         // 添加消息
         manager.add_user_message("Hello");
@@ -488,7 +505,7 @@ mod tests {
 
         // Mock LLM 返回摘要
         let mock = MockLlmClient::with_response("This is a summary of the conversation.");
-        
+
         // 执行 compaction
         manager.compact(&mock).await.unwrap();
 

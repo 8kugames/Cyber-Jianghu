@@ -6,6 +6,7 @@
 // ============================================================================
 
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -15,7 +16,8 @@ use crate::ai::llm::LlmClient;
 use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
 use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{IntentValidator, Validator};
-use crate::config::Config;
+use crate::config::{Config, ReviewConfig};
+use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
@@ -38,11 +40,18 @@ pub struct AgentBuilder {
     validator: Option<Arc<dyn Validator>>,
     lifespan_calculator: Option<LifespanCalculator>,
     validator_config: ValidatorConfig,
+    /// 审查存储（ReflectorSoul 共享）
+    review_store: Option<Arc<ReviewStore>>,
+    /// 审查配置
+    review_config: ReviewConfig,
+    /// 重连请求接收通道（Claw 模式）
+    reconnect_rx: Option<mpsc::Receiver<crate::runtime::decision::http::ReconnectRequest>>,
 }
 
 impl AgentBuilder {
     /// 创建新的构建器
     pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
+        let review_config = config.review.clone().unwrap_or_default();
         Self {
             config,
             decision_callback,
@@ -56,6 +65,9 @@ impl AgentBuilder {
             validator: None,
             lifespan_calculator: None,
             validator_config: ValidatorConfig::default(),
+            review_store: None,
+            review_config,
+            reconnect_rx: None,
         }
     }
 
@@ -128,6 +140,18 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置审查存储（ActorSoul + ReflectorSoul）
+    pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
+        self.review_store = Some(store);
+        self
+    }
+
+    /// 设置重连请求接收通道（Claw 模式热切换）
+    pub fn with_reconnect_rx(mut self, rx: mpsc::Receiver<ReconnectRequest>) -> Self {
+        self.reconnect_rx = Some(rx);
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -149,13 +173,13 @@ impl AgentBuilder {
 
             match result {
                 Ok(manager) => {
-                    let agent_name = self.config.agent.as_ref()
+                    let agent_name = self
+                        .config
+                        .agent
+                        .as_ref()
                         .map(|c| c.name.as_str())
                         .unwrap_or("(未创建)");
-                    info!(
-                        "Memory system initialized for agent '{}'",
-                        agent_name
-                    );
+                    info!("Memory system initialized for agent '{}'", agent_name);
                     Some(manager)
                 }
                 Err(e) => {
@@ -184,8 +208,10 @@ impl AgentBuilder {
             validator_config: self.validator_config,
             registration_callback: None,
             reconnect_backoff: 0,
-            reconnect_rx: None,  // Builder 创建的 Agent 不使用热切换
+            reconnect_rx: self.reconnect_rx,
             death_reported: false,
+            review_store: self.review_store,
+            review_config: self.review_config,
         }
     }
 }

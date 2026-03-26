@@ -66,7 +66,6 @@ pub fn get_logs_dir() -> PathBuf {
                 return PathBuf::from(dir);
             }
 
-            
             // 如果目录不存在，尝试创建它（在运行时）
             // 这里只返回路径，创建逻辑由调用者负责
             PathBuf::from("logs")
