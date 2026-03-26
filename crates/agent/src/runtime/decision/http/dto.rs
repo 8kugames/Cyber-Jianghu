@@ -179,3 +179,23 @@ pub struct LlmConfigUpdateDetails {
     pub base_url: Option<String>,
     pub api_key: String,
 }
+
+// ============================================================================
+// 引导状态 API DTOs
+// ============================================================================
+
+/// 引导状态响应
+#[derive(Debug, Serialize)]
+pub struct SetupStatusResponse {
+    /// 是否需要引导配置
+    pub needs_setup: bool,
+    /// 是否有服务器配置
+    pub has_server: bool,
+    /// 是否有 LLM 配置
+    pub has_llm: bool,
+    /// 是否有角色
+    pub has_character: bool,
+    /// 当前角色名（如果有）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_character: Option<String>,
+}
