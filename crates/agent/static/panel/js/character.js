@@ -8,6 +8,16 @@ let hasMore = false;
 let hasMoreMemories = false;
 let hasMoreDreamRecords = false;
 let allCharacters = [];
+let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
+
+// 加载属性元数据（分类信息，从 narrative_config 解析）
+async function loadAttributeMeta() {
+    try {
+        attributeMeta = await apiGet('/api/v1/attribute-meta');
+    } catch (err) {
+        console.error('加载属性元数据失败:', err);
+    }
+}
 
 // 加载所有角色列表
 async function loadCharacterList() {
@@ -247,50 +257,57 @@ function renderAttributes(attributes) {
         return;
     }
 
-    const statusAttrs = ['hp', 'stamina', 'hunger', 'thirst'];
-    const innateAttrs = ['strength', 'agility', 'constitution', 'intelligence', 'charisma', 'luck'];
+    const categories = attributeMeta ? attributeMeta.categories : null;
+    const statusKeys = new Set(categories?.status || []);
+    const primaryKeys = new Set(categories?.primary || []);
+    const derivedKeys = new Set(categories?.derived || []);
+    const knownKeys = new Set([...statusKeys, ...primaryKeys, ...derivedKeys]);
 
     const isRedundantMax = (key) => {
         if (typeof key !== 'string' || !key.endsWith('_max')) return false;
         const base = key.slice(0, -4);
-        if (statusAttrs.includes(base) || innateAttrs.includes(base)) return true;
-        return false;
+        return knownKeys.has(base);
     };
 
     let html = '';
 
     // 先天属性
-    html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-    innateAttrs.forEach(key => {
-        const attr = attributes[key];
-        if (attr && typeof attr === 'object' && attr.current !== undefined) {
-            html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
-                <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                <span class="attr-value">${attr.current}/${attr.max}</span>
-            </div>`;
-        }
-    });
-    html += '</div></div>';
+    const primaryList = categories?.primary || [];
+    if (primaryList.length > 0) {
+        html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+        primaryList.forEach(key => {
+            const attr = attributes[key];
+            if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
+                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                    <span class="attr-value">${attr.current}</span>
+                </div>`;
+            }
+        });
+        html += '</div></div>';
+    }
 
     // 状态属性
-    html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-    statusAttrs.forEach(key => {
-        const attr = attributes[key];
-        if (attr && typeof attr === 'object' && attr.current !== undefined) {
-            const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-            const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-            html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
-                <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                <span class="attr-value">${attr.current}/${attr.max}</span>
-            </div>`;
-        }
-    });
-    html += '</div></div>';
+    const statusList = categories?.status || [];
+    if (statusList.length > 0) {
+        html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+        statusList.forEach(key => {
+            const attr = attributes[key];
+            if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
+                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                    <span class="attr-value">${attr.current}/${attr.max}</span>
+                </div>`;
+            }
+        });
+        html += '</div></div>';
+    }
 
-    // 派生属性
-    const known = [...statusAttrs, ...innateAttrs];
+    // 派生属性（从 attributes 中过滤掉已知 key 和 _max 冗余项）
     const derived = Object.keys(attributes)
-        .filter(k => !known.includes(k))
+        .filter(k => !knownKeys.has(k))
         .filter(k => !isRedundantMax(k))
         .filter(k => attributes[k] && typeof attributes[k] === 'object');
 
@@ -299,11 +316,9 @@ function renderAttributes(attributes) {
         derived.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
                     <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                    <span class="attr-value">${attr.current}/${attr.max}</span>
+                    <span class="attr-value">${attr.current}</span>
                 </div>`;
             }
         });
@@ -531,8 +546,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return div;
     }
 
-    loadCharacterList();
-    loadCharacter();
+    loadAttributeMeta().then(() => {
+        loadCharacterList();
+        loadCharacter();
+    });
 
     document.getElementById('load-more-experiences-btn').addEventListener('click', loadMoreExperiences);
     document.getElementById('load-more-memories-btn').addEventListener('click', loadMoreMemories);

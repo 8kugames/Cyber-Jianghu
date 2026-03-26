@@ -48,7 +48,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -370,6 +370,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             post(handlers::register_character_handler),
         ) // 创建新角色（转发到 Server）
         // === 角色信息端点 ===
+        .route(
+            "/api/v1/attribute-meta",
+            get(handlers::get_attribute_meta_handler),
+        ) // 属性元数据（分类）
         .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
         .route(
             "/api/v1/character/experiences",
@@ -384,6 +388,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/dream",
             post(handlers::dream_character_handler),
         ) // 托梦（持续 n 回合的念头注入）
+        .route(
+            "/api/v1/character/dream/records",
+            get(handlers::get_dream_records_handler),
+        )
         // === 多角色管理端点 ===
         .route("/api/v1/characters", get(handlers::list_characters_handler)) // 获取所有角色列表
         .route(
@@ -465,7 +473,8 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         Err(e) => {
             return Err(anyhow::anyhow!(
                 "无法绑定端口 {} ({}): 请检查是否有旧进程仍在运行，或使用其他端口",
-                port, e
+                port,
+                e
             ));
         }
     };
@@ -618,9 +627,9 @@ pub fn create_http_state(
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
-        reconnect_tx,                                        // 重连请求发送通道
+        reconnect_tx,   // 重连请求发送通道
         death_event_tx, // 死亡事件广播通道
-        runtime_mode, // 从调用者传入
+        runtime_mode,   // 从调用者传入
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -707,9 +716,15 @@ impl HttpApiState {
         let dream_store = self.dream_store.as_ref()?;
         let mut dream = dream_store.write().await;
 
-        if dream.remaining_ticks > 0 {
+        let agent_id = *self.agent_id.read().await;
+        dream.ensure_loaded(&self.config_path, &agent_id);
+
+        let mut changed = false;
+
+        let result = if dream.remaining_ticks > 0 {
             let thought = dream.thought.clone();
             dream.remaining_ticks = dream.remaining_ticks.saturating_sub(1);
+            changed = true;
 
             if dream.remaining_ticks == 0 {
                 info!("[dream] 托梦效果已结束");
@@ -718,9 +733,18 @@ impl HttpApiState {
 
             thought
         } else {
-            dream.thought = None;
+            if dream.thought.is_some() {
+                dream.thought = None;
+                changed = true;
+            }
             None
+        };
+
+        if changed {
+            dream.save_to_file(&self.config_path, &agent_id);
         }
+
+        result
     }
 
     /// 在 Tick 处理后异步更新关系描述
