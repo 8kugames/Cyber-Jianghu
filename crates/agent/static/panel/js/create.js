@@ -144,6 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('personality').value = '';
             document.getElementById('values').value = '';
             document.getElementById('speech_patterns').value = '';
+
+            // 1.5 秒后自动跳转到角色详情页
+            setTimeout(() => {
+                window.location.href = 'character.html';
+            }, 1500);
         } catch (err) {
             showError(err.message);
             show(errorDiv);

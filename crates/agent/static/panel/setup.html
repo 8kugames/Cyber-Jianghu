@@ -281,18 +281,8 @@
             // 初始化
             async function init() {
                 await loadProviders();
-                const config = await preloadConfig();
-                // 自动跳过已配置的步骤
-                if (config) {
-                    const hasServer = config.server_ws_url && config.server_ws_url !== '';
-                    const hasLlm = config.llm && config.llm.actor && config.llm.actor.model;
-                    if (hasServer && hasLlm) {
-                        showStep(3);
-                        document.getElementById('setup-message').textContent = '配置已就绪，可直接创建角色';
-                    } else if (hasServer) {
-                        showStep(2);
-                    }
-                }
+                await preloadConfig();
+                // 始终从步骤 1 开始，让用户确认预填充的服务器地址
             }
             init();
         </script>
