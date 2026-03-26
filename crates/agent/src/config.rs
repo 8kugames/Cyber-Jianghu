@@ -880,7 +880,10 @@ mod tests {
             config_path: PathBuf::from("/test/config.yaml"),
             ..Default::default()
         };
-        assert_eq!(config.get_reflector_llm_config().model, Some("qwen2.5:14b".to_string()));
+        assert_eq!(
+            config.get_reflector_llm_config().model,
+            Some("qwen2.5:14b".to_string())
+        );
     }
 
     #[test]
@@ -899,12 +902,17 @@ mod tests {
             config_path: PathBuf::from("/test/config.yaml"),
             ..Default::default()
         };
-        assert_eq!(config.get_reflector_llm_config().model, Some("qwen2.5:32b".to_string()));
+        assert_eq!(
+            config.get_reflector_llm_config().model,
+            Some("qwen2.5:32b".to_string())
+        );
     }
 
     #[test]
     fn test_api_key_validation_openai() {
-        assert!(LlmConfig::validate_api_key("openai", "sk-1234567890abcdef1234567890abcdef").is_ok());
+        assert!(
+            LlmConfig::validate_api_key("openai", "sk-1234567890abcdef1234567890abcdef").is_ok()
+        );
         assert!(LlmConfig::validate_api_key("openai", "invalid").is_err());
     }
 
