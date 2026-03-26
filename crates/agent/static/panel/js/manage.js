@@ -78,6 +78,97 @@ async function executeRebirth() {
     }
 }
 
+// LLM 配置辅助函数
+function setFormValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value || '';
+}
+
+function getActorConfig() {
+    return {
+        provider: document.getElementById('actor-provider').value,
+        model: document.getElementById('actor-model').value,
+        base_url: document.getElementById('actor-base-url').value || null,
+        api_key: document.getElementById('actor-api-key').value || null
+    };
+}
+
+function getReflectorConfig() {
+    return {
+        provider: document.getElementById('reflector-provider').value,
+        model: document.getElementById('reflector-model').value,
+        base_url: document.getElementById('reflector-base-url').value || null,
+        api_key: document.getElementById('reflector-api-key').value || null
+    };
+}
+
+function disableAllInputs(section) {
+    section.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
+}
+
+function showSavingState() {
+    const btn = document.getElementById('save-llm-btn');
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+}
+
+function resetSaveButton() {
+    const btn = document.getElementById('save-llm-btn');
+    btn.disabled = false;
+    btn.textContent = '保存配置';
+}
+
+async function loadProviders() {
+    const res = await fetch('/api/v1/config/llm/providers');
+    const data = await res.json();
+
+    const actorSelect = document.getElementById('actor-provider');
+    const reflectorSelect = document.getElementById('reflector-provider');
+    const baseUrlGroup = document.getElementById('actor-base-url-group');
+    const apiKeyGroup = document.getElementById('actor-api-key-group');
+
+    actorSelect.innerHTML = '';
+    reflectorSelect.innerHTML = '';
+
+    data.providers.forEach(provider => {
+        actorSelect.add(new Option(provider.label, provider.value));
+        reflectorSelect.add(new Option(provider.label, provider.value));
+    });
+
+    actorSelect.addEventListener('change', (e) => {
+        const selected = data.providers.find(p => p.value === e.target.value);
+        baseUrlGroup.style.display = selected.requires_base_url ? 'block' : 'none';
+        apiKeyGroup.style.display = selected.requires_base_url ? 'block' : 'none';
+    });
+}
+
+async function loadLlmConfig() {
+    const res = await fetch('/api/v1/config/llm');
+    const data = await res.json();
+
+    const section = document.getElementById('llm-config-section');
+
+    if (data.runtime_mode === 'claw') {
+        section.classList.add('claw-mode-disabled');
+        section.querySelector('.section-desc').textContent =
+            'LLM 配置仅在 Cognitive 模式下生效。当前模式：Claw';
+        disableAllInputs(section);
+        return;
+    }
+
+    setFormValue('actor-provider', data.actor.provider);
+    setFormValue('actor-model', data.actor.model);
+    setFormValue('actor-base-url', data.actor.base_url || '');
+
+    const apiKeyInput = document.getElementById('actor-api-key');
+    apiKeyInput.placeholder = data.actor.has_api_key ? '已配置（留空不修改）' : '未配置';
+
+    document.getElementById('reflector-inherit').checked = data.reflector_inherits_actor;
+    document.getElementById('reflector-inherit').dispatchEvent(new Event('change'));
+
+    document.getElementById('actor-provider').dispatchEvent(new Event('change'));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     dialog = document.getElementById('confirm-dialog');
     confirmBtn = document.getElementById('confirm-ok');
@@ -158,4 +249,51 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.textContent = '注入托梦';
         }
     });
+
+    // LLM 配置保存按钮
+    document.getElementById('save-llm-btn').addEventListener('click', async () => {
+        showSavingState();
+
+        try {
+            const payload = {
+                actor: getActorConfig(),
+                reflector: document.getElementById('reflector-inherit').checked ? null : getReflectorConfig(),
+                reflector_inherits_actor: document.getElementById('reflector-inherit').checked
+            };
+
+            const res = await fetch('/api/v1/config/llm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (res.ok) {
+                showSuccess('配置已保存，将在检测到文件变更时生效');
+                await loadLlmConfig();
+            } else {
+                const err = await res.json();
+                showError(err.message || '保存失败');
+            }
+        } catch (e) {
+            showError('网络错误: ' + e.message);
+        } finally {
+            resetSaveButton();
+        }
+    });
+
+    // ReflectorSoul 继承 checkbox
+    document.getElementById('reflector-inherit').addEventListener('change', (e) => {
+        const form = document.getElementById('reflector-llm-form');
+        if (e.target.checked) {
+            form.classList.add('disabled-form');
+            form.querySelectorAll('input, select').forEach(el => el.disabled = true);
+        } else {
+            form.classList.remove('disabled-form');
+            form.querySelectorAll('input, select').forEach(el => el.disabled = false);
+        }
+    });
+
+    // 加载 LLM 配置
+    loadProviders();
+    loadLlmConfig();
 });
