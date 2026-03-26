@@ -127,6 +127,9 @@ pub struct Agent {
 
     /// 配置重载通知接收通道
     pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
+
+    /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
+    pub(crate) http_api_state: Option<std::sync::Arc<crate::runtime::decision::http::HttpApiState>>,
 }
 
 impl Agent {
@@ -179,6 +182,7 @@ impl Agent {
             actor_llm_client: None,
             actor_llm_container: None,
             config_reload_rx: None,
+            http_api_state: None,
         }
     }
 
