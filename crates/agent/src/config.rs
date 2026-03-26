@@ -8,7 +8,7 @@
 // 3. Character - 当前角色（通过 Web/API 创建）
 // ============================================================================
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,8 +22,7 @@ use zeroize::Zeroize;
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
 
 /// 支持的 LLM Provider
-pub const SUPPORTED_PROVIDERS: &[&str] =
-    &["ollama", "openai", "anthropic", "deepseek", "openai_compatible"];
+pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
 
 // ============================================================================
 // Agent 身份配置（持久化）
@@ -403,25 +402,10 @@ impl LlmConfig {
             return Ok(());
         }
         match provider {
-            "openai" => {
-                if !api_key.starts_with("sk-") {
-                    return Err(anyhow!("OpenAI API Key 必须以 sk- 开头"));
-                }
-                if api_key.len() < 20 {
-                    return Err(anyhow!("OpenAI API Key 长度不足"));
-                }
+            "ollama" | "openclaw" => {}
+            "openai_compatible" => {
+                // OpenAI Compatible 通常需要 API Key，但不强制格式
             }
-            "anthropic" => {
-                if !api_key.starts_with("sk-ant-") {
-                    return Err(anyhow!("Anthropic API Key 必须以 sk-ant- 开头"));
-                }
-            }
-            "deepseek" => {
-                if !api_key.starts_with("sk-") {
-                    return Err(anyhow!("DeepSeek API Key 必须以 sk- 开头"));
-                }
-            }
-            "ollama" => {}
             _ => {}
         }
         Ok(())
@@ -907,19 +891,5 @@ mod tests {
             config.get_reflector_llm_config().model,
             Some("qwen2.5:32b".to_string())
         );
-    }
-
-    #[test]
-    fn test_api_key_validation_openai() {
-        assert!(
-            LlmConfig::validate_api_key("openai", "sk-1234567890abcdef1234567890abcdef").is_ok()
-        );
-        assert!(LlmConfig::validate_api_key("openai", "invalid").is_err());
-    }
-
-    #[test]
-    fn test_api_key_validation_anthropic() {
-        assert!(LlmConfig::validate_api_key("anthropic", "sk-ant-api123").is_ok());
-        assert!(LlmConfig::validate_api_key("anthropic", "invalid").is_err());
     }
 }

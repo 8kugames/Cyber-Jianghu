@@ -17,7 +17,7 @@
 #    docker compose -f docker-compose.prod.yml up -d
 #
 # 4. 创建角色（两种方式）：
-#    - Web 面板: http://localhost:23340/panel/
+#    - Web 面板: http://localhost:23340/welcome.html
 #    - CLI 命令: cyber-jianghu-agent character create <name>
 #
 # 5. 查看日志
@@ -48,7 +48,7 @@ services:
       CYBER_JIANGHU_SERVER_HTTP_URL: ${AGENT_SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
 
       # Agent 运行配置
-      CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-claw}
+      CYBER_JIANGHU_RUNTIME_MODE: ${AGENT_RUNTIME_MODE:-cognitive}
       CYBER_JIANGHU_PORT: ${AGENT_PORT:-23340}
 
       # 日志级别

@@ -83,12 +83,10 @@ async function loadCharacter() {
         document.getElementById('location').textContent = data.location || '-';
         document.getElementById('tick-id').textContent = data.tick_id || '-';
 
-        // 状态
         if (data.status) {
             const statusEl = document.getElementById('status');
-            statusEl.textContent = data.status === 'alive' ? '存活' :
-                                   data.status === 'dead' ? '死亡' : data.status;
-            statusEl.className = `value status-${data.status}`;
+            const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
+            statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>';
         }
 
         // 注册时间
