@@ -19,11 +19,12 @@ use axum::{
     http::{Response, StatusCode},
     response::{IntoResponse, Json},
 };
+use std::collections::HashMap;
 use bytes::Bytes;
 use http_body::Frame;
 use http_body_util::StreamBody;
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -595,7 +596,7 @@ pub(super) async fn get_relationships_handler(
 
     let service = RelationshipService::new(store);
     match service.get_all() {
-        Ok(relationships) => Json(relationships).into_response(),
+        Ok(relationships) => Json(serde_json::json!({ "relationships": relationships })).into_response(),
         Err(e) => {
             error!("[http] Failed to get relationships: {}", e);
             (
@@ -1063,7 +1064,9 @@ pub struct CharacterRegisterResponse {
 /// POST /api/v1/character/generate - 使用 LLM 自动生成角色
 ///
 /// 调用配置的 LLM 生成一个符合世界观的武侠角色，返回完整角色信息供用户确认
-pub(super) async fn generate_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+pub(super) async fn generate_character_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
     use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClientExt, LlmProvider};
 
     // 1. 读取配置文件
@@ -1583,6 +1586,25 @@ fn load_narrative_config(
     None
 }
 
+/// 属性元数据响应
+#[derive(Debug, Serialize)]
+pub struct AttributeMetaResponse {
+    /// 属性分类
+    pub categories: HashMap<String, Vec<String>>,
+}
+
+/// 获取属性元数据（分类、中文名等，从 narrative_config 解析）
+pub(super) async fn get_attribute_meta_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let narrative_config = load_narrative_config(&state.config_path);
+    let categories = narrative_config
+        .map(|cfg| cfg.attribute_categories)
+        .unwrap_or_default();
+
+    Json(AttributeMetaResponse { categories }).into_response()
+}
+
 /// 丰富属性数据，添加叙事描述
 fn enrich_attributes_with_descriptions(
     raw_attributes: Option<serde_json::Value>,
@@ -1939,6 +1961,13 @@ pub struct DreamResponse {
     pub can_use_today: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DreamRecord {
+    pub injected_at: String,
+    pub thought: String,
+    pub duration: u32,
+}
+
 /// 托梦状态（存储在 HttpApiState 中）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DreamState {
@@ -1946,8 +1975,80 @@ pub struct DreamState {
     pub thought: Option<String>,
     /// 剩余回合数
     pub remaining_ticks: u32,
+    pub records: Vec<DreamRecord>,
     /// 上次使用的游戏日期（用于每日限制）
     pub last_used_game_date: Option<GameDate>,
+    #[serde(skip)]
+    pub loaded: bool,
+    #[serde(skip)]
+    pub current_agent_id: Option<uuid::Uuid>,
+}
+
+impl DreamState {
+    pub fn load_from_file(config_path: &std::path::Path, agent_id: &uuid::Uuid) -> Option<Self> {
+        if agent_id.is_nil() {
+            return None;
+        }
+        if let Some(dir) = config_path.parent() {
+            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
+            if file_path.exists() {
+                match std::fs::read_to_string(&file_path) {
+                    Ok(content) => match serde_json::from_str::<Self>(&content) {
+                        Ok(mut state) => {
+                            state.loaded = true;
+                            state.current_agent_id = Some(*agent_id);
+                            return Some(state);
+                        }
+                        Err(e) => {
+                            tracing::error!("反序列化托梦记录失败 {:?}: {}", file_path, e);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("读取托梦记录文件失败 {:?}: {}", file_path, e);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn save_to_file(&self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+        if agent_id.is_nil() {
+            return;
+        }
+        if let Some(dir) = config_path.parent() {
+            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
+            match serde_json::to_string_pretty(self) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(&file_path, json) {
+                        tracing::error!("写入托梦记录文件失败 {:?}: {}", file_path, e);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("序列化托梦记录失败: {}", e);
+                }
+            }
+        }
+    }
+
+    pub fn ensure_loaded(&mut self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+        if agent_id.is_nil() {
+            return;
+        }
+        if self.loaded && self.current_agent_id == Some(*agent_id) {
+            return;
+        }
+        if let Some(loaded) = Self::load_from_file(config_path, agent_id) {
+            *self = loaded;
+        } else {
+            self.thought = None;
+            self.remaining_ticks = 0;
+            self.records.clear();
+            self.last_used_game_date = None;
+            self.loaded = true;
+            self.current_agent_id = Some(*agent_id);
+        }
+    }
 }
 
 /// 游戏日期（用于每日限制）
@@ -2018,7 +2119,10 @@ pub(super) async fn dream_character_handler(
 
     // 检查每日限制
     {
-        let dream = dream_store.read().await;
+        let mut dream = dream_store.write().await;
+        let agent_id = *state.agent_id.read().await;
+        dream.ensure_loaded(&state.config_path, &agent_id);
+
         if let Some(ref last_date) = dream.last_used_game_date {
             if last_date == &current_date {
                 return (
@@ -2042,9 +2146,24 @@ pub(super) async fn dream_character_handler(
 
     // 更新托梦状态
     let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
+    
     dream.thought = Some(req.thought.clone());
     dream.remaining_ticks = req.duration;
     dream.last_used_game_date = Some(current_date);
+    dream.records.insert(
+        0,
+        DreamRecord {
+            injected_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            thought: req.thought.clone(),
+            duration: req.duration,
+        },
+    );
+    if dream.records.len() > 200 {
+        dream.records.truncate(200);
+    }
+    dream.save_to_file(&state.config_path, &agent_id);
 
     Json(DreamResponse {
         success: true,
@@ -2071,7 +2190,9 @@ pub(super) async fn get_dream_handler(State(state): State<HttpApiState>) -> impl
         }
     };
 
-    let dream = dream_store.read().await;
+    let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
 
     // 获取当前游戏日期，判断今天是否还能使用
     let can_use_today = {
@@ -2102,6 +2223,59 @@ pub struct DreamStatusResponse {
     pub remaining_ticks: u32,
     /// 今天是否还能使用
     pub can_use_today: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DreamRecordsResponse {
+    pub page: u32,
+    pub limit: u32,
+    pub total: u32,
+    pub has_more: bool,
+    pub records: Vec<DreamRecord>,
+}
+
+pub(super) async fn get_dream_records_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let limit: u32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+
+    let Some(dream_store) = &state.dream_store else {
+        return Json(DreamRecordsResponse {
+            page,
+            limit,
+            total: 0,
+            has_more: false,
+            records: vec![],
+        })
+        .into_response();
+    };
+
+    let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
+
+    let total = dream.records.len() as u32;
+    let start = ((page - 1) * limit) as usize;
+    let end = std::cmp::min(start + limit as usize, dream.records.len());
+    let records = if start < dream.records.len() {
+        dream.records[start..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    Json(DreamRecordsResponse {
+        page,
+        limit,
+        total,
+        has_more: end < dream.records.len(),
+        records,
+    })
+    .into_response()
 }
 
 // ============================================================================
@@ -3289,9 +3463,7 @@ pub(super) async fn get_cognitive_context_handler(
 /// GET /api/v1/events - SSE 实时事件流
 ///
 /// 用于 Web 面板实时接收死亡等事件通知
-pub(super) async fn death_events_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let mut rx = state.death_event_tx.subscribe();
 
     let stream = async_stream::stream! {
