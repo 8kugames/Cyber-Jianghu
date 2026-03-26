@@ -64,7 +64,8 @@ pub enum DownstreamMessage {
         /// 四阶段认知上下文（结构化 JSON，引导 OpenClaw 四阶段推理）
         /// 包含：Perception → Motivation → Planning → Decision
         #[serde(skip_serializing_if = "Option::is_none")]
-        cognitive_context: Option<crate::runtime::decision::http::cognitive_context::CognitiveContext>,
+        cognitive_context:
+            Option<crate::runtime::decision::http::cognitive_context::CognitiveContext>,
     },
 
     /// Tick 关闭通知（超时未收到 Intent 时发送）
@@ -92,7 +93,6 @@ pub enum DownstreamMessage {
     },
 
     // === Server 消息透传 ===
-
     /// Server 错误消息
     ServerError {
         /// 结构化错误码
@@ -375,7 +375,8 @@ impl DownstreamMessage {
             || message.contains("limit exceeded")
         {
             ServerErrorCode::RateLimited
-        } else if message.contains("tick") && (message.contains("too far") || message.contains("过期"))
+        } else if message.contains("tick")
+            && (message.contains("too far") || message.contains("过期"))
         {
             ServerErrorCode::TickExpired
         } else if message.contains("Invalid") || message.contains("无效") {
@@ -551,7 +552,8 @@ mod tests {
     #[test]
     fn test_serialize_tick_message_with_context() {
         use crate::runtime::decision::http::cognitive_context::{
-            CognitiveContext, PerceptionContext, MotivationContext, PlanningContext, DecisionContext,
+            CognitiveContext, DecisionContext, MotivationContext, PerceptionContext,
+            PlanningContext,
         };
 
         let state = create_test_world_state();
@@ -705,7 +707,12 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code, message, tick_id, current_tick } => {
+            DownstreamMessage::ServerError {
+                code,
+                message,
+                tick_id,
+                current_tick,
+            } => {
                 assert_eq!(code, ServerErrorCode::AgentDead);
                 assert!(message.contains("死亡"));
                 assert!(tick_id.is_none()); // 消息中没有 tick_id
@@ -725,7 +732,12 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code: _, message, tick_id, current_tick } => {
+            DownstreamMessage::ServerError {
+                code: _,
+                message,
+                tick_id,
+                current_tick,
+            } => {
                 assert_eq!(tick_id, Some(105));
                 assert!(message.contains("tick 105"));
                 assert_eq!(current_tick, Some(100)); // 传入的 current_tick

@@ -470,19 +470,21 @@ impl SchemaValidator {
                 let num_val = value.as_f64().or_else(|| value.as_i64().map(|v| v as f64));
                 if let Some(val) = num_val {
                     if let Some(min) = property.minimum
-                        && val < min {
-                            return Err(SchemaValidationError::ValueOutOfRange(format!(
-                                "值 {} 小于最小值 {}",
-                                val, min
-                            )));
-                        }
+                        && val < min
+                    {
+                        return Err(SchemaValidationError::ValueOutOfRange(format!(
+                            "值 {} 小于最小值 {}",
+                            val, min
+                        )));
+                    }
                     if let Some(max) = property.maximum
-                        && val > max {
-                            return Err(SchemaValidationError::ValueOutOfRange(format!(
-                                "值 {} 大于最大值 {}",
-                                val, max
-                            )));
-                        }
+                        && val > max
+                    {
+                        return Err(SchemaValidationError::ValueOutOfRange(format!(
+                            "值 {} 大于最大值 {}",
+                            val, max
+                        )));
+                    }
                 }
             }
             SchemaPropertyType::Boolean => {
@@ -503,11 +505,12 @@ impl SchemaValidator {
 
                 // 验证数组项
                 if let Some(ref items) = property.items
-                    && let Some(arr) = value.as_array() {
-                        for item in arr {
-                            Self::validate_property(item, items)?;
-                        }
+                    && let Some(arr) = value.as_array()
+                {
+                    for item in arr {
+                        Self::validate_property(item, items)?;
                     }
+                }
             }
             SchemaPropertyType::Object => {
                 if !value.is_object() {

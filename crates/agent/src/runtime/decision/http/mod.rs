@@ -29,8 +29,8 @@
 // - HTTP API 是辅助功能，WebSocket 是 OpenClaw 与 Agent 的主通道
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
-mod context;
 pub mod cognitive_context;
+mod context;
 mod dto;
 mod handlers;
 pub mod intent_history;
@@ -230,8 +230,12 @@ pub fn http_decision(
             state.api_state.maybe_update_narratives(&world_state).await;
 
             if let Some(ref ws_state) = state.ws_shared_state {
-                let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
-                let deadline = Instant::now() + Duration::from_secs((tick_duration as f64 * 0.9) as u64);
+                let tick_duration = state
+                    .api_state
+                    .tick_duration_secs
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let deadline =
+                    Instant::now() + Duration::from_secs((tick_duration as f64 * 0.9) as u64);
                 ws_state.broadcast_tick(&world_state, deadline);
             }
 
@@ -241,10 +245,17 @@ pub fn http_decision(
             // 计算动态超时时间：tick_duration_secs * 0.8
             // 从 GameRules 获取真实的 tick_duration_secs（默认 60 秒）
             // 给 OpenClaw 足够的时间进行决策
-            let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
+            let tick_duration = state
+                .api_state
+                .tick_duration_secs
+                .load(std::sync::atomic::Ordering::Relaxed);
             let dynamic_timeout = (tick_duration as f64 * 0.8) as u64;
 
-            tracing::info!("[http] Waiting for intent, tick={}, timeout={}s", world_state.tick_id, dynamic_timeout);
+            tracing::info!(
+                "[http] Waiting for intent, tick={}, timeout={}s",
+                world_state.tick_id,
+                dynamic_timeout
+            );
 
             // 消费队列中过期的意图
             loop {
@@ -255,7 +266,11 @@ pub fn http_decision(
                     }
                     Ok(intent) => {
                         // 发现当前或未来 tick 的意图，直接返回
-                        tracing::info!("[http] Found queued intent for tick {}, action={}", intent.tick_id, intent.action_type);
+                        tracing::info!(
+                            "[http] Found queued intent for tick {}, action={}",
+                            intent.tick_id,
+                            intent.action_type
+                        );
                         return intent;
                     }
                     Err(_) => break,
@@ -264,9 +279,13 @@ pub fn http_decision(
 
             match tokio::time::timeout(Duration::from_secs(dynamic_timeout), rx.recv()).await {
                 Ok(Some(intent)) => {
-                    tracing::info!("[http] Received intent for tick {}, action={}", intent.tick_id, intent.action_type);
+                    tracing::info!(
+                        "[http] Received intent for tick {}, action={}",
+                        intent.tick_id,
+                        intent.action_type
+                    );
                     intent
-                },
+                }
                 Ok(None) => {
                     error!("[http] Channel closed, defaulting to idle");
                     let guard = agent_id_clone.read().await;
@@ -302,7 +321,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
         // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
-        .route("/api/v1/cognitive", get(handlers::get_cognitive_context_handler)) // 结构化认知上下文
+        .route(
+            "/api/v1/cognitive",
+            get(handlers::get_cognitive_context_handler),
+        ) // 结构化认知上下文
         // === 关系管理端点 ===
         .route(
             "/api/v1/relationship/list",
@@ -365,7 +387,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 获取审查状态
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
-        .route("/api/v1/config/reload", post(handlers::reload_config_handler)) // 热重载配置
+        .route(
+            "/api/v1/config/reload",
+            post(handlers::reload_config_handler),
+        ) // 热重载配置
         .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
 }
 
@@ -406,9 +431,18 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
     info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
-    info!("[http] - Create character: http://127.0.0.1:{}/index.html", local_addr.port());
-    info!("[http] - Character info:  http://127.0.0.1:{}/character.html", local_addr.port());
-    info!("[http] - Management:      http://127.0.0.1:{}/manage.html", local_addr.port());
+    info!(
+        "[http] - Create character: http://127.0.0.1:{}/index.html",
+        local_addr.port()
+    );
+    info!(
+        "[http] - Character info:  http://127.0.0.1:{}/character.html",
+        local_addr.port()
+    );
+    info!(
+        "[http] - Management:      http://127.0.0.1:{}/manage.html",
+        local_addr.port()
+    );
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -539,7 +573,7 @@ pub fn create_http_state(
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
-        reconnect_tx,  // 重连请求发送通道
+        reconnect_tx, // 重连请求发送通道
     };
 
     let decision_state = Arc::new(HttpDecisionState {

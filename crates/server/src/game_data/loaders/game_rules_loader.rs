@@ -36,7 +36,7 @@ pub fn load_game_rules<P: AsRef<Path>>(config_dir: P) -> Result<UnifiedGameRules
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game_data::loaders::config_format::{parse_config, ConfigFormat};
+    use crate::game_data::loaders::config_format::{ConfigFormat, parse_config};
     use std::fs;
     use tempfile::TempDir;
 

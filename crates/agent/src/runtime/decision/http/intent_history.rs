@@ -121,7 +121,10 @@ impl IntentHistoryStore {
         let mut entries = self.entries.write().await;
         if let Some(entry) = entries.get_mut(&tick_id) {
             entry.observer_thought = Some(thought);
-            tracing::debug!("[intent_history] Updated observer thought for tick {}", tick_id);
+            tracing::debug!(
+                "[intent_history] Updated observer thought for tick {}",
+                tick_id
+            );
         } else {
             tracing::warn!(
                 "[intent_history] No entry found for tick {} when updating observer thought",
@@ -153,9 +156,7 @@ impl IntentHistoryStore {
         let entries = self.entries.read().await;
         tick_ids
             .iter()
-            .filter_map(|&tick_id| {
-                entries.get(&tick_id).cloned().map(|e| (tick_id, e))
-            })
+            .filter_map(|&tick_id| entries.get(&tick_id).cloned().map(|e| (tick_id, e)))
             .collect()
     }
 
@@ -185,7 +186,12 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(1, intent_id, "idle".to_string(), Some("思考中...".to_string()))
+            .record_intent(
+                1,
+                intent_id,
+                "idle".to_string(),
+                Some("思考中...".to_string()),
+            )
             .await;
 
         let entry = store.get_by_tick(1).await;
@@ -243,7 +249,12 @@ mod tests {
 
         for i in 1..=5 {
             store
-                .record_intent(i, Uuid::new_v4(), "idle".to_string(), Some(format!("thought {}", i)))
+                .record_intent(
+                    i,
+                    Uuid::new_v4(),
+                    "idle".to_string(),
+                    Some(format!("thought {}", i)),
+                )
                 .await;
         }
 

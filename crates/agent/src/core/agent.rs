@@ -8,7 +8,7 @@
 use anyhow::Result;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::ai::dialogue::DialogueClient;
@@ -19,9 +19,9 @@ use crate::ai::memory::tools::{MemoryToolDefinition, MemoryToolResult};
 use crate::ai::memory::types::MemoryEntry;
 use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{PersonaInfo, Validator};
-use crate::config::Config;
+use crate::config::{Config, ReviewConfig};
 use crate::models::{Intent, WorldState};
-use crate::runtime::decision::http::ReconnectRequest;
+use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
 
 use super::builder::AgentBuilder;
@@ -107,6 +107,12 @@ pub struct Agent {
 
     /// 死亡是否已报告（避免重复日志）
     pub(crate) death_reported: bool,
+
+    /// 审查存储（ReflectorSoul 共享，用于 ActorSoul 提交审查）
+    pub(crate) review_store: Option<std::sync::Arc<ReviewStore>>,
+
+    /// 审查配置
+    pub(crate) review_config: ReviewConfig,
 }
 
 impl Agent {
@@ -129,10 +135,13 @@ impl Agent {
         reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
     ) -> Self {
         let client = AgentClient::new(config.server.clone());
+        let review_config = config.review.clone().unwrap_or_default();
 
         // 设置设备身份（如果已存在）
         if let Some(ref identity) = config.identity {
-            client.set_identity(identity.device_id, identity.auth_token.clone()).await;
+            client
+                .set_identity(identity.device_id, identity.auth_token.clone())
+                .await;
         }
 
         Self {
@@ -151,12 +160,16 @@ impl Agent {
             reconnect_backoff: 0,
             reconnect_rx,
             death_reported: false,
+            review_store: None,
+            review_config,
         }
     }
 
     /// 获取角色名称（如果已创建）
     pub(crate) fn character_name(&self) -> &str {
-        self.config.agent.as_ref()
+        self.config
+            .agent
+            .as_ref()
             .map(|c| c.name.as_str())
             .unwrap_or("(未创建)")
     }
@@ -382,18 +395,16 @@ impl Agent {
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
         match &self.config.agent {
-            Some(character) => {
-                PersonaInfo {
-                    gender: character.gender.clone(),
-                    age: self
-                        .lifespan_calculator
-                        .as_ref()
-                        .map(|c| c.current_age())
-                        .unwrap_or(character.age),
-                    personality: character.personality.clone(),
-                    values: character.values.clone(),
-                }
-            }
+            Some(character) => PersonaInfo {
+                gender: character.gender.clone(),
+                age: self
+                    .lifespan_calculator
+                    .as_ref()
+                    .map(|c| c.current_age())
+                    .unwrap_or(character.age),
+                personality: character.personality.clone(),
+                values: character.values.clone(),
+            },
             None => {
                 // 未创建角色时的默认人设
                 PersonaInfo {
@@ -480,19 +491,13 @@ impl Agent {
             if remaining < min_retry_time {
                 warn!("Tick time exhausted, forcing idle");
                 let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::idle(
-                    agent_id,
-                    world_state.tick_id,
-                ));
+                return Ok(Intent::idle(agent_id, world_state.tick_id));
             }
 
             if attempt > max_attempts {
                 warn!("Max validation attempts reached, forcing idle");
                 let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::idle(
-                    agent_id,
-                    world_state.tick_id,
-                ));
+                return Ok(Intent::idle(agent_id, world_state.tick_id));
             }
 
             // 调用决策回调（可能包含驳回反馈）
@@ -551,16 +556,115 @@ impl Agent {
                     {
                         warn!("Too many consecutive rejections, forcing idle");
                         let agent_id = self.client.agent_id().await.unwrap_or_default();
-                        return Ok(Intent::idle(
-                            agent_id,
-                            world_state.tick_id,
-                        ));
+                        return Ok(Intent::idle(agent_id, world_state.tick_id));
                     }
 
                     // 记录驳回原因，用于下一次决策
                     last_rejection_reason = Some(reason);
                 }
             }
+        }
+    }
+
+    /// 提交 Intent 给 ReflectorSoul 审查
+    ///
+    /// ActorSoul 生成 Intent 后，提交给 ReflectorSoul 进行审查
+    /// 等待审查结果后返回最终 Intent（通过、拒绝或超时降级）
+    pub async fn submit_for_review(
+        &self,
+        intent: Intent,
+        world_state: &WorldState,
+        review_store: &std::sync::Arc<ReviewStore>,
+    ) -> Result<Intent> {
+        use cyber_jianghu_protocol::PersonaSummary;
+        use std::time::Instant;
+
+        let persona = self.extract_persona();
+        let character_name = self
+            .config
+            .agent
+            .as_ref()
+            .map(|c| c.name.as_str())
+            .unwrap_or("(未创建)");
+
+        // 构建 PersonaSummary（ReflectorSoul 使用）
+        let persona_summary = PersonaSummary {
+            name: character_name.to_string(),
+            gender: persona.gender.clone(),
+            age: persona.age,
+            personality: persona.personality.clone(),
+            values: persona.values.clone(),
+        };
+
+        // 添加到待审查队列
+        let intent_id = review_store
+            .add_pending(
+                intent.clone(),
+                self.client.agent_id().await.unwrap_or_default(),
+                persona_summary,
+                self.build_world_context(world_state),
+            )
+            .await;
+
+        info!(
+            "[ActorSoul] Submitted intent {} for ReflectorSoul review",
+            intent_id
+        );
+
+        // 等待 ReflectorSoul 审查结果（带超时）
+        let timeout = std::time::Duration::from_secs(self.review_config.timeout_seconds);
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            // 检查超时
+            if Instant::now() > deadline {
+                warn!(
+                    "[ActorSoul] Review timeout for intent {}, using original intent",
+                    intent_id
+                );
+                return Ok(intent);
+            }
+
+            // 检查审查状态
+            if let Some(result) = review_store.get_status(intent_id).await {
+                use crate::runtime::decision::http::review::ReviewStatus;
+                match result.status {
+                    ReviewStatus::Approved => {
+                        info!(
+                            "[ActorSoul] Intent approved by ReflectorSoul: {:?}",
+                            result.reason
+                        );
+                        return Ok(intent);
+                    }
+                    ReviewStatus::Rejected => {
+                        warn!(
+                            "[ActorSoul] Intent rejected by ReflectorSoul: {:?}",
+                            result.reason
+                        );
+                        // 拒绝后返回 idle
+                        return Ok(Intent::idle(
+                            self.client.agent_id().await.unwrap_or_default(),
+                            world_state.tick_id,
+                        )
+                        .with_thought(format!(
+                            "被反思之魂驳回: {}",
+                            result.reason.unwrap_or_default()
+                        )));
+                    }
+                    ReviewStatus::TimeoutApproved => {
+                        info!(
+                            "[ActorSoul] Review timeout approved for intent {}",
+                            intent_id
+                        );
+                        return Ok(intent);
+                    }
+                    ReviewStatus::Pending => {
+                        // 继续等待
+                    }
+                }
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     }
 }

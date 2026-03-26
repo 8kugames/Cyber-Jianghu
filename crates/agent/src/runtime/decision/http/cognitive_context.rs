@@ -113,7 +113,9 @@ impl Default for CognitiveContext {
             },
             decision: DecisionContext {
                 requires_reasoning: true,
-                thinking_prompt: "基于你的感知、动机和可用动作，决定下一步行动。请先用一段话描述你的推理过程。".to_string(),
+                thinking_prompt:
+                    "基于你的感知、动机和可用动作，决定下一步行动。请先用一段话描述你的推理过程。"
+                        .to_string(),
             },
         }
     }
@@ -160,14 +162,20 @@ pub struct CognitiveContextBuilder {
 
 impl Default for CognitiveContextBuilder {
     fn default() -> Self {
-        Self::new(NarrativeEngine::default(), CognitiveContextConfig::default())
+        Self::new(
+            NarrativeEngine::default(),
+            CognitiveContextConfig::default(),
+        )
     }
 }
 
 impl CognitiveContextBuilder {
     /// 创建新的构建器
     pub fn new(narrative_engine: NarrativeEngine, config: CognitiveContextConfig) -> Self {
-        Self { narrative_engine, config }
+        Self {
+            narrative_engine,
+            config,
+        }
     }
 
     /// 使用默认配置创建
@@ -208,10 +216,9 @@ impl CognitiveContextBuilder {
     ) -> PerceptionContext {
         let self_state = &world_state.self_state;
 
-        let narrative: PerceptionNarrative = self.narrative_engine.generate_narrative(
-            &self_state.attributes,
-            &self_state.status_effects,
-        );
+        let narrative: PerceptionNarrative = self
+            .narrative_engine
+            .generate_narrative(&self_state.attributes, &self_state.status_effects);
 
         let self_status = format!(
             "{}, {}, {}, {}",
@@ -375,7 +382,9 @@ impl CognitiveContextBuilder {
     fn build_decision(&self) -> DecisionContext {
         DecisionContext {
             requires_reasoning: true,
-            thinking_prompt: "基于你的感知、动机和可用动作，决定下一步行动。请先用一段话描述你的推理过程。".to_string(),
+            thinking_prompt:
+                "基于你的感知、动机和可用动作，决定下一步行动。请先用一段话描述你的推理过程。"
+                    .to_string(),
         }
     }
 }
@@ -424,10 +433,22 @@ mod tests {
 
     #[test]
     fn test_drive_sorting() {
-        let mut drives = vec![
-            Drive { drive: "low".to_string(), intensity: 3, reason: "".to_string() },
-            Drive { drive: "high".to_string(), intensity: 8, reason: "".to_string() },
-            Drive { drive: "mid".to_string(), intensity: 5, reason: "".to_string() },
+        let mut drives = [
+            Drive {
+                drive: "low".to_string(),
+                intensity: 3,
+                reason: "".to_string(),
+            },
+            Drive {
+                drive: "high".to_string(),
+                intensity: 8,
+                reason: "".to_string(),
+            },
+            Drive {
+                drive: "mid".to_string(),
+                intensity: 5,
+                reason: "".to_string(),
+            },
         ];
 
         drives.sort_by(|a, b| b.intensity.cmp(&a.intensity));

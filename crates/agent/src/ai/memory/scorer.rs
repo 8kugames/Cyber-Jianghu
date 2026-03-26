@@ -114,9 +114,10 @@ impl ImportanceScorer {
         if let Some(items) = metadata.get("items").and_then(|v| v.as_array()) {
             for item in items {
                 if let Some(name) = item.get("name").and_then(|v| v.as_str())
-                    && (name.contains("刀") || name.contains("剑") || name.contains("秘籍")) {
-                        adjustment += 0.15;
-                    }
+                    && (name.contains("刀") || name.contains("剑") || name.contains("秘籍"))
+                {
+                    adjustment += 0.15;
+                }
             }
         }
 
