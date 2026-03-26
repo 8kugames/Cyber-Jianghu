@@ -594,8 +594,12 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             };
             let decision = create_claw_decision_callback(claw_state);
 
+            // 创建重连通道（用于 Web Panel 触发服务器地址热切换）
+            let (reconnect_tx, reconnect_rx) =
+                mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
+
             let (api_state, actual_port) =
-                start_http_api_server(port, device_id.clone(), &config)?;
+                start_http_api_server(port, device_id.clone(), &config, Some(reconnect_tx))?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -633,11 +637,17 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 .with_review_store(review_store.clone())
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
+                .with_http_api_state(api_state.clone())
+                .with_reconnect_rx(reconnect_rx)
                 .build();
+            let intent_history = api_state.intent_history.clone();
             tokio::spawn(async move {
-                if let Err(e) =
-                    run_reflector_soul_task(reflector_config_watcher.subscribe(), review_store)
-                        .await
+                if let Err(e) = run_reflector_soul_task(
+                    reflector_config_watcher.subscribe(),
+                    review_store,
+                    intent_history,
+                )
+                .await
                 {
                     error!("ReflectorSoul 任务异常退出: {}", e);
                 }
@@ -677,9 +687,14 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 .with_review_store(review_store.clone())
                 .build();
 
+            let intent_history = setup.api_state.intent_history.clone();
             tokio::spawn(async move {
-                if let Err(e) =
-                    run_reflector_soul_task(reflector_config_reload_rx, review_store).await
+                if let Err(e) = run_reflector_soul_task(
+                    reflector_config_reload_rx,
+                    review_store,
+                    intent_history,
+                )
+                .await
                 {
                     error!("ReflectorSoul 任务异常退出: {}", e);
                 }
@@ -693,11 +708,13 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
     // Cognitive 模式：设置死亡事件回调
     if let Some(death_tx) = cognitive_death_event_tx {
         let death_tx_clone = death_tx.clone();
-        agent.set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
-            if matches!(msg, ServerMessage::AgentDied { .. }) {
-                let _ = death_tx_clone.send(msg);
-            }
-        })).await;
+        agent
+            .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
+                if matches!(msg, ServerMessage::AgentDied { .. }) {
+                    let _ = death_tx_clone.send(msg);
+                }
+            }))
+            .await;
     }
 
     if let Some(setup) = maybe_callback_setup {
@@ -839,6 +856,9 @@ fn start_http_api_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
     config: &Config,
+    reconnect_tx: Option<
+        mpsc::Sender<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>,
+    >,
 ) -> Result<(
     Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
     u16,
@@ -869,7 +889,7 @@ fn start_http_api_server(
             config.server.http_url.clone(),
             config.server.ws_url.clone(),
             config.identity.clone(),
-            None,
+            reconnect_tx,
             config_path(),
             None,
             config.runtime.mode,
@@ -883,8 +903,11 @@ fn start_http_api_server(
         let mut try_port = actual_port;
 
         loop {
-            match cyber_jianghu_agent::runtime::decision::run_http_server(try_port, api_state_clone.clone())
-                .await
+            match cyber_jianghu_agent::runtime::decision::run_http_server(
+                try_port,
+                api_state_clone.clone(),
+            )
+            .await
             {
                 Ok(()) => return,
                 Err(e) if is_auto_port => {
@@ -929,6 +952,9 @@ fn start_http_api_server(
 async fn run_reflector_soul_task(
     mut config_reload_rx: tokio::sync::broadcast::Receiver<()>,
     review_store: Arc<ReviewStore>,
+    intent_history: Option<
+        Arc<cyber_jianghu_agent::runtime::decision::http::intent_history::IntentHistoryStore>,
+    >,
 ) -> Result<()> {
     info!("ReflectorSoul 启动（反思之魂），审查 ActorSoul 意图");
 
@@ -980,8 +1006,13 @@ async fn run_reflector_soul_task(
                 } else {
                     info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
                     for review in reviews {
-                        if let Err(e) =
-                            process_review_with_store(&llm_client, &review_store, &review).await
+                        if let Err(e) = process_review_with_store(
+                            &llm_client,
+                            &review_store,
+                            &review,
+                            intent_history.as_ref(),
+                        )
+                        .await
                         {
                             warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
                         }
@@ -997,6 +1028,9 @@ async fn process_review_with_store(
     llm_client: &DirectLlmClient,
     review_store: &Arc<ReviewStore>,
     review: &cyber_jianghu_agent::runtime::decision::http::review::PendingReview,
+    intent_history: Option<
+        &Arc<cyber_jianghu_agent::runtime::decision::http::intent_history::IntentHistoryStore>,
+    >,
 ) -> Result<()> {
     use cyber_jianghu_agent::runtime::decision::http::review::ReviewDecision;
     use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
@@ -1035,6 +1069,17 @@ async fn process_review_with_store(
         .submit_review(review.intent_id, submission)
         .await
         .map_err(|e| anyhow::anyhow!("ReflectorSoul submit_review failed: {:?}", e))?;
+
+    // 更新经历日志中的 observer_thought（供 Web Panel 查询）
+    if let Some(history) = intent_history {
+        history
+            .update_observer_thought(review.intent.tick_id, response_text.clone())
+            .await;
+        info!(
+            "[ReflectorSoul] Updated observer thought for tick {} in intent_history",
+            review.intent.tick_id
+        );
+    }
 
     info!(
         "[ReflectorSoul] 审查结果已提交: {} -> {:?}",
