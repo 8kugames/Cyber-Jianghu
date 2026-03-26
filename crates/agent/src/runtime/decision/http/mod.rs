@@ -30,6 +30,7 @@
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 pub mod cognitive_context;
+pub mod config_watcher;
 mod context;
 mod dto;
 mod handlers;
@@ -71,6 +72,9 @@ use crate::ai::validator::{RuleEngineValidator, Validator};
 
 // 重导出 review 模块的公共 API
 pub use review::{PendingReviewEntry, ReviewState, ReviewStore};
+
+// 重导出 config_watcher 模块的公共 API
+pub use config_watcher::ConfigWatcher;
 
 // 重导出 context 模块的公共 API
 pub use context::{
