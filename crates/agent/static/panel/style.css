@@ -1032,6 +1032,12 @@ button[type="submit"]:disabled {
     margin-top: 4px;
 }
 
+.world-tree-card .char-registered {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
 /* ============================================================================
    Status
    ============================================================================ */
@@ -1164,6 +1170,10 @@ button[type="submit"]:disabled {
     box-shadow: var(--shadow-lg);
 }
 
+.dialog-large {
+    max-width: 500px;
+}
+
 .dialog h3 {
     color: var(--danger);
     font-size: 16px;
@@ -1196,6 +1206,46 @@ button[type="submit"]:disabled {
 
 .cancel-btn:hover {
     border-color: var(--text-muted);
+}
+
+/* ============================================================================
+   LLM Config Section
+   ============================================================================ */
+
+.subsection {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.subsection:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.subsection h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 14px;
+}
+
+.form-row {
+    display: flex;
+    gap: 12px;
+}
+
+.form-row > .form-group {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+@media (max-width: 480px) {
+    .form-row {
+        flex-direction: column;
+        gap: 0;
+    }
 }
 
 /* ============================================================================
@@ -1273,3 +1323,74 @@ button[type="submit"]:disabled {
    ============================================================================ */
 
 .hidden { display: none !important; }
+
+/* ============================================================================
+   Generate Bar
+   ============================================================================ */
+
+.generate-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 14px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.generate-bar .btn-secondary {
+    flex: none;
+    padding: 8px 20px;
+    white-space: nowrap;
+}
+
+.generate-bar .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    border-color: var(--border);
+    color: var(--text-muted);
+}
+
+/* ============================================================================
+   Token Usage Stats
+   ============================================================================ */
+
+.token-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 14px 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
+}
+
+.token-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.token-stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.token-stat-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 600px) {
+    .token-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

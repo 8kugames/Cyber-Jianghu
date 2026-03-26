@@ -42,13 +42,13 @@ use axum::{
     Router,
     routing::{get, post},
 };
-use cyber_jianghu_protocol::{Intent, WorldState};
+use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{broadcast, Mutex, RwLock, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -168,6 +168,8 @@ pub struct HttpApiState {
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
     pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    /// 死亡事件广播通道（用于 SSE 实时推送）
+    pub death_event_tx: broadcast::Sender<ServerMessage>,
     /// 运行时模式（Claw/Cognitive）
     pub runtime_mode: crate::config::RuntimeMode,
 }
@@ -360,6 +362,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/validate", post(handlers::validate_intent_handler)) // 验证意图是否符合人设
         // === 角色注册端点 ===
         .route(
+            "/api/v1/character/generate",
+            post(handlers::generate_character_handler),
+        ) // LLM 一键生成角色
+        .route(
             "/api/v1/character/register",
             post(handlers::register_character_handler),
         ) // 创建新角色（转发到 Server）
@@ -391,6 +397,8 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/review/{intent_id}/status",
             get(review::get_review_status),
         ) // 获取审查状态
+        // === 实时事件端点（SSE）===
+        .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
         .route(
@@ -414,6 +422,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/config/llm",
             post(handlers::update_llm_config_handler),
         ) // 更新 LLM 配置
+        .route(
+            "/api/v1/config/llm/usage",
+            get(handlers::get_llm_usage_handler),
+        ) // 获取 LLM Token 累计使用统计
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -454,7 +466,7 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     info!("[http] HTTP_PORT={}", local_addr.port());
     info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
     info!(
-        "[http] - Create character: http://127.0.0.1:{}/index.html",
+        "[http] - Create character: http://127.0.0.1:{}/create.html",
         local_addr.port()
     );
     info!(
@@ -575,6 +587,8 @@ pub fn create_http_state(
     // 初始化叙事引擎（用于属性叙事化描述）
     let narrative_engine = Some(Arc::new(create_narrative_engine()));
 
+    let (death_event_tx, _) = broadcast::channel(100);
+
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
         last_state_update: Arc::new(RwLock::new(None)),
@@ -597,6 +611,7 @@ pub fn create_http_state(
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx,                                        // 重连请求发送通道
+        death_event_tx, // 死亡事件广播通道
         runtime_mode, // 从调用者传入
     };
 

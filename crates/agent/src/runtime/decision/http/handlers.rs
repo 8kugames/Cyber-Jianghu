@@ -16,9 +16,13 @@
 
 use axum::{
     extract::{Path as AxumPath, State},
-    http::StatusCode,
+    http::{Response, StatusCode},
     response::{IntoResponse, Json},
 };
+use bytes::Bytes;
+use http_body::Frame;
+use http_body_util::StreamBody;
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -26,7 +30,7 @@ use uuid::Uuid;
 use crate::ai::cognitive::narrative::NarrativeEngine;
 use crate::ai::lifespan::LifespanStatus;
 use crate::ai::validator::{PersonaInfo, ValidationRequest, ValidationResult};
-use cyber_jianghu_protocol::{ActionType, Intent};
+use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
 
 use super::cognitive_context::{CognitiveContext, CognitiveContextBuilder};
 use super::context::{
@@ -238,6 +242,30 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 "valid": true,
                 "reason": "动作符合人设",
                 "narrative": "..."
+            })),
+        },
+        // === 角色生成端点 ===
+        ApiEndpoint {
+            path: "/api/v1/character/generate".to_string(),
+            method: "POST".to_string(),
+            description: "LLM 一键生成角色（返回完整的角色配置，供前端填充表单）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "name": "柳蕴娘",
+                "age": 24,
+                "gender": "女",
+                "appearance": "眉如远山，眼若秋水，身着素色罗裙",
+                "identity": "江南药铺掌柜之女，自幼随父研习医术",
+                "personality": ["沉稳", "善良"],
+                "values": ["知识", "和平"],
+                "language_style": {
+                    "tone": "温和",
+                    "speech_patterns": ["说话简洁"]
+                },
+                "goals": {
+                    "short_term": "收集罕见草药配方",
+                    "long_term": "编纂一本江湖医术典籍"
+                }
             })),
         },
         // === 审查端点（Player Agent 提供，Observer Agent 调用）===
@@ -1028,6 +1056,142 @@ pub struct CharacterRegisterResponse {
     /// 警告信息（如配置保存失败）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+}
+
+/// LLM 生成角色处理器
+///
+/// POST /api/v1/character/generate - 使用 LLM 自动生成角色
+///
+/// 调用配置的 LLM 生成一个符合世界观的武侠角色，返回完整角色信息供用户确认
+pub(super) async fn generate_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClientExt, LlmProvider};
+
+    // 1. 读取配置文件
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "config_read_error".to_string(),
+                    message: format!("读取配置文件失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. 检查 LLM 是否已配置
+    if config.llm.model.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error_code: "llm_not_configured".to_string(),
+                message: "请先配置 LLM".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // 3. 创建 LLM 客户端
+    let provider = match LlmProvider::from_str(&config.llm.provider) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "invalid_provider".to_string(),
+                    message: format!("不支持的 LLM Provider: {}", config.llm.provider),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let mut client_config = DirectLlmClientConfig::new(provider, config.llm.api_key.as_deref());
+
+    if let Some(ref model) = config.llm.model {
+        client_config = client_config.with_model(model);
+    }
+    if let Some(ref base_url) = config.llm.base_url {
+        client_config = client_config.with_base_url(base_url);
+    }
+    client_config = client_config.with_temperature(0.9);
+
+    let llm_client = match DirectLlmClient::new(client_config) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "llm_client_error".to_string(),
+                    message: format!("创建 LLM 客户端失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 4. 构建角色生成 prompt
+    let prompt = r#"你是一个武侠角色生成器。请生成一个符合以下世界观的角色：
+
+## 世界观
+时代：北宋前期（约10世纪中国），冷兵器时代。
+允许的概念：内力、轻功、武功、点穴、暗器、毒术、医术、易容、阵法。
+禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
+
+## 要求
+请生成一个随机但符合世界观的武侠角色，以 JSON 格式返回。
+
+## 字段要求
+- name: 姓名（2-6个汉字）
+- age: 年龄（16-60的整数）
+- gender: 性别（"男"或"女"）
+- appearance: 外貌描述（20-50字）
+- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字）
+- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾）
+- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平）
+- language_style: 对象，包含：
+  - tone: 语调（从以下选项中选1个：豪迈、温和、冷漠、狡黠、文雅）
+  - speech_patterns: 说话特点数组（从以下选项中选1-3个：喜欢引用古诗词、说话简洁、喜欢用成语、说话带方言、喜欢开玩笑、说话谨慎）
+- goals: 对象，包含：
+  - short_term: 短期目标（不超过100字）
+  - long_term: 长远目标（不超过100字）
+
+## 输出格式
+请严格输出 JSON，不要包含其他文字。"#;
+
+    // 5. 调用 LLM 生成角色
+    #[derive(Debug, Serialize, Deserialize)]
+    struct GeneratedCharacter {
+        name: String,
+        age: u8,
+        gender: String,
+        appearance: Option<String>,
+        identity: Option<String>,
+        personality: Vec<String>,
+        values: Vec<String>,
+        language_style: LanguageStyleRequest,
+        goals: GoalsRequest,
+    }
+
+    match llm_client.complete_json::<GeneratedCharacter>(prompt).await {
+        Ok(character) => {
+            info!("[character] LLM 生成角色成功: {}", character.name);
+            (StatusCode::OK, Json(character)).into_response()
+        }
+        Err(e) => {
+            error!("[character] LLM 生成角色失败: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error_code: "generation_failed".to_string(),
+                    message: format!("角色生成失败，请重试: {}", e),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// 角色注册处理器
@@ -2305,8 +2469,7 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
         }
     };
 
-    let has_server =
-        !config.server.ws_url.is_empty() && config.server.ws_url != "ws://localhost:23333/ws";
+    let has_server = !config.server.ws_url.is_empty();
     let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
     let has_character = config.agent.as_ref().map_or(false, |c| c.is_registered());
     let current_character = config
@@ -3069,6 +3232,11 @@ pub(super) async fn update_llm_config_handler(
         .into_response()
 }
 
+/// GET /api/v1/config/llm/usage - 获取 LLM Token 累计使用统计
+pub(super) async fn get_llm_usage_handler() -> impl IntoResponse {
+    Json(crate::ai::llm::token_usage_tracker().snapshot())
+}
+
 // ============================================================================
 // 认知上下文端点
 // ============================================================================
@@ -3164,4 +3332,51 @@ pub(super) async fn get_cognitive_context_handler(
             (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response()
         }
     }
+}
+
+/// GET /api/v1/events - SSE 实时事件流
+///
+/// 用于 Web 面板实时接收死亡等事件通知
+pub(super) async fn death_events_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let mut rx = state.death_event_tx.subscribe();
+
+    let stream = async_stream::stream! {
+        let data = Bytes::from_static(b"event: connected\ndata: {\"status\":\"connected\"}\n\n");
+        yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+
+        loop {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
+                Ok(Ok(msg)) => {
+                    if matches!(msg, ServerMessage::AgentDied { .. }) {
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+                            yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    break;
+                }
+                Err(_) => {
+                    let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
+                    yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                }
+            }
+        }
+    };
+
+    let body = StreamBody::new(stream);
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/event-stream; charset=utf-8")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive")
+        .header("X-Accel-Buffering", "no")
+        .body(body)
+        .unwrap();
+
+    response
 }
