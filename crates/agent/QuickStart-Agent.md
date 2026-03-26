@@ -15,7 +15,7 @@
 cargo install --path crates/agent
 
 # 启动 Cognitive 模式（默认，ReflectorSoul 已内置启用）
-cyber-jianghu-agent run --character-name 张三
+cyber-jianghu-agent run
 
 # 或启动 Claw 模式（等待外部调度器）
 cyber-jianghu-agent run --mode claw

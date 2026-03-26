@@ -71,11 +71,6 @@ enum Commands {
         /// - cognitive: 内置 LLM 决策，无需外部调度器
         #[arg(long, default_value = "cognitive")]
         mode: String,
-
-        /// 自动创建角色（如果不存在）
-        /// 提供角色姓名即可自动创建并注册角色
-        #[arg(long)]
-        character_name: Option<String>,
     },
 
     /// 显示当前配置
@@ -333,12 +328,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run {
-            port,
-            mode,
-            character_name,
-        }) => {
-            run_agent(port, mode, character_name).await?;
+        Some(Commands::Run { port, mode }) => {
+            run_agent(port, mode).await?;
         }
 
         Some(Commands::Show) => {
@@ -364,7 +355,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string(), None).await?;
+            run_agent(0, "cognitive".to_string()).await?;
         }
     }
 
@@ -515,7 +506,7 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> Result<()> {
+async fn run_agent(port: u16, mode: String) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
@@ -551,47 +542,11 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
     let device_id_value = identity_clone.device_id;
     info!("Device ID: {}", device_id_value);
 
-    if let Some(ref name) = character_name {
-        if !config.has_character() {
-            info!("自动创建角色: {}", name);
-            let character = CharacterConfig {
-                name: name.clone(),
-                ..Default::default()
-            };
-            let actual_port = if port == 0 { 23340 } else { port };
-            match create_character_via_api(actual_port, character).await {
-                Ok(agent_id) => {
-                    info!("角色创建成功，Agent ID: {}", agent_id);
-                    config = load_config()?.unwrap_or_else(|| {
-                        warn!("重新加载配置失败，使用内存中的配置");
-                        config.clone()
-                    });
-                }
-                Err(e) => {
-                    error!("自动创建角色失败: {}", e);
-                    error!(
-                        "请先通过 'cyber-jianghu-agent create-character --name {}' 创建角色",
-                        name
-                    );
-                    return Err(e);
-                }
-            }
-        } else {
-            info!(
-                "角色已存在: {}",
-                config
-                    .agent
-                    .as_ref()
-                    .map(|c| c.name.as_str())
-                    .unwrap_or("(未知)")
-            );
-        }
-    } else if !config.has_character() {
+    if !config.has_character() {
         warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
         warn!("请通过以下方式创建角色:");
         warn!("  1. Web 面板: http://localhost:23340/panel");
         warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
-        warn!("  3. 使用 --character-name 参数: cyber-jianghu-agent run --character-name 你的名字");
     }
 
     let device_id = Arc::new(RwLock::new(device_id_value));
@@ -635,13 +590,19 @@ async fn run_agent(port: u16, mode: String, character_name: Option<String>) -> R
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
 
-            // 自动打开浏览器（Cognitive 模式）
+            // 自动打开浏览器（Cognitive 模式，仅非容器环境）
+            // Docker 容器内无法打开宿主机浏览器，需要手动访问
             let browser_url = format!("http://localhost:{}/welcome.html", actual_port);
+            let is_container = std::path::Path::new("/app/.dockerenv").exists();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                match open::that_detached(&browser_url) {
-                    Ok(_) => info!("浏览器已打开: {}", browser_url),
-                    Err(e) => warn!("无法自动打开浏览器: {}，请手动访问: {}", e, browser_url),
+                if is_container {
+                    info!("浏览器请手动打开: {}", browser_url);
+                } else {
+                    match open::that_detached(&browser_url) {
+                        Ok(_) => info!("浏览器已打开: {}", browser_url),
+                        Err(e) => warn!("无法自动打开浏览器: {}，请手动访问: {}", e, browser_url),
+                    }
                 }
             });
 
