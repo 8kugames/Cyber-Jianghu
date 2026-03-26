@@ -1884,14 +1884,23 @@ pub(super) async fn rebirth_character_handler(
         *current = None;
     }
 
-    // 7. 清理本地配置文件（角色信息）
+    // 7. 更新本地配置：标记角色归隐，保留服务器/LLM/身份配置
     {
         let agent_config = &state.config_path;
         if agent_config.exists() {
-            if let Err(e) = std::fs::remove_file(agent_config) {
-                error!("删除配置文件失败: {}", e);
-            } else {
-                info!("已删除角色配置文件: {:?}", agent_config);
+            match crate::config::Config::from_file(agent_config) {
+                Ok(mut config) => {
+                    config.retire_current_character();
+                    config.agent = None;
+                    if let Err(e) = config.save_to_file(agent_config) {
+                        error!("保存配置文件失败: {}", e);
+                    } else {
+                        info!("角色已归隐，配置已更新: {:?}", agent_config);
+                    }
+                }
+                Err(e) => {
+                    error!("读取配置文件失败: {}", e);
+                }
             }
         }
     }
