@@ -20,7 +20,7 @@ use super::LlmClient;
 
 /// OpenClaw 配置文件格式
 #[derive(Debug, Deserialize)]
-struct OpenClawConfig {
+pub struct OpenClawConfig {
     /// Gateway 配置
     #[serde(default)]
     gateway: Option<GatewayConfig>,
@@ -34,7 +34,7 @@ struct GatewayConfig {
 
 impl OpenClawConfig {
     /// 从默认路径读取配置
-    fn load() -> Result<Self> {
+    pub fn load() -> Result<Self> {
         let config_path = Self::config_path()?;
         let content = std::fs::read_to_string(&config_path).with_context(|| {
             format!(
@@ -51,7 +51,7 @@ impl OpenClawConfig {
     }
 
     /// 获取配置文件路径
-    fn config_path() -> Result<PathBuf> {
+    pub fn config_path() -> Result<PathBuf> {
         let config_dir = std::env::var("HOME")
             .map(|home| PathBuf::from(home).join(".openclaw"))
             .unwrap_or_else(|_| PathBuf::from("."));
@@ -60,7 +60,7 @@ impl OpenClawConfig {
     }
 
     /// 获取 Gateway URL
-    fn gateway_url(&self) -> Option<&String> {
+    pub fn gateway_url(&self) -> Option<&String> {
         self.gateway.as_ref()?.url.as_ref()
     }
 }
@@ -117,7 +117,7 @@ impl LlmProvider {
     /// 是否需要 API Key
     pub fn requires_api_key(&self) -> bool {
         match self {
-            Self::OpenClaw => false,        // OpenClaw 配置文件中包含认证信息
+            Self::OpenClaw => true,         // OpenClaw 读取 Gateway 配置，但 API Key 需用户输入
             Self::OpenAICompatible => true, // OpenAI 兼容接口通常需要 key
             Self::Ollama => false,          // Ollama 本地通常不需要
         }
@@ -498,12 +498,12 @@ mod tests {
 
     #[test]
     fn test_provider_defaults() {
-        // OpenClaw 从配置文件读取
+        // OpenClaw 从配置文件读取 base_url/model，但需要用户输入 API Key
         assert_eq!(LlmProvider::OpenClaw.default_base_url(), None);
         assert_eq!(LlmProvider::OpenClaw.default_model(), None);
-        assert!(!LlmProvider::OpenClaw.requires_api_key());
-        assert!(!LlmProvider::OpenClaw.requires_base_url());
-        assert!(!LlmProvider::OpenClaw.requires_model());
+        assert!(LlmProvider::OpenClaw.requires_api_key()); // 用户需要手动输入
+        assert!(!LlmProvider::OpenClaw.requires_base_url()); // 从配置文件读取
+        assert!(!LlmProvider::OpenClaw.requires_model()); // 从配置文件读取
         assert!(LlmProvider::OpenClaw.reads_from_config());
 
         // OpenAICompatible 没有默认值

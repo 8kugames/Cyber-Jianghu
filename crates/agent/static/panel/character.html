@@ -26,124 +26,256 @@
 
                 <!-- 当前角色 Tab -->
                 <div id="tab-current" class="tab-content active">
-                    <!-- 角色选择器 -->
-                    <section id="character-selector-section" class="form-section hidden">
-                        <h2>角色选择</h2>
-                        <div class="form-group">
-                            <select id="character-select"></select>
+                    <div class="vertical-tabs-container">
+                        <!-- 垂直标签页侧边栏 -->
+                        <div class="vertical-tabs-sidebar">
+                            <button class="vertical-tab active" data-vertical-tab="basic">基本信息</button>
+                            <button class="vertical-tab" data-vertical-tab="inventory">持有物品</button>
+                            <button class="vertical-tab" data-vertical-tab="memories">记忆关系</button>
+                            <button class="vertical-tab" data-vertical-tab="experiences">经历日志</button>
+                            <button class="vertical-tab" data-vertical-tab="dream">托梦记录</button>
+                            <button class="vertical-tab" data-vertical-tab="rebirth">转生</button>
                         </div>
-                        <div class="info-item">
-                            <span class="label">当前服务器</span>
-                            <span class="value" id="current-server">-</span>
+
+                        <!-- 垂直标签页内容区域 -->
+                        <div class="vertical-tabs-content">
+
+                            <!-- 基本信息 Tab -->
+                            <div id="vertical-tab-basic" class="vertical-tab-content active">
+                                <!-- 角色选择器 -->
+                                <section id="character-selector-section" class="form-section hidden">
+                                    <h2>角色选择</h2>
+                                    <div class="form-group">
+                                        <select id="character-select"></select>
+                                    </div>
+                                    <div class="info-item">
+                                        <span class="label">当前服务器</span>
+                                        <span class="value" id="current-server">-</span>
+                                    </div>
+                                </section>
+
+                                <div id="loading" class="loading">
+                                    <p>加载中...</p>
+                                </div>
+
+                                <div id="error" class="error hidden">
+                                    <h3>加载失败</h3>
+                                    <p id="error-message"></p>
+                                    <button id="retry-btn" class="btn-secondary">重试</button>
+                                </div>
+
+                                <div id="character-info" class="hidden">
+                                    <section class="form-section">
+                                        <h2>基本信息</h2>
+                                        <div class="info-grid">
+                                            <div class="info-item">
+                                                <span class="label">姓名</span>
+                                                <span class="value" id="name">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">年龄</span>
+                                                <span class="value" id="age">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">性别</span>
+                                                <span class="value" id="gender">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">身份</span>
+                                                <span class="value" id="identity">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">状态</span>
+                                                <span class="value" id="status">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">注册时间</span>
+                                                <span class="value" id="registered-at">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="info-item full-width">
+                                            <span class="label">外貌</span>
+                                            <span class="value" id="appearance">-</span>
+                                        </div>
+                                    </section>
+
+                                    <section class="form-section">
+                                        <h2>性格与价值观</h2>
+                                        <div class="info-item">
+                                            <span class="label">性格特征</span>
+                                            <div class="tag-list" id="personality">-</div>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="label">核心价值观</span>
+                                            <div class="tag-list" id="values">-</div>
+                                        </div>
+                                    </section>
+
+                                    <section class="form-section">
+                                        <h2>当前状态</h2>
+                                        <div class="info-grid">
+                                            <div class="info-item">
+                                                <span class="label">当前位置</span>
+                                                <span class="value" id="location">-</span>
+                                            </div>
+                                            <div class="info-item">
+                                                <span class="label">当前 Tick</span>
+                                                <span class="value" id="tick-id">-</span>
+                                            </div>
+                                        </div>
+                                        <div class="info-item">
+                                            <span class="label">游戏时间</span>
+                                            <span class="value" id="world-time">-</span>
+                                        </div>
+                                    </section>
+
+                                    <section class="form-section">
+                                        <h2>属性</h2>
+                                        <div id="attributes" class="attributes-grid"></div>
+                                    </section>
+                                </div>
+                            </div>
+
+                            <!-- 持有物品 Tab -->
+                            <div id="vertical-tab-inventory" class="vertical-tab-content">
+                                <section class="form-section">
+                                    <h2>持有物品</h2>
+                                    <div id="inventory" class="inventory-list">
+                                        <p class="loading-text">加载中...</p>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <!-- 记忆关系 Tab -->
+                            <div id="vertical-tab-memories" class="vertical-tab-content">
+                                <section class="form-section">
+                                    <h2>近期记忆</h2>
+                                    <div id="memories" class="memory-list"></div>
+                                    <div id="load-more-memories" class="load-more hidden">
+                                        <button id="load-more-memories-btn" class="btn-secondary">加载更多</button>
+                                    </div>
+                                </section>
+
+                                <section class="form-section">
+                                    <h2>已知关系</h2>
+                                    <div id="relationships" class="relationship-list"></div>
+                                </section>
+                            </div>
+
+                            <!-- 经历日志 Tab -->
+                            <div id="vertical-tab-experiences" class="vertical-tab-content">
+                                <section class="form-section">
+                                    <h2>经历日志</h2>
+                                    <div id="experiences" class="experience-list"></div>
+                                    <div id="load-more" class="load-more hidden">
+                                        <button id="load-more-experiences-btn" class="btn-secondary">加载更多</button>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <!-- 托梦记录 Tab -->
+                            <div id="vertical-tab-dream" class="vertical-tab-content">
+                                <section class="form-section">
+                                    <h2>托梦</h2>
+                                    <p class="section-desc">
+                                        注入一个念头，将在接下来的回合中持续影响角色的思考。
+                                        此功能用于引导角色行为或注入特定剧情。
+                                    </p>
+
+                                    <div class="info-item" style="margin-bottom: 12px;">
+                                        <span class="label">目标角色</span>
+                                        <span class="value" id="dream-target-character">加载中...</span>
+                                    </div>
+
+                                    <div id="dream-status" class="status-card hidden">
+                                        <h4>当前托梦</h4>
+                                        <p id="current-dream"></p>
+                                        <p class="remaining">剩余 <span id="remaining-ticks">0</span> 回合</p>
+                                    </div>
+
+                                    <form id="dream-form">
+                                        <div class="form-group">
+                                            <label for="dream-thought">念头内容</label>
+                                            <textarea
+                                                id="dream-thought"
+                                                name="thought"
+                                                rows="3"
+                                                required
+                                                placeholder="输入要注入的念头，如：'你突然想起一个多年未见的老友'"
+                                            ></textarea>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="dream-duration">持续回合数</label>
+                                            <input
+                                                type="number"
+                                                id="dream-duration"
+                                                name="duration"
+                                                min="1"
+                                                max="100"
+                                                value="5"
+                                            />
+                                        </div>
+                                        <div class="form-actions">
+                                            <button type="submit" id="dream-btn">注入托梦</button>
+                                        </div>
+                                    </form>
+
+                                    <div id="dream-result" class="result hidden">
+                                        <p id="dream-message"></p>
+                                    </div>
+                                    <div id="dream-error" class="error hidden">
+                                        <p id="dream-error-msg"></p>
+                                    </div>
+                                </section>
+
+                                <section class="form-section">
+                                    <h2>托梦记录</h2>
+                                    <div id="dream-records" class="experience-list">
+                                        <p class="no-data">暂无托梦记录</p>
+                                    </div>
+                                    <div id="load-more-dream-records" class="load-more hidden">
+                                        <button id="load-more-dream-records-btn" class="btn-secondary">加载更多</button>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <!-- 转生 Tab -->
+                            <div id="vertical-tab-rebirth" class="vertical-tab-content">
+                                <section class="form-section danger-zone">
+                                    <h2>转生</h2>
+                                    <p class="section-desc">
+                                        强制当前角色归隐，然后可以创建新角色。
+                                        <strong>此操作不可逆！</strong>角色的所有进度和物品都将丢失。
+                                    </p>
+
+                                    <div class="warning-box">
+                                        <h4>注意事项</h4>
+                                        <ul>
+                                            <li>角色将被标记为"归隐"状态</li>
+                                            <li>所有物品和属性将被清除</li>
+                                            <li>可以创建新角色继续游戏</li>
+                                            <li>设备身份保持不变</li>
+                                        </ul>
+                                    </div>
+
+                                    <div class="form-actions">
+                                        <button type="button" id="rebirth-btn" class="danger-btn">
+                                            确认转生
+                                        </button>
+                                    </div>
+
+                                    <div id="rebirth-result" class="result hidden">
+                                        <p id="rebirth-message"></p>
+                                        <a href="index.html" class="nav-link">创建新角色</a>
+                                    </div>
+                                    <div id="rebirth-error" class="error hidden">
+                                        <p id="rebirth-error-msg"></p>
+                                    </div>
+                                </section>
+                            </div>
+
                         </div>
-                    </section>
-
-                    <div id="loading" class="loading">
-                        <p>加载中...</p>
                     </div>
-
-                    <div id="error" class="error hidden">
-                        <h3>加载失败</h3>
-                        <p id="error-message"></p>
-                        <button id="retry-btn" class="btn-secondary">重试</button>
-                    </div>
-
-                    <div id="character-info" class="hidden">
-                        <section class="form-section">
-                            <h2>基本信息</h2>
-                            <div class="info-grid">
-                                <div class="info-item">
-                                    <span class="label">姓名</span>
-                                    <span class="value" id="name">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">年龄</span>
-                                    <span class="value" id="age">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">性别</span>
-                                    <span class="value" id="gender">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">身份</span>
-                                    <span class="value" id="identity">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">状态</span>
-                                    <span class="value" id="status">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">注册时间</span>
-                                    <span class="value" id="registered-at">-</span>
-                                </div>
-                            </div>
-                            <div class="info-item full-width">
-                                <span class="label">外貌</span>
-                                <span class="value" id="appearance">-</span>
-                            </div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>性格与价值观</h2>
-                            <div class="info-item">
-                                <span class="label">性格特征</span>
-                                <div class="tag-list" id="personality">-</div>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">核心价值观</span>
-                                <div class="tag-list" id="values">-</div>
-                            </div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>当前状态</h2>
-                            <div class="info-grid">
-                                <div class="info-item">
-                                    <span class="label">当前位置</span>
-                                    <span class="value" id="location">-</span>
-                                </div>
-                                <div class="info-item">
-                                    <span class="label">当前 Tick</span>
-                                    <span class="value" id="tick-id">-</span>
-                                </div>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">游戏时间</span>
-                                <span class="value" id="world-time">-</span>
-                            </div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>属性</h2>
-                            <div id="attributes" class="attributes-grid"></div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>持有物品</h2>
-                            <div id="inventory" class="inventory-list"></div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>已知关系</h2>
-                            <div id="relationships" class="relationship-list"></div>
-                        </section>
-
-                        <section class="form-section">
-                            <h2>近期记忆</h2>
-                            <div id="memories" class="memory-list"></div>
-                            <div id="load-more-memories" class="load-more hidden">
-                                <button id="load-more-memories-btn" class="btn-secondary">加载更多</button>
-                            </div>
-                        </section>
-                    </div>
-
-                    <section id="experiences-section" class="form-section hidden">
-                        <h2>经历日志</h2>
-                        <div id="experiences" class="experience-list"></div>
-                        <div id="load-more" class="load-more hidden">
-                            <button id="load-more-experiences-btn" class="btn-secondary">加载更多</button>
-                        </div>
-                    </section>
                 </div>
 
                 <!-- 世界树 Tab -->
@@ -154,87 +286,22 @@
                             <p class="loading-text">加载中...</p>
                         </div>
                     </section>
+
+                    <!-- 角色详情对话框 -->
+                    <div id="character-detail-dialog" class="dialog-overlay" style="display: none;">
+                        <div class="dialog dialog-large">
+                            <h3>角色详情</h3>
+                            <div id="character-detail-content"></div>
+                            <div class="dialog-actions">
+                                <button id="character-detail-close" class="cancel-btn">关闭</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </main>
         </div>
 
         <script src="js/shared.js"></script>
         <script src="js/character.js"></script>
-        <script>
-            document.getElementById('retry-btn').addEventListener('click', loadCharacter);
-
-            // Tab switching
-            document.querySelectorAll('.page-tab').forEach(tab => {
-                tab.addEventListener('click', () => {
-                    document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
-                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                    tab.classList.add('active');
-                    const target = document.getElementById(`tab-${tab.dataset.tab}`);
-                    if (target) target.classList.add('active');
-
-                    if (tab.dataset.tab === 'worldtree') {
-                        loadWorldTree();
-                    }
-                });
-            });
-
-            // Load world tree
-            async function loadWorldTree() {
-                const container = document.getElementById('world-tree-list');
-                try {
-                    const data = await apiGet('/api/v1/characters');
-                    if (!data.characters || data.characters.length === 0) {
-                        container.innerHTML = '<p class="no-data">暂无角色记录</p>';
-                        return;
-                    }
-
-                    container.innerHTML = data.characters.map(c => {
-                        const statusClass = c.status === 'alive' ? 'alive' : c.status === 'dead' ? 'dead' : 'retired';
-                        const statusText = c.status === 'alive' ? '存活' : c.status === 'dead' ? '已故' : '归隐';
-                        const serverShort = c.server_url ? c.server_url.replace(/^https?:\/\//, '').split('/')[0] : '';
-                        return `
-                            <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
-                                <div class="char-name">${escapeHtml(c.name)}</div>
-                                <div class="char-status ${statusClass}">${statusText}</div>
-                                <div class="char-meta">${c.age}岁 · ${c.gender}</div>
-                                ${serverShort ? `<div class="char-server">${escapeHtml(serverShort)}</div>` : ''}
-                            </div>
-                        `;
-                    }).join('');
-
-                    container.querySelectorAll('.world-tree-card').forEach(card => {
-                        card.addEventListener('click', () => {
-                            const agentId = card.dataset.agentId;
-                            if (!agentId) return;
-                            if (card.classList.contains('current')) return;
-                            switchCharacterById(agentId);
-                        });
-                    });
-
-                } catch (err) {
-                    container.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
-                }
-            }
-
-            async function switchCharacterById(agentId) {
-                try {
-                    const data = await apiPost('/api/v1/characters/switch', { agent_id: agentId });
-                    if (data.success) {
-                        showSuccess('已切换到角色');
-                        document.querySelector('[data-tab="current"]').click();
-                        loadCharacter();
-                    } else {
-                        showError(data.message || '切换失败');
-                    }
-                } catch (err) {
-                    showError('切换失败: ' + err.message);
-                }
-            }
-
-            // Check hash for world tree tab
-            if (window.location.hash === '#世界树') {
-                document.querySelector('[data-tab="worldtree"]').click();
-            }
-        </script>
     </body>
 </html>

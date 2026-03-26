@@ -60,11 +60,7 @@ RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-agent; \
-    else \
-        cargo build --release -p cyber-jianghu-agent; \
-    fi
+    cargo build --release -p cyber-jianghu-agent
 
 # 复制实际源代码
 COPY crates/protocol/src ./crates/protocol/src
@@ -75,11 +71,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     touch crates/protocol/src/lib.rs && \
-    if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-agent; \
-    else \
-        cargo build --release -p cyber-jianghu-agent; \
-    fi && \
+    cargo build --release -p cyber-jianghu-agent && \
     cp /app/target/release/cyber-jianghu-agent /app/agent-bin
 
 # ============================================================================

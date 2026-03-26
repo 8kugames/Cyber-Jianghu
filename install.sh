@@ -305,14 +305,18 @@ cmd_agent_start() {
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
     ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
+    local agent_port="${AGENT_PORT:-23340}"
     info "启动 Agent ($mode)..."
+    SERVER_WS_URL="ws://cyber-jianghu-server:23333/ws" \
+    SERVER_HTTP_URL="http://cyber-jianghu-server:23333" \
+    AGENT_PORT="$agent_port" \
     docker compose -f "$compose_file" up -d
     success "Agent 已启动"
     echo ""
     info "访问地址:"
-    echo "  - Web Panel:  http://localhost:23340/"
-    echo "  - HTTP API:   http://localhost:23340/api/v1"
-    echo "  - Health:     http://localhost:23340/api/v1/health"
+    echo "  - Web Panel:  http://localhost:${agent_port}/welcome.html"
+    echo "  - HTTP API:   http://localhost:${agent_port}/api/v1"
+    echo "  - Health:     http://localhost:${agent_port}/api/v1/health"
 }
 cmd_agent_stop() {
     ensure_network "cyber-jianghu-network"
