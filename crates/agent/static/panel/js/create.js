@@ -1,11 +1,13 @@
 // 角色创建页逻辑
 
-// 智能路由：检查服务器连接和角色状态
-async function checkAndRedirect() {
+// 检查角色状态，决定显示创建表单还是阻止信息
+async function checkCharacterAndBlock() {
     try {
         const data = await apiGet('/api/v1/character');
-        if (data.agent_id && data.status === 'alive') {
-            window.location.href = 'character.html';
+        if (data.agent_id && data.status !== '归隐') {
+            document.getElementById('character-form').classList.add('hidden');
+            document.getElementById('character-blocked').classList.remove('hidden');
+            return;
         }
     } catch (err) {
         console.log('服务器连接检查失败，保持在创建页:', err.message);
@@ -33,11 +35,75 @@ function updateHiddenInput(container, hiddenInput) {
     hiddenInput.value = JSON.stringify(values);
 }
 
+// 选中标签（根据值数组）
+function selectTagsByValues(containerId, hiddenInputId, values) {
+    const container = document.getElementById(containerId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+    if (!container || !hiddenInput) return;
+
+    // 先清除所有选中状态
+    container.querySelectorAll('.tag.selected').forEach(t => t.classList.remove('selected'));
+
+    // 按值选中
+    const tags = container.querySelectorAll('.tag');
+    tags.forEach(tag => {
+        if (values.includes(tag.dataset.value)) {
+            tag.classList.add('selected');
+        }
+    });
+
+    updateHiddenInput(container, hiddenInput);
+}
+
+// 一键生成角色
+async function generateCharacter() {
+    const btn = document.getElementById('generate-btn');
+    const hint = document.getElementById('generate-hint');
+
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    hint.textContent = '';
+    hint.className = 'hint';
+
+    try {
+        const data = await apiPost('/api/v1/character/generate', {}, { timeout: 120000 });
+
+        // 填充文本字段
+        document.getElementById('name').value = data.name || '';
+        document.getElementById('age').value = data.age || 25;
+        document.getElementById('gender').value = data.gender || '男';
+        document.getElementById('appearance').value = data.appearance || '';
+        document.getElementById('identity').value = data.identity || '';
+        document.getElementById('short_term_goal').value = data.goals?.short_term || '';
+        document.getElementById('long_term_goal').value = data.goals?.long_term || '';
+
+        // 设置语调下拉框
+        const toneSelect = document.getElementById('tone');
+        toneSelect.value = data.language_style?.tone || '';
+
+        // 选中标签
+        selectTagsByValues('personality-tags', 'personality', data.personality || []);
+        selectTagsByValues('values-tags', 'values', data.values || []);
+        selectTagsByValues('speech-patterns-tags', 'speech_patterns', data.language_style?.speech_patterns || []);
+
+        hint.textContent = '角色已生成，可修改后提交';
+        hint.className = 'hint';
+    } catch (err) {
+        hint.textContent = err.message;
+        hint.className = 'hint error';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '一键生成';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    checkAndRedirect();
+    checkCharacterAndBlock();
     setupTagSelection('personality-tags', 'personality');
     setupTagSelection('values-tags', 'values');
     setupTagSelection('speech-patterns-tags', 'speech_patterns');
+
+    document.getElementById('generate-btn').addEventListener('click', generateCharacter);
 
     document.getElementById('character-form').addEventListener('submit', async (e) => {
         e.preventDefault();
