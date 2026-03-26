@@ -2608,6 +2608,385 @@ pub(super) async fn set_server_handler(
 }
 
 // ============================================================================
+// LLM 配置 API Handlers
+// ============================================================================
+
+/// GET /api/v1/config/llm/providers - 返回支持的 LLM Provider 列表
+pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
+    let providers = vec![
+        dto::LlmProviderInfo {
+            value: "ollama".to_string(),
+            label: "Ollama".to_string(),
+            requires_base_url: false,
+        },
+        dto::LlmProviderInfo {
+            value: "openai".to_string(),
+            label: "OpenAI".to_string(),
+            requires_base_url: true,
+        },
+        dto::LlmProviderInfo {
+            value: "anthropic".to_string(),
+            label: "Anthropic".to_string(),
+            requires_base_url: true,
+        },
+        dto::LlmProviderInfo {
+            value: "deepseek".to_string(),
+            label: "DeepSeek".to_string(),
+            requires_base_url: true,
+        },
+    ];
+    Json(dto::LlmProvidersResponse { providers })
+}
+
+/// GET /api/v1/config/llm - 返回当前 LLM 配置
+pub(super) async fn get_llm_config_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[llm] 读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "config_read_error".to_string(),
+                    message: format!("读取配置文件失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let actor = dto::LlmConfigInfo {
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone().unwrap_or_default(),
+        base_url: config.llm.base_url.clone(),
+        has_api_key: config
+            .llm
+            .api_key
+            .as_ref()
+            .map_or(false, |k| !k.is_empty()),
+    };
+
+    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
+        provider: c.provider.clone(),
+        model: c.model.clone().unwrap_or_default(),
+        base_url: c.base_url.clone(),
+        has_api_key: c.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+    });
+
+    let response = dto::LlmConfigResponse {
+        actor,
+        reflector,
+        reflector_inherits_actor: config.llm_reflector.is_none(),
+        runtime_mode: state.runtime_mode.to_string(),
+    };
+
+    Json(response).into_response()
+}
+
+/// LLM 配置更新响应
+#[derive(Debug, Serialize)]
+#[allow(dead_code)]
+pub struct LlmConfigUpdateResponse {
+    pub success: bool,
+    pub message: String,
+    pub config: Option<dto::LlmConfigResponse>,
+}
+
+/// 验证 LLM 配置并创建测试客户端
+#[allow(dead_code)]
+fn validate_llm_config(
+    provider: &str,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: Option<&str>,
+) -> anyhow::Result<()> {
+    // 验证 provider
+    if !crate::config::SUPPORTED_PROVIDERS.contains(&provider) {
+        anyhow::bail!("不支持的 Provider: {}", provider);
+    }
+
+    // 验证 model
+    if model.is_empty() {
+        anyhow::bail!("model 不能为空");
+    }
+
+    // 验证 API Key 格式
+    if let Some(key) = api_key {
+        crate::config::LlmConfig::validate_api_key(provider, key)?;
+    }
+
+    // 检查 requires_base_url 的 provider 是否提供了 base_url
+    match provider {
+        "openai" | "anthropic" | "deepseek" => {
+            if base_url.is_none() || base_url.map_or(true, |u| u.is_empty()) {
+                anyhow::bail!("{} 需要提供 base_url", provider);
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// POST /api/v1/config/llm - 更新 LLM 配置
+///
+/// 验证配置、测试 LLM 连接、保存配置文件
+#[allow(dead_code)]
+pub(super) async fn update_llm_config_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<dto::LlmConfigUpdate>,
+) -> impl IntoResponse {
+    use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider};
+
+    // 1. 验证 actor 配置
+    if let Err(e) = validate_llm_config(
+        &req.actor.provider,
+        &req.actor.model,
+        req.actor.base_url.as_deref(),
+        if req.actor.api_key.is_empty() {
+            None
+        } else {
+            Some(&req.actor.api_key)
+        },
+    ) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("Actor 配置验证失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 2. 验证 reflector 配置（如果有）
+    if let Some(ref reflector) = req.reflector {
+        if let Err(e) = validate_llm_config(
+            &reflector.provider,
+            &reflector.model,
+            reflector.base_url.as_deref(),
+            if reflector.api_key.is_empty() {
+                None
+            } else {
+                Some(&reflector.api_key)
+            },
+        ) {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("Reflector 配置验证失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // 3. 创建测试 LLM 客户端并测试连接
+    let provider = match LlmProvider::from_str(&req.actor.provider) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("不支持的 Provider: {}", req.actor.provider),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let test_config = DirectLlmClientConfig::new(
+        provider,
+        if req.actor.api_key.is_empty() {
+            None::<String>
+        } else {
+            Some(req.actor.api_key.clone())
+        },
+    )
+    .with_model(&req.actor.model);
+
+    let test_config = if let Some(ref url) = req.actor.base_url {
+        test_config.with_base_url(url)
+    } else {
+        test_config
+    };
+
+    let test_client = match DirectLlmClient::new(test_config) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("创建 LLM 客户端失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 测试 LLM 连接
+    match test_client.complete("Hello, this is a connection test. Reply with 'OK'.").await {
+        Ok(_) => {
+            info!("[llm] LLM 连接测试成功: provider={}, model={}", req.actor.provider, req.actor.model);
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("LLM 连接测试失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // 4. 读取现有配置
+    let mut config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("读取配置文件失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 5. 备份原配置
+    let backup = config.clone();
+
+    // 6. 更新 LLM 配置
+    config.llm = crate::config::LlmConfig {
+        provider: req.actor.provider.clone(),
+        base_url: req.actor.base_url.clone(),
+        api_key: if req.actor.api_key.is_empty() {
+            None
+        } else {
+            Some(req.actor.api_key.clone())
+        },
+        model: Some(req.actor.model.clone()),
+        temperature: config.llm.temperature,
+        max_tokens: config.llm.max_tokens,
+    };
+
+    // 更新 reflector 配置
+    if req.reflector_inherits_actor {
+        config.llm_reflector = None;
+    } else if let Some(ref reflector) = req.reflector {
+        config.llm_reflector = Some(crate::config::LlmConfig {
+            provider: reflector.provider.clone(),
+            base_url: reflector.base_url.clone(),
+            api_key: if reflector.api_key.is_empty() {
+                None
+            } else {
+                Some(reflector.api_key.clone())
+            },
+            model: Some(reflector.model.clone()),
+            temperature: config.llm.temperature,
+            max_tokens: config.llm.max_tokens,
+        });
+    }
+
+    // 7. 保存配置（原子写入）
+    let config_path = state.config_path.clone();
+    let tmp_path = config_path.with_extension("tmp");
+
+    if let Err(e) = config.save_to_file(&tmp_path) {
+        error!("[llm] 保存临时配置文件失败: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("保存配置失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 验证临时文件可读
+    if let Err(e) = crate::config::Config::from_file(&tmp_path) {
+        error!("[llm] 验证临时配置文件失败: {}", e);
+        let _ = std::fs::remove_file(&tmp_path);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("配置文件验证失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 原子替换
+    if let Err(e) = std::fs::rename(&tmp_path, &config_path) {
+        error!("[llm] 替换配置文件失败: {}", e);
+        let _ = std::fs::remove_file(&tmp_path);
+        // 尝试恢复备份
+        let _ = backup.save_to_file(&config_path);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("替换配置文件失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    info!("[llm] LLM 配置已更新: provider={}, model={}", req.actor.provider, req.actor.model);
+
+    // 8. 返回更新后的配置
+    let actor = dto::LlmConfigInfo {
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone().unwrap_or_default(),
+        base_url: config.llm.base_url.clone(),
+        has_api_key: config.llm.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+    };
+
+    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
+        provider: c.provider.clone(),
+        model: c.model.clone().unwrap_or_default(),
+        base_url: c.base_url.clone(),
+        has_api_key: c.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+    });
+
+    let response = dto::LlmConfigResponse {
+        actor,
+        reflector,
+        reflector_inherits_actor: config.llm_reflector.is_none(),
+        runtime_mode: state.runtime_mode.to_string(),
+    };
+
+    (
+        StatusCode::OK,
+        Json(LlmConfigUpdateResponse {
+            success: true,
+            message: "LLM 配置已更新".to_string(),
+            config: Some(response),
+        }),
+    )
+        .into_response()
+}
+
+// ============================================================================
 // 认知上下文端点
 // ============================================================================
 

@@ -22,7 +22,7 @@
                 <section id="character-selector-section" class="form-section hidden">
                     <h2>角色选择</h2>
                     <div class="form-group">
-                        <select id="character-select" onchange="switchCharacter()">
+                        <select id="character-select">
                             <!-- 动态加载角色列表 -->
                         </select>
                     </div>
@@ -41,7 +41,7 @@
                 <div id="error" class="error hidden">
                     <h3>加载失败</h3>
                     <p id="error-message"></p>
-                    <button onclick="loadCharacter()" class="btn-secondary">重试</button>
+                    <button id="retry-btn" class="btn-secondary">重试</button>
                 </div>
 
                 <!-- 角色信息 -->
@@ -128,6 +128,25 @@
                             <!-- 动态加载 -->
                         </div>
                     </section>
+
+                    <!-- 关系列表 -->
+                    <section class="form-section">
+                        <h2>已知关系</h2>
+                        <div id="relationships" class="relationship-list">
+                            <!-- 动态加载 -->
+                        </div>
+                    </section>
+
+                    <!-- 近期记忆 -->
+                    <section class="form-section">
+                        <h2>近期记忆</h2>
+                        <div id="memories" class="memory-list">
+                            <!-- 动态加载 -->
+                        </div>
+                        <div id="load-more-memories" class="load-more hidden">
+                            <button id="load-more-memories-btn" class="btn-secondary">加载更多</button>
+                        </div>
+                    </section>
                 </div>
 
                 <!-- 经历日志 -->
@@ -137,362 +156,16 @@
                         <!-- 动态加载 -->
                     </div>
                     <div id="load-more" class="load-more hidden">
-                        <button onclick="loadMoreExperiences()" class="btn-secondary">加载更多</button>
+                        <button id="load-more-experiences-btn" class="btn-secondary">加载更多</button>
                     </div>
                 </section>
             </main>
         </div>
 
+        <script src="js/shared.js"></script>
+        <script src="js/character.js"></script>
         <script>
-            // 获取当前主机和端口
-            const API_BASE = `${window.location.protocol}//${window.location.host}`;
-
-            let currentPage = 1;
-            const limit = 20;
-            let hasMore = false;
-            let allCharacters = [];
-
-            // XSS 防护：转义 HTML 特殊字符
-            function escapeHtml(text) {
-                if (!text) return '';
-                const div = document.createElement('div');
-                div.textContent = text;
-                return div.innerHTML;
-            }
-
-            // 加载所有角色列表
-            async function loadCharacterList() {
-                try {
-                    const response = await fetch(`${API_BASE}/api/v1/characters`);
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        console.error('加载角色列表失败:', data.message);
-                        return;
-                    }
-
-                    allCharacters = data.characters || [];
-                    const selectEl = document.getElementById('character-select');
-                    const serverEl = document.getElementById('current-server');
-                    const selectorSection = document.getElementById('character-selector-section');
-
-                    // 显示当前服务器
-                    serverEl.textContent = data.current_server_url || '-';
-
-                    // 如果只有一个角色且是当前角色，隐藏选择器
-                    const aliveCharacters = allCharacters.filter(c => c.status === 'alive');
-                    if (aliveCharacters.length <= 1) {
-                        selectorSection.classList.add('hidden');
-                        return;
-                    }
-
-                    // 填充选择器
-                    selectEl.innerHTML = allCharacters.map(c => {
-                        const statusText = c.status === 'alive' ? '' :
-                                          c.status === 'dead' ? ' [已故]' : ' [归隐]';
-                        const serverInfo = c.server_url ? ` (${c.server_url.replace(/^https?:\/\//, '').split('/')[0]})` : '';
-                        const selected = c.is_current ? 'selected' : '';
-                        const disabled = c.status !== 'alive' ? 'disabled' : '';
-                        return `<option value="${c.agent_id || ''}" ${selected} ${disabled}>${escapeHtml(c.name)}${statusText}${serverInfo}</option>`;
-                    }).join('');
-
-                    selectorSection.classList.remove('hidden');
-                } catch (err) {
-                    console.error('加载角色列表失败:', err);
-                }
-            }
-
-            // 切换角色
-            async function switchCharacter() {
-                const selectEl = document.getElementById('character-select');
-                const agentId = selectEl.value;
-
-                if (!agentId) return;
-
-                // 检查是否是当前角色
-                const currentChar = allCharacters.find(c => c.agent_id === agentId);
-                if (currentChar && currentChar.is_current) return;
-
-                try {
-                    const response = await fetch(`${API_BASE}/api/v1/characters/switch`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ agent_id: agentId })
-                    });
-
-                    const data = await response.json();
-
-                    if (response.ok && data.success) {
-                        // 重新加载角色信息
-                        loadCharacter();
-                    } else {
-                        alert(data.message || '切换角色失败');
-                        // 恢复选择
-                        const currentChar = allCharacters.find(c => c.is_current);
-                        if (currentChar) {
-                            selectEl.value = currentChar.agent_id;
-                        }
-                    }
-                } catch (err) {
-                    alert('切换角色失败: ' + err.message);
-                }
-            }
-
-            // 加载角色信息
-            async function loadCharacter() {
-                const loading = document.getElementById('loading');
-                const error = document.getElementById('error');
-                const info = document.getElementById('character-info');
-                const expSection = document.getElementById('experiences-section');
-
-                loading.classList.remove('hidden');
-                error.classList.add('hidden');
-                info.classList.add('hidden');
-                expSection.classList.add('hidden');
-
-                try {
-                    const response = await fetch(`${API_BASE}/api/v1/character`);
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.message || `服务器错误: ${response.status}`);
-                    }
-
-                    // 填充基本信息
-                    document.getElementById('name').textContent = data.name || '-';
-                    document.getElementById('age').textContent = data.age || '-';
-                    document.getElementById('gender').textContent = data.gender || '-';
-                    document.getElementById('identity').textContent = data.identity || '-';
-                    document.getElementById('appearance').textContent = data.appearance || '-';
-                    document.getElementById('location').textContent = data.location || '-';
-                    document.getElementById('tick-id').textContent = data.tick_id || '-';
-
-                    // 状态（存活/死亡）
-                    if (data.status) {
-                        const statusEl = document.getElementById('status');
-                        statusEl.textContent = data.status === 'alive' ? '存活' :
-                                               data.status === 'dead' ? '死亡' : data.status;
-                        statusEl.className = `value status-${data.status}`;
-                    }
-
-                    // 注册时间
-                    if (data.registered_at) {
-                        const date = new Date(data.registered_at);
-                        document.getElementById('registered-at').textContent =
-                            date.toLocaleDateString('zh-CN') + ' ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-                    }
-
-                    // 游戏时间
-                    if (data.world_time) {
-                        const wt = data.world_time;
-                        document.getElementById('world-time').textContent =
-                            `${wt.year}年${wt.month}月${wt.day}日 ${wt.hour}:${String(wt.minute).padStart(2, '0')}`;
-                    }
-
-                    // 性格标签
-                    const personalityEl = document.getElementById('personality');
-                    personalityEl.innerHTML = data.personality && data.personality.length > 0
-                        ? data.personality.map(p => `<span class="info-tag">${p}</span>`).join('')
-                        : '-';
-
-                    // 价值观标签
-                    const valuesEl = document.getElementById('values');
-                    valuesEl.innerHTML = data.values && data.values.length > 0
-                        ? data.values.map(v => `<span class="info-tag">${v}</span>`).join('')
-                        : '-';
-
-                    // 属性 - 按类别分组显示（参考服务端详细面板）
-                    const attrsEl = document.getElementById('attributes');
-                    if (data.attributes) {
-                        // 定义属性分组
-                        const statusAttrs = ['hp', 'stamina', 'hunger', 'thirst'];
-                        const innateAttrs = ['strength', 'agility', 'constitution', 'intelligence', 'charisma', 'luck'];
-                        const is_redundant_attr = (key, attributes) => {
-                            if (typeof key !== 'string') return false;
-                            if (!key.endsWith('_max')) return false;
-                            const base_key = key.slice(0, -4);
-                            if (statusAttrs.includes(base_key) || innateAttrs.includes(base_key)) return true;
-                            const base_attr = attributes ? attributes[base_key] : undefined;
-                            if (!base_attr || typeof base_attr !== 'object') return false;
-                            return base_attr.max !== undefined;
-                        };
-
-                        let html = '';
-
-                        // 先天属性
-                        html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-                        innateAttrs.forEach(key => {
-                            const attr = data.attributes[key];
-                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                                html += `
-                                    <div class="attr-item" title="${escapeHtml(attr.description || '')}">
-                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                                        <span class="attr-value">${attr.current}/${attr.max}</span>
-                                    </div>
-                                `;
-                            }
-                        });
-                        html += '</div></div>';
-
-                        // 状态属性
-                        html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-                        statusAttrs.forEach(key => {
-                            const attr = data.attributes[key];
-                            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                                const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                                const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
-                                html += `
-                                    <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
-                                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                                        <span class="attr-value">${attr.current}/${attr.max}</span>
-                                    </div>
-                                `;
-                            }
-                        });
-                        html += '</div></div>';
-
-                        // 派生属性（排除已展示的先天/状态，以及明显冗余的 *_max）
-                        const knownAttrs = [...statusAttrs, ...innateAttrs];
-                        const derivedAttrs = Object.keys(data.attributes)
-                            .filter(k => !knownAttrs.includes(k))
-                            .filter(k => !is_redundant_attr(k, data.attributes))
-                            .filter(k => data.attributes[k] && typeof data.attributes[k] === 'object');
-                        if (derivedAttrs.length > 0) {
-                            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-                            derivedAttrs.forEach(key => {
-                                const attr = data.attributes[key];
-                                if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                                    const percentage = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                                    const statusClass = percentage > 70 ? 'attr-high' : percentage > 30 ? 'attr-medium' : 'attr-low';
-                                    html += `
-                                        <div class="attr-item ${statusClass}" title="${escapeHtml(attr.description || '')}">
-                                            <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                                            <span class="attr-value">${attr.current}/${attr.max}</span>
-                                        </div>
-                                    `;
-                                }
-                            });
-                            html += '</div></div>';
-                        }
-
-                        attrsEl.innerHTML = html;
-                    } else {
-                        attrsEl.innerHTML = '<p class="no-data">暂无属性数据</p>';
-                    }
-
-                    // 物品
-                    const invEl = document.getElementById('inventory');
-                    if (data.inventory && data.inventory.length > 0) {
-                        invEl.innerHTML = data.inventory.map(item => `
-                            <div class="inv-item">
-                                <span class="inv-name">${item.name || item.item_id}</span>
-                                <span class="inv-qty">x${item.quantity || 1}</span>
-                            </div>
-                        `).join('');
-                    } else {
-                        invEl.innerHTML = '<p class="no-data">暂无物品</p>';
-                    }
-
-                    loading.classList.add('hidden');
-                    info.classList.remove('hidden');
-                    expSection.classList.remove('hidden');
-
-                    // 加载经历日志
-                    loadExperiences();
-
-                } catch (err) {
-                    loading.classList.add('hidden');
-                    document.getElementById('error-message').textContent = err.message;
-                    error.classList.remove('hidden');
-                }
-            }
-
-            // 加载经历日志
-            async function loadExperiences(page = 1) {
-                const expEl = document.getElementById('experiences');
-                const loadMoreEl = document.getElementById('load-more');
-
-                if (page === 1) {
-                    expEl.innerHTML = '<p class="loading-text">加载中...</p>';
-                }
-
-                try {
-                    const response = await fetch(
-                        `${API_BASE}/api/v1/character/experiences?page=${page}&limit=${limit}`
-                    );
-                    const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.message || `服务器错误: ${response.status}`);
-                    }
-
-                    hasMore = data.has_more;
-                    currentPage = page;
-
-                    if (page === 1) {
-                        expEl.innerHTML = '';
-                    }
-
-                    if (data.experiences && data.experiences.length > 0) {
-                        data.experiences.forEach(exp => {
-                            const div = document.createElement('div');
-                            div.className = 'exp-item';
-
-                            // 构建经历条目 HTML（使用 escapeHtml 防止 XSS）
-                            let html = `
-                                <div class="exp-header">
-                                    <span class="exp-tick">Tick ${exp.tick_id}</span>
-                                </div>
-                                <div class="exp-content">${escapeHtml(exp.event)}</div>
-                            `;
-
-                            // 意图摘要（Agent 的思考）
-                            if (exp.intent_summary) {
-                                html += `
-                                    <div class="exp-thought">
-                                        <span class="thought-label">意图:</span>
-                                        <span class="thought-content">${escapeHtml(exp.intent_summary)}</span>
-                                    </div>
-                                `;
-                            }
-
-                            // Observer 思维链
-                            if (exp.observer_thought) {
-                                html += `
-                                    <div class="exp-observer">
-                                        <span class="observer-label">审查:</span>
-                                        <span class="observer-content">${escapeHtml(exp.observer_thought)}</span>
-                                    </div>
-                                `;
-                            }
-
-                            div.innerHTML = html;
-                            expEl.appendChild(div);
-                        });
-                    } else if (page === 1) {
-                        expEl.innerHTML = '<p class="no-data">暂无经历记录</p>';
-                    }
-
-                    if (hasMore) {
-                        loadMoreEl.classList.remove('hidden');
-                    } else {
-                        loadMoreEl.classList.add('hidden');
-                    }
-
-                } catch (err) {
-                    expEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
-                }
-            }
-
-            function loadMoreExperiences() {
-                loadExperiences(currentPage + 1);
-            }
-
-            // 页面加载时获取角色信息
-            document.addEventListener('DOMContentLoaded', () => {
-                loadCharacterList();
-                loadCharacter();
-            });
+            document.getElementById('retry-btn').addEventListener('click', loadCharacter);
         </script>
     </body>
 </html>

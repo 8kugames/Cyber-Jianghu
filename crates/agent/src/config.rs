@@ -8,7 +8,7 @@
 // 3. Character - 当前角色（通过 Web/API 创建）
 // ============================================================================
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -295,6 +295,15 @@ pub enum RuntimeMode {
     /// Cognitive 模式 - 内置 LLM 决策，无需外部调度器
     /// Agent 内部调用 LLM 直接进行决策
     Cognitive,
+}
+
+impl std::fmt::Display for RuntimeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeMode::Claw => write!(f, "claw"),
+            RuntimeMode::Cognitive => write!(f, "cognitive"),
+        }
+    }
 }
 
 /// 运行时配置

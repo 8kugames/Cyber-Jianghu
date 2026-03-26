@@ -1,16 +1,20 @@
-/* 赛博江湖 - Agent Web Panel Styles */
+/* 赛博江湖 - Agent Web Panel 样式 (Atom One Light) */
 
 :root {
-    --primary-color: #2c3e50;
-    --accent-color: #3498db;
-    --bg-color: #f5f6fa;
-    --card-bg: #ffffff;
-    --text-color: #2c3e50;
-    --text-muted: #7f8c8d;
-    --border-color: #dcdde1;
-    --success-color: #27ae60;
-    --error-color: #c0392b;
-    --warning-color: #f39c12;
+    --bg-primary: #fafafa;
+    --bg-secondary: #f0f0f0;
+    --bg-card: #ffffff;
+    --text-primary: #383a42;
+    --text-muted: #5c6370;
+    --accent: #4078f2;
+    --accent-hover: #3061d6;
+    --success: #4fc08d;
+    --danger: #e06c75;
+    --warning: #e5c07b;
+    --info: #61afef;
+    --border: #e1e1e1;
+    --shadow: rgba(0, 0, 0, 0.06);
+    --shadow-hover: rgba(0, 0, 0, 0.1);
 }
 
 * {
@@ -21,8 +25,8 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background-color: var(--bg-color);
-    color: var(--text-color);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
     min-height: 100vh;
     line-height: 1.5;
 }
@@ -35,21 +39,25 @@ body {
 
 /* Header */
 header {
-    background-color: var(--primary-color);
-    color: white;
+    background-color: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
     padding: 0 24px;
     height: 56px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 3px var(--shadow);
 }
 
 header h1 {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
-    letter-spacing: 0.5px;
-    margin: 0;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
 }
 
 /* Navigation Tabs */
@@ -64,22 +72,21 @@ header h1 {
     height: 100%;
     display: flex;
     align-items: center;
-    color: white;
+    color: var(--text-muted);
     text-decoration: none;
     font-size: 14px;
-    opacity: 0.7;
-    transition: all 0.2s;
-    border-bottom: 3px solid transparent;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s ease;
 }
 
 .nav-tab:hover {
-    opacity: 1;
-    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    background: var(--bg-secondary);
 }
 
 .nav-tab.active {
-    opacity: 1;
-    border-bottom-color: var(--accent-color);
+    color: var(--accent);
+    border-bottom-color: var(--accent);
 }
 
 /* Main Content */
@@ -89,21 +96,23 @@ main {
 
 /* Form Sections */
 .form-section {
-    background: var(--card-bg);
+    background: var(--bg-card);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 3px var(--shadow);
 }
 
 .form-section h2 {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    color: var(--primary-color);
+    color: var(--text-primary);
     margin-bottom: 16px;
     padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .section-desc {
@@ -133,13 +142,13 @@ main {
 label {
     display: block;
     margin-bottom: 6px;
-    color: var(--text-color);
+    color: var(--text-primary);
     font-size: 13px;
     font-weight: 500;
 }
 
 .required {
-    color: var(--error-color);
+    color: var(--danger);
 }
 
 input[type="text"],
@@ -148,21 +157,20 @@ select,
 textarea {
     width: 100%;
     padding: 10px 12px;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    color: var(--text-color);
+    color: var(--text-primary);
     font-size: 14px;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-input[type="text"]:focus,
-input[type="number"]:focus,
+input:focus,
 select:focus,
 textarea:focus {
     outline: none;
-    border-color: var(--accent-color);
-    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(64, 120, 242, 0.1);
 }
 
 input::placeholder,
@@ -172,10 +180,15 @@ textarea::placeholder {
 
 select {
     cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%235c6370' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
 }
 
 select option {
-    background: var(--card-bg);
+    background: var(--bg-card);
 }
 
 /* Tag Selector */
@@ -189,22 +202,24 @@ select option {
 .tag {
     display: inline-block;
     padding: 6px 14px;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     border-radius: 20px;
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s;
+    color: var(--text-muted);
+    transition: all 0.15s ease;
 }
 
 .tag:hover {
-    border-color: var(--accent-color);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .tag.selected {
-    background: var(--accent-color);
-    border-color: var(--accent-color);
-    color: white;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
 }
 
 /* Buttons */
@@ -215,67 +230,77 @@ select option {
 button[type="submit"] {
     width: 100%;
     padding: 12px 20px;
-    background: var(--accent-color);
-    color: white;
+    background: var(--accent);
+    color: #fff;
     border: none;
     border-radius: 6px;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s, transform 0.1s;
 }
 
 button[type="submit"]:hover {
-    background: #2980b9;
+    background: var(--accent-hover);
+}
+
+button[type="submit"]:active {
+    transform: scale(0.98);
 }
 
 button[type="submit"]:disabled {
     background: var(--text-muted);
     cursor: not-allowed;
+    transform: none;
 }
 
 .danger-btn {
     width: 100%;
     padding: 12px 20px;
-    background: var(--error-color);
-    color: white;
+    background: var(--danger);
+    color: #fff;
     border: none;
     border-radius: 6px;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s, transform 0.1s;
 }
 
 .danger-btn:hover {
-    background: #a93226;
+    background: #c9545d;
+}
+
+.danger-btn:active {
+    transform: scale(0.98);
 }
 
 .danger-btn:disabled {
     background: var(--text-muted);
     cursor: not-allowed;
+    transform: none;
 }
 
 .btn-secondary {
     padding: 10px 20px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
     border-radius: 6px;
     cursor: pointer;
     font-size: 14px;
-    transition: all 0.2s;
+    transition: all 0.15s;
 }
 
 .btn-secondary:hover {
-    border-color: var(--accent-color);
-    color: var(--accent-color);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 /* Result & Error Messages */
 .result,
 .error {
-    background: var(--card-bg);
+    background: var(--bg-card);
     border-radius: 8px;
     padding: 14px;
     margin-top: 16px;
@@ -284,28 +309,28 @@ button[type="submit"]:disabled {
 }
 
 .result {
-    border-color: var(--success-color);
-    background: rgba(39, 174, 96, 0.05);
+    border-color: var(--success);
+    background: rgba(79, 192, 141, 0.08);
 }
 
 .result h3 {
-    color: var(--success-color);
+    color: var(--success);
     font-size: 14px;
     margin-bottom: 8px;
 }
 
 .error {
-    border-color: var(--error-color);
-    background: rgba(192, 57, 43, 0.05);
+    border-color: var(--danger);
+    background: rgba(224, 108, 117, 0.08);
 }
 
 .error h3 {
-    color: var(--error-color);
+    color: var(--danger);
     font-size: 14px;
     margin-bottom: 8px;
 }
 
-/* Info Section (character.html) */
+/* Info Section */
 .info-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -331,18 +356,19 @@ button[type="submit"]:disabled {
 
 .info-item .value {
     font-size: 14px;
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 .info-tag {
     display: inline-block;
     padding: 4px 10px;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
     border-radius: 14px;
     font-size: 12px;
     margin-right: 4px;
     margin-bottom: 4px;
+    color: var(--text-muted);
 }
 
 .tag-list {
@@ -357,20 +383,19 @@ button[type="submit"]:disabled {
     gap: 16px;
 }
 
-/* Attribute Section */
 .attr-section {
-    background: var(--bg-color);
+    background: var(--bg-secondary);
     border-radius: 8px;
     padding: 12px;
 }
 
 .attr-section h4 {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    color: var(--primary-color);
+    color: var(--text-primary);
     margin: 0 0 10px 0;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border);
 }
 
 .attr-group {
@@ -380,53 +405,19 @@ button[type="submit"]:disabled {
 }
 
 .attr-item {
-    background: var(--card-bg);
+    background: var(--bg-card);
     padding: 8px 10px;
     border-radius: 6px;
     text-align: center;
     cursor: help;
     position: relative;
-    transition: transform 0.2s, box-shadow 0.2s;
-    border: 1px solid var(--border-color);
+    transition: transform 0.15s, box-shadow 0.15s;
+    border: 1px solid var(--border);
 }
 
 .attr-item:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-/* Attribute status colors */
-.attr-item.attr-high {
-    border-left: 3px solid #27ae60;
-}
-
-.attr-item.attr-medium {
-    border-left: 3px solid #f39c12;
-}
-
-.attr-item.attr-low {
-    border-left: 3px solid #e74c3c;
-}
-
-/* Tooltip */
-.attr-item[title]:hover::after {
-    content: attr(title);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.85);
-    color: #fff;
-    font-size: 12px;
-    border-radius: 6px;
-    white-space: nowrap;
-    max-width: 250px;
-    white-space: normal;
-    text-align: center;
-    z-index: 100;
-    margin-bottom: 8px;
-    pointer-events: none;
+    box-shadow: 0 4px 12px var(--shadow-hover);
 }
 
 .attr-name {
@@ -440,7 +431,20 @@ button[type="submit"]:disabled {
     display: block;
     font-size: 14px;
     font-weight: 600;
-    color: var(--primary-color);
+    color: var(--text-primary);
+}
+
+/* Attribute status colors */
+.attr-item.attr-high {
+    border-left: 3px solid var(--success);
+}
+
+.attr-item.attr-medium {
+    border-left: 3px solid var(--warning);
+}
+
+.attr-item.attr-low {
+    border-left: 3px solid var(--danger);
 }
 
 /* Inventory List */
@@ -451,20 +455,77 @@ button[type="submit"]:disabled {
 }
 
 .inv-item {
-    background: var(--bg-color);
+    background: var(--bg-secondary);
     padding: 6px 12px;
     border-radius: 6px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border);
     font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .inv-name {
-    color: var(--text-color);
+    color: var(--text-primary);
 }
 
 .inv-qty {
     color: var(--text-muted);
-    margin-left: 4px;
+}
+
+/* Relationship List */
+.relationship-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rel-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+}
+
+.rel-name {
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.rel-favorability {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Memory List */
+.memory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mem-item {
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: 6px;
+    border-left: 3px solid var(--info);
+}
+
+.mem-tick {
+    font-size: 11px;
+    color: var(--info);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.mem-content {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.5;
 }
 
 /* Experience List */
@@ -475,10 +536,10 @@ button[type="submit"]:disabled {
 
 .exp-item {
     padding: 12px 14px;
-    background: var(--bg-color);
+    background: var(--bg-secondary);
     border-radius: 6px;
     margin-bottom: 8px;
-    border-left: 3px solid var(--accent-color);
+    border-left: 3px solid var(--accent);
 }
 
 .exp-header {
@@ -489,12 +550,12 @@ button[type="submit"]:disabled {
 
 .exp-tick {
     font-size: 11px;
-    color: var(--accent-color);
+    color: var(--accent);
     font-weight: 500;
 }
 
 .exp-content {
-    color: var(--text-color);
+    color: var(--text-primary);
     font-size: 13px;
 }
 
@@ -502,17 +563,17 @@ button[type="submit"]:disabled {
 .exp-observer {
     margin-top: 8px;
     padding: 8px 10px;
-    background: var(--card-bg);
+    background: var(--bg-card);
     border-radius: 4px;
     font-size: 12px;
 }
 
 .exp-thought {
-    border-left: 3px solid var(--success-color);
+    border-left: 3px solid var(--success);
 }
 
 .exp-observer {
-    border-left: 3px solid var(--warning-color);
+    border-left: 3px solid var(--warning);
 }
 
 .thought-label,
@@ -525,21 +586,21 @@ button[type="submit"]:disabled {
 }
 
 .thought-content {
-    color: var(--success-color);
+    color: var(--success);
 }
 
 .observer-content {
-    color: var(--warning-color);
+    color: var(--warning);
 }
 
 /* Status */
 .status-alive {
-    color: var(--success-color) !important;
+    color: var(--success) !important;
     font-weight: 500;
 }
 
 .status-dead {
-    color: var(--error-color) !important;
+    color: var(--danger) !important;
     font-weight: 500;
 }
 
@@ -557,18 +618,18 @@ button[type="submit"]:disabled {
 
 .load-more button {
     padding: 8px 20px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s;
+    transition: all 0.15s;
 }
 
 .load-more button:hover {
-    border-color: var(--accent-color);
-    color: var(--accent-color);
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .no-data {
@@ -586,7 +647,7 @@ button[type="submit"]:disabled {
 }
 
 .error-text {
-    color: var(--error-color);
+    color: var(--danger);
     text-align: center;
     padding: 20px;
     font-size: 13px;
@@ -594,15 +655,15 @@ button[type="submit"]:disabled {
 
 /* Manage Page */
 .status-card {
-    background: var(--bg-color);
+    background: rgba(79, 192, 141, 0.08);
     border-radius: 6px;
     padding: 14px;
     margin-bottom: 14px;
-    border: 1px solid var(--success-color);
+    border: 1px solid var(--success);
 }
 
 .status-card h4 {
-    color: var(--success-color);
+    color: var(--success);
     font-size: 12px;
     margin-bottom: 6px;
 }
@@ -614,23 +675,23 @@ button[type="submit"]:disabled {
 }
 
 .danger-zone {
-    border-color: rgba(192, 57, 43, 0.3);
+    border-color: rgba(224, 108, 117, 0.3);
 }
 
 .danger-zone h2 {
-    color: var(--error-color);
+    color: var(--danger);
 }
 
 .warning-box {
-    background: rgba(192, 57, 43, 0.05);
-    border: 1px solid rgba(192, 57, 43, 0.2);
+    background: rgba(224, 108, 117, 0.05);
+    border: 1px solid rgba(224, 108, 117, 0.2);
     border-radius: 6px;
     padding: 14px;
     margin-bottom: 14px;
 }
 
 .warning-box h4 {
-    color: var(--error-color);
+    color: var(--danger);
     font-size: 13px;
     margin-bottom: 8px;
 }
@@ -655,35 +716,24 @@ button[type="submit"]:disabled {
     top: 9px;
     width: 5px;
     height: 5px;
-    background: var(--error-color);
+    background: var(--danger);
     border-radius: 50%;
 }
 
 .nav-link {
     display: inline-block;
     padding: 8px 16px;
-    background: var(--accent-color);
-    color: white;
+    background: var(--accent);
+    color: #fff;
     text-decoration: none;
     border-radius: 6px;
     font-size: 13px;
     margin-top: 10px;
-    transition: background 0.2s;
+    transition: background 0.15s;
 }
 
 .nav-link:hover {
-    background: #2980b9;
-}
-
-.retry-btn {
-    padding: 8px 16px;
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
-    border-radius: 6px;
-    cursor: pointer;
-    margin-top: 10px;
-    font-size: 13px;
+    background: var(--accent-hover);
 }
 
 /* Dialog */
@@ -693,7 +743,7 @@ button[type="submit"]:disabled {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -701,7 +751,7 @@ button[type="submit"]:disabled {
 }
 
 .dialog {
-    background: var(--card-bg);
+    background: var(--bg-card);
     border-radius: 10px;
     padding: 20px;
     max-width: 360px;
@@ -710,13 +760,13 @@ button[type="submit"]:disabled {
 }
 
 .dialog h3 {
-    color: var(--error-color);
+    color: var(--danger);
     font-size: 16px;
     margin-bottom: 10px;
 }
 
 .dialog p {
-    color: var(--text-color);
+    color: var(--text-primary);
     font-size: 13px;
     margin-bottom: 20px;
     line-height: 1.5;
@@ -730,13 +780,13 @@ button[type="submit"]:disabled {
 
 .cancel-btn {
     padding: 8px 16px;
-    background: var(--bg-color);
-    border: 1px solid var(--border-color);
-    color: var(--text-color);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
-    transition: all 0.2s;
+    transition: all 0.15s;
 }
 
 .cancel-btn:hover {
@@ -759,7 +809,7 @@ button[type="submit"]:disabled {
     }
 
     header h1 {
-        font-size: 16px;
+        font-size: 15px;
     }
 
     .nav-tab {
@@ -784,7 +834,7 @@ button[type="submit"]:disabled {
         grid-template-columns: 1fr;
     }
 
-    .attributes-grid {
+    .attr-group {
         grid-template-columns: repeat(2, 1fr);
     }
 }
