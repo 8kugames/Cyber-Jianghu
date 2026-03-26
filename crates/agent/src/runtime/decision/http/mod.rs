@@ -460,7 +460,15 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
 
     let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "无法绑定端口 {} ({}): 请检查是否有旧进程仍在运行，或使用其他端口",
+                port, e
+            ));
+        }
+    };
     let local_addr = listener.local_addr()?;
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
