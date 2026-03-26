@@ -85,6 +85,16 @@ const showWarning = (m) => showToast(m, 'warning', 3500);
 const showInfo = (m) => showToast(m, 'info');
 
 // API 请求
+async function parseApiResponse(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return { message: text };
+    }
+}
+
 async function apiGet(endpoint, options = {}) {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const retries = options.retries ?? MAX_RETRIES;
@@ -92,9 +102,9 @@ async function apiGet(endpoint, options = {}) {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
     }, retries, timeout);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || `服务器错误: ${response.status}`);
-    return data;
+    const data = await parseApiResponse(response);
+    if (!response.ok) throw new Error((data && data.message) || `服务器错误: ${response.status}`);
+    return data ?? {};
 }
 
 async function apiPost(endpoint, body, options = {}) {
@@ -105,9 +115,9 @@ async function apiPost(endpoint, body, options = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     }, retries, timeout);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.message || `服务器错误: ${response.status}`);
-    return data;
+    const data = await parseApiResponse(response);
+    if (!response.ok) throw new Error((data && data.message) || `服务器错误: ${response.status}`);
+    return data ?? {};
 }
 
 // 工具函数
