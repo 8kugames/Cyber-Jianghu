@@ -211,10 +211,11 @@ impl Attribute {
     /// 成长（仅对可成长属性有效）
     pub fn train(&mut self, amount: i32) -> bool {
         if let AttributeValue::Growable { base, current } = &mut self.value
-            && *current < *base {
-                *current = (*current as i32 + amount).min(*base as i32) as u8;
-                return true;
-            }
+            && *current < *base
+        {
+            *current = (*current as i32 + amount).min(*base as i32) as u8;
+            return true;
+        }
         false
     }
 

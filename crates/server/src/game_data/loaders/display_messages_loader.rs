@@ -25,9 +25,7 @@ pub fn load_display_messages(config_dir: &Path) -> Result<DisplayMessagesConfig>
         return load_from_path(&json_path, ConfigFormat::Json);
     }
 
-    tracing::info!(
-        "[display_messages_loader] Config file not found, using builtin config"
-    );
+    tracing::info!("[display_messages_loader] Config file not found, using builtin config");
     Ok(DisplayMessagesConfig::builtin())
 }
 

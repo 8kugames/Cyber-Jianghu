@@ -352,7 +352,11 @@ pub(super) async fn health_handler(State(state): State<HttpApiState>) -> impl In
 
     let response = HealthResponse {
         status: "ok".to_string(),
-        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
+        agent_id: if agent_id.is_nil() {
+            None
+        } else {
+            Some(agent_id.to_string())
+        },
         tick_id: current.as_ref().map(|s| s.tick_id),
     };
     Json(response)
@@ -395,7 +399,11 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
             let context = if let Some(store) = &state.relationship_store {
                 generate_context_markdown(world_state, store, engine, dream_thought.as_deref())
             } else {
-                generate_context_markdown_no_relationship(world_state, engine, dream_thought.as_deref())
+                generate_context_markdown_no_relationship(
+                    world_state,
+                    engine,
+                    dream_thought.as_deref(),
+                )
             };
             Json(ContextResponse {
                 context,
@@ -502,12 +510,14 @@ pub(super) async fn submit_intent_handler(
 
     // 记录到 IntentHistoryStore（用于经历日志查询）
     if let Some(history) = &state.intent_history {
-        history.record_intent(
-            tick_id,
-            intent.intent_id,
-            action_type_str,
-            req.thought_log.clone(),
-        ).await;
+        history
+            .record_intent(
+                tick_id,
+                intent.intent_id,
+                action_type_str,
+                req.thought_log.clone(),
+            )
+            .await;
     }
 
     let intent_id = intent.intent_id;
@@ -933,7 +943,11 @@ pub(super) async fn get_tick_status_handler(
 
     Json(dto::TickStatusResponse {
         tick_id,
-        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
+        agent_id: if agent_id.is_nil() {
+            None
+        } else {
+            Some(agent_id.to_string())
+        },
         has_new_state: has_state,
         seconds_until_next_tick: None, // 服务端未提供此信息
         last_updated_at: chrono::Utc::now().to_rfc3339(),
@@ -1204,7 +1218,10 @@ pub(super) async fn register_character_handler(
             if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
                 let mut id = state.agent_id.write().await;
                 *id = agent_uuid;
-                info!("[character] Updated runtime agent_id to {} ({})", agent_uuid, payload.name);
+                info!(
+                    "[character] Updated runtime agent_id to {} ({})",
+                    agent_uuid, payload.name
+                );
             }
 
             (
@@ -1287,9 +1304,7 @@ pub struct CharacterInfoResponse {
 /// 数据来源：
 /// - 配置文件：name, age, gender, appearance, identity, personality, values
 /// - WorldState：attributes, inventory, location, tick_id, world_time
-pub(super) async fn get_character_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     // 1. 从配置文件读取角色配置
     let config = match crate::config::Config::from_file(&state.config_path) {
         Ok(cfg) => cfg,
@@ -1327,27 +1342,29 @@ pub(super) async fn get_character_handler(
     // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
-    let (
-        agent_id,
-        raw_attributes,
-        inventory,
-        location,
-        tick_id,
-        world_time,
-    ) = match current.as_ref() {
-        Some(ws) => {
-            let agent_id = ws.agent_id.map(|id| id.to_string());
-            let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
-            let inv = serde_json::to_value(&ws.self_state.inventory).ok();
-            let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
-            let time = serde_json::to_value(&ws.world_time).ok();
-            (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
-        }
-        None => (character.agent_id.map(|id| id.to_string()), None, None, None, None, None),
-    };
+    let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
+        match current.as_ref() {
+            Some(ws) => {
+                let agent_id = ws.agent_id.map(|id| id.to_string());
+                let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
+                let inv = serde_json::to_value(&ws.self_state.inventory).ok();
+                let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+                let time = serde_json::to_value(&ws.world_time).ok();
+                (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
+            }
+            None => (
+                character.agent_id.map(|id| id.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        };
 
     // 5. 计算角色状态（在 move attributes 之前）
-    let status = raw_attributes.as_ref()
+    let status = raw_attributes
+        .as_ref()
         .and_then(|a| a.get("hp"))
         .and_then(|hp| hp.as_i64())
         .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
@@ -1367,7 +1384,9 @@ pub(super) async fn get_character_handler(
         values: character.values.clone(),
         registered_at: character.registered_at.map(|t| t.to_rfc3339()),
         attributes,
-        birth_attributes: character.birth_attributes.as_ref()
+        birth_attributes: character
+            .birth_attributes
+            .as_ref()
             .and_then(|a| serde_json::to_value(a).ok()),
         inventory,
         location,
@@ -1380,7 +1399,9 @@ pub(super) async fn get_character_handler(
 }
 
 /// 加载叙事配置
-fn load_narrative_config(config_path: &std::path::Path) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
+fn load_narrative_config(
+    config_path: &std::path::Path,
+) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
     let config_dir = config_path.parent()?;
     let narrative_path = config_dir.join("narrative_config.json");
 
@@ -1423,7 +1444,9 @@ fn enrich_attributes_with_descriptions(
                 .map(|attr_cfg| {
                     let name = attr_cfg.display_name.clone();
                     let current_i32 = current as i32;
-                    let desc = attr_cfg.thresholds.iter()
+                    let desc = attr_cfg
+                        .thresholds
+                        .iter()
                         .rev()
                         .find(|t| current_i32 >= t.min && current_i32 <= t.max)
                         .map(|t| t.description.clone())
@@ -1496,10 +1519,7 @@ pub(super) async fn get_experiences_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let page: u32 = params
-        .get("page")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
+    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
     let limit: u32 = params
         .get("limit")
         .and_then(|s| s.parse().ok())
@@ -1865,9 +1885,7 @@ pub(super) async fn dream_character_handler(
 /// 获取当前托梦状态
 ///
 /// GET /api/v1/character/dream
-pub(super) async fn get_dream_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_dream_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let dream_store = match &state.dream_store {
         Some(store) => store,
         None => {
@@ -1977,7 +1995,10 @@ pub(super) async fn list_characters_handler(
     };
 
     let current_server_url = state.server_http_url.read().await.clone();
-    let current_agent_id = config.agent.as_ref().and_then(|c| c.agent_id.map(|id| id.to_string()));
+    let current_agent_id = config
+        .agent
+        .as_ref()
+        .and_then(|c| c.agent_id.map(|id| id.to_string()));
 
     // 从 characters 数组构建列表
     let mut characters: Vec<CharacterInfo> = config
@@ -2388,8 +2409,7 @@ fn save_server_config(
     use std::io::Write;
 
     // 读取现有配置
-    let existing_content = std::fs::read_to_string(config_path)
-        .unwrap_or_else(|_| String::new());
+    let existing_content = std::fs::read_to_string(config_path).unwrap_or_else(|_| String::new());
 
     // 解析或创建 YAML
     let mut config: serde_yaml::Value = if existing_content.is_empty() {
@@ -2457,7 +2477,10 @@ pub(super) async fn set_server_handler(
 
     // 如果服务器地址变化，检查设备注册状态和角色状态
     if server_changed {
-        info!("[config] 检测到服务器地址变更: {} -> {}", old_ws_url, req.ws_url);
+        info!(
+            "[config] 检测到服务器地址变更: {} -> {}",
+            old_ws_url, req.ws_url
+        );
 
         // 服务器变更后，设备需要重新注册（每个服务器有独立的设备表）
         needs_device_registration = true;
@@ -2526,11 +2549,7 @@ pub(super) async fn set_server_handler(
     }
 
     // 2. 持久化到配置文件（config_path 是文件路径，非目录）
-    if let Err(e) = save_server_config(
-        &state.config_path,
-        &req.ws_url,
-        Some(&http_url_value),
-    ) {
+    if let Err(e) = save_server_config(&state.config_path, &req.ws_url, Some(&http_url_value)) {
         error!("保存配置失败: {}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2637,26 +2656,25 @@ pub(super) async fn get_cognitive_context_handler(
             let narrative_engine = NarrativeEngine::default();
             let builder = CognitiveContextBuilder::new(narrative_engine, Default::default());
 
-            let (persona_info, persona_ref): (Option<CognitivePersonaInfo>, Option<crate::ai::persona::dynamic_persona::DynamicPersona>) =
-                if let Some(ref persona_arc) = state.dynamic_persona {
-                    persona_arc.read(|p| {
-                        let info = CognitivePersonaInfo {
-                            name: p.name.clone(),
-                            personality: p.traits.keys().take(3).cloned().collect(),
-                            description: p.base_description.chars().take(100).collect(),
-                        };
-                        (Some(info), Some(p.clone()))
-                    })
-                } else {
-                    (None, None)
-                };
+            let (persona_info, persona_ref): (
+                Option<CognitivePersonaInfo>,
+                Option<crate::ai::persona::dynamic_persona::DynamicPersona>,
+            ) = if let Some(ref persona_arc) = state.dynamic_persona {
+                persona_arc.read(|p| {
+                    let info = CognitivePersonaInfo {
+                        name: p.name.clone(),
+                        personality: p.traits.keys().take(3).cloned().collect(),
+                        description: p.base_description.chars().take(100).collect(),
+                    };
+                    (Some(info), Some(p.clone()))
+                })
+            } else {
+                (None, None)
+            };
 
             let relationship_store = state.relationship_store.as_ref().map(|v| &**v);
-            let cognitive_context = builder.build_with_persona(
-                world_state,
-                persona_ref.as_ref(),
-                relationship_store,
-            );
+            let cognitive_context =
+                builder.build_with_persona(world_state, persona_ref.as_ref(), relationship_store);
 
             let simplified_world_state = SimplifiedWorldState {
                 agent_id: world_state.agent_id.map(|id| id.to_string()),

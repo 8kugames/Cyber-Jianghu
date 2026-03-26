@@ -357,7 +357,6 @@ impl TickScheduler {
         let (mut updated_states, dead_agents, mut decay_events, death_notifications) =
             decay::apply_decay_and_environmental_damage(tick_id, intent_processed_states);
 
-
         // Push death notifications immediately to agents
         for notification in death_notifications {
             if let Err(e) = crate::websocket::send_agent_died_notification(
@@ -368,7 +367,8 @@ impl TickScheduler {
                 notification.tick_id,
                 notification.died_at,
                 &self.connection_manager,
-            ).await
+            )
+            .await
             {
                 warn!(
                     "Failed to send death notification to agent {}: {}",
@@ -481,9 +481,7 @@ impl TickScheduler {
         let phase3_duration = phase3_start.elapsed();
         info!(
             "阶段3完成 - 统计和超时跟踪, {}个Agent, {}个动作, 耗时: {:?}",
-            agents_processed,
-            actions_executed,
-            phase3_duration
+            agents_processed, actions_executed, phase3_duration
         );
 
         let phase4_start = Instant::now();

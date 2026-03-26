@@ -176,13 +176,14 @@ impl EventContext {
 
         // 从 metadata 中提取其他 Agent
         if let Some(obj) = event.metadata.as_object()
-            && let Some(targets) = obj.get("targets").and_then(|v| v.as_array()) {
-                for target in targets {
-                    if let Some(name) = target.as_str() {
-                        agents.push(name.to_string());
-                    }
+            && let Some(targets) = obj.get("targets").and_then(|v| v.as_array())
+        {
+            for target in targets {
+                if let Some(name) = target.as_str() {
+                    agents.push(name.to_string());
                 }
             }
+        }
 
         agents
     }

@@ -63,7 +63,11 @@ pub struct ToolResult {
 }
 
 impl ToolResult {
-    pub fn success(id: impl Into<String>, name: impl Into<String>, result: impl Into<String>) -> Self {
+    pub fn success(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        result: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -72,7 +76,11 @@ impl ToolResult {
         }
     }
 
-    pub fn failure(id: impl Into<String>, name: impl Into<String>, error: impl Into<String>) -> Self {
+    pub fn failure(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -126,7 +134,10 @@ impl TurnCycle {
                 anyhow::bail!("Timeout {}s exceeded", self.config.timeout_secs);
             }
 
-            debug!("Turn cycle iteration {}/{}", iterations, self.config.max_iterations);
+            debug!(
+                "Turn cycle iteration {}/{}",
+                iterations, self.config.max_iterations
+            );
 
             let response = services.call_llm(history).await?;
 
@@ -164,9 +175,16 @@ impl TurnCycle {
         for item in tool_calls {
             let id = item.get("id")?.as_str()?.to_string();
             let name = item.get("name")?.as_str()?.to_string();
-            let arguments = item.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+            let arguments = item
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
 
-            calls.push(ToolCall { id, name, arguments });
+            calls.push(ToolCall {
+                id,
+                name,
+                arguments,
+            });
         }
 
         if calls.is_empty() {
@@ -177,8 +195,8 @@ impl TurnCycle {
     }
 
     fn parse_intent(&self, response: &str) -> Result<Intent> {
-        let json: serde_json::Value = serde_json::from_str(response)
-            .context("Failed to parse intent JSON")?;
+        let json: serde_json::Value =
+            serde_json::from_str(response).context("Failed to parse intent JSON")?;
 
         let action_type = json
             .get("action_type")
@@ -265,8 +283,13 @@ mod tests {
             tick_id: 1,
             agent_id: None,
             world_time: WorldTime {
-                year: 1, month: 1, day: 1, hour: 12,
-                minute: 0, second: 0, weather: "sunny".to_string(),
+                year: 1,
+                month: 1,
+                day: 1,
+                hour: 12,
+                minute: 0,
+                second: 0,
+                weather: "sunny".to_string(),
             },
             location: Location {
                 node_id: "test".to_string(),
@@ -292,14 +315,20 @@ mod tests {
         let turn_cycle = TurnCycle::default();
         let history = HistoryManager::default();
 
-        let services = MockServices::new(vec![r#"{
+        let services = MockServices::new(vec![
+            r#"{
             "action_type": "move",
             "action_data": {"target": "north"},
             "thought": "I should move north"
-        }"#.to_string()]);
+        }"#
+            .to_string(),
+        ]);
 
         let ws = create_test_world_state();
-        let intent = turn_cycle.run(&services, &ws, &mut history.clone()).await.unwrap();
+        let intent = turn_cycle
+            .run(&services, &ws, &mut history.clone())
+            .await
+            .unwrap();
 
         assert_eq!(intent.action_type, "move");
     }
@@ -310,13 +339,17 @@ mod tests {
         let history = HistoryManager::default();
 
         let responses = vec![
-            r#"{"tool_calls": [{"id": "1", "name": "search", "arguments": {"query": "test"}}]}"#.to_string(),
+            r#"{"tool_calls": [{"id": "1", "name": "search", "arguments": {"query": "test"}}]}"#
+                .to_string(),
             r#"{"action_type": "idle", "thought": "done"}"#.to_string(),
         ];
 
         let services = MockServices::new(responses);
         let ws = create_test_world_state();
-        let intent = turn_cycle.run(&services, &ws, &mut history.clone()).await.unwrap();
+        let intent = turn_cycle
+            .run(&services, &ws, &mut history.clone())
+            .await
+            .unwrap();
 
         assert_eq!(intent.action_type, "idle");
     }

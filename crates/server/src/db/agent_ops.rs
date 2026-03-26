@@ -479,11 +479,12 @@ pub async fn register_agent_transactional(
         .fetch_one(&mut *tx)
         .await
         .context("验证初始物品插入失败")?;
-    
+
     if check.0 != initial_items.len() as i64 {
         error!(
             "初始物品数量不匹配！预期: {}, 实际: {}",
-            initial_items.len(), check.0
+            initial_items.len(),
+            check.0
         );
         // 注意：不强制失败，因为可能是有意为之（如配置为空）
     } else {
