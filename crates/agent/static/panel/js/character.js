@@ -155,6 +155,7 @@ async function switchCharacter() {
         const data = await apiPost('/api/v1/characters/switch', { agent_id: agentId });
         if (data.success) {
             loadCharacter();
+            loadRelationships();
         } else {
             showError(data.message || '切换角色失败');
             const currentChar = allCharacters.find(c => c.is_current);
@@ -416,18 +417,105 @@ async function loadRelationships() {
     try {
         const data = await apiGet('/api/v1/relationship/list');
         if (data.relationships && data.relationships.length > 0) {
-            relEl.innerHTML = data.relationships.map(rel => `
-                <div class="rel-item">
-                    <span class="rel-name">${escapeHtml(rel.target_name || rel.target_agent_id || '未知')}</span>
-                    <span class="rel-favorability">好感度: ${rel.favorability ?? 0}</span>
-                </div>
-            `).join('');
+            relEl.innerHTML = data.relationships.map((rel, idx) => {
+                const fav = rel.favorability ?? 0;
+                const level = rel.relationship_level || 'neutral';
+                const label = rel.relationship_label || '陌生人';
+                const pct = Math.max(0, Math.min(100, Math.round(((fav + 100) / 200) * 100)));
+                return `
+                <div class="rel-item" data-rel-id="${rel.target_agent_id || idx}">
+                    <div class="rel-item-left">
+                        <span class="rel-name">${escapeHtml(rel.target_name || rel.target_agent_id || '未知')}</span>
+                        <div class="rel-meta">
+                            <span class="rel-label ${level}">${escapeHtml(label)}</span>
+                        </div>
+                    </div>
+                    <div class="rel-right">
+                        <div class="rel-favor-bar">
+                            <div class="rel-favor-fill ${level}" style="width:${pct}%"></div>
+                        </div>
+                        <span class="rel-favor-value">${fav}</span>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // 缓存关系数据供抽屉使用
+            relEl._relationships = data.relationships;
+
+            // 绑定点击事件
+            relEl.querySelectorAll('.rel-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const id = item.dataset.relId;
+                    const rel = relEl._relationships.find(r => (r.target_agent_id || '') === id);
+                    if (rel) openRelationshipDrawer(rel);
+                });
+            });
         } else {
             relEl.innerHTML = '<p class="no-data">暂无关系记录</p>';
         }
     } catch (err) {
         relEl.innerHTML = '<p class="error-text">加载关系失败</p>';
     }
+}
+
+// 打开关系详情抽屉
+function openRelationshipDrawer(rel) {
+    if (!rel) return;
+
+    const fav = rel.favorability ?? 0;
+    const level = rel.relationship_level || 'neutral';
+    const label = rel.relationship_label || '陌生人';
+    const pct = Math.max(0, Math.min(100, Math.round(((fav + 100) / 200) * 100)));
+
+    document.getElementById('drawer-name').textContent = rel.target_name || rel.target_agent_id || '未知';
+
+    const labelEl = document.getElementById('drawer-label');
+    labelEl.textContent = label;
+    labelEl.className = 'drawer-label ' + level;
+
+    const fillEl = document.getElementById('drawer-favorability-fill');
+    fillEl.style.width = pct + '%';
+    fillEl.className = 'favorability-fill ' + level;
+    document.getElementById('drawer-favorability-value').textContent = fav;
+
+    document.getElementById('drawer-description').textContent = rel.self_description || '暂无描述';
+
+    // 渲染关键事件
+    const eventsEl = document.getElementById('drawer-events');
+    const events = rel.key_events || [];
+    if (events.length > 0) {
+        // 按时间倒序
+        const sorted = [...events].sort((a, b) => (b.tick_id || 0) - (a.tick_id || 0));
+        eventsEl.innerHTML = sorted.map(evt => {
+            const delta = evt.favorability_delta || 0;
+            const deltaCls = delta > 0 ? 'positive' : delta < 0 ? 'negative' : 'neutral';
+            const deltaSign = delta > 0 ? '+' : '';
+            return `
+            <div class="drawer-event">
+                <div class="drawer-event-header">
+                    <span class="drawer-event-type">${escapeHtml(evt.event_type || '事件')}</span>
+                    <span class="drawer-event-delta ${deltaCls}">${deltaSign}${delta}</span>
+                </div>
+                <div class="drawer-event-desc">${escapeHtml(evt.description || '')}</div>
+                <div class="drawer-event-tick">Tick ${evt.tick_id || '-'}</div>
+            </div>`;
+        }).join('');
+    } else {
+        eventsEl.innerHTML = '<p class="no-data">暂无关键事件</p>';
+    }
+
+    // 打开抽屉
+    const drawer = document.getElementById('relationship-drawer');
+    const overlay = document.getElementById('relationship-drawer-overlay');
+    drawer.classList.add('open');
+    overlay.classList.add('open');
+}
+
+function closeRelationshipDrawer() {
+    const drawer = document.getElementById('relationship-drawer');
+    const overlay = document.getElementById('relationship-drawer-overlay');
+    drawer.classList.remove('open');
+    overlay.classList.remove('open');
 }
 
 // 加载近期记忆
@@ -559,6 +647,13 @@ document.addEventListener('DOMContentLoaded', () => {
     loadRelationships();
     loadMemories();
     loadDreamStatus();
+
+    // 关系抽屉关闭事件
+    document.getElementById('drawer-close').addEventListener('click', closeRelationshipDrawer);
+    document.getElementById('relationship-drawer-overlay').addEventListener('click', closeRelationshipDrawer);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeRelationshipDrawer();
+    });
 
     // 横向标签页切换
     document.querySelectorAll('.page-tab').forEach(tab => {

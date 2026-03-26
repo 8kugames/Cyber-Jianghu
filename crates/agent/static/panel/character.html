@@ -6,8 +6,7 @@
         <title>赛博江湖 - 角色信息</title>
         <link rel="stylesheet" href="style.css" />
     </head>
-    <body>
-        <div class="container">
+    <body class="full-width-page">
             <header>
                 <h1>赛博江湖</h1>
                 <nav class="nav-tabs">
@@ -478,7 +477,40 @@
                     </div>
                 </div>
             </main>
-        </div>
+
+        <!-- 关系详情侧边抽屉 -->
+        <div id="relationship-drawer-overlay" class="drawer-overlay"></div>
+        <aside id="relationship-drawer" class="drawer">
+            <div class="drawer-header">
+                <div>
+                    <h3 id="drawer-name" class="drawer-name">-</h3>
+                    <span id="drawer-label" class="drawer-label">-</span>
+                </div>
+                <button id="drawer-close" class="drawer-close" aria-label="关闭">&times;</button>
+            </div>
+            <div class="drawer-body">
+                <!-- 好感度 -->
+                <section class="drawer-section">
+                    <div class="drawer-section-title">好感度</div>
+                    <div class="favorability-bar-wrap">
+                        <div class="favorability-bar">
+                            <div id="drawer-favorability-fill" class="favorability-fill"></div>
+                        </div>
+                        <span id="drawer-favorability-value" class="favorability-value">0</span>
+                    </div>
+                </section>
+                <!-- 关系描述 -->
+                <section class="drawer-section">
+                    <div class="drawer-section-title">关系描述</div>
+                    <p id="drawer-description" class="drawer-description">-</p>
+                </section>
+                <!-- 关键事件 -->
+                <section class="drawer-section">
+                    <div class="drawer-section-title">关键事件</div>
+                    <div id="drawer-events" class="drawer-events"></div>
+                </section>
+            </div>
+        </aside>
 
         <script src="js/shared.js"></script>
         <script src="js/character.js"></script>
