@@ -619,21 +619,32 @@ impl Config {
         Ok(config)
     }
 
-    /// 保存配置到文件
+    /// 保存配置到文件（原子写入：先写临时文件，再 rename 替换）
+    ///
+    /// 避免进程中断时文件被截断为空。
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path_display = path.as_ref().display().to_string();
+        let path = path.as_ref();
+        let path_display = path.display().to_string();
         let yaml =
             serde_yaml::to_string(self).with_context(|| "Failed to serialize config to YAML")?;
 
         // 确保目录存在
-        if let Some(parent) = path.as_ref().parent() {
+        if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("Failed to create config directory: {}", parent.display())
             })?;
         }
 
-        fs::write(&path, yaml)
-            .with_context(|| format!("Failed to write config file: {}", path_display))?;
+        // 原子写入：先写临时文件，再 rename
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &yaml).with_context(|| {
+            format!("Failed to write temp config file: {}", tmp_path.display())
+        })?;
+
+        if let Err(e) = fs::rename(&tmp_path, path) {
+            let _ = fs::remove_file(&tmp_path);
+            anyhow::bail!("Failed to replace config file {}: {}", path_display, e);
+        }
 
         Ok(())
     }

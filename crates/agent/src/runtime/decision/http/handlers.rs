@@ -3130,49 +3130,16 @@ pub(super) async fn update_llm_config_handler(
         });
     }
 
-    // 7. 保存配置（原子写入）
-    let config_path = state.config_path.clone();
-    let tmp_path = config_path.with_extension("tmp");
-
-    if let Err(e) = config.save_to_file(&tmp_path) {
-        error!("[llm] 保存临时配置文件失败: {}", e);
+    // 7. 保存配置（save_to_file 已内置原子写入）
+    if let Err(e) = config.save_to_file(&state.config_path) {
+        error!("[llm] 保存配置文件失败: {}", e);
+        // 尝试恢复备份
+        let _ = backup.save_to_file(&state.config_path);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(LlmConfigUpdateResponse {
                 success: false,
                 message: format!("保存配置失败: {}", e),
-                config: None,
-            }),
-        )
-            .into_response();
-    }
-
-    // 验证临时文件可读
-    if let Err(e) = crate::config::Config::from_file(&tmp_path) {
-        error!("[llm] 验证临时配置文件失败: {}", e);
-        let _ = std::fs::remove_file(&tmp_path);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(LlmConfigUpdateResponse {
-                success: false,
-                message: format!("配置文件验证失败: {}", e),
-                config: None,
-            }),
-        )
-            .into_response();
-    }
-
-    // 原子替换
-    if let Err(e) = std::fs::rename(&tmp_path, &config_path) {
-        error!("[llm] 替换配置文件失败: {}", e);
-        let _ = std::fs::remove_file(&tmp_path);
-        // 尝试恢复备份
-        let _ = backup.save_to_file(&config_path);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(LlmConfigUpdateResponse {
-                success: false,
-                message: format!("替换配置文件失败: {}", e),
                 config: None,
             }),
         )
