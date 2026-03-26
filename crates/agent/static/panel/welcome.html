@@ -64,6 +64,8 @@
                     } else {
                         cardReturn.classList.add("disabled");
                         cardReturn.removeAttribute("href");
+                        cardNew.href = "create.html";
+                        cardNew.querySelector("p").textContent = "创建新角色，开始你的武侠人生";
                         statusText.textContent =
                             "已配置服务器和 LLM，请创建角色";
                     }
