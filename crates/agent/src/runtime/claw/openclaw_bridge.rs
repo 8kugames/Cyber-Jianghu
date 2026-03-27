@@ -50,6 +50,8 @@ struct PendingRequest {
     created_at: Instant,
 }
 
+const CANCELLED_ERROR: &str = "LLM request cancelled (OpenClaw disconnected)";
+
 /// Bridge that sends LLM requests to OpenClaw via WebSocket
 ///
 /// Implements `LlmClient` trait so it can be used anywhere a generic
@@ -80,21 +82,29 @@ impl OpenClawBridge {
         bridge
     }
 
-    /// Spawn background task to clean up stale pending requests
-    ///
-    /// Removes requests older than 5 minutes (300 seconds)
     fn spawn_cleanup_task(&self) {
         let pending = self.pending.clone();
-        let interval = self.config.cleanup_interval_secs;
+        let timeout = self.config.timeout_secs;
 
         tokio::spawn(async move {
-            let mut timer = tokio::time::interval(Duration::from_secs(interval));
+            let mut timer = tokio::time::interval(Duration::from_secs(1));
             loop {
                 timer.tick().await;
                 let mut pending = pending.write().await;
                 let now = Instant::now();
-                // Clean up requests older than 5 minutes
-                pending.retain(|_, req| now.duration_since(req.created_at).as_secs() < 300);
+                let stale_threshold = Duration::from_secs(timeout);
+
+                let mut to_remove = Vec::new();
+                for (id, req) in pending.iter() {
+                    if now.duration_since(req.created_at) > stale_threshold {
+                        to_remove.push(id.clone());
+                    }
+                }
+                for id in to_remove {
+                    if let Some(req) = pending.remove(&id) {
+                        let _ = req.tx.send(Err(anyhow::anyhow!("{}", CANCELLED_ERROR)));
+                    }
+                }
             }
         });
     }
@@ -125,7 +135,6 @@ impl LlmClient for OpenClawBridge {
         let (tx, rx) = oneshot::channel();
         let request_id = Uuid::new_v4().to_string();
 
-        // Insert pending request
         self.pending.write().await.insert(
             request_id.clone(),
             PendingRequest {
@@ -134,20 +143,22 @@ impl LlmClient for OpenClawBridge {
             },
         );
 
-        // Send request to OpenClaw
         self.ws_sender
             .send(UpstreamMessage::LLMRequest {
                 request_id: request_id.clone(),
                 prompt: prompt.to_string(),
             })
             .await
-            .context("WebSocket sender closed")?;
+            .context("WebSocket sender closed (OpenClaw disconnected)")?;
 
-        // Wait for response with timeout
-        tokio::time::timeout(Duration::from_secs(self.config.timeout_secs), rx)
-            .await
-            .context("LLM request timeout")?
-            .context("Response channel closed")?
+        match tokio::time::timeout(Duration::from_secs(self.config.timeout_secs), rx).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => Err(anyhow::anyhow!("{}: {}", CANCELLED_ERROR, e)),
+            Err(_) => Err(anyhow::anyhow!(
+                "timeout after {}s",
+                self.config.timeout_secs
+            )),
+        }
     }
 }
 
