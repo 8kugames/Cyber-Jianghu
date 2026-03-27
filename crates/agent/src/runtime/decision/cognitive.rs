@@ -46,7 +46,7 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-                    Intent::idle(agent_id, world_state.tick_id)
+            Intent::new(agent_id, world_state.tick_id, "idle", None)
                         .with_thought(format!("认知失败: {}", e))
                 }
             }
@@ -78,7 +78,7 @@ pub fn cognitive_decision_with_retry(
             }
 
             // 所有重试都失败
-            Intent::idle(agent_id, world_state.tick_id)
+            Intent::new(agent_id, world_state.tick_id, "idle", None)
                 .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error))
         })
     }

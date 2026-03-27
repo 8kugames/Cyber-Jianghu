@@ -23,20 +23,18 @@ fn with_writer<F>(f: F)
 where
     F: FnOnce(&mut dyn Write),
 {
-    let guard = WRITER.get().and_then(|w: &Mutex<RollingFileAppender>| w.lock().ok());
+    let guard = WRITER
+        .get()
+        .and_then(|w: &Mutex<RollingFileAppender>| w.lock().ok());
     if let Some(mut writer) = guard {
-        let _ = f(&mut *writer);
+        f(&mut *writer);
     }
 }
 
 pub fn log_thinking(agent_name: &str, tick_id: i64, content: &str) {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     with_writer(|w| {
-        let _ = writeln!(
-            w,
-            "\n[{}] [{} - Tick {}]",
-            timestamp, agent_name, tick_id
-        );
+        let _ = writeln!(w, "\n[{}] [{} - Tick {}]", timestamp, agent_name, tick_id);
         let _ = writeln!(w, "{}", content);
         let _ = writeln!(w, "{}", "-".repeat(60));
     });

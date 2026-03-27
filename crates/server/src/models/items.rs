@@ -37,7 +37,7 @@ pub enum ItemType {
 
 impl ItemType {
     /// 从字符串解析
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "consumable" => ItemType::Consumable,
             "weapon" => ItemType::Weapon,

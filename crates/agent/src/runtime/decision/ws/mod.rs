@@ -88,7 +88,7 @@ pub fn ws_decision(
                     // 广播 tick_closed 消息给客户端
                     ws_state.broadcast_tick_closed(world_state.tick_id, "timeout");
 
-                    Intent::idle(agent_id_value, world_state.tick_id)
+                    Intent::new(agent_id_value, world_state.tick_id, "idle", None)
                         .with_thought("Tick timeout, auto idle".to_string())
                 }
             }

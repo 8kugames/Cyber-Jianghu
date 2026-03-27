@@ -49,6 +49,7 @@ pub enum ServerErrorCode {
 /// 下行消息类型
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum DownstreamMessage {
     /// Tick 开始通知（每个 Tick 推送）
     Tick {
@@ -394,15 +395,12 @@ impl DownstreamMessage {
         let patterns = [r"tick_id[:\s]+(\d+)", r"tick[:\s]+(\d+)"];
 
         for pattern in patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if let Some(caps) = re.captures(message) {
-                    if let Some(m) = caps.get(1) {
-                        if let Ok(n) = m.as_str().parse::<i64>() {
+            if let Ok(re) = regex::Regex::new(pattern)
+                && let Some(caps) = re.captures(message)
+                    && let Some(m) = caps.get(1)
+                        && let Ok(n) = m.as_str().parse::<i64>() {
                             return Some(n);
                         }
-                    }
-                }
-            }
         }
         None
     }

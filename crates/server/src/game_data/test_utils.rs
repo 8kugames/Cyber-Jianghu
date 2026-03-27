@@ -27,7 +27,7 @@ static TEST_REGISTRY: std::sync::OnceLock<TestRegistry> = std::sync::OnceLock::n
 /// 所有测试共享同一个配置实例，使用 OnceLock 确保只初始化一次。
 ///
 /// # 示例
-/// ```rust
+/// ```no_run
 /// #[test]
 /// fn test_something() {
 ///     cyber_jianghu_server::game_data::init_test_registry();
