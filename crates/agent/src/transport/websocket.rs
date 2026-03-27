@@ -205,6 +205,12 @@ impl WebSocketClient {
                             game_rules,
                             world_building_rules,
                         }) => {
+                            // agent_id 为零 = 需要注册新角色
+                            if agent_id == Uuid::nil() {
+                                return Err(anyhow::anyhow!(
+                                    "Pending registration: no active character, please register"
+                                ));
+                            }
                             state.agent_id = Some(agent_id);
                             state.game_rules = Some(game_rules.clone());
                             if let Some(rules) = world_building_rules {

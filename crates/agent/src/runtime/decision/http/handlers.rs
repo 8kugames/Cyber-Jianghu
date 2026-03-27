@@ -1608,16 +1608,30 @@ pub(super) async fn get_attribute_meta_handler(
 }
 
 /// 丰富属性数据，添加叙事描述
+///
+/// 从服务器返回的原始属性中：
+/// - 提取 `{key}_max` 字段作为属性最大值（服务器通过 max_value_formula 计算）
+/// - 如果没有 `{key}_max` 字段，说明该属性没有上限（如声望、派生属性）
 fn enrich_attributes_with_descriptions(
     raw_attributes: Option<serde_json::Value>,
     narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let attrs = raw_attributes?;
+    let attrs_obj = attrs.as_object()?;
 
-    // 将属性转换为带描述的格式
-    let enriched: serde_json::Map<String, serde_json::Value> = attrs
-        .as_object()?
+    // 预先收集所有 _max 字段
+    let max_values: std::collections::HashMap<&str, i64> = attrs_obj
         .iter()
+        .filter_map(|(key, value)| {
+            key.strip_suffix("_max")
+                .and_then(|base| value.as_i64().map(|v| (base, v)))
+        })
+        .collect();
+
+    // 将属性转换为带描述的格式（排除 _max 冗余字段）
+    let enriched: serde_json::Map<String, serde_json::Value> = attrs_obj
+        .iter()
+        .filter(|(key, _)| !key.ends_with("_max")) // 排除 _max 字段
         .filter_map(|(key, value)| {
             // 获取当前值
             let current = match value.as_i64() {
@@ -1643,20 +1657,26 @@ fn enrich_attributes_with_descriptions(
                 })
                 .unwrap_or_else(|| (key.clone(), format!("{}: {}", key, current)));
 
-            // 从叙事配置获取最大值（取最大 threshold 的 max）
-            let max = narrative_config
-                .as_ref()
-                .and_then(|cfg| cfg.attributes.get(key))
-                .and_then(|attr_cfg| attr_cfg.thresholds.iter().map(|t| t.max as i64).max())
-                .unwrap_or(100);
+            // 从服务器返回的 {key}_max 字段获取最大值
+            // 如果没有 _max 字段，说明该属性没有上限（如声望、派生属性）
+            let max = max_values.get(key.as_str()).copied();
 
             // 构建属性对象
-            let attr_obj = serde_json::json!({
-                "name": display_name,
-                "current": current,
-                "max": max,
-                "description": description
-            });
+            let attr_obj = if let Some(max_val) = max {
+                serde_json::json!({
+                    "name": display_name,
+                    "current": current,
+                    "max": max_val,
+                    "description": description
+                })
+            } else {
+                // 没有上限的属性，不设置 max 字段
+                serde_json::json!({
+                    "name": display_name,
+                    "current": current,
+                    "description": description
+                })
+            };
 
             Some((key.clone(), attr_obj))
         })
@@ -1905,6 +1925,19 @@ pub(super) async fn rebirth_character_handler(
                     error!("读取配置文件失败: {}", e);
                 }
             }
+        }
+    }
+
+    // 8. 触发重连，让主循环重新注册新角色
+    if let Some(ref tx) = state.reconnect_tx {
+        let server_ws_url = state.server_ws_url.read().await.clone();
+        let reconnect_req = super::ReconnectRequest {
+            ws_url: server_ws_url,
+        };
+        if let Err(e) = tx.send(reconnect_req).await {
+            error!("发送重连请求失败: {}", e);
+        } else {
+            info!("转生后触发 WebSocket 重连");
         }
     }
 

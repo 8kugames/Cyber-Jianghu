@@ -704,6 +704,15 @@ button[type="submit"]:disabled {
 .attr-item.attr-medium { border-left: 3px solid var(--warning); }
 .attr-item.attr-low { border-left: 3px solid var(--danger); }
 
+/* 值变化高亮动画 */
+.value-changed {
+    animation: value-flash 0.3s ease-out;
+}
+@keyframes value-flash {
+    0% { background-color: var(--warning); }
+    100% { background-color: transparent; }
+}
+
 /* ============================================================================
    Inventory, Relationships, Memories
    ============================================================================ */
