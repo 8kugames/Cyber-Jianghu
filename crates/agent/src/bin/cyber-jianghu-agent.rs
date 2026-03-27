@@ -39,10 +39,11 @@ use cyber_jianghu_agent::config::{
 use cyber_jianghu_agent::{
     AgentBuilder,
     core::cognitive::{MultiStageCognitiveEngine, CognitiveEngineConfig},
+    runtime::claw::{OpenClawBridge, BridgeConfig},
     runtime::decision::{cognitive_decision_with_retry, CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback},
     runtime::decision::http::{ConfigWatcher, review::ReviewStore, thinking_log},
     runtime::decision::ws::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
-    runtime::decision::{create_http_state, http_decision},
+    runtime::decision::{create_http_state},
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
@@ -710,7 +711,6 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
             let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
-            let http_state = setup.http_state.clone();
             cognitive_death_event_tx = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
@@ -719,12 +719,82 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 device_id: device_id.clone(),
                 persona_info: persona_info.clone(),
             });
-            let decision = Arc::new(http_decision(device_id.clone(), http_state, 55));
+
+            // 获取 LLM 通信通道
+            let upstream_tx = setup.shared_state.upstream_tx.clone();
+            let llm_response_rx = setup.shared_state.llm_response_rx.lock().unwrap().take();
+
+            // 创建 OpenClawBridge 作为 LlmClient 实现
+            let openclaw_bridge = Arc::new(OpenClawBridge::new(upstream_tx, BridgeConfig::default()));
+            info!("OpenClawBridge 已创建（Claw 模式 LLM 客户端）");
+
+            // 启动 LLM 响应转发任务
+            if let Some(mut response_rx) = llm_response_rx {
+                let bridge = openclaw_bridge.clone();
+                tokio::spawn(async move {
+                    while let Some((request_id, result)) = response_rx.recv().await {
+                        bridge.handle_response(&request_id, result.map_err(|e| anyhow::anyhow!("{}", e)));
+                    }
+                    info!("LLM 响应转发任务结束");
+                });
+                info!("LLM 响应转发任务已启动");
+            }
 
             // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
             let review_store =
                 Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
             info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
+
+            // 创建 MultiStageCognitiveEngine（与 Cognitive 模式共享架构）
+            let agent_name = config
+                .agent
+                .as_ref()
+                .map(|c| c.name.as_str())
+                .unwrap_or("(未创建)");
+            let agent_id = config
+                .identity
+                .as_ref()
+                .map(|i| i.device_id)
+                .unwrap_or_else(Uuid::new_v4);
+            let persona_description = config
+                .agent
+                .as_ref()
+                .map(|c| c.generate_system_prompt())
+                .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
+
+            let cognitive_config = CognitiveEngineConfig {
+                agent_name: agent_name.to_string(),
+                persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(agent_id, agent_name, &persona_description),
+                temperature: config.llm.temperature,
+                max_tokens_per_stage: config.llm.max_tokens,
+            };
+
+            let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
+            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_client.clone(), cognitive_config));
+            info!("MultiStageCognitiveEngine 已创建（Claw 模式）");
+
+            let cognitive_decision_with_feedback: DecisionWithFeedbackCallback = Arc::new(
+                cognitive_decision_with_retry(
+                    agent_id,
+                    cognitive_engine.clone(),
+                    CognitiveDecisionConfig::default().max_retries,
+                ),
+            );
+
+            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                let engine = cognitive_engine.clone();
+                let ws = ws.clone();
+                Box::pin(async move {
+                    match engine.think(&ws).await {
+                        Ok(chain) => chain.final_intent,
+                        Err(e) => {
+                            error!("[claw-cognitive] Decision failed: {}", e);
+                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                .with_thought(format!("认知失败: {}", e))
+                        }
+                    }
+                })
+            });
 
             // 启动 ReflectorSoul 任务（Claw 模式无配置热重载）
             let (_reflector_config_reload_tx, reflector_config_reload_rx) =
@@ -732,8 +802,10 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
             // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
             let agent = AgentBuilder::new(config, decision)
+                .with_decision_feedback(cognitive_decision_with_feedback)
                 .with_reconnect_rx(setup.reconnect_rx)
                 .with_review_store(review_store.clone())
+                .with_llm_client(llm_client.clone(), None)
                 .build();
 
             let intent_history = setup.api_state.intent_history.clone();
@@ -830,7 +902,6 @@ struct ServerSetup {
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     shared_state: Arc<WsSharedState>,
     api_state: cyber_jianghu_agent::runtime::decision::http::HttpApiState,
-    http_state: Arc<cyber_jianghu_agent::runtime::decision::http::HttpDecisionState>,
 }
 
 struct ClawCallbackSetup {
@@ -871,7 +942,7 @@ fn start_claw_server(
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
     ws_state.spawn_validation_task((*shared_state).clone());
 
-    let (http_decision_state, api_state) = create_http_state(
+    let (_http_decision_state, api_state) = create_http_state(
         device_id,
         config.server.http_url.clone(),
         config.server.ws_url.clone(),
@@ -897,7 +968,6 @@ fn start_claw_server(
         server_msg_tx,
         shared_state: shared_state_for_callback,
         api_state: api_state_for_callback,
-        http_state: http_decision_state,
     })
 }
 
