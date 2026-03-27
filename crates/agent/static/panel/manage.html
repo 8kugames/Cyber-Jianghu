@@ -11,7 +11,6 @@
             <header>
                 <h1>赛博江湖</h1>
                 <nav class="nav-tabs">
-                    <a href="welcome.html" class="nav-tab">首页</a>
                     <a href="character.html" class="nav-tab">角色信息</a>
                     <a href="manage.html" class="nav-tab active">管理</a>
                 </nav>
@@ -37,7 +36,9 @@
                             />
                         </div>
                         <div class="form-group">
-                            <label for="server-http-url">HTTP 地址（可选）</label>
+                            <label for="server-http-url"
+                                >HTTP 地址（可选）</label
+                            >
                             <input
                                 type="text"
                                 id="server-http-url"
@@ -46,7 +47,9 @@
                             />
                         </div>
                         <div class="form-actions">
-                            <button type="submit" id="save-server-btn">保存并重连</button>
+                            <button type="submit" id="save-server-btn">
+                                保存并重连
+                            </button>
                         </div>
                     </form>
 
@@ -61,25 +64,43 @@
                 <!-- LLM 配置 -->
                 <section class="form-section" id="llm-config-section">
                     <h2>LLM 配置</h2>
-                    <p class="section-desc">配置 ActorSoul 和 ReflectorSoul 使用的 LLM 模型。</p>
+                    <p class="section-desc">
+                        配置 ActorSoul 和 ReflectorSoul 使用的 LLM 模型。
+                    </p>
 
                     <!-- Token 使用统计 -->
                     <div class="token-stats" id="token-stats">
                         <div class="token-stat-item">
                             <span class="token-stat-label">API 调用</span>
-                            <span class="token-stat-value" id="stat-total-calls">--</span>
+                            <span class="token-stat-value" id="stat-total-calls"
+                                >--</span
+                            >
                         </div>
                         <div class="token-stat-item">
                             <span class="token-stat-label">Prompt Tokens</span>
-                            <span class="token-stat-value" id="stat-prompt-tokens">--</span>
+                            <span
+                                class="token-stat-value"
+                                id="stat-prompt-tokens"
+                                >--</span
+                            >
                         </div>
                         <div class="token-stat-item">
-                            <span class="token-stat-label">Completion Tokens</span>
-                            <span class="token-stat-value" id="stat-completion-tokens">--</span>
+                            <span class="token-stat-label"
+                                >Completion Tokens</span
+                            >
+                            <span
+                                class="token-stat-value"
+                                id="stat-completion-tokens"
+                                >--</span
+                            >
                         </div>
                         <div class="token-stat-item">
                             <span class="token-stat-label">Total Tokens</span>
-                            <span class="token-stat-value" id="stat-total-tokens">--</span>
+                            <span
+                                class="token-stat-value"
+                                id="stat-total-tokens"
+                                >--</span
+                            >
                         </div>
                     </div>
 
@@ -90,22 +111,39 @@
                             <div class="form-row">
                                 <div class="form-group">
                                     <label for="actor-provider">Provider</label>
-                                    <select id="actor-provider" name="provider" required>
+                                    <select
+                                        id="actor-provider"
+                                        name="provider"
+                                        required
+                                    >
                                         <!-- 动态加载 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
                                     <label for="actor-model">Model</label>
-                                    <input type="text" id="actor-model" name="model" required />
+                                    <input
+                                        type="text"
+                                        id="actor-model"
+                                        name="model"
+                                        required
+                                    />
                                 </div>
                             </div>
                             <div class="form-group" id="actor-base-url-group">
                                 <label for="actor-base-url">Base URL</label>
-                                <input type="url" id="actor-base-url" name="base_url" />
+                                <input
+                                    type="url"
+                                    id="actor-base-url"
+                                    name="base_url"
+                                />
                             </div>
                             <div class="form-group" id="actor-api-key-group">
                                 <label for="actor-api-key">API Key</label>
-                                <input type="password" id="actor-api-key" name="api_key" />
+                                <input
+                                    type="password"
+                                    id="actor-api-key"
+                                    name="api_key"
+                                />
                                 <small>留空表示不修改当前值</small>
                             </div>
                         </form>
@@ -116,7 +154,11 @@
                         <h3>ReflectorSoul (反思之魂)</h3>
                         <div class="form-group checkbox-group">
                             <label class="checkbox-label">
-                                <input type="checkbox" id="reflector-inherit" checked />
+                                <input
+                                    type="checkbox"
+                                    id="reflector-inherit"
+                                    checked
+                                />
                                 使用与 ActorSoul 相同的配置
                             </label>
                         </div>
@@ -124,36 +166,62 @@
                         <form id="reflector-llm-form" class="disabled-form">
                             <div class="form-row">
                                 <div class="form-group">
-                                    <label for="reflector-provider">Provider</label>
-                                    <select id="reflector-provider" name="provider" required>
+                                    <label for="reflector-provider"
+                                        >Provider</label
+                                    >
+                                    <select
+                                        id="reflector-provider"
+                                        name="provider"
+                                        required
+                                    >
                                         <!-- 动态加载 -->
                                     </select>
                                 </div>
                                 <div class="form-group">
                                     <label for="reflector-model">Model</label>
-                                    <input type="text" id="reflector-model" name="model" required />
+                                    <input
+                                        type="text"
+                                        id="reflector-model"
+                                        name="model"
+                                        required
+                                    />
                                 </div>
                             </div>
-                            <div class="form-group" id="reflector-base-url-group">
+                            <div
+                                class="form-group"
+                                id="reflector-base-url-group"
+                            >
                                 <label for="reflector-base-url">Base URL</label>
-                                <input type="url" id="reflector-base-url" name="base_url" />
+                                <input
+                                    type="url"
+                                    id="reflector-base-url"
+                                    name="base_url"
+                                />
                             </div>
-                            <div class="form-group" id="reflector-api-key-group">
+                            <div
+                                class="form-group"
+                                id="reflector-api-key-group"
+                            >
                                 <label for="reflector-api-key">API Key</label>
-                                <input type="password" id="reflector-api-key" name="api_key" />
+                                <input
+                                    type="password"
+                                    id="reflector-api-key"
+                                    name="api_key"
+                                />
                                 <small>留空表示不修改当前值</small>
                             </div>
                         </form>
                     </div>
 
                     <div class="form-actions">
-                        <button type="button" id="save-llm-btn">保存配置</button>
+                        <button type="button" id="save-llm-btn">
+                            保存配置
+                        </button>
                     </div>
 
                     <div id="llm-config-result" class="result hidden"></div>
                     <div id="llm-config-error" class="error hidden"></div>
                 </section>
-
             </main>
         </div>
 

@@ -422,6 +422,9 @@ impl super::Agent {
                         Ok((agent_id, game_rules)) => {
                             info!("重连后注册确认: agent_id={}", agent_id);
 
+                            // 重置死亡状态（转生后获得新身份）
+                            self.death_reported = false;
+
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
                             if let Some(ref callback) = self.registration_callback {
                                 callback(agent_id);
@@ -431,7 +434,13 @@ impl super::Agent {
                             self.config.update_game_rules(game_rules);
                         }
                         Err(e) => {
-                            // 注册确认失败，可能需要重新建立连接
+                            let err_msg = format!("{}", e);
+                            // Pending registration = 需要注册新角色，停止重试
+                            if err_msg.contains("Pending registration") {
+                                info!("等待注册新角色，停止重连");
+                                return Err(anyhow::anyhow!("Pending registration: {}", e));
+                            }
+                            // 其他错误，继续重试
                             error!("重连后注册确认失败: {}", e);
                             self.client.close().await;
                             // 增加退避计数器并继续重试
