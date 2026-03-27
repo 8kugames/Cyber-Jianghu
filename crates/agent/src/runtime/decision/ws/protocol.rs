@@ -47,7 +47,7 @@ pub enum ServerErrorCode {
 // ============================================================================
 
 /// 下行消息类型
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
 pub enum DownstreamMessage {

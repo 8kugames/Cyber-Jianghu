@@ -284,6 +284,21 @@ pub struct WsSharedState {
     /// Intent 发送通道
     pub intent_tx: mpsc::Sender<WsIntent>,
 
+    /// 上行消息发送通道（用于 OpenClawBridge 发送消息到 OpenClaw）
+    /// Agent -> OpenClaw 方向
+    pub upstream_tx: mpsc::Sender<super::protocol::UpstreamMessage>,
+
+    /// LLM 响应通道（OpenClaw -> Agent）
+    /// 当 OpenClaw 返回 LLM 响应时，通过此通道通知 OpenClawBridge
+    pub llm_response_tx: mpsc::Sender<(String, Result<String, String>)>,
+
+    /// LLM 响应接收通道（由 OpenClawBridge 使用）
+    pub llm_response_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<(String, Result<String, String>)>>>>,
+
+    /// 上行消息接收通道（从 WsDecisionState 转移所有权）
+    /// 仅在第一个 WebSocket 连接时使用（单连接限制）
+    pub upstream_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<super::protocol::UpstreamMessage>>>>,
+
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
@@ -393,6 +408,9 @@ impl From<&WsDecisionState> for WsSharedState {
             .map(|v| v == "1" || v == "true" || v == "yes")
             .unwrap_or(false);
 
+        let (upstream_tx, upstream_rx) = mpsc::channel(16);
+        let (llm_response_tx, llm_response_rx) = mpsc::channel(16);
+
         Self {
             state_tx: state.state_tx.clone(),
             tick_closed_tx: state.tick_closed_tx.clone(),
@@ -411,6 +429,10 @@ impl From<&WsDecisionState> for WsSharedState {
             persona: Arc::new(RwLock::new(None)),
             submitted_tick: Arc::new(AtomicI64::new(-1)), // -1 表示未提交
             validation_tx: state.validation_tx.clone(),
+            upstream_tx,
+            llm_response_tx,
+            llm_response_rx: Arc::new(std::sync::Mutex::new(Some(llm_response_rx))),
+            upstream_rx: Arc::new(std::sync::Mutex::new(Some(upstream_rx))),
         }
     }
 }
