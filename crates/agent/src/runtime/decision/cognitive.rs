@@ -46,7 +46,7 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-            Intent::new(agent_id, world_state.tick_id, "idle", None)
+                    Intent::new(agent_id, world_state.tick_id, "idle", None)
                         .with_thought(format!("认知失败: {}", e))
                 }
             }
@@ -68,7 +68,10 @@ pub fn cognitive_decision_with_retry(
             let mut last_error = String::new();
 
             for attempt in 0..=max_retries {
-                match engine.think_with_feedback(&world_state, feedback.as_deref()).await {
+                match engine
+                    .think_with_feedback(&world_state, feedback.as_deref())
+                    .await
+                {
                     Ok(chain) => return chain.final_intent,
                     Err(e) => {
                         last_error = e.to_string();

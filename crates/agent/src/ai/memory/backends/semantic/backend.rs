@@ -97,7 +97,10 @@ impl SemanticMemoryBackend {
     pub fn search_fts_only(&self, query: &str, limit: usize) -> Result<Vec<(i64, f32)>> {
         let fts = self.fts_fallback.lock().unwrap();
         let results = fts.search(query, limit)?;
-        Ok(results.into_iter().map(|m| (m.id.unwrap_or(0), 0.0)).collect())
+        Ok(results
+            .into_iter()
+            .map(|m| (m.id.unwrap_or(0), 0.0))
+            .collect())
     }
 
     #[allow(dead_code)]
@@ -137,7 +140,10 @@ impl SemanticMemoryBackend {
         tracing::debug!("Using FTS fallback for query: {}", params.query);
         let fts = self.fts_fallback.lock().unwrap();
         let results = fts.search(&params.query, params.limit)?;
-        Ok(results.into_iter().map(|m| (m.id.unwrap_or(0), 0.0)).collect())
+        Ok(results
+            .into_iter()
+            .map(|m| (m.id.unwrap_or(0), 0.0))
+            .collect())
     }
 
     fn client_memory_to_entry(memory: ClientMemory) -> MemoryEntry {
@@ -190,7 +196,11 @@ impl SemanticSearchable for SemanticMemoryBackend {
 
         if use_vector {
             if let Ok(query_vector) = self.embedder.embed(query).await {
-                let results = self.vector_store.lock().unwrap().search(&query_vector, limit);
+                let results = self
+                    .vector_store
+                    .lock()
+                    .unwrap()
+                    .search(&query_vector, limit);
 
                 match results {
                     Ok(results) if !results.is_empty() => {
@@ -198,7 +208,10 @@ impl SemanticSearchable for SemanticMemoryBackend {
                         let fts = self.fts_fallback.lock().unwrap();
                         let ids: Vec<i64> = results.into_iter().map(|(id, _)| id).collect();
                         let memories = fts.get_memories_by_ids(&ids)?;
-                        return Ok(memories.into_iter().map(Self::client_memory_to_entry).collect());
+                        return Ok(memories
+                            .into_iter()
+                            .map(Self::client_memory_to_entry)
+                            .collect());
                     }
                     Ok(_) => {
                         tracing::debug!("Vector search returned empty, falling back to FTS");
@@ -216,7 +229,10 @@ impl SemanticSearchable for SemanticMemoryBackend {
         let memories = fts.search(query, limit)?;
         tracing::debug!("FTS search returned {} results", memories.len());
 
-        Ok(memories.into_iter().map(Self::client_memory_to_entry).collect())
+        Ok(memories
+            .into_iter()
+            .map(Self::client_memory_to_entry)
+            .collect())
     }
 
     async fn ensure_embedding(&mut self, _memory_id: i64) -> Result<()> {

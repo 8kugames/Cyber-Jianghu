@@ -93,7 +93,7 @@ attack:
 - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
 - [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
 
-**第二层: 道德审查**（ActorSoul + ReflectorSoul，已接入 intent 提交链路）:
+**第二层: 超我审查**（ActorSoul + ReflectorSoul，已接入 intent 提交链路）:
 - [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送
 - [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore`，超时 30 秒自动通过
 - [x] Observer Agent API: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`

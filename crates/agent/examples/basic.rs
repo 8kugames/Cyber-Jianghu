@@ -11,7 +11,6 @@ use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use uuid::Uuid;
 
-
 /// 模拟决策函数（完全动态架构)
 ///
 /// 在实际使用中,这个函数会由 OpenClaw 或外部 LLM 提供
@@ -69,15 +68,31 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
                         .any(|item| item.item_id == "mantou" && item.quantity > 0);
 
                     if has_mantou {
-                        Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "mantou"})))
-                            .with_thought(thought)
+                        Intent::new(
+                            agent_id,
+                            world_state.tick_id,
+                            "use",
+                            Some(serde_json::json!({"item_id": "mantou"})),
+                        )
+                        .with_thought(thought)
                     } else {
                         // 没有馒头,尝试使用水
-                        Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "water"})))
-                            .with_thought("没有馒头了,尝试喝水".to_string())
+                        Intent::new(
+                            agent_id,
+                            world_state.tick_id,
+                            "use",
+                            Some(serde_json::json!({"item_id": "water"})),
+                        )
+                        .with_thought("没有馒头了,尝试喝水".to_string())
                     }
                 } else {
-                    Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "water"}))).with_thought(thought)
+                    Intent::new(
+                        agent_id,
+                        world_state.tick_id,
+                        "use",
+                        Some(serde_json::json!({"item_id": "water"})),
+                    )
+                    .with_thought(thought)
                 }
             }
             _ => Intent::new(agent_id, world_state.tick_id, "idle", None).with_thought(thought),

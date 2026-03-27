@@ -293,11 +293,14 @@ pub struct WsSharedState {
     pub llm_response_tx: mpsc::Sender<(String, Result<String, String>)>,
 
     /// LLM 响应接收通道（由 OpenClawBridge 使用）
-    pub llm_response_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<(String, Result<String, String>)>>>>,
+    #[allow(clippy::type_complexity)]
+    pub llm_response_rx:
+        Arc<std::sync::Mutex<Option<mpsc::Receiver<(String, Result<String, String>)>>>>,
 
     /// 上行消息接收通道（从 WsDecisionState 转移所有权）
     /// 仅在第一个 WebSocket 连接时使用（单连接限制）
-    pub upstream_rx: Arc<std::sync::Mutex<Option<mpsc::Receiver<super::protocol::UpstreamMessage>>>>,
+    pub upstream_rx:
+        Arc<std::sync::Mutex<Option<mpsc::Receiver<super::protocol::UpstreamMessage>>>>,
 
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
