@@ -37,6 +37,7 @@ mod handlers;
 pub mod intent_history;
 pub mod review;
 pub mod service;
+pub mod thinking_log;
 
 use axum::{
     Router,

@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.0.87"
+version = "0.0.89"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 # 日志
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
 
 # 工具库
 chrono = { workspace = true }
