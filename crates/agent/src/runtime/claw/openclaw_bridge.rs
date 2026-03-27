@@ -18,6 +18,12 @@ use uuid::Uuid;
 use crate::ai::llm::LlmClient;
 use crate::runtime::decision::ws::protocol::UpstreamMessage;
 
+/// LLM Client container that supports hot-reload
+///
+/// Used by Agent and AgentBuilder for LLM client management.
+/// Wrapped in `RwLock` to allow runtime LLM client switching.
+pub type LlmClientContainer = Arc<RwLock<Arc<dyn LlmClient>>>;
+
 /// Configuration for OpenClawBridge
 #[derive(Debug, Clone)]
 pub struct BridgeConfig {

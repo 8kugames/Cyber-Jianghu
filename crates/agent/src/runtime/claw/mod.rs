@@ -1,27 +1,7 @@
-// Claw Runtime - 内部调度器运行时
+// Claw Runtime - OpenClaw Bridge
 //
-// 提供替代 OpenClaw 的轻量级调度能力：
-// - History Manager：防止 context overflow
-// - Turn Cycle：Agent 决策循环
-// - Context Builder：构建 LLM 调用上下文
-//
-// 核心原则：
-// 1. 极简：只实现必要的功能
-// 2. Fail Fast：不允许静默失败
-// 3. 自控：完全控制 context 管理
+// Provides OpenClaw integration for Claw mode.
 
-mod context;
-mod decision;
-mod history;
 mod openclaw_bridge;
-mod turn_cycle;
 
-pub use context::ContextBuilder;
-pub use decision::{
-    ClawDecisionState, LlmClientContainer, claw_decision, create_claw_decision_callback,
-};
-pub use history::{
-    ChatMessage, HealthStatus, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager,
-};
-pub use openclaw_bridge::{BridgeConfig, OpenClawBridge};
-pub use turn_cycle::{Intent, ToolCall, ToolResult, TurnCycle, TurnCycleConfig, TurnCycleServices};
+pub use openclaw_bridge::{BridgeConfig, LlmClientContainer, OpenClawBridge};
