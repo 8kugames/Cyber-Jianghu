@@ -617,15 +617,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         document.body.appendChild(div);
         div.querySelector('#death-goto-rebirth').addEventListener('click', () => {
-            div.style.display = 'none';
-            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('[data-tab="current"]').classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById('tab-current').classList.add('active');
-            document.querySelectorAll('.vertical-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('[data-vertical-tab="rebirth"]').classList.add('active');
-            document.querySelectorAll('.vertical-tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById('vertical-tab-rebirth').classList.add('active');
+            // 死亡后直接跳转创建页，无需"归隐"确认
+            window.location.href = 'create.html';
         });
         div.querySelector('#death-close').addEventListener('click', () => {
             div.style.display = 'none';
@@ -638,24 +631,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAttributeMeta().then(async () => {
         await loadCharacterList();
-        // 当前角色非存活时，在当前角色 tab 显示创建入口
         const currentChar = allCharacters.find(c => c.is_current);
+        
+        // 当前角色非存活时，切换到世界树分页
         if (!currentChar || currentChar.status !== 'alive') {
             hide('#loading');
-            const infoEl = document.getElementById('character-info');
-            infoEl.innerHTML = `
-                <div class="form-section">
-                    <h2>当前无活跃角色</h2>
-                    <p class="section-desc">角色已归隐或尚未创建。</p>
-                    <div class="form-actions">
-                        <a href="create.html" class="nav-link">创建新角色</a>
-                    </div>
-                </div>
-            `;
-            show('#character-info');
+            // 切换到世界树 tab
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="worldtree"]').classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-worldtree').classList.add('active');
             return;
         }
+        
+        // 角色数据通过 HTTP API 获取，立即可用
         loadCharacter();
+        loadRelationships();
+        loadMemories();
+        loadDreamStatus();
     });
 
     document.getElementById('load-more-experiences-btn').addEventListener('click', loadMoreExperiences);

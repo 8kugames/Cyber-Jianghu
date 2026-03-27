@@ -586,9 +586,9 @@ pub async fn get_agent_details(
             {
                 return crate::game_data::types::StatusComponent::evaluate_max_value(
                     &attr_def.max_value_formula,
-                    100,
+                    100.0,
                     &attributes_map,
-                );
+                ) as i32;
             }
             100
         };

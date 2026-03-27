@@ -2,6 +2,7 @@
 
 let providersData = null;
 let tokenUsageTimer = null;
+let llmConfigSnapshot = null;
 
 function formatNumber(n) {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
@@ -24,6 +25,8 @@ async function loadTokenUsage() {
         setText('stat-prompt-tokens', formatNumber(data.total_prompt_tokens));
         setText('stat-completion-tokens', formatNumber(data.total_completion_tokens));
         setText('stat-total-tokens', formatNumber(data.total_tokens));
+
+        updateUsageTimestamp();
     } catch (err) {
         console.error('加载 Token 使用统计失败:', err);
     }
@@ -65,6 +68,94 @@ function getReflectorConfig() {
     };
 }
 
+function getCurrentLlmState() {
+    const inherit = document.getElementById('reflector-inherit')?.checked ?? true;
+    return JSON.stringify({
+        actor: getActorConfig(),
+        reflector_inherits_actor: inherit,
+        reflector: inherit ? null : getReflectorConfig()
+    });
+}
+
+function setBadgeState(el, text, className) {
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('badge-muted', 'badge-success', 'badge-warning', 'badge-danger');
+    el.classList.add(className);
+}
+
+function setSaveState(state) {
+    const badge = document.getElementById('llm-save-state');
+    if (!badge) return;
+    if (state === 'saved') {
+        setBadgeState(badge, '状态：已保存', 'badge-success');
+        return;
+    }
+    if (state === 'saving') {
+        setBadgeState(badge, '状态：保存中', 'badge-warning');
+        return;
+    }
+    if (state === 'error') {
+        setBadgeState(badge, '状态：保存失败', 'badge-danger');
+        return;
+    }
+    if (state === 'disabled') {
+        setBadgeState(badge, '状态：不可用', 'badge-muted');
+        return;
+    }
+    setBadgeState(badge, '状态：未保存', 'badge-warning');
+}
+
+function updateRuntimeBadge(mode) {
+    const badge = document.getElementById('llm-runtime-badge');
+    if (!badge) return;
+    if (mode === 'claw') {
+        setBadgeState(badge, '模式：Claw', 'badge-danger');
+        return;
+    }
+    if (mode === 'cognitive') {
+        setBadgeState(badge, '模式：Cognitive', 'badge-success');
+        return;
+    }
+    setBadgeState(badge, '模式：--', 'badge-muted');
+}
+
+function updateReflectorBadge(isInherit) {
+    const badge = document.getElementById('reflector-inherit-badge');
+    if (!badge) return;
+    if (isInherit) {
+        setBadgeState(badge, '继承中', 'badge-muted');
+    } else {
+        setBadgeState(badge, '独立配置', 'badge-warning');
+    }
+}
+
+function refreshDirtyState() {
+    if (!llmConfigSnapshot) return;
+    const isDirty = getCurrentLlmState() !== llmConfigSnapshot;
+    setSaveState(isDirty ? 'dirty' : 'saved');
+}
+
+function updateUsageTimestamp() {
+    const el = document.getElementById('llm-usage-updated');
+    if (!el) return;
+    const time = new Date().toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    el.textContent = `统计更新时间：${time}`;
+}
+
+function bindLlmDirtyTracking() {
+    const section = document.getElementById('llm-config-section');
+    if (!section) return;
+    section.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('input', refreshDirtyState);
+        el.addEventListener('change', refreshDirtyState);
+    });
+}
+
 function disableAllInputs(section) {
     section.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
 }
@@ -73,6 +164,7 @@ function showSavingState() {
     const btn = document.getElementById('save-llm-btn');
     btn.disabled = true;
     btn.textContent = '保存中...';
+    setSaveState('saving');
 }
 
 function resetSaveButton() {
@@ -135,6 +227,8 @@ async function loadLlmConfig() {
             return;
         }
 
+        updateRuntimeBadge(data.runtime_mode);
+
         if (data.runtime_mode === 'claw') {
             section.classList.add('claw-mode-disabled');
             const sectionDesc = section.querySelector('.section-desc');
@@ -142,8 +236,20 @@ async function loadLlmConfig() {
                 sectionDesc.textContent =
                     'LLM 配置仅在 Cognitive 模式下生效。当前模式：Claw';
             }
+            const modeHint = document.getElementById('llm-mode-hint');
+            if (modeHint) {
+                modeHint.textContent = '当前运行模式为 Claw，LLM 配置已禁用。';
+            }
             disableAllInputs(section);
+            setSaveState('disabled');
             return;
+        }
+
+        section.classList.remove('claw-mode-disabled');
+        section.querySelectorAll('input, select, button').forEach(el => (el.disabled = false));
+        const modeHint = document.getElementById('llm-mode-hint');
+        if (modeHint) {
+            modeHint.textContent = '保存后将在检测到文件变更时生效。';
         }
 
         setFormValue('actor-provider', data.actor.provider);
@@ -169,6 +275,10 @@ async function loadLlmConfig() {
         if (actorProvider) {
             actorProvider.dispatchEvent(new Event('change'));
         }
+
+        llmConfigSnapshot = getCurrentLlmState();
+        setSaveState('saved');
+        updateReflectorBadge(reflectorInherit?.checked ?? true);
     } catch (err) {
         console.error('加载 LLM 配置失败:', err);
         showError('加载 LLM 配置失败: ' + err.message);
@@ -219,6 +329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const actorConfig = getActorConfig();
         if (!actorConfig.provider || !actorConfig.model) {
             showError('请填写 ActorSoul 的 Provider 和 Model');
+            setSaveState('error');
             return;
         }
 
@@ -227,6 +338,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const reflectorConfig = getReflectorConfig();
             if (!reflectorConfig.provider || !reflectorConfig.model) {
                 showError('请填写 ReflectorSoul 的 Provider 和 Model');
+                setSaveState('error');
                 return;
             }
         }
@@ -252,9 +364,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 const err = await res.json();
                 showError(err.message || '保存失败');
+                setSaveState('error');
             }
         } catch (e) {
             showError('网络错误: ' + e.message);
+            setSaveState('error');
         } finally {
             resetSaveButton();
         }
@@ -274,6 +388,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 form.classList.remove('disabled-form');
                 form.querySelectorAll('input, select').forEach(el => el.disabled = false);
             }
+            updateReflectorBadge(e.target.checked);
+            refreshDirtyState();
         });
     }
 
@@ -302,6 +418,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 加载 LLM 配置（串行执行避免竞态条件）
     await loadProviders();
     await loadLlmConfig();
+    bindLlmDirtyTracking();
 
     // Token 使用统计：立即加载 + 每分钟刷新
     await loadTokenUsage();

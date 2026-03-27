@@ -177,9 +177,9 @@ impl StatusComponent {
     /// 辅助方法：解析最大值公式
     pub fn evaluate_max_value(
         formula: &Option<String>,
-        default_max: i32,
+        default_max: f32,
         context: &std::collections::HashMap<String, i32>,
-    ) -> i32 {
+    ) -> f32 {
         if let Some(f) = formula {
             let mut eval_context = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
             for (k, v) in context {
@@ -187,10 +187,10 @@ impl StatusComponent {
             }
             let res = evalexpr::eval_with_context(f, &eval_context);
             if let Ok(evalexpr::Value::Int(result)) = res {
-                return result as i32;
+                return result as f32;
             } else if let Ok(evalexpr::Value::Float(result)) = res {
-                return result as i32;
-            } else if let Ok(parsed) = f.parse::<i32>() {
+                return result as f32;
+            } else if let Ok(parsed) = f.parse::<f32>() {
                 return parsed;
             }
         }
@@ -215,7 +215,8 @@ impl StatusComponent {
 
         let current = attr.value.get();
         let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
-        let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, 255, context);
+        let max_value =
+            Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context) as i32;
 
         let new_value = (current + delta).clamp(min_value, max_value);
         attr.value.set(new_value);

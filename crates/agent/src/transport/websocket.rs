@@ -367,11 +367,21 @@ impl WebSocketClient {
                                 ..
                             } = msg
                             {
-                                warn!("Agent {} died: {} - {}", agent_id, cause, description);
-                            }
-                            // 透传给 OpenClaw（触发重生流程）
-                            if let Some(ref callback) = server_msg_cb {
-                                callback(msg);
+                                let current_agent_id = {
+                                    let state = self.state.read().await;
+                                    state.agent_id
+                                };
+                                if current_agent_id == Some(agent_id) {
+                                    warn!("Agent {} died: {} - {}", agent_id, cause, description);
+                                    if let Some(ref callback) = server_msg_cb {
+                                        callback(msg);
+                                    }
+                                } else {
+                                    debug!(
+                                        "Ignored death notification for agent {} (current agent is {:?})",
+                                        agent_id, current_agent_id
+                                    );
+                                }
                             }
                             // 继续等待
                         }

@@ -1142,26 +1142,28 @@ pub(super) async fn generate_character_handler(
 
 ## 世界观
 时代：北宋前期（约10世纪中国），冷兵器时代。
-允许的概念：内力、轻功、武功、点穴、暗器、毒术、医术、易容、阵法。
+允许的概念：内力、轻功、武功、点穴，暗器、毒术、医术、易容、阵法。
 禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
 
-## 要求
-请生成一个随机但符合世界观的武侠角色，以 JSON 格式返回。
+## 核心要求
+1. **多样性**：生成的每个角色必须在姓名、身份背景、性格、价值观、语言风格、目标等方面与常见角色有明显差异
+2. **避免重复**：不要生成重复或相似的角色，不同角色应该有截然不同的背景故事和个性
+3. **真实性**：角色应该像一个真实的人，有复杂的动机和独特的说话方式
 
 ## 字段要求
 - name: 姓名（2-6个汉字）
 - age: 年龄（16-60的整数）
 - gender: 性别（"男"或"女"）
-- appearance: 外貌描述（20-50字）
-- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字）
-- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾）
-- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平）
+- appearance: 外貌描述（20-50字），要有特色
+- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字），要有独特的故事
+- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾），避免只选正面或只选负面，性格特征需要与身份背景吻合。
+- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平），核心价值观需要与身份背景吻合。
 - language_style: 对象，包含：
   - tone: 语调（从以下选项中选1个：豪迈、温和、冷漠、狡黠、文雅）
   - speech_patterns: 说话特点数组（从以下选项中选1-3个：喜欢引用古诗词、说话简洁、喜欢用成语、说话带方言、喜欢开玩笑、说话谨慎）
 - goals: 对象，包含：
-  - short_term: 短期目标（不超过100字）
-  - long_term: 长远目标（不超过100字）
+  - short_term: 短期目标（不超过100字），要具体且有个人特色
+  - long_term: 长远目标（不超过100字），要有野心或深度
 
 ## 输出格式
 请严格输出 JSON，不要包含其他文字。"#;
@@ -1506,7 +1508,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     };
 
     // 3. 加载叙事配置（用于属性描述）
-    let narrative_config = load_narrative_config(&state.config_path);
+    let narrative_config = state.narrative_config.read().await.clone();
 
     // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
@@ -1532,11 +1534,16 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         };
 
     // 5. 计算角色状态（在 move attributes 之前）
-    let status = raw_attributes
-        .as_ref()
-        .and_then(|a| a.get("hp"))
-        .and_then(|hp| hp.as_i64())
-        .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
+    // 优先使用 is_dead 标志（当 AgentDied 消息已收到但 WorldState 尚未更新时）
+    let status = if state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
+        Some("dead".to_string())
+    } else {
+        raw_attributes
+            .as_ref()
+            .and_then(|a| a.get("hp"))
+            .and_then(|hp| hp.as_i64())
+            .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
+    };
 
     // 6. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
@@ -1567,27 +1574,6 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     Json(response).into_response()
 }
 
-/// 加载叙事配置
-fn load_narrative_config(
-    config_path: &std::path::Path,
-) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
-    let config_dir = config_path.parent()?;
-    let narrative_path = config_dir.join("narrative_config.json");
-
-    if narrative_path.exists() {
-        match crate::ai::cognitive::narrative::NarrativeConfig::from_file(&narrative_path) {
-            Ok(config) => {
-                info!("已加载叙事配置: {:?}", narrative_path);
-                return Some(config);
-            }
-            Err(e) => {
-                error!("加载叙事配置失败: {}", e);
-            }
-        }
-    }
-    None
-}
-
 /// 属性元数据响应
 #[derive(Debug, Serialize)]
 pub struct AttributeMetaResponse {
@@ -1595,15 +1581,16 @@ pub struct AttributeMetaResponse {
     pub categories: HashMap<String, Vec<String>>,
 }
 
-/// 获取属性元数据（分类、中文名等，从 narrative_config 解析）
 pub(super) async fn get_attribute_meta_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let narrative_config = load_narrative_config(&state.config_path);
-    let categories = narrative_config
-        .map(|cfg| cfg.attribute_categories)
+    let categories = state
+        .narrative_config
+        .read()
+        .await
+        .as_ref()
+        .map(|c| c.attribute_categories.clone())
         .unwrap_or_default();
-
     Json(AttributeMetaResponse { categories }).into_response()
 }
 
@@ -1747,9 +1734,7 @@ pub(super) async fn get_experiences_handler(
     let experiences: Vec<ExperienceEntry> = entries
         .into_iter()
         .map(|e| {
-            let world_time = e
-                .world_time
-                .and_then(|s| serde_json::from_str(&s).ok());
+            let world_time = e.world_time.and_then(|s| serde_json::from_str(&s).ok());
             ExperienceEntry {
                 tick_id: e.tick_id,
                 world_time,
@@ -3019,7 +3004,7 @@ pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
         },
         dto::LlmProviderInfo {
             value: "openai_compatible".to_string(),
-            label: "OpenAI Compatible (DeepSeek/GLM/Kimi/Minimax等)".to_string(),
+            label: "OpenAI Compatible".to_string(),
             requires_base_url: true,
             disabled: None,
             disabled_reason: None,

@@ -17,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-
 /// Intent 历史条目
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntentHistoryEntry {
@@ -101,10 +100,7 @@ impl IntentHistoryStore {
         action_type: String,
         thought_log: Option<String>,
     ) {
-        let conn = self
-            .conn
-            .lock()
-            .expect("intent_history lock not poisoned");
+        let conn = self.conn.lock().expect("intent_history lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
         // INSERT ON CONFLICT: 同一 tick 可能被重新提交，保留已有 observer_thought/event/world_time
@@ -117,14 +113,17 @@ impl IntentHistoryStore {
                 action_type = excluded.action_type,
                 thought_log = excluded.thought_log,
                 created_at = excluded.created_at",
-            params![tick_id, intent_id.to_string(), action_type, thought_log, created_at],
+            params![
+                tick_id,
+                intent_id.to_string(),
+                action_type,
+                thought_log,
+                created_at
+            ],
         );
 
         match result {
-            Ok(_) => tracing::debug!(
-                "[intent_history] Recorded intent for tick {}",
-                tick_id
-            ),
+            Ok(_) => tracing::debug!("[intent_history] Recorded intent for tick {}", tick_id),
             Err(e) => tracing::warn!(
                 "[intent_history] Failed to record intent for tick {}: {}",
                 tick_id,
@@ -135,10 +134,7 @@ impl IntentHistoryStore {
 
     /// 记录事件（来自 WorldState.events_log）
     pub async fn record_event(&self, tick_id: i64, event: &str, world_time: Option<String>) {
-        let conn = self
-            .conn
-            .lock()
-            .expect("intent_history lock not poisoned");
+        let conn = self.conn.lock().expect("intent_history lock not poisoned");
 
         let tx = match conn.unchecked_transaction() {
             Ok(tx) => tx,
@@ -161,21 +157,27 @@ impl IntentHistoryStore {
                 "INSERT OR IGNORE INTO intent_history
                  (tick_id, intent_id, action_type, event, world_time, created_at)
                  VALUES (?1, ?2, '', ?3, ?4, ?5)",
-                params![tick_id, Uuid::nil().to_string(), event, world_time, created_at],
+                params![
+                    tick_id,
+                    Uuid::nil().to_string(),
+                    event,
+                    world_time,
+                    created_at
+                ],
             );
         }
 
         if tx.commit().is_err() {
-            tracing::warn!("[intent_history] Failed to commit event for tick {}", tick_id);
+            tracing::warn!(
+                "[intent_history] Failed to commit event for tick {}",
+                tick_id
+            );
         }
     }
 
     /// 更新 Observer 思维链
     pub async fn update_observer_thought(&self, tick_id: i64, thought: String) {
-        let conn = self
-            .conn
-            .lock()
-            .expect("intent_history lock not poisoned");
+        let conn = self.conn.lock().expect("intent_history lock not poisoned");
 
         let result = conn.execute(
             "UPDATE intent_history SET observer_thought = ?1 WHERE tick_id = ?2",
@@ -208,7 +210,10 @@ impl IntentHistoryStore {
     /// 分页获取所有条目（按 tick_id 降序）
     pub async fn get_page(&self, page: u32, limit: u32) -> Result<(Vec<IntentHistoryEntry>, u32)> {
         let page = page.max(1);
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("Lock failed: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock failed: {}", e))?;
 
         let total: u32 = conn
             .query_row("SELECT COUNT(*) FROM intent_history", [], |row| row.get(0))
@@ -224,9 +229,7 @@ impl IntentHistoryStore {
         )?;
 
         let entries = stmt
-            .query_map(params![limit, offset], |row| {
-                Ok(Self::row_to_entry(row))
-            })?
+            .query_map(params![limit, offset], |row| Ok(Self::row_to_entry(row)))?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok((entries, total))
@@ -315,7 +318,12 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(1, intent_id, "idle".to_string(), Some("思考中...".to_string()))
+            .record_intent(
+                1,
+                intent_id,
+                "idle".to_string(),
+                Some("思考中...".to_string()),
+            )
             .await;
 
         let entry = store.get_by_tick(1).await;
@@ -332,17 +340,16 @@ mod tests {
         let (_dir, store) = make_store();
         let intent_id = Uuid::new_v4();
 
-        store.record_intent(1, intent_id, "idle".to_string(), None).await;
+        store
+            .record_intent(1, intent_id, "idle".to_string(), None)
+            .await;
 
         store
             .update_observer_thought(1, "这个行为符合人设".to_string())
             .await;
 
         let entry = store.get_by_tick(1).await.unwrap();
-        assert_eq!(
-            entry.observer_thought,
-            Some("这个行为符合人设".to_string())
-        );
+        assert_eq!(entry.observer_thought, Some("这个行为符合人设".to_string()));
     }
 
     #[tokio::test]
@@ -351,7 +358,12 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(5, intent_id, "speak".to_string(), Some("想说点什么".to_string()))
+            .record_intent(
+                5,
+                intent_id,
+                "speak".to_string(),
+                Some("想说点什么".to_string()),
+            )
             .await;
 
         store
@@ -411,7 +423,12 @@ mod tests {
         // 写入
         let store = IntentHistoryStore::open(agent_id, &db_path).unwrap();
         store
-            .record_intent(42, intent_id, "move".to_string(), Some("去集市".to_string()))
+            .record_intent(
+                42,
+                intent_id,
+                "move".to_string(),
+                Some("去集市".to_string()),
+            )
             .await;
         drop(store);
 
