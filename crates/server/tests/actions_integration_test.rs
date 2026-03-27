@@ -14,7 +14,6 @@ mod tests {
     fn test_module_structure() {
         // 验证 actions 模块存在且可访问
         // 完整测试需要数据库连接
-        
     }
 
     /// 测试攻击动作的数据结构构建

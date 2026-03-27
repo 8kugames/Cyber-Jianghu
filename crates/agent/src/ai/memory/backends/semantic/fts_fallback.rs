@@ -8,7 +8,7 @@
 
 use crate::ai::memory::store::ClientMemory;
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 use uuid::Uuid;

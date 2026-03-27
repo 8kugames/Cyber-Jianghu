@@ -19,11 +19,11 @@ use axum::{
     http::{Response, StatusCode},
     response::{IntoResponse, Json},
 };
-use std::collections::HashMap;
 use bytes::Bytes;
 use http_body::Frame;
 use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -596,7 +596,9 @@ pub(super) async fn get_relationships_handler(
 
     let service = RelationshipService::new(store);
     match service.get_all() {
-        Ok(relationships) => Json(serde_json::json!({ "relationships": relationships })).into_response(),
+        Ok(relationships) => {
+            Json(serde_json::json!({ "relationships": relationships })).into_response()
+        }
         Err(e) => {
             error!("[http] Failed to get relationships: {}", e);
             (
@@ -1314,24 +1316,25 @@ pub(super) async fn register_character_handler(
 
             // 7. 保存 narrative_config 到本地配置目录
             if let Some(ref narrative_config) = result.narrative_config
-                && let Some(home) = dirs::home_dir() {
-                    let config_dir = home.join(".cyber-jianghu").join("config");
-                    if let Err(e) = std::fs::create_dir_all(&config_dir) {
-                        error!("创建配置目录失败: {}", e);
-                    } else {
-                        let config_path = config_dir.join("narrative_config.json");
-                        match serde_json::to_string_pretty(narrative_config) {
-                            Ok(json) => {
-                                if let Err(e) = std::fs::write(&config_path, json) {
-                                    error!("保存 narrative_config 失败: {}", e);
-                                } else {
-                                    info!("已保存 narrative_config 到 {:?}", config_path);
-                                }
+                && let Some(home) = dirs::home_dir()
+            {
+                let config_dir = home.join(".cyber-jianghu").join("config");
+                if let Err(e) = std::fs::create_dir_all(&config_dir) {
+                    error!("创建配置目录失败: {}", e);
+                } else {
+                    let config_path = config_dir.join("narrative_config.json");
+                    match serde_json::to_string_pretty(narrative_config) {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(&config_path, json) {
+                                error!("保存 narrative_config 失败: {}", e);
+                            } else {
+                                info!("已保存 narrative_config 到 {:?}", config_path);
                             }
-                            Err(e) => error!("序列化 narrative_config 失败: {}", e),
                         }
+                        Err(e) => error!("序列化 narrative_config 失败: {}", e),
                     }
                 }
+            }
 
             // 8. 更新本地配置文件（添加 agent_id、注册时间、先天属性和游戏规则）
             let mut config_warning = None;
@@ -2123,18 +2126,19 @@ pub(super) async fn dream_character_handler(
         dream.ensure_loaded(&state.config_path, &agent_id);
 
         if let Some(ref last_date) = dream.last_used_game_date
-            && last_date == &current_date {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(DreamResponse {
-                        success: false,
-                        message: "今日已使用过托梦，请明天再试".to_string(),
-                        remaining_ticks: dream.remaining_ticks,
-                        can_use_today: false,
-                    }),
-                )
-                    .into_response();
-            }
+            && last_date == &current_date
+        {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(DreamResponse {
+                    success: false,
+                    message: "今日已使用过托梦，请明天再试".to_string(),
+                    remaining_ticks: dream.remaining_ticks,
+                    can_use_today: false,
+                }),
+            )
+                .into_response();
+        }
     }
 
     info!(
@@ -2146,7 +2150,7 @@ pub(super) async fn dream_character_handler(
     let mut dream = dream_store.write().await;
     let agent_id = *state.agent_id.read().await;
     dream.ensure_loaded(&state.config_path, &agent_id);
-    
+
     dream.thought = Some(req.thought.clone());
     dream.remaining_ticks = req.duration;
     dream.last_used_game_date = Some(current_date);
@@ -3113,9 +3117,10 @@ fn validate_llm_config(
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
     if provider == "openai_compatible"
-        && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty())) {
-            anyhow::bail!("{} 需要提供 base_url", provider);
-        }
+        && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty()))
+    {
+        anyhow::bail!("{} 需要提供 base_url", provider);
+    }
 
     Ok(())
 }
@@ -3163,17 +3168,18 @@ pub(super) async fn update_llm_config_handler(
             } else {
                 Some(&reflector.api_key)
             },
-        ) {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(LlmConfigUpdateResponse {
-                    success: false,
-                    message: format!("Reflector 配置验证失败: {}", e),
-                    config: None,
-                }),
-            )
-                .into_response();
-        }
+        )
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("Reflector 配置验证失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
 
     // 3. 创建测试 LLM 客户端并测试连接
     let provider = match LlmProvider::parse(&req.actor.provider) {
@@ -3484,8 +3490,6 @@ pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> i
     };
 
     let body = StreamBody::new(stream);
-
-    
 
     Response::builder()
         .status(StatusCode::OK)

@@ -99,12 +99,16 @@ pub struct AttributeDefinition {
 impl AttributeDefinition {
     /// 获取 default_value 的浮点值
     pub fn default_value_as_f32(&self) -> Option<f32> {
-        self.default_value.as_ref().and_then(|v| v.as_f64().map(|f| f as f32))
+        self.default_value
+            .as_ref()
+            .and_then(|v| v.as_f64().map(|f| f as f32))
     }
 
     /// 获取 min_value 的浮点值
     pub fn min_value_as_f32(&self) -> Option<f32> {
-        self.min_value.as_ref().and_then(|v| v.as_f64().map(|f| f as f32))
+        self.min_value
+            .as_ref()
+            .and_then(|v| v.as_f64().map(|f| f as f32))
     }
 
     /// 获取 max_value 的整数值
@@ -116,6 +120,8 @@ impl AttributeDefinition {
 
     /// 获取 decay_per_tick 的浮点值
     pub fn decay_per_tick_as_f32(&self) -> Option<f32> {
-        self.decay_per_tick.as_ref().and_then(|v| v.as_f64().map(|f| f as f32))
+        self.decay_per_tick
+            .as_ref()
+            .and_then(|v| v.as_f64().map(|f| f as f32))
     }
 }
