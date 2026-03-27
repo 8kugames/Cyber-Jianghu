@@ -211,8 +211,8 @@ impl AgentBuilder {
             });
 
             // 如果有 LLM 客户端，使用 new_with_llm 初始化
-            let result = if let Some(llm_client) = self.llm_client {
-                MemoryManager::new_with_llm(config, llm_client)
+            let result = if let Some(ref llm_client) = self.llm_client {
+                MemoryManager::new_with_llm(config, llm_client.clone())
             } else {
                 MemoryManager::new(config)
             };
@@ -258,7 +258,7 @@ impl AgentBuilder {
             death_reported: false,
             review_store: self.review_store,
             review_config: self.review_config,
-            actor_llm_client: None,
+            actor_llm_client: self.llm_client,
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
