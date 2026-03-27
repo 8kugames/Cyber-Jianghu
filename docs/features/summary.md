@@ -40,7 +40,12 @@ Agent SDK 是接入世界的"躯壳"，支持内置 LLM 自主决策（Cognitive
 - [x] **多级记忆系统**:
   - [x] **工作记忆**: 短期上下文维持 (FIFO 队列，支持限制最大条目数)。
   - [x] **情景记忆**: 结合时间的事件流水账 (SQLite 持久化)。
-  - [x] **语义记忆**: FTS 搜索已修复（返回完整记忆条目）；向量存储（Embedder + HNSW）基础设施已就绪，但 `add()` 为 no-op，高重要性记忆的自动向量化生成（`ensure_embeddings_for_priority`）未实现。
+  - [-] **语义记忆**:
+    - [x] FTS 搜索已修复（返回完整记忆条目）。
+    - [x] 向量存储（Embedder + HNSW）基础设施已就绪。
+    - [ ] `add()` 为 no-op（语义记忆不由 direct add 写入，由 episodic 后端通过向量生成写入）。
+    - [ ] `ensure_embeddings_for_priority()` 未实现（高重要性记忆的自动向量化生成未实现）。
+    - [ ] `ensure_embedding(memory_id)` 未实现（单条记忆的按需向量化未实现）。
 - [x] **认知感知流水线**:
   - [x] **叙事翻译**: 将生硬的数值（如 `health: 30%`）转化为自然语言描述（如"你感到头晕目眩，身负重伤"），方便 LLM 理解。
   - [x] **动机推演**: 基于当前状态和性格，自动推断出下一步应当采取的短期动机。
@@ -52,19 +57,19 @@ Agent SDK 是接入世界的"躯壳"，支持内置 LLM 自主决策（Cognitive
 - [x] **动态人设与社交**:
   - [x] 角色性格 (`Persona`) 能够根据外界反馈（被攻击、被治愈）进行动态偏移。
   - [x] 支持建立与其他 Agent 的好感度/信任度关系图谱，并支持查询与修改。
-- [x] **意图验证器** (共享基础设施，不区分模式):
+- [-] **意图验证器** (共享基础设施):
   - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate` 可用。
   - [x] LLM 验证器 (`IntentValidator`)，WebSocket intent 提交链路集成（10秒超时降级策略）。
   - [x] 验证失败返回 `ServerError{ValidationFailed}` 允许在剩余 tick 时间内重试。
-  - [ ] Cognitive 模式 intent 提交链路未接入验证器 (`cognitive_decision_with_retry` 直接返回 intent，绕过验证)。
-  - [ ] Observer Agent 审查系统未接入 intent 提交链路。
+  - [x] Cognitive 模式 intent 提交链路**已接入**验证器（`with_llm_client` 自动创建 `IntentValidator`，`submit_intent_with_validation` 循环中先决策后验证，驳回后 `think_with_feedback` 接收反馈重试）。注意：首次尝试使用无反馈 `decision_callback`，后续重试使用带反馈的 `cognitive_decision_with_retry`；验证器与认知引擎共用同一 `llm_arc`。
 
-- [x] **Observer Agent 审查系统** (共享基础设施，API 已实现):
-  - [x] `GET /api/v1/review/pending` - Observer Agent 轮询待审查意图
-  - [x] `POST /api/v1/review/{intent_id}` - 提交审查结果 (批准/拒绝)
-  - [x] `GET /api/v1/review/{intent_id}/status` - 查询审查状态
-  - [x] 超时自动通过机制已实现 (`ReviewStore::process_timeouts`)
-  - [ ] intent 提交链路未接入审查流程（Cognitive 模式 `cognitive_decision_with_retry` 和 Claw 模式均直接发送，未经过 ReviewStore）
+- [x] **ActorSoul 意图审查** (ReviewStore，已接入 intent 提交链路):
+  - [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送。
+  - [x] `GET /api/v1/review/pending` - Observer Agent 轮询待审查意图。
+  - [x] `POST /api/v1/review/{intent_id}` - 提交审查结果 (批准/拒绝)。
+  - [x] `GET /api/v1/review/{intent_id}/status` - 查询审查状态。
+  - [x] 超时自动通过机制已实现（默认 30 秒超时）。
+  - [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore` 队列并调用 LLM 审查。
 
 ### 3. Dual Soul 架构 (共享基础设施)
 - [x] **ActorSoul (行动之魂)**: 生成意图。
@@ -72,7 +77,6 @@ Agent SDK 是接入世界的"躯壳"，支持内置 LLM 自主决策（Cognitive
   - Claw 模式: 由外部 OpenClaw 通过 WebSocket 提交。
 - [x] **ReflectorSoul (反思之魂)**: 后台轮询 `ReviewStore`，使用 LLM 审查意图。
 - [x] **超时自动通过**: 默认 30 秒超时，防止 tick 过期。
-- [x] ActorSoul 的 intent 经过 ReviewStore 审查流程后再发送至服务端（`lifecycle.rs:296-300` 调用 `submit_for_review`）。
 
 ## 三、 通信协议 (Protocol)
 
