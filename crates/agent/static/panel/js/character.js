@@ -584,6 +584,14 @@ document.addEventListener('DOMContentLoaded', () => {
         deathEventSource.addEventListener('heartbeat', () => {
             // 连接存活，无需操作
         });
+        deathEventSource.addEventListener('tick_update', () => {
+            // 防抖：避免短时间内多次刷新
+            if (window._tickRefreshTimer) clearTimeout(window._tickRefreshTimer);
+            window._tickRefreshTimer = setTimeout(() => {
+                loadCharacter();
+                loadRelationships();
+            }, 1000);
+        });
         deathEventSource.onerror = () => {
             console.warn('SSE connection lost, reconnecting...');
             deathEventSource.close();
