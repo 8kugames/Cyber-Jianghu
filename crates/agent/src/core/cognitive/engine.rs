@@ -72,8 +72,15 @@ impl MultiStageCognitiveEngine {
         Self::new(llm_client, CognitiveEngineConfig::default())
     }
 
-    /// 执行完整认知流程
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
+        self.think_with_feedback(world_state, None).await
+    }
+
+    pub async fn think_with_feedback(
+        &self,
+        world_state: &WorldState,
+        validation_feedback: Option<&str>,
+    ) -> Result<CognitiveChain> {
         let start_time = std::time::Instant::now();
         let tick_id = world_state.tick_id;
 
@@ -81,20 +88,32 @@ impl MultiStageCognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
-        // === Stage 1: Perception (感知) ===
-        debug!("执行 Stage 1: Perception");
-        let (perception_response, perception) = self.perceive(world_state).await?;
+        let (perception_response, perception) = self
+            .perceive_with_memory(world_state, "", validation_feedback)
+            .await?;
         chain.add_stage(perception);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception",
-            &self.build_perception_prompt(world_state), &perception_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Perception",
+            &self.build_perception_prompt_with_memory(world_state, "", validation_feedback),
+            &perception_response,
+        );
 
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let (motivation_response, motivation) = self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) = self
+            .motivate(world_state, &perception_output)
+            .await?;
         chain.add_stage(motivation);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Motivation",
-            &self.build_motivation_prompt(world_state, &perception_output), &motivation_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output),
+            &motivation_response,
+        );
 
         // === Stage 3: Planning (规划) ===
         debug!("执行 Stage 3: Planning");
@@ -103,16 +122,26 @@ impl MultiStageCognitiveEngine {
             .plan(world_state, &perception_output, &motivation_output)
             .await?;
         chain.add_stage(planning);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning",
-            &self.build_planning_prompt(world_state, &perception_output, &motivation_output), &planning_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output),
+            &planning_response,
+        );
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
         let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Decision",
-            &self.build_decision_prompt(world_state, &chain), &decision_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Decision",
+            &self.build_decision_prompt(world_state, &chain),
+            &decision_response,
+        );
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
@@ -138,14 +167,12 @@ impl MultiStageCognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
-        // === Stage 1: Perception (感知) ===
-        debug!("执行 Stage 1: Perception (with memory context)");
         let (perception_response, perception) = self
-            .perceive_with_memory(world_state, memory_context)
+            .perceive_with_memory(world_state, memory_context, None)
             .await?;
         chain.add_stage(perception);
         thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception",
-            &self.build_perception_prompt_with_memory(world_state, memory_context), &perception_response);
+            &self.build_perception_prompt_with_memory(world_state, memory_context, None), &perception_response);
 
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
@@ -191,6 +218,7 @@ impl MultiStageCognitiveEngine {
     // ========================================================================
 
     /// Stage 1: 感知 - 理解当前世界状态
+    #[allow(dead_code)]
     async fn perceive(&self, world_state: &WorldState) -> Result<(String, StageOutput)> {
         let prompt = self.build_perception_prompt(world_state);
 
@@ -212,13 +240,13 @@ impl MultiStageCognitiveEngine {
         )))
     }
 
-    /// Stage 1 (带记忆): 感知 - 理解当前世界状态，融入记忆上下文
     async fn perceive_with_memory(
         &self,
         world_state: &WorldState,
         memory_context: &str,
+        validation_feedback: Option<&str>,
     ) -> Result<(String, StageOutput)> {
-        let prompt = self.build_perception_prompt_with_memory(world_state, memory_context);
+        let prompt = self.build_perception_prompt_with_memory(world_state, memory_context, validation_feedback);
 
         let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
 
@@ -330,15 +358,16 @@ impl MultiStageCognitiveEngine {
     // Prompt 构建方法
     // ========================================================================
 
+    #[allow(dead_code)]
     fn build_perception_prompt(&self, world_state: &WorldState) -> String {
-        self.build_perception_prompt_with_memory(world_state, "")
+        self.build_perception_prompt_with_memory(world_state, "", None)
     }
 
-    /// 构建带记忆上下文的感知 Prompt（数据驱动叙事化版本）
     fn build_perception_prompt_with_memory(
         &self,
         world_state: &WorldState,
         memory_context: &str,
+        validation_feedback: Option<&str>,
     ) -> String {
         let self_state = &world_state.self_state;
 
@@ -399,9 +428,14 @@ impl MultiStageCognitiveEngine {
             )
         };
 
+        let feedback_section = match validation_feedback {
+            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            None => String::new(),
+        };
+
         format!(
             r#"# 感知阶段 (Perception)
-
+{feedback_section}
 你是 {agent_name}。
 {persona}
 
@@ -439,6 +473,7 @@ impl MultiStageCognitiveEngine {
             entities = entities_str,
             items = items_str,
             memory_section = memory_section,
+            feedback_section = feedback_section,
         )
     }
 
