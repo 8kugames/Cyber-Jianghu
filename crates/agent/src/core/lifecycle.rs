@@ -287,6 +287,9 @@ impl super::Agent {
                                 self.character_name(), death_event.description
                             );
                             self.death_reported = true;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                             // 死亡后不退出，等待转生：
                             // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
                             // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连

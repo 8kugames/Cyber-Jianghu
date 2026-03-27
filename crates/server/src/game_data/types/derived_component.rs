@@ -22,7 +22,7 @@ pub struct DerivedAttributeComponent {
 
     /// 缓存（用于避免重复计算）
     #[serde(skip)]
-    pub cache: HashMap<String, i32>,
+    pub cache: HashMap<String, f32>,
 }
 
 #[allow(dead_code)]
@@ -42,7 +42,7 @@ impl DerivedAttributeComponent {
         name: &str,
         formula_engine: &FormulaEngine,
         provider: &dyn PrimaryAttributeProvider,
-    ) -> Result<i32, String> {
+    ) -> Result<f32, String> {
         // 先检查缓存
         if let Some(&cached) = self.cache.get(name) {
             return Ok(cached);
@@ -54,11 +54,10 @@ impl DerivedAttributeComponent {
             .ok_or_else(|| format!("Derived attribute '{}' not found", name))?;
 
         if let Some(formula) = &def.formula {
-            // 使用公式引擎计算
             let result = formula_engine
                 .evaluate(formula, provider)
                 .map_err(|e| format!("Formula evaluation error: {}", e))?;
-            Ok(result as i32)
+            Ok(result as f32)
         } else {
             Err(format!(
                 "No formula defined for derived attribute '{}'",
@@ -72,7 +71,7 @@ impl DerivedAttributeComponent {
         &mut self,
         formula_engine: &FormulaEngine,
         provider: &dyn PrimaryAttributeProvider,
-    ) -> HashMap<String, i32> {
+    ) -> HashMap<String, f32> {
         let mut results = HashMap::new();
 
         for name in self.definitions.keys() {

@@ -100,51 +100,102 @@
                             </div>
 
                             <div id="character-info" class="hidden">
-                                <section class="form-section">
-                                    <h2>基本信息</h2>
-                                    <div class="info-grid">
-                                        <div class="info-item">
-                                            <span class="label">姓名</span>
-                                            <span class="value" id="name"
-                                                >-</span
-                                            >
+                                <section class="character-hero">
+                                    <div class="hero-main">
+                                        <div
+                                            class="hero-avatar"
+                                            aria-hidden="true"
+                                        >
+                                            魂
                                         </div>
-                                        <div class="info-item">
-                                            <span class="label">年龄</span>
-                                            <span class="value" id="age"
-                                                >-</span
+                                        <div class="hero-text">
+                                            <div class="hero-name" id="name">
+                                                -
+                                            </div>
+                                            <div
+                                                class="hero-status"
+                                                id="status"
                                             >
+                                                -
+                                            </div>
+                                            <div class="hero-meta">
+                                                <span class="hero-meta-label"
+                                                    >性别</span
+                                                >
+                                                <span
+                                                    class="hero-meta-value"
+                                                    id="gender"
+                                                    >-</span
+                                                >
+                                                <span class="hero-meta-sep"
+                                                    >·</span
+                                                >
+                                                <span class="hero-meta-label"
+                                                    >年龄</span
+                                                >
+                                                <span
+                                                    class="hero-meta-value"
+                                                    id="age"
+                                                    >-</span
+                                                >
+                                            </div>
                                         </div>
-                                        <div class="info-item">
-                                            <span class="label">性别</span>
-                                            <span class="value" id="gender"
-                                                >-</span
+                                    </div>
+                                    <div class="hero-stats">
+                                        <div class="hero-stat">
+                                            <span class="hero-stat-label"
+                                                >当前位置</span
                                             >
-                                        </div>
-                                        <div class="info-item">
-                                            <span class="label">身份</span>
-                                            <span class="value" id="identity"
-                                                >-</span
-                                            >
-                                        </div>
-                                        <div class="info-item">
-                                            <span class="label">状态</span>
-                                            <span class="value" id="status"
-                                                >-</span
-                                            >
-                                        </div>
-                                        <div class="info-item">
-                                            <span class="label">注册时间</span>
                                             <span
-                                                class="value"
+                                                class="hero-stat-value"
+                                                id="location"
+                                                >-</span
+                                            >
+                                        </div>
+                                        <div class="hero-stat">
+                                            <span class="hero-stat-label"
+                                                >当前 Tick</span
+                                            >
+                                            <span
+                                                class="hero-stat-value"
+                                                id="tick-id"
+                                                >-</span
+                                            >
+                                        </div>
+                                        <div class="hero-stat">
+                                            <span class="hero-stat-label"
+                                                >游戏时间</span
+                                            >
+                                            <span
+                                                class="hero-stat-value"
+                                                id="world-time"
+                                                >-</span
+                                            >
+                                        </div>
+                                        <div class="hero-stat">
+                                            <span class="hero-stat-label"
+                                                >注册时间</span
+                                            >
+                                            <span
+                                                class="hero-stat-value"
                                                 id="registered-at"
                                                 >-</span
                                             >
                                         </div>
                                     </div>
+                                </section>
+
+                                <section class="form-section">
+                                    <h2>人物画像</h2>
                                     <div class="info-item full-width">
                                         <span class="label">外貌</span>
                                         <span class="value" id="appearance"
+                                            >-</span
+                                        >
+                                    </div>
+                                    <div class="info-item full-width">
+                                        <span class="label">身份背景</span>
+                                        <span class="value" id="identity"
                                             >-</span
                                         >
                                     </div>
@@ -152,40 +203,23 @@
 
                                 <section class="form-section">
                                     <h2>性格与价值观</h2>
-                                    <div class="info-item">
-                                        <span class="label">性格特征</span>
-                                        <div class="tag-list" id="personality">
-                                            -
-                                        </div>
-                                    </div>
-                                    <div class="info-item">
-                                        <span class="label">核心价值观</span>
-                                        <div class="tag-list" id="values">
-                                            -
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section class="form-section">
-                                    <h2>当前状态</h2>
                                     <div class="info-grid">
                                         <div class="info-item">
-                                            <span class="label">当前位置</span>
-                                            <span class="value" id="location"
-                                                >-</span
+                                            <span class="label">性格特征</span>
+                                            <div
+                                                class="tag-list"
+                                                id="personality"
                                             >
+                                                -
+                                            </div>
                                         </div>
                                         <div class="info-item">
-                                            <span class="label">当前 Tick</span>
-                                            <span class="value" id="tick-id"
-                                                >-</span
+                                            <span class="label"
+                                                >核心价值观</span
                                             >
-                                        </div>
-                                        <div class="info-item">
-                                            <span class="label">游戏时间</span>
-                                            <span class="value" id="world-time"
-                                                >-</span
-                                            >
+                                            <div class="tag-list" id="values">
+                                                -
+                                            </div>
                                         </div>
                                     </div>
                                 </section>

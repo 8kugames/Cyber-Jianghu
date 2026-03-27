@@ -51,6 +51,7 @@ fn create_test_world_state() -> WorldState {
         },
         self_state: AgentSelfState {
             attributes,
+            derived_attributes: HashMap::new(),
             attribute_descriptions: HashMap::from([
                 ("hp".to_string(), "生命值 80/100，状态良好".to_string()),
                 ("stamina".to_string(), "体力有些消耗".to_string()),

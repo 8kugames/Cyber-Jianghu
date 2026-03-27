@@ -5,8 +5,121 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>赛博江湖 - 管理</title>
         <link rel="stylesheet" href="style.css" />
+        <style>
+            .section-desc {
+                color: var(--text-secondary);
+                font-size: 13px;
+                margin-top: 6px;
+            }
+
+            .llm-header {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 8px;
+            }
+
+            .llm-header h2 {
+                margin-bottom: 0;
+                padding-bottom: 0;
+                border-bottom: none;
+            }
+
+            .llm-meta {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .badge {
+                font-size: 11px;
+                padding: 4px 10px;
+                border-radius: 999px;
+                border: 1px solid var(--border);
+                background: var(--bg-secondary);
+                color: var(--text-secondary);
+                font-weight: 600;
+                letter-spacing: 0.2px;
+            }
+
+            .badge-success {
+                border-color: var(--success);
+                color: var(--success);
+                background: var(--success-light);
+            }
+
+            .badge-warning {
+                border-color: var(--warning);
+                color: #b08929;
+                background: var(--warning-light);
+            }
+
+            .badge-danger {
+                border-color: var(--danger);
+                color: var(--danger);
+                background: var(--danger-light);
+            }
+
+            .badge-muted {
+                border-color: var(--border-light);
+                color: var(--text-muted);
+                background: var(--bg-secondary);
+            }
+
+            .llm-hint-row {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                flex-wrap: wrap;
+                margin-bottom: 14px;
+            }
+
+            .inline-tip {
+                font-size: 12px;
+                color: var(--text-muted);
+                margin-top: 6px;
+            }
+
+            .subsection-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin-bottom: 12px;
+            }
+
+            .subsection-header h3 {
+                margin-bottom: 0;
+            }
+
+            .toggle {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                user-select: none;
+            }
+
+            .disabled-form {
+                opacity: 0.6;
+                background: var(--bg-secondary);
+                padding: 12px;
+                border-radius: var(--radius-sm);
+                border: 1px dashed var(--border);
+            }
+
+            @media (max-width: 600px) {
+                .llm-header {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+            }
+        </style>
     </head>
-    <body>
+    <body class="full-width-page">
         <div class="container">
             <header>
                 <h1>赛博江湖</h1>
@@ -63,10 +176,35 @@
 
                 <!-- LLM 配置 -->
                 <section class="form-section" id="llm-config-section">
-                    <h2>LLM 配置</h2>
-                    <p class="section-desc">
-                        配置 ActorSoul 和 ReflectorSoul 使用的 LLM 模型。
-                    </p>
+                    <div class="llm-header">
+                        <div>
+                            <h2>LLM 配置</h2>
+                            <p class="section-desc">
+                                配置 ActorSoul 和 ReflectorSoul 使用的 LLM 模型。
+                            </p>
+                        </div>
+                        <div class="llm-meta">
+                            <span
+                                id="llm-runtime-badge"
+                                class="badge badge-muted"
+                                >模式：--</span
+                            >
+                            <span
+                                id="llm-save-state"
+                                class="badge badge-muted"
+                                >状态：加载中</span
+                            >
+                        </div>
+                    </div>
+
+                    <div class="llm-hint-row">
+                        <span class="hint" id="llm-mode-hint"
+                            >保存后将在检测到文件变更时生效。</span
+                        >
+                        <span class="hint" id="llm-usage-updated"
+                            >统计更新时间：--</span
+                        >
+                    </div>
 
                     <!-- Token 使用统计 -->
                     <div class="token-stats" id="token-stats">
@@ -106,7 +244,10 @@
 
                     <!-- ActorSoul 配置 -->
                     <div class="subsection">
-                        <h3>ActorSoul (行动之魂)</h3>
+                        <div class="subsection-header">
+                            <h3>ActorSoul (行动之魂)</h3>
+                            <span class="badge badge-muted">主配置</span>
+                        </div>
                         <form id="actor-llm-form">
                             <div class="form-row">
                                 <div class="form-group">
@@ -128,6 +269,9 @@
                                         required
                                     />
                                 </div>
+                            </div>
+                            <div class="inline-tip">
+                                Provider 决定是否需要 Base URL 与 API Key。
                             </div>
                             <div class="form-group" id="actor-base-url-group">
                                 <label for="actor-base-url">Base URL</label>
@@ -151,16 +295,23 @@
 
                     <!-- ReflectorSoul 配置 -->
                     <div class="subsection">
-                        <h3>ReflectorSoul (反思之魂)</h3>
-                        <div class="form-group checkbox-group">
-                            <label class="checkbox-label">
-                                <input
-                                    type="checkbox"
-                                    id="reflector-inherit"
-                                    checked
-                                />
-                                使用与 ActorSoul 相同的配置
-                            </label>
+                        <div class="subsection-header">
+                            <h3>ReflectorSoul (反思之魂)</h3>
+                            <div class="llm-meta">
+                                <span
+                                    id="reflector-inherit-badge"
+                                    class="badge badge-muted"
+                                    >继承中</span
+                                >
+                                <label class="toggle">
+                                    <input
+                                        type="checkbox"
+                                        id="reflector-inherit"
+                                        checked
+                                    />
+                                    使用与 ActorSoul 相同的配置
+                                </label>
+                            </div>
                         </div>
 
                         <form id="reflector-llm-form" class="disabled-form">
@@ -186,6 +337,9 @@
                                         required
                                     />
                                 </div>
+                            </div>
+                            <div class="inline-tip">
+                                单独配置 ReflectorSoul 时需要填写完整参数。
                             </div>
                             <div
                                 class="form-group"
