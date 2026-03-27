@@ -56,8 +56,10 @@ docker compose logs -f agent
 
 ## 端口配置
 
-- Agent HTTP API：`23340`（开发）、`23340-23349`（多实例）
-- 环境变量：`AGENT_PORT`
+- Agent HTTP API：`23340-23349`（port=0 时随机分配）
+- 环境变量：`CYBER_JIANGHU_PORT`（设为 0 则随机分配，否则使用指定端口）
+
+> **注意**：当 `port=0` 或未设置时，Agent 会在 23340-23349 范围内随机选择一个可用端口。启动日志会显示实际分配的端口。
 
 ## 多 Agent 部署
 
