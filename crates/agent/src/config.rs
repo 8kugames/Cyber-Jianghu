@@ -329,6 +329,32 @@ impl Default for RuntimeConfig {
 }
 
 // ============================================================================
+// Claw 模式配置
+// ============================================================================
+
+/// Claw 模式专用配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClawConfig {
+    /// 是否使用统一认知架构（OpenClawBridge + MultiStageCognitiveEngine）
+    /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
+    /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
+    #[serde(default = "default_use_unified_cognitive")]
+    pub use_unified_cognitive: bool,
+}
+
+fn default_use_unified_cognitive() -> bool {
+    true
+}
+
+impl Default for ClawConfig {
+    fn default() -> Self {
+        Self {
+            use_unified_cognitive: true,
+        }
+    }
+}
+
+// ============================================================================
 // LLM 配置（仅 Cognitive 模式使用）
 // ============================================================================
 
@@ -573,6 +599,10 @@ pub struct Config {
     #[serde(default)]
     pub runtime: RuntimeConfig,
 
+    /// Claw 模式专用配置
+    #[serde(default)]
+    pub claw: ClawConfig,
+
     /// LLM 配置（仅 Cognitive 模式使用）
     #[serde(default)]
     pub llm: LlmConfig,
@@ -678,6 +708,7 @@ impl Config {
             agent: None,
             characters: vec![],
             runtime,
+            claw: ClawConfig::default(),
             llm: LlmConfig::from_env(),
             llm_reflector: None,
             memory: MemoryConfig::default(),

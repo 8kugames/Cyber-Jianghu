@@ -720,98 +720,132 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 persona_info: persona_info.clone(),
             });
 
-            // 获取 LLM 通信通道
-            let upstream_tx = setup.shared_state.upstream_tx.clone();
-            let llm_response_rx = setup.shared_state.llm_response_rx.lock().unwrap().take();
-
-            // 创建 OpenClawBridge 作为 LlmClient 实现
-            let openclaw_bridge = Arc::new(OpenClawBridge::new(upstream_tx, BridgeConfig::default()));
-            info!("OpenClawBridge 已创建（Claw 模式 LLM 客户端）");
-
-            // 启动 LLM 响应转发任务
-            if let Some(mut response_rx) = llm_response_rx {
-                let bridge = openclaw_bridge.clone();
-                tokio::spawn(async move {
-                    while let Some((request_id, result)) = response_rx.recv().await {
-                        bridge.handle_response(&request_id, result.map_err(|e| anyhow::anyhow!("{}", e)));
-                    }
-                    info!("LLM 响应转发任务结束");
-                });
-                info!("LLM 响应转发任务已启动");
-            }
+            // 检查是否使用统一认知架构
+            let use_unified_cognitive = config.claw.use_unified_cognitive;
+            info!("Claw 模式 use_unified_cognitive={}", use_unified_cognitive);
 
             // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
             let review_store =
                 Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
             info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
 
-            // 创建 MultiStageCognitiveEngine（与 Cognitive 模式共享架构）
-            let agent_name = config
-                .agent
-                .as_ref()
-                .map(|c| c.name.as_str())
-                .unwrap_or("(未创建)");
-            let agent_id = config
-                .identity
-                .as_ref()
-                .map(|i| i.device_id)
-                .unwrap_or_else(Uuid::new_v4);
-            let persona_description = config
-                .agent
-                .as_ref()
-                .map(|c| c.generate_system_prompt())
-                .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
+            let agent = if use_unified_cognitive {
+                // === 统一认知架构路径 ===
+                // 获取 LLM 通信通道
+                let upstream_tx = setup.shared_state.upstream_tx.clone();
+                let llm_response_rx = setup.shared_state.llm_response_rx.lock().unwrap().take();
 
-            let cognitive_config = CognitiveEngineConfig {
-                agent_name: agent_name.to_string(),
-                persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(agent_id, agent_name, &persona_description),
-                temperature: config.llm.temperature,
-                max_tokens_per_stage: config.llm.max_tokens,
-            };
+                // 创建 OpenClawBridge 作为 LlmClient 实现
+                let openclaw_bridge = Arc::new(OpenClawBridge::new(upstream_tx, BridgeConfig::default()));
+                info!("OpenClawBridge 已创建（Claw 模式 LLM 客户端）");
 
-            let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
-            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_client.clone(), cognitive_config));
-            info!("MultiStageCognitiveEngine 已创建（Claw 模式）");
-
-            let cognitive_decision_with_feedback: DecisionWithFeedbackCallback = Arc::new(
-                cognitive_decision_with_retry(
-                    agent_id,
-                    cognitive_engine.clone(),
-                    CognitiveDecisionConfig::default().max_retries,
-                ),
-            );
-
-            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
-                let engine = cognitive_engine.clone();
-                let ws = ws.clone();
-                Box::pin(async move {
-                    match engine.think(&ws).await {
-                        Ok(chain) => chain.final_intent,
-                        Err(e) => {
-                            error!("[claw-cognitive] Decision failed: {}", e);
-                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
-                                .with_thought(format!("认知失败: {}", e))
+                // 启动 LLM 响应转发任务
+                if let Some(mut response_rx) = llm_response_rx {
+                    let bridge = openclaw_bridge.clone();
+                    tokio::spawn(async move {
+                        while let Some((request_id, result)) = response_rx.recv().await {
+                            bridge.handle_response(&request_id, result.map_err(|e| anyhow::anyhow!("{}", e)));
                         }
-                    }
-                })
-            });
+                        info!("LLM 响应转发任务结束");
+                    });
+                    info!("LLM 响应转发任务已启动");
+                }
 
-            // 启动 ReflectorSoul 任务（Claw 模式无配置热重载）
-            let (_reflector_config_reload_tx, reflector_config_reload_rx) =
-                tokio::sync::broadcast::channel(1);
+                // 创建 MultiStageCognitiveEngine（与 Cognitive 模式共享架构）
+                let agent_name = config
+                    .agent
+                    .as_ref()
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("(未创建)");
+                let agent_id = config
+                    .identity
+                    .as_ref()
+                    .map(|i| i.device_id)
+                    .unwrap_or_else(Uuid::new_v4);
+                let persona_description = config
+                    .agent
+                    .as_ref()
+                    .map(|c| c.generate_system_prompt())
+                    .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
 
-            // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
-            let agent = AgentBuilder::new(config, decision)
-                .with_decision_feedback(cognitive_decision_with_feedback)
-                .with_reconnect_rx(setup.reconnect_rx)
-                .with_review_store(review_store.clone())
-                .with_llm_client(llm_client.clone(), None)
-                .build();
+                let cognitive_config = CognitiveEngineConfig {
+                    agent_name: agent_name.to_string(),
+                    persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(agent_id, agent_name, &persona_description),
+                    temperature: config.llm.temperature,
+                    max_tokens_per_stage: config.llm.max_tokens,
+                };
+
+                let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
+                let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_client.clone(), cognitive_config));
+                info!("MultiStageCognitiveEngine 已创建（Claw 模式统一认知架构）");
+
+                let cognitive_decision_with_feedback: DecisionWithFeedbackCallback = Arc::new(
+                    cognitive_decision_with_retry(
+                        agent_id,
+                        cognitive_engine.clone(),
+                        CognitiveDecisionConfig::default().max_retries,
+                    ),
+                );
+
+                let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                    let engine = cognitive_engine.clone();
+                    let ws = ws.clone();
+                    Box::pin(async move {
+                        match engine.think(&ws).await {
+                            Ok(chain) => chain.final_intent,
+                            Err(e) => {
+                                error!("[claw-cognitive] Decision failed: {}", e);
+                                Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                    .with_thought(format!("认知失败: {}", e))
+                            }
+                        }
+                    })
+                });
+
+                // 启动 ReflectorSoul 任务（Claw 模式无配置热重载）
+                let (_reflector_config_reload_tx, _reflector_config_reload_rx) =
+                    tokio::sync::broadcast::channel::<()>(1);
+
+                // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
+                AgentBuilder::new(config, decision)
+                    .with_decision_feedback(cognitive_decision_with_feedback)
+                    .with_reconnect_rx(setup.reconnect_rx)
+                    .with_review_store(review_store.clone())
+                    .with_llm_client(llm_client.clone(), None)
+                    .build()
+            } else {
+                // === Legacy 路径（http_decision） ===
+                // Agent 被动等待 OpenClaw 提交完整 Intent，不使用认知引擎
+                info!("使用 Legacy 路径，等待 OpenClaw 提交 Intent");
+
+                let agent_id = config
+                    .identity
+                    .as_ref()
+                    .map(|i| i.device_id)
+                    .unwrap_or_else(Uuid::new_v4);
+
+                let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                    let agent_id = agent_id;
+                    let tick_id = ws.tick_id;
+                    Box::pin(async move {
+                        Intent::new(agent_id, tick_id, "idle", None)
+                            .with_thought("等待 OpenClaw 提交 Intent".to_string())
+                    })
+                });
+
+                let (_reflector_config_reload_tx, _reflector_config_reload_rx) =
+                    tokio::sync::broadcast::channel::<()>(1);
+
+                AgentBuilder::new(config, decision)
+                    .with_reconnect_rx(setup.reconnect_rx)
+                    .with_review_store(review_store.clone())
+                    .build()
+            };
 
             let intent_history = setup.api_state.intent_history.clone();
             tokio::spawn(async move {
                 if let Err(e) = run_reflector_soul_task(
-                    reflector_config_reload_rx,
+                    tokio::sync::broadcast::channel::<()>(1).1,
                     review_store,
                     intent_history,
                 )
