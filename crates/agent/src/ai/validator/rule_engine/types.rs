@@ -303,7 +303,12 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::move_to(agent_id, 1, "location_1");
+        let intent = Intent::new(
+            agent_id,
+            1,
+            "move",
+            Some(serde_json::json!({"target_location": "location_1"})),
+        );
 
         let context = RuleValidationContext {
             intent,
@@ -323,7 +328,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
 
         let mut attributes = HashMap::new();
         attributes.insert("health".to_string(), serde_json::json!(100));
@@ -352,7 +357,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
 
         let request = ValidationRequest {
             intent,

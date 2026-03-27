@@ -153,7 +153,7 @@ impl LlmProvider {
     }
 
     /// 从字符串解析
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "openclaw" => Some(Self::OpenClaw),
             "openai_compatible" | "openai-compatible" => Some(Self::OpenAICompatible),
@@ -562,23 +562,23 @@ mod tests {
     #[test]
     fn test_provider_from_str() {
         assert_eq!(
-            LlmProvider::from_str("openclaw"),
+            LlmProvider::parse("openclaw"),
             Some(LlmProvider::OpenClaw)
         );
         assert_eq!(
-            LlmProvider::from_str("OpenClaw"),
+            LlmProvider::parse("OpenClaw"),
             Some(LlmProvider::OpenClaw)
         );
         assert_eq!(
-            LlmProvider::from_str("openai_compatible"),
+            LlmProvider::parse("openai_compatible"),
             Some(LlmProvider::OpenAICompatible)
         );
         assert_eq!(
-            LlmProvider::from_str("openai-compatible"),
+            LlmProvider::parse("openai-compatible"),
             Some(LlmProvider::OpenAICompatible)
         );
-        assert_eq!(LlmProvider::from_str("ollama"), Some(LlmProvider::Ollama));
-        assert_eq!(LlmProvider::from_str("unknown"), None);
+        assert_eq!(LlmProvider::parse("ollama"), Some(LlmProvider::Ollama));
+        assert_eq!(LlmProvider::parse("unknown"), None);
     }
 
     #[test]

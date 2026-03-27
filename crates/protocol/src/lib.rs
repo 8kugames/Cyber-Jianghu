@@ -17,10 +17,11 @@
 //! use uuid::Uuid;
 //!
 //! // 创建意图
-//! let intent = Intent::speak(
+//! let intent = Intent::new(
 //!     Uuid::new_v4(),
 //!     1,
-//!     "Hello World".to_string()
+//!     "speak",
+//!     Some(serde_json::json!({"content": "Hello World"})),
 //! );
 //! ```
 //!

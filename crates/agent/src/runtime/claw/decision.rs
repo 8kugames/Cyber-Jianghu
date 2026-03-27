@@ -1,8 +1,14 @@
 // Claw Decision - 内部调度器决策函数
 
 use anyhow::Result;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+type DecisionCallback = dyn Fn(&WorldState) -> Pin<Box<dyn Future<Output = Intent> + Send>>
+    + Send
+    + Sync;
 use tracing::{debug, error, info};
 
 use crate::ai::llm::LlmClient;
@@ -102,7 +108,7 @@ pub async fn claw_decision(state: &ClawDecisionState, world_state: &WorldState) 
         (Some(start), Some(end)) => &response[start..end],
         _ => {
             error!("No JSON found in LLM response");
-            return Ok(Intent::idle(agent_id, tick_id));
+            return Ok(Intent::new(agent_id, tick_id, "idle", None));
         }
     };
 
@@ -110,7 +116,7 @@ pub async fn claw_decision(state: &ClawDecisionState, world_state: &WorldState) 
         Ok(v) => v,
         Err(e) => {
             error!("Failed to parse JSON: {}", e);
-            return Ok(Intent::idle(agent_id, tick_id));
+            return Ok(Intent::new(agent_id, tick_id, "idle", None));
         }
     };
 
@@ -132,6 +138,31 @@ pub async fn claw_decision(state: &ClawDecisionState, world_state: &WorldState) 
         intent = intent.with_thought(t);
     }
     Ok(intent)
+}
+
+pub fn create_claw_decision_callback(
+    state: ClawDecisionState,
+) -> Arc<DecisionCallback> {
+    let state = Arc::new(state);
+
+    Arc::new(move |world_state: &WorldState| {
+        let state = state.clone();
+        let world_state = world_state.clone();
+        Box::pin(async move {
+            match claw_decision(&state, &world_state).await {
+                Ok(intent) => intent,
+                Err(e) => {
+                    error!("Claw decision failed: {}", e);
+                    Intent::new(
+                        world_state.agent_id.unwrap_or_default(),
+                        world_state.tick_id,
+                        "idle",
+                        None,
+                    )
+                }
+            }
+        })
+    })
 }
 
 #[cfg(test)]
@@ -173,31 +204,4 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
         assert_eq!(parsed["action_type"], "idle");
     }
-}
-
-pub fn create_claw_decision_callback(
-    state: ClawDecisionState,
-) -> Arc<
-    dyn Fn(&WorldState) -> std::pin::Pin<Box<dyn std::future::Future<Output = Intent> + Send>>
-        + Send
-        + Sync,
-> {
-    let state = Arc::new(state);
-
-    Arc::new(move |world_state: &WorldState| {
-        let state = state.clone();
-        let world_state = world_state.clone();
-        Box::pin(async move {
-            match claw_decision(&state, &world_state).await {
-                Ok(intent) => intent,
-                Err(e) => {
-                    error!("Claw decision failed: {}", e);
-                    Intent::idle(
-                        world_state.agent_id.unwrap_or_default(),
-                        world_state.tick_id,
-                    )
-                }
-            }
-        })
-    })
 }

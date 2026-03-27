@@ -11,7 +11,6 @@ use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use tracing_subscriber;
 
 /// 模拟决策函数（完全动态架构)
 ///
@@ -47,9 +46,7 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
         // - 如果饥饿值低, 使用馒头
         // - 如果口渴值低, 使用水
         // - 否则 idle
-        let action = if hunger < 30 {
-            "use"
-        } else if thirst < 30 {
+        let action = if hunger < 30 || thirst < 30 {
             "use"
         } else {
             "idle"
@@ -72,18 +69,18 @@ fn make_decision(world_state: &WorldState) -> BoxFuture<'static, Intent> {
                         .any(|item| item.item_id == "mantou" && item.quantity > 0);
 
                     if has_mantou {
-                        Intent::use_item(agent_id, world_state.tick_id, "mantou")
+                        Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "mantou"})))
                             .with_thought(thought)
                     } else {
                         // 没有馒头,尝试使用水
-                        Intent::use_item(agent_id, world_state.tick_id, "water")
+                        Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "water"})))
                             .with_thought("没有馒头了,尝试喝水".to_string())
                     }
                 } else {
-                    Intent::use_item(agent_id, world_state.tick_id, "water").with_thought(thought)
+                    Intent::new(agent_id, world_state.tick_id, "use", Some(serde_json::json!({"item_id": "water"}))).with_thought(thought)
                 }
             }
-            _ => Intent::idle(agent_id, world_state.tick_id).with_thought(thought),
+            _ => Intent::new(agent_id, world_state.tick_id, "idle", None).with_thought(thought),
         }
     })
 }

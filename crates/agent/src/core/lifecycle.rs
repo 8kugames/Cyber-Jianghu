@@ -166,7 +166,7 @@ impl super::Agent {
                     match crate::config::Config::from_file(&self.config.config_path) {
                         Ok(new_config) => {
                             // 创建新的 LLM 客户端
-                            let provider = LlmProvider::from_str(&new_config.llm.provider);
+                            let provider = LlmProvider::parse(&new_config.llm.provider);
                             let llm_client_result = match provider {
                                 Some(provider) => {
                                     let mut client_config = DirectLlmClientConfig::new(
@@ -244,8 +244,8 @@ impl super::Agent {
                     }
 
                     // 1.5 检查是否死亡（只报告一次）
-                    if !self.death_reported {
-                        if let Some(death_event) = world_state.events_log.iter().find(|e| {
+                    if !self.death_reported
+                        && let Some(death_event) = world_state.events_log.iter().find(|e| {
                             if let Some(cause) = e.metadata.get("cause")
                                 && let Some(cause_str) = cause.as_str() {
                                     return cause_str.starts_with("death");
@@ -264,7 +264,6 @@ impl super::Agent {
                             // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
                             // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
                         }
-                    }
 
                     // 2. 处理事件并更新记忆
                     if let Err(e) = self.process_events(&world_state.events_log).await {
@@ -301,8 +300,8 @@ impl super::Agent {
                     };
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
-                    if let Some(ref api_state) = self.http_api_state {
-                        if let Some(ref history) = api_state.intent_history {
+                    if let Some(ref api_state) = self.http_api_state
+                        && let Some(ref history) = api_state.intent_history {
                             history
                                 .record_intent(
                                     final_intent.tick_id,
@@ -312,7 +311,6 @@ impl super::Agent {
                                 )
                                 .await;
                         }
-                    }
 
                     // 6. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {
@@ -326,9 +324,11 @@ impl super::Agent {
                             // 发送最后一个 idle 意图后退出
                             let agent_id = self.client.agent_id().await.unwrap_or_default();
                             self.client
-                                .send_intent(&Intent::idle(
+                                .send_intent(&Intent::new(
                                     agent_id,
                                     world_state.tick_id,
+                                    "idle",
+                                    None,
                                 ))
                                 .await
                                 .ok();

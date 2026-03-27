@@ -792,15 +792,14 @@ impl Config {
         if let Some(ref mut character) = self.agent {
             character.status = CharacterStatus::Retired;
             // 更新 characters 列表中的记录
-            if let Some(agent_id) = character.agent_id {
-                if let Some(existing) = self
+            if let Some(agent_id) = character.agent_id
+                && let Some(existing) = self
                     .characters
                     .iter_mut()
                     .find(|c| c.agent_id == Some(agent_id))
                 {
                     existing.status = CharacterStatus::Retired;
                 }
-            }
         }
     }
 

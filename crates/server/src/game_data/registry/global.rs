@@ -37,6 +37,7 @@ pub fn registry_or_panic() -> &'static GameDataCache {
 ///
 /// 测试中调用此函数来重置注册表，避免测试隔离性问题
 #[cfg(test)]
+#[allow(dead_code)]
 pub fn reset_registry_for_test(cache: Arc<GameDataCache>) {
-    CONFIG_REGISTRY.set(cache);
+    let _ = CONFIG_REGISTRY.set(cache);
 }

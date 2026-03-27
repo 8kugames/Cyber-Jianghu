@@ -416,7 +416,7 @@ mod tests {
         ));
 
         // 设置 final_intent
-        chain.final_intent = crate::models::Intent::use_item(Uuid::new_v4(), 1, "mantou")
+        chain.final_intent = crate::models::Intent::new(Uuid::new_v4(), 1, "use", Some(serde_json::json!({"item_id": "mantou"})))
             .with_thought("因为饥饿，所以决定使用馒头".to_string());
 
         chain

@@ -54,7 +54,7 @@ impl IntentCollector {
                     "Agent {} 未提交意图，生成默认 idle 意图 (tick_id: {})",
                     state.agent_id, tick_id
                 );
-                intents.push(Intent::idle(state.agent_id, tick_id));
+                intents.push(Intent::new(state.agent_id, tick_id, "idle", None));
             }
         }
 

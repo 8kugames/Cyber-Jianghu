@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_build_validation_prompt() {
         let prompt = ObserverPrompt::new();
-        let intent = crate::models::Intent::idle(Uuid::new_v4(), 1);
+        let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "idle", None);
         let persona = crate::ai::validator::PersonaInfo::default();
         let world_rules = cyber_jianghu_protocol::WorldBuildingRules::default();
         let world_context = "测试世界状态";

@@ -8,14 +8,14 @@
 
 ### 1. 核心运行机制
 - [x] **Tick 驱动系统**: 实现了基于固定频率（可配置 TPS）的时间流转循环，处理意图收集、自然衰减（饥饿、口渴、环境伤害）、动作结算、状态持久化与状态广播。
-- [x] **动态公式引擎**: 实现了基于 AST 的自研公式求值引擎 (`formula_engine`)，允许在配置文件中直接编写数学表达式并绑定 Agent 属性进行动态计算。
-- [x] **数据驱动配置**: 所有核心数据（属性定义、物品、地图位置、动作定义、叙事配置等）均通过 YAML 文件在启动时加载，支持热更新。
+- [x] **动态公式引擎**: 运行时公式计算使用 `evalexpr` crate（战斗伤害、属性恢复、死亡条件判定等），同时自研 AST 公式引擎 (`formula_engine`) 用于派生属性的动态计算。两者均支持在配置文件中编写数学表达式并绑定 Agent 属性。
+- [x] **数据驱动配置**: 所有核心数据（属性定义、物品、地图位置、动作定义、叙事配置等）均通过 YAML 文件在启动时加载，支持热更新 (`POST /api/admin/reload-config`)。
 
 ### 2. 实体与状态管理
 - [x] **Agent 生命周期**: 支持新 Agent 降生（注册）、属性初始化、存活状态维护以及寿命自然衰减与死亡判定。
-- [x] **持久化系统**: 集成 PostgreSQL 数据库，实现 Agent 基础数据、实时状态（Health/Energy等）、以及场景掉落物的持久化读写。
+- [x] **持久化系统**: 集成 PostgreSQL 数据库，实现 Agent 基础数据、实时状态（Health/Energy等）、场景掉落物的持久化读写。
 - [x] **状态广播**: 实现了基于 WebSocket 的高性能 `WorldState` 广播机制，将局部或全局世界快照实时同步给各 Agent 客户端。
-- [x] **agent_id → device_id 反向映射**: 维护角色到设备的映射关系，确保广播消息能正确路由到 WebSocket 连接。
+- [x] **agent_id -> device_id 反向映射**: 维护角色到设备的映射关系，确保广播消息能正确路由到 WebSocket 连接。
 
 ### 3. 动作与交互系统
 - [x] **基础行为**: 实现了 `Idle` (空闲)、`Move` (基于地理图节点的移动校验)。
@@ -28,10 +28,11 @@
 
 ## 二、 客户端 SDK (Agent) 功能
 
-Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑"。
+Agent SDK 是接入世界的"躯壳"，支持内置 LLM 自主决策（Cognitive 模式）或外部 LLM 编排（Claw 模式）。
 
 ### 1. 接入与运行模式
-- [x] **Claw 模式**: Agent 默认模式，为 OpenClaw 和其他外部 LLM 编排框架提供 WebSocket + HTTP API 接口。内置叙事引擎、记忆系统、意图验证等认知能力作为 API 供外部调用。
+- [x] **Cognitive 模式** (默认): 内置多阶段认知引擎和 LLM 客户端，Agent 完全自主决策，无需外部编排。
+- [x] **Claw 模式**: 为 OpenClaw 和其他外部 LLM 编排框架提供 WebSocket + HTTP API 接口。内置叙事引擎、记忆系统、意图验证等认知能力作为 API 供外部调用。
 - [x] **网络通信容错**: 实现了 WebSocket 自动断线重连、指数退避策略以及注册流的自动恢复。
 - [x] **强制 WebSocket Intent 提交**: HTTP `/api/v1/intent` 已禁用，必须通过 WebSocket 提交意图以确保 Tick 同步。
 
@@ -39,11 +40,11 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 - [x] **多级记忆系统**:
   - [x] **工作记忆**: 短期上下文维持 (FIFO 队列，支持限制最大条目数)。
   - [x] **情景记忆**: 结合时间的事件流水账 (SQLite 持久化)。
-  - [x] **语义记忆**: 实现了本地向量存储（Embedder）和全文检索 (FTS) 回退机制，用于存取世界观知识和过往经验。
+  - [x] **语义记忆**: FTS 搜索已修复（返回完整记忆条目）；向量存储（Embedder + HNSW）基础设施已就绪，但 `add()` 为 no-op，高重要性记忆的自动向量化生成（`ensure_embeddings_for_priority`）未实现。
 - [x] **认知感知流水线**:
   - [x] **叙事翻译**: 将生硬的数值（如 `health: 30%`）转化为自然语言描述（如"你感到头晕目眩，身负重伤"），方便 LLM 理解。
   - [x] **动机推演**: 基于当前状态和性格，自动推断出下一步应当采取的短期动机。
-- [x] **四阶段认知上下文**: WebSocket Tick 消息内置结构化认知引导
+- [x] **四阶段认知上下文**: 结构化认知引导，Cognitive 模式内置运行，Claw 模式通过 WebSocket Tick 消息下发
   - [x] **Perception (感知)**: 理解当前世界状态、自身状态、环境观察
   - [x] **Motivation (动机)**: 基于人设生成内在驱动力
   - [x] **Planning (规划)**: 制定行动计划和可用动作
@@ -51,19 +52,27 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 - [x] **动态人设与社交**:
   - [x] 角色性格 (`Persona`) 能够根据外界反馈（被攻击、被治愈）进行动态偏移。
   - [x] 支持建立与其他 Agent 的好感度/信任度关系图谱，并支持查询与修改。
-- [x] **意图验证器** (HTTP API 可用，WebSocket 链路已自动集成):
-  - [x] 基于规则引擎和 LLM 二次校验的拦截器已实现 (`ai/validator/`)
-  - [x] HTTP API `POST /api/v1/validate` 可供 OpenClaw 主动调用
-  - [x] WebSocket intent 提交链路自动调用验证器（10秒超时降级策略）
-  - [x] 验证失败返回 `ServerError{ValidationFailed}` 允许在剩余 tick 时间内重试
-  - [ ] Observer Agent 审查系统未接入 intent 提交链路
+- [x] **意图验证器** (共享基础设施，不区分模式):
+  - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate` 可用。
+  - [x] LLM 验证器 (`IntentValidator`)，WebSocket intent 提交链路集成（10秒超时降级策略）。
+  - [x] 验证失败返回 `ServerError{ValidationFailed}` 允许在剩余 tick 时间内重试。
+  - [ ] Cognitive 模式 intent 提交链路未接入验证器 (`cognitive_decision_with_retry` 直接返回 intent，绕过验证)。
+  - [ ] Observer Agent 审查系统未接入 intent 提交链路。
 
-- [x] **Observer Agent 审查系统** (API 已实现，独立于 intent 链路):
+- [x] **Observer Agent 审查系统** (共享基础设施，API 已实现):
   - [x] `GET /api/v1/review/pending` - Observer Agent 轮询待审查意图
   - [x] `POST /api/v1/review/{intent_id}` - 提交审查结果 (批准/拒绝)
   - [x] `GET /api/v1/review/{intent_id}/status` - 查询审查状态
   - [x] 超时自动通过机制已实现 (`ReviewStore::process_timeouts`)
-  - [ ] Player Agent intent 提交未经过审查流程（需 OpenClaw 自行编排）
+  - [ ] intent 提交链路未接入审查流程（Cognitive 模式 `cognitive_decision_with_retry` 和 Claw 模式均直接发送，未经过 ReviewStore）
+
+### 3. Dual Soul 架构 (共享基础设施)
+- [x] **ActorSoul (行动之魂)**: 生成意图。
+  - Cognitive 模式: 通过多阶段认知引擎生成。
+  - Claw 模式: 由外部 OpenClaw 通过 WebSocket 提交。
+- [x] **ReflectorSoul (反思之魂)**: 后台轮询 `ReviewStore`，使用 LLM 审查意图。
+- [x] **超时自动通过**: 默认 30 秒超时，防止 tick 过期。
+- [x] ActorSoul 的 intent 经过 ReviewStore 审查流程后再发送至服务端（`lifecycle.rs:296-300` 调用 `submit_for_review`）。
 
 ## 三、 通信协议 (Protocol)
 
@@ -72,20 +81,20 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 
 ## 四、 扩展支持 (OpenClaw 集成)
 - [x] OpenClaw 集成已独立发布为 npm 包 `@8kugames/cyber-jianghu-openclaw`。
-- [x] 实现了 `jianghu_act` 动作执行工具、注册 Hook 以及内存插件，支持外部 AI Agent 零代码接入赛博江湖。
-- [x] WebSocket Tick 消息内置四阶段认知上下文，引导 OpenClaw 进行结构化推理。
+- [x] npm 包提供了 `jianghu_act` 动作执行工具、注册 Hook 以及内存插件，支持外部 AI Agent 零代码接入赛博江湖。
+- [x] Claw 模式 WebSocket Tick 消息内置四阶段认知上下文，引导 OpenClaw 进行结构化推理（Cognitive 模式内部运行相同流程）。
 - [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)。
 
 ---
 
-## 五、 设备与角色系统 (Phase 3 重构)
+## 五、 设备与角色系统 (Phase 3)
 
 实现了设备身份（Device）与角色身份（Agent）的完全分离，支持归隐转生机制。
 
 ### 1. 设备管理
 - [x] **设备注册**: 新增 `/api/v1/agent/connect` 端点，用于设备首次连接时获取身份凭证。
 - [x] **设备持久化**: 设备信息存储在 `devices` 表中，包含 `auth_token` 和 `last_seen`。
-- [x] **设备认证**: WebSocket 连接现在基于 `device_id` 进行验证，而非角色 Token。
+- [x] **设备认证**: WebSocket 连接基于 `device_id` + `auth_token` 双重验证（`WS /ws?device_id={uuid}&token={auth_token}`）。
 
 ### 2. 角色管理
 - [x] **角色注册**: 新增 `/api/v1/agent/register` 端点，设备可为自身创建多个角色。
@@ -93,7 +102,7 @@ Agent SDK 是接入世界的"躯壳"，外部 LLM（如 openclaw）作为"大脑
 - [x] **角色绑定**: 角色通过 `device_id` 关联到设备，支持一个设备管理多个角色。
 
 ### 3. Web 管理面板
-- [x] **角色创建页面**: `GET /` 提供可视化角色创建界面。
+- [x] **入口页面**: `GET /` 提供 Web 面板入口（`index.html`），包含角色创建、角色信息、管理等导航。
 - [x] **角色信息页面**: `GET /character.html` 展示角色属性、背包、经历等信息。
 - [x] **管理页面**: `GET /manage.html` 支持梦境注入和转生操作。
 

@@ -422,6 +422,7 @@ async fn handle_client_message(
 ///
 /// 将 Intent 保存到 IntentManager（临时缓存）
 /// 包含速率限制检查、Agent 存活检查和 tick_id 校验
+#[allow(clippy::too_many_arguments)]
 async fn handle_intent(
     connection_agent_id: uuid::Uuid,
     device_id: uuid::Uuid,

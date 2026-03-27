@@ -10,6 +10,6 @@ mod tests {
     fn test_module_structure() {
         // 验证 processor 模块存在且可访问
         // 完整测试需要数据库连接
-        assert!(true, "Processor module structure is valid");
+        
     }
 }

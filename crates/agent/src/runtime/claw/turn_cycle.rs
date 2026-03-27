@@ -242,7 +242,7 @@ pub trait TurnCycleServices: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::llm::mock::MockLlmClient;
+    
     use crate::models::{AgentSelfState, Location, WorldTime};
 
     struct MockServices {

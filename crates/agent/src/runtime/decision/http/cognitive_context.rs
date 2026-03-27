@@ -316,7 +316,7 @@ impl CognitiveContextBuilder {
             for (trait_name, trait_obj) in p.traits.iter().take(2) {
                 drives.push(Drive {
                     drive: trait_name.clone(),
-                    intensity: (trait_obj.value() as u8 / 2).max(3),
+                    intensity: (trait_obj.value() / 2).max(3),
                     reason: format!("基于{}的性格倾向", p.name),
                 });
             }

@@ -299,13 +299,13 @@ pub fn http_decision(
                     error!("[http] Channel closed, defaulting to idle");
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::idle(id, world_state.tick_id)
+                    Intent::new(id, world_state.tick_id, "idle", None)
                 }
                 Err(_) => {
                     // 超时是正常的（表示没有外部决策）
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::idle(id, world_state.tick_id)
+                    Intent::new(id, world_state.tick_id, "idle", None)
                 }
             }
         })
@@ -544,6 +544,7 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// # Arguments
 /// * `config_path` - 配置文件完整路径（由调用者传入，确保与主程序一致）
+#[allow(clippy::too_many_arguments)]
 pub fn create_http_state(
     agent_id: Arc<RwLock<Uuid>>,
     server_http_url: String,

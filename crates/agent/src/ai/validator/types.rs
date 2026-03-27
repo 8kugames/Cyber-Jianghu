@@ -83,7 +83,7 @@ pub enum RejectionType {
 
 impl RejectionType {
     /// 从字符串解析
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "era_violation" => Self::EraViolation,
             "power_system_violation" => Self::PowerSystemViolation,
@@ -136,14 +136,14 @@ mod tests {
     #[test]
     fn test_rejection_type_from_str() {
         assert_eq!(
-            RejectionType::from_str("era_violation"),
+            RejectionType::parse("era_violation"),
             RejectionType::EraViolation
         );
         assert_eq!(
-            RejectionType::from_str("out_of_character"),
+            RejectionType::parse("out_of_character"),
             RejectionType::OutOfCharacter
         );
-        assert_eq!(RejectionType::from_str("unknown"), RejectionType::Other);
+        assert_eq!(RejectionType::parse("unknown"), RejectionType::Other);
     }
 
     #[test]

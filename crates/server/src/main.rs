@@ -69,6 +69,7 @@ fn start_tick_engine(
 // ============================================================================
 
 #[tokio::main]
+#[allow(clippy::await_holding_lock)]
 async fn main() -> Result<()> {
     // 1. 初始化日志
     let subscriber = FmtSubscriber::builder()
@@ -174,15 +175,15 @@ async fn main() -> Result<()> {
     let tokens_file = "cyber_jianghu_admin.tmp";
     let mut token_paths = vec![PathBuf::from(tokens_file)];
     let logs_token_path = crate::paths::get_logs_dir().join(tokens_file);
-    if logs_token_path != PathBuf::from(tokens_file) {
+    if logs_token_path.as_os_str() != tokens_file {
         token_paths.push(logs_token_path);
     }
 
     for token_path in token_paths {
-        if let Some(parent) = token_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = token_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
 
         let mut file = File::create(&token_path).map_err(|e| {

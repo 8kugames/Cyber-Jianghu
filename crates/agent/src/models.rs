@@ -38,11 +38,16 @@ mod tests {
     #[test]
     fn test_intent_creation() {
         let agent_id = uuid::Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
         assert_eq!(intent.action_type.as_str(), "idle");
         assert_eq!(intent.tick_id, 1);
 
-        let intent = Intent::speak(agent_id, 2, "大家好".to_string());
+        let intent = Intent::new(
+            agent_id,
+            2,
+            "speak",
+            Some(serde_json::json!({"content": "大家好"})),
+        );
         assert_eq!(intent.action_type.as_str(), "speak");
         assert!(intent.action_data.is_some());
     }
@@ -50,7 +55,8 @@ mod tests {
     #[test]
     fn test_intent_with_thought() {
         let agent_id = uuid::Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1).with_thought("我需要休息一下".to_string());
+        let intent =
+            Intent::new(agent_id, 1, "idle", None).with_thought("我需要休息一下".to_string());
         assert_eq!(intent.thought_log, Some("我需要休息一下".to_string()));
     }
 }

@@ -68,16 +68,20 @@ impl DeathNotification {
 /// - 基于当前位置的 environmental_damage 配置
 /// - 如果 > 0，则扣除相应 HP
 ///
-/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
-pub fn apply_decay_and_environmental_damage(
-    tick_id: i64,
-    mut agent_states: Vec<AgentState>,
-) -> (
+/// 衰减处理结果
+#[allow(clippy::type_complexity)]
+pub type DecayResult = (
     Vec<AgentState>,
     Vec<Uuid>,
     Vec<(Uuid, crate::models::WorldEvent)>,
     Vec<DeathNotification>,
-) {
+);
+
+/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
+pub fn apply_decay_and_environmental_damage(
+    tick_id: i64,
+    mut agent_states: Vec<AgentState>,
+) -> DecayResult {
     let mut dead_agents = Vec::new();
     let mut events = Vec::new();
     let mut death_notifications = Vec::new();
