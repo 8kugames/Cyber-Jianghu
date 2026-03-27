@@ -17,7 +17,8 @@ impl BasicActionExecutor {
     pub(super) fn execute_idle(intent: &Intent) -> ActionExecutionResult {
         ActionExecutionResult::success(
             format!("Agent {} 休息了一会", intent.agent_id),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         )
     }
 
@@ -34,7 +35,8 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少移动数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -51,7 +53,8 @@ impl BasicActionExecutor {
         {
             return ActionExecutionResult::failure(
                 format!("目标位置不存在: {}", data.target_location),
-                intent.action_type.to_string(), Some(intent.intent_id),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
             );
         }
 
@@ -67,7 +70,8 @@ impl BasicActionExecutor {
                     "无法从 {} 移动到 {}（位置不相邻）",
                     current_location, data.target_location
                 ),
-                intent.action_type.to_string(), Some(intent.intent_id),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
             );
         }
 
@@ -76,7 +80,8 @@ impl BasicActionExecutor {
                 "Agent {} 从 {} 移动到 {}",
                 intent.agent_id, current_location, data.target_location
             ),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::LocationChanged {
@@ -98,14 +103,16 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少对话数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
 
         let mut result = ActionExecutionResult::success(
             format!("{} 说: {}", intent.agent_id, data.content),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::MessageSpoken {
@@ -129,14 +136,16 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少拾取数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
 
         let mut result = ActionExecutionResult::success(
             format!("尝试从场景中拾取 {} 个 {}", data.quantity, data.item_id),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::ItemPickedUp {
@@ -159,14 +168,16 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少丢弃数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
 
         let mut result = ActionExecutionResult::success(
             format!("丢弃了 {} 个 {} 到地面", data.quantity, data.item_id),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::ItemDropped {
@@ -192,7 +203,8 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少采集数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -210,7 +222,8 @@ impl BasicActionExecutor {
         if !can_gather {
             return ActionExecutionResult::failure(
                 format!("当前位置无法采集 {}", data.target_id),
-                intent.action_type.to_string(), Some(intent.intent_id),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
             );
         }
 
@@ -230,7 +243,8 @@ impl BasicActionExecutor {
 
         let mut result = ActionExecutionResult::success(
             format!("从场景中采集了 {} 个 {}", quantity, data.target_id),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::ItemGathered {
@@ -252,7 +266,8 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少制造数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -263,14 +278,16 @@ impl BasicActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     format!("配方不存在: {}", data.recipe_id),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
 
         let mut result = ActionExecutionResult::success(
             format!("制造了 {}", recipe.name),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::ItemCrafted {

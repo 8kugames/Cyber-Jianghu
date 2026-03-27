@@ -95,8 +95,9 @@ impl WebSocketClient {
 
     /// 连接到服务器
     pub async fn connect(&self) -> Result<()> {
-        // 使用带 token 的 URL 进行连接
-        let (device_id, auth_token) = self.identity.as_ref()
+        let (device_id, auth_token) = self
+            .identity
+            .as_ref()
             .context("Identity not set. Call set_identity() first.")?;
 
         let url_with_token = self.config.ws_url_with_token(*device_id, auth_token);
@@ -111,6 +112,9 @@ impl WebSocketClient {
         let mut state = self.state.write().await;
         state.ws = Some(ws);
         state.connected = true;
+        state.agent_id = None;
+        state.game_rules = None;
+        state.world_building_rules = None;
 
         info!("Connected to server");
         Ok(())
@@ -350,7 +354,13 @@ impl WebSocketClient {
                             // 继续等待
                         }
                         Ok(msg @ ServerMessage::AgentDied { .. }) => {
-                            if let ServerMessage::AgentDied { agent_id, ref cause, ref description, .. } = msg {
+                            if let ServerMessage::AgentDied {
+                                agent_id,
+                                ref cause,
+                                ref description,
+                                ..
+                            } = msg
+                            {
                                 warn!("Agent {} died: {} - {}", agent_id, cause, description);
                             }
                             // 透传给 OpenClaw（触发重生流程）
@@ -526,7 +536,10 @@ impl AgentClient {
     }
 
     /// 设置对话消息回调
-    pub async fn set_dialogue_callback(&self, callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>) {
+    pub async fn set_dialogue_callback(
+        &self,
+        callback: Arc<dyn Fn(DialogueMessage) + Send + Sync>,
+    ) {
         let client = self.client.read().await;
         client.set_dialogue_callback(callback);
     }

@@ -479,11 +479,12 @@ pub async fn register_agent_transactional(
         .fetch_one(&mut *tx)
         .await
         .context("验证初始物品插入失败")?;
-    
+
     if check.0 != initial_items.len() as i64 {
         error!(
             "初始物品数量不匹配！预期: {}, 实际: {}",
-            initial_items.len(), check.0
+            initial_items.len(),
+            check.0
         );
         // 注意：不强制失败，因为可能是有意为之（如配置为空）
     } else {
@@ -593,6 +594,7 @@ pub async fn rebirth_agent(
 
 /// 历史角色信息（用于归隐角色列表）
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[allow(dead_code)]
 pub struct RetiredAgentInfo {
     /// Agent ID
     pub agent_id: Uuid,
@@ -609,6 +611,7 @@ pub struct RetiredAgentInfo {
 /// 查询设备的归隐角色列表
 ///
 /// 用于 Web 面板查看历史角色
+#[allow(dead_code)]
 pub async fn list_retired_agents(pool: &PgPool, device_id: Uuid) -> Result<Vec<RetiredAgentInfo>> {
     debug!("查询归隐角色列表: device_id={}", device_id);
 

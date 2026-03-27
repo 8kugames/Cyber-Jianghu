@@ -68,16 +68,20 @@ impl DeathNotification {
 /// - 基于当前位置的 environmental_damage 配置
 /// - 如果 > 0，则扣除相应 HP
 ///
-/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
-pub fn apply_decay_and_environmental_damage(
-    tick_id: i64,
-    mut agent_states: Vec<AgentState>,
-) -> (
+/// 衰减处理结果
+#[allow(clippy::type_complexity)]
+pub type DecayResult = (
     Vec<AgentState>,
     Vec<Uuid>,
     Vec<(Uuid, crate::models::WorldEvent)>,
     Vec<DeathNotification>,
-) {
+);
+
+/// 返回值：(更新后的Agent状态, 本Tick死亡的Agent ID列表, 事件列表, 死亡通知列表)
+pub fn apply_decay_and_environmental_damage(
+    tick_id: i64,
+    mut agent_states: Vec<AgentState>,
+) -> DecayResult {
     let mut dead_agents = Vec::new();
     let mut events = Vec::new();
     let mut death_notifications = Vec::new();
@@ -113,10 +117,7 @@ pub fn apply_decay_and_environmental_damage(
                     }
                 };
 
-                warn!(
-                    "Agent {} 已死亡（{}），将清空背包",
-                    agent_id, cause
-                );
+                warn!("Agent {} 已死亡（{}），将清空背包", agent_id, cause);
 
                 // 创建死亡事件
                 let death_event = crate::models::WorldEvent {
@@ -131,13 +132,8 @@ pub fn apply_decay_and_environmental_damage(
                 events.push((agent_id, death_event));
 
                 // 创建死亡通知
-                let notification = DeathNotification::new(
-                    agent_id,
-                    cause,
-                    description,
-                    location,
-                    tick_id,
-                );
+                let notification =
+                    DeathNotification::new(agent_id, cause, description, location, tick_id);
                 death_notifications.push(notification);
             }
             continue; // 已死亡，跳过环境伤害检查
@@ -189,10 +185,7 @@ pub fn apply_decay_and_environmental_damage(
                         }
                     };
 
-                    warn!(
-                        "Agent {} 已死亡（{}），将清空背包",
-                        agent_id, cause
-                    );
+                    warn!("Agent {} 已死亡（{}），将清空背包", agent_id, cause);
 
                     // 创建死亡事件
                     let death_event = crate::models::WorldEvent {
@@ -400,7 +393,10 @@ mod tests {
         }
 
         // 验证死亡原因
-        let causes: Vec<&str> = death_notifications.iter().map(|n| n.cause.as_str()).collect();
+        let causes: Vec<&str> = death_notifications
+            .iter()
+            .map(|n| n.cause.as_str())
+            .collect();
         assert!(causes.contains(&"hunger"), "应该包含饥饿死亡");
         assert!(causes.contains(&"thirst"), "应该包含口渴死亡");
     }

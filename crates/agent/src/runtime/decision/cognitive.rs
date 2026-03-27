@@ -46,7 +46,7 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-                    Intent::idle(agent_id, world_state.tick_id)
+                    Intent::new(agent_id, world_state.tick_id, "idle", None)
                         .with_thought(format!("认知失败: {}", e))
                 }
             }
@@ -54,21 +54,24 @@ pub fn cognitive_decision(
     }
 }
 
-/// 创建带重试的认知决策函数
 pub fn cognitive_decision_with_retry(
     agent_id: Uuid,
     engine: Arc<MultiStageCognitiveEngine>,
     max_retries: usize,
-) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
-    move |world_state: &WorldState| {
+) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
+    move |world_state: &WorldState, feedback: Option<&str>| {
         let engine = engine.clone();
         let world_state = world_state.clone();
+        let feedback = feedback.map(|s| s.to_string());
 
         Box::pin(async move {
             let mut last_error = String::new();
 
             for attempt in 0..=max_retries {
-                match engine.think(&world_state).await {
+                match engine
+                    .think_with_feedback(&world_state, feedback.as_deref())
+                    .await
+                {
                     Ok(chain) => return chain.final_intent,
                     Err(e) => {
                         last_error = e.to_string();
@@ -77,8 +80,7 @@ pub fn cognitive_decision_with_retry(
                 }
             }
 
-            // 所有重试都失败
-            Intent::idle(agent_id, world_state.tick_id)
+            Intent::new(agent_id, world_state.tick_id, "idle", None)
                 .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error))
         })
     }

@@ -103,9 +103,10 @@ impl GlobalMemoryRegistry {
                         .strip_prefix("agent_")
                         .and_then(|s| s.strip_suffix(".db"))
                         && let Ok(agent_id) = Uuid::parse_str(agent_id_str)
-                            && let Ok(lifetime) = self.inspect_agent_db(&path, agent_id) {
-                                self.agents.push(lifetime);
-                            }
+                        && let Ok(lifetime) = self.inspect_agent_db(&path, agent_id)
+                    {
+                        self.agents.push(lifetime);
+                    }
                 }
             }
         }
@@ -289,9 +290,10 @@ impl GlobalMemoryRegistry {
         for agent in &self.agents {
             // 先检查这个 agent 是否有在范围内的记忆
             if let (Some(earliest), Some(latest)) = (agent.earliest_tick, agent.latest_tick)
-                && (latest < tick_start || earliest > tick_end) {
-                    continue; // 跳过没有交集的 agent
-                }
+                && (latest < tick_start || earliest > tick_end)
+            {
+                continue; // 跳过没有交集的 agent
+            }
 
             if let Ok(memories) =
                 self.read_memories_in_range(&agent.db_path, tick_start, tick_end, limit)

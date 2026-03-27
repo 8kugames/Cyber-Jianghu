@@ -68,7 +68,6 @@ impl RuleEngine {
     ///
     /// 预加载默认的验证规则
     pub fn with_default_config() -> Self {
-        
         // TODO: 这里可以加载默认规则
         Self::new()
     }

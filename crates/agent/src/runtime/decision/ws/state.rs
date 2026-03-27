@@ -8,11 +8,11 @@
 // - Tick 时序管理
 // ============================================================================
 
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{debug, warn};
 
 use crate::models::{Intent, WorldState};
@@ -34,7 +34,7 @@ pub const TICK_TIMEOUT_RATIO: f64 = 0.9;
 // 重导出验证模块
 // ============================================================================
 
-pub use super::validation::{spawn_validation_task, ValidationTaskParams, WsValidationRequest};
+pub use super::validation::{ValidationTaskParams, WsValidationRequest, spawn_validation_task};
 
 // ============================================================================
 // WebSocket 决策状态
@@ -136,7 +136,8 @@ impl WsDecisionState {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            self.deadline_ms.store(now_ms + duration_ms, Ordering::Relaxed);
+            self.deadline_ms
+                .store(now_ms + duration_ms, Ordering::Relaxed);
         }
     }
 
@@ -156,8 +157,7 @@ impl WsDecisionState {
         // 将 UUID 转换为 i64（取前 8 字节）
         let bytes = agent_id.as_bytes();
         let i = i64::from_be_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ]);
         self.agent_id.store(i, Ordering::Relaxed);
     }
@@ -167,9 +167,8 @@ impl WsDecisionState {
         let i = self.agent_id.load(Ordering::Relaxed);
         let bytes = i.to_be_bytes();
         Uuid::from_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            0, 0, 0, 0, 0, 0, 0, 0, // 剩余字节填 0
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], 0, 0,
+            0, 0, 0, 0, 0, 0, // 剩余字节填 0
         ])
     }
 
@@ -285,6 +284,24 @@ pub struct WsSharedState {
     /// Intent 发送通道
     pub intent_tx: mpsc::Sender<WsIntent>,
 
+    /// 上行消息发送通道（用于 OpenClawBridge 发送消息到 OpenClaw）
+    /// Agent -> OpenClaw 方向
+    pub upstream_tx: mpsc::Sender<super::protocol::UpstreamMessage>,
+
+    /// LLM 响应通道（OpenClaw -> Agent）
+    /// 当 OpenClaw 返回 LLM 响应时，通过此通道通知 OpenClawBridge
+    pub llm_response_tx: mpsc::Sender<(String, Result<String, String>)>,
+
+    /// LLM 响应接收通道（由 OpenClawBridge 使用）
+    #[allow(clippy::type_complexity)]
+    pub llm_response_rx:
+        Arc<std::sync::Mutex<Option<mpsc::Receiver<(String, Result<String, String>)>>>>,
+
+    /// 上行消息接收通道（从 WsDecisionState 转移所有权）
+    /// 仅在第一个 WebSocket 连接时使用（单连接限制）
+    pub upstream_rx:
+        Arc<std::sync::Mutex<Option<mpsc::Receiver<super::protocol::UpstreamMessage>>>>,
+
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
@@ -301,7 +318,8 @@ pub struct WsSharedState {
     pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
 
     /// 认知上下文构建器（可选，用于生成四阶段认知上下文）
-    pub cognitive_context_builder: Option<Arc<crate::runtime::decision::http::cognitive_context::CognitiveContextBuilder>>,
+    pub cognitive_context_builder:
+        Option<Arc<crate::runtime::decision::http::cognitive_context::CognitiveContextBuilder>>,
 
     /// OpenClaw 连接状态（单连接限制）
     pub openclaw_connected: Arc<AtomicBool>,
@@ -311,7 +329,6 @@ pub struct WsSharedState {
     pub allow_external_connections: bool,
 
     // === 意图验证相关字段 ===
-
     /// 意图验证器
     ///
     /// 用于验证 OpenClaw 提交的意图是否符合人设和世界观规则。
@@ -363,7 +380,8 @@ impl WsSharedState {
         // 新 tick 开始，重置 submitted_tick 允许新提交
         self.submitted_tick.store(-1, Ordering::Release);
 
-        self.current_tick.store(world_state.tick_id, Ordering::Relaxed);
+        self.current_tick
+            .store(world_state.tick_id, Ordering::Relaxed);
 
         let now = Instant::now();
         if deadline > now {
@@ -372,7 +390,8 @@ impl WsSharedState {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64;
-            self.deadline_ms.store(now_ms + duration_ms, Ordering::Relaxed);
+            self.deadline_ms
+                .store(now_ms + duration_ms, Ordering::Relaxed);
         }
 
         let state = Arc::new(world_state.clone());
@@ -392,6 +411,9 @@ impl From<&WsDecisionState> for WsSharedState {
             .map(|v| v == "1" || v == "true" || v == "yes")
             .unwrap_or(false);
 
+        let (upstream_tx, upstream_rx) = mpsc::channel(16);
+        let (llm_response_tx, llm_response_rx) = mpsc::channel(16);
+
         Self {
             state_tx: state.state_tx.clone(),
             tick_closed_tx: state.tick_closed_tx.clone(),
@@ -410,6 +432,10 @@ impl From<&WsDecisionState> for WsSharedState {
             persona: Arc::new(RwLock::new(None)),
             submitted_tick: Arc::new(AtomicI64::new(-1)), // -1 表示未提交
             validation_tx: state.validation_tx.clone(),
+            upstream_tx,
+            llm_response_tx,
+            llm_response_rx: Arc::new(std::sync::Mutex::new(Some(llm_response_rx))),
+            upstream_rx: Arc::new(std::sync::Mutex::new(Some(upstream_rx))),
         }
     }
 }
@@ -437,20 +463,21 @@ impl WsSharedState {
         use crate::ai::cognitive::narrative::NarrativeEngine;
 
         // 获取叙事引擎（配置的或默认的）
-        let engine: &NarrativeEngine = self
-            .narrative_engine
-            .as_deref()
-            .unwrap_or_else(|| {
-                // 使用静态默认引擎
-                static DEFAULT_ENGINE: std::sync::OnceLock<NarrativeEngine> =
-                    std::sync::OnceLock::new();
-                DEFAULT_ENGINE.get_or_init(NarrativeEngine::with_builtin_config)
-            });
+        let engine: &NarrativeEngine = self.narrative_engine.as_deref().unwrap_or_else(|| {
+            // 使用静态默认引擎
+            static DEFAULT_ENGINE: std::sync::OnceLock<NarrativeEngine> =
+                std::sync::OnceLock::new();
+            DEFAULT_ENGINE.get_or_init(NarrativeEngine::with_builtin_config)
+        });
 
         // 生成简化上下文（不包含关系信息）
-        Some(super::super::http::generate_context_markdown_no_relationship(
-            world_state, engine, None, // WebSocket 状态不包含托梦
-        ))
+        Some(
+            super::super::http::generate_context_markdown_no_relationship(
+                world_state,
+                engine,
+                None, // WebSocket 状态不包含托梦
+            ),
+        )
     }
 
     /// 生成四阶段认知上下文
@@ -490,12 +517,7 @@ impl WsSharedState {
 
 /// 将 WsIntent 转换为 Intent
 pub fn ws_intent_to_intent(intent: WsIntent, agent_id: Uuid, tick_id: i64) -> Intent {
-    let mut intent_obj = Intent::new(
-        agent_id,
-        tick_id,
-        intent.action_type,
-        intent.action_data,
-    );
+    let mut intent_obj = Intent::new(agent_id, tick_id, intent.action_type, intent.action_data);
 
     if let Some(thought_log) = intent.thought_log {
         intent_obj = intent_obj.with_thought(thought_log);

@@ -16,17 +16,22 @@
 
 use axum::{
     extract::{Path as AxumPath, State},
-    http::StatusCode,
+    http::{Response, StatusCode},
     response::{IntoResponse, Json},
 };
+use bytes::Bytes;
+use http_body::Frame;
+use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Duration;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::ai::cognitive::narrative::NarrativeEngine;
 use crate::ai::lifespan::LifespanStatus;
 use crate::ai::validator::{PersonaInfo, ValidationRequest, ValidationResult};
-use cyber_jianghu_protocol::{ActionType, Intent};
+use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
 
 use super::cognitive_context::{CognitiveContext, CognitiveContextBuilder};
 use super::context::{
@@ -240,6 +245,30 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 "narrative": "..."
             })),
         },
+        // === 角色生成端点 ===
+        ApiEndpoint {
+            path: "/api/v1/character/generate".to_string(),
+            method: "POST".to_string(),
+            description: "LLM 一键生成角色（返回完整的角色配置，供前端填充表单）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "name": "柳蕴娘",
+                "age": 24,
+                "gender": "女",
+                "appearance": "眉如远山，眼若秋水，身着素色罗裙",
+                "identity": "江南药铺掌柜之女，自幼随父研习医术",
+                "personality": ["沉稳", "善良"],
+                "values": ["知识", "和平"],
+                "language_style": {
+                    "tone": "温和",
+                    "speech_patterns": ["说话简洁"]
+                },
+                "goals": {
+                    "short_term": "收集罕见草药配方",
+                    "long_term": "编纂一本江湖医术典籍"
+                }
+            })),
+        },
         // === 审查端点（Player Agent 提供，Observer Agent 调用）===
         ApiEndpoint {
             path: "/api/v1/review/pending".to_string(),
@@ -352,7 +381,11 @@ pub(super) async fn health_handler(State(state): State<HttpApiState>) -> impl In
 
     let response = HealthResponse {
         status: "ok".to_string(),
-        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
+        agent_id: if agent_id.is_nil() {
+            None
+        } else {
+            Some(agent_id.to_string())
+        },
         tick_id: current.as_ref().map(|s| s.tick_id),
     };
     Json(response)
@@ -395,7 +428,11 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
             let context = if let Some(store) = &state.relationship_store {
                 generate_context_markdown(world_state, store, engine, dream_thought.as_deref())
             } else {
-                generate_context_markdown_no_relationship(world_state, engine, dream_thought.as_deref())
+                generate_context_markdown_no_relationship(
+                    world_state,
+                    engine,
+                    dream_thought.as_deref(),
+                )
             };
             Json(ContextResponse {
                 context,
@@ -502,12 +539,14 @@ pub(super) async fn submit_intent_handler(
 
     // 记录到 IntentHistoryStore（用于经历日志查询）
     if let Some(history) = &state.intent_history {
-        history.record_intent(
-            tick_id,
-            intent.intent_id,
-            action_type_str,
-            req.thought_log.clone(),
-        ).await;
+        history
+            .record_intent(
+                tick_id,
+                intent.intent_id,
+                action_type_str,
+                req.thought_log.clone(),
+            )
+            .await;
     }
 
     let intent_id = intent.intent_id;
@@ -557,7 +596,9 @@ pub(super) async fn get_relationships_handler(
 
     let service = RelationshipService::new(store);
     match service.get_all() {
-        Ok(relationships) => Json(relationships).into_response(),
+        Ok(relationships) => {
+            Json(serde_json::json!({ "relationships": relationships })).into_response()
+        }
         Err(e) => {
             error!("[http] Failed to get relationships: {}", e);
             (
@@ -933,7 +974,11 @@ pub(super) async fn get_tick_status_handler(
 
     Json(dto::TickStatusResponse {
         tick_id,
-        agent_id: if agent_id.is_nil() { None } else { Some(agent_id.to_string()) },
+        agent_id: if agent_id.is_nil() {
+            None
+        } else {
+            Some(agent_id.to_string())
+        },
         has_new_state: has_state,
         seconds_until_next_tick: None, // 服务端未提供此信息
         last_updated_at: chrono::Utc::now().to_rfc3339(),
@@ -1014,6 +1059,144 @@ pub struct CharacterRegisterResponse {
     /// 警告信息（如配置保存失败）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+}
+
+/// LLM 生成角色处理器
+///
+/// POST /api/v1/character/generate - 使用 LLM 自动生成角色
+///
+/// 调用配置的 LLM 生成一个符合世界观的武侠角色，返回完整角色信息供用户确认
+pub(super) async fn generate_character_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClientExt, LlmProvider};
+
+    // 1. 读取配置文件
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "config_read_error".to_string(),
+                    message: format!("读取配置文件失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. 检查 LLM 是否已配置
+    if config.llm.model.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error_code: "llm_not_configured".to_string(),
+                message: "请先配置 LLM".to_string(),
+            }),
+        )
+            .into_response();
+    }
+
+    // 3. 创建 LLM 客户端
+    let provider = match LlmProvider::parse(&config.llm.provider) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "invalid_provider".to_string(),
+                    message: format!("不支持的 LLM Provider: {}", config.llm.provider),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let mut client_config = DirectLlmClientConfig::new(provider, config.llm.api_key.as_deref());
+
+    if let Some(ref model) = config.llm.model {
+        client_config = client_config.with_model(model);
+    }
+    if let Some(ref base_url) = config.llm.base_url {
+        client_config = client_config.with_base_url(base_url);
+    }
+    client_config = client_config.with_temperature(0.9);
+
+    let llm_client = match DirectLlmClient::new(client_config) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "llm_client_error".to_string(),
+                    message: format!("创建 LLM 客户端失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 4. 构建角色生成 prompt
+    let prompt = r#"你是一个武侠角色生成器。请生成一个符合以下世界观的角色：
+
+## 世界观
+时代：北宋前期（约10世纪中国），冷兵器时代。
+允许的概念：内力、轻功、武功、点穴、暗器、毒术、医术、易容、阵法。
+禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
+
+## 要求
+请生成一个随机但符合世界观的武侠角色，以 JSON 格式返回。
+
+## 字段要求
+- name: 姓名（2-6个汉字）
+- age: 年龄（16-60的整数）
+- gender: 性别（"男"或"女"）
+- appearance: 外貌描述（20-50字）
+- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字）
+- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾）
+- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平）
+- language_style: 对象，包含：
+  - tone: 语调（从以下选项中选1个：豪迈、温和、冷漠、狡黠、文雅）
+  - speech_patterns: 说话特点数组（从以下选项中选1-3个：喜欢引用古诗词、说话简洁、喜欢用成语、说话带方言、喜欢开玩笑、说话谨慎）
+- goals: 对象，包含：
+  - short_term: 短期目标（不超过100字）
+  - long_term: 长远目标（不超过100字）
+
+## 输出格式
+请严格输出 JSON，不要包含其他文字。"#;
+
+    // 5. 调用 LLM 生成角色
+    #[derive(Debug, Serialize, Deserialize)]
+    struct GeneratedCharacter {
+        name: String,
+        age: u8,
+        gender: String,
+        appearance: Option<String>,
+        identity: Option<String>,
+        personality: Vec<String>,
+        values: Vec<String>,
+        language_style: LanguageStyleRequest,
+        goals: GoalsRequest,
+    }
+
+    match llm_client.complete_json::<GeneratedCharacter>(prompt).await {
+        Ok(character) => {
+            info!("[character] LLM 生成角色成功: {}", character.name);
+            (StatusCode::OK, Json(character)).into_response()
+        }
+        Err(e) => {
+            error!("[character] LLM 生成角色失败: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ErrorResponse {
+                    error_code: "generation_failed".to_string(),
+                    message: format!("角色生成失败，请重试: {}", e),
+                }),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// 角色注册处理器
@@ -1132,23 +1315,23 @@ pub(super) async fn register_character_handler(
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
             // 7. 保存 narrative_config 到本地配置目录
-            if let Some(ref narrative_config) = result.narrative_config {
-                if let Some(home) = dirs::home_dir() {
-                    let config_dir = home.join(".cyber-jianghu").join("config");
-                    if let Err(e) = std::fs::create_dir_all(&config_dir) {
-                        error!("创建配置目录失败: {}", e);
-                    } else {
-                        let config_path = config_dir.join("narrative_config.json");
-                        match serde_json::to_string_pretty(narrative_config) {
-                            Ok(json) => {
-                                if let Err(e) = std::fs::write(&config_path, json) {
-                                    error!("保存 narrative_config 失败: {}", e);
-                                } else {
-                                    info!("已保存 narrative_config 到 {:?}", config_path);
-                                }
+            if let Some(ref narrative_config) = result.narrative_config
+                && let Some(home) = dirs::home_dir()
+            {
+                let config_dir = home.join(".cyber-jianghu").join("config");
+                if let Err(e) = std::fs::create_dir_all(&config_dir) {
+                    error!("创建配置目录失败: {}", e);
+                } else {
+                    let config_path = config_dir.join("narrative_config.json");
+                    match serde_json::to_string_pretty(narrative_config) {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(&config_path, json) {
+                                error!("保存 narrative_config 失败: {}", e);
+                            } else {
+                                info!("已保存 narrative_config 到 {:?}", config_path);
                             }
-                            Err(e) => error!("序列化 narrative_config 失败: {}", e),
                         }
+                        Err(e) => error!("序列化 narrative_config 失败: {}", e),
                     }
                 }
             }
@@ -1204,7 +1387,10 @@ pub(super) async fn register_character_handler(
             if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
                 let mut id = state.agent_id.write().await;
                 *id = agent_uuid;
-                info!("[character] Updated runtime agent_id to {} ({})", agent_uuid, payload.name);
+                info!(
+                    "[character] Updated runtime agent_id to {} ({})",
+                    agent_uuid, payload.name
+                );
             }
 
             (
@@ -1287,9 +1473,7 @@ pub struct CharacterInfoResponse {
 /// 数据来源：
 /// - 配置文件：name, age, gender, appearance, identity, personality, values
 /// - WorldState：attributes, inventory, location, tick_id, world_time
-pub(super) async fn get_character_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     // 1. 从配置文件读取角色配置
     let config = match crate::config::Config::from_file(&state.config_path) {
         Ok(cfg) => cfg,
@@ -1327,27 +1511,29 @@ pub(super) async fn get_character_handler(
     // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
-    let (
-        agent_id,
-        raw_attributes,
-        inventory,
-        location,
-        tick_id,
-        world_time,
-    ) = match current.as_ref() {
-        Some(ws) => {
-            let agent_id = ws.agent_id.map(|id| id.to_string());
-            let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
-            let inv = serde_json::to_value(&ws.self_state.inventory).ok();
-            let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
-            let time = serde_json::to_value(&ws.world_time).ok();
-            (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
-        }
-        None => (character.agent_id.map(|id| id.to_string()), None, None, None, None, None),
-    };
+    let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
+        match current.as_ref() {
+            Some(ws) => {
+                let agent_id = ws.agent_id.map(|id| id.to_string());
+                let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
+                let inv = serde_json::to_value(&ws.self_state.inventory).ok();
+                let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+                let time = serde_json::to_value(&ws.world_time).ok();
+                (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
+            }
+            None => (
+                character.agent_id.map(|id| id.to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        };
 
     // 5. 计算角色状态（在 move attributes 之前）
-    let status = raw_attributes.as_ref()
+    let status = raw_attributes
+        .as_ref()
         .and_then(|a| a.get("hp"))
         .and_then(|hp| hp.as_i64())
         .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
@@ -1367,7 +1553,9 @@ pub(super) async fn get_character_handler(
         values: character.values.clone(),
         registered_at: character.registered_at.map(|t| t.to_rfc3339()),
         attributes,
-        birth_attributes: character.birth_attributes.as_ref()
+        birth_attributes: character
+            .birth_attributes
+            .as_ref()
             .and_then(|a| serde_json::to_value(a).ok()),
         inventory,
         location,
@@ -1380,7 +1568,9 @@ pub(super) async fn get_character_handler(
 }
 
 /// 加载叙事配置
-fn load_narrative_config(config_path: &std::path::Path) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
+fn load_narrative_config(
+    config_path: &std::path::Path,
+) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
     let config_dir = config_path.parent()?;
     let narrative_path = config_dir.join("narrative_config.json");
 
@@ -1396,6 +1586,25 @@ fn load_narrative_config(config_path: &std::path::Path) -> Option<crate::ai::cog
         }
     }
     None
+}
+
+/// 属性元数据响应
+#[derive(Debug, Serialize)]
+pub struct AttributeMetaResponse {
+    /// 属性分类
+    pub categories: HashMap<String, Vec<String>>,
+}
+
+/// 获取属性元数据（分类、中文名等，从 narrative_config 解析）
+pub(super) async fn get_attribute_meta_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let narrative_config = load_narrative_config(&state.config_path);
+    let categories = narrative_config
+        .map(|cfg| cfg.attribute_categories)
+        .unwrap_or_default();
+
+    Json(AttributeMetaResponse { categories }).into_response()
 }
 
 /// 丰富属性数据，添加叙事描述
@@ -1423,7 +1632,9 @@ fn enrich_attributes_with_descriptions(
                 .map(|attr_cfg| {
                     let name = attr_cfg.display_name.clone();
                     let current_i32 = current as i32;
-                    let desc = attr_cfg.thresholds.iter()
+                    let desc = attr_cfg
+                        .thresholds
+                        .iter()
                         .rev()
                         .find(|t| current_i32 >= t.min && current_i32 <= t.max)
                         .map(|t| t.description.clone())
@@ -1496,10 +1707,7 @@ pub(super) async fn get_experiences_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let page: u32 = params
-        .get("page")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
+    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
     let limit: u32 = params
         .get("limit")
         .and_then(|s| s.parse().ok())
@@ -1700,14 +1908,23 @@ pub(super) async fn rebirth_character_handler(
         *current = None;
     }
 
-    // 7. 清理本地配置文件（角色信息）
+    // 7. 更新本地配置：标记角色归隐，保留服务器/LLM/身份配置
     {
         let agent_config = &state.config_path;
         if agent_config.exists() {
-            if let Err(e) = std::fs::remove_file(agent_config) {
-                error!("删除配置文件失败: {}", e);
-            } else {
-                info!("已删除角色配置文件: {:?}", agent_config);
+            match crate::config::Config::from_file(agent_config) {
+                Ok(mut config) => {
+                    config.retire_current_character();
+                    config.agent = None;
+                    if let Err(e) = config.save_to_file(agent_config) {
+                        error!("保存配置文件失败: {}", e);
+                    } else {
+                        info!("角色已归隐，配置已更新: {:?}", agent_config);
+                    }
+                }
+                Err(e) => {
+                    error!("读取配置文件失败: {}", e);
+                }
             }
         }
     }
@@ -1746,6 +1963,13 @@ pub struct DreamResponse {
     pub can_use_today: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DreamRecord {
+    pub injected_at: String,
+    pub thought: String,
+    pub duration: u32,
+}
+
 /// 托梦状态（存储在 HttpApiState 中）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DreamState {
@@ -1753,8 +1977,80 @@ pub struct DreamState {
     pub thought: Option<String>,
     /// 剩余回合数
     pub remaining_ticks: u32,
+    pub records: Vec<DreamRecord>,
     /// 上次使用的游戏日期（用于每日限制）
     pub last_used_game_date: Option<GameDate>,
+    #[serde(skip)]
+    pub loaded: bool,
+    #[serde(skip)]
+    pub current_agent_id: Option<uuid::Uuid>,
+}
+
+impl DreamState {
+    pub fn load_from_file(config_path: &std::path::Path, agent_id: &uuid::Uuid) -> Option<Self> {
+        if agent_id.is_nil() {
+            return None;
+        }
+        if let Some(dir) = config_path.parent() {
+            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
+            if file_path.exists() {
+                match std::fs::read_to_string(&file_path) {
+                    Ok(content) => match serde_json::from_str::<Self>(&content) {
+                        Ok(mut state) => {
+                            state.loaded = true;
+                            state.current_agent_id = Some(*agent_id);
+                            return Some(state);
+                        }
+                        Err(e) => {
+                            tracing::error!("反序列化托梦记录失败 {:?}: {}", file_path, e);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("读取托梦记录文件失败 {:?}: {}", file_path, e);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub fn save_to_file(&self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+        if agent_id.is_nil() {
+            return;
+        }
+        if let Some(dir) = config_path.parent() {
+            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
+            match serde_json::to_string_pretty(self) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(&file_path, json) {
+                        tracing::error!("写入托梦记录文件失败 {:?}: {}", file_path, e);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("序列化托梦记录失败: {}", e);
+                }
+            }
+        }
+    }
+
+    pub fn ensure_loaded(&mut self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+        if agent_id.is_nil() {
+            return;
+        }
+        if self.loaded && self.current_agent_id == Some(*agent_id) {
+            return;
+        }
+        if let Some(loaded) = Self::load_from_file(config_path, agent_id) {
+            *self = loaded;
+        } else {
+            self.thought = None;
+            self.remaining_ticks = 0;
+            self.records.clear();
+            self.last_used_game_date = None;
+            self.loaded = true;
+            self.current_agent_id = Some(*agent_id);
+        }
+    }
 }
 
 /// 游戏日期（用于每日限制）
@@ -1825,20 +2121,23 @@ pub(super) async fn dream_character_handler(
 
     // 检查每日限制
     {
-        let dream = dream_store.read().await;
-        if let Some(ref last_date) = dream.last_used_game_date {
-            if last_date == &current_date {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(DreamResponse {
-                        success: false,
-                        message: "今日已使用过托梦，请明天再试".to_string(),
-                        remaining_ticks: dream.remaining_ticks,
-                        can_use_today: false,
-                    }),
-                )
-                    .into_response();
-            }
+        let mut dream = dream_store.write().await;
+        let agent_id = *state.agent_id.read().await;
+        dream.ensure_loaded(&state.config_path, &agent_id);
+
+        if let Some(ref last_date) = dream.last_used_game_date
+            && last_date == &current_date
+        {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(DreamResponse {
+                    success: false,
+                    message: "今日已使用过托梦，请明天再试".to_string(),
+                    remaining_ticks: dream.remaining_ticks,
+                    can_use_today: false,
+                }),
+            )
+                .into_response();
         }
     }
 
@@ -1849,9 +2148,24 @@ pub(super) async fn dream_character_handler(
 
     // 更新托梦状态
     let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
+
     dream.thought = Some(req.thought.clone());
     dream.remaining_ticks = req.duration;
     dream.last_used_game_date = Some(current_date);
+    dream.records.insert(
+        0,
+        DreamRecord {
+            injected_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            thought: req.thought.clone(),
+            duration: req.duration,
+        },
+    );
+    if dream.records.len() > 200 {
+        dream.records.truncate(200);
+    }
+    dream.save_to_file(&state.config_path, &agent_id);
 
     Json(DreamResponse {
         success: true,
@@ -1865,9 +2179,7 @@ pub(super) async fn dream_character_handler(
 /// 获取当前托梦状态
 ///
 /// GET /api/v1/character/dream
-pub(super) async fn get_dream_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_dream_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let dream_store = match &state.dream_store {
         Some(store) => store,
         None => {
@@ -1880,7 +2192,9 @@ pub(super) async fn get_dream_handler(
         }
     };
 
-    let dream = dream_store.read().await;
+    let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
 
     // 获取当前游戏日期，判断今天是否还能使用
     let can_use_today = {
@@ -1911,6 +2225,59 @@ pub struct DreamStatusResponse {
     pub remaining_ticks: u32,
     /// 今天是否还能使用
     pub can_use_today: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DreamRecordsResponse {
+    pub page: u32,
+    pub limit: u32,
+    pub total: u32,
+    pub has_more: bool,
+    pub records: Vec<DreamRecord>,
+}
+
+pub(super) async fn get_dream_records_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let limit: u32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+
+    let Some(dream_store) = &state.dream_store else {
+        return Json(DreamRecordsResponse {
+            page,
+            limit,
+            total: 0,
+            has_more: false,
+            records: vec![],
+        })
+        .into_response();
+    };
+
+    let mut dream = dream_store.write().await;
+    let agent_id = *state.agent_id.read().await;
+    dream.ensure_loaded(&state.config_path, &agent_id);
+
+    let total = dream.records.len() as u32;
+    let start = ((page - 1) * limit) as usize;
+    let end = std::cmp::min(start + limit as usize, dream.records.len());
+    let records = if start < dream.records.len() {
+        dream.records[start..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    Json(DreamRecordsResponse {
+        page,
+        limit,
+        total,
+        has_more: end < dream.records.len(),
+        records,
+    })
+    .into_response()
 }
 
 // ============================================================================
@@ -1977,7 +2344,10 @@ pub(super) async fn list_characters_handler(
     };
 
     let current_server_url = state.server_http_url.read().await.clone();
-    let current_agent_id = config.agent.as_ref().and_then(|c| c.agent_id.map(|id| id.to_string()));
+    let current_agent_id = config
+        .agent
+        .as_ref()
+        .and_then(|c| c.agent_id.map(|id| id.to_string()));
 
     // 从 characters 数组构建列表
     let mut characters: Vec<CharacterInfo> = config
@@ -2268,6 +2638,42 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
+/// GET /api/v1/setup/status - 返回引导状态
+pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(_) => {
+            return Json(dto::SetupStatusResponse {
+                needs_setup: true,
+                has_server: false,
+                has_llm: false,
+                has_character: false,
+                current_character: None,
+            })
+            .into_response();
+        }
+    };
+
+    let has_server = !config.server.ws_url.is_empty();
+    let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
+    let has_character = config.agent.as_ref().is_some_and(|c| c.is_registered());
+    let current_character = config
+        .agent
+        .as_ref()
+        .filter(|c| c.is_registered())
+        .map(|c| c.name.clone());
+    let needs_setup = !has_server || !has_llm;
+
+    Json(dto::SetupStatusResponse {
+        needs_setup,
+        has_server,
+        has_llm,
+        has_character,
+        current_character,
+    })
+    .into_response()
+}
+
 /// 配置重载请求
 #[derive(Debug, Deserialize)]
 pub struct ConfigReloadRequest {
@@ -2374,10 +2780,10 @@ pub(super) async fn reload_config_handler(
     }
 }
 
-/// 保存服务器配置到文件
+/// 保存服务器配置到文件（使用类型化 Config，避免 serde_yaml::Value 破坏其他字段）
 ///
 /// # Arguments
-/// * `config_path` - 配置文件完整路径（如 `~/.config/cyber-jianghu/agent.yaml`）
+/// * `config_path` - 配置文件完整路径
 /// * `ws_url` - WebSocket URL
 /// * `http_url` - HTTP URL（可选）
 fn save_server_config(
@@ -2385,43 +2791,18 @@ fn save_server_config(
     ws_url: &str,
     http_url: Option<&str>,
 ) -> anyhow::Result<()> {
-    use std::io::Write;
-
-    // 读取现有配置
-    let existing_content = std::fs::read_to_string(config_path)
-        .unwrap_or_else(|_| String::new());
-
-    // 解析或创建 YAML
-    let mut config: serde_yaml::Value = if existing_content.is_empty() {
-        serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+    let mut config = if config_path.exists() {
+        crate::config::Config::from_file(config_path)?
     } else {
-        serde_yaml::from_str(&existing_content)?
+        crate::config::Config::default()
     };
 
-    // 更新 server 部分
-    if let Some(mapping) = config.as_mapping_mut() {
-        let mut server_mapping = serde_yaml::Mapping::new();
-        server_mapping.insert(
-            serde_yaml::Value::String("ws_url".to_string()),
-            serde_yaml::Value::String(ws_url.to_string()),
-        );
-        if let Some(http) = http_url {
-            server_mapping.insert(
-                serde_yaml::Value::String("http_url".to_string()),
-                serde_yaml::Value::String(http.to_string()),
-            );
-        }
-        mapping.insert(
-            serde_yaml::Value::String("server".to_string()),
-            serde_yaml::Value::Mapping(server_mapping),
-        );
+    config.server.ws_url = ws_url.to_string();
+    if let Some(http) = http_url {
+        config.server.http_url = http.to_string();
     }
 
-    // 写回文件
-    let yaml_content = serde_yaml::to_string(&config)?;
-    let mut file = std::fs::File::create(config_path)?;
-    file.write_all(yaml_content.as_bytes())?;
-
+    config.save_to_file(config_path)?;
     Ok(())
 }
 
@@ -2457,7 +2838,10 @@ pub(super) async fn set_server_handler(
 
     // 如果服务器地址变化，检查设备注册状态和角色状态
     if server_changed {
-        info!("[config] 检测到服务器地址变更: {} -> {}", old_ws_url, req.ws_url);
+        info!(
+            "[config] 检测到服务器地址变更: {} -> {}",
+            old_ws_url, req.ws_url
+        );
 
         // 服务器变更后，设备需要重新注册（每个服务器有独立的设备表）
         needs_device_registration = true;
@@ -2526,11 +2910,7 @@ pub(super) async fn set_server_handler(
     }
 
     // 2. 持久化到配置文件（config_path 是文件路径，非目录）
-    if let Err(e) = save_server_config(
-        &state.config_path,
-        &req.ws_url,
-        Some(&http_url_value),
-    ) {
+    if let Err(e) = save_server_config(&state.config_path, &req.ws_url, Some(&http_url_value)) {
         error!("保存配置失败: {}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -2589,6 +2969,400 @@ pub(super) async fn set_server_handler(
 }
 
 // ============================================================================
+// LLM 配置 API Handlers
+// ============================================================================
+
+/// GET /api/v1/config/llm/providers - 返回支持的 LLM Provider 列表
+///
+/// 注意：此接口不读取 OpenClaw 配置内容，仅检查配置文件是否存在。
+/// 遵循"仅当用户选择 openclaw provider 时读取一次"的原则。
+/// 如果 OpenClaw 配置文件不存在，则禁选该 Provider。
+pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
+    // 仅检查 OpenClaw 配置文件是否存在，不读取内容
+    // 遵循"仅当用户选择 openclaw provider 时读取一次"的原则
+    let openclaw_config_path = crate::ai::llm::direct_client::OpenClawConfig::config_path();
+    let has_openclaw_config = openclaw_config_path
+        .as_ref()
+        .is_ok_and(|path| path.exists());
+
+    let providers = vec![
+        dto::LlmProviderInfo {
+            value: "ollama".to_string(),
+            label: "Ollama".to_string(),
+            requires_base_url: false,
+            disabled: None,
+            disabled_reason: None,
+        },
+        dto::LlmProviderInfo {
+            value: "openclaw".to_string(),
+            label: "OpenClaw Gateway".to_string(),
+            requires_base_url: false,
+            // 如果配置文件不存在，禁选该 Provider
+            disabled: Some(!has_openclaw_config),
+            disabled_reason: if !has_openclaw_config {
+                Some("OpenClaw 不存在".to_string())
+            } else {
+                None
+            },
+        },
+        dto::LlmProviderInfo {
+            value: "openai_compatible".to_string(),
+            label: "OpenAI Compatible (DeepSeek/GLM/Kimi/Minimax等)".to_string(),
+            requires_base_url: true,
+            disabled: None,
+            disabled_reason: None,
+        },
+    ];
+    Json(dto::LlmProvidersResponse { providers })
+}
+
+/// GET /api/v1/config/llm/providers/openclaw/defaults - 返回 OpenClaw 默认配置
+///
+/// **仅当用户选择 openclaw provider 时调用此接口**
+/// 读取 `~/.openclaw/openclaw.json` 获取 gateway_url
+/// 注意：不读取 api_key，api_key 必须由用户手动输入
+pub(super) async fn get_openclaw_defaults_handler() -> impl IntoResponse {
+    use crate::ai::llm::direct_client::OpenClawConfig;
+
+    match OpenClawConfig::load() {
+        Ok(config) => {
+            let base_url = config.gateway_url().map(|s| s.to_string());
+            Json(dto::OpenClawDefaultsResponse {
+                base_url,
+                model: None, // OpenClaw 配置中没有默认模型
+            })
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load OpenClaw config: {}", e);
+            Json(dto::OpenClawDefaultsResponse {
+                base_url: None,
+                model: None,
+            })
+        }
+    }
+}
+
+/// GET /api/v1/config/llm - 返回当前 LLM 配置
+pub(super) async fn get_llm_config_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("[llm] 读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "config_read_error".to_string(),
+                    message: format!("读取配置文件失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let actor = dto::LlmConfigInfo {
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone().unwrap_or_default(),
+        base_url: config.llm.base_url.clone(),
+        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+    };
+
+    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
+        provider: c.provider.clone(),
+        model: c.model.clone().unwrap_or_default(),
+        base_url: c.base_url.clone(),
+        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+    });
+
+    let response = dto::LlmConfigResponse {
+        actor,
+        reflector,
+        reflector_inherits_actor: config.llm_reflector.is_none(),
+        runtime_mode: state.runtime_mode.to_string(),
+    };
+
+    Json(response).into_response()
+}
+
+/// LLM 配置更新响应
+#[derive(Debug, Serialize)]
+#[allow(dead_code)]
+pub struct LlmConfigUpdateResponse {
+    pub success: bool,
+    pub message: String,
+    pub config: Option<dto::LlmConfigResponse>,
+}
+
+/// 验证 LLM 配置并创建测试客户端
+#[allow(dead_code)]
+fn validate_llm_config(
+    provider: &str,
+    model: &str,
+    base_url: Option<&str>,
+    api_key: Option<&str>,
+) -> anyhow::Result<()> {
+    // 验证 provider
+    if !crate::config::SUPPORTED_PROVIDERS.contains(&provider) {
+        anyhow::bail!("不支持的 Provider: {}", provider);
+    }
+
+    // 验证 model
+    if model.is_empty() {
+        anyhow::bail!("model 不能为空");
+    }
+
+    // 验证 API Key 格式
+    if let Some(key) = api_key {
+        crate::config::LlmConfig::validate_api_key(provider, key)?;
+    }
+
+    // 检查 requires_base_url 的 provider 是否提供了 base_url
+    if provider == "openai_compatible"
+        && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty()))
+    {
+        anyhow::bail!("{} 需要提供 base_url", provider);
+    }
+
+    Ok(())
+}
+
+/// POST /api/v1/config/llm - 更新 LLM 配置
+///
+/// 验证配置、测试 LLM 连接、保存配置文件
+#[allow(dead_code)]
+pub(super) async fn update_llm_config_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<dto::LlmConfigUpdate>,
+) -> impl IntoResponse {
+    use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider};
+
+    // 1. 验证 actor 配置
+    if let Err(e) = validate_llm_config(
+        &req.actor.provider,
+        &req.actor.model,
+        req.actor.base_url.as_deref(),
+        if req.actor.api_key.is_empty() {
+            None
+        } else {
+            Some(&req.actor.api_key)
+        },
+    ) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("Actor 配置验证失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 2. 验证 reflector 配置（如果有）
+    if let Some(ref reflector) = req.reflector
+        && let Err(e) = validate_llm_config(
+            &reflector.provider,
+            &reflector.model,
+            reflector.base_url.as_deref(),
+            if reflector.api_key.is_empty() {
+                None
+            } else {
+                Some(&reflector.api_key)
+            },
+        )
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("Reflector 配置验证失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 3. 创建测试 LLM 客户端并测试连接
+    let provider = match LlmProvider::parse(&req.actor.provider) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("不支持的 Provider: {}", req.actor.provider),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let test_config = DirectLlmClientConfig::new(
+        provider,
+        if req.actor.api_key.is_empty() {
+            None::<String>
+        } else {
+            Some(req.actor.api_key.clone())
+        },
+    )
+    .with_model(&req.actor.model);
+
+    let test_config = if let Some(ref url) = req.actor.base_url {
+        test_config.with_base_url(url)
+    } else {
+        test_config
+    };
+
+    let test_client = match DirectLlmClient::new(test_config) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("创建 LLM 客户端失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 测试 LLM 连接
+    match test_client
+        .complete("Hello, this is a connection test. Reply with 'OK'.")
+        .await
+    {
+        Ok(_) => {
+            info!(
+                "[llm] LLM 连接测试成功: provider={}, model={}",
+                req.actor.provider, req.actor.model
+            );
+        }
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("LLM 连接测试失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    // 4. 读取现有配置
+    let mut config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(LlmConfigUpdateResponse {
+                    success: false,
+                    message: format!("读取配置文件失败: {}", e),
+                    config: None,
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 5. 备份原配置
+    let backup = config.clone();
+
+    // 6. 更新 LLM 配置
+    config.llm = crate::config::LlmConfig {
+        provider: req.actor.provider.clone(),
+        base_url: req.actor.base_url.clone(),
+        api_key: if req.actor.api_key.is_empty() {
+            None
+        } else {
+            Some(req.actor.api_key.clone())
+        },
+        model: Some(req.actor.model.clone()),
+        temperature: config.llm.temperature,
+        max_tokens: config.llm.max_tokens,
+    };
+
+    // 更新 reflector 配置
+    if req.reflector_inherits_actor {
+        config.llm_reflector = None;
+    } else if let Some(ref reflector) = req.reflector {
+        config.llm_reflector = Some(crate::config::LlmConfig {
+            provider: reflector.provider.clone(),
+            base_url: reflector.base_url.clone(),
+            api_key: if reflector.api_key.is_empty() {
+                None
+            } else {
+                Some(reflector.api_key.clone())
+            },
+            model: Some(reflector.model.clone()),
+            temperature: config.llm.temperature,
+            max_tokens: config.llm.max_tokens,
+        });
+    }
+
+    // 7. 保存配置（save_to_file 已内置原子写入）
+    if let Err(e) = config.save_to_file(&state.config_path) {
+        error!("[llm] 保存配置文件失败: {}", e);
+        // 尝试恢复备份
+        let _ = backup.save_to_file(&state.config_path);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(LlmConfigUpdateResponse {
+                success: false,
+                message: format!("保存配置失败: {}", e),
+                config: None,
+            }),
+        )
+            .into_response();
+    }
+
+    info!(
+        "[llm] LLM 配置已更新: provider={}, model={}",
+        req.actor.provider, req.actor.model
+    );
+
+    // 8. 返回更新后的配置
+    let actor = dto::LlmConfigInfo {
+        provider: config.llm.provider.clone(),
+        model: config.llm.model.clone().unwrap_or_default(),
+        base_url: config.llm.base_url.clone(),
+        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+    };
+
+    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
+        provider: c.provider.clone(),
+        model: c.model.clone().unwrap_or_default(),
+        base_url: c.base_url.clone(),
+        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+    });
+
+    let response = dto::LlmConfigResponse {
+        actor,
+        reflector,
+        reflector_inherits_actor: config.llm_reflector.is_none(),
+        runtime_mode: state.runtime_mode.to_string(),
+    };
+
+    (
+        StatusCode::OK,
+        Json(LlmConfigUpdateResponse {
+            success: true,
+            message: "LLM 配置已更新".to_string(),
+            config: Some(response),
+        }),
+    )
+        .into_response()
+}
+
+/// GET /api/v1/config/llm/usage - 获取 LLM Token 累计使用统计
+pub(super) async fn get_llm_usage_handler() -> impl IntoResponse {
+    Json(crate::ai::llm::token_usage_tracker().snapshot())
+}
+
+// ============================================================================
 // 认知上下文端点
 // ============================================================================
 
@@ -2637,26 +3411,25 @@ pub(super) async fn get_cognitive_context_handler(
             let narrative_engine = NarrativeEngine::default();
             let builder = CognitiveContextBuilder::new(narrative_engine, Default::default());
 
-            let (persona_info, persona_ref): (Option<CognitivePersonaInfo>, Option<crate::ai::persona::dynamic_persona::DynamicPersona>) =
-                if let Some(ref persona_arc) = state.dynamic_persona {
-                    persona_arc.read(|p| {
-                        let info = CognitivePersonaInfo {
-                            name: p.name.clone(),
-                            personality: p.traits.keys().take(3).cloned().collect(),
-                            description: p.base_description.chars().take(100).collect(),
-                        };
-                        (Some(info), Some(p.clone()))
-                    })
-                } else {
-                    (None, None)
-                };
+            let (persona_info, persona_ref): (
+                Option<CognitivePersonaInfo>,
+                Option<crate::ai::persona::dynamic_persona::DynamicPersona>,
+            ) = if let Some(ref persona_arc) = state.dynamic_persona {
+                persona_arc.read(|p| {
+                    let info = CognitivePersonaInfo {
+                        name: p.name.clone(),
+                        personality: p.traits.keys().take(3).cloned().collect(),
+                        description: p.base_description.chars().take(100).collect(),
+                    };
+                    (Some(info), Some(p.clone()))
+                })
+            } else {
+                (None, None)
+            };
 
-            let relationship_store = state.relationship_store.as_ref().map(|v| &**v);
-            let cognitive_context = builder.build_with_persona(
-                world_state,
-                persona_ref.as_ref(),
-                relationship_store,
-            );
+            let relationship_store = state.relationship_store.as_deref();
+            let cognitive_context =
+                builder.build_with_persona(world_state, persona_ref.as_ref(), relationship_store);
 
             let simplified_world_state = SimplifiedWorldState {
                 agent_id: world_state.agent_id.map(|id| id.to_string()),
@@ -2684,4 +3457,46 @@ pub(super) async fn get_cognitive_context_handler(
             (StatusCode::SERVICE_UNAVAILABLE, Json(error)).into_response()
         }
     }
+}
+
+/// GET /api/v1/events - SSE 实时事件流
+///
+/// 用于 Web 面板实时接收死亡等事件通知
+pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let mut rx = state.death_event_tx.subscribe();
+
+    let stream = async_stream::stream! {
+        let data = Bytes::from_static(b"event: connected\ndata: {\"status\":\"connected\"}\n\n");
+        yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+
+        loop {
+            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
+                Ok(Ok(msg)) => {
+                    if matches!(msg, ServerMessage::AgentDied { .. })
+                        && let Ok(json) = serde_json::to_string(&msg) {
+                            let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+                            yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                        }
+                }
+                Ok(Err(_)) => {
+                    break;
+                }
+                Err(_) => {
+                    let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
+                    yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                }
+            }
+        }
+    };
+
+    let body = StreamBody::new(stream);
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/event-stream; charset=utf-8")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive")
+        .header("X-Accel-Buffering", "no")
+        .body(body)
+        .unwrap()
 }

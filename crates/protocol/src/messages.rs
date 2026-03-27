@@ -187,7 +187,9 @@ pub enum ServerMessage {
 /// use serde_json::json;
 ///
 /// let msg = ClientMessage::Intent {
+///     intent_id: None,
 ///     tick_id: 1,
+///     agent_id: None,
 ///     thought_log: Some("思考过程".to_string()),
 ///     action_type: "speak".to_string(),
 ///     action_data: Some(json!({"content": "你好"})),
@@ -287,7 +289,7 @@ mod tests {
     #[test]
     fn test_client_message_serialization() {
         let agent_id = Uuid::nil();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
         let msg = ClientMessage::from_intent(intent);
 
         let json = msg.to_json().unwrap();

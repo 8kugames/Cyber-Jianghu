@@ -9,6 +9,7 @@
 // - 连接清理
 // ============================================================================
 
+use anyhow::Context;
 use axum::{
     body::Bytes,
     extract::{
@@ -17,7 +18,6 @@ use axum::{
     },
     response::Response,
 };
-use anyhow::Context;
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
@@ -45,7 +45,10 @@ pub async fn websocket_handler(
     State(state): State<Arc<crate::state::AppState>>,
 ) -> Response {
     // 调试日志：显示收到的参数
-    debug!("WebSocket request: device_id={}, token={}", query.device_id, query.token);
+    debug!(
+        "WebSocket request: device_id={}, token={}",
+        query.device_id, query.token
+    );
 
     // 1. 验证设备身份（device_id + auth_token）
     let device_valid =
@@ -83,7 +86,10 @@ pub async fn websocket_handler(
     // 3. 获取该设备的角色信息（从数据库查询）
     let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
         Ok(Some(agent)) => {
-            info!("Device {} has agent '{}' ({})", query.device_id, agent.name, agent.agent_id);
+            info!(
+                "Device {} has agent '{}' ({})",
+                query.device_id, agent.name, agent.agent_id
+            );
             agent.agent_id
         }
         Ok(None) => {
@@ -116,7 +122,9 @@ pub async fn websocket_handler(
     );
 
     // 升级到 WebSocket
-    ws.on_upgrade(move |socket| handle_websocket(socket, agent_id, query.device_id, agent_name, state))
+    ws.on_upgrade(move |socket| {
+        handle_websocket(socket, agent_id, query.device_id, agent_name, state)
+    })
 }
 
 // ============================================================================
@@ -226,11 +234,21 @@ async fn handle_websocket(
         loop {
             interval.tick().await;
             // 发送 Ping 消息
-            if tx_for_heartbeat.send(Message::Ping(Bytes::new())).await.is_err() {
-                debug!("Heartbeat failed for agent '{}', connection likely closed", agent_name_for_heartbeat);
+            if tx_for_heartbeat
+                .send(Message::Ping(Bytes::new()))
+                .await
+                .is_err()
+            {
+                debug!(
+                    "Heartbeat failed for agent '{}', connection likely closed",
+                    agent_name_for_heartbeat
+                );
                 break;
             }
-            debug!("Sent heartbeat Ping to agent '{}'", agent_name_for_heartbeat);
+            debug!(
+                "Sent heartbeat Ping to agent '{}'",
+                agent_name_for_heartbeat
+            );
         }
     });
 
@@ -268,9 +286,13 @@ async fn handle_websocket(
                         // 解析消息
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(client_msg) => {
-                                if let Err(e) =
-                                    handle_client_message(&agent_id, device_id_for_recv, client_msg, &state_for_recv)
-                                        .await
+                                if let Err(e) = handle_client_message(
+                                    &agent_id,
+                                    device_id_for_recv,
+                                    client_msg,
+                                    &state_for_recv,
+                                )
+                                .await
                                 {
                                     error!(
                                         "Failed to handle message from agent '{}': {}",
@@ -400,6 +422,7 @@ async fn handle_client_message(
 ///
 /// 将 Intent 保存到 IntentManager（临时缓存）
 /// 包含速率限制检查、Agent 存活检查和 tick_id 校验
+#[allow(clippy::too_many_arguments)]
 async fn handle_intent(
     connection_agent_id: uuid::Uuid,
     device_id: uuid::Uuid,
@@ -417,13 +440,12 @@ async fn handle_intent(
     let agent_id = match msg_agent_id {
         Some(id) => {
             // 使用 query_scalar 只查询 device_id，避免 SELECT *
-            let owner_device_id: Option<uuid::Uuid> = sqlx::query_scalar(
-                "SELECT device_id FROM agents WHERE agent_id = $1"
-            )
-            .bind(id)
-            .fetch_optional(&state.db_pool)
-            .await
-            .context("查询 Agent 归属失败")?;
+            let owner_device_id: Option<uuid::Uuid> =
+                sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
+                    .bind(id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .context("查询 Agent 归属失败")?;
 
             match owner_device_id {
                 Some(owner) if owner == device_id => {
@@ -431,7 +453,11 @@ async fn handle_intent(
                     id
                 }
                 Some(_) => {
-                    tracing::warn!("Agent ownership mismatch: agent={}, device={}", id, device_id);
+                    tracing::warn!(
+                        "Agent ownership mismatch: agent={}, device={}",
+                        id,
+                        device_id
+                    );
                     return Err("无权操作此角色".into());
                 }
                 None => {

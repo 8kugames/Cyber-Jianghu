@@ -37,7 +37,10 @@ pub async fn send_world_state(
         match agent_to_device.get(&agent_id) {
             Some(&device_id) => device_id,
             None => {
-                warn!("Agent {} is not online and no device mapping found", agent_id);
+                warn!(
+                    "Agent {} is not online and no device mapping found",
+                    agent_id
+                );
                 return Ok(());
             }
         }
@@ -50,9 +53,15 @@ pub async fn send_world_state(
         };
         let json = serde_json::to_string(&msg)?;
         connection.send(Message::Text(json.into())).await?;
-        debug!("WorldState sent to agent {} via device {}", agent_id, device_id);
+        debug!(
+            "WorldState sent to agent {} via device {}",
+            agent_id, device_id
+        );
     } else {
-        warn!("Agent {} is not online (device {} not connected)", agent_id, device_id);
+        warn!(
+            "Agent {} is not online (device {} not connected)",
+            agent_id, device_id
+        );
     }
 
     Ok(())

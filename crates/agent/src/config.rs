@@ -11,14 +11,18 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 // ============================================================================
 // 导入 protocol 类型
 // ============================================================================
 
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
+
+/// 支持的 LLM Provider
+pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
 
 // ============================================================================
 // Agent 身份配置（持久化）
@@ -293,6 +297,15 @@ pub enum RuntimeMode {
     Cognitive,
 }
 
+impl std::fmt::Display for RuntimeMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeMode::Claw => write!(f, "claw"),
+            RuntimeMode::Cognitive => write!(f, "cognitive"),
+        }
+    }
+}
+
 /// 运行时配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
@@ -311,6 +324,32 @@ impl Default for RuntimeConfig {
         Self {
             mode: RuntimeMode::Cognitive,
             port: 0,
+        }
+    }
+}
+
+// ============================================================================
+// Claw 模式配置
+// ============================================================================
+
+/// Claw 模式专用配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClawConfig {
+    /// 是否使用统一认知架构（OpenClawBridge + MultiStageCognitiveEngine）
+    /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
+    /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
+    #[serde(default = "default_use_unified_cognitive")]
+    pub use_unified_cognitive: bool,
+}
+
+fn default_use_unified_cognitive() -> bool {
+    true
+}
+
+impl Default for ClawConfig {
+    fn default() -> Self {
+        Self {
+            use_unified_cognitive: true,
         }
     }
 }
@@ -380,6 +419,29 @@ impl LlmConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
+        }
+    }
+
+    /// API Key 格式验证
+    pub fn validate_api_key(provider: &str, api_key: &str) -> Result<()> {
+        if api_key.is_empty() {
+            return Ok(());
+        }
+        match provider {
+            "ollama" | "openclaw" => {}
+            "openai_compatible" => {
+                // OpenAI Compatible 通常需要 API Key，但不强制格式
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+impl Drop for LlmConfig {
+    fn drop(&mut self) {
+        if let Some(ref mut key) = self.api_key {
+            key.zeroize();
         }
     }
 }
@@ -537,9 +599,17 @@ pub struct Config {
     #[serde(default)]
     pub runtime: RuntimeConfig,
 
+    /// Claw 模式专用配置
+    #[serde(default)]
+    pub claw: ClawConfig,
+
     /// LLM 配置（仅 Cognitive 模式使用）
     #[serde(default)]
     pub llm: LlmConfig,
+
+    /// ReflectorSoul LLM 配置（可选，未配置时继承 llm）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_reflector: Option<LlmConfig>,
 
     /// 记忆系统配置
     #[serde(default)]
@@ -560,6 +630,10 @@ pub struct Config {
     /// 游戏规则（从服务器获取）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub game_rules: Option<GameRules>,
+
+    /// 配置文件路径（运行时设置，不序列化）
+    #[serde(skip)]
+    pub config_path: PathBuf,
 }
 
 impl Config {
@@ -575,21 +649,31 @@ impl Config {
         Ok(config)
     }
 
-    /// 保存配置到文件
+    /// 保存配置到文件（原子写入：先写临时文件，再 rename 替换）
+    ///
+    /// 避免进程中断时文件被截断为空。
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path_display = path.as_ref().display().to_string();
+        let path = path.as_ref();
+        let path_display = path.display().to_string();
         let yaml =
             serde_yaml::to_string(self).with_context(|| "Failed to serialize config to YAML")?;
 
         // 确保目录存在
-        if let Some(parent) = path.as_ref().parent() {
+        if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("Failed to create config directory: {}", parent.display())
             })?;
         }
 
-        fs::write(&path, yaml)
-            .with_context(|| format!("Failed to write config file: {}", path_display))?;
+        // 原子写入：先写临时文件，再 rename
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &yaml)
+            .with_context(|| format!("Failed to write temp config file: {}", tmp_path.display()))?;
+
+        if let Err(e) = fs::rename(&tmp_path, path) {
+            let _ = fs::remove_file(&tmp_path);
+            anyhow::bail!("Failed to replace config file {}: {}", path_display, e);
+        }
 
         Ok(())
     }
@@ -624,12 +708,15 @@ impl Config {
             agent: None,
             characters: vec![],
             runtime,
+            claw: ClawConfig::default(),
             llm: LlmConfig::from_env(),
+            llm_reflector: None,
             memory: MemoryConfig::default(),
             role: AgentRole::default(),
             review: None,
             observer: None,
             game_rules: None,
+            config_path: PathBuf::new(),
         })
     }
 
@@ -736,14 +823,13 @@ impl Config {
         if let Some(ref mut character) = self.agent {
             character.status = CharacterStatus::Retired;
             // 更新 characters 列表中的记录
-            if let Some(agent_id) = character.agent_id {
-                if let Some(existing) = self
+            if let Some(agent_id) = character.agent_id
+                && let Some(existing) = self
                     .characters
                     .iter_mut()
                     .find(|c| c.agent_id == Some(agent_id))
-                {
-                    existing.status = CharacterStatus::Retired;
-                }
+            {
+                existing.status = CharacterStatus::Retired;
             }
         }
     }
@@ -755,6 +841,11 @@ impl Config {
                 && c.status == CharacterStatus::Alive
                 && c.agent_id.is_some()
         })
+    }
+
+    /// 获取 ReflectorSoul LLM 配置（带回退逻辑）
+    pub fn get_reflector_llm_config(&self) -> &LlmConfig {
+        self.llm_reflector.as_ref().unwrap_or(&self.llm)
     }
 }
 
@@ -800,5 +891,45 @@ mod tests {
         assert!(config.identity.is_none());
         assert!(config.agent.is_none());
         assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
+    }
+
+    #[test]
+    fn test_reflector_llm_inheritance() {
+        let mut llm = LlmConfig::default();
+        llm.provider = "ollama".to_string();
+        llm.model = Some("qwen2.5:14b".to_string());
+
+        let config = Config {
+            llm,
+            llm_reflector: None,
+            config_path: PathBuf::from("/test/config.yaml"),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.get_reflector_llm_config().model,
+            Some("qwen2.5:14b".to_string())
+        );
+    }
+
+    #[test]
+    fn test_reflector_llm_override() {
+        let mut llm = LlmConfig::default();
+        llm.provider = "ollama".to_string();
+        llm.model = Some("qwen2.5:14b".to_string());
+
+        let mut llm_reflector = LlmConfig::default();
+        llm_reflector.provider = "ollama".to_string();
+        llm_reflector.model = Some("qwen2.5:32b".to_string());
+
+        let config = Config {
+            llm,
+            llm_reflector: Some(llm_reflector),
+            config_path: PathBuf::from("/test/config.yaml"),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.get_reflector_llm_config().model,
+            Some("qwen2.5:32b".to_string())
+        );
     }
 }

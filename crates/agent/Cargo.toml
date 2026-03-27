@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.0.57"
+version = "0.0.99"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ description = "Agent SDK for Cyber-Jianghu MMO-MAS - connects to game server wit
 
 [dependencies]
 # 协议（包含合并后的 GameError)
-cyber-jianghu-protocol = { path = "../protocol", version = "0.0.9" }
+cyber-jianghu-protocol = { version = "0.0.15", path = "../protocol" }
 
 # 异步运行时
 tokio = { workspace = true }
@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 # 日志
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
 
 # 工具库
 chrono = { workspace = true }
@@ -43,8 +44,14 @@ regex = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # HTTP 服务器（用于 HTTP API 辅助功能）
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "tokio"] }
 tower = "0.5"
+http-body-util = "0.1"
+http-body = "1.0"
+bytes = "1.0"
+
+# SSE 流式响应
+async-stream = "0.3"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 
 # SQLite 数据库（用于本地记忆存储）
@@ -66,6 +73,18 @@ rayon = "1.10"
 
 # 随机数生成
 rand = { workspace = true }
+
+# 文件系统监控（配置热加载）
+notify = "7"
+
+# 浏览器打开
+open = "5"
+
+# 速率限制（HTTP API）
+governor = "0.6"
+
+# 安全内存清理（API密钥）
+zeroize = "1"
 
 [dev-dependencies]
 tokio-test = "0.4"

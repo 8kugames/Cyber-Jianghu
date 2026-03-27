@@ -176,8 +176,9 @@ pub async fn apply_state_change(
                         };
 
                         if state
-                                .status
-                                .apply_change(&effect.attribute, value_to_apply, &context).is_ok()
+                            .status
+                            .apply_change(&effect.attribute, value_to_apply, &context)
+                            .is_ok()
                         {
                             attribute_delta.insert(
                                 effect.attribute.clone(),

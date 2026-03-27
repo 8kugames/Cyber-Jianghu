@@ -38,10 +38,11 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         // 尝试从响应中解析 JSON
         // 这里假设 LLM 返回的内容就是 JSON，或者包含在 markdown 代码块中
         let json_str = if let Some(start) = response.find("```json") {
-            if let Some(end) = response[start..].find("```") {
-                response[start + 7..start + end].trim()
+            let after_marker = start + 7;
+            if let Some(end) = response[after_marker..].find("```") {
+                response[after_marker..after_marker + end].trim()
             } else {
-                response.trim()
+                response[after_marker..].trim()
             }
         } else if let Some(start) = response.find('{') {
             if let Some(end) = response.rfind('}') {

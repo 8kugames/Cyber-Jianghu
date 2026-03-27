@@ -6,7 +6,7 @@
 #[cfg(test)]
 mod tests {
     use cyber_jianghu_protocol::ActionType;
-    use cyber_jianghu_server::models::{AgentState, Intent};
+    use cyber_jianghu_server::models::Intent;
     use uuid::Uuid;
 
     /// 烟雾测试：验证模块结构正确
@@ -14,7 +14,6 @@ mod tests {
     fn test_module_structure() {
         // 验证 actions 模块存在且可访问
         // 完整测试需要数据库连接
-        assert!(true, "Actions module structure is valid");
     }
 
     /// 测试攻击动作的数据结构构建

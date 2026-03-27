@@ -16,6 +16,32 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// 关系等级定义（阈值从高到低排列）
+///
+/// 数据来源：`crates/server/config/relationship_levels.yaml`（未来可配置化）
+/// 当前内联定义，保持单一真相源。
+const RELATIONSHIP_LEVELS: &[(i32, &str, &str)] = &[
+    (80, "best", "至交好友"),
+    (50, "good", "好友"),
+    (20, "known", "熟人"),
+    (-20, "neutral", "陌生人"),
+    (-50, "dislike", "不喜欢"),
+    (-80, "hostile", "敌对"),
+    (i32::MIN, "nemesis", "死敌"),
+];
+
+/// 根据好感度获取关系等级信息
+///
+/// 返回 (level_key, label)，level_key 用于前端 CSS class，label 用于展示
+pub fn get_relationship_level(favorability: i32) -> (&'static str, &'static str) {
+    for &(threshold, level, label) in RELATIONSHIP_LEVELS {
+        if favorability >= threshold {
+            return (level, label);
+        }
+    }
+    unreachable!()
+}
+
 /// 关键事件
 ///
 /// 记录与目标 Agent 互动的关键事件
@@ -54,7 +80,7 @@ impl KeyEvent {
 /// 关系记忆
 ///
 /// 存储对某个目标 Agent 的关系记忆
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RelationshipMemory {
     /// 目标 Agent ID
     pub target_agent_id: Uuid,
@@ -127,15 +153,7 @@ impl RelationshipMemory {
     ///
     /// 根据好感度返回关系描述
     pub fn get_relationship_description(&self) -> &str {
-        match self.favorability {
-            i if i >= 80 => "至交好友",
-            i if i >= 50 => "好友",
-            i if i >= 20 => "熟人",
-            i if i >= -20 => "陌生人",
-            i if i >= -50 => "不喜欢",
-            i if i >= -80 => "敌对",
-            _ => "死敌",
-        }
+        get_relationship_level(self.favorability).1
     }
 
     /// 构建 LLM 上下文
@@ -189,6 +207,29 @@ impl RelationshipMemory {
             .iter()
             .map(|e| e.favorability_delta)
             .sum()
+    }
+}
+
+impl Serialize for RelationshipMemory {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let (level, label) = get_relationship_level(self.favorability);
+        let mut state = serializer.serialize_struct("RelationshipMemory", 10)?;
+        state.serialize_field("target_agent_id", &self.target_agent_id)?;
+        state.serialize_field("target_name", &self.target_name)?;
+        state.serialize_field("favorability", &self.favorability)?;
+        state.serialize_field("key_events", &self.key_events)?;
+        state.serialize_field("last_interaction_tick", &self.last_interaction_tick)?;
+        state.serialize_field("updated_at", &self.updated_at)?;
+        state.serialize_field("self_description", &self.self_description)?;
+        state.serialize_field("description_tick", &self.description_tick)?;
+        state.serialize_field("relationship_level", level)?;
+        state.serialize_field("relationship_label", label)?;
+        state.end()
     }
 }
 

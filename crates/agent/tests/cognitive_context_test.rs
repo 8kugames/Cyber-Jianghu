@@ -3,7 +3,7 @@
 //! 测试 CognitiveContextBuilder 从 WorldState 生成结构化认知上下文
 
 use cyber_jianghu_agent::runtime::decision::http::cognitive_context::{
-    CognitiveContext, CognitiveContextBuilder, CognitiveContextConfig, Drive,
+    CognitiveContext, CognitiveContextBuilder, Drive,
 };
 use cyber_jianghu_protocol::{
     AdjacentNode, AgentSelfState, AvailableAction, Entity, Location, SceneItem, WorldEvent,
@@ -101,8 +101,7 @@ fn create_test_world_state() -> WorldState {
 
 #[test]
 fn test_cognitive_context_builder_default() {
-    let builder = CognitiveContextBuilder::default();
-    assert!(true);
+    let _builder = CognitiveContextBuilder::default();
 }
 
 #[test]
@@ -171,5 +170,7 @@ fn test_narrative_engine_integrated() {
     let builder = CognitiveContextBuilder::default();
     let ctx = builder.build(&world_state);
 
-    assert!(ctx.perception.self_status.contains("饥饿") || ctx.perception.self_status.contains("口渴"));
+    assert!(
+        ctx.perception.self_status.contains("饥饿") || ctx.perception.self_status.contains("口渴")
+    );
 }

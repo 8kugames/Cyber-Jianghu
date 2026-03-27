@@ -68,8 +68,8 @@ pub struct AttributeMetadata {
     #[serde(default)]
     pub affects: Vec<String>,
 
-    /// 每tick衰减值
-    pub decay_per_tick: Option<i32>,
+    /// 每tick衰减值（支持浮点数）
+    pub decay_per_tick: Option<f32>,
 
     /// 死亡条件
     pub death_condition: Option<DeathCondition>,
@@ -77,11 +77,11 @@ pub struct AttributeMetadata {
     /// 计算公式
     pub formula: Option<String>,
 
-    /// 默认值
-    pub default_value: Option<i32>,
+    /// 默认值（支持浮点数）
+    pub default_value: Option<f32>,
 
-    /// 最小值
-    pub min_value: Option<i32>,
+    /// 最小值（支持浮点数）
+    pub min_value: Option<f32>,
 
     /// 最大值公式
     pub max_value_formula: Option<String>,
@@ -183,7 +183,7 @@ impl Attribute {
                 AttributeValue::DailyRandom { value, range }
             }
             AttributeType::Status => {
-                let value = config.default_value.unwrap_or(0) as u8;
+                let value = config.default_value.unwrap_or(0.0_f32) as u8;
                 AttributeValue::Static { value }
             }
             AttributeType::Derived => {
@@ -211,10 +211,11 @@ impl Attribute {
     /// 成长（仅对可成长属性有效）
     pub fn train(&mut self, amount: i32) -> bool {
         if let AttributeValue::Growable { base, current } = &mut self.value
-            && *current < *base {
-                *current = (*current as i32 + amount).min(*base as i32) as u8;
-                return true;
-            }
+            && *current < *base
+        {
+            *current = (*current as i32 + amount).min(*base as i32) as u8;
+            return true;
+        }
         false
     }
 
@@ -473,7 +474,7 @@ impl StatusComponent {
         for attr in self.collection.attributes.values_mut() {
             if let Some(decay) = attr.metadata.decay_per_tick {
                 let current = attr.get_value();
-                let new_value = (current + decay).max(0);
+                let new_value = (current as f32 + decay).floor().max(0.0) as i32;
                 attr.set_value(new_value);
             }
         }

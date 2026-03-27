@@ -202,17 +202,19 @@ impl CognitiveValidator {
             let next = &stages[i + 1].content;
 
             // 计算相似度（简化版：检查一个是否是另一个的子串）
-            if current.len() > 10 && next.len() > 10
-                && (current.contains(next) || next.contains(current)) {
-                    return Some(CognitiveValidationResult::rejected(
-                        format!(
-                            "{} 阶段和 {} 阶段内容过于相似，存在复制粘贴嫌疑",
-                            stages[i].stage.name(),
-                            stages[i + 1].stage.name()
-                        ),
-                        "请确保每个阶段有独立、独特的思考，避免复制前面的内容".to_string(),
-                    ));
-                }
+            if current.len() > 10
+                && next.len() > 10
+                && (current.contains(next) || next.contains(current))
+            {
+                return Some(CognitiveValidationResult::rejected(
+                    format!(
+                        "{} 阶段和 {} 阶段内容过于相似，存在复制粘贴嫌疑",
+                        stages[i].stage.name(),
+                        stages[i + 1].stage.name()
+                    ),
+                    "请确保每个阶段有独立、独特的思考，避免复制前面的内容".to_string(),
+                ));
+            }
         }
 
         // 检查是否使用了通用的"偷懒"短语
@@ -414,8 +416,13 @@ mod tests {
         ));
 
         // 设置 final_intent
-        chain.final_intent = crate::models::Intent::use_item(Uuid::new_v4(), 1, "mantou")
-            .with_thought("因为饥饿，所以决定使用馒头".to_string());
+        chain.final_intent = crate::models::Intent::new(
+            Uuid::new_v4(),
+            1,
+            "use",
+            Some(serde_json::json!({"item_id": "mantou"})),
+        )
+        .with_thought("因为饥饿，所以决定使用馒头".to_string());
 
         chain
     }
@@ -461,10 +468,7 @@ mod tests {
 
         // 添加所有阶段，但内容太短
         for stage in CognitiveStage::all() {
-            chain.add_stage(crate::core::StageOutput::new(
-                stage.clone(),
-                "短".to_string(),
-            ));
+            chain.add_stage(crate::core::StageOutput::new(stage, "短".to_string()));
         }
 
         let result = validator.validate(&chain);

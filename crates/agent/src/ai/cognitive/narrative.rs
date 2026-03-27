@@ -62,6 +62,9 @@ pub struct NarrativeConfig {
     /// 描述
     #[serde(default)]
     pub description: String,
+    /// 属性分类（primary/status/derived）
+    #[serde(default)]
+    pub attribute_categories: HashMap<String, Vec<String>>,
     /// 属性配置映射
     pub attributes: HashMap<String, NarrativeAttributeConfig>,
     /// 状态效果配置
@@ -268,6 +271,7 @@ impl NarrativeConfig {
         Self {
             version: "0.0.1-builtin".to_string(),
             description: "内置默认叙事配置".to_string(),
+            attribute_categories: HashMap::new(),
             attributes,
             status_effects,
         }

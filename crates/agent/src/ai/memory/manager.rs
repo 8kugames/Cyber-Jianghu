@@ -92,9 +92,11 @@ impl MemoryManager {
 
         // 初始化语义记忆
         let embedder = Arc::new(EmbedderService::new(Some(llm_client.clone())));
+        let episodic_db_path = config.db_dir.join(format!("agent_{}.db", config.agent_id));
         let semantic_config =
             crate::ai::memory::backends::semantic::backend::SemanticMemoryConfig {
                 db_path: config.db_dir.join("semantic.db"),
+                episodic_db_path,
                 ..Default::default()
             };
 

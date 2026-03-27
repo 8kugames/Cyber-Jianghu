@@ -174,142 +174,6 @@ impl Intent {
         }
     }
 
-    /// 创建 idle 意图
-    pub fn idle(agent_id: Uuid, tick_id: i64) -> Self {
-        Self::new(agent_id, tick_id, ActionType::IDLE, None)
-    }
-
-    /// 创建 speak 意图
-    pub fn speak(agent_id: Uuid, tick_id: i64, content: String) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::SPEAK,
-            Some(serde_json::json!({ "content": content })),
-        )
-    }
-
-    /// 创建 give 意图
-    pub fn give(
-        agent_id: Uuid,
-        tick_id: i64,
-        target_id: Uuid,
-        item_id: &str,
-        quantity: i32,
-    ) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::GIVE,
-            Some(serde_json::json!({
-                "target_agent_id": target_id.to_string(),
-                "item_id": item_id,
-                "quantity": quantity
-            })),
-        )
-    }
-
-    /// 创建 steal 意图
-    pub fn steal(agent_id: Uuid, tick_id: i64, target_id: Uuid, item_id: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::STEAL,
-            Some(serde_json::json!({
-                "target_agent_id": target_id.to_string(),
-                "item_id": item_id
-            })),
-        )
-    }
-
-    /// 创建 move 意图
-    pub fn move_to(agent_id: Uuid, tick_id: i64, target_location: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::MOVE,
-            Some(serde_json::json!({
-                "target_location": target_location
-            })),
-        )
-    }
-
-    /// 创建 pickup 意图
-    pub fn pickup(agent_id: Uuid, tick_id: i64, item_id: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::PICKUP,
-            Some(serde_json::json!({ "item_id": item_id })),
-        )
-    }
-
-    /// 创建 use 意图
-    pub fn use_item(agent_id: Uuid, tick_id: i64, item_id: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::USE,
-            Some(serde_json::json!({ "item_id": item_id })),
-        )
-    }
-
-    /// 创建 drop 意图
-    pub fn drop_item(agent_id: Uuid, tick_id: i64, item_id: &str, quantity: i32) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::DROP,
-            Some(serde_json::json!({ "item_id": item_id, "quantity": quantity })),
-        )
-    }
-
-    /// 创建 gather 意图
-    pub fn gather(agent_id: Uuid, tick_id: i64, target_id: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::GATHER,
-            Some(serde_json::json!({ "target_id": target_id })),
-        )
-    }
-
-    /// 创建 craft 意图
-    pub fn craft(agent_id: Uuid, tick_id: i64, recipe_id: &str) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::CRAFT,
-            Some(serde_json::json!({ "recipe_id": recipe_id })),
-        )
-    }
-
-    /// 创建 attack 意图
-    pub fn attack(agent_id: Uuid, tick_id: i64, target_id: Uuid) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::ATTACK,
-            Some(serde_json::json!({
-                "target_agent_id": target_id.to_string()
-            })),
-        )
-    }
-
-    /// 创建 trade 意图
-    pub fn trade(agent_id: Uuid, tick_id: i64, target_id: Uuid, item_id: &str, price: i32) -> Self {
-        Self::new(
-            agent_id,
-            tick_id,
-            ActionType::TRADE,
-            Some(serde_json::json!({
-                "target_agent_id": target_id.to_string(),
-                "item_id": item_id,
-                "price": price
-            })),
-        )
-    }
-
     /// 设置思考日志
     pub fn with_thought(mut self, thought: String) -> Self {
         self.thought_log = Some(thought);
@@ -363,7 +227,7 @@ mod tests {
     #[test]
     fn test_intent_idle() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
         assert_eq!(intent.action_type.as_str(), "idle");
         assert_eq!(intent.tick_id, 1);
     }
@@ -371,7 +235,12 @@ mod tests {
     #[test]
     fn test_intent_speak() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::speak(agent_id, 2, "Hello".to_string());
+        let intent = Intent::new(
+            agent_id,
+            2,
+            "speak",
+            Some(serde_json::json!({"content": "Hello"})),
+        );
         assert_eq!(intent.action_type.as_str(), "speak");
         assert!(intent.action_data.is_some());
     }
@@ -379,7 +248,7 @@ mod tests {
     #[test]
     fn test_intent_with_thought() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::idle(agent_id, 1).with_thought("Thinking...".to_string());
+        let intent = Intent::new(agent_id, 1, "idle", None).with_thought("Thinking...".to_string());
         assert_eq!(intent.thought_log, Some("Thinking...".to_string()));
     }
 }

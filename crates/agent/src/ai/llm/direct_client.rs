@@ -14,13 +14,79 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{debug, error};
 
 use super::LlmClient;
 
+// ============================================================================
+// Token Usage Tracking
+// ============================================================================
+
+/// LLM Token 累计使用统计
+///
+/// 使用 AtomicU64 实现无锁并发累加，通过全局单例共享。
+/// 适用于单进程 Agent 场景。
+pub struct TokenUsageTracker {
+    /// 累计 Prompt Tokens
+    pub total_prompt_tokens: AtomicU64,
+    /// 累计 Completion Tokens
+    pub total_completion_tokens: AtomicU64,
+    /// 累计 API 调用次数
+    pub total_calls: AtomicU64,
+}
+
+impl TokenUsageTracker {
+    fn new() -> Self {
+        Self {
+            total_prompt_tokens: AtomicU64::new(0),
+            total_completion_tokens: AtomicU64::new(0),
+            total_calls: AtomicU64::new(0),
+        }
+    }
+
+    /// 记录一次 API 调用的 token 使用量
+    pub fn record(&self, prompt_tokens: u64, completion_tokens: u64) {
+        self.total_prompt_tokens
+            .fetch_add(prompt_tokens, Ordering::Relaxed);
+        self.total_completion_tokens
+            .fetch_add(completion_tokens, Ordering::Relaxed);
+        self.total_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// 获取当前统计数据
+    pub fn snapshot(&self) -> TokenUsageSnapshot {
+        let prompt = self.total_prompt_tokens.load(Ordering::Relaxed);
+        let completion = self.total_completion_tokens.load(Ordering::Relaxed);
+        TokenUsageSnapshot {
+            total_prompt_tokens: prompt,
+            total_completion_tokens: completion,
+            total_tokens: prompt + completion,
+            total_calls: self.total_calls.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Token 使用统计快照
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenUsageSnapshot {
+    pub total_prompt_tokens: u64,
+    pub total_completion_tokens: u64,
+    pub total_tokens: u64,
+    pub total_calls: u64,
+}
+
+static TOKEN_USAGE: OnceLock<TokenUsageTracker> = OnceLock::new();
+
+/// 获取全局 Token 使用统计追踪器
+pub fn token_usage_tracker() -> &'static TokenUsageTracker {
+    TOKEN_USAGE.get_or_init(TokenUsageTracker::new)
+}
+
 /// OpenClaw 配置文件格式
 #[derive(Debug, Deserialize)]
-struct OpenClawConfig {
+pub struct OpenClawConfig {
     /// Gateway 配置
     #[serde(default)]
     gateway: Option<GatewayConfig>,
@@ -34,7 +100,7 @@ struct GatewayConfig {
 
 impl OpenClawConfig {
     /// 从默认路径读取配置
-    fn load() -> Result<Self> {
+    pub fn load() -> Result<Self> {
         let config_path = Self::config_path()?;
         let content = std::fs::read_to_string(&config_path).with_context(|| {
             format!(
@@ -51,7 +117,7 @@ impl OpenClawConfig {
     }
 
     /// 获取配置文件路径
-    fn config_path() -> Result<PathBuf> {
+    pub fn config_path() -> Result<PathBuf> {
         let config_dir = std::env::var("HOME")
             .map(|home| PathBuf::from(home).join(".openclaw"))
             .unwrap_or_else(|_| PathBuf::from("."));
@@ -60,7 +126,7 @@ impl OpenClawConfig {
     }
 
     /// 获取 Gateway URL
-    fn gateway_url(&self) -> Option<&String> {
+    pub fn gateway_url(&self) -> Option<&String> {
         self.gateway.as_ref()?.url.as_ref()
     }
 }
@@ -77,8 +143,17 @@ pub enum LlmProvider {
 }
 
 impl LlmProvider {
+    /// 获取 provider 的字符串表示
+    pub fn as_str(&self) -> &str {
+        match self {
+            LlmProvider::OpenClaw => "openclaw",
+            LlmProvider::OpenAICompatible => "openai_compatible",
+            LlmProvider::Ollama => "ollama",
+        }
+    }
+
     /// 从字符串解析
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "openclaw" => Some(Self::OpenClaw),
             "openai_compatible" | "openai-compatible" => Some(Self::OpenAICompatible),
@@ -108,9 +183,9 @@ impl LlmProvider {
     /// 是否需要 API Key
     pub fn requires_api_key(&self) -> bool {
         match self {
-            Self::OpenClaw => false,        // OpenClaw 配置文件中包含认证信息
+            Self::OpenClaw => true, // OpenClaw 读取 Gateway 配置，但 API Key 需用户输入
             Self::OpenAICompatible => true, // OpenAI 兼容接口通常需要 key
-            Self::Ollama => false,          // Ollama 本地通常不需要
+            Self::Ollama => false,  // Ollama 本地通常不需要
         }
     }
 
@@ -305,6 +380,11 @@ impl DirectLlmClient {
         self.config.get_model_with_default()
     }
 
+    /// 获取当前使用的 provider 名称
+    pub fn provider_name(&self) -> String {
+        self.config.provider.as_str().to_string()
+    }
+
     /// 便捷方法：创建 OpenClaw 客户端（自动读取配置文件）
     pub fn openclaw() -> Result<Self> {
         Self::new(DirectLlmClientConfig::new(
@@ -404,6 +484,15 @@ impl DirectLlmClient {
             .await
             .context("Failed to parse LLM response")?;
 
+        // 记录 token 使用量
+        if let Some(ref usage) = response_data.usage {
+            token_usage_tracker().record(usage.prompt_tokens, usage.completion_tokens);
+            debug!(
+                "Token usage: prompt={}, completion={}",
+                usage.prompt_tokens, usage.completion_tokens
+            );
+        }
+
         if let Some(choice) = response_data.choices.first() {
             let content = choice.message.content.trim().to_string();
             debug!("LLM response length: {} chars", content.len());
@@ -445,6 +534,16 @@ struct ChatMessage {
 #[derive(Debug, Deserialize)]
 struct OpenAIResponse {
     choices: Vec<OpenAIChoice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -462,34 +561,28 @@ mod tests {
 
     #[test]
     fn test_provider_from_str() {
+        assert_eq!(LlmProvider::parse("openclaw"), Some(LlmProvider::OpenClaw));
+        assert_eq!(LlmProvider::parse("OpenClaw"), Some(LlmProvider::OpenClaw));
         assert_eq!(
-            LlmProvider::from_str("openclaw"),
-            Some(LlmProvider::OpenClaw)
-        );
-        assert_eq!(
-            LlmProvider::from_str("OpenClaw"),
-            Some(LlmProvider::OpenClaw)
-        );
-        assert_eq!(
-            LlmProvider::from_str("openai_compatible"),
+            LlmProvider::parse("openai_compatible"),
             Some(LlmProvider::OpenAICompatible)
         );
         assert_eq!(
-            LlmProvider::from_str("openai-compatible"),
+            LlmProvider::parse("openai-compatible"),
             Some(LlmProvider::OpenAICompatible)
         );
-        assert_eq!(LlmProvider::from_str("ollama"), Some(LlmProvider::Ollama));
-        assert_eq!(LlmProvider::from_str("unknown"), None);
+        assert_eq!(LlmProvider::parse("ollama"), Some(LlmProvider::Ollama));
+        assert_eq!(LlmProvider::parse("unknown"), None);
     }
 
     #[test]
     fn test_provider_defaults() {
-        // OpenClaw 从配置文件读取
+        // OpenClaw 从配置文件读取 base_url/model，但需要用户输入 API Key
         assert_eq!(LlmProvider::OpenClaw.default_base_url(), None);
         assert_eq!(LlmProvider::OpenClaw.default_model(), None);
-        assert!(!LlmProvider::OpenClaw.requires_api_key());
-        assert!(!LlmProvider::OpenClaw.requires_base_url());
-        assert!(!LlmProvider::OpenClaw.requires_model());
+        assert!(LlmProvider::OpenClaw.requires_api_key()); // 用户需要手动输入
+        assert!(!LlmProvider::OpenClaw.requires_base_url()); // 从配置文件读取
+        assert!(!LlmProvider::OpenClaw.requires_model()); // 从配置文件读取
         assert!(LlmProvider::OpenClaw.reads_from_config());
 
         // OpenAICompatible 没有默认值

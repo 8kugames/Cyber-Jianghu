@@ -12,8 +12,7 @@
 //
 // ## Agent 架构说明
 //
-// Agent 仅支持 Claw 模式，外部调度器（如 OpenClaw）通过 WebSocket + HTTP API
-// 与 Agent 通信。Agent 不内置 LLM 调用，LLM 决策由外部调度器负责。
+// Claw 模式和 Cognitive 模式的区别**仅限于 LLM 调用位置**，其他逻辑（认知引擎、双魂、审查）完全由 Agent 自持。
 //
 // ### 通信协议
 // - WebSocket `/ws`: OpenClaw 连接，Agent 推送 Tick，OpenClaw 提交 Intent
@@ -21,11 +20,6 @@
 //
 // ### 超时处理
 // - Tick 截止时间到达时，OpenClaw 未提交 Intent → Agent 自动提交 idle Intent
-//
-// ### Cognitive 阶段参考
-// - 四阶段认知框架（Perception → Motivation → Planning → Decision）定义在
-//   `core/cognitive/stages.rs`，作为 OpenClaw 实现者的参考文档
-// - Agent 通过 `ai/cognitive/narrative.rs` 生成叙事化上下文，引导 OpenClaw 的 LLM 推理
 
 pub mod cognitive;
 pub mod http;
@@ -40,8 +34,8 @@ pub use http::{
 };
 // 重导出 ws
 pub use ws::{
-    WsDecisionConfig, WsDecisionState, WsSharedState, ws_decision, ws_router,
-    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO,
+    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO, WsDecisionConfig, WsDecisionState,
+    WsSharedState, ws_decision, ws_router,
 };
 
 use cyber_jianghu_protocol::{Intent, WorldState};

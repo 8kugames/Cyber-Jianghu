@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use crate::ai::llm::{LlmClient, LlmClientExt};
+use crate::runtime::decision::http::thinking_log;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::prompt::ObserverPrompt;
@@ -86,14 +87,16 @@ impl IntentValidator {
         debug!("Validation prompt:\n{}", prompt);
 
         // 调用 LLM
-        let response: LlmValidationResponse = self
-            .llm_client
-            .complete_json(&format!(
-                "{}\n\n{}",
-                self.observer_prompt.system_prompt(),
-                prompt
-            ))
-            .await?;
+        let full_prompt = format!("{}\n\n{}", self.observer_prompt.system_prompt(), prompt);
+        let response: LlmValidationResponse = self.llm_client.complete_json(&full_prompt).await?;
+
+        thinking_log::log_llm(
+            &format!("Agent({})", request.intent.agent_id),
+            request.intent.tick_id,
+            "ReflectorSoul",
+            &full_prompt,
+            &format!("{:?}", response),
+        );
 
         let result = response.into_validation_result();
 
@@ -209,7 +212,7 @@ impl LlmValidationResponse {
             },
             "rejected" => ValidationResult::Rejected {
                 reason: self.reason,
-                rejection_type: super::types::RejectionType::from_str(&self.rejection_type),
+                rejection_type: super::types::RejectionType::parse(&self.rejection_type),
             },
             _ => ValidationResult::Rejected {
                 reason: format!("无效的响应结果: {}", self.result),
@@ -237,7 +240,7 @@ mod tests {
         let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::idle(uuid::Uuid::new_v4(), 1),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
         };
@@ -266,7 +269,7 @@ mod tests {
         let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::idle(uuid::Uuid::new_v4(), 1),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
         };

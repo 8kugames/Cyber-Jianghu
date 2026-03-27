@@ -47,8 +47,9 @@ pub enum ServerErrorCode {
 // ============================================================================
 
 /// 下行消息类型
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum DownstreamMessage {
     /// Tick 开始通知（每个 Tick 推送）
     Tick {
@@ -64,7 +65,8 @@ pub enum DownstreamMessage {
         /// 四阶段认知上下文（结构化 JSON，引导 OpenClaw 四阶段推理）
         /// 包含：Perception → Motivation → Planning → Decision
         #[serde(skip_serializing_if = "Option::is_none")]
-        cognitive_context: Option<crate::runtime::decision::http::cognitive_context::CognitiveContext>,
+        cognitive_context:
+            Option<crate::runtime::decision::http::cognitive_context::CognitiveContext>,
     },
 
     /// Tick 关闭通知（超时未收到 Intent 时发送）
@@ -92,7 +94,6 @@ pub enum DownstreamMessage {
     },
 
     // === Server 消息透传 ===
-
     /// Server 错误消息
     ServerError {
         /// 结构化错误码
@@ -152,6 +153,17 @@ pub enum DownstreamMessage {
         /// 是否建议重新同步
         suggest_resync: bool,
     },
+
+    /// LLM 响应（OpenClaw -> Agent，用于 Claw 模式）
+    LLMResponse {
+        /// 请求 ID（用于匹配请求）
+        request_id: String,
+        /// LLM 生成内容
+        content: String,
+        /// 错误信息（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 /// 玩家意图（用于审核请求）
@@ -185,7 +197,7 @@ pub struct PersonaSummary {
 // ============================================================================
 
 /// 上行消息类型
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpstreamMessage {
     /// 意图提交
@@ -214,6 +226,14 @@ pub enum UpstreamMessage {
         /// 叙事化描述（如果通过）
         #[serde(default)]
         narrative: Option<String>,
+    },
+
+    /// LLM 请求（Agent -> OpenClaw，用于 Claw 模式）
+    LLMRequest {
+        /// 请求 ID（用于匹配响应）
+        request_id: String,
+        /// LLM 提示词
+        prompt: String,
     },
 }
 
@@ -262,6 +282,8 @@ impl From<UpstreamMessage> for Option<WsIntent> {
             }),
             // ReviewResult 不是 Intent，返回 None
             UpstreamMessage::ReviewResult { .. } => None,
+            // LLMRequest 不是 Intent，返回 None
+            UpstreamMessage::LLMRequest { .. } => None,
         }
     }
 }
@@ -375,7 +397,8 @@ impl DownstreamMessage {
             || message.contains("limit exceeded")
         {
             ServerErrorCode::RateLimited
-        } else if message.contains("tick") && (message.contains("too far") || message.contains("过期"))
+        } else if message.contains("tick")
+            && (message.contains("too far") || message.contains("过期"))
         {
             ServerErrorCode::TickExpired
         } else if message.contains("Invalid") || message.contains("无效") {
@@ -393,14 +416,12 @@ impl DownstreamMessage {
         let patterns = [r"tick_id[:\s]+(\d+)", r"tick[:\s]+(\d+)"];
 
         for pattern in patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if let Some(caps) = re.captures(message) {
-                    if let Some(m) = caps.get(1) {
-                        if let Ok(n) = m.as_str().parse::<i64>() {
-                            return Some(n);
-                        }
-                    }
-                }
+            if let Ok(re) = regex::Regex::new(pattern)
+                && let Some(caps) = re.captures(message)
+                && let Some(m) = caps.get(1)
+                && let Ok(n) = m.as_str().parse::<i64>()
+            {
+                return Some(n);
             }
         }
         None
@@ -551,7 +572,8 @@ mod tests {
     #[test]
     fn test_serialize_tick_message_with_context() {
         use crate::runtime::decision::http::cognitive_context::{
-            CognitiveContext, PerceptionContext, MotivationContext, PlanningContext, DecisionContext,
+            CognitiveContext, DecisionContext, MotivationContext, PerceptionContext,
+            PlanningContext,
         };
 
         let state = create_test_world_state();
@@ -705,7 +727,12 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code, message, tick_id, current_tick } => {
+            DownstreamMessage::ServerError {
+                code,
+                message,
+                tick_id,
+                current_tick,
+            } => {
                 assert_eq!(code, ServerErrorCode::AgentDead);
                 assert!(message.contains("死亡"));
                 assert!(tick_id.is_none()); // 消息中没有 tick_id
@@ -725,7 +752,12 @@ mod tests {
         assert!(result.is_some());
 
         match result.unwrap() {
-            DownstreamMessage::ServerError { code: _, message, tick_id, current_tick } => {
+            DownstreamMessage::ServerError {
+                code: _,
+                message,
+                tick_id,
+                current_tick,
+            } => {
                 assert_eq!(tick_id, Some(105));
                 assert!(message.contains("tick 105"));
                 assert_eq!(current_tick, Some(100)); // 传入的 current_tick

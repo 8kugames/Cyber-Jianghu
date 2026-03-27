@@ -9,12 +9,43 @@
 
 ### ⚠️ Breaking Changes
 
+- **Agent**: CLI 移除 `--role` 和 `--target-endpoint` 参数
+  - 移除远程 Observer 模式（HTTP 轮询其他 Agent）
+  - ReflectorSoul 现在作为进程内双 Soul 架构默认启用
+  - 原因：简化架构，统一使用 AgentBuilder 接口
+
 - **Agent**: HTTP Intent API 禁用
   - 移除 `POST /api/v1/intent` 路由
   - 强制使用 WebSocket 提交 Intent（确保 Tick 同步）
   - 原因：HTTP 轮询无法保证 tick_id 实时同步，会导致意图被拒绝
 
 ### Added
+
+- **Agent**: ActorSoul 和 ReflectorSoul LLM 独立配置
+  - 新增 `llm_reflector` 配置字段，支持独立配置 ReflectorSoul LLM
+  - 新增 GET /api/v1/config/llm/providers 端点
+  - 新增 GET /api/v1/config/llm 端点获取当前配置
+  - 新增 POST /api/v1/config/llm 端点更新配置
+  - Web 面板新增 LLM 配置界面
+  - 配置变更通过文件监听自动热重载
+  - API Key 格式验证和内存安全（zeroize）
+  - 配置更新原子替换 + 备份回滚机制
+
+- **Agent**: ActorSoul + ReflectorSoul 双 Soul 架构
+  - 新增 `ReviewStore` 共享内存用于进程内审查通信
+  - ActorSoul (行动之魂)：生成意图，执行行动
+  - ReflectorSoul (反思之魂)：审查意图，道德判断（默认启用）
+  - AgentBuilder 新增 `with_review_store()` 和 `with_reconnect_rx()` 方法
+
+- **Agent**: 审查系统默认启用
+  - Cognitive 和 Claw 模式均默认启用 ReflectorSoul
+  - 支持三种审查结果：Approved、Rejected、TimeoutApproved
+  - 审查超时自动批准（默认 30 秒）
+
+- **Agent**: 架构统一（COI 原则）
+  - Cognitive 和 Claw 模式统一使用 AgentBuilder
+  - 移除 `Agent::new()` 的使用（改用 Builder）
+  - 确保两种模式功能完全一致
 
 - **Server**: agent_id → device_id 反向映射系统
   - 新增 `AgentToDeviceMap` 类型维护角色到设备的映射
@@ -28,11 +59,19 @@
 
 ### Changed
 
+- **Agent**: 配置文件新增 `config_path` 字段
+
 - **Server**: WebSocket 连接管理改用 device_id 作为 key
   - 连接管理器现在以 device_id 而非 agent_id 存储连接
   - 支持同一设备管理多角色的场景
 
 ### Removed
+
+- **Agent**: 移除远程 Observer 模式相关代码
+  - 删除 `run_observer_mode()` 函数
+  - 删除 `fetch_pending_reviews()` 和 `process_review_remote()` 函数
+  - 删除 `--role observer` 和 `--target-endpoint` CLI 参数
+  - 保留 HTTP API 端点供外部监控工具使用
 
 - 删除过时的设计文档：
   - `docs/openclaw-cognitive-integration.md`

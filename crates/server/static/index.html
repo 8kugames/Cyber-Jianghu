@@ -744,13 +744,14 @@
             </div>
         </div>
 
+        <script src="js-yaml.min.js"></script>
         <script>
             let currentFile = null;
             let refreshInterval = null;
             let authToken = localStorage.getItem("admin_token") || "";
 
             // Smooth time animation state
-            let smoothTimeConfig = null;  // { tickId, tickDurationSecs, ticksPerHour, lastSyncTime }
+            let smoothTimeConfig = null; // { tickId, tickDurationSecs, ticksPerHour, lastSyncTime }
             let smoothTimeAnimationId = null;
 
             // Check for token in URL
@@ -787,7 +788,7 @@
                 document.getElementById("auth-modal").style.display = "flex";
             }
 
-            function submitAuthToken() {
+            async function submitAuthToken() {
                 const token = document
                     .getElementById("auth-token-input")
                     .value.trim();
@@ -796,6 +797,10 @@
                     localStorage.setItem("admin_token", token);
                     document.getElementById("auth-modal").style.display =
                         "none";
+                    // Retry init mapping if empty
+                    if (Object.keys(locationNames).length === 0) {
+                        await initLocationMapping();
+                    }
                     // Retry current view load
                     if (
                         document
@@ -860,8 +865,8 @@
                         tickId: data.current_tick_id,
                         tickDurationSecs: data.tick_duration_secs,
                         ticksPerHour: data.ticks_per_hour,
-                        season: data.game_time.season,  // 季节名称
-                        lastSyncTime: Date.now(),  // 记录同步时刻
+                        season: data.game_time.season, // 季节名称
+                        lastSyncTime: Date.now(), // 记录同步时刻
                     };
 
                     // Start smooth time animation if not already running
@@ -912,7 +917,6 @@
                     } else {
                         await loadOfflineAgents();
                     }
-                    await loadWorldOverview();
                 } catch (e) {
                     console.error("Failed to load stats", e);
                 }
@@ -950,12 +954,17 @@
                     const elapsedRealMs = now - smoothTimeConfig.lastSyncTime;
                     // 计算当前 tick 内的进度 (基于现实时间)
                     const elapsedRealSecs = elapsedRealMs / 1000;
-                    const tickProgress = Math.min(elapsedRealSecs / smoothTimeConfig.tickDurationSecs, 1.0);
+                    const tickProgress = Math.min(
+                        elapsedRealSecs / smoothTimeConfig.tickDurationSecs,
+                        1.0,
+                    );
 
                     // 计算平滑游戏时间
                     // 总游戏小时 = tickId / ticksPerHour + tick进度 / ticksPerHour
-                    const baseGameHours = smoothTimeConfig.tickId / smoothTimeConfig.ticksPerHour;
-                    const fractionalHours = tickProgress / smoothTimeConfig.ticksPerHour;
+                    const baseGameHours =
+                        smoothTimeConfig.tickId / smoothTimeConfig.ticksPerHour;
+                    const fractionalHours =
+                        tickProgress / smoothTimeConfig.ticksPerHour;
                     const totalGameHours = baseGameHours + fractionalHours;
 
                     // 转换为年/月/日/时/分/秒
@@ -968,15 +977,18 @@
                     const totalHoursI = Math.floor(totalGameHours);
                     const year = 1 + Math.floor(totalHoursI / hoursPerYear);
                     const remainingAfterYear = totalHoursI % hoursPerYear;
-                    const month = 1 + Math.floor(remainingAfterYear / hoursPerMonth);
-                    const remainingAfterMonth = remainingAfterYear % hoursPerMonth;
-                    const day = 1 + Math.floor(remainingAfterMonth / hoursPerDay);
+                    const month =
+                        1 + Math.floor(remainingAfterYear / hoursPerMonth);
+                    const remainingAfterMonth =
+                        remainingAfterYear % hoursPerMonth;
+                    const day =
+                        1 + Math.floor(remainingAfterMonth / hoursPerDay);
                     const hour = remainingAfterMonth % hoursPerDay;
 
                     // 小数部分计算分钟和秒
                     const hourFrac = totalGameHours % 1;
                     const minute = Math.floor(hourFrac * 60);
-                    const second = Math.round((hourFrac * 60) % 1 * 60);
+                    const second = Math.round(((hourFrac * 60) % 1) * 60);
 
                     // 更新显示（季节和Tick同行，时间换行）
                     const pad = (n) => String(n).padStart(2, "0");
@@ -996,7 +1008,8 @@
                         }
                     }
 
-                    smoothTimeAnimationId = requestAnimationFrame(updateSmoothTime);
+                    smoothTimeAnimationId =
+                        requestAnimationFrame(updateSmoothTime);
                 }
 
                 updateSmoothTime();
@@ -1210,10 +1223,14 @@
             }
 
             async function cleanupOfflineAgents() {
-                if (!confirm("确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。")) {
+                if (
+                    !confirm(
+                        "确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。",
+                    )
+                ) {
                     return;
                 }
-                
+
                 try {
                     const res = await fetch("/api/dashboard/agents/cleanup", {
                         method: "POST",
@@ -1224,7 +1241,10 @@
 
                     if (res.ok) {
                         const data = await res.json();
-                        showToast(`清理成功！共删除了 ${data.deleted_count} 个离线 Agent。`, "success");
+                        showToast(
+                            `清理成功！共删除了 ${data.deleted_count} 个离线 Agent。`,
+                            "success",
+                        );
                         loadStats();
                         if (currentAgentTab === "offline") {
                             loadOfflineAgents();
@@ -1237,6 +1257,50 @@
                     console.error("Failed to cleanup agents", e);
                     showToast("网络请求失败", "error");
                 }
+            }
+
+            let locationNames = {};
+
+            async function initLocationMapping() {
+                try {
+                    const res = await fetch(`/api/config/locations.yaml`, {
+                        headers: getAuthHeaders(),
+                    });
+                    if (handleAuthError(res)) return;
+                    if (res.ok) {
+                        const data = await res.json();
+                        const doc = jsyaml.load(data.content);
+                        if (doc && doc.data && doc.data.nodes) {
+                            const nodeMap = {};
+                            doc.data.nodes.forEach((node) => {
+                                nodeMap[node.node_id] = node;
+                            });
+
+                            doc.data.nodes.forEach((node) => {
+                                if (
+                                    node.parent_id &&
+                                    nodeMap[node.parent_id] &&
+                                    node.type === "sub_scene"
+                                ) {
+                                    locationNames[node.node_id] =
+                                        `${nodeMap[node.parent_id].name} - ${node.name}`;
+                                } else {
+                                    locationNames[node.node_id] = node.name;
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to load locations mapping", e);
+                }
+            }
+
+            function getLocationName(locId) {
+                // 如果是子节点（例如带有下划线），并且没有完全匹配的名称，可以尝试构建层级名称
+                if (locationNames[locId]) {
+                    return locationNames[locId];
+                }
+                return locId;
             }
 
             function renderAgents() {
@@ -1279,8 +1343,8 @@
                         (agent) => `
                     <div class="agent-card" onclick="openAgentModal('${agent.id}')" style="${agent.is_alive === false ? "opacity: 0.6; filter: grayscale(1);" : ""}">
                         <div class="agent-name">${agent.name} ${agent.is_alive === false ? "💀" : ""}</div>
-                        <div class="agent-info">📍 ${agent.location}</div>
-                        <div class="agent-info">🕒 ${formatTimeAgo(agent.last_active)}</div>
+                        <div class="agent-info">📍 ${getLocationName(agent.location)}</div>
+                        <div class="agent-info">🕒 ${new Date(agent.created_at).toLocaleString()}</div>
                         <div class="hp-bar">
                             <div class="hp-fill" style="width: ${agent.hp}%; background: ${agent.is_alive === false ? "#999" : "var(--success-color)"}"></div>
                         </div>
@@ -1337,14 +1401,15 @@
 
                     body.innerHTML = `
                         <div class="detail-section">
-                            <div class="detail-title">基本信息</div>
+                            <div class="detail-title">基本信息 <span class="detail-label">ID:</span> <span style="font-family: monospace; font-size: 12px;">${agent.id}</span></div>
+
                             <div class="detail-grid">
-                                <div class="detail-item"><span class="detail-label">ID:</span> <span style="font-family: monospace; font-size: 12px;">${agent.id}</span></div>
-                                <div class="detail-item"><span class="detail-label">位置:</span> ${agent.location}</div>
+                                <div class="detail-item"><span class="detail-label">位置:</span> ${getLocationName(agent.location)}</div>
                                 <div class="detail-item"><span class="detail-label">状态:</span>
                                     <span style="color: ${agent.is_alive ? "green" : "red"}">${agent.is_alive ? "存活" : "死亡"}</span>
                                 </div>
                                 <div class="detail-item"><span class="detail-label">创建时间:</span> ${new Date(agent.created_at).toLocaleString()}</div>
+                                <div class="detail-item"><span class="detail-label">最后活跃:</span> ${agent.last_active ? new Date(agent.last_active).toLocaleString() : "从未"}</div>
                             </div>
                         </div>
 
@@ -1413,8 +1478,12 @@
             }
 
             // Init
-            loadStats();
-            startAutoRefresh();
+            async function bootstrap() {
+                await initLocationMapping();
+                loadStats();
+                startAutoRefresh();
+            }
+            bootstrap();
         </script>
     </body>
 </html>
