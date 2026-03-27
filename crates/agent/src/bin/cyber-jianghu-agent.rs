@@ -39,12 +39,12 @@ use cyber_jianghu_agent::config::{
 use cyber_jianghu_agent::{
     AgentBuilder,
     core::cognitive::{MultiStageCognitiveEngine, CognitiveEngineConfig},
-    runtime::decision::{cognitive_decision_with_retry, CognitiveDecisionConfig, DecisionCallback},
+    runtime::decision::{cognitive_decision_with_retry, CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback},
     runtime::decision::http::{ConfigWatcher, review::ReviewStore, thinking_log},
     runtime::decision::ws::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
 };
-use cyber_jianghu_protocol::ServerMessage;
+use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
 // ============================================================================
 // CLI 定义
@@ -623,13 +623,30 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 temperature: config.llm.temperature,
                 max_tokens_per_stage: config.llm.max_tokens,
             };
-            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_arc, cognitive_config));
+            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_arc.clone(), cognitive_config));
 
-            let decision: DecisionCallback = Arc::new(cognitive_decision_with_retry(
-                agent_id,
-                cognitive_engine,
-                CognitiveDecisionConfig::default().max_retries,
-            ));
+            let cognitive_decision_with_feedback: DecisionWithFeedbackCallback = Arc::new(
+                cognitive_decision_with_retry(
+                    agent_id,
+                    cognitive_engine.clone(),
+                    CognitiveDecisionConfig::default().max_retries,
+                ),
+            );
+
+            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                let engine = cognitive_engine.clone();
+                let ws = ws.clone();
+                Box::pin(async move {
+                    match engine.think(&ws).await {
+                        Ok(chain) => chain.final_intent,
+                        Err(e) => {
+                            error!("[cognitive] Decision failed: {}", e);
+                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                .with_thought(format!("认知失败: {}", e))
+                        }
+                    }
+                })
+            });
 
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
@@ -664,7 +681,9 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             let reflector_config_watcher = config_watcher.clone();
 
             let agent = AgentBuilder::new(config, decision)
+                .with_decision_feedback(cognitive_decision_with_feedback)
                 .with_review_store(review_store.clone())
+                .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
