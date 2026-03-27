@@ -13,6 +13,7 @@
 mod context;
 mod decision;
 mod history;
+mod openclaw_bridge;
 mod turn_cycle;
 
 pub use context::ContextBuilder;
@@ -22,4 +23,5 @@ pub use decision::{
 pub use history::{
     ChatMessage, HealthStatus, HistoryConfig, HistoryEntry, HistoryHealth, HistoryManager,
 };
+pub use openclaw_bridge::{BridgeConfig, OpenClawBridge};
 pub use turn_cycle::{Intent, ToolCall, ToolResult, TurnCycle, TurnCycleConfig, TurnCycleServices};

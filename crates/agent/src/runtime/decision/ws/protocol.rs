@@ -186,7 +186,7 @@ pub struct PersonaSummary {
 // ============================================================================
 
 /// 上行消息类型
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UpstreamMessage {
     /// 意图提交
@@ -215,6 +215,14 @@ pub enum UpstreamMessage {
         /// 叙事化描述（如果通过）
         #[serde(default)]
         narrative: Option<String>,
+    },
+
+    /// LLM 请求（Agent -> OpenClaw，用于 Claw 模式）
+    LLMRequest {
+        /// 请求 ID（用于匹配响应）
+        request_id: String,
+        /// LLM 提示词
+        prompt: String,
     },
 }
 
@@ -263,6 +271,8 @@ impl From<UpstreamMessage> for Option<WsIntent> {
             }),
             // ReviewResult 不是 Intent，返回 None
             UpstreamMessage::ReviewResult { .. } => None,
+            // LLMRequest 不是 Intent，返回 None
+            UpstreamMessage::LLMRequest { .. } => None,
         }
     }
 }
