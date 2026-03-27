@@ -153,6 +153,17 @@ pub enum DownstreamMessage {
         /// 是否建议重新同步
         suggest_resync: bool,
     },
+
+    /// LLM 响应（OpenClaw -> Agent，用于 Claw 模式）
+    LLMResponse {
+        /// 请求 ID（用于匹配请求）
+        request_id: String,
+        /// LLM 生成内容
+        content: String,
+        /// 错误信息（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 /// 玩家意图（用于审核请求）
