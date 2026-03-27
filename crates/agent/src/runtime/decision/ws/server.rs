@@ -11,26 +11,26 @@
 // ============================================================================
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         ConnectInfo, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::Response,
     routing::get,
-    Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, error, info, warn};
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, UpstreamMessage, WsIntent};
 use super::state::{WsSharedState, WsValidationRequest};
-use crate::runtime::decision::http::{create_api_router, get_static_serve_dir, HttpApiState};
+use crate::runtime::decision::http::{HttpApiState, create_api_router, get_static_serve_dir};
 
 // ============================================================================
 // WebSocket 路由
@@ -51,7 +51,10 @@ async fn ws_handler(
 ) -> Response {
     // 安全检查：仅允许 localhost 连接，除非配置允许外部连接
     if !addr.ip().is_loopback() && !state.allow_external_connections {
-        warn!("Rejected WebSocket connection from non-localhost: {} (allow_external_connections=false)", addr);
+        warn!(
+            "Rejected WebSocket connection from non-localhost: {} (allow_external_connections=false)",
+            addr
+        );
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body("Only localhost connections allowed (set CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 to allow)".into())
@@ -94,6 +97,10 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     let mut server_msg_rx = state.server_msg_tx.subscribe();
     let intent_tx = state.intent_tx.clone();
 
+    // 获取上行消息接收通道（用于转发 OpenClawBridge 的 LLM 请求）
+    let upstream_rx = state.upstream_rx.lock().unwrap().take();
+    let llm_response_tx = state.llm_response_tx.clone();
+
     // 使用 Arc<AtomicBool> 来共享活跃状态
     let is_active = Arc::new(AtomicBool::new(true));
     let is_active_read = is_active.clone();
@@ -107,7 +114,23 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                 Ok(Message::Text(text)) => {
                     debug!("Received message");
 
-                    // 解析消息
+                    if let Ok(DownstreamMessage::LLMResponse {
+                        request_id,
+                        content,
+                        error,
+                    }) = serde_json::from_str::<DownstreamMessage>(&text)
+                    {
+                        let result = if let Some(err) = error {
+                            Err(err)
+                        } else {
+                            Ok(content)
+                        };
+                        if let Err(e) = llm_response_tx.send((request_id, result)).await {
+                            warn!("Failed to send LLM response to bridge: {}", e);
+                        }
+                        continue;
+                    }
+
                     match serde_json::from_str::<UpstreamMessage>(&text) {
                         Ok(upstream) => {
                             // 使用 From trait 转换
@@ -207,12 +230,14 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
     // 写任务：广播 WorldState 和 tick_closed
     let write_task = async {
+        let mut upstream_rx = upstream_rx;
+
         loop {
             if !is_active_write.load(Ordering::Relaxed) {
                 break;
             }
 
-            // 使用 select 同时监听 state_rx 和 tick_closed_rx
+            // 使用 select 同时监听多个通道
             tokio::select! {
                 // 接收 WorldState
                 result = state_rx.recv() => {
@@ -324,6 +349,28 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                         }
                     }
                 }
+                // 接收来自 OpenClawBridge 的上行消息（转发到 WebSocket）
+                Some(msg) = async {
+                    if let Some(ref mut rx) = upstream_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    match serde_json::to_string(&msg) {
+                        Ok(json) => {
+                            let mut tx = ws_tx.lock().await;
+                            if let Err(e) = tx.send(Message::Text(json.into())).await {
+                                debug!("Failed to send upstream message: {}", e);
+                                break;
+                            }
+                            debug!("Forwarded upstream message to OpenClaw");
+                        }
+                        Err(e) => {
+                            error!("Failed to serialize upstream message: {}", e);
+                        }
+                    }
+                }
             }
         }
     };
@@ -371,9 +418,7 @@ pub async fn run_ws_server(
     let api_router = create_api_router().with_state(api_state);
 
     // 合并路由
-    let app = Router::new()
-        .merge(ws_router)
-        .merge(api_router);
+    let app = Router::new().merge(ws_router).merge(api_router);
 
     // 添加静态文件服务（用于 Web 面板）
     let serve_dir = get_static_serve_dir();
@@ -385,14 +430,21 @@ pub async fn run_ws_server(
 
     info!("[claw] Mixed Server listening on {}", local_addr);
     info!("[claw] HTTP_PORT={}", local_addr.port());
-    info!("[claw] WebSocket: ws://127.0.0.1:{}/ws (localhost only)", local_addr.port());
-    info!("[claw] HTTP API: http://127.0.0.1:{}/api/v1", local_addr.port());
+    info!(
+        "[claw] WebSocket: ws://127.0.0.1:{}/ws (localhost only)",
+        local_addr.port()
+    );
+    info!(
+        "[claw] HTTP API: http://127.0.0.1:{}/api/v1",
+        local_addr.port()
+    );
 
     // 使用 into_make_service_with_connect_info 来获取客户端地址
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }
@@ -401,7 +453,7 @@ pub async fn run_ws_server(
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64};
-    use tokio::sync::{mpsc, RwLock};
+    use tokio::sync::{RwLock, mpsc};
 
     #[tokio::test]
     async fn test_ws_shared_state() {
@@ -410,6 +462,8 @@ mod tests {
         let (server_msg_tx, _) = broadcast::channel(32);
         let (intent_tx, _) = mpsc::channel(16);
         let (validation_tx, _) = mpsc::channel(1);
+        let (upstream_tx, upstream_rx) = mpsc::channel(16);
+        let (llm_response_tx, llm_response_rx) = mpsc::channel(16);
 
         let shared = WsSharedState {
             state_tx,
@@ -428,6 +482,10 @@ mod tests {
             persona: Arc::new(RwLock::new(None)),
             submitted_tick: Arc::new(AtomicI64::new(-1)),
             validation_tx,
+            upstream_tx,
+            llm_response_tx,
+            llm_response_rx: Arc::new(std::sync::Mutex::new(Some(llm_response_rx))),
+            upstream_rx: Arc::new(std::sync::Mutex::new(Some(upstream_rx))),
         };
 
         assert_eq!(shared.get_current_tick(), 100);

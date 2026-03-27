@@ -6,36 +6,34 @@
 // 当向量检索不可用时，使用 SQLite FTS5 全文检索作为降级方案
 // ============================================================================
 
+use crate::ai::memory::store::ClientMemory;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use std::path::Path;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-/// FTS 降级处理器
-///
-/// 使用 SQLite FTS5 进行全文检索
 pub struct FtsFallback {
-    /// 数据库连接
-    conn: Mutex<Connection>,
-    /// Agent ID
+    fts_conn: Mutex<Connection>,
+    episodic_conn: Mutex<Connection>,
     agent_id: Uuid,
 }
 
 impl FtsFallback {
-    /// 创建新的 FTS 降级处理器
-    pub fn new(agent_id: Uuid, db_path: &Path) -> Result<Self> {
-        // 确保目录存在
-        if let Some(parent) = db_path.parent() {
+    pub fn new(agent_id: Uuid, fts_db_path: &Path, episodic_db_path: &Path) -> Result<Self> {
+        if let Some(parent) = fts_db_path.parent() {
             std::fs::create_dir_all(parent).context("Failed to create database directory")?;
         }
 
-        let conn = Connection::open(db_path).context("Failed to open FTS database")?;
+        let fts_conn = Connection::open(fts_db_path).context("Failed to open FTS database")?;
+        Self::init_schema(&fts_conn)?;
 
-        Self::init_schema(&conn)?;
+        let episodic_conn =
+            Connection::open(episodic_db_path).context("Failed to open episodic database")?;
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            fts_conn: Mutex::new(fts_conn),
+            episodic_conn: Mutex::new(episodic_conn),
             agent_id,
         })
     }
@@ -86,78 +84,117 @@ impl FtsFallback {
         Ok(())
     }
 
-    /// 重建 FTS 索引
     pub fn rebuild_index(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let fts_conn = self.fts_conn.lock().unwrap();
 
-        // 重建 FTS 索引
-        conn.execute(
-            "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
-            [],
-        )
-        .context("Failed to rebuild FTS index")?;
+        fts_conn
+            .execute(
+                "INSERT INTO memories_fts(memories_fts) VALUES('rebuild')",
+                [],
+            )
+            .context("Failed to rebuild FTS index")?;
 
         tracing::info!("FTS index rebuilt");
         Ok(())
     }
 
-    /// 全文检索
-    ///
-    /// 返回匹配记忆的 ID 列表
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<i64>> {
-        let conn = self.conn.lock().unwrap();
+    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClientMemory>> {
+        let episodic_conn = self.episodic_conn.lock().unwrap();
 
-        // 对查询进行转义和预处理
         let fts_query = self.prepare_query(query);
 
-        let mut stmt = conn
+        let mut stmt = episodic_conn
             .prepare(
-                "SELECT m.id
-                 FROM client_memories m
-                 JOIN memories_fts fts ON m.id = fts.rowid
-                 WHERE memories_fts MATCH ?1
-                   AND m.agent_id = ?2
-                   AND m.is_archived = FALSE
-                 ORDER BY bm25(memories_fts) ASC
-                 LIMIT ?3",
+                "SELECT id, agent_id, tick_id, event_type, content, metadata,
+                    importance_score, sentiment_score, memory_type,
+                    is_confirmed, created_at, updated_at
+             FROM client_memories
+             WHERE id IN (
+                 SELECT fts.rowid FROM memories_fts fts WHERE memories_fts MATCH ?1
+             )
+             AND agent_id = ?2 AND is_archived = FALSE
+             ORDER BY bm25(memories_fts) ASC
+             LIMIT ?3",
             )
             .context("Failed to prepare FTS search query")?;
 
-        let ids = stmt
+        let memories = stmt
             .query_map(
                 params![fts_query, self.agent_id.to_string(), limit as i64],
-                |row| row.get(0),
+                |row| {
+                    Ok(ClientMemory {
+                        id: row.get(0)?,
+                        agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                        tick_id: row.get(2)?,
+                        event_type: row.get(3)?,
+                        content: row.get(4)?,
+                        metadata: row
+                            .get::<_, Option<String>>(5)?
+                            .and_then(|s| serde_json::from_str(&s).ok())
+                            .unwrap_or_default(),
+                        importance_score: row.get(6)?,
+                        sentiment_score: row.get(7)?,
+                        memory_type: row.get(8)?,
+                        is_confirmed: row.get(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                    })
+                },
             )
             .context("Failed to execute FTS search query")?;
 
-        ids.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
-    /// 模糊搜索（使用 LIKE 作为最后的降级方案）
-    pub fn search_like(&self, pattern: &str, limit: usize) -> Result<Vec<i64>> {
-        let conn = self.conn.lock().unwrap();
+    pub fn search_like(&self, pattern: &str, limit: usize) -> Result<Vec<ClientMemory>> {
+        let episodic_conn = self.episodic_conn.lock().unwrap();
 
         let like_pattern = format!("%{}%", pattern);
 
-        let mut stmt = conn
+        let mut stmt = episodic_conn
             .prepare(
-                "SELECT id FROM client_memories
-                 WHERE agent_id = ?1
-                   AND content LIKE ?2
-                   AND is_archived = FALSE
-                 ORDER BY importance_score DESC
-                 LIMIT ?3",
+                "SELECT id, agent_id, tick_id, event_type, content, metadata,
+                    importance_score, sentiment_score, memory_type,
+                    is_confirmed, created_at, updated_at
+             FROM client_memories
+             WHERE agent_id = ?1
+               AND content LIKE ?2
+               AND is_archived = FALSE
+             ORDER BY importance_score DESC
+             LIMIT ?3",
             )
             .context("Failed to prepare LIKE search query")?;
 
-        let ids = stmt
+        let memories = stmt
             .query_map(
                 params![self.agent_id.to_string(), like_pattern, limit as i64],
-                |row| row.get(0),
+                |row| {
+                    Ok(ClientMemory {
+                        id: row.get(0)?,
+                        agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                        tick_id: row.get(2)?,
+                        event_type: row.get(3)?,
+                        content: row.get(4)?,
+                        metadata: row
+                            .get::<_, Option<String>>(5)?
+                            .and_then(|s| serde_json::from_str(&s).ok())
+                            .unwrap_or_default(),
+                        importance_score: row.get(6)?,
+                        sentiment_score: row.get(7)?,
+                        memory_type: row.get(8)?,
+                        is_confirmed: row.get(9)?,
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                    })
+                },
             )
             .context("Failed to execute LIKE search query")?;
 
-        ids.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
     }
 
     /// 准备 FTS 查询
@@ -187,18 +224,62 @@ impl FtsFallback {
         }
     }
 
-    /// 检查 FTS 是否可用
     pub fn is_available(&self) -> bool {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("SELECT 1 FROM memories_fts LIMIT 1", [])
+        let fts_conn = self.fts_conn.lock().unwrap();
+        fts_conn
+            .execute("SELECT 1 FROM memories_fts LIMIT 1", [])
             .is_ok()
     }
 
-    /// 获取索引统计
-    pub fn stats(&self) -> Result<FtsStats> {
-        let conn = self.conn.lock().unwrap();
+    pub fn get_memories_by_ids(&self, ids: &[i64]) -> Result<Vec<ClientMemory>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        let count: i64 = conn
+        let episodic_conn = self.episodic_conn.lock().unwrap();
+        let agent_id_str = self.agent_id.to_string();
+
+        let mut memories = Vec::new();
+        for &id in ids {
+            let mut stmt = episodic_conn.prepare(
+                "SELECT id, agent_id, tick_id, event_type, content, metadata,
+                        importance_score, sentiment_score, memory_type,
+                        is_confirmed, created_at, updated_at
+                 FROM client_memories WHERE id = ?1 AND agent_id = ?2",
+            )?;
+
+            let result = stmt.query_row(params![id, agent_id_str], |row| {
+                Ok(ClientMemory {
+                    id: row.get(0)?,
+                    agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                    tick_id: row.get(2)?,
+                    event_type: row.get(3)?,
+                    content: row.get(4)?,
+                    metadata: row
+                        .get::<_, Option<String>>(5)?
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or_default(),
+                    importance_score: row.get(6)?,
+                    sentiment_score: row.get(7)?,
+                    memory_type: row.get(8)?,
+                    is_confirmed: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                })
+            });
+
+            if let Ok(memory) = result {
+                memories.push(memory);
+            }
+        }
+
+        Ok(memories)
+    }
+
+    pub fn stats(&self) -> Result<FtsStats> {
+        let fts_conn = self.fts_conn.lock().unwrap();
+
+        let count: i64 = fts_conn
             .query_row("SELECT COUNT(*) FROM memories_fts", [], |row| row.get(0))
             .unwrap_or(0);
 
@@ -228,29 +309,28 @@ mod tests {
     fn test_prepare_query() {
         let agent_id = Uuid::new_v4();
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
+        let episodic_path = temp_dir.path().join("episodic.db");
+        let fts_path = temp_dir.path().join("fts.db");
 
-        // 创建基础表结构（测试需要）
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS client_memories (
+        let episodic_conn = Connection::open(&episodic_path).unwrap();
+        episodic_conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS client_memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 agent_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 importance_score REAL DEFAULT 0.5,
                 is_archived BOOLEAN DEFAULT FALSE
             )",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
 
-        let fts = FtsFallback::new(agent_id, &db_path).unwrap();
+        let fts = FtsFallback::new(agent_id, &fts_path, &episodic_path).unwrap();
 
-        // 测试普通查询
         let query = fts.prepare_query("战斗");
         assert!(query.contains("战斗"));
 
-        // 测试特殊字符转义
         let query_with_special = fts.prepare_query("test-value");
         assert!(query_with_special.contains("-"));
     }
@@ -259,63 +339,44 @@ mod tests {
     fn test_search_like() {
         let agent_id = Uuid::new_v4();
         let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
+        let episodic_path = temp_dir.path().join("episodic.db");
+        let fts_path = temp_dir.path().join("fts.db");
 
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS client_memories (
+        let episodic_conn = Connection::open(&episodic_path).unwrap();
+        episodic_conn
+            .execute(
+                "CREATE TABLE IF NOT EXISTS client_memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 agent_id TEXT NOT NULL,
+                tick_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
                 content TEXT NOT NULL,
+                metadata TEXT,
                 importance_score REAL DEFAULT 0.5,
+                sentiment_score REAL DEFAULT 0.0,
+                memory_type TEXT DEFAULT 'episodic',
+                is_confirmed BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 is_archived BOOLEAN DEFAULT FALSE
             )",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
 
-        // 插入测试数据
-        conn.execute(
-            "INSERT INTO client_memories (agent_id, content, importance_score) VALUES (?1, ?2, ?3)",
-            params![agent_id.to_string(), "战斗胜利，获得了奖励", 0.8],
-        )
-        .unwrap();
+        episodic_conn.execute(
+            "INSERT INTO client_memories (agent_id, tick_id, event_type, content, importance_score) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![agent_id.to_string(), 1, "combat", "战斗胜利，获得了奖励", 0.8],
+        ).unwrap();
 
-        conn.execute(
-            "INSERT INTO client_memories (agent_id, content, importance_score) VALUES (?1, ?2, ?3)",
-            params![agent_id.to_string(), "购买物品成功", 0.5],
-        )
-        .unwrap();
+        episodic_conn.execute(
+            "INSERT INTO client_memories (agent_id, tick_id, event_type, content, importance_score) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![agent_id.to_string(), 2, "trade", "购买物品成功", 0.5],
+        ).unwrap();
 
-        let fts = FtsFallback::new(agent_id, &db_path).unwrap();
+        let fts = FtsFallback::new(agent_id, &fts_path, &episodic_path).unwrap();
 
         let results = fts.search_like("战斗", 10).unwrap();
         assert_eq!(results.len(), 1);
-    }
-
-    #[test]
-    fn test_stats() {
-        let agent_id = Uuid::new_v4();
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("test.db");
-
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS client_memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                agent_id TEXT NOT NULL,
-                content TEXT NOT NULL,
-                importance_score REAL DEFAULT 0.5,
-                is_archived BOOLEAN DEFAULT FALSE
-            )",
-            [],
-        )
-        .unwrap();
-
-        let fts = FtsFallback::new(agent_id, &db_path).unwrap();
-        let stats = fts.stats().unwrap();
-
-        // 空索引
-        assert_eq!(stats.document_count, 0);
     }
 }

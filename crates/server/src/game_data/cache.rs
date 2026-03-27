@@ -452,21 +452,28 @@ mod tests {
 
         // Initialize test registry with death info configured
         init_test_registry();
-        let cache = super::super::registry::registry().expect("test registry should be initialized");
+        let cache =
+            super::super::registry::registry().expect("test registry should be initialized");
 
         // Test hunger death info
         let info = cache.get_death_info("hunger");
         assert!(info.is_some(), "hunger should have death info");
         let info = info.unwrap();
         assert_eq!(info.cause, "hunger");
-        assert!(info.message.contains("饥饿"), "death message should mention hunger");
+        assert!(
+            info.message.contains("饥饿"),
+            "death message should mention hunger"
+        );
 
         // Test thirst death info
         let info = cache.get_death_info("thirst");
         assert!(info.is_some(), "thirst should have death info");
         let info = info.unwrap();
         assert_eq!(info.cause, "thirst");
-        assert!(info.message.contains("脱水"), "death message should mention dehydration");
+        assert!(
+            info.message.contains("脱水"),
+            "death message should mention dehydration"
+        );
     }
 
     #[test]
@@ -474,7 +481,8 @@ mod tests {
         use crate::game_data::test_utils::init_test_registry;
 
         init_test_registry();
-        let cache = super::super::registry::registry().expect("test registry should be initialized");
+        let cache =
+            super::super::registry::registry().expect("test registry should be initialized");
 
         // Non-death attribute should return None
         let info = cache.get_death_info("hp");
@@ -486,7 +494,8 @@ mod tests {
         use crate::game_data::test_utils::init_test_registry;
 
         init_test_registry();
-        let cache = super::super::registry::registry().expect("test registry should be initialized");
+        let cache =
+            super::super::registry::registry().expect("test registry should be initialized");
 
         // Unknown attribute should return None
         let info = cache.get_death_info("nonexistent");

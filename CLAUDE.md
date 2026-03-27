@@ -96,7 +96,7 @@ PR checks enforce these before merge:
 2. `cargo clippy --all-targets -- -D warnings` - Lint with warnings as errors
 3. `cargo nextest run --workspace` - All tests pass
 
-CI builds for 5 platforms: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64.
+CI builds for 4 platforms: linux-x86_64 (musl), linux-arm64 (musl), macos-arm64, windows-x86_64.
 Docker images published to `ghcr.io/8kugames/cyber-jianghu-server`.
 
 ## Architecture
@@ -191,6 +191,26 @@ Key agent modules:
 **Runtime modes** (decision module):
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
+
+**Dual Soul Architecture** (Cognitive mode):
+The agent uses a dual-soul design for intent generation and moral review:
+
+```
+ActorSoul (行动之魂/本我)     ReflectorSoul (反思之魂/超我)
+       │                              │
+       │  submit_for_review()        │  poll ReviewStore
+       │  ─────────────────────────> │
+       │                              │  LLM review
+       │  <─────────────────────────  │  submit_review()
+       │  await approval              │
+       ▼
+   send_intent()
+```
+
+- **ActorSoul**: Generates intents, pursues immediate goals (id/本我)
+- **ReflectorSoul**: Reviews intents against moral values, approves/rejects (superego/超我)
+- **ReviewStore**: In-memory shared state for pending reviews and results
+- **Timeout**: Default 30s, auto-approves on timeout to prevent tick expiry
 
 ### Protocol Layer
 
@@ -291,9 +311,20 @@ use super::builder::AgentBuilder;
 ### Testing Conventions
 
 - Integration tests go in `crates/*/tests/` directories
-- Shared test fixtures in `tests/common/fixtures.rs`
+- Shared test fixtures in `crates/*/tests/common/fixtures.rs`
 - Unit tests in `#[cfg(test)] mod tests` within source files
 - CI uses `cargo-nextest` for faster parallel test execution
+
+**Test Fixture Pattern**:
+```rust
+// crates/server/tests/common/fixtures.rs
+pub fn make_test_agent(agent_id: Uuid, location: &str) -> AgentState { ... }
+pub fn make_test_intent(agent_id: Uuid, tick_id: i64, action: ActionType) -> Intent { ... }
+
+// Usage in tests
+let agent = make_test_agent(uuid, "village_center");
+let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
+```
 
 ## Important Rules
 
@@ -301,9 +332,29 @@ use super::builder::AgentBuilder;
 2. **Data-driven**: Configure via `crates/server/config/*.yaml`, not hardcoded values
 3. **No type suppression**: Never use `as any` or suppress errors
 4. **Bugfix Rule**: Fix minimally, NEVER refactor while fixing bugs
-5. **File size limit**: Keep .rs files under 500 lines
+5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
+
+### 核心人设与沟通铁律 (Communication Protocol)
+*   **直入主题 (No Bullshit)**：跳过所有客套话。禁用“好问题”、“很高兴为您解答”、“绝对没问题”。直接给答案。
+*   **字字珠玑 (Brevity)**：一句话能说完，绝不说第二句。
+*   **拒绝骑墙 (Take a Stand)**：封杀“看情况 (It depends)”、“各有优劣”。你必须有明确的技术站位，给我一个你认为最优的方案。
+*   **直言不讳 (Call Me Out)**：如果我提出了愚蠢的设计或做法，直接指出来。用聪明人的机智点醒我，不要刻意搞笑，不要人身攻击，但也绝不粉饰太平。
+*   **去企业化 (Anti-Corporate)**：像一个实战经验丰富的顶尖黑客那样交流，而不是像在背诵员工手册。
+*   **默认使用中文(Chat Chinese first)**
+
+### 技术绝对底线 (Technical Absolutes)
+*   **YAGNI & KISS**：坚决砍掉为“虚无的未来”买单的架构。组合优于继承。极简不等于简陋，严禁为了少敲键盘而写出丧失健壮性的烂代码。
+*   **Fail Fast**：零信任，悲观预期。宁可原地崩溃宕机，也绝不让脏数据过境。Catch-all 且不处理是死罪。
+*   **拒绝臆想**：没有 Profiler 数据，绝不提前优化。消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计）。
+
+### 触发器：何时必须闭嘴并反问 (Hard Interrupts)
+如果你在编码前或编码中遇到以下情况，**立即停止写代码，先问我**：
+1.  **形容词当指标**：我说了“要求快”、“高并发”、“海量数据”，却没有给具体数字。
+2.  **范围蔓延**：你发现需求在无限膨胀，偏离核心。—— *停下来，建议我砍需求。*
+3.  **你想抄近道**：你为了省事想用妥协性的“临时方案”。—— *停下来，告诉我利弊，等我点头。*
+4.  **无头烂账**：绝不在主干代码里留下没有任何追踪标记（TODO/Ticket）的 Hack 代码。
 
 ## Key Dependencies
 

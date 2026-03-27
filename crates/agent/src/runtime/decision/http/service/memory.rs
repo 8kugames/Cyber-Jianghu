@@ -74,6 +74,7 @@ pub fn memories_to_json_response(memories: &[MemoryEntry]) -> serde_json::Value 
     serde_json::json!({
         "memories": results,
         "count": results.len(),
+        "has_more": false,
     })
 }
 
@@ -83,6 +84,7 @@ pub fn search_result_to_json(memories: &[MemoryEntry], query: &str) -> serde_jso
     serde_json::json!({
         "memories": results,
         "count": results.len(),
-        "query": query
+        "query": query,
+        "has_more": false,
     })
 }

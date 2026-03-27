@@ -93,17 +93,19 @@ fn check_token(
 ) -> bool {
     // 1. 检查 Query Param
     if let Some(token) = query_token
-        && check_token_value(state, token, require_write) {
-            return true;
-        }
+        && check_token_value(state, token, require_write)
+    {
+        return true;
+    }
 
     // 2. 检查 Header (Authorization: Bearer <token>)
     if let Some(auth_header) = req.headers().get(header::AUTHORIZATION)
         && let Ok(auth_str) = auth_header.to_str()
-            && let Some(token) = auth_str.strip_prefix("Bearer ")
-                && check_token_value(state, token, require_write) {
-                    return true;
-                }
+        && let Some(token) = auth_str.strip_prefix("Bearer ")
+        && check_token_value(state, token, require_write)
+    {
+        return true;
+    }
 
     false
 }

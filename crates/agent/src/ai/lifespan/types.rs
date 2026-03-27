@@ -60,8 +60,7 @@ pub struct AgingEffectValues {
 }
 
 /// 衰老阶段
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AgingStage {
     /// 壮年（无影响）
     #[default]
@@ -73,7 +72,6 @@ pub enum AgingStage {
     /// 耄耋（严重影响）
     Venerable,
 }
-
 
 impl std::fmt::Display for AgingStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

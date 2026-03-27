@@ -29,25 +29,27 @@
 // - HTTP API 是辅助功能，WebSocket 是 OpenClaw 与 Agent 的主通道
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
-mod context;
 pub mod cognitive_context;
+pub mod config_watcher;
+mod context;
 mod dto;
 mod handlers;
 pub mod intent_history;
 pub mod review;
 pub mod service;
+pub mod thinking_log;
 
 use axum::{
     Router,
     routing::{get, post},
 };
-use cyber_jianghu_protocol::{Intent, WorldState};
+use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
@@ -71,6 +73,9 @@ use crate::ai::validator::{RuleEngineValidator, Validator};
 
 // 重导出 review 模块的公共 API
 pub use review::{PendingReviewEntry, ReviewState, ReviewStore};
+
+// 重导出 config_watcher 模块的公共 API
+pub use config_watcher::ConfigWatcher;
 
 // 重导出 context 模块的公共 API
 pub use context::{
@@ -164,6 +169,10 @@ pub struct HttpApiState {
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
     pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    /// 死亡事件广播通道（用于 SSE 实时推送）
+    pub death_event_tx: broadcast::Sender<ServerMessage>,
+    /// 运行时模式（Claw/Cognitive）
+    pub runtime_mode: crate::config::RuntimeMode,
 }
 
 /// HTTP 决策状态
@@ -230,8 +239,12 @@ pub fn http_decision(
             state.api_state.maybe_update_narratives(&world_state).await;
 
             if let Some(ref ws_state) = state.ws_shared_state {
-                let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
-                let deadline = Instant::now() + Duration::from_secs((tick_duration as f64 * 0.9) as u64);
+                let tick_duration = state
+                    .api_state
+                    .tick_duration_secs
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let deadline =
+                    Instant::now() + Duration::from_secs((tick_duration as f64 * 0.9) as u64);
                 ws_state.broadcast_tick(&world_state, deadline);
             }
 
@@ -241,10 +254,17 @@ pub fn http_decision(
             // 计算动态超时时间：tick_duration_secs * 0.8
             // 从 GameRules 获取真实的 tick_duration_secs（默认 60 秒）
             // 给 OpenClaw 足够的时间进行决策
-            let tick_duration = state.api_state.tick_duration_secs.load(std::sync::atomic::Ordering::Relaxed);
+            let tick_duration = state
+                .api_state
+                .tick_duration_secs
+                .load(std::sync::atomic::Ordering::Relaxed);
             let dynamic_timeout = (tick_duration as f64 * 0.8) as u64;
 
-            tracing::info!("[http] Waiting for intent, tick={}, timeout={}s", world_state.tick_id, dynamic_timeout);
+            tracing::info!(
+                "[http] Waiting for intent, tick={}, timeout={}s",
+                world_state.tick_id,
+                dynamic_timeout
+            );
 
             // 消费队列中过期的意图
             loop {
@@ -255,7 +275,11 @@ pub fn http_decision(
                     }
                     Ok(intent) => {
                         // 发现当前或未来 tick 的意图，直接返回
-                        tracing::info!("[http] Found queued intent for tick {}, action={}", intent.tick_id, intent.action_type);
+                        tracing::info!(
+                            "[http] Found queued intent for tick {}, action={}",
+                            intent.tick_id,
+                            intent.action_type
+                        );
                         return intent;
                     }
                     Err(_) => break,
@@ -264,20 +288,24 @@ pub fn http_decision(
 
             match tokio::time::timeout(Duration::from_secs(dynamic_timeout), rx.recv()).await {
                 Ok(Some(intent)) => {
-                    tracing::info!("[http] Received intent for tick {}, action={}", intent.tick_id, intent.action_type);
+                    tracing::info!(
+                        "[http] Received intent for tick {}, action={}",
+                        intent.tick_id,
+                        intent.action_type
+                    );
                     intent
-                },
+                }
                 Ok(None) => {
                     error!("[http] Channel closed, defaulting to idle");
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::idle(id, world_state.tick_id)
+                    Intent::new(id, world_state.tick_id, "idle", None)
                 }
                 Err(_) => {
                     // 超时是正常的（表示没有外部决策）
                     let guard = agent_id_clone.read().await;
                     let id = *guard;
-                    Intent::idle(id, world_state.tick_id)
+                    Intent::new(id, world_state.tick_id, "idle", None)
                 }
             }
         })
@@ -302,7 +330,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
         // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
-        .route("/api/v1/cognitive", get(handlers::get_cognitive_context_handler)) // 结构化认知上下文
+        .route(
+            "/api/v1/cognitive",
+            get(handlers::get_cognitive_context_handler),
+        ) // 结构化认知上下文
         // === 关系管理端点 ===
         .route(
             "/api/v1/relationship/list",
@@ -332,10 +363,18 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/validate", post(handlers::validate_intent_handler)) // 验证意图是否符合人设
         // === 角色注册端点 ===
         .route(
+            "/api/v1/character/generate",
+            post(handlers::generate_character_handler),
+        ) // LLM 一键生成角色
+        .route(
             "/api/v1/character/register",
             post(handlers::register_character_handler),
         ) // 创建新角色（转发到 Server）
         // === 角色信息端点 ===
+        .route(
+            "/api/v1/attribute-meta",
+            get(handlers::get_attribute_meta_handler),
+        ) // 属性元数据（分类）
         .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
         .route(
             "/api/v1/character/experiences",
@@ -350,6 +389,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/dream",
             post(handlers::dream_character_handler),
         ) // 托梦（持续 n 回合的念头注入）
+        .route(
+            "/api/v1/character/dream/records",
+            get(handlers::get_dream_records_handler),
+        )
         // === 多角色管理端点 ===
         .route("/api/v1/characters", get(handlers::list_characters_handler)) // 获取所有角色列表
         .route(
@@ -363,10 +406,35 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/review/{intent_id}/status",
             get(review::get_review_status),
         ) // 获取审查状态
+        // === 实时事件端点（SSE）===
+        .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
-        .route("/api/v1/config/reload", post(handlers::reload_config_handler)) // 热重载配置
+        .route(
+            "/api/v1/config/reload",
+            post(handlers::reload_config_handler),
+        ) // 热重载配置
         .route("/api/v1/config/server", post(handlers::set_server_handler)) // 设置服务器地址
+        // === 引导状态端点 ===
+        .route("/api/v1/setup/status", get(handlers::setup_status_handler)) // 获取引导状态
+        // === LLM 配置端点 ===
+        .route(
+            "/api/v1/config/llm/providers",
+            get(handlers::get_llm_providers_handler),
+        ) // 获取支持的 LLM Provider 列表
+        .route(
+            "/api/v1/config/llm/providers/openclaw/defaults",
+            get(handlers::get_openclaw_defaults_handler),
+        ) // 获取 OpenClaw 默认配置（仅当选择 openclaw 时调用）
+        .route("/api/v1/config/llm", get(handlers::get_llm_config_handler)) // 获取当前 LLM 配置
+        .route(
+            "/api/v1/config/llm",
+            post(handlers::update_llm_config_handler),
+        ) // 更新 LLM 配置
+        .route(
+            "/api/v1/config/llm/usage",
+            get(handlers::get_llm_usage_handler),
+        ) // 获取 LLM Token 累计使用统计
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -401,14 +469,32 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
 
     let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "无法绑定端口 {} ({}): 请检查是否有旧进程仍在运行，或使用其他端口",
+                port,
+                e
+            ));
+        }
+    };
     let local_addr = listener.local_addr()?;
     info!("[http] API Server listening on {}", local_addr);
     info!("[http] HTTP_PORT={}", local_addr.port());
     info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
-    info!("[http] - Create character: http://127.0.0.1:{}/index.html", local_addr.port());
-    info!("[http] - Character info:  http://127.0.0.1:{}/character.html", local_addr.port());
-    info!("[http] - Management:      http://127.0.0.1:{}/manage.html", local_addr.port());
+    info!(
+        "[http] - Create character: http://127.0.0.1:{}/create.html",
+        local_addr.port()
+    );
+    info!(
+        "[http] - Character info:  http://127.0.0.1:{}/character.html",
+        local_addr.port()
+    );
+    info!(
+        "[http] - Management:      http://127.0.0.1:{}/manage.html",
+        local_addr.port()
+    );
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -458,6 +544,7 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// # Arguments
 /// * `config_path` - 配置文件完整路径（由调用者传入，确保与主程序一致）
+#[allow(clippy::too_many_arguments)]
 pub fn create_http_state(
     agent_id: Arc<RwLock<Uuid>>,
     server_http_url: String,
@@ -466,6 +553,7 @@ pub fn create_http_state(
     reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
     config_path: PathBuf,
     ws_shared_state: Option<Arc<super::ws::WsSharedState>>,
+    runtime_mode: crate::config::RuntimeMode,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
@@ -518,6 +606,8 @@ pub fn create_http_state(
     // 初始化叙事引擎（用于属性叙事化描述）
     let narrative_engine = Some(Arc::new(create_narrative_engine()));
 
+    let (death_event_tx, _) = broadcast::channel(100);
+
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
         last_state_update: Arc::new(RwLock::new(None)),
@@ -539,7 +629,9 @@ pub fn create_http_state(
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
-        reconnect_tx,  // 重连请求发送通道
+        reconnect_tx,   // 重连请求发送通道
+        death_event_tx, // 死亡事件广播通道
+        runtime_mode,   // 从调用者传入
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -626,9 +718,15 @@ impl HttpApiState {
         let dream_store = self.dream_store.as_ref()?;
         let mut dream = dream_store.write().await;
 
-        if dream.remaining_ticks > 0 {
+        let agent_id = *self.agent_id.read().await;
+        dream.ensure_loaded(&self.config_path, &agent_id);
+
+        let mut changed = false;
+
+        let result = if dream.remaining_ticks > 0 {
             let thought = dream.thought.clone();
             dream.remaining_ticks = dream.remaining_ticks.saturating_sub(1);
+            changed = true;
 
             if dream.remaining_ticks == 0 {
                 info!("[dream] 托梦效果已结束");
@@ -637,9 +735,18 @@ impl HttpApiState {
 
             thought
         } else {
-            dream.thought = None;
+            if dream.thought.is_some() {
+                dream.thought = None;
+                changed = true;
+            }
             None
+        };
+
+        if changed {
+            dream.save_to_file(&self.config_path, &agent_id);
         }
+
+        result
     }
 
     /// 在 Tick 处理后异步更新关系描述

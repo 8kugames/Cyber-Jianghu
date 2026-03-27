@@ -32,8 +32,8 @@ use cyber_jianghu_protocol::{Intent, WorldState};
 pub use protocol::{DownstreamMessage, UpstreamMessage, WsIntent};
 pub use server::{run_ws_server, ws_router};
 pub use state::{
-    ws_intent_to_intent, WsDecisionState, WsSharedState, DEFAULT_TICK_DURATION_SECS,
-    TICK_TIMEOUT_RATIO,
+    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO, WsDecisionState, WsSharedState,
+    ws_intent_to_intent,
 };
 
 // ============================================================================
@@ -83,15 +83,12 @@ pub fn ws_decision(
                 }
                 None => {
                     // 超时或过期，自动 idle
-                    warn!(
-                        "Tick {} timeout or expired, auto idle",
-                        world_state.tick_id
-                    );
+                    warn!("Tick {} timeout or expired, auto idle", world_state.tick_id);
 
                     // 广播 tick_closed 消息给客户端
                     ws_state.broadcast_tick_closed(world_state.tick_id, "timeout");
 
-                    Intent::idle(agent_id_value, world_state.tick_id)
+                    Intent::new(agent_id_value, world_state.tick_id, "idle", None)
                         .with_thought("Tick timeout, auto idle".to_string())
                 }
             }

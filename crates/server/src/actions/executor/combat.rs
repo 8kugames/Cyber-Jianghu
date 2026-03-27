@@ -34,7 +34,8 @@ impl CombatActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少使用数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -45,7 +46,8 @@ impl CombatActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     format!("物品不存在: {}", data.item_id),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -54,7 +56,8 @@ impl CombatActionExecutor {
         if !item.is_usable() {
             return ActionExecutionResult::failure(
                 format!("{} 不可使用", item.name),
-                intent.action_type.to_string(), Some(intent.intent_id),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
             );
         }
 
@@ -81,7 +84,8 @@ impl CombatActionExecutor {
 
         let mut result = ActionExecutionResult::success(
             format!("准备使用 {}", item.name),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         // 添加物品使用变更（包含效果信息，在 apply_state_change 中原子处理）
@@ -111,7 +115,8 @@ impl CombatActionExecutor {
             None => {
                 return ActionExecutionResult::failure(
                     "缺少攻击数据".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -122,7 +127,8 @@ impl CombatActionExecutor {
             Err(_) => {
                 return ActionExecutionResult::failure(
                     "无效的目标 ID".to_string(),
-                    intent.action_type.to_string(), Some(intent.intent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
                 );
             }
         };
@@ -159,14 +165,16 @@ impl CombatActionExecutor {
                     // 公式返回了非数值类型
                     return ActionExecutionResult::failure(
                         format!("伤害公式返回了无效类型: {}", formula),
-                        intent.action_type.to_string(), Some(intent.intent_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
                     );
                 }
                 Err(e) => {
                     // 公式解析错误，应该失败而不是静默回退
                     return ActionExecutionResult::failure(
                         format!("伤害公式解析失败: {} - 公式: {}", e, formula),
-                        intent.action_type.to_string(), Some(intent.intent_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
                     );
                 }
             }
@@ -176,7 +184,8 @@ impl CombatActionExecutor {
                 None => {
                     return ActionExecutionResult::failure(
                         "攻击动作配置缺失".to_string(),
-                        intent.action_type.to_string(), Some(intent.intent_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
                     );
                 }
             };
@@ -191,7 +200,8 @@ impl CombatActionExecutor {
 
         let mut result = ActionExecutionResult::success(
             format!("攻击成功，造成 {} 点伤害", total_damage),
-            intent.action_type.to_string(), Some(intent.intent_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
         );
 
         result.add_change(StateChange::HpChanged {

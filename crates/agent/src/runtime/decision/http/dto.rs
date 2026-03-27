@@ -126,3 +126,98 @@ pub struct TickStatusResponse {
     /// 状态的存在时间（毫秒）
     pub state_age_ms: Option<u64>,
 }
+
+// ============================================================================
+// LLM 配置 API DTOs
+// ============================================================================
+
+/// LLM Provider 信息
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmProviderInfo {
+    pub value: String,
+    pub label: String,
+    pub requires_base_url: bool,
+    /// Provider 是否可用
+    ///
+    /// - `true`: 可选择
+    /// - `false`: 禁选（如 OpenClaw 配置文件不存在）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    /// 禁选原因（当 disabled=true 时显示）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+}
+
+/// Provider 列表响应
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmProvidersResponse {
+    pub providers: Vec<LlmProviderInfo>,
+}
+
+/// OpenClaw 默认配置响应
+///
+/// 仅当用户选择 openclaw provider 时请求此接口
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenClawDefaultsResponse {
+    /// Gateway URL（从 `~/.openclaw/openclaw.json` 读取）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// 默认模型（OpenClaw 配置中通常没有此字段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// LLM 配置信息（不含 API Key）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmConfigInfo {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub has_api_key: bool,
+}
+
+/// LLM 配置响应
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LlmConfigResponse {
+    pub actor: LlmConfigInfo,
+    pub reflector: Option<LlmConfigInfo>,
+    pub reflector_inherits_actor: bool,
+    pub runtime_mode: String,
+}
+
+/// LLM 配置更新请求
+#[derive(Debug, Deserialize)]
+pub struct LlmConfigUpdate {
+    pub actor: LlmConfigUpdateDetails,
+    pub reflector: Option<LlmConfigUpdateDetails>,
+    pub reflector_inherits_actor: bool,
+}
+
+/// LLM 配置更新详情
+#[derive(Debug, Deserialize)]
+pub struct LlmConfigUpdateDetails {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key: String,
+}
+
+// ============================================================================
+// 引导状态 API DTOs
+// ============================================================================
+
+/// 引导状态响应
+#[derive(Debug, Serialize)]
+pub struct SetupStatusResponse {
+    /// 是否需要引导配置
+    pub needs_setup: bool,
+    /// 是否有服务器配置
+    pub has_server: bool,
+    /// 是否有 LLM 配置
+    pub has_llm: bool,
+    /// 是否有角色
+    pub has_character: bool,
+    /// 当前角色名（如果有）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_character: Option<String>,
+}
