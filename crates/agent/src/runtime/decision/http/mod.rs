@@ -171,6 +171,8 @@ pub struct HttpApiState {
     pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
     /// 死亡事件广播通道（用于 SSE 实时推送）
     pub death_event_tx: broadcast::Sender<ServerMessage>,
+    /// Tick 更新广播通道（用于 SSE 实时推送，仅发送 tick_id）
+    pub tick_update_tx: broadcast::Sender<i64>,
     /// 运行时模式（Claw/Cognitive）
     pub runtime_mode: crate::config::RuntimeMode,
 }
@@ -237,6 +239,21 @@ pub fn http_decision(
 
             // 触发叙事更新（异步，不阻塞）
             state.api_state.maybe_update_narratives(&world_state).await;
+
+            // 持久化 events_log 到 IntentHistory（供经历日志查询）
+            if let Some(ref history) = state.api_state.intent_history {
+                let world_time_str = serde_json::to_string(&world_state.world_time).ok();
+                for (i, event) in world_state.events_log.iter().enumerate() {
+                    let tick_id =
+                        world_state.tick_id - (world_state.events_log.len() - i - 1) as i64;
+                    history
+                        .record_event(tick_id, &event.description, world_time_str.clone())
+                        .await;
+                }
+            }
+
+            // 广播 Tick 更新事件（供 Web Panel SSE 实时刷新）
+            let _ = state.api_state.tick_update_tx.send(world_state.tick_id);
 
             if let Some(ref ws_state) = state.ws_shared_state {
                 let tick_duration = state
@@ -571,7 +588,10 @@ pub fn create_http_state(
 
     // 初始化关系存储
     let relationship_store =
-        RelationshipStore::open(current_agent_id, &data_dir.join("relationships.db"))
+        RelationshipStore::open(
+            current_agent_id,
+            &data_dir.join(format!("relationships_{}.db", current_agent_id)),
+        )
             .ok()
             .map(Arc::new);
 
@@ -607,6 +627,7 @@ pub fn create_http_state(
     let narrative_engine = Some(Arc::new(create_narrative_engine()));
 
     let (death_event_tx, _) = broadcast::channel(100);
+    let (tick_update_tx, _) = broadcast::channel(64);
 
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
@@ -627,10 +648,13 @@ pub fn create_http_state(
         dynamic_persona: None,
         narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
-        intent_history: Some(Arc::new(intent_history::IntentHistoryStore::new(100))),
+        intent_history: intent_history::IntentHistoryStore::open(current_agent_id, &data_dir.join(format!("intent_history_{}.db", current_agent_id)))
+            .ok()
+            .map(Arc::new),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx,   // 重连请求发送通道
         death_event_tx, // 死亡事件广播通道
+        tick_update_tx, // Tick 更新广播通道
         runtime_mode,   // 从调用者传入
     };
 
