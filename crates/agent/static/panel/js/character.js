@@ -258,16 +258,6 @@ function renderAttributes(attributes) {
     }
 
     const categories = attributeMeta ? attributeMeta.categories : null;
-    const statusKeys = new Set(categories?.status || []);
-    const primaryKeys = new Set(categories?.primary || []);
-    const derivedKeys = new Set(categories?.derived || []);
-    const knownKeys = new Set([...statusKeys, ...primaryKeys, ...derivedKeys]);
-
-    const isRedundantMax = (key) => {
-        if (typeof key !== 'string' || !key.endsWith('_max')) return false;
-        const base = key.slice(0, -4);
-        return knownKeys.has(base);
-    };
 
     let html = '';
 
@@ -294,26 +284,31 @@ function renderAttributes(attributes) {
         statusList.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
-                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                    <span class="attr-value">${attr.current}/${attr.max}</span>
-                </div>`;
+                if (attr.max !== undefined && attr.max !== null) {
+                    // 有上限的状态属性，显示进度条
+                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                    html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
+                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                        <span class="attr-value">${attr.current}/${attr.max}</span>
+                    </div>`;
+                } else {
+                    // 无上限的状态属性（如声望）
+                    html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
+                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                        <span class="attr-value">${attr.current}</span>
+                    </div>`;
+                }
             }
         });
         html += '</div></div>';
     }
 
-    // 派生属性（从 attributes 中过滤掉已知 key 和 _max 冗余项）
-    const derived = Object.keys(attributes)
-        .filter(k => !knownKeys.has(k))
-        .filter(k => !isRedundantMax(k))
-        .filter(k => attributes[k] && typeof attributes[k] === 'object');
-
-    if (derived.length > 0) {
+    // 派生属性（从配置分类中获取）
+    const derivedList = categories?.derived || [];
+    if (derivedList.length > 0) {
         html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-        derived.forEach(key => {
+        derivedList.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
                 html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">

@@ -209,6 +209,23 @@ impl AgentState {
             }
         }
 
+        // 计算并返回派生属性（基于先天属性实时计算，不存储）
+        if let Some(config) =
+            crate::game_data::registry::StateRegistry::get_attributes_config()
+        {
+            for (name, attr_def) in &config.data.derived.attributes {
+                if let Some(formula) = &attr_def.formula {
+                    let value =
+                        crate::game_data::types::StatusComponent::evaluate_max_value(
+                            &Some(formula.clone()),
+                            attr_def.default_value.map(|v| v as i32).unwrap_or(0),
+                            &context,
+                        );
+                    attributes.insert(name.clone(), value);
+                }
+            }
+        }
+
         attributes
     }
 }
