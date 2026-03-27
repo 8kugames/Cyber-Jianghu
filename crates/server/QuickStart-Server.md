@@ -44,11 +44,12 @@ docker compose logs -f server
 | DB_PASSWORD | PostgreSQL 密码（必须修改） | changeme |
 | POSTGRES_PORT | PostgreSQL 端口 | 5432 |
 | SERVER_PORT | 服务端端口 | 23333 |
-| TICK_DURATION_SECS | Tick 周期（秒） | 60 |
 | ADMIN_READ_TOKEN | Dashboard 只读 Token | 自动生成 |
 | ADMIN_WRITE_TOKEN | Dashboard 读写 Token | 自动生成 |
 | RUST_LOG | 日志级别 | info |
 | ENVIRONMENT | 环境标识 | development |
+
+> **注意**：`TICK_DURATION_SECS` 环境变量已被废弃。Tick 周期通过 `config/game_rules.yaml` 的 `tick.real_seconds_per_tick` 配置。
 
 ## 访问服务
 
