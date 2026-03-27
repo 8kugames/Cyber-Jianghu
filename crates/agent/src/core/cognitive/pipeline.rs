@@ -189,6 +189,7 @@ mod tests {
             },
             self_state: AgentSelfState {
                 attributes: HashMap::new(),
+                derived_attributes: HashMap::new(),
                 attribute_descriptions: HashMap::new(),
                 status_effects: vec![],
                 inventory: vec![],

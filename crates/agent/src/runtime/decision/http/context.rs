@@ -33,6 +33,8 @@ pub struct AttributesGlimpse {
     pub attributes: Vec<FormattedAttribute>,
     /// 原始属性数值（供程序使用）
     pub raw: HashMap<String, i32>,
+    /// 派生属性原始数值（浮点数）
+    pub derived_raw: HashMap<String, f32>,
     /// 警告：此数据不可记忆
     pub warning: String,
 }
@@ -63,6 +65,7 @@ pub fn create_attributes_glimpse(
 ) -> AttributesGlimpse {
     let mut formatted = Vec::new();
     let raw: HashMap<String, i32> = state.self_state.attributes.clone();
+    let derived_raw: HashMap<String, f32> = state.self_state.derived_attributes.clone();
 
     // 定义属性类别（基于名称前缀或具体名称）
     let status_attrs = [
@@ -82,20 +85,6 @@ pub fn create_attributes_glimpse(
         "charisma",
         "luck",
     ];
-    // 派生属性当前不在 WorldState 中，这里列出已知名称
-    let derived_attrs = [
-        "max_carry_weight",
-        "physical_damage",
-        "dodge_rate",
-        "critical_rate",
-        "skill_learning_speed",
-        "exp_bonus",
-        "stamina_regen",
-        "qi_regen",
-        "perception",
-        "social_interaction",
-        "event_probability",
-    ];
 
     for (name, &value) in &raw {
         let display_name = engine.get_display_name(name).unwrap_or(name).to_string();
@@ -103,31 +92,30 @@ pub fn create_attributes_glimpse(
             "status"
         } else if primary_attrs.contains(&name.as_str()) {
             "primary"
-        } else if derived_attrs.contains(&name.as_str()) {
-            "derived"
         } else {
             "unknown"
         };
 
-        // 格式化值
-        let value_str = if category == "primary" {
-            // 先天属性 - 显示当前值，带成长标记
-            // 注意：先天属性通常有 birth_range，但没有 max_value 概念
-            // 这里简化处理，只显示当前值
-            format!("{}", value)
-        } else if category == "status" {
-            // 状态值 - 显示当前值
-            format!("{}", value)
-        } else {
-            // 派生属性或其他
-            format!("{}", value)
-        };
+        let value_str = format!("{}", value);
 
         formatted.push(FormattedAttribute {
             name: name.clone(),
             display_name,
             value_str,
             category: category.to_string(),
+        });
+    }
+
+    // 添加派生属性（从 derived_raw 获取，格式化为两位小数）
+    for (name, &value) in &derived_raw {
+        let display_name = engine.get_display_name(name).unwrap_or(name).to_string();
+        let value_str = format!("{:.2}", value);
+
+        formatted.push(FormattedAttribute {
+            name: name.clone(),
+            display_name,
+            value_str,
+            category: "derived".to_string(),
         });
     }
 
@@ -146,6 +134,7 @@ pub fn create_attributes_glimpse(
         tick_id: state.tick_id,
         attributes: formatted,
         raw,
+        derived_raw,
         warning: "此数据为梦中一瞥，仅限当前决策周期使用。禁止存储到记忆系统。".to_string(),
     }
 }

@@ -15,6 +15,11 @@ pub struct AgentSelfState {
     #[serde(default)]
     pub attributes: HashMap<String, i32>,
 
+    /// 派生属性映射（实时计算，浮点数）
+    /// 如闪避率、暴击率等，基于公式实时计算
+    #[serde(default)]
+    pub derived_attributes: HashMap<String, f32>,
+
     /// 属性叙事描述（数据驱动）
     /// 将数值转换为自然语言描述，便于 LLM 理解
     #[serde(default)]
