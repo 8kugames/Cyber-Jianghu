@@ -21,7 +21,6 @@ use super::{AttributeComponent, DerivedAttributeComponent, StatusComponent};
 
 /// Attribute 的 server 特有方法
 // pub trait AttributeExt { ... } // Removed and moved to protocol
-
 /// AttributeComponent 的 server 特有方法（预留：属性系统扩展）
 #[allow(dead_code)]
 pub trait AttributeComponentExt {
@@ -180,7 +179,7 @@ impl StatusComponentExt for StatusComponent {
         for attr in self.collection.attributes.values_mut() {
             if let Some(decay) = attr.metadata.decay_per_tick {
                 let current = attr.get_value();
-                let new_value = (current + decay).max(0).min(255);
+                let new_value = (current as f32 + decay).floor().clamp(0.0, 255.0) as i32;
                 attr.set_value(new_value);
             }
         }

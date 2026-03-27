@@ -77,7 +77,6 @@ pub struct ActionValidation {
     pub field_validations: Vec<FieldValidation>,
 }
 
-
 /// 字段验证规则
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FieldValidation {

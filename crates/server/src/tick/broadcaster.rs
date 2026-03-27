@@ -43,6 +43,7 @@ impl Broadcaster {
     /// 广播新状态给所有Agent
     ///
     /// 为每个Agent构建个性化WorldState并通过WebSocket发送
+    #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
         tick_id: i64,
@@ -124,8 +125,13 @@ impl Broadcaster {
             );
 
             // 向该Agent发送其专属的WorldState
-            if let Err(e) =
-                send_world_state(agent_state.agent_id, world_state, connection_manager, agent_to_device_map).await
+            if let Err(e) = send_world_state(
+                agent_state.agent_id,
+                world_state,
+                connection_manager,
+                agent_to_device_map,
+            )
+            .await
             {
                 warn!("向Agent {} 发送WorldState失败: {}", agent_state.agent_id, e);
             } else {
@@ -141,6 +147,7 @@ impl Broadcaster {
     ///
     /// 包含周围Agent信息（同节点、存活、在线的其他Agent）
     /// 使用数据驱动：从配置加载位置信息和可用动作
+    #[allow(clippy::too_many_arguments)]
     fn build_world_state_for_agent(
         &self,
         agent_state: &AgentState,
@@ -185,13 +192,13 @@ impl Broadcaster {
             .get_neighbors(current_node_id)
             .iter()
             .filter_map(|edge| {
-                location_registry.get_node(&edge.to_node_id).map(|node| {
-                    AdjacentNode {
+                location_registry
+                    .get_node(&edge.to_node_id)
+                    .map(|node| AdjacentNode {
                         node_id: edge.to_node_id.clone(),
                         name: node.name.clone(),
                         travel_cost: edge.travel_cost,
-                    }
-                })
+                    })
             })
             .collect();
 
@@ -199,14 +206,20 @@ impl Broadcaster {
         if !agent_state.is_alive {
             let has_death_event = events.iter().any(|e| {
                 if let Some(cause) = e.metadata.get("cause")
-                    && let Some(cause_str) = cause.as_str() {
-                        return cause_str.starts_with("death");
-                    }
+                    && let Some(cause_str) = cause.as_str()
+                {
+                    return cause_str.starts_with("death");
+                }
                 false
             });
 
             if !has_death_event {
-                let death_message = game_data_cache.get().display_messages.notifications.death.clone();
+                let death_message = game_data_cache
+                    .get()
+                    .display_messages
+                    .notifications
+                    .death
+                    .clone();
                 events.push(WorldEvent {
                     event_type: "system_notification".to_string(),
                     tick_id,
@@ -266,18 +279,17 @@ impl Broadcaster {
             .collect();
 
         // 从 ActionRegistry 获取所有可用动作（数据驱动）
-        let available_actions: Vec<crate::models::AvailableAction> = ActionRegistry::all_action_names()
-            .into_iter()
-            .filter_map(|action_name| {
-                ActionRegistry::get(&action_name).map(|config| {
-                    crate::models::AvailableAction {
+        let available_actions: Vec<crate::models::AvailableAction> =
+            ActionRegistry::all_action_names()
+                .into_iter()
+                .filter_map(|action_name| {
+                    ActionRegistry::get(&action_name).map(|config| crate::models::AvailableAction {
                         action: action_name,
                         description: config.description,
                         valid_targets: None,
-                    }
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
         // 获取天气描述（数据驱动，目前固定晴天）
         let weather = game_data_cache.get().display_messages.weather.sunny.clone();
@@ -311,7 +323,9 @@ impl Broadcaster {
                 let attribute_descriptions: HashMap<String, String> = attributes
                     .iter()
                     .filter_map(|(name, &value)| {
-                        game_data.narrative.get_description(name, value)
+                        game_data
+                            .narrative
+                            .get_description(name, value)
                             .map(|desc| (name.clone(), desc.to_string()))
                     })
                     .collect();

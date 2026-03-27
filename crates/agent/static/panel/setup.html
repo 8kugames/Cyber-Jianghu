@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>赛博江湖 - 初始配置</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="container">
+            <header>
+                <h1>赛博江湖</h1>
+                <nav class="nav-tabs">
+                    <span class="nav-tab active">初始配置</span>
+                </nav>
+            </header>
+
+            <main>
+                <div class="setup-progress">
+                    <div class="progress-step active" id="step-indicator-1">
+                        <span class="step-num">1</span>
+                        <span class="step-label">服务器</span>
+                    </div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step-indicator-2">
+                        <span class="step-num">2</span>
+                        <span class="step-label">LLM</span>
+                    </div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step-indicator-3">
+                        <span class="step-num">3</span>
+                        <span class="step-label">完成</span>
+                    </div>
+                </div>
+
+                <section class="setup-step" id="step-1">
+                    <div class="setup-step-header">
+                        <h2>第一步：服务器配置</h2>
+                        <p>配置游戏服务器地址（默认 localhost:23333）</p>
+                    </div>
+                    <form id="server-form">
+                        <div class="form-group">
+                            <label for="server-ws-url">WebSocket 地址</label>
+                            <input type="text" id="server-ws-url" value="ws://localhost:23333/ws" required />
+                        </div>
+                        <div class="form-group">
+                            <label for="server-http-url">HTTP 地址</label>
+                            <input type="text" id="server-http-url" value="http://localhost:23333" />
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="server-next-btn">下一步</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="setup-step hidden" id="step-2">
+                    <div class="setup-step-header">
+                        <h2>第二步：LLM 配置</h2>
+                        <p>选择 LLM Provider 并配置连接信息</p>
+                    </div>
+                    <form id="llm-form">
+                        <div class="form-group">
+                            <label for="llm-provider">Provider</label>
+                            <select id="llm-provider">
+                                <!-- 动态加载 -->
+                            </select>
+                            <p id="llm-provider-hint" class="hint hidden"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="llm-model">模型</label>
+                            <input type="text" id="llm-model" placeholder="如: qwen2.5:14b 或 gpt-4o" required />
+                        </div>
+                        <div class="form-group" id="base-url-group">
+                            <label for="llm-base-url">Base URL</label>
+                            <input type="text" id="llm-base-url" placeholder="如: http://localhost:11434" />
+                        </div>
+                        <div class="form-group hidden" id="api-key-group">
+                            <label for="llm-api-key">API Key</label>
+                            <input type="password" id="llm-api-key" placeholder="输入 API Key" />
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="llm-back-btn" class="btn-secondary">上一步</button>
+                            <button type="submit" id="llm-next-btn">下一步</button>
+                        </div>
+                    </form>
+                </section>
+
+                <section class="setup-step hidden" id="step-3">
+                    <div class="setup-step-header">
+                        <h2>配置完成</h2>
+                        <p>服务器和 LLM 配置已保存，正在热重载...</p>
+                    </div>
+                    <div id="setup-success">
+                        <div class="success-icon">&#10003;</div>
+                        <p id="setup-message">保存成功</p>
+                    </div>
+                    <div id="setup-error" class="error hidden">
+                        <p id="setup-error-msg"></p>
+                    </div>
+                    <div class="form-actions">
+                        <a href="create.html" class="nav-link" id="go-create">前往创建角色</a>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <script src="js/shared.js"></script>
+        <script>
+            let currentStep = 1;
+            const totalSteps = 3;
+            let providersData = []; // 缓存 Provider 数据
+
+            function showStep(n) {
+                document.querySelectorAll('.setup-step').forEach(s => s.classList.add('hidden'));
+                document.getElementById('step-' + n).classList.remove('hidden');
+
+                for (let i = 1; i <= totalSteps; i++) {
+                    const indicator = document.getElementById('step-indicator-' + i);
+                    indicator.classList.toggle('active', i === n);
+                    indicator.classList.toggle('completed', i < n);
+                }
+
+                currentStep = n;
+            }
+
+            // 动态加载 Provider 列表
+            async function loadProviders() {
+                try {
+                    var data = await apiGet('/api/v1/config/llm/providers');
+                    providersData = data.providers || [];
+
+                    var select = document.getElementById('llm-provider');
+                    select.innerHTML = '';
+
+                    providersData.forEach(p => {
+                        var option = document.createElement('option');
+                        option.value = p.value;
+                        option.textContent = p.label;
+                        option.disabled = p.disabled || false;
+                        option.dataset.requiresBaseUrl = p.requires_base_url || false;
+                        if (p.disabled_reason) {
+                            option.title = p.disabled_reason;
+                        }
+                        select.appendChild(option);
+                    });
+
+                    // 触发 change 事件更新 UI
+                    select.dispatchEvent(new Event('change'));
+                } catch (err) {
+                    console.error('加载 Provider 列表失败:', err);
+                    // 回退到硬编码
+                    var select = document.getElementById('llm-provider');
+                    select.innerHTML = `
+                        <option value="ollama">Ollama（本地模型）</option>
+                        <option value="openai_compatible">OpenAI Compatible</option>
+                    `;
+                }
+            }
+
+            document.getElementById('llm-provider').addEventListener('change', async function() {
+                var selectedOption = this.options[this.selectedIndex];
+                var isDisabled = selectedOption.disabled;
+                var requiresBaseUrl = selectedOption.dataset.requiresBaseUrl === 'true';
+
+                // 显示/隐藏禁用提示
+                var hint = document.getElementById('llm-provider-hint');
+                if (isDisabled) {
+                    hint.textContent = selectedOption.title || '此 Provider 当前不可用';
+                    hint.classList.remove('hidden');
+                } else {
+                    hint.classList.add('hidden');
+                }
+
+                // 更新表单字段显示
+                var isLocal = this.value === 'ollama';
+                document.getElementById('base-url-group').classList.toggle('hidden', isLocal);
+                document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
+
+                if (isLocal) {
+                    document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
+                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b';
+                } else if (this.value === 'openclaw') {
+                    // 尝试加载 OpenClaw 默认配置
+                    try {
+                        var defaults = await apiGet('/api/v1/config/llm/providers/openclaw/defaults');
+                        if (defaults.base_url) {
+                            document.getElementById('llm-base-url').value = defaults.base_url;
+                        }
+                        if (defaults.model) {
+                            document.getElementById('llm-model').value = defaults.model;
+                        }
+                        document.getElementById('llm-base-url').placeholder = '自动从 OpenClaw Gateway 读取';
+                        document.getElementById('llm-model').placeholder = '输入模型名称';
+                    } catch (err) {
+                        console.log('加载 OpenClaw 默认配置失败');
+                    }
+                } else {
+                    document.getElementById('llm-base-url').placeholder = '如: https://api.openai.com/v1';
+                    document.getElementById('llm-model').placeholder = '如: gpt-4o';
+                }
+            });
+
+            document.getElementById('server-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                var btn = document.getElementById('server-next-btn');
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+
+                try {
+                    var ws_url = document.getElementById('server-ws-url').value.trim();
+                    var http_url = document.getElementById('server-http-url').value.trim();
+                    await apiPost('/api/v1/config/server', { ws_url: ws_url, http_url: http_url });
+                    showStep(2);
+                } catch (err) {
+                    showError(err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '下一步';
+                }
+            });
+
+            document.getElementById('llm-form').addEventListener('submit', async function(e) {
+                e.preventDefault();
+                var btn = document.getElementById('llm-next-btn');
+                btn.disabled = true;
+                btn.textContent = '保存中...';
+
+                try {
+                    var provider = document.getElementById('llm-provider').value;
+                    var selectedOption = document.getElementById('llm-provider').options[document.getElementById('llm-provider').selectedIndex];
+
+                    if (selectedOption.disabled) {
+                        throw new Error('当前选择的 Provider 不可用');
+                    }
+
+                    var model = document.getElementById('llm-model').value.trim();
+                    var base_url = document.getElementById('llm-base-url').value.trim() || null;
+                    var api_key = document.getElementById('llm-api-key').value || null;
+
+                    await apiPost('/api/v1/config/llm', {
+                        actor: { provider: provider, model: model, base_url: base_url, api_key: api_key },
+                        reflector: null,
+                        reflector_inherits_actor: true
+                    });
+
+                    showStep(3);
+                    document.getElementById('setup-message').textContent = '配置已保存，Agent 正在热重载...';
+                } catch (err) {
+                    showError(err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '下一步';
+                }
+            });
+
+            document.getElementById('llm-back-btn').addEventListener('click', function() {
+                showStep(1);
+            });
+
+            async function preloadConfig() {
+                try {
+                    var serverData = await apiGet('/api/v1/config');
+                    document.getElementById('server-ws-url').value = serverData.server_ws_url || 'ws://localhost:23333/ws';
+                    document.getElementById('server-http-url').value = serverData.server_http_url || 'http://localhost:23333';
+
+                    var llmData = await apiGet('/api/v1/config/llm');
+                    if (llmData && llmData.actor) {
+                        document.getElementById('llm-provider').value = llmData.actor.provider;
+                        document.getElementById('llm-model').value = llmData.actor.model || '';
+                        document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
+                        // 触发 change 事件以更新 UI（显示/隐藏 base_url 和 api_key 字段）
+                        document.getElementById('llm-provider').dispatchEvent(new Event('change'));
+                    }
+                    return { server_ws_url: serverData.server_ws_url, llm: llmData };
+                } catch (err) {
+                    console.log('加载已有配置失败，继续使用默认值');
+                    return null;
+                }
+            }
+
+            // 初始化
+            async function init() {
+                await loadProviders();
+                await preloadConfig();
+                // 始终从步骤 1 开始，让用户确认预填充的服务器地址
+            }
+            init();
+        </script>
+    </body>
+</html>

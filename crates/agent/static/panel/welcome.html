@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>赛博江湖</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="welcome-container">
+            <header class="welcome-header">
+                <h1>赛博江湖</h1>
+                <p class="welcome-subtitle">MMO-MAS 智能体世界</p>
+            </header>
+
+            <main class="welcome-main">
+                <div class="welcome-cards">
+                    <a
+                        href="create.html"
+                        class="welcome-card welcome-card-primary"
+                        id="card-new"
+                    >
+                        <div class="card-icon">初</div>
+                        <h2>初次入世</h2>
+                        <p>全新旅程，创建你的第一个角色</p>
+                    </a>
+
+                    <a
+                        href="character.html"
+                        class="welcome-card"
+                        id="card-return"
+                    >
+                        <div class="card-icon">再</div>
+                        <h2>再次降临</h2>
+                        <p>返回江湖，继续你的武侠人生</p>
+                    </a>
+
+                    <a
+                        href="setup.html"
+                        class="welcome-card"
+                        id="card-setup"
+                        style="display: none;"
+                    >
+                        <div class="card-icon">配</div>
+                        <h2>初始配置</h2>
+                        <p>配置服务器与 LLM</p>
+                    </a>
+                </div>
+            </main>
+
+            <footer class="welcome-footer">
+                <span id="status-text">检测配置状态...</span>
+            </footer>
+        </div>
+
+        <script src="js/shared.js"></script>
+        <script>
+            async function checkSetup() {
+                try {
+                    const data = await apiGet("/api/v1/setup/status");
+                    const cardNew = document.getElementById("card-new");
+                    const cardReturn = document.getElementById("card-return");
+                    const cardSetup = document.getElementById("card-setup");
+                    const statusText = document.getElementById("status-text");
+
+                    if (data.needs_setup) {
+                        // 未配置服务器或 LLM，只显示配置卡片
+                        cardNew.style.display = "none";
+                        cardReturn.classList.add("disabled");
+                        cardReturn.removeAttribute("href");
+                        cardSetup.style.display = "";
+                        statusText.textContent =
+                            "尚未配置服务器或 LLM，请先完成引导配置";
+                    } else if (data.has_character) {
+                        cardSetup.style.display = "none";
+                        cardNew.style.display = "none";
+                        statusText.textContent =
+                            "当前角色: " +
+                            (data.current_character || "未知") +
+                            " | 已配置";
+                    } else {
+                        // 已配置但无角色（含转生后），直接指向创建页
+                        cardSetup.style.display = "none";
+                        cardReturn.classList.add("disabled");
+                        cardReturn.removeAttribute("href");
+                        cardNew.href = "create.html";
+                        cardNew.querySelector("h2").textContent = "再入江湖";
+                        cardNew.querySelector("p").textContent = "创建新角色，开始你的武侠人生";
+                        statusText.textContent =
+                            "已配置服务器和 LLM，请创建角色";
+                    }
+                } catch (err) {
+                    document.getElementById("status-text").textContent =
+                        "无法连接 Agent，请确保服务已启动";
+                }
+            }
+            checkSetup();
+        </script>
+    </body>
+</html>

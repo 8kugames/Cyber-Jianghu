@@ -164,9 +164,10 @@ impl NarrativeGenerator {
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
             if let Some(&last_tick) = pending.get(&target_id)
-                && last_tick == current_tick {
-                    return Ok(()); // 已在当前 tick 生成过
-                }
+                && last_tick == current_tick
+            {
+                return Ok(()); // 已在当前 tick 生成过
+            }
             pending.insert(target_id, current_tick);
         }
 

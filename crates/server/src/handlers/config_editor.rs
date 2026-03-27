@@ -48,12 +48,13 @@ pub async fn list_configs() -> Json<Vec<ConfigFile>> {
             let path = entry.path();
             if path.is_file()
                 && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                    && get_config_format(name).is_some() {
-                        files.push(ConfigFile {
-                            name: name.to_string(),
-                            size: entry.metadata().map(|m| m.len()).unwrap_or(0),
-                        });
-                    }
+                && get_config_format(name).is_some()
+            {
+                files.push(ConfigFile {
+                    name: name.to_string(),
+                    size: entry.metadata().map(|m| m.len()).unwrap_or(0),
+                });
+            }
         }
     }
 
@@ -98,9 +99,10 @@ pub async fn update_config_content(
 
     // 阶段1: 校验配置格式
     if let Some(format) = get_config_format(&filename)
-        && let Err(e) = validate_config_content(&filename, &payload.content, format) {
-            return (StatusCode::BAD_REQUEST, format!("Validation failed: {}", e));
-        }
+        && let Err(e) = validate_config_content(&filename, &payload.content, format)
+    {
+        return (StatusCode::BAD_REQUEST, format!("Validation failed: {}", e));
+    }
 
     let path = get_config_dir().join(&filename);
 

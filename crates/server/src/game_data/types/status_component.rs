@@ -37,11 +37,11 @@ impl StatusComponent {
                 initial_value: None,
                 growth_rate: None,
                 affects: vec![],
-                decay_per_tick: attr_def.decay_per_tick_as_i32(),
+                decay_per_tick: attr_def.decay_per_tick_as_f32(),
                 death_condition: attr_def.death_condition.clone(),
                 formula: attr_def.formula.clone(),
-                default_value: attr_def.default_value_as_i32(),
-                min_value: attr_def.min_value_as_i32(),
+                default_value: attr_def.default_value_as_f32(),
+                min_value: attr_def.min_value_as_f32(),
                 max_value_formula: attr_def.max_value_as_i32().map(|v| v.to_string()),
                 recovery_formula: attr_def.recovery_formula.clone(),
                 primary_attribute_deps: attr_def.primary_attribute_deps.clone().unwrap_or_default(),
@@ -82,13 +82,14 @@ impl StatusComponent {
     /// 获取需要衰减的属性列表及其衰减量
     ///
     /// 注意：decay_per_tick 表示衰减（扣减），正值表示减少量
-    pub fn get_decaying_attributes(&self) -> Vec<(String, i32)> {
+    pub fn get_decaying_attributes(&self) -> Vec<(String, f32)> {
         let mut result = Vec::new();
         for (name, attr) in &self.collection.attributes {
             if let Some(decay) = attr.metadata.decay_per_tick
-                && decay != 0 {
-                    result.push((name.clone(), decay));
-                }
+                && decay != 0.0
+            {
+                result.push((name.clone(), decay));
+            }
         }
 
         // Ensure consistent ordering for tests (e.g. hunger, thirst, stamina)
@@ -98,7 +99,7 @@ impl StatusComponent {
             if a.1 == b.1 {
                 a.0.cmp(&b.0)
             } else {
-                b.1.cmp(&a.1) // Higher decay first
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal) // Higher decay first
             }
         });
 
@@ -113,8 +114,8 @@ impl StatusComponent {
         for (name, attr) in &self.collection.attributes {
             if let Some(formula) = &attr.metadata.recovery_formula {
                 // 只有当 decay_per_tick 为 0 或不存在时，才使用 recovery_formula
-                let decay = attr.metadata.decay_per_tick.unwrap_or(0);
-                if decay == 0 {
+                let decay = attr.metadata.decay_per_tick.unwrap_or(0.0);
+                if decay == 0.0 {
                     result.push((name.clone(), formula.clone()));
                 }
             }
@@ -126,12 +127,13 @@ impl StatusComponent {
     pub fn check_death_conditions(&self) -> Option<String> {
         for attr in self.collection.attributes.values() {
             if let Some(death_condition) = &attr.metadata.death_condition
-                && death_condition.check_int(attr.value.get()) {
-                    return Some(format!(
-                        "Death condition met for attribute '{}'",
-                        attr.metadata.name
-                    ));
-                }
+                && death_condition.check_int(attr.value.get())
+            {
+                return Some(format!(
+                    "Death condition met for attribute '{}'",
+                    attr.metadata.name
+                ));
+            }
         }
         None
     }
@@ -150,17 +152,17 @@ impl StatusComponent {
                 initial_value: None,
                 growth_rate: None,
                 affects: vec![],
-                decay_per_tick: attr_def.decay_per_tick.map(|v| v as i32),
+                decay_per_tick: attr_def.decay_per_tick.map(|v| v as f32),
                 death_condition: attr_def.death_condition.clone(),
                 formula: attr_def.formula.clone(),
-                default_value: attr_def.default_value.map(|v| v as i32),
-                min_value: attr_def.min_value.map(|v| v as i32),
+                default_value: attr_def.default_value.map(|v| v as f32),
+                min_value: attr_def.min_value.map(|v| v as f32),
                 max_value_formula: attr_def.max_value_formula.clone(),
                 recovery_formula: attr_def.recovery_formula.clone(),
                 primary_attribute_deps: attr_def.primary_attribute_deps.clone().unwrap_or_default(),
             };
 
-            let initial_val = attr_def.default_value.map(|v| v as i32).unwrap_or(0);
+            let initial_val = attr_def.default_value.map(|v| v as f32).unwrap_or(0.0) as i32;
             collection.add(Attribute {
                 value: AttributeValue::Static {
                     value: initial_val as u8,
@@ -212,7 +214,7 @@ impl StatusComponent {
         let attr = self.collection.attributes.get_mut(name).unwrap();
 
         let current = attr.value.get();
-        let min_value = attr.metadata.min_value.unwrap_or(0);
+        let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
         let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, 255, context);
 
         let new_value = (current + delta).clamp(min_value, max_value);
@@ -222,7 +224,7 @@ impl StatusComponent {
 
     /// 获取属性的每tick衰减值
     #[allow(dead_code)]
-    pub fn decay_per_tick(&self, name: &str) -> Option<i32> {
+    pub fn decay_per_tick(&self, name: &str) -> Option<f32> {
         self.collection
             .attributes
             .get(name)

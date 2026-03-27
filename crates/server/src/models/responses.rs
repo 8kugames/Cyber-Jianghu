@@ -106,8 +106,12 @@ pub struct AgentRegisterRequest {
     pub system_prompt: Option<String>,
 }
 
-fn default_age() -> u8 { 25 }
-fn default_gender() -> String { "男".to_string() }
+fn default_age() -> u8 {
+    25
+}
+fn default_gender() -> String {
+    "男".to_string()
+}
 
 /// 语言风格请求
 #[derive(Debug, Deserialize, Default)]

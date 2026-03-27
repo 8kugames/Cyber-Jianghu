@@ -36,13 +36,18 @@ impl ActionExecutor {
         if !agent_state.is_alive {
             return ActionExecutionResult::failure(
                 "Agent 已死亡，无法执行此动作。请重新转生入世。".to_string(),
-                intent.action_type.to_string(), Some(intent.intent_id),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
             );
         }
 
         // 1. 处理通用消耗
         if let Err(e) = self.consume_requirements(intent, agent_state) {
-            return ActionExecutionResult::failure(e, intent.action_type.to_string(), Some(intent.intent_id));
+            return ActionExecutionResult::failure(
+                e,
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
         }
 
         // 2. 执行特定逻辑（数据驱动：字符串匹配）
@@ -83,12 +88,14 @@ impl ActionExecutor {
                     // 有配置但无特殊逻辑，返回通用成功
                     ActionExecutionResult::success(
                         config.description.clone(),
-                        intent.action_type.to_string(), Some(intent.intent_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
                     )
                 } else {
                     ActionExecutionResult::failure(
                         format!("未知的动作类型: {}", intent.action_type.as_str()),
-                        intent.action_type.to_string(), Some(intent.intent_id),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
                     )
                 }
             }

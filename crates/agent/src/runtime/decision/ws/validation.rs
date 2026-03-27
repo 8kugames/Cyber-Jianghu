@@ -8,14 +8,14 @@
 // - 超时降级策略
 // ============================================================================
 
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
-use tokio::sync::{mpsc, RwLock};
+use futures_util::stream::SplitSink;
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -286,7 +286,10 @@ mod tests {
         // 第二次 CAS：应该失败（值已不再是 -1）
         let result2 = submitted_tick.compare_exchange(-1, 100, Ordering::AcqRel, Ordering::Acquire);
         // 失败时返回 Err(current_value)
-        assert!(result2 == Err(100), "Second CAS should fail with current value");
+        assert!(
+            result2 == Err(100),
+            "Second CAS should fail with current value"
+        );
     }
 
     /// 测试 CAS 去重在并发场景下的行为

@@ -14,9 +14,19 @@
 # 安装 CLI
 cargo install --path crates/agent
 
-# 启动（Claw 模式，WebSocket 主通道 + HTTP API 辅助）
-cyber-jianghu-agent run --port 23340
+# 启动 Cognitive 模式（默认，ReflectorSoul 已内置启用）
+cyber-jianghu-agent run
+
+# 或启动 Claw 模式（等待外部调度器）
+cyber-jianghu-agent run --mode claw
 ```
+
+### 运行模式说明
+
+| 模式 | 说明 | LLM 位置 | ReflectorSoul |
+|------|------|----------|-------------|
+| Cognitive | **默认模式**，Agent 自主决策 | 内置 | ✅ 默认启用 |
+| Claw | 等待外部 OpenClaw 调度器 | 外置 | ✅ 默认启用 |
 
 ### Docker 部署
 
@@ -140,3 +150,21 @@ A: Docker Volume 或 ~/.cyber-jianghu/
 
 **Q: 设备 ID 与角色 ID 区别？**
 A: 设备 ID 标识客户端（持久化），角色 ID 标识游戏侠客（可转世重建）
+
+## 配置管理
+
+### LLM 配置
+
+Agent 支持配置不同的 LLM 模型给 ActorSoul 和 ReflectorSoul：
+
+```yaml
+# ~/.cyber-jianghu/agent.yaml
+llm:
+  provider: ollama
+  model: qwen2.5:14b
+
+llm_reflector:  # 可选
+  model: qwen2.5:32b
+```
+
+配置可通过 Web 面板修改：http://localhost:23340/manage.html

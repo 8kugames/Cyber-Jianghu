@@ -13,9 +13,39 @@ version: "0.0.1"
 description: "叙事化状态描述配置"
 
 # ------------------------------------------------------------------
+# 属性分类（供前端渲染使用）
+# ------------------------------------------------------------------
+attribute_categories:
+  primary:
+    - strength
+    - agility
+    - constitution
+    - intelligence
+    - charisma
+    - luck
+  status:
+    - hp
+    - stamina
+    - hunger
+    - thirst
+    - qi
+    - sanity
+    - reputation
+  derived:
+    - max_carry_weight
+    - physical_damage
+    - dodge_rate
+    - critical_rate
+    - skill_learning_speed
+    - exp_bonus
+    - stamina_regen
+    - qi_regen
+
+# ------------------------------------------------------------------
 # 属性叙事描述
 # ------------------------------------------------------------------
 attributes:
+    # -- 状态属性 --
     hp:
       name: hp
       display_name: 生命值
@@ -41,7 +71,7 @@ attributes:
 
     hunger:
       name: hunger
-      display_name: 饥饿
+      display_name: 饥饿值
       note: "值越高表示越饱，越低表示越饿"
       thresholds:
         - min: 80
@@ -62,7 +92,7 @@ attributes:
 
     thirst:
       name: thirst
-      display_name: 口渴
+      display_name: 口渴值
       note: "值越高表示越不渴，越低表示越渴"
       thresholds:
         - min: 80
@@ -100,6 +130,180 @@ attributes:
         - min: 0
           max: 19
           description: "体力耗尽，已经没有力气行动，必须立即休息"
+
+    qi:
+      name: qi
+      display_name: 内力
+      thresholds:
+        - min: 80
+          max: 100
+          description: "内力充沛，真气充盈全身"
+        - min: 60
+          max: 79
+          description: "内力充足，可以施展武功"
+        - min: 40
+          max: 59
+          description: "内力一般，不宜过度消耗"
+        - min: 20
+          max: 39
+          description: "内力不足，真气运行艰难"
+        - min: 0
+          max: 19
+          description: "内力枯竭，无法运功"
+
+    sanity:
+      name: sanity
+      display_name: 理智值
+      thresholds:
+        - min: 80
+          max: 100
+          description: "神志清明，思维清晰"
+        - min: 60
+          max: 79
+          description: "精神状态良好，偶尔有些恍惚"
+        - min: 40
+          max: 59
+          description: "有些精神恍惚，思绪不太连贯"
+        - min: 20
+          max: 39
+          description: "理智涣散，难以集中注意力"
+        - min: 0
+          max: 19
+          description: "神志不清，已接近疯狂边缘"
+
+    reputation:
+      name: reputation
+      display_name: 声望
+      thresholds:
+        - min: 80
+          max: 100
+          description: "名震江湖，人人敬仰"
+        - min: 60
+          max: 79
+          description: "在江湖中小有名气"
+        - min: 40
+          max: 59
+          description: "江湖中略有耳闻"
+        - min: 20
+          max: 39
+          description: "默默无闻的江湖人"
+        - min: 0
+          max: 19
+          description: "籍籍无名，无人知晓"
+
+    # -- 先天属性 --
+    strength:
+      name: strength
+      display_name: 力量
+      thresholds:
+        - min: 0
+          max: 0
+          description: "力量"
+
+    agility:
+      name: agility
+      display_name: 敏捷
+      thresholds:
+        - min: 0
+          max: 0
+          description: "敏捷"
+
+    constitution:
+      name: constitution
+      display_name: 根骨
+      thresholds:
+        - min: 0
+          max: 0
+          description: "根骨"
+
+    intelligence:
+      name: intelligence
+      display_name: 悟性
+      thresholds:
+        - min: 0
+          max: 0
+          description: "悟性"
+
+    charisma:
+      name: charisma
+      display_name: 魅力
+      thresholds:
+        - min: 0
+          max: 0
+          description: "魅力"
+
+    luck:
+      name: luck
+      display_name: 福缘
+      thresholds:
+        - min: 0
+          max: 0
+          description: "福缘"
+
+    # -- 派生属性 --
+    max_carry_weight:
+      name: max_carry_weight
+      display_name: 负重上限
+      thresholds:
+        - min: 0
+          max: 0
+          description: "负重上限"
+
+    physical_damage:
+      name: physical_damage
+      display_name: 物理伤害
+      thresholds:
+        - min: 0
+          max: 0
+          description: "物理伤害"
+
+    dodge_rate:
+      name: dodge_rate
+      display_name: 闪避率
+      thresholds:
+        - min: 0
+          max: 0
+          description: "闪避率"
+
+    critical_rate:
+      name: critical_rate
+      display_name: 暴击率
+      thresholds:
+        - min: 0
+          max: 0
+          description: "暴击率"
+
+    skill_learning_speed:
+      name: skill_learning_speed
+      display_name: 技能学习速度
+      thresholds:
+        - min: 0
+          max: 0
+          description: "技能学习速度"
+
+    exp_bonus:
+      name: exp_bonus
+      display_name: 经验加成
+      thresholds:
+        - min: 0
+          max: 0
+          description: "经验加成"
+
+    stamina_regen:
+      name: stamina_regen
+      display_name: 体力恢复
+      thresholds:
+        - min: 0
+          max: 0
+          description: "体力恢复"
+
+    qi_regen:
+      name: qi_regen
+      display_name: 内力恢复
+      thresholds:
+        - min: 0
+          max: 0
+          description: "内力恢复"
 
 # ------------------------------------------------------------------
 # 状态效果描述
