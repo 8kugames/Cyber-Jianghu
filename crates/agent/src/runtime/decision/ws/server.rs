@@ -96,7 +96,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     // 订阅 Server 消息广播（用于透传）
     let mut server_msg_rx = state.server_msg_tx.subscribe();
     let intent_tx = state.intent_tx.clone();
-    
+
     // 获取上行消息接收通道（用于转发 OpenClawBridge 的 LLM 请求）
     let upstream_rx = state.upstream_rx.lock().unwrap().take();
     let llm_response_tx = state.llm_response_tx.clone();
@@ -114,8 +114,11 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                 Ok(Message::Text(text)) => {
                     debug!("Received message");
 
-                    if let Ok(DownstreamMessage::LLMResponse { request_id, content, error }) =
-                        serde_json::from_str::<DownstreamMessage>(&text)
+                    if let Ok(DownstreamMessage::LLMResponse {
+                        request_id,
+                        content,
+                        error,
+                    }) = serde_json::from_str::<DownstreamMessage>(&text)
                     {
                         let result = if let Some(err) = error {
                             Err(err)
@@ -228,7 +231,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     // 写任务：广播 WorldState 和 tick_closed
     let write_task = async {
         let mut upstream_rx = upstream_rx;
-        
+
         loop {
             if !is_active_write.load(Ordering::Relaxed) {
                 break;

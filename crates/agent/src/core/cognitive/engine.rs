@@ -103,9 +103,8 @@ impl MultiStageCognitiveEngine {
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let (motivation_response, motivation) = self
-            .motivate(world_state, &perception_output)
-            .await?;
+        let (motivation_response, motivation) =
+            self.motivate(world_state, &perception_output).await?;
         chain.add_stage(motivation);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -171,16 +170,27 @@ impl MultiStageCognitiveEngine {
             .perceive_with_memory(world_state, memory_context, None)
             .await?;
         chain.add_stage(perception);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception",
-            &self.build_perception_prompt_with_memory(world_state, memory_context, None), &perception_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Perception",
+            &self.build_perception_prompt_with_memory(world_state, memory_context, None),
+            &perception_response,
+        );
 
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let (motivation_response, motivation) = self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) =
+            self.motivate(world_state, &perception_output).await?;
         chain.add_stage(motivation);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Motivation",
-            &self.build_motivation_prompt(world_state, &perception_output), &motivation_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output),
+            &motivation_response,
+        );
 
         // === Stage 3: Planning (规划) ===
         debug!("执行 Stage 3: Planning");
@@ -189,16 +199,26 @@ impl MultiStageCognitiveEngine {
             .plan(world_state, &perception_output, &motivation_output)
             .await?;
         chain.add_stage(planning);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning",
-            &self.build_planning_prompt(world_state, &perception_output, &motivation_output), &planning_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output),
+            &planning_response,
+        );
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
         let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Decision",
-            &self.build_decision_prompt(world_state, &chain), &decision_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Decision",
+            &self.build_decision_prompt(world_state, &chain),
+            &decision_response,
+        );
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
@@ -233,11 +253,10 @@ impl MultiStageCognitiveEngine {
 
         let metadata = serde_json::to_value(&response)?;
         let response_json = serde_json::to_string(&response)?;
-        Ok((response_json, StageOutput::with_metadata(
-            CognitiveStage::Perception,
-            content,
-            metadata,
-        )))
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
+        ))
     }
 
     async fn perceive_with_memory(
@@ -246,7 +265,11 @@ impl MultiStageCognitiveEngine {
         memory_context: &str,
         validation_feedback: Option<&str>,
     ) -> Result<(String, StageOutput)> {
-        let prompt = self.build_perception_prompt_with_memory(world_state, memory_context, validation_feedback);
+        let prompt = self.build_perception_prompt_with_memory(
+            world_state,
+            memory_context,
+            validation_feedback,
+        );
 
         let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
 
@@ -259,11 +282,10 @@ impl MultiStageCognitiveEngine {
 
         let metadata = serde_json::to_value(&response)?;
         let response_json = serde_json::to_string(&response)?;
-        Ok((response_json, StageOutput::with_metadata(
-            CognitiveStage::Perception,
-            content,
-            metadata,
-        )))
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
+        ))
     }
 
     /// Stage 2: 动机 - 基于人设生成内在驱动力
@@ -283,11 +305,10 @@ impl MultiStageCognitiveEngine {
 
         let metadata = serde_json::to_value(&response)?;
         let response_json = serde_json::to_string(&response)?;
-        Ok((response_json, StageOutput::with_metadata(
-            CognitiveStage::Motivation,
-            content,
-            metadata,
-        )))
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Motivation, content, metadata),
+        ))
     }
 
     /// Stage 3: 规划 - 制定行动计划
@@ -310,11 +331,10 @@ impl MultiStageCognitiveEngine {
 
         let metadata = serde_json::to_value(&response)?;
         let response_json = serde_json::to_string(&response)?;
-        Ok((response_json, StageOutput::with_metadata(
-            CognitiveStage::Planning,
-            content,
-            metadata,
-        )))
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Planning, content, metadata),
+        ))
     }
 
     /// Stage 4: 决策 - 选择最终行动
@@ -345,8 +365,7 @@ impl MultiStageCognitiveEngine {
 
         let content = format!(
             "思考: {}\n行动: {}",
-            response.thought_process,
-            intent.action_type
+            response.thought_process, intent.action_type
         );
 
         let stage_output = StageOutput::with_metadata(CognitiveStage::Decision, content, metadata);

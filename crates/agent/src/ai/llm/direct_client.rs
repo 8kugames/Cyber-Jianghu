@@ -561,14 +561,8 @@ mod tests {
 
     #[test]
     fn test_provider_from_str() {
-        assert_eq!(
-            LlmProvider::parse("openclaw"),
-            Some(LlmProvider::OpenClaw)
-        );
-        assert_eq!(
-            LlmProvider::parse("OpenClaw"),
-            Some(LlmProvider::OpenClaw)
-        );
+        assert_eq!(LlmProvider::parse("openclaw"), Some(LlmProvider::OpenClaw));
+        assert_eq!(LlmProvider::parse("OpenClaw"), Some(LlmProvider::OpenClaw));
         assert_eq!(
             LlmProvider::parse("openai_compatible"),
             Some(LlmProvider::OpenAICompatible)

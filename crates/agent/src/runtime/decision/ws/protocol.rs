@@ -418,10 +418,11 @@ impl DownstreamMessage {
         for pattern in patterns {
             if let Ok(re) = regex::Regex::new(pattern)
                 && let Some(caps) = re.captures(message)
-                    && let Some(m) = caps.get(1)
-                        && let Ok(n) = m.as_str().parse::<i64>() {
-                            return Some(n);
-                        }
+                && let Some(m) = caps.get(1)
+                && let Ok(n) = m.as_str().parse::<i64>()
+            {
+                return Some(n);
+            }
         }
         None
     }

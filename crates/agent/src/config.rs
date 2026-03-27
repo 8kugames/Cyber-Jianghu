@@ -828,9 +828,9 @@ impl Config {
                     .characters
                     .iter_mut()
                     .find(|c| c.agent_id == Some(agent_id))
-                {
-                    existing.status = CharacterStatus::Retired;
-                }
+            {
+                existing.status = CharacterStatus::Retired;
+            }
         }
     }
 

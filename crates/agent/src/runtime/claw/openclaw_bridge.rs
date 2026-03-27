@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{RwLock, oneshot};
 use uuid::Uuid;
 
 use crate::ai::llm::LlmClient;
@@ -165,7 +165,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_response_completes_request() {
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, _rx) = mpsc::channel(1);
         let config = BridgeConfig::default();
         let bridge = OpenClawBridge::new(tx, config);
 
@@ -184,7 +184,7 @@ mod tests {
 
         // Verify response received
         let result = response_rx.await.unwrap();
-        assert_eq!(result, "test response".to_string());
+        assert_eq!(result.unwrap(), "test response".to_string());
 
         // Verify pending request removed
         assert!(bridge.pending.read().await.is_empty());

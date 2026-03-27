@@ -21,9 +21,9 @@ use uuid::Uuid;
 /// 数据来源：`crates/server/config/relationship_levels.yaml`（未来可配置化）
 /// 当前内联定义，保持单一真相源。
 const RELATIONSHIP_LEVELS: &[(i32, &str, &str)] = &[
-    (80,  "best",    "至交好友"),
-    (50,  "good",    "好友"),
-    (20,  "known",   "熟人"),
+    (80, "best", "至交好友"),
+    (50, "good", "好友"),
+    (20, "known", "熟人"),
     (-20, "neutral", "陌生人"),
     (-50, "dislike", "不喜欢"),
     (-80, "hostile", "敌对"),

@@ -87,15 +87,8 @@ impl IntentValidator {
         debug!("Validation prompt:\n{}", prompt);
 
         // 调用 LLM
-        let full_prompt = format!(
-            "{}\n\n{}",
-            self.observer_prompt.system_prompt(),
-            prompt
-        );
-        let response: LlmValidationResponse = self
-            .llm_client
-            .complete_json(&full_prompt)
-            .await?;
+        let full_prompt = format!("{}\n\n{}", self.observer_prompt.system_prompt(), prompt);
+        let response: LlmValidationResponse = self.llm_client.complete_json(&full_prompt).await?;
 
         thinking_log::log_llm(
             &format!("Agent({})", request.intent.agent_id),
