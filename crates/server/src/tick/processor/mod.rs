@@ -17,6 +17,7 @@
 mod events;
 mod executor;
 mod mutator;
+#[allow(clippy::module_inception)]
 mod processor;
 mod resolver;
 

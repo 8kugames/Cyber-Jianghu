@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn test_client_message_serialization() {
         let agent_id = Uuid::nil();
-        let intent = Intent::idle(agent_id, 1);
+        let intent = Intent::new(agent_id, 1, "idle", None);
         let msg = ClientMessage::from_intent(intent);
 
         let json = msg.to_json().unwrap();

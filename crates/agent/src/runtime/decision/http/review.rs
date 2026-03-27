@@ -389,7 +389,7 @@ mod tests {
         let config = ReviewConfig::default();
         let store = ReviewStore::new(config);
 
-        let intent = cyber_jianghu_protocol::Intent::idle(Uuid::new_v4(), 1);
+        let intent = cyber_jianghu_protocol::Intent::new(Uuid::new_v4(), 1, "idle", None);
         let persona = PersonaSummary {
             name: "测试".to_string(),
             gender: "男".to_string(),
@@ -412,7 +412,7 @@ mod tests {
         let config = ReviewConfig::default();
         let store = ReviewStore::new(config);
 
-        let intent = cyber_jianghu_protocol::Intent::idle(Uuid::new_v4(), 1);
+        let intent = cyber_jianghu_protocol::Intent::new(Uuid::new_v4(), 1, "idle", None);
         let persona = PersonaSummary {
             name: "测试".to_string(),
             gender: "男".to_string(),

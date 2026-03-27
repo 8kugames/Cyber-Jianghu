@@ -1097,7 +1097,7 @@ pub(super) async fn generate_character_handler(
     }
 
     // 3. 创建 LLM 客户端
-    let provider = match LlmProvider::from_str(&config.llm.provider) {
+    let provider = match LlmProvider::parse(&config.llm.provider) {
         Some(p) => p,
         None => {
             return (
@@ -1313,8 +1313,8 @@ pub(super) async fn register_character_handler(
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
             // 7. 保存 narrative_config 到本地配置目录
-            if let Some(ref narrative_config) = result.narrative_config {
-                if let Some(home) = dirs::home_dir() {
+            if let Some(ref narrative_config) = result.narrative_config
+                && let Some(home) = dirs::home_dir() {
                     let config_dir = home.join(".cyber-jianghu").join("config");
                     if let Err(e) = std::fs::create_dir_all(&config_dir) {
                         error!("创建配置目录失败: {}", e);
@@ -1332,7 +1332,6 @@ pub(super) async fn register_character_handler(
                         }
                     }
                 }
-            }
 
             // 8. 更新本地配置文件（添加 agent_id、注册时间、先天属性和游戏规则）
             let mut config_warning = None;
@@ -2123,8 +2122,8 @@ pub(super) async fn dream_character_handler(
         let agent_id = *state.agent_id.read().await;
         dream.ensure_loaded(&state.config_path, &agent_id);
 
-        if let Some(ref last_date) = dream.last_used_game_date {
-            if last_date == &current_date {
+        if let Some(ref last_date) = dream.last_used_game_date
+            && last_date == &current_date {
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
                     Json(DreamResponse {
@@ -2136,7 +2135,6 @@ pub(super) async fn dream_character_handler(
                 )
                     .into_response();
             }
-        }
     }
 
     info!(
@@ -2654,7 +2652,7 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
 
     let has_server = !config.server.ws_url.is_empty();
     let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
-    let has_character = config.agent.as_ref().map_or(false, |c| c.is_registered());
+    let has_character = config.agent.as_ref().is_some_and(|c| c.is_registered());
     let current_character = config
         .agent
         .as_ref()
@@ -2981,7 +2979,7 @@ pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
     let openclaw_config_path = crate::ai::llm::direct_client::OpenClawConfig::config_path();
     let has_openclaw_config = openclaw_config_path
         .as_ref()
-        .map_or(false, |path| path.exists());
+        .is_ok_and(|path| path.exists());
 
     let providers = vec![
         dto::LlmProviderInfo {
@@ -3061,14 +3059,14 @@ pub(super) async fn get_llm_config_handler(State(state): State<HttpApiState>) ->
         provider: config.llm.provider.clone(),
         model: config.llm.model.clone().unwrap_or_default(),
         base_url: config.llm.base_url.clone(),
-        has_api_key: config.llm.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
     };
 
     let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
         provider: c.provider.clone(),
         model: c.model.clone().unwrap_or_default(),
         base_url: c.base_url.clone(),
-        has_api_key: c.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
     });
 
     let response = dto::LlmConfigResponse {
@@ -3114,14 +3112,10 @@ fn validate_llm_config(
     }
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
-    match provider {
-        "openai_compatible" => {
-            if base_url.is_none() || base_url.map_or(true, |u| u.is_empty()) {
-                anyhow::bail!("{} 需要提供 base_url", provider);
-            }
+    if provider == "openai_compatible"
+        && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty())) {
+            anyhow::bail!("{} 需要提供 base_url", provider);
         }
-        _ => {}
-    }
 
     Ok(())
 }
@@ -3159,8 +3153,8 @@ pub(super) async fn update_llm_config_handler(
     }
 
     // 2. 验证 reflector 配置（如果有）
-    if let Some(ref reflector) = req.reflector {
-        if let Err(e) = validate_llm_config(
+    if let Some(ref reflector) = req.reflector
+        && let Err(e) = validate_llm_config(
             &reflector.provider,
             &reflector.model,
             reflector.base_url.as_deref(),
@@ -3180,10 +3174,9 @@ pub(super) async fn update_llm_config_handler(
             )
                 .into_response();
         }
-    }
 
     // 3. 创建测试 LLM 客户端并测试连接
-    let provider = match LlmProvider::from_str(&req.actor.provider) {
+    let provider = match LlmProvider::parse(&req.actor.provider) {
         Some(p) => p,
         None => {
             return (
@@ -3330,14 +3323,14 @@ pub(super) async fn update_llm_config_handler(
         provider: config.llm.provider.clone(),
         model: config.llm.model.clone().unwrap_or_default(),
         base_url: config.llm.base_url.clone(),
-        has_api_key: config.llm.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
     };
 
     let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
         provider: c.provider.clone(),
         model: c.model.clone().unwrap_or_default(),
         base_url: c.base_url.clone(),
-        has_api_key: c.api_key.as_ref().map_or(false, |k| !k.is_empty()),
+        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
     });
 
     let response = dto::LlmConfigResponse {
@@ -3428,7 +3421,7 @@ pub(super) async fn get_cognitive_context_handler(
                 (None, None)
             };
 
-            let relationship_store = state.relationship_store.as_ref().map(|v| &**v);
+            let relationship_store = state.relationship_store.as_deref();
             let cognitive_context =
                 builder.build_with_persona(world_state, persona_ref.as_ref(), relationship_store);
 
@@ -3473,12 +3466,11 @@ pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> i
         loop {
             match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
                 Ok(Ok(msg)) => {
-                    if matches!(msg, ServerMessage::AgentDied { .. }) {
-                        if let Ok(json) = serde_json::to_string(&msg) {
+                    if matches!(msg, ServerMessage::AgentDied { .. })
+                        && let Ok(json) = serde_json::to_string(&msg) {
                             let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                         }
-                    }
                 }
                 Ok(Err(_)) => {
                     break;
@@ -3493,14 +3485,14 @@ pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> i
 
     let body = StreamBody::new(stream);
 
-    let response = Response::builder()
+    
+
+    Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "text/event-stream; charset=utf-8")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
         .header("X-Accel-Buffering", "no")
         .body(body)
-        .unwrap();
-
-    response
+        .unwrap()
 }

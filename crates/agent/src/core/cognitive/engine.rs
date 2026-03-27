@@ -12,7 +12,7 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::chain::CognitiveChain;
 use super::stages::{
@@ -23,6 +23,7 @@ use crate::ai::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
 use crate::ai::llm::{LlmClient, LlmClientExt};
 use crate::ai::persona::DynamicPersona;
 use crate::models::{Intent, WorldState};
+use crate::runtime::decision::http::thinking_log;
 
 /// 多阶段认知引擎配置
 #[derive(Clone, Debug)]
@@ -78,33 +79,40 @@ impl MultiStageCognitiveEngine {
 
         info!("[{}-{}] 开始认知流程...", self.config.agent_name, tick_id);
 
-        // 使用 DynamicPersona 生成认知链
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
         // === Stage 1: Perception (感知) ===
         debug!("执行 Stage 1: Perception");
-        let perception = self.perceive(world_state).await?;
+        let (perception_response, perception) = self.perceive(world_state).await?;
         chain.add_stage(perception);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception",
+            &self.build_perception_prompt(world_state), &perception_response);
 
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let motivation = self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) = self.motivate(world_state, &perception_output).await?;
         chain.add_stage(motivation);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output), &motivation_response);
 
         // === Stage 3: Planning (规划) ===
         debug!("执行 Stage 3: Planning");
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
-        let planning = self
+        let (planning_response, planning) = self
             .plan(world_state, &perception_output, &motivation_output)
             .await?;
         chain.add_stage(planning);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output), &planning_response);
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
-        let (decision, intent) = self.decide(world_state, &chain).await?;
+        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
         chain.add_stage(decision);
         chain.final_intent = intent;
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Decision",
+            &self.build_decision_prompt(world_state, &chain), &decision_response);
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
@@ -113,6 +121,8 @@ impl MultiStageCognitiveEngine {
             "[{}-{}] 认知完成，耗时 {}ms",
             self.config.agent_name, tick_id, chain.duration_ms
         );
+
+        thinking_log::log_thinking(&self.config.agent_name, tick_id, &chain.summarize());
 
         Ok(chain)
     }
@@ -126,35 +136,42 @@ impl MultiStageCognitiveEngine {
         let start_time = std::time::Instant::now();
         let tick_id = world_state.tick_id;
 
-        // 使用 DynamicPersona 生成认知链
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
         // === Stage 1: Perception (感知) ===
         debug!("执行 Stage 1: Perception (with memory context)");
-        let perception = self
+        let (perception_response, perception) = self
             .perceive_with_memory(world_state, memory_context)
             .await?;
         chain.add_stage(perception);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception",
+            &self.build_perception_prompt_with_memory(world_state, memory_context), &perception_response);
 
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let motivation = self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) = self.motivate(world_state, &perception_output).await?;
         chain.add_stage(motivation);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output), &motivation_response);
 
         // === Stage 3: Planning (规划) ===
         debug!("执行 Stage 3: Planning");
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
-        let planning = self
+        let (planning_response, planning) = self
             .plan(world_state, &perception_output, &motivation_output)
             .await?;
         chain.add_stage(planning);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output), &planning_response);
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
-        let (decision, intent) = self.decide(world_state, &chain).await?;
+        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
         chain.add_stage(decision);
         chain.final_intent = intent;
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Decision",
+            &self.build_decision_prompt(world_state, &chain), &decision_response);
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
@@ -164,6 +181,8 @@ impl MultiStageCognitiveEngine {
             self.config.agent_name, tick_id, chain.duration_ms
         );
 
+        thinking_log::log_thinking(&self.config.agent_name, tick_id, &chain.summarize());
+
         Ok(chain)
     }
 
@@ -172,12 +191,11 @@ impl MultiStageCognitiveEngine {
     // ========================================================================
 
     /// Stage 1: 感知 - 理解当前世界状态
-    async fn perceive(&self, world_state: &WorldState) -> Result<StageOutput> {
+    async fn perceive(&self, world_state: &WorldState) -> Result<(String, StageOutput)> {
         let prompt = self.build_perception_prompt(world_state);
 
         let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
 
-        // 构建阶段输出
         let content = format!(
             "自身状态: {}\n环境: {}\n关键观察: {}",
             response.self_status,
@@ -186,11 +204,12 @@ impl MultiStageCognitiveEngine {
         );
 
         let metadata = serde_json::to_value(&response)?;
-        Ok(StageOutput::with_metadata(
+        let response_json = serde_json::to_string(&response)?;
+        Ok((response_json, StageOutput::with_metadata(
             CognitiveStage::Perception,
             content,
             metadata,
-        ))
+        )))
     }
 
     /// Stage 1 (带记忆): 感知 - 理解当前世界状态，融入记忆上下文
@@ -198,12 +217,11 @@ impl MultiStageCognitiveEngine {
         &self,
         world_state: &WorldState,
         memory_context: &str,
-    ) -> Result<StageOutput> {
+    ) -> Result<(String, StageOutput)> {
         let prompt = self.build_perception_prompt_with_memory(world_state, memory_context);
 
         let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
 
-        // 构建阶段输出
         let content = format!(
             "自身状态: {}\n环境: {}\n关键观察: {}",
             response.self_status,
@@ -212,11 +230,12 @@ impl MultiStageCognitiveEngine {
         );
 
         let metadata = serde_json::to_value(&response)?;
-        Ok(StageOutput::with_metadata(
+        let response_json = serde_json::to_string(&response)?;
+        Ok((response_json, StageOutput::with_metadata(
             CognitiveStage::Perception,
             content,
             metadata,
-        ))
+        )))
     }
 
     /// Stage 2: 动机 - 基于人设生成内在驱动力
@@ -224,7 +243,7 @@ impl MultiStageCognitiveEngine {
         &self,
         world_state: &WorldState,
         perception: &StageOutput,
-    ) -> Result<StageOutput> {
+    ) -> Result<(String, StageOutput)> {
         let prompt = self.build_motivation_prompt(world_state, perception);
 
         let response: MotivationResponse = self.llm_client.complete_json(&prompt).await?;
@@ -235,11 +254,12 @@ impl MultiStageCognitiveEngine {
         );
 
         let metadata = serde_json::to_value(&response)?;
-        Ok(StageOutput::with_metadata(
+        let response_json = serde_json::to_string(&response)?;
+        Ok((response_json, StageOutput::with_metadata(
             CognitiveStage::Motivation,
             content,
             metadata,
-        ))
+        )))
     }
 
     /// Stage 3: 规划 - 制定行动计划
@@ -248,7 +268,7 @@ impl MultiStageCognitiveEngine {
         world_state: &WorldState,
         perception: &StageOutput,
         motivation: &StageOutput,
-    ) -> Result<StageOutput> {
+    ) -> Result<(String, StageOutput)> {
         let prompt = self.build_planning_prompt(world_state, perception, motivation);
 
         let response: PlanningResponse = self.llm_client.complete_json(&prompt).await?;
@@ -261,41 +281,49 @@ impl MultiStageCognitiveEngine {
         );
 
         let metadata = serde_json::to_value(&response)?;
-        Ok(StageOutput::with_metadata(
+        let response_json = serde_json::to_string(&response)?;
+        Ok((response_json, StageOutput::with_metadata(
             CognitiveStage::Planning,
             content,
             metadata,
-        ))
+        )))
     }
 
     /// Stage 4: 决策 - 选择最终行动
-    ///
-    /// 返回 (StageOutput, Intent) 元组，让调用者同时获得阶段输出和最终意图
     async fn decide(
         &self,
         world_state: &WorldState,
         chain: &CognitiveChain,
-    ) -> Result<(StageOutput, Intent)> {
+    ) -> Result<(String, StageOutput, Intent)> {
         let prompt = self.build_decision_prompt(world_state, chain);
 
         let response: DecisionResponse = self.llm_client.complete_json(&prompt).await?;
 
-        // 转换为 Intent
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
+        let action_type = response.action.to_lowercase();
 
-        let intent = self.parse_decision_response(agent_id, tick_id, &response)?;
+        let response_json = serde_json::to_string(&response)?;
+        let metadata = serde_json::to_value(&response)?;
+
+        let action_data = if response.action_data.is_null() {
+            None
+        } else {
+            Some(response.action_data)
+        };
+
+        let intent = Intent::new(agent_id, tick_id, action_type.as_str(), action_data)
+            .with_thought(response.thought_process.clone());
 
         let content = format!(
             "思考: {}\n行动: {}",
             response.thought_process,
-            format!("{:#?}", intent.action_type)
+            intent.action_type
         );
 
-        let metadata = serde_json::to_value(&response)?;
         let stage_output = StageOutput::with_metadata(CognitiveStage::Decision, content, metadata);
 
-        Ok((stage_output, intent))
+        Ok((response_json, stage_output, intent))
     }
 
     // ========================================================================
@@ -531,10 +559,28 @@ impl MultiStageCognitiveEngine {
 ## 输出格式
 {{
   "thought_process": "你的完整思考过程，必须引用感知、动机和规划 (300字以内)",
-  "action": "动作名称 (idle, speak, move, use, attack, pickup, give, trade, steal)",
-  "target": "目标名称或ID (可选)",
-  "data": "额外数据，如说话内容 (可选)"
+  "action": "动作名称",
+  "action_data": {{}}
 }}
+
+## 可用动作及 action_data 字段（字段名必须严格匹配，否则服务端会拒绝）
+
+| action | action_data 必填字段 | 说明 |
+|--------|---------------------|------|
+| idle | (无) | 休息 |
+| speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
+| move | {{"target_location": "位置名"}} | 移动到指定位置 |
+| use | {{"item_id": "物品名"}} | 使用背包中的物品 |
+| attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
+| pickup | {{"item_id": "物品名"}} | 从地面拾取物品 |
+| give | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "quantity": 数量}} | 给予物品 |
+| steal | {{"target_agent_id": "目标AgentID", "item_id": "物品名"}} | 偷取物品 |
+| trade | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "price": 价格}} | 交易 |
+| drop | {{"item_id": "物品名", "quantity": 数量}} | 丢弃物品 |
+| gather | {{"target_id": "采集目标ID"}} | 采集资源 |
+| craft | {{"recipe_id": "配方ID"}} | 制造物品 |
+
+注意：target_agent_id 从 entities 列表中获取，item_id 从 inventory 或 nearby_items 中获取。
 "#,
             agent_name = self.config.agent_name,
             persona = self.config.persona.generate_description()
@@ -544,87 +590,6 @@ impl MultiStageCognitiveEngine {
     // ========================================================================
     // 辅助方法
     // ========================================================================
-
-    /// 解析决策响应为 Intent
-    fn parse_decision_response(
-        &self,
-        agent_id: uuid::Uuid,
-        tick_id: i64,
-        response: &DecisionResponse,
-    ) -> Result<Intent> {
-        let action = response.action.to_lowercase();
-        let target = response.target.as_deref();
-        let data = response.data.as_deref();
-
-        let mut intent = match action.as_str() {
-            "idle" => Intent::idle(agent_id, tick_id),
-            "speak" => {
-                let content = data.unwrap_or("...").to_string();
-                Intent::speak(agent_id, tick_id, content)
-            }
-            "move" => {
-                // MVP 阶段暂时不支持移动
-                Intent::idle(agent_id, tick_id).with_thought("想要移动，但暂不支持".to_string())
-            }
-            "use" => {
-                if let Some(_item_name) = target {
-                    Intent::use_item(agent_id, tick_id, _item_name)
-                } else {
-                    Intent::idle(agent_id, tick_id)
-                        .with_thought("想用东西但不知道用什么".to_string())
-                }
-            }
-            "attack" => {
-                if let Some(_target_name) = target {
-                    Intent::attack(agent_id, tick_id, uuid::Uuid::new_v4()) // 需要解析名字为 ID
-                } else {
-                    Intent::idle(agent_id, tick_id).with_thought("想攻击但没有目标".to_string())
-                }
-            }
-            "pickup" => {
-                if let Some(_item_name) = target {
-                    Intent::pickup(agent_id, tick_id, _item_name)
-                } else {
-                    Intent::idle(agent_id, tick_id)
-                        .with_thought("想捡东西但不知道捡什么".to_string())
-                }
-            }
-            "give" => {
-                if let Some(_target_name) = target {
-                    Intent::give(
-                        agent_id,
-                        tick_id,
-                        uuid::Uuid::new_v4(),
-                        data.unwrap_or_default(),
-                        1,
-                    )
-                } else {
-                    Intent::idle(agent_id, tick_id).with_thought("想给东西但没有目标".to_string())
-                }
-            }
-            "trade" => Intent::idle(agent_id, tick_id).with_thought("交易功能开发中".to_string()),
-            "steal" => {
-                if let Some(_target_name) = target {
-                    Intent::steal(
-                        agent_id,
-                        tick_id,
-                        uuid::Uuid::new_v4(),
-                        data.unwrap_or_default(),
-                    )
-                } else {
-                    Intent::idle(agent_id, tick_id).with_thought("想偷东西但没有目标".to_string())
-                }
-            }
-            _ => {
-                warn!("未知动作: {}", action);
-                Intent::idle(agent_id, tick_id).with_thought(format!("未知动作: {}", action))
-            }
-        };
-
-        // 附加思考过程
-        intent.thought_log = Some(response.thought_process.clone());
-        Ok(intent)
-    }
 }
 
 // ============================================================================
@@ -643,9 +608,11 @@ impl MultiStageCognitiveEngine {
                     Ok(chain) => chain.final_intent,
                     Err(e) => {
                         tracing::error!("多阶段认知失败: {}", e);
-                        Intent::idle(
+                        Intent::new(
                             world_state.agent_id.unwrap_or_default(),
                             world_state.tick_id,
+                            "idle",
+                            None,
                         )
                         .with_thought(format!("认知受阻: {}", e))
                     }

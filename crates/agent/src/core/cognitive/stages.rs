@@ -108,16 +108,18 @@ pub struct PlanningResponse {
 }
 
 /// 决策阶段响应
+///
+/// 数据驱动：action 为动作名，action_data 直接透传到服务端。
+/// LLM 必须按服务端要求的字段名输出 action_data，无需 agent 端硬编码映射。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponse {
     /// 思考过程（必须引用前面的阶段）
     pub thought_process: String,
-    /// 选择的动作
+    /// 选择的动作（对应 actions.yaml 中的 key）
     pub action: String,
-    /// 目标（可选）
-    pub target: Option<String>,
-    /// 额外数据（可选）
-    pub data: Option<String>,
+    /// 动作参数（直接透传到服务端，字段名必须与 actions.yaml 中 required_fields 一致）
+    #[serde(default)]
+    pub action_data: serde_json::Value,
 }
 
 #[cfg(test)]

@@ -43,6 +43,7 @@ impl Broadcaster {
     /// 广播新状态给所有Agent
     ///
     /// 为每个Agent构建个性化WorldState并通过WebSocket发送
+    #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
         tick_id: i64,
@@ -146,6 +147,7 @@ impl Broadcaster {
     ///
     /// 包含周围Agent信息（同节点、存活、在线的其他Agent）
     /// 使用数据驱动：从配置加载位置信息和可用动作
+    #[allow(clippy::too_many_arguments)]
     fn build_world_state_for_agent(
         &self,
         agent_state: &AgentState,

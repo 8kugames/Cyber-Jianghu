@@ -38,8 +38,9 @@ use cyber_jianghu_agent::config::{
 };
 use cyber_jianghu_agent::{
     AgentBuilder,
-    runtime::claw::{ClawDecisionState, create_claw_decision_callback},
-    runtime::decision::http::{ConfigWatcher, review::ReviewStore},
+    core::cognitive::{MultiStageCognitiveEngine, CognitiveEngineConfig},
+    runtime::decision::{cognitive_decision_with_retry, CognitiveDecisionConfig, DecisionCallback},
+    runtime::decision::http::{ConfigWatcher, review::ReviewStore, thinking_log},
     runtime::decision::ws::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::decision::{create_http_state, http_decision},
 };
@@ -315,16 +316,34 @@ fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str) {
 }
 
 // ============================================================================
+// 日志系统初始化
+// ============================================================================
+
+fn init_tracing() -> Result<()> {
+    let config_dir = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cyber-jianghu");
+
+    let thinking_log_path = thinking_log::init_thinking_log(&config_dir)?;
+
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_writer(std::io::stderr)
+        .init();
+
+    info!("日志系统已初始化，thinking log: {}", thinking_log_path.display());
+
+    Ok(())
+}
+
+// ============================================================================
 // 主入口
 // ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // 初始化日志
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
-        .with_writer(std::io::stderr)
-        .init();
+    init_tracing()?;
 
     let cli = Cli::parse();
 
@@ -485,7 +504,7 @@ fn reset_agent() -> Result<()> {
 }
 
 fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
-    let provider = LlmProvider::from_str(&llm_config.provider)
+    let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
 
     let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
@@ -577,24 +596,41 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 config.llm.model.as_deref().unwrap_or("default")
             );
 
-            // 创建 LLM Client 容器（支持热重载）
-            // 容器会被 ClawDecisionState 和 Agent 共享
-            // 注意：需要显式转换为 Arc<dyn LlmClient> 以支持动态分发
             let llm_arc: Arc<dyn LlmClient> = Arc::new(llm_client);
-            let llm_container = Arc::new(RwLock::new(llm_arc));
+            let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
             info!("LLM Client 容器已创建（支持热重载）");
 
-            let claw_state = if let Some(ref character) = config.agent {
-                info!("使用角色 persona: {}", character.name);
-                ClawDecisionState::from_container(llm_container.clone())
-                    .with_system_prompt(character.generate_system_prompt())
-            } else {
-                info!("使用默认系统提示词（无角色配置）");
-                ClawDecisionState::from_container(llm_container.clone())
-            };
-            let decision = create_claw_decision_callback(claw_state);
+            let agent_name = config
+                .agent
+                .as_ref()
+                .map(|c| c.name.as_str())
+                .unwrap_or("(未创建)");
+            let agent_id = config
+                .identity
+                .as_ref()
+                .map(|i| i.device_id)
+                .unwrap_or_else(Uuid::new_v4);
 
-            // 创建重连通道（用于 Web Panel 触发服务器地址热切换）
+            let persona_description = config
+                .agent
+                .as_ref()
+                .map(|c| c.generate_system_prompt())
+                .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
+
+            let cognitive_config = CognitiveEngineConfig {
+                agent_name: agent_name.to_string(),
+                persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(agent_id, agent_name, &persona_description),
+                temperature: config.llm.temperature,
+                max_tokens_per_stage: config.llm.max_tokens,
+            };
+            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(llm_arc, cognitive_config));
+
+            let decision: DecisionCallback = Arc::new(cognitive_decision_with_retry(
+                agent_id,
+                cognitive_engine,
+                CognitiveDecisionConfig::default().max_retries,
+            ));
+
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
@@ -604,8 +640,6 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
 
-            // 自动打开浏览器（Cognitive 模式，仅非容器环境）
-            // Docker 容器内无法打开宿主机浏览器，需要手动访问
             let browser_url = format!("http://localhost:{}/welcome.html", actual_port);
             let is_container = std::path::Path::new("/app/.dockerenv").exists();
             tokio::spawn(async move {
@@ -620,19 +654,15 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 }
             });
 
-            // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
             let review_store =
                 Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
             info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
 
-            // 创建文件监听（仅 Cognitive 模式）
             let config_watcher = Arc::new(ConfigWatcher::new(config_path.clone())?);
             info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
 
-            // 启动 ReflectorSoul 任务（默认启用，与 ActorSoul 同步热重载）
             let reflector_config_watcher = config_watcher.clone();
 
-            // 注入 Agent（包含 LLM 容器用于热重载）
             let agent = AgentBuilder::new(config, decision)
                 .with_review_store(review_store.clone())
                 .with_llm_container(llm_container)

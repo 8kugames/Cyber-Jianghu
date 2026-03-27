@@ -512,13 +512,13 @@ impl Agent {
             if remaining < min_retry_time {
                 warn!("Tick time exhausted, forcing idle");
                 let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::idle(agent_id, world_state.tick_id));
+                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
             }
 
             if attempt > max_attempts {
                 warn!("Max validation attempts reached, forcing idle");
                 let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::idle(agent_id, world_state.tick_id));
+                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
             }
 
             // 调用决策回调（可能包含驳回反馈）
@@ -577,7 +577,7 @@ impl Agent {
                     {
                         warn!("Too many consecutive rejections, forcing idle");
                         let agent_id = self.client.agent_id().await.unwrap_or_default();
-                        return Ok(Intent::idle(agent_id, world_state.tick_id));
+                        return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
                     }
 
                     // 记录驳回原因，用于下一次决策
@@ -663,9 +663,11 @@ impl Agent {
                             result.reason
                         );
                         // 拒绝后返回 idle
-                        return Ok(Intent::idle(
+                        return Ok(Intent::new(
                             self.client.agent_id().await.unwrap_or_default(),
                             world_state.tick_id,
+                            "idle",
+                            None,
                         )
                         .with_thought(format!(
                             "被反思之魂驳回: {}",
