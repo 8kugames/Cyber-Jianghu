@@ -1699,10 +1699,10 @@ pub struct ExperiencesResponse {
 ///
 /// GET /api/v1/character/experiences?page=1&limit=20
 ///
-/// 数据来源：
-/// - event: WorldState.events_log
-/// - observer_thought: IntentHistoryStore（Observer Agent 审查时记录）
-/// - intent_summary: IntentHistoryStore（Agent 提交 Intent 时的 thought_log）
+/// 数据来源：IntentHistoryStore（SQLite 持久化，按角色隔离）
+/// - event: WorldState.events_log 中的事件描述
+/// - observer_thought: Observer Agent 审查时的思维链
+/// - intent_summary: Agent 提交 Intent 时的 thought_log
 pub(super) async fn get_experiences_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -1713,71 +1713,41 @@ pub(super) async fn get_experiences_handler(
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
 
-    // 从当前 WorldState 获取 events_log
-    let current = state.current_state.read().await;
-
-    // 预加载 intent_history 数据（如果可用）
-    let history_entries = if let Some(ref history) = state.intent_history {
-        if let Some(ws) = current.as_ref() {
-            let tick_ids: Vec<i64> = ws
-                .events_log
-                .iter()
-                .enumerate()
-                .map(|(i, _)| ws.tick_id - (ws.events_log.len() - i - 1) as i64)
-                .collect();
-            Some(history.get_by_ticks(&tick_ids).await)
-        } else {
-            None
-        }
-    } else {
-        None
+    let (entries, total) = match &state.intent_history {
+        Some(history) => match history.get_page(page, limit).await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!("[experiences] Failed to query intent history: {}", e);
+                (vec![], 0)
+            }
+        },
+        None => (vec![], 0),
     };
 
-    let experiences: Vec<ExperienceEntry> = match current.as_ref() {
-        Some(ws) => ws
-            .events_log
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                let tick_id = ws.tick_id - (ws.events_log.len() - i - 1) as i64;
+    let experiences: Vec<ExperienceEntry> = entries
+        .into_iter()
+        .map(|e| {
+            let world_time = e
+                .world_time
+                .and_then(|s| serde_json::from_str(&s).ok());
+            ExperienceEntry {
+                tick_id: e.tick_id,
+                world_time,
+                event: e.event.unwrap_or_default(),
+                observer_thought: e.observer_thought,
+                intent_summary: e.thought_log,
+            }
+        })
+        .collect();
 
-                // 从 history store 获取 observer_thought 和 intent_summary
-                let (observer_thought, intent_summary) = match &history_entries {
-                    Some(entries) => entries
-                        .get(&tick_id)
-                        .map(|e| (e.observer_thought.clone(), e.thought_log.clone()))
-                        .unwrap_or((None, None)),
-                    None => (None, None),
-                };
-
-                ExperienceEntry {
-                    tick_id,
-                    world_time: serde_json::to_value(&ws.world_time).ok(),
-                    event: event.description.clone(),
-                    observer_thought,
-                    intent_summary,
-                }
-            })
-            .collect(),
-        None => vec![],
-    };
-
-    let total = experiences.len() as u32;
-    let start = ((page - 1) * limit) as usize;
-    let end = std::cmp::min(start + limit as usize, experiences.len());
-
-    let paginated = if start < experiences.len() {
-        experiences[start..end].to_vec()
-    } else {
-        vec![]
-    };
+    let has_more = (page * limit) < total;
 
     Json(ExperiencesResponse {
         page,
         limit,
         total,
-        has_more: end < experiences.len(),
-        experiences: paginated,
+        has_more,
+        experiences,
     })
 }
 
@@ -1881,10 +1851,11 @@ pub(super) async fn rebirth_character_handler(
         }
     };
 
-    // 4. 服务器必须成功才继续
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let skip_retire = body.contains("没有活跃的角色") || body.contains("无需归隐");
+
+    if !status.is_success() && !skip_retire {
         error!("服务器转生请求失败: {} - {}", status, body);
         return (
             StatusCode::BAD_GATEWAY,
@@ -1895,8 +1866,8 @@ pub(super) async fn rebirth_character_handler(
         )
             .into_response();
     }
+    let is_dead_character = skip_retire;
 
-    // 5. 重置 agent_id 为 nil（表示未注册状态）
     {
         let mut agent_id_guard = state.agent_id.write().await;
         *agent_id_guard = Uuid::nil();
@@ -1908,18 +1879,26 @@ pub(super) async fn rebirth_character_handler(
         *current = None;
     }
 
-    // 7. 更新本地配置：标记角色归隐，保留服务器/LLM/身份配置
+    // 7. 更新本地配置：区分死亡角色和正常归隐
     {
         let agent_config = &state.config_path;
         if agent_config.exists() {
             match crate::config::Config::from_file(agent_config) {
                 Ok(mut config) => {
-                    config.retire_current_character();
+                    // 死亡角色不需要调用 retire_current_character（status 已是 active，is_alive 已是 false）
+                    // 正常归隐角色才需要标记为 retired
+                    if !is_dead_character {
+                        config.retire_current_character();
+                    }
                     config.agent = None;
                     if let Err(e) = config.save_to_file(agent_config) {
                         error!("保存配置文件失败: {}", e);
                     } else {
-                        info!("角色已归隐，配置已更新: {:?}", agent_config);
+                        if is_dead_character {
+                            info!("死亡角色已清理本地状态，配置已更新: {:?}", agent_config);
+                        } else {
+                            info!("角色已归隐，配置已更新: {:?}", agent_config);
+                        }
                     }
                 }
                 Err(e) => {
@@ -3463,27 +3442,44 @@ pub(super) async fn get_cognitive_context_handler(
 ///
 /// 用于 Web 面板实时接收死亡等事件通知
 pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    let mut rx = state.death_event_tx.subscribe();
+    let mut death_rx = state.death_event_tx.subscribe();
+    let mut tick_rx = state.tick_update_tx.subscribe();
 
     let stream = async_stream::stream! {
         let data = Bytes::from_static(b"event: connected\ndata: {\"status\":\"connected\"}\n\n");
         yield Ok::<_, std::convert::Infallible>(Frame::data(data));
 
         loop {
-            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
-                Ok(Ok(msg)) => {
-                    if matches!(msg, ServerMessage::AgentDied { .. })
-                        && let Ok(json) = serde_json::to_string(&msg) {
-                            let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+            tokio::select! {
+                death_result = tokio::time::timeout(Duration::from_secs(30), death_rx.recv()) => {
+                    match death_result {
+                        Ok(Ok(msg)) => {
+                            if matches!(msg, ServerMessage::AgentDied { .. })
+                                && let Ok(json) = serde_json::to_string(&msg) {
+                                let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+                                yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                            }
+                        }
+                        Ok(Err(_)) => {
+                            break;
+                        }
+                        Err(_) => {
+                            let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                         }
+                    }
                 }
-                Ok(Err(_)) => {
-                    break;
-                }
-                Err(_) => {
-                    let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
-                    yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                tick_result = tick_rx.recv() => {
+                    match tick_result {
+                        Ok(tick_id) => {
+                            let json = serde_json::json!({"tick_id": tick_id}).to_string();
+                            let data = Bytes::from(format!("event: tick_update\ndata: {}\n\n", json));
+                            yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
                 }
             }
         }
