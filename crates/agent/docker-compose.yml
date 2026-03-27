@@ -80,7 +80,6 @@ services:
 networks:
   cyber-jianghu-network:
     external: true
-    name: cyber-jianghu-network
 
 # ============================================================================
 # 数据卷配置

@@ -92,8 +92,7 @@ services:
 # ============================================================================
 networks:
   cyber-jianghu-network:
-    driver: bridge
-    name: cyber-jianghu-network
+    external: true
 
 # ============================================================================
 # 数据卷配置

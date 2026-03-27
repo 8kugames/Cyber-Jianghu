@@ -211,6 +211,7 @@ cmd_server_start() {
     ensure_secure_db_password "$mode"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "server"
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
@@ -263,6 +264,7 @@ cmd_server_restart() {
         [ "$arg" = "--prod" ] && mode="prod"
         [ "$arg" = "--no-cache" ] && no_cache="yes"
     done
+    ensure_network "cyber-jianghu-network"
     enter_component_dir "server"
     info "重建服务端镜像并重启..."
     local compose_file="docker-compose.yml"
