@@ -153,21 +153,14 @@ async fn handle_websocket(
     // 分离 WebSocket 的发送和接收端（提前分离，以便在拒绝时使用）
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // agent_id 为零 = 角色已归隐或未注册，拒绝连接
-    if agent_id == uuid::Uuid::nil() {
-        warn!(
-            "Rejecting connection for retired/unregistered agent '{}'",
-            agent_name
+    // agent_id 为零 = 角色已归隐或未注册，但设备验证通过
+    // 允许连接，让 Agent 可以注册新角色（通过 /api/v1/agent/register）
+    let is_pending_registration = agent_id == uuid::Uuid::nil();
+    if is_pending_registration {
+        info!(
+            "Device {} connected for pending registration (character retired or new device)",
+            device_id
         );
-        let error_msg = ServerMessage::Error {
-            message: "Character retired or not registered. Please create a new character."
-                .to_string(),
-        };
-        if let Ok(json) = serde_json::to_string(&error_msg) {
-            let _ = ws_sender.send(Message::Text(json.into())).await;
-        }
-        let _ = ws_sender.send(Message::Close(None)).await;
-        return;
     }
 
     // 创建消息通道（用于向 Agent 发送消息），限制容量以提供背压
