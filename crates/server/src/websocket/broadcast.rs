@@ -90,9 +90,13 @@ pub async fn forward_dialogue_message(
     Ok(())
 }
 
+/// 死亡通知上下文（用于减少函数参数）
+pub struct DeathNotificationContext<'a> {
+    pub connection_manager: &'a ConnectionManager,
+    pub agent_to_device_map: &'a AgentToDeviceMap,
+}
+
 /// 向指定 Agent 发送死亡通知
-///
-/// 通过 WebSocket 连接发送 AgentDied 消息
 pub async fn send_agent_died_notification(
     agent_id: uuid::Uuid,
     cause: String,
@@ -100,11 +104,25 @@ pub async fn send_agent_died_notification(
     location: String,
     tick_id: i64,
     died_at: i64,
-    connection_manager: &ConnectionManager,
+    ctx: &DeathNotificationContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = connection_manager.read().await;
+    let connections = ctx.connection_manager.read().await;
 
-    if let Some(connection) = connections.get(&agent_id) {
+    let device_id = {
+        let agent_to_device = ctx.agent_to_device_map.read().await;
+        match agent_to_device.get(&agent_id) {
+            Some(&device_id) => device_id,
+            None => {
+                warn!(
+                    "Agent {} has no device mapping, cannot send AgentDied notification",
+                    agent_id
+                );
+                return Ok(());
+            }
+        }
+    };
+
+    if let Some(connection) = connections.get(&device_id) {
         let msg = ServerMessage::AgentDied {
             agent_id,
             cause,
@@ -112,15 +130,18 @@ pub async fn send_agent_died_notification(
             location,
             tick_id,
             died_at,
-            rebirth_delay_ticks: 0, // Current design: immediate rebirth
+            rebirth_delay_ticks: 0,
         };
         let json = serde_json::to_string(&msg)?;
         connection.send(Message::Text(json.into())).await?;
-        debug!("AgentDied notification sent to agent {}", agent_id);
+        debug!(
+            "AgentDied notification sent to agent {} via device {}",
+            agent_id, device_id
+        );
     } else {
         warn!(
-            "Agent {} is not online, cannot send AgentDied notification",
-            agent_id
+            "Agent {} is not online (device {} not connected), cannot send AgentDied notification",
+            agent_id, device_id
         );
     }
 

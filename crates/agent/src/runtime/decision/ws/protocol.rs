@@ -164,6 +164,25 @@ pub enum DownstreamMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+
+    /// Agent 死亡通知（Server -> Agent -> OpenClaw）
+    /// 通知 OpenClaw 角色已死亡，需要进行转生处理
+    AgentDied {
+        /// 死亡的 Agent ID
+        agent_id: Uuid,
+        /// 死亡原因代码（来自配置：hunger, thirst, environmental, combat, etc.）
+        cause: String,
+        /// 死亡描述（来自配置，叙事化文本）
+        description: String,
+        /// 死亡位置（node_id）
+        location: String,
+        /// 当前 tick
+        tick_id: i64,
+        /// 死亡时间戳（Unix timestamp, 毫秒）
+        died_at: i64,
+        /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
+        rebirth_delay_ticks: i32,
+    },
 }
 
 /// 玩家意图（用于审核请求）
@@ -383,6 +402,23 @@ impl DownstreamMessage {
                     last_updated: rules.last_updated,
                 })
             }
+            ServerMessage::AgentDied {
+                agent_id,
+                cause,
+                description,
+                location,
+                tick_id,
+                died_at,
+                rebirth_delay_ticks,
+            } => Some(DownstreamMessage::AgentDied {
+                agent_id,
+                cause,
+                description,
+                location,
+                tick_id,
+                died_at,
+                rebirth_delay_ticks,
+            }),
             // 其他消息类型不透传
             _ => None,
         }

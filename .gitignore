@@ -71,6 +71,7 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+mock_venv/
 venv/
 env/
 ENV/

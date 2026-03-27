@@ -6,8 +6,10 @@
 // ============================================================================
 
 use anyhow::Result;
+use cyber_jianghu_protocol::ServerMessage;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::models::Intent;
@@ -113,6 +115,30 @@ impl super::Agent {
         let (agent_id, game_rules) = self.client.wait_for_registration().await?;
         info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
+
+        // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
+        if agent_id == Uuid::nil() {
+            warn!(
+                "Agent '{}' retired (agent_id is nil)",
+                self.character_name()
+            );
+            self.death_reported = true;
+
+            if let Some(ref api_state) = self.http_api_state {
+                let death_msg = ServerMessage::AgentDied {
+                    agent_id: Uuid::nil(),
+                    cause: "retired".to_string(),
+                    description: "角色已归隐，请创建新角色".to_string(),
+                    location: String::new(),
+                    tick_id: 0,
+                    died_at: chrono::Utc::now().timestamp_millis(),
+                    rebirth_delay_ticks: 0,
+                };
+                let _ = api_state.death_event_tx.send(death_msg);
+            }
+
+            return Ok(());
+        }
 
         // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
         if let Some(ref callback) = self.registration_callback {
@@ -261,8 +287,10 @@ impl super::Agent {
                                 self.character_name(), death_event.description
                             );
                             self.death_reported = true;
-                            // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
-                            // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
+                            // 死亡后不退出，等待转生：
+                            // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
+                            // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连
+                            continue;
                         }
 
                     // 2. 处理事件并更新记忆
