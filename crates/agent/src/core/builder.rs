@@ -210,12 +210,8 @@ impl AgentBuilder {
                 ..Default::default()
             });
 
-            // 如果有 LLM 客户端，使用 new_with_llm 初始化
-            let result = if let Some(ref llm_client) = self.llm_client {
-                MemoryManager::new_with_llm(config, llm_client.clone())
-            } else {
-                MemoryManager::new(config)
-            };
+            // 初始化记忆管理器（使用本地 embedder）
+            let result = MemoryManager::new(config);
 
             match result {
                 Ok(manager) => {

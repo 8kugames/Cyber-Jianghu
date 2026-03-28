@@ -6,10 +6,13 @@
 // ============================================================================
 
 use anyhow::Result;
+use cyber_jianghu_protocol::ServerMessage;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use crate::config::CharacterStatus;
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -31,6 +34,27 @@ impl super::Agent {
     ///
     /// 持续接收世界状态，做出决策，发送意图
     pub async fn run(&mut self) -> Result<()> {
+        // 检查角色状态：若已死亡或已归隐，跳过服务器连接
+        let skip_connection = self.death_reported
+            || self
+                .config
+                .agent
+                .as_ref()
+                .map(|c| c.status != CharacterStatus::Alive)
+                .unwrap_or(false);
+
+        if skip_connection {
+            if let Some(ref agent) = self.config.agent {
+                warn!(
+                    "Agent '{}' status is {:?}, skipping server connection (waiting for rebirth)",
+                    agent.name, agent.status
+                );
+            } else {
+                warn!("No active character, skipping server connection");
+            }
+            return Ok(());
+        }
+
         // 初始连接：无限重试（带日志采样）
         let mut connect_attempt = 0u32;
         loop {
@@ -113,6 +137,33 @@ impl super::Agent {
         let (agent_id, game_rules) = self.client.wait_for_registration().await?;
         info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
+
+        // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
+        if agent_id == Uuid::nil() {
+            warn!(
+                "Agent '{}' retired (agent_id is nil)",
+                self.character_name()
+            );
+            self.death_reported = true;
+
+            if let Some(ref api_state) = self.http_api_state {
+                api_state
+                    .is_dead
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                let death_msg = ServerMessage::AgentDied {
+                    agent_id: Uuid::nil(),
+                    cause: "retired".to_string(),
+                    description: "角色已归隐，请创建新角色".to_string(),
+                    location: String::new(),
+                    tick_id: 0,
+                    died_at: chrono::Utc::now().timestamp_millis(),
+                    rebirth_delay_ticks: 0,
+                };
+                let _ = api_state.death_event_tx.send(death_msg);
+            }
+
+            return Ok(());
+        }
 
         // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
         if let Some(ref callback) = self.registration_callback {
@@ -261,8 +312,13 @@ impl super::Agent {
                                 self.character_name(), death_event.description
                             );
                             self.death_reported = true;
-                            // 可以在这里处理死亡逻辑，例如退出循环或进入观察者模式
-                            // 目前 MVP 阶段，我们只是记录日志并继续（可能会尝试发送 idle 直到被踢出）
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            // 死亡后不退出，等待转生：
+                            // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
+                            // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连
+                            continue;
                         }
 
                     // 2. 处理事件并更新记忆
@@ -394,6 +450,38 @@ impl super::Agent {
                         Ok((agent_id, game_rules)) => {
                             info!("重连后注册确认: agent_id={}", agent_id);
 
+                            // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
+                            if agent_id == Uuid::nil() {
+                                warn!("重连后收到 nil agent_id，角色已归隐");
+                                self.death_reported = true;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    api_state
+                                        .is_dead
+                                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let death_msg = ServerMessage::AgentDied {
+                                        agent_id: Uuid::nil(),
+                                        cause: "retired".to_string(),
+                                        description: "角色已归隐，请创建新角色".to_string(),
+                                        location: String::new(),
+                                        tick_id: 0,
+                                        died_at: chrono::Utc::now().timestamp_millis(),
+                                        rebirth_delay_ticks: 0,
+                                    };
+                                    let _ = api_state.death_event_tx.send(death_msg);
+                                }
+                                return Err(anyhow::anyhow!(
+                                    "Pending registration: character retired"
+                                ));
+                            }
+
+                            // 重置死亡状态（转生后获得新身份）
+                            self.death_reported = false;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state
+                                    .is_dead
+                                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                            }
+
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
                             if let Some(ref callback) = self.registration_callback {
                                 callback(agent_id);
@@ -403,7 +491,13 @@ impl super::Agent {
                             self.config.update_game_rules(game_rules);
                         }
                         Err(e) => {
-                            // 注册确认失败，可能需要重新建立连接
+                            let err_msg = format!("{}", e);
+                            // Pending registration = 需要注册新角色，停止重试
+                            if err_msg.contains("Pending registration") {
+                                info!("等待注册新角色，停止重连");
+                                return Err(anyhow::anyhow!("Pending registration: {}", e));
+                            }
+                            // 其他错误，继续重试
                             error!("重连后注册确认失败: {}", e);
                             self.client.close().await;
                             // 增加退避计数器并继续重试

@@ -69,14 +69,11 @@ pub async fn persist_states(
     Ok(())
 }
 
-/// 保存Tick日志到数据库
+/// 保存Tick日志到文件
 ///
-/// MVP阶段：只打印日志，不实际保存
-/// TODO: 实现真实的数据库保存（Phase 2）
+/// 注意：Tick日志详情已通过 `create_tick_log` / `update_tick_log` 写入数据库。
+/// 此函数仅将日志信息打印到标准日志（用于日志文件收集和监控）。
 pub async fn save_tick_log(tick_log: &TickLog) -> Result<()> {
-    // MVP阶段：只打印日志，不实际保存到数据库
-    // Phase 2 将实现真实的数据库保存
-
     tracing::info!(
         "Tick日志: id={}, status={:?}, agents={}, actions={}, duration={}ms",
         tick_log.tick_id,

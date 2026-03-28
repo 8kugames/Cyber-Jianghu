@@ -864,6 +864,52 @@ pub async fn apply_state_change(
 mod tests {
     use super::*;
 
+    fn make_test_agent_state(agent_id: uuid::Uuid) -> AgentState {
+        use crate::game_data::types::StatusComponent;
+        use crate::game_data::types::attributes::{
+            Attribute, AttributeCollection, AttributeMetadata, AttributeType, AttributeValue,
+        };
+
+        let mut hunger_collection = AttributeCollection::new_collection();
+        hunger_collection.add(Attribute {
+            value: AttributeValue::Static { value: 50 },
+            metadata: AttributeMetadata {
+                name: "hunger".to_string(),
+                display_name: "饥饿".to_string(),
+                description: String::new(),
+                attr_type: AttributeType::Status,
+                birth_range: None,
+                initial_value: None,
+                growth_rate: None,
+                affects: vec![],
+                decay_per_tick: None,
+                death_condition: None,
+                formula: None,
+                default_value: None,
+                min_value: None,
+                max_value_formula: None,
+                recovery_formula: None,
+                primary_attribute_deps: vec![],
+            },
+        });
+
+        AgentState {
+            id: 0,
+            agent_id,
+            tick_id: 1,
+            primary_attributes: crate::game_data::types::AttributeComponent {
+                collection: AttributeCollection::new_collection(),
+            },
+            status: StatusComponent {
+                collection: hunger_collection,
+            },
+            node_id: "test".to_string(),
+            is_alive: true,
+            inventory_cleared_this_tick: false,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
     #[tokio::test]
     async fn test_hunger_changed() {
         let db_pool = sqlx::postgres::PgPoolOptions::new()
@@ -871,7 +917,7 @@ mod tests {
             .unwrap();
         let tick_id = 1i64;
         let agent_id = uuid::Uuid::new_v4();
-        let agent_state = AgentState::new(agent_id, tick_id);
+        let agent_state = make_test_agent_state(agent_id);
         let mut events = Vec::new();
 
         let change = StateChange::HungerChanged {

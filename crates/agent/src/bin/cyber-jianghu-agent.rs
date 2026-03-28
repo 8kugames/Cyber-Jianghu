@@ -592,6 +592,9 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
     // 根据模式创建决策回调和相关组件
     let maybe_callback_setup: Option<ClawCallbackSetup>;
     let cognitive_death_event_tx: Option<tokio::sync::broadcast::Sender<ServerMessage>>;
+    let cognitive_api_state: Option<
+        Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
+    >;
 
     let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
@@ -675,11 +678,11 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 if is_container {
-                    info!("浏览器请手动打开: {}", browser_url);
+                    debug!("浏览器请手动打开: {}", browser_url);
                 } else {
                     match open::that_detached(&browser_url) {
                         Ok(_) => info!("浏览器已打开: {}", browser_url),
-                        Err(e) => warn!("无法自动打开浏览器: {}，请手动访问: {}", e, browser_url),
+                        Err(e) => debug!("无法自动打开浏览器: {}，请手动访问: {}", e, browser_url),
                     }
                 }
             });
@@ -718,12 +721,14 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
             maybe_callback_setup = None;
             cognitive_death_event_tx = Some(api_state.death_event_tx.clone());
+            cognitive_api_state = Some(api_state.clone());
             agent
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
             let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
             cognitive_death_event_tx = None;
+            cognitive_api_state = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
                 shared_state: setup.shared_state.clone(),
                 api_state: setup.api_state.clone(),
@@ -883,11 +888,15 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
     };
 
     // Cognitive 模式：设置死亡事件回调
-    if let Some(death_tx) = cognitive_death_event_tx {
+    if let (Some(death_tx), Some(api_state)) = (cognitive_death_event_tx, cognitive_api_state) {
         let death_tx_clone = death_tx.clone();
+        let api_state_clone = api_state.clone();
         agent
             .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
                 if matches!(msg, ServerMessage::AgentDied { .. }) {
+                    api_state_clone
+                        .is_dead
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = death_tx_clone.send(msg);
                 }
             }))
@@ -936,8 +945,10 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
         agent
             .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
-                // 广播死亡事件到 SSE 订阅者
                 if matches!(msg, ServerMessage::AgentDied { .. }) {
+                    api_state_clone
+                        .is_dead
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = api_state_clone.death_event_tx.send(msg.clone());
                 }
                 let current_tick = 0;

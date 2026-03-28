@@ -191,10 +191,10 @@ impl AgentState {
             // 顺便提供上限值
             let max_value = crate::game_data::types::StatusComponent::evaluate_max_value(
                 &attr.metadata.max_value_formula,
-                255,
+                255.0,
                 &context,
             );
-            attributes.insert(format!("{}_max", name), max_value);
+            attributes.insert(format!("{}_max", name), max_value as i32);
         }
 
         // 从 AttributeComponent 收集所有先天属性
@@ -210,5 +210,28 @@ impl AgentState {
         }
 
         attributes
+    }
+
+    /// 获取派生属性用于协议序列化（浮点数）
+    ///
+    /// 计算派生属性（如闪避率、暴击率等）并返回 f32 HashMap
+    pub fn get_derived_attributes_for_protocol(&self) -> HashMap<String, f32> {
+        let mut derived_attributes = HashMap::new();
+        let context = self.get_formula_context();
+
+        if let Some(config) = crate::game_data::registry::StateRegistry::get_attributes_config() {
+            for (name, attr_def) in &config.data.derived.attributes {
+                if let Some(formula) = &attr_def.formula {
+                    let value = crate::game_data::types::StatusComponent::evaluate_max_value(
+                        &Some(formula.clone()),
+                        attr_def.default_value.unwrap_or(0.0) as f32,
+                        &context,
+                    );
+                    derived_attributes.insert(name.clone(), value);
+                }
+            }
+        }
+
+        derived_attributes
     }
 }
