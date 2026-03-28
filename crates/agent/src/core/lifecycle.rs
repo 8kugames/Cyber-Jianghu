@@ -5,10 +5,11 @@
 // 处理 Agent 的连接、重连、主循环和关闭
 // ============================================================================
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cyber_jianghu_protocol::ServerMessage;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::config::CharacterStatus;
@@ -26,6 +27,46 @@ fn should_log_retry(attempt: u32) -> bool {
     // 检查是否为完全平方数
     let sqrt = (attempt as f64).sqrt() as u32;
     sqrt * sqrt == attempt
+}
+
+/// 向服务器注册设备身份
+async fn register_device_identity(server_url: &str, device_id: Uuid) -> Result<String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/v1/agent/connect", server_url);
+
+    info!("向服务器注册设备: {} -> {}", device_id, url);
+
+    #[derive(serde::Serialize)]
+    struct AgentConnectRequest {
+        device_id: Uuid,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct AgentConnectResponse {
+        auth_token: String,
+        message: String,
+    }
+
+    let response = client
+        .post(&url)
+        .json(&AgentConnectRequest { device_id })
+        .send()
+        .await
+        .context("Failed to connect to server")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Server returned error {}: {}", status, body);
+    }
+
+    let result: AgentConnectResponse = response
+        .json()
+        .await
+        .context("Failed to parse server response")?;
+
+    info!("服务器响应: {}", result.message);
+    Ok(result.auth_token)
 }
 
 impl super::Agent {
@@ -133,14 +174,47 @@ impl super::Agent {
         }
 
         // 等待注册确认（包含游戏规则和存活状态）
-        let (agent_id, game_rules, is_alive) = self.client.wait_for_registration().await?;
+        let registration_result = self.client.wait_for_registration().await;
+
+        // 处理 "Invalid device credentials" 错误：清除身份并重新注册
+        if let Err(ref e) = registration_result {
+            let err_msg = e.to_string();
+            if err_msg.contains("Invalid device credentials") {
+                warn!("服务器拒绝设备凭证，将清除旧身份并重新注册...");
+                self.config.clear_identity();
+                // 重新连接并注册
+                self.client.close().await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                // 生成新身份并注册
+                let new_device_id = Uuid::new_v4();
+                let http_url = self.config.server.http_url.clone();
+                match register_device_identity(&http_url, new_device_id).await {
+                    Ok(auth_token) => {
+                        self.config.identity = Some(crate::config::IdentityConfig {
+                            device_id: new_device_id,
+                            auth_token,
+                            server_url: Some(http_url),
+                        });
+                        if let Err(save_err) = self.config.save_to_file(&self.config.config_path) {
+                            warn!("保存新身份失败: {}", save_err);
+                        }
+                        info!("新身份已注册: {}", new_device_id);
+                    }
+                    Err(reg_err) => {
+                        error!("重新注册失败: {}", reg_err);
+                    }
+                }
+            }
+        }
+
+        let (agent_id, game_rules, is_alive) = registration_result?;
         info!("Agent '{}' registered with server", self.character_name());
         info!(
             "Server-assigned Agent ID: {} (alive={})",
             agent_id, is_alive
         );
 
-        // is_alive == false = 角色已死亡/归隐，跳过主循环，直接触发死亡/转生流程
+        // is_alive == false = 角色已死亡/归隐/未创建，跳过主循环，等待转生/创建角色
         // 覆盖两种情况：agent_id 为 nil（已归隐）或 agent_id 非 nil 但已死亡（竞态窗口）
         if !is_alive {
             warn!(
@@ -157,7 +231,7 @@ impl super::Agent {
                 let death_msg = ServerMessage::AgentDied {
                     agent_id,
                     cause: "retired".to_string(),
-                    description: "角色已归隐，请创建新角色".to_string(),
+                    description: "角色已归隐或尚未创建，请创建新角色".to_string(),
                     location: String::new(),
                     tick_id: 0,
                     died_at: chrono::Utc::now().timestamp_millis(),
@@ -166,7 +240,127 @@ impl super::Agent {
                 let _ = api_state.death_event_tx.send(death_msg);
             }
 
-            return Ok(());
+            // 不退出！等待配置重载（角色创建会触发配置重载）后重新连接
+            info!(
+                "Agent '{}' 等待角色创建，HTTP API 保持运行...",
+                self.character_name()
+            );
+
+            loop {
+                tokio::select! {
+                    // 等待配置重载（角色创建会触发配置重载）
+                    _ = async {
+                        if let Some(ref mut rx) = self.config_reload_rx {
+                            rx.recv().await
+                        } else {
+                            std::future::pending().await
+                        }
+                    } => {
+                        info!("检测到配置变更，重新加载...");
+                        match crate::config::Config::from_file(&self.config.config_path) {
+                            Ok(new_config) => {
+                                self.config = new_config;
+                                info!("配置已重载，尝试重新连接...");
+                            }
+                            Err(e) => {
+                                warn!("配置读取失败: {}，继续等待", e);
+                                continue;
+                            }
+                        }
+                    }
+                    // 等待重连请求（转生/角色切换）
+                    Some(req) = async {
+                        if let Some(ref mut rx) = self.reconnect_rx {
+                            rx.recv().await
+                        } else {
+                            std::future::pending().await
+                        }
+                    } => {
+                        info!("[main] 收到重连请求: {}", req.ws_url);
+                        let http_url = req.ws_url
+                            .replace("ws://", "http://")
+                            .replace("wss://", "https://")
+                            .replace("/ws", "");
+                        self.client.update_server_url(req.ws_url.clone(), http_url).await;
+                        break; // 跳出循环，执行重连
+                    }
+                    // 定期检查配置是否有角色信息
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                        info!("定期检查配置是否有角色创建...");
+                        match crate::config::Config::from_file(&self.config.config_path) {
+                            Ok(new_config) => {
+                                let had_character_before = self.config.agent.is_some();
+                                let has_character_now = new_config.agent.is_some();
+                                // 检查是否有新角色被创建
+                                if !had_character_before && has_character_now {
+                                    info!("检测到新角色，重新连接...");
+                                    self.config = new_config;
+                                    break;
+                                }
+                                self.config = new_config;
+                            }
+                            Err(e) => {
+                                debug!("配置读取失败（定期检查）: {}", e);
+                            }
+                        }
+                    }
+                }
+
+                // 重置状态，准备重新连接
+                self.death_reported = false;
+                if let Some(ref api_state) = self.http_api_state {
+                    api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                self.client.close().await;
+
+                // 重新连接并注册
+                match self.client.connect().await {
+                    Ok(()) => info!("重新连接成功"),
+                    Err(e) => {
+                        warn!("重新连接失败: {}，5秒后重试...", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        continue;
+                    }
+                }
+
+                match self.client.wait_for_registration().await {
+                    Ok((new_agent_id, new_game_rules, new_is_alive)) => {
+                        info!(
+                            "重新注册成功: agent_id={} (alive={})",
+                            new_agent_id, new_is_alive
+                        );
+
+                        if new_is_alive {
+                            // 角色已创建，更新状态并进入主循环
+                            if let Some(ref callback) = self.registration_callback {
+                                callback(new_agent_id);
+                            }
+                            self.config.update_game_rules(new_game_rules);
+                            // 重置死亡标记
+                            self.death_reported = false;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            // 继续执行到下面的主循环
+                            info!("角色已就绪，进入游戏主循环");
+                            break; // 退出等待循环，继续到主循环
+                        } else {
+                            // 仍然不存活，继续等待
+                            info!("角色仍未创建，继续等待...");
+                            self.death_reported = true;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("重新注册失败: {}，继续等待...", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                }
+            }
+
+            // 如果到这里，说明角色已创建（alive=true），继续执行到主循环
         }
 
         // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
