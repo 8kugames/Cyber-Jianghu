@@ -10,7 +10,6 @@
 // - ArchiveMemory: 遗忘归档存储
 // ============================================================================
 
-use crate::ai::llm::LlmClient;
 use crate::ai::memory::backend::{MemoryBackend, SearchableBackend, SemanticSearchable};
 use crate::ai::memory::backends::archive::ArchiveMemoryBackend;
 use crate::ai::memory::backends::episodic::EpisodicMemoryBackend;
@@ -66,7 +65,7 @@ pub struct MemoryManager {
     episodic: EpisodicMemoryBackend,
     /// 归档记忆后端
     archive: ArchiveMemoryBackend,
-    /// 语义记忆后端（可选，需要 LlmClient）
+    /// 语义记忆后端（可选，使用本地 embedder）
     semantic: Option<Arc<tokio::sync::Mutex<SemanticMemoryBackend>>>,
     /// 遗忘调度器
     forgetting_scheduler: ForgettingScheduler,
@@ -75,11 +74,8 @@ pub struct MemoryManager {
 }
 
 impl MemoryManager {
-    /// 创建新的记忆管理器（带 LlmClient）
-    pub fn new_with_llm(
-        config: MemoryManagerConfig,
-        llm_client: Arc<dyn LlmClient>,
-    ) -> Result<Self> {
+    /// 创建新的记忆管理器
+    pub fn new(config: MemoryManagerConfig) -> Result<Self> {
         // 确保目录存在
         std::fs::create_dir_all(&config.db_dir).context("Failed to create database directory")?;
 
@@ -90,8 +86,8 @@ impl MemoryManager {
         let archive = ArchiveMemoryBackend::new(config.agent_id, &config.db_dir)
             .context("Failed to create archive memory backend")?;
 
-        // 初始化语义记忆
-        let embedder = Arc::new(EmbedderService::new(Some(llm_client.clone())));
+        // 初始化语义记忆（使用本地 embedder）
+        let embedder = Arc::new(EmbedderService::new());
         let episodic_db_path = config.db_dir.join(format!("agent_{}.db", config.agent_id));
         let semantic_config =
             crate::ai::memory::backends::semantic::backend::SemanticMemoryConfig {
@@ -100,8 +96,7 @@ impl MemoryManager {
                 ..Default::default()
             };
 
-        let semantic = match SemanticMemoryBackend::new(config.agent_id, semantic_config, embedder)
-        {
+        let semantic = match SemanticMemoryBackend::new(config.agent_id, semantic_config, embedder) {
             Ok(backend) => Some(Arc::new(tokio::sync::Mutex::new(backend))),
             Err(e) => {
                 tracing::warn!("Failed to initialize semantic memory: {}", e);
@@ -118,32 +113,6 @@ impl MemoryManager {
             episodic,
             archive,
             semantic,
-            forgetting_scheduler,
-            scorer: ImportanceScorer::new(),
-        })
-    }
-
-    /// 创建新的记忆管理器（无 LLM）
-    pub fn new(config: MemoryManagerConfig) -> Result<Self> {
-        // 确保目录存在
-        std::fs::create_dir_all(&config.db_dir).context("Failed to create database directory")?;
-
-        // 创建各后端
-        let working = WorkingMemoryBackend::new(config.working_memory_size);
-        let episodic = EpisodicMemoryBackend::new(config.agent_id, &config.db_dir)
-            .context("Failed to create episodic memory backend")?;
-        let archive = ArchiveMemoryBackend::new(config.agent_id, &config.db_dir)
-            .context("Failed to create archive memory backend")?;
-
-        // 创建遗忘调度器
-        let forgetting_scheduler = ForgettingScheduler::new(config.ebbinghaus_config.clone(), 0);
-
-        Ok(Self {
-            config,
-            working,
-            episodic,
-            archive,
-            semantic: None,
             forgetting_scheduler,
             scorer: ImportanceScorer::new(),
         })
