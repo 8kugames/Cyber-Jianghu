@@ -134,3 +134,26 @@ attack:
 - [x] `ADMIN_READ_TOKEN`/`ADMIN_WRITE_TOKEN` 空值自动生成
 - [x] `scripts/version-bump.sh` 自动检测变更并升级版本号
 - [x] PostgreSQL 就绪等待机制
+
+---
+
+## 七、 待实现功能 (TODO)
+
+### 服务端
+
+- [ ] **物品自然损坏**: `crates/server/src/tick/decay.rs:219-227`
+  - 基础设施已就绪（`AgentItem.durability`、`agent_inventory.durability` 列、`ItemDefinition.max_durability/decay_rate` 类型定义）
+  - 需要实现：衰减逻辑（查询背包 → 扣减耐久 → 移除物品 → 发送通知）+ `items.yaml` 配置衰减率
+
+### Agent SDK
+
+- [ ] **语义记忆向量生成**: `crates/agent/src/ai/memory/backends/semantic/backend.rs`
+  - 基础设施已就绪（HNSW 向量索引 + FTS fallback + LocalEmbedder）
+  - 需要实现：`SemanticMemoryBackend::add()` 空操作 → 改为真正写入向量存储
+  - 需要实现：`ensure_embeddings_for_priority()` stub → 实现优先级记忆的向量生成
+  - 需要实现：`ensure_embedding(memory_id)` stub → 实现单个记忆的向量生成
+
+- [ ] **记忆归档与强度更新**: `crates/agent/src/ai/memory/backends/episodic.rs:166-178`
+  - 已实现：Ebbinghaus 遗忘曲线计算、重要性评分器
+  - 需要实现：`archive_memories()` stub → 改为调用 `ArchiveMemoryBackend::archive()` 真正移动到归档表
+  - 需要实现：`strengthen_memory()` stub → 需要 `MemoryStore` schema 支持 `strength`/`access_count`/`last_accessed_at` 列
