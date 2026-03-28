@@ -205,13 +205,19 @@ async function loadProviders() {
     }
 }
 
+// 支持自定义 base_url 的 provider 列表（即使 requires_base_url 为 false 也显示字段）
+const PROVIDERS_WITH_OPTIONAL_BASE_URL = ['ollama'];
+
 function handleProviderChange(targetSelect, baseUrlGroup, apiKeyGroup) {
     if (!providersData) return;
 
     const selected = providersData.providers.find(p => p.value === targetSelect.value);
     if (selected) {
-        baseUrlGroup.style.display = selected.requires_base_url ? 'block' : 'none';
-        apiKeyGroup.style.display = selected.requires_base_url ? 'block' : 'none';
+        // base_url 字段显示条件：required=true 或者在可选列表中
+        const showBaseUrl = selected.requires_base_url || PROVIDERS_WITH_OPTIONAL_BASE_URL.includes(selected.value);
+        baseUrlGroup.style.display = showBaseUrl ? 'block' : 'none';
+        // API Key 字段显示条件与 base_url 相同（Ollama 不需要 API Key）
+        apiKeyGroup.style.display = showBaseUrl ? 'block' : 'none';
     }
 }
 

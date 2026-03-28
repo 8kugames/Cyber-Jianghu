@@ -35,7 +35,7 @@ data:
     # Tick 调度配置（现实时间 → Tick 转换）
     tick:
       # 服务器每多少秒执行一个 tick
-      real_seconds_per_tick: 60
+      real_seconds_per_tick: 300  # 联调测试临时调整（原值 60）
 
     # 出生点配置
     location:

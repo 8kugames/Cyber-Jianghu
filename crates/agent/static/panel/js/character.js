@@ -1011,9 +1011,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const currentItems = Array.from(invEl.querySelectorAll('.inventory-item')).map(item => ({
-            name: item.querySelector('.item-name')?.textContent,
-            quantity: item.querySelector('.item-quantity')?.textContent
+        const currentItems = Array.from(invEl.querySelectorAll('.inv-item')).map(item => ({
+            name: item.querySelector('.inv-name')?.textContent,
+            quantity: item.querySelector('.inv-qty')?.textContent
         }));
 
         const newItems = inventory.map(item => ({
