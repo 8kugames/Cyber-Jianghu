@@ -557,9 +557,9 @@ function loadMoreMemories() {
     loadMemories(memoryPage + 1);
 }
 
-// 页面加载
+    // 页面加载
 document.addEventListener('DOMContentLoaded', () => {
-    // SSE 连接：实时接收死亡事件
+    // SSE 连接：实时接收死亡事件（仅对存活角色启用）
     let deathEventSource = null;
     function connectDeathEvents() {
         deathEventSource = new EventSource('/api/v1/events');
@@ -593,7 +593,6 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(connectDeathEvents, 5000);
         };
     }
-    connectDeathEvents();
 
     // 死亡通知弹窗
     function showDeathModal(data) {
@@ -633,7 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadCharacterList();
         const currentChar = allCharacters.find(c => c.is_current);
         
-        // 当前角色非存活时，切换到世界树分页
+        // 当前角色非存活时，切换到世界树分页（不建立 SSE 连接）
         if (!currentChar || currentChar.status !== 'alive') {
             hide('#loading');
             // 切换到世界树 tab
@@ -643,6 +642,9 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('tab-worldtree').classList.add('active');
             return;
         }
+        
+        // 仅对存活角色建立 SSE 连接
+        connectDeathEvents();
         
         // 角色数据通过 HTTP API 获取，立即可用
         loadCharacter();

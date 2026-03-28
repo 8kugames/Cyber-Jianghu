@@ -1466,6 +1466,8 @@ pub struct CharacterInfoResponse {
     // === 状态 ===
     /// 角色状态（alive, dead, etc.）
     pub status: Option<String>,
+    /// 数据是否来自缓存（true = 数据可能已过时）
+    pub is_stale: bool,
 }
 
 /// 获取角色信息
@@ -1513,6 +1515,9 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
+    // 是否使用缓存数据（当服务器未连接时）
+    let is_stale = current.is_none();
+
     let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
         match current.as_ref() {
             Some(ws) => {
@@ -1523,14 +1528,21 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 let time = serde_json::to_value(&ws.world_time).ok();
                 (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
             }
-            None => (
-                character.agent_id.map(|id| id.to_string()),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
+            None => {
+                // 降级使用配置数据（birth_attributes 作为 attributes 的兜底）
+                let fallback_attrs = character
+                    .birth_attributes
+                    .as_ref()
+                    .and_then(|a| serde_json::to_value(a).ok());
+                (
+                    character.agent_id.map(|id| id.to_string()),
+                    fallback_attrs,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
         };
 
     // 5. 计算角色状态（在 move attributes 之前）
@@ -1569,6 +1581,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         tick_id,
         world_time,
         status,
+        is_stale,
     };
 
     Json(response).into_response()
