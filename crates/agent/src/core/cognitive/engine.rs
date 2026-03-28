@@ -88,9 +88,23 @@ impl MultiStageCognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
+        // 辅助闭包：记录已完成的阶段并返回错误
+        let log_partial_and_fail =
+            |chain: &CognitiveChain, stage: &str, err: anyhow::Error| -> anyhow::Error {
+                let summary = format!(
+                    "认知流程在 {} 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    stage,
+                    err,
+                    chain.summarize()
+                );
+                thinking_log::log_thinking(&self.config.agent_name, tick_id, &summary);
+                err
+            };
+
         let (perception_response, perception) = self
             .perceive_with_memory(world_state, "", validation_feedback)
-            .await?;
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Perception", e))?;
         chain.add_stage(perception);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -103,8 +117,10 @@ impl MultiStageCognitiveEngine {
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let (motivation_response, motivation) =
-            self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) = self
+            .motivate(world_state, &perception_output)
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Motivation", e))?;
         chain.add_stage(motivation);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -119,7 +135,8 @@ impl MultiStageCognitiveEngine {
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
         let (planning_response, planning) = self
             .plan(world_state, &perception_output, &motivation_output)
-            .await?;
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Planning", e))?;
         chain.add_stage(planning);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -131,7 +148,10 @@ impl MultiStageCognitiveEngine {
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
-        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
+        let (decision_response, decision, intent) = self
+            .decide(world_state, &chain)
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Decision", e))?;
         chain.add_stage(decision);
         chain.final_intent = intent;
         thinking_log::log_llm(
@@ -166,9 +186,23 @@ impl MultiStageCognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
+        // 辅助闭包：记录已完成的阶段并返回错误
+        let log_partial_and_fail =
+            |chain: &CognitiveChain, stage: &str, err: anyhow::Error| -> anyhow::Error {
+                let summary = format!(
+                    "认知流程在 {} 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    stage,
+                    err,
+                    chain.summarize()
+                );
+                thinking_log::log_thinking(&self.config.agent_name, tick_id, &summary);
+                err
+            };
+
         let (perception_response, perception) = self
             .perceive_with_memory(world_state, memory_context, None)
-            .await?;
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Perception", e))?;
         chain.add_stage(perception);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -181,8 +215,10 @@ impl MultiStageCognitiveEngine {
         // === Stage 2: Motivation (动机) ===
         debug!("执行 Stage 2: Motivation");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let (motivation_response, motivation) =
-            self.motivate(world_state, &perception_output).await?;
+        let (motivation_response, motivation) = self
+            .motivate(world_state, &perception_output)
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Motivation", e))?;
         chain.add_stage(motivation);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -197,7 +233,8 @@ impl MultiStageCognitiveEngine {
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
         let (planning_response, planning) = self
             .plan(world_state, &perception_output, &motivation_output)
-            .await?;
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Planning", e))?;
         chain.add_stage(planning);
         thinking_log::log_llm(
             &self.config.agent_name,
@@ -209,7 +246,10 @@ impl MultiStageCognitiveEngine {
 
         // === Stage 4: Decision (决策) ===
         debug!("执行 Stage 4: Decision");
-        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
+        let (decision_response, decision, intent) = self
+            .decide(world_state, &chain)
+            .await
+            .map_err(|e| log_partial_and_fail(&chain, "Decision", e))?;
         chain.add_stage(decision);
         chain.final_intent = intent;
         thinking_log::log_llm(

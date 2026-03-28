@@ -9,7 +9,7 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -20,6 +20,15 @@ use zeroize::Zeroize;
 // ============================================================================
 
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
+
+/// 反序列化辅助：将 null 视为默认值（空字符串）
+fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
 
 /// 支持的 LLM Provider
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
@@ -150,6 +159,7 @@ pub struct CharacterConfig {
 
     // === 基本信息 ===
     /// 姓名
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub name: String,
 
     /// 年龄
@@ -157,7 +167,10 @@ pub struct CharacterConfig {
     pub age: u8,
 
     /// 性别
-    #[serde(default = "default_gender")]
+    #[serde(
+        default = "default_gender",
+        deserialize_with = "deserialize_null_string"
+    )]
     pub gender: String,
 
     /// 外貌描述
