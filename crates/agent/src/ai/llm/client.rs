@@ -54,7 +54,10 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             response.trim()
         };
 
-        let parsed: D = serde_json::from_str(json_str)?;
+        let parsed: D = serde_json::from_str(json_str).map_err(|e| {
+            tracing::error!("[complete_json] Failed to parse JSON: {}\nRaw JSON: {}", e, json_str);
+            e
+        })?;
         Ok(parsed)
     }
 }

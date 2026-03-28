@@ -109,6 +109,7 @@ pub struct DialogueSession {
 ///     agent_id: Uuid::new_v4(),
 ///     game_rules,
 ///     world_building_rules: None,
+///     is_alive: true,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]

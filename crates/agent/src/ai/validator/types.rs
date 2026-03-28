@@ -36,15 +36,17 @@ impl Default for PersonaInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LlmValidationResponse {
     /// 结果：approved 或 rejected
+    #[serde(default)]
     pub result: String,
     /// 原因
-    pub reason: String,
-    /// 驳回类型
     #[serde(default)]
-    pub rejection_type: String,
+    pub reason: String,
+    /// 驳回类型（approved 时为 null）
+    #[serde(default)]
+    pub rejection_type: Option<String>,
     /// 叙事摘要（仅 approved 时有值）
     #[serde(default)]
-    pub narrative: String,
+    pub narrative: Option<String>,
 }
 
 /// 验证结果（内部使用）

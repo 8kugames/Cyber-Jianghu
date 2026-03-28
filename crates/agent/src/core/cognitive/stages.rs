@@ -2,7 +2,16 @@
 // 认知阶段定义
 // ============================================================================
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// 反序列化辅助：将 null 视为空字符串
+fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
 
 /// 认知阶段
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,10 +87,13 @@ impl StageOutput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerceptionResponse {
     /// 自身状态摘要
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub self_status: String,
     /// 环境观察
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub environment: String,
     /// 识别到的关键信息
+    #[serde(default)]
     pub key_observations: Vec<String>,
 }
 
@@ -89,10 +101,13 @@ pub struct PerceptionResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MotivationResponse {
     /// 当前主要驱动力
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub primary_drive: String,
     /// 驱动强度 (1-10)
+    #[serde(default)]
     pub drive_intensity: u8,
     /// 为什么有这个动机
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub reasoning: String,
 }
 
@@ -100,10 +115,39 @@ pub struct MotivationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningResponse {
     /// 计划步骤
+    #[serde(default)]
     pub steps: Vec<String>,
     /// 优先级 (1-10)
+    #[serde(default)]
     pub priority: u8,
     /// 预期结果
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub expected_outcome: String,
+}
+
+/// 动机+规划合并阶段响应（一次 LLM 调用完成两个阶段）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MotivationPlanningResponse {
+    // --- 动机字段 ---
+    /// 当前主要驱动力
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub primary_drive: String,
+    /// 驱动强度 (1-10)
+    #[serde(default)]
+    pub drive_intensity: u8,
+    /// 为什么有这个动机
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub reasoning: String,
+
+    // --- 规划字段 ---
+    /// 计划步骤
+    #[serde(default)]
+    pub steps: Vec<String>,
+    /// 优先级 (1-10)
+    #[serde(default)]
+    pub priority: u8,
+    /// 预期结果
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub expected_outcome: String,
 }
 
@@ -114,8 +158,10 @@ pub struct PlanningResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionResponse {
     /// 思考过程（必须引用前面的阶段）
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub thought_process: String,
     /// 选择的动作（对应 actions.yaml 中的 key）
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub action: String,
     /// 动作参数（直接透传到服务端，字段名必须与 actions.yaml 中 required_fields 一致）
     #[serde(default)]
