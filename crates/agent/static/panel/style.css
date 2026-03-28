@@ -934,24 +934,39 @@ button[type="button"]:disabled {
 .inventory-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
 }
 
 .inv-item {
+    position: relative;
     background: #fff;
-    padding: 8px 14px;
-    border-radius: var(--radius-sm);
+    padding: 10px 16px;
+    border-radius: 999px;
     border: 1px solid var(--border-light);
     font-size: 13px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     box-shadow: var(--shadow-sm);
     background-clip: padding-box;
+    transition: all 0.2s;
 }
 
 .inv-name { color: var(--text-primary); }
-.inv-qty { color: var(--text-muted); font-size: 12px; }
+.inv-qty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+}
+
+.inv-item:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
 
 .relationship-list {
     display: flex;
