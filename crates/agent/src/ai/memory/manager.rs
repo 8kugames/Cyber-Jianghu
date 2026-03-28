@@ -96,7 +96,8 @@ impl MemoryManager {
                 ..Default::default()
             };
 
-        let semantic = match SemanticMemoryBackend::new(config.agent_id, semantic_config, embedder) {
+        let semantic = match SemanticMemoryBackend::new(config.agent_id, semantic_config, embedder)
+        {
             Ok(backend) => Some(Arc::new(tokio::sync::Mutex::new(backend))),
             Err(e) => {
                 tracing::warn!("Failed to initialize semantic memory: {}", e);
