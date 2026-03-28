@@ -371,7 +371,7 @@ impl Default for ClawConfig {
 // LLM 配置（仅 Cognitive 模式使用）
 // ============================================================================
 
-const DEFAULT_LLM_PROVIDER: &str = "ollama";
+const DEFAULT_LLM_PROVIDER: &str = "openclaw";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
 
