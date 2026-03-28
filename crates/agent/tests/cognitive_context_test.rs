@@ -97,6 +97,7 @@ fn create_test_world_state() -> WorldState {
                 valid_targets: Some(vec!["wine_bottle".to_string()]),
             },
         ],
+        deadline_ms: 0,
     }
 }
 

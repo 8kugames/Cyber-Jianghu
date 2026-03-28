@@ -449,10 +449,7 @@ impl TickScheduler {
                     warn!("Failed to retire dead agent {}: {}", agent_id, e);
                 }
             }
-            info!(
-                "已将 {} 个死亡 Agent 状态更新为 retired",
-                dead_agents.len()
-            );
+            info!("已将 {} 个死亡 Agent 状态更新为 retired", dead_agents.len());
         }
 
         let phase2_2_duration = phase2_2_start.elapsed();
@@ -512,6 +509,10 @@ impl TickScheduler {
         info!("阶段4完成 - 持久化状态, 耗时: {:?}", phase4_duration);
 
         let phase5_start = Instant::now();
+        let deadline_ms = {
+            let gd = self.game_data_cache.get();
+            gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64 * 1000
+        };
         self.broadcaster
             .broadcast_states(
                 tick_id,
@@ -521,6 +522,7 @@ impl TickScheduler {
                 &self.agent_to_device_map,
                 &self.event_manager,
                 &self.game_data_cache,
+                deadline_ms,
             )
             .await
             .context("广播状态失败")?;

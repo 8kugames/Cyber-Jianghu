@@ -9,7 +9,6 @@ use anyhow::Result;
 use cyber_jianghu_protocol::ServerMessage;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::config::CharacterStatus;
@@ -133,16 +132,21 @@ impl super::Agent {
             );
         }
 
-        // 等待注册确认（包含游戏规则）
-        let (agent_id, game_rules) = self.client.wait_for_registration().await?;
+        // 等待注册确认（包含游戏规则和存活状态）
+        let (agent_id, game_rules, is_alive) = self.client.wait_for_registration().await?;
         info!("Agent '{}' registered with server", self.character_name());
-        info!("Server-assigned Agent ID: {}", agent_id);
+        info!(
+            "Server-assigned Agent ID: {} (alive={})",
+            agent_id, is_alive
+        );
 
-        // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
-        if agent_id == Uuid::nil() {
+        // is_alive == false = 角色已死亡/归隐，跳过主循环，直接触发死亡/转生流程
+        // 覆盖两种情况：agent_id 为 nil（已归隐）或 agent_id 非 nil 但已死亡（竞态窗口）
+        if !is_alive {
             warn!(
-                "Agent '{}' retired (agent_id is nil)",
-                self.character_name()
+                "Agent '{}' is not alive (agent_id={})",
+                self.character_name(),
+                agent_id
             );
             self.death_reported = true;
 
@@ -151,7 +155,7 @@ impl super::Agent {
                     .is_dead
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 let death_msg = ServerMessage::AgentDied {
-                    agent_id: Uuid::nil(),
+                    agent_id,
                     cause: "retired".to_string(),
                     description: "角色已归隐，请创建新角色".to_string(),
                     location: String::new(),
@@ -338,6 +342,21 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
+                    // 4.5 检查 WebSocket 层面的死亡通知（is_dead 标志由 AgentDied 消息设置）
+                    // 避免 events_log 检测与 AgentDied 消息之间的时序竞争
+                    if let Some(ref api_state) = self.http_api_state
+                        && api_state.is_dead.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        if !self.death_reported {
+                            warn!(
+                                "Agent '{}' detected dead via is_dead flag (WebSocket AgentDied), skipping decision",
+                                self.character_name()
+                            );
+                            self.death_reported = true;
+                        }
+                        continue;
+                    }
+
                     // 5. 调用决策回调（带验证和记忆上下文）
                     let intent = if self.validator.is_some() {
                         self.decide_with_validation(&world_state).await?
@@ -447,19 +466,19 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok((agent_id, game_rules)) => {
-                            info!("重连后注册确认: agent_id={}", agent_id);
+                        Ok((agent_id, game_rules, is_alive)) => {
+                            info!("重连后注册确认: agent_id={} (alive={})", agent_id, is_alive);
 
-                            // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
-                            if agent_id == Uuid::nil() {
-                                warn!("重连后收到 nil agent_id，角色已归隐");
+                            // is_alive == false = 角色已死亡/归隐（可能在等待期间被删除）
+                            if !is_alive {
+                                warn!("重连后角色不存活 (agent_id={})", agent_id);
                                 self.death_reported = true;
                                 if let Some(ref api_state) = self.http_api_state {
                                     api_state
                                         .is_dead
                                         .store(true, std::sync::atomic::Ordering::Relaxed);
                                     let death_msg = ServerMessage::AgentDied {
-                                        agent_id: Uuid::nil(),
+                                        agent_id,
                                         cause: "retired".to_string(),
                                         description: "角色已归隐，请创建新角色".to_string(),
                                         location: String::new(),

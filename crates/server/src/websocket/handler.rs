@@ -190,6 +190,19 @@ async fn handle_websocket(
         );
     }
 
+    // 查询角色存活状态（如果有角色）
+    let is_alive = if agent_id != uuid::Uuid::nil() {
+        match crate::db::get_latest_agent_state(&state.db_pool, agent_id).await {
+            Ok(agent_state) => agent_state.is_alive,
+            Err(e) => {
+                warn!("Failed to query agent state for is_alive check: {}", e);
+                true // 查询失败默认存活，避免误判死亡
+            }
+        }
+    } else {
+        false // nil agent_id = 无角色 = 不存活
+    };
+
     // 准备注册成功消息（包含游戏规则）
     let registered_json = {
         // 从配置构建 GameRules
@@ -207,6 +220,7 @@ async fn handle_websocket(
             agent_id,
             game_rules,
             world_building_rules,
+            is_alive,
         };
         serde_json::to_string(&registered_msg).ok()
     };
@@ -223,6 +237,52 @@ async fn handle_websocket(
                 "Sent Registered message with game rules to agent '{}' ({})",
                 agent_name, agent_id
             );
+        }
+    }
+
+    // ===== 连接后立即推送当前 WorldState =====
+    // Agent 不需要等第一个 tick 就能看到自己的存活状态
+    if agent_id != uuid::Uuid::nil() {
+        match crate::db::get_latest_agent_state(&state.db_pool, agent_id).await {
+            Ok(agent_state) => {
+                // 计算 deadline：距离下次 tick 的剩余毫秒数
+                let deadline_ms = {
+                    let gd = state.game_data.get();
+                    let tick_secs =
+                        gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
+                    drop(gd);
+                    // 简化：给一个完整 tick 周期，因为 agent 刚连接
+                    tick_secs * 1000
+                };
+
+                // 构建 WorldState（简化版，不含其他 agent entities）
+                let world_state = crate::tick::build_initial_world_state(
+                    &agent_state,
+                    &state.game_data,
+                    deadline_ms,
+                );
+                let ws_msg =
+                    cyber_jianghu_protocol::ServerMessage::WorldState { data: world_state };
+                if let Ok(ws_json) = serde_json::to_string(&ws_msg) {
+                    if tx.send(Message::Text(ws_json.into())).await.is_err() {
+                        warn!(
+                            "Failed to send initial WorldState to agent '{}' ({})",
+                            agent_name, agent_id
+                        );
+                    } else {
+                        info!(
+                            "Sent initial WorldState to agent '{}' (alive={})",
+                            agent_name, agent_state.is_alive
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load agent state for initial WorldState: agent={}, err={}",
+                    agent_id, e
+                );
+            }
         }
     }
 

@@ -546,11 +546,10 @@ pub async fn rebirth_agent(
 
     let agent_info: Option<(Uuid, String)> = sqlx::query_as(
         r#"
-        SELECT a.agent_id, a.name 
+        SELECT a.agent_id, a.name
         FROM agents a
-        INNER JOIN agent_states s ON a.agent_id = s.agent_id
-        WHERE a.device_id = $1 AND a.status = 'active' AND s.is_alive = true
-        ORDER BY s.tick_id DESC
+        WHERE a.device_id = $1 AND a.status = 'active'
+        ORDER BY a.registered_at DESC
         LIMIT 1
         "#,
     )
