@@ -203,8 +203,8 @@ main {
     align-items: center;
     text-align: center;
     position: relative;
-    overflow: hidden;
     box-shadow: var(--shadow-md);
+    background-clip: padding-box;
 }
 
 .welcome-card::before {
@@ -394,6 +394,35 @@ main {
     box-shadow: var(--shadow-md);
 }
 
+/* ============================================================================
+   Rounded Container Clip
+   ============================================================================ */
+
+.form-section,
+.welcome-card,
+.world-tree-card,
+.exp-item,
+.mem-item,
+.rel-item,
+.inv-item,
+.status-card,
+.warning-box,
+.setup-step,
+.page-tabs,
+.vertical-tabs-container,
+.vertical-tabs-sidebar,
+.vertical-tabs-content,
+.token-stats,
+.generate-bar,
+.dialog,
+.result,
+.error,
+.tag,
+.info-tag,
+.drawer-event {
+    background-clip: padding-box;
+}
+
 #setup-success p {
     font-size: 14px;
     color: var(--text-secondary);
@@ -411,7 +440,7 @@ main {
     margin-bottom: 16px;
     box-shadow: var(--shadow-sm);
     position: relative;
-    overflow: hidden;
+    background-clip: padding-box;
 }
 
 .form-section h2 {
@@ -918,6 +947,7 @@ button[type="button"]:disabled {
     align-items: center;
     gap: 6px;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .inv-name { color: var(--text-primary); }
@@ -940,6 +970,7 @@ button[type="button"]:disabled {
     cursor: pointer;
     transition: all 0.15s;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .rel-item:hover {
@@ -1043,6 +1074,7 @@ button[type="button"]:disabled {
     border: 1px solid var(--border-light);
     border-left: 4px solid var(--info);
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .mem-tick {
@@ -1071,6 +1103,7 @@ button[type="button"]:disabled {
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
     padding: 14px 16px;
+    background-clip: padding-box;
 }
 
 .exp-item {
@@ -1082,6 +1115,7 @@ button[type="button"]:disabled {
     border: 1px solid var(--border-light);
     box-shadow: var(--shadow-sm);
     transition: all 0.2s;
+    background-clip: padding-box;
 }
 
 .exp-item::before {
@@ -1201,24 +1235,29 @@ button[type="button"]:disabled {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    overflow: hidden;
     box-shadow: var(--shadow-sm);
+    padding: 6px;
+    background-clip: padding-box;
 }
 
 .vertical-tabs-sidebar {
     width: 140px;
     background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     display: flex;
     flex-direction: column;
+    padding: 6px;
+    gap: 4px;
 }
 
 .vertical-tab {
-    padding: 14px 16px;
+    padding: 12px 14px;
     font-size: 13px;
     color: var(--text-secondary);
     background: none;
-    border: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
     transition: all 0.15s;
@@ -1228,21 +1267,27 @@ button[type="button"]:disabled {
 .vertical-tab:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
+    border-color: var(--border);
 }
 
 .vertical-tab.active {
     color: var(--accent);
-    background: var(--bg-card);
+    background: #fff;
+    border-color: var(--accent);
+    box-shadow: var(--shadow-sm);
     border-left-color: var(--accent);
     font-weight: 500;
 }
 
 .vertical-tabs-content {
     flex: 1;
-    padding: 20px 24px;
+    padding: 20px 22px;
     overflow-y: auto;
     max-height: calc(100vh - 160px);
     background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-left: 10px;
 }
 
 .vertical-tab-content {
@@ -1282,7 +1327,7 @@ button[type="button"]:disabled {
         border-left: none;
         border-bottom: 3px solid transparent;
         flex-shrink: 0;
-        padding: 12px 16px;
+        padding: 10px 14px;
     }
 
     .vertical-tab.active {
@@ -1293,6 +1338,8 @@ button[type="button"]:disabled {
     .vertical-tabs-content {
         max-height: none;
         overflow-y: visible;
+        margin-left: 0;
+        margin-top: 10px;
     }
 }
 
@@ -1315,7 +1362,7 @@ button[type="button"]:disabled {
     cursor: pointer;
     transition: all 0.2s;
     box-shadow: var(--shadow-sm);
-    overflow: hidden;
+    background-clip: padding-box;
 }
 
 .world-tree-card::before {
@@ -1408,6 +1455,7 @@ button[type="button"]:disabled {
     font-size: 13px;
     font-weight: 500;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .status-badge.alive {
@@ -1465,14 +1513,28 @@ button[type="button"]:disabled {
     box-shadow: var(--shadow-md);
 }
 
-.no-data, .loading-text {
-    color: var(--text-muted);
+.no-data,
+.loading-text,
+.error-text {
     text-align: center;
-    padding: 24px;
+    padding: 20px 16px;
     font-size: 13px;
+    border-radius: var(--radius-sm);
+    border: 1px dashed var(--border);
+    background: #fff;
+    box-shadow: var(--shadow-sm);
 }
 
-.error-text { color: var(--danger); text-align: center; padding: 24px; font-size: 13px; }
+.no-data,
+.loading-text {
+    color: var(--text-muted);
+}
+
+.error-text {
+    color: var(--danger);
+    border-color: rgba(224, 108, 117, 0.4);
+    background: var(--danger-light);
+}
 
 /* ============================================================================
    Result & Error
@@ -1485,6 +1547,7 @@ button[type="button"]:disabled {
     margin-top: 16px;
     border: 1px solid;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .result {
@@ -1530,6 +1593,7 @@ button[type="button"]:disabled {
     max-width: 360px;
     width: 90%;
     box-shadow: var(--shadow-xl);
+    background-clip: padding-box;
 }
 
 .dialog-large {
@@ -1622,6 +1686,7 @@ button[type="button"]:disabled {
     padding: 16px 18px;
     margin-bottom: 16px;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .status-card h4 {
@@ -1652,6 +1717,7 @@ button[type="button"]:disabled {
     padding: 16px;
     margin-bottom: 16px;
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .warning-box h4 {
@@ -1909,6 +1975,7 @@ button[type="button"]:disabled {
     border: 1px solid var(--border-light);
     border-left: 4px solid var(--accent);
     box-shadow: var(--shadow-sm);
+    background-clip: padding-box;
 }
 
 .drawer-event-header {

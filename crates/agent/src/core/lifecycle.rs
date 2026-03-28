@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use crate::config::CharacterStatus;
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -33,6 +34,27 @@ impl super::Agent {
     ///
     /// 持续接收世界状态，做出决策，发送意图
     pub async fn run(&mut self) -> Result<()> {
+        // 检查角色状态：若已死亡或已归隐，跳过服务器连接
+        let skip_connection = self.death_reported
+            || self
+                .config
+                .agent
+                .as_ref()
+                .map(|c| c.status != CharacterStatus::Alive)
+                .unwrap_or(false);
+
+        if skip_connection {
+            if let Some(ref agent) = self.config.agent {
+                warn!(
+                    "Agent '{}' status is {:?}, skipping server connection (waiting for rebirth)",
+                    agent.name, agent.status
+                );
+            } else {
+                warn!("No active character, skipping server connection");
+            }
+            return Ok(());
+        }
+
         // 初始连接：无限重试（带日志采样）
         let mut connect_attempt = 0u32;
         loop {
@@ -125,6 +147,9 @@ impl super::Agent {
             self.death_reported = true;
 
             if let Some(ref api_state) = self.http_api_state {
+                api_state
+                    .is_dead
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 let death_msg = ServerMessage::AgentDied {
                     agent_id: Uuid::nil(),
                     cause: "retired".to_string(),
@@ -425,8 +450,37 @@ impl super::Agent {
                         Ok((agent_id, game_rules)) => {
                             info!("重连后注册确认: agent_id={}", agent_id);
 
+                            // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
+                            if agent_id == Uuid::nil() {
+                                warn!("重连后收到 nil agent_id，角色已归隐");
+                                self.death_reported = true;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    api_state
+                                        .is_dead
+                                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let death_msg = ServerMessage::AgentDied {
+                                        agent_id: Uuid::nil(),
+                                        cause: "retired".to_string(),
+                                        description: "角色已归隐，请创建新角色".to_string(),
+                                        location: String::new(),
+                                        tick_id: 0,
+                                        died_at: chrono::Utc::now().timestamp_millis(),
+                                        rebirth_delay_ticks: 0,
+                                    };
+                                    let _ = api_state.death_event_tx.send(death_msg);
+                                }
+                                return Err(anyhow::anyhow!(
+                                    "Pending registration: character retired"
+                                ));
+                            }
+
                             // 重置死亡状态（转生后获得新身份）
                             self.death_reported = false;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state
+                                    .is_dead
+                                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                            }
 
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
                             if let Some(ref callback) = self.registration_callback {
