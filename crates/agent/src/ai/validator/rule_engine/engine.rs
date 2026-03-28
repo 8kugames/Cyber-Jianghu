@@ -33,8 +33,11 @@ impl Validator for RuleEngine {
             persona_info: request.persona,
             world_context: request.world_context,
             tick_id,
-            history_intents: vec![],    // TODO: 从历史记录获取
-            attributes: HashMap::new(), // TODO: 从 Agent 状态获取
+            // 注意：RuleValidationContext 的 history_intents 和 attributes 字段暂未填充
+            // 当前规则引擎在空数据上下文中进行验证，结果可能不准确
+            // 如需启用规则验证，需从 WorldState/AgentState 获取这些数据并传入
+            history_intents: vec![],
+            attributes: HashMap::new(),
         };
 
         // 调用内部验证逻辑

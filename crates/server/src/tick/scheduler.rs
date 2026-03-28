@@ -358,6 +358,10 @@ impl TickScheduler {
             decay::apply_decay_and_environmental_damage(tick_id, intent_processed_states);
 
         // Push death notifications immediately to agents
+        let ctx = crate::websocket::DeathNotificationContext {
+            connection_manager: &self.connection_manager,
+            agent_to_device_map: &self.agent_to_device_map,
+        };
         for notification in death_notifications {
             if let Err(e) = crate::websocket::send_agent_died_notification(
                 notification.agent_id,
@@ -366,7 +370,7 @@ impl TickScheduler {
                 notification.location,
                 notification.tick_id,
                 notification.died_at,
-                &self.connection_manager,
+                &ctx,
             )
             .await
             {

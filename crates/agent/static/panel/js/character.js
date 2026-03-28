@@ -258,16 +258,6 @@ function renderAttributes(attributes) {
     }
 
     const categories = attributeMeta ? attributeMeta.categories : null;
-    const statusKeys = new Set(categories?.status || []);
-    const primaryKeys = new Set(categories?.primary || []);
-    const derivedKeys = new Set(categories?.derived || []);
-    const knownKeys = new Set([...statusKeys, ...primaryKeys, ...derivedKeys]);
-
-    const isRedundantMax = (key) => {
-        if (typeof key !== 'string' || !key.endsWith('_max')) return false;
-        const base = key.slice(0, -4);
-        return knownKeys.has(base);
-    };
 
     let html = '';
 
@@ -294,26 +284,31 @@ function renderAttributes(attributes) {
         statusList.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
-                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                    <span class="attr-value">${attr.current}/${attr.max}</span>
-                </div>`;
+                if (attr.max !== undefined && attr.max !== null) {
+                    // 有上限的状态属性，显示进度条
+                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                    html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
+                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                        <span class="attr-value">${attr.current}/${attr.max}</span>
+                    </div>`;
+                } else {
+                    // 无上限的状态属性（如声望）
+                    html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
+                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
+                        <span class="attr-value">${attr.current}</span>
+                    </div>`;
+                }
             }
         });
         html += '</div></div>';
     }
 
-    // 派生属性（从 attributes 中过滤掉已知 key 和 _max 冗余项）
-    const derived = Object.keys(attributes)
-        .filter(k => !knownKeys.has(k))
-        .filter(k => !isRedundantMax(k))
-        .filter(k => attributes[k] && typeof attributes[k] === 'object');
-
-    if (derived.length > 0) {
+    // 派生属性（从配置分类中获取）
+    const derivedList = categories?.derived || [];
+    if (derivedList.length > 0) {
         html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-        derived.forEach(key => {
+        derivedList.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
                 html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
@@ -562,9 +557,9 @@ function loadMoreMemories() {
     loadMemories(memoryPage + 1);
 }
 
-// 页面加载
+    // 页面加载
 document.addEventListener('DOMContentLoaded', () => {
-    // SSE 连接：实时接收死亡事件
+    // SSE 连接：实时接收死亡事件（仅对存活角色启用）
     let deathEventSource = null;
     function connectDeathEvents() {
         deathEventSource = new EventSource('/api/v1/events');
@@ -584,13 +579,20 @@ document.addEventListener('DOMContentLoaded', () => {
         deathEventSource.addEventListener('heartbeat', () => {
             // 连接存活，无需操作
         });
+        deathEventSource.addEventListener('tick_update', () => {
+            // 防抖：避免短时间内多次刷新
+            if (window._tickRefreshTimer) clearTimeout(window._tickRefreshTimer);
+            window._tickRefreshTimer = setTimeout(() => {
+                loadCharacter();
+                loadRelationships();
+            }, 1000);
+        });
         deathEventSource.onerror = () => {
             console.warn('SSE connection lost, reconnecting...');
             deathEventSource.close();
             setTimeout(connectDeathEvents, 5000);
         };
     }
-    connectDeathEvents();
 
     // 死亡通知弹窗
     function showDeathModal(data) {
@@ -614,15 +616,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         document.body.appendChild(div);
         div.querySelector('#death-goto-rebirth').addEventListener('click', () => {
-            div.style.display = 'none';
-            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('[data-tab="current"]').classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById('tab-current').classList.add('active');
-            document.querySelectorAll('.vertical-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('[data-vertical-tab="rebirth"]').classList.add('active');
-            document.querySelectorAll('.vertical-tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById('vertical-tab-rebirth').classList.add('active');
+            // 死亡后直接跳转创建页，无需"归隐"确认
+            window.location.href = 'create.html';
         });
         div.querySelector('#death-close').addEventListener('click', () => {
             div.style.display = 'none';
@@ -635,24 +630,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAttributeMeta().then(async () => {
         await loadCharacterList();
-        // 当前角色非存活时，在当前角色 tab 显示创建入口
         const currentChar = allCharacters.find(c => c.is_current);
+        
+        // 当前角色非存活时，切换到世界树分页（不建立 SSE 连接）
         if (!currentChar || currentChar.status !== 'alive') {
             hide('#loading');
-            const infoEl = document.getElementById('character-info');
-            infoEl.innerHTML = `
-                <div class="form-section">
-                    <h2>当前无活跃角色</h2>
-                    <p class="section-desc">角色已归隐或尚未创建。</p>
-                    <div class="form-actions">
-                        <a href="create.html" class="nav-link">创建新角色</a>
-                    </div>
-                </div>
-            `;
-            show('#character-info');
+            // 切换到世界树 tab
+            document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('[data-tab="worldtree"]').classList.add('active');
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-worldtree').classList.add('active');
             return;
         }
+        
+        // 仅对存活角色建立 SSE 连接
+        connectDeathEvents();
+        
+        // 角色数据通过 HTTP API 获取，立即可用
         loadCharacter();
+        loadRelationships();
+        loadMemories();
+        loadDreamStatus();
     });
 
     document.getElementById('load-more-experiences-btn').addEventListener('click', loadMoreExperiences);
@@ -768,6 +766,9 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const data = await apiPost('/api/v1/character/rebirth', { confirm: true });
                 if (data.success) {
+                    // 隐藏死亡 modal（如果存在）
+                    const deathModal = document.getElementById('death-notification-modal');
+                    if (deathModal) deathModal.style.display = 'none';
                     document.getElementById('rebirth-message').textContent = data.message;
                     show(document.getElementById('rebirth-result'));
                     rebirthBtn.textContent = '已转生';
@@ -820,5 +821,223 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.textContent = '注入托梦';
             }
         });
+    }
+
+    // 自动刷新：每秒 1 次（增量刷新，避免闪烁）
+    let lastRefreshData = null;
+    setInterval(async () => {
+        const currentChar = allCharacters.find(c => c.is_current);
+        if (currentChar && currentChar.status === 'alive') {
+            await incrementalRefresh();
+        }
+    }, 1000);
+
+    // 增量刷新：只更新变化的字段
+    async function incrementalRefresh() {
+        try {
+            const data = await apiGet('/api/v1/character');
+            
+            // 记录当前数据用于下次比较
+            const newDataHash = JSON.stringify({
+                tick_id: data.tick_id,
+                location: data.location,
+                world_time: data.world_time,
+                attributes: data.attributes,
+                inventory: data.inventory
+            });
+            
+            // 数据没变化，跳过
+            if (newDataHash === lastRefreshData) return;
+            lastRefreshData = newDataHash;
+
+            // 更新高频变化字段（tick、位置、时间）
+            updateField('tick-id', data.tick_id);
+            updateField('location', data.location);
+            updateField('world-time', data.world_time ? formatWorldTime(data.world_time) : '-');
+
+            // 更新状态
+            if (data.status) {
+                const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
+                const statusEl = document.getElementById('status');
+                statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>';
+            }
+
+            // 更新属性（使用 data 属性存储旧值，只更新变化的）
+            updateAttributesIncremental(data.attributes);
+
+            // 更新物品
+            updateInventoryIncremental(data.inventory);
+
+            // 更新关系（增量刷新）
+            await refreshRelationshipsIncremental();
+
+        } catch (err) {
+            // 忽略刷新错误，静默失败
+        }
+    }
+
+    // 增量刷新关系（每 5 秒检查一次，避免频繁请求）
+    let lastRelationshipCheck = 0;
+    let cachedRelationshipCount = 0;
+    let cachedRelationshipData = null;
+
+    async function refreshRelationshipsIncremental() {
+        const now = Date.now();
+        if (now - lastRelationshipCheck < 5000) return; // 最多 5 秒一次
+        lastRelationshipCheck = now;
+
+        try {
+            const data = await apiGet('/api/v1/relationship/list');
+            const rels = data.relationships || [];
+            const newCount = rels.length;
+
+            // 关系数量没变化，跳过
+            if (newCount === cachedRelationshipCount && cachedRelationshipData) {
+                // 但检查 favorability 是否有变化
+                let hasChange = false;
+                rels.forEach((rel, idx) => {
+                    const cached = cachedRelationshipData[idx];
+                    if (cached && cached.favorability !== rel.favorability) {
+                        hasChange = true;
+                    }
+                });
+                if (!hasChange) return;
+            }
+
+            cachedRelationshipCount = newCount;
+            cachedRelationshipData = rels;
+
+            const relEl = document.getElementById('relationships');
+            if (rels.length === 0) {
+                relEl.innerHTML = '<p class="no-data">暂无关系记录</p>';
+                return;
+            }
+
+            relEl.innerHTML = rels.map((rel, idx) => {
+                const fav = rel.favorability ?? 0;
+                const level = rel.relationship_level || 'neutral';
+                const label = rel.relationship_label || '陌生人';
+                const pct = Math.max(0, Math.min(100, Math.round(((fav + 100) / 200) * 100)));
+                return `
+                <div class="rel-item" data-rel-id="${rel.target_agent_id || idx}">
+                    <div class="rel-item-left">
+                        <span class="rel-name">${escapeHtml(rel.target_name || rel.target_agent_id || '未知')}</span>
+                        <div class="rel-meta">
+                            <span class="rel-label ${level}">${escapeHtml(label)}</span>
+                        </div>
+                    </div>
+                    <div class="rel-right">
+                        <div class="rel-favor-bar">
+                            <div class="rel-favor-fill ${level}" style="width:${pct}%"></div>
+                        </div>
+                        <span class="rel-favor-value">${fav}</span>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // 缓存关系数据供抽屉使用
+            relEl._relationships = rels;
+
+            // 绑定点击事件
+            relEl.querySelectorAll('.rel-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const id = item.dataset.relId;
+                    const rel = relEl._relationships.find(r => (r.target_agent_id || '') === id);
+                    if (rel) openRelationshipDrawer(rel);
+                });
+            });
+
+        } catch (err) {
+            // 忽略错误
+        }
+    }
+
+    // 更新字段（带变化检测和视觉反馈）
+    function updateField(id, newValue) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const oldValue = el.textContent;
+        if (oldValue !== String(newValue)) {
+            el.textContent = newValue;
+            // 短暂高亮提示变化
+            el.classList.add('value-changed');
+            setTimeout(() => el.classList.remove('value-changed'), 300);
+        }
+    }
+
+    // 增量更新属性（只更新变化的值）
+    function updateAttributesIncremental(attributes) {
+        if (!attributes) return;
+        const attrsEl = document.getElementById('attributes');
+        const existingItems = attrsEl.querySelectorAll('.attr-item');
+        
+        existingItems.forEach(item => {
+            const nameEl = item.querySelector('.attr-name');
+            const valueEl = item.querySelector('.attr-value');
+            if (!nameEl || !valueEl) return;
+            
+            const attrName = nameEl.textContent;
+            // 找到对应属性
+            const attrKey = Object.keys(attributes).find(k => attributes[k].name === attrName);
+            if (!attrKey) return;
+            
+            const attr = attributes[attrKey];
+            const newValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : String(attr.current);
+            
+            if (valueEl.textContent !== newValue) {
+                valueEl.textContent = newValue;
+                item.classList.add('value-changed');
+                setTimeout(() => item.classList.remove('value-changed'), 300);
+                
+                // 更新颜色类
+                if (attr.max > 0) {
+                    const pct = Math.round((attr.current / attr.max) * 100);
+                    item.classList.remove('attr-high', 'attr-medium', 'attr-low');
+                    item.classList.add(pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low');
+                }
+            }
+        });
+    }
+
+    // 增量更新物品（只更新变化的）
+    function updateInventoryIncremental(inventory) {
+        if (!inventory && inventory !== 0) return;
+        const invEl = document.getElementById('inventory');
+        
+        if (!inventory || inventory.length === 0) {
+            if (!invEl.querySelector('.no-data')) {
+                invEl.innerHTML = '<p class="no-data">暂无物品</p>';
+            }
+            return;
+        }
+
+        const currentItems = Array.from(invEl.querySelectorAll('.inventory-item')).map(item => ({
+            name: item.querySelector('.item-name')?.textContent,
+            quantity: item.querySelector('.item-quantity')?.textContent
+        }));
+
+        const newItems = inventory.map(item => ({
+            name: item.name,
+            quantity: String(item.quantity || 1)
+        }));
+
+        // 比较是否相同
+        const isSame = currentItems.length === newItems.length &&
+            currentItems.every((curr, i) => curr.name === newItems[i].name && curr.quantity === newItems[i].quantity);
+
+        if (!isSame) {
+            invEl.innerHTML = '';
+            inventory.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'inventory-item';
+                div.innerHTML = `
+                    <span class="item-name">${escapeHtml(item.name || '未知物品')}</span>
+                    <span class="item-quantity">x${item.quantity || 1}</span>
+                `;
+                invEl.appendChild(div);
+            });
+            invEl.classList.add('value-changed');
+            setTimeout(() => invEl.classList.remove('value-changed'), 300);
+        }
     }
 });
