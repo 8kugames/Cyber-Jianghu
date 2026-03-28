@@ -104,10 +104,10 @@ ensure_secure_db_password() {
     local server_dir="$PROJECT_ROOT/crates/server"
     local env_file="$server_dir/.env"
 
-    # 只在生产环境检查
-    if [ "$mode" != "prod" ]; then
-        return 0
-    fi
+    # # 只在生产环境检查
+    # if [ "$mode" != "prod" ]; then
+    #     return 0
+    # fi
 
     # 检查 .env 文件是否存在
     if [ ! -f "$env_file" ]; then

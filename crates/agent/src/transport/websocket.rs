@@ -190,7 +190,9 @@ impl WebSocketClient {
     }
 
     /// 等待注册响应
-    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
+    ///
+    /// 返回 `(agent_id, game_rules, is_alive)`
+    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules, bool)> {
         let mut state = self.state.write().await;
 
         let ws = state.ws.as_mut().context("Not connected to server")?;
@@ -204,20 +206,25 @@ impl WebSocketClient {
                             agent_id,
                             game_rules,
                             world_building_rules,
+                            is_alive,
                         }) => {
-                            // agent_id 为零 = 需要注册新角色
+                            // agent_id 为零 = 角色已死亡/归隐/未注册
                             if agent_id == Uuid::nil() {
-                                return Err(anyhow::anyhow!(
-                                    "Pending registration: no active character, please register"
-                                ));
+                                info!(
+                                    "Received nil agent_id: character is dead, retired, or not yet registered"
+                                );
+                                return Ok((Uuid::nil(), game_rules, false));
                             }
                             state.agent_id = Some(agent_id);
                             state.game_rules = Some(game_rules.clone());
                             if let Some(rules) = world_building_rules {
                                 state.world_building_rules = Some(rules);
                             }
-                            info!("Agent registered with ID: {}", agent_id);
-                            return Ok((agent_id, game_rules));
+                            info!(
+                                "Agent registered with ID: {} (alive={})",
+                                agent_id, is_alive
+                            );
+                            return Ok((agent_id, game_rules, is_alive));
                         }
                         Ok(ServerMessage::Error { message }) => {
                             return Err(anyhow::anyhow!("Server error: {}", message));
@@ -582,7 +589,9 @@ impl AgentClient {
     }
 
     /// 等待注册响应
-    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
+    ///
+    /// 返回 `(agent_id, game_rules, is_alive)`
+    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules, bool)> {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }

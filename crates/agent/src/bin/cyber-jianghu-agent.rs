@@ -305,9 +305,10 @@ async fn ensure_identity(config: &mut Config) -> Result<()> {
 // ============================================================================
 
 /// 打印启动 Banner
-fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str) {
+fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str, mode: &str) {
+    let mode_line = format!("Cyber-Jianghu Agent ({})", mode);
     info!("╔══════════════════════════════════════════════╗");
-    info!("║       Cyber-Jianghu Agent (Claw Mode)        ║");
+    info!("║{: ^46}║", mode_line);
     info!("╠══════════════════════════════════════════════╣");
     info!("║ HTTP API:  http://0.0.0.0:{}                 ║", port);
     info!("║ WebSocket: {:<34} ║", server_ws_url);
@@ -1000,7 +1001,7 @@ fn start_claw_server(
     );
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str, "Claw");
 
     let (reconnect_tx, reconnect_rx) =
         mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
@@ -1067,7 +1068,12 @@ fn start_http_api_server(
     info!("启动 HTTP API 服务器，端口: {}", actual_port);
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+    print_startup_banner(
+        actual_port,
+        &config.server.ws_url,
+        &config_path_str,
+        "Cognitive",
+    );
 
     let (_http_decision_state, api_state) =
         cyber_jianghu_agent::runtime::decision::create_http_state(

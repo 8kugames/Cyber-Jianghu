@@ -18,6 +18,11 @@ use uuid::Uuid;
 
 use crate::types::{GameRules, WorldBuildingRules, WorldState};
 
+/// serde default helper: 缺省 true（fail-open，旧 server 不发字段时假定存活）
+fn default_true() -> bool {
+    true
+}
+
 // ============================================================================
 // 对话消息类型
 // ============================================================================
@@ -117,6 +122,10 @@ pub enum ServerMessage {
         /// 世界观规则（可选，保持向后兼容）
         #[serde(skip_serializing_if = "Option::is_none")]
         world_building_rules: Option<WorldBuildingRules>,
+        /// 角色是否存活（由服务器在连接时立即告知）
+        /// 缺省 true：旧 server 不发此字段时假定存活（fail-open）
+        #[serde(default = "default_true")]
+        is_alive: bool,
     },
 
     /// 世界状态下发
@@ -338,6 +347,7 @@ mod tests {
             agent_id,
             game_rules,
             world_building_rules: None,
+            is_alive: true,
         };
 
         let json = msg.to_json().unwrap();
@@ -388,6 +398,7 @@ mod tests {
             nearby_items: vec![],
             events_log: vec![],
             available_actions: vec![],
+            deadline_ms: 0,
         };
 
         let msg = ServerMessage::WorldState { data: world_state };
@@ -475,6 +486,7 @@ mod tests {
             agent_id,
             game_rules,
             world_building_rules: Some(world_rules),
+            is_alive: true,
         };
 
         let json = msg.to_json().unwrap();
