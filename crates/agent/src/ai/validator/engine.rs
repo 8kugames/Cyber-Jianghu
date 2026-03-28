@@ -208,11 +208,13 @@ impl LlmValidationResponse {
                 } else {
                     Some(self.reason)
                 },
-                narrative: self.narrative,
+                narrative: self.narrative.unwrap_or_default(),
             },
             "rejected" => ValidationResult::Rejected {
                 reason: self.reason,
-                rejection_type: super::types::RejectionType::parse(&self.rejection_type),
+                rejection_type: super::types::RejectionType::parse(
+                    self.rejection_type.as_deref().unwrap_or("other"),
+                ),
             },
             _ => ValidationResult::Rejected {
                 reason: format!("无效的响应结果: {}", self.result),

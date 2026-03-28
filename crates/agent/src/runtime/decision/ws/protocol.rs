@@ -79,20 +79,6 @@ pub enum DownstreamMessage {
         next_tick_in_ms: u64,
     },
 
-    /// 审核请求（发送给 Observer Agent）
-    ReviewRequest {
-        /// 目标 Tick ID
-        tick_id: i64,
-        /// 玩家意图
-        player_intent: WsPlayerIntent,
-        /// 人设摘要
-        persona_summary: PersonaSummary,
-        /// 世界上下文
-        world_context: String,
-        /// 审核截止时间（Unix timestamp, 毫秒）
-        deadline_ms: u64,
-    },
-
     // === Server 消息透传 ===
     /// Server 错误消息
     ServerError {
@@ -185,32 +171,6 @@ pub enum DownstreamMessage {
     },
 }
 
-/// 玩家意图（用于审核请求）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WsPlayerIntent {
-    /// 动作类型
-    pub action_type: String,
-    /// 动作数据
-    #[serde(default)]
-    pub action_data: Option<Value>,
-    /// 思考日志
-    #[serde(default)]
-    pub thought_log: Option<String>,
-}
-
-/// 人设摘要（用于审核请求）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersonaSummary {
-    /// 角色名称
-    pub name: String,
-    /// 性格特点
-    #[serde(default)]
-    pub personality: Vec<String>,
-    /// 价值观
-    #[serde(default)]
-    pub values: Vec<String>,
-}
-
 // ============================================================================
 // 上行消息（外部调度器 → Agent）
 // ============================================================================
@@ -233,20 +193,6 @@ pub enum UpstreamMessage {
         thought_log: Option<String>,
     },
 
-    /// 审核结果（由 Observer Agent 发送）
-    ReviewResult {
-        /// 目标 Tick ID
-        tick_id: i64,
-        /// 审核决定
-        decision: ReviewDecision,
-        /// 审核原因
-        #[serde(default)]
-        reason: Option<String>,
-        /// 叙事化描述（如果通过）
-        #[serde(default)]
-        narrative: Option<String>,
-    },
-
     /// LLM 请求（Agent -> OpenClaw，用于 Claw 模式）
     LLMRequest {
         /// 请求 ID（用于匹配响应）
@@ -254,18 +200,6 @@ pub enum UpstreamMessage {
         /// LLM 提示词
         prompt: String,
     },
-}
-
-/// 审核决定
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewDecision {
-    /// 通过
-    Approved,
-    /// 拒绝
-    Rejected,
-    /// 需要修改
-    NeedsModification,
 }
 
 // ============================================================================
@@ -299,8 +233,6 @@ impl From<UpstreamMessage> for Option<WsIntent> {
                 action_data,
                 thought_log,
             }),
-            // ReviewResult 不是 Intent，返回 None
-            UpstreamMessage::ReviewResult { .. } => None,
             // LLMRequest 不是 Intent，返回 None
             UpstreamMessage::LLMRequest { .. } => None,
         }
@@ -706,48 +638,6 @@ mod tests {
                 assert_eq!(thought_log, Some("I should greet them".to_string()));
             }
             _ => panic!("Expected Intent message"),
-        }
-    }
-
-    #[test]
-    fn test_deserialize_review_result_approved() {
-        let json = r#"{"type":"review_result","tick_id":105,"decision":"approved","reason":"符合角色性格","narrative":"张三热情地向店小二打招呼"}"#;
-        let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
-
-        match msg {
-            UpstreamMessage::ReviewResult {
-                tick_id,
-                decision,
-                reason,
-                narrative,
-            } => {
-                assert_eq!(tick_id, 105);
-                assert!(matches!(decision, ReviewDecision::Approved));
-                assert_eq!(reason, Some("符合角色性格".to_string()));
-                assert_eq!(narrative, Some("张三热情地向店小二打招呼".to_string()));
-            }
-            _ => panic!("Expected ReviewResult message"),
-        }
-    }
-
-    #[test]
-    fn test_deserialize_review_result_rejected() {
-        let json = r#"{"type":"review_result","tick_id":105,"decision":"rejected"}"#;
-        let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
-
-        match msg {
-            UpstreamMessage::ReviewResult {
-                tick_id,
-                decision,
-                reason,
-                narrative,
-            } => {
-                assert_eq!(tick_id, 105);
-                assert!(matches!(decision, ReviewDecision::Rejected));
-                assert!(reason.is_none());
-                assert!(narrative.is_none());
-            }
-            _ => panic!("Expected ReviewResult message"),
         }
     }
 
