@@ -122,7 +122,7 @@ impl TickScheduler {
             .await
             .unwrap_or(0);
 
-        let time_based_tick_id = self.calculate_tick_id_from_time(game_epoch, tick_duration_secs);
+        let time_based_tick_id = self.calculate_tick_id_from_time(game_epoch);
 
         // 使用两者中的较大值，确保不会回退
         self.current_tick_id = db_max_tick_id.max(time_based_tick_id);
@@ -141,15 +141,10 @@ impl TickScheduler {
         while self.is_running {
             interval.tick().await;
 
-            // 每次循环重新计算 tick_id，确保基于真实时间
-            // 但要保证不会回退
-            let new_tick_id = self.calculate_tick_id_from_time(game_epoch, tick_duration_secs);
-            if new_tick_id > self.current_tick_id {
-                self.current_tick_id = new_tick_id;
-            } else {
-                // 如果时间计算值没有增加（可能是系统时钟问题），则递增
-                self.current_tick_id += 1;
-            }
+            // 每次循环重新计算 tick_id（分钟级时间戳）
+            // tick_id 直接基于时间，不存在序号回退问题
+            let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
+            self.current_tick_id = new_tick_id;
 
             // 执行一次Tick（F-06：失败时写入 tick_logs）
             if let Err(e) = self.execute_tick().await {
@@ -163,17 +158,17 @@ impl TickScheduler {
         Ok(())
     }
 
-    /// 根据真实时间计算 tick ID
+    /// 根据真实时间计算 tick ID（秒级秒数）
     ///
-    /// tick_id = (当前Unix时间戳 - 游戏纪元) / tick周期
-    fn calculate_tick_id_from_time(&self, game_epoch: i64, tick_duration_secs: u64) -> i64 {
+    /// tick_id = 当前Unix时间戳 - 游戏纪元
+    /// 直接使用秒级秒数，real_seconds_per_tick 只影响执行频率，不影响 tick_id
+    fn calculate_tick_id_from_time(&self, game_epoch: i64) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
 
-        let tick_duration = tick_duration_secs as i64;
-        (now - game_epoch) / tick_duration
+        now - game_epoch
     }
 
     /// 解析游戏纪元（从 YAML 配置）
@@ -439,6 +434,27 @@ impl TickScheduler {
             }
         }
 
+        // 死亡 Agent 状态更新：将 agents.status 设为 retired
+        // 确保死亡角色不再阻止同设备注册新角色
+        if !dead_agents.is_empty() {
+            for agent_id in &dead_agents {
+                if let Err(e) = sqlx::query(
+                    r#"UPDATE agents SET status = 'retired', retired_at = CURRENT_TIMESTAMP
+                       WHERE agent_id = $1 AND status = 'active'"#,
+                )
+                .bind(*agent_id)
+                .execute(&self.db_pool)
+                .await
+                {
+                    warn!("Failed to retire dead agent {}: {}", agent_id, e);
+                }
+            }
+            info!(
+                "已将 {} 个死亡 Agent 状态更新为 retired",
+                dead_agents.len()
+            );
+        }
+
         let phase2_2_duration = phase2_2_start.elapsed();
         let _phase2_duration = phase2_1_duration + phase2_2_duration;
         info!(
@@ -572,9 +588,9 @@ mod tests {
         assert_eq!(timestamp, 1772467200, "时间戳应该等于 1772467200");
     }
 
-    /// 测试 tick_id 计算
+    /// 测试 tick_id 计算（秒级秒数）
     ///
-    /// 验证基于东八区时间的 tick_id 计算正确
+    /// 验证 tick_id = now - game_epoch（秒级秒数）
     #[test]
     fn test_tick_id_calculation() {
         let start_date_str = "2026-03-03";
@@ -587,24 +603,20 @@ mod tests {
             .unwrap()
             .timestamp();
 
-        // 假设 60 秒一个 tick
-        let tick_duration_secs: u64 = 60;
-
+        // tick_id = now - game_epoch（秒级秒数）
         // 在北京时间 2026-03-03 00:00:00，tick_id 应该是 0
-        let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;
+        let tick_at_epoch = game_epoch - game_epoch;
         assert_eq!(tick_at_epoch, 0, "纪元时刻的 tick_id 应该是 0");
 
-        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 1
-        // 1 分钟 = 60 秒 = 1 个 tick
+        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 60
         let one_minute_later = game_epoch + 60;
-        let tick_after_1min = (one_minute_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1min, 1, "1分钟后的 tick_id 应该是 1");
+        let tick_after_1min = one_minute_later - game_epoch;
+        assert_eq!(tick_after_1min, 60, "1分钟后的 tick_id 应该是 60");
 
-        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 60
-        // 1 小时 = 3600 秒 = 60 个 tick
+        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 3600
         let one_hour_later = game_epoch + 3600;
-        let tick_after_1hour = (one_hour_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1hour, 60, "1小时后的 tick_id 应该是 60");
+        let tick_after_1hour = one_hour_later - game_epoch;
+        assert_eq!(tick_after_1hour, 3600, "1小时后的 tick_id 应该是 3600");
     }
 
     /// 测试时间戳转换的一致性
