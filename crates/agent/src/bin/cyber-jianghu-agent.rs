@@ -74,8 +74,9 @@ enum Commands {
         /// 运行模式
         /// - claw: 等待外部调度器（如 OpenClaw）通过 WebSocket 连接
         /// - cognitive: 内置 LLM 决策，无需外部调度器
-        #[arg(long, default_value = "cognitive")]
-        mode: String,
+        /// 不指定时使用配置文件或环境变量 CYBER_JIANGHU_RUNTIME_MODE 的值
+        #[arg(long)]
+        mode: Option<String>,
     },
 
     /// 显示当前配置
@@ -383,7 +384,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string()).await?;
+            run_agent(0, None).await?;
         }
     }
 
@@ -534,27 +535,42 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16, mode: String) -> Result<()> {
+async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
     let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
 
-    let runtime_mode = match mode.to_lowercase().as_str() {
-        "cognitive" => {
-            info!("使用 Cognitive 模式（内置 LLM 决策）");
-            RuntimeMode::Cognitive
+    // CLI 参数优先，否则使用配置文件/环境变量
+    if let Some(mode_str) = mode {
+        let runtime_mode = match mode_str.to_lowercase().as_str() {
+            "cognitive" => {
+                info!("使用 Cognitive 模式（内置 LLM 决策）");
+                RuntimeMode::Cognitive
+            }
+            "claw" => {
+                info!("使用 Claw 模式（等待外部调度器）");
+                RuntimeMode::Claw
+            }
+            _ => {
+                info!("未知模式 '{}'，使用配置文件中的设置", mode_str);
+                // 不覆盖，保持配置文件值
+                config.runtime.mode
+            }
+        };
+        if runtime_mode != config.runtime.mode {
+            config.runtime.mode = runtime_mode;
         }
-        "claw" => {
-            info!("使用 Claw 模式（等待外部调度器）");
-            RuntimeMode::Claw
+    } else {
+        match config.runtime.mode {
+            RuntimeMode::Cognitive => {
+                info!("使用 Cognitive 模式（内置 LLM 决策）");
+            }
+            RuntimeMode::Claw => {
+                info!("使用 Claw 模式（等待外部调度器）");
+            }
         }
-        _ => {
-            info!("未知模式 '{}'，使用 Cognitive 模式", mode);
-            RuntimeMode::Cognitive
-        }
-    };
-    config.runtime.mode = runtime_mode;
+    }
 
     // 设置配置文件路径（用于热重载）
     let config_path = config_path();
@@ -597,7 +613,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
     >;
 
-    let mut agent = match runtime_mode {
+    let mut agent = match config.runtime.mode {
         RuntimeMode::Cognitive => {
             info!("创建 Cognitive 模式组件...");
             let llm_client = create_llm_client(&config.llm)?;
