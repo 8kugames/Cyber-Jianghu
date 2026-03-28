@@ -18,9 +18,10 @@
 2. 如果死亡，返回 `ServerMessage::Error`：
    ```json
    {
-     "Error": {
-       "message": "Agent 已死亡，无法执行此动作。请重新转生入世。"
-     }
+     "type": "error",
+     "code": "agent_dead",
+     "message": "Agent 已死亡，无法执行此动作。请重新转生入世。",
+     "tick_id": 123
    }
    ```
 3. Agent 需要调用 `/api/v1/agent/rebirth` 删除旧角色

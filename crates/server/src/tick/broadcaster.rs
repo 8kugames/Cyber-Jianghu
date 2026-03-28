@@ -318,6 +318,9 @@ impl Broadcaster {
                 // 获取属性数值
                 let attributes = agent_state.get_attributes_for_protocol();
 
+                // 获取派生属性（浮点数）
+                let derived_attributes = agent_state.get_derived_attributes_for_protocol();
+
                 // 从 NarrativeConfig 生成叙事描述
                 let game_data = game_data_cache.get();
                 let attribute_descriptions: HashMap<String, String> = attributes
@@ -332,14 +335,18 @@ impl Broadcaster {
 
                 crate::models::AgentSelfState {
                     attributes,
+                    derived_attributes,
                     attribute_descriptions,
-                    status_effects: vec![], // TODO: 从 Agent 状态加载
+                    // 注意：status_effects 字段暂未实现，始终为空数组
+                    // Agent 的实际状态效果通过 attribute_descriptions 描述
+                    status_effects: vec![],
                     inventory,
                 }
             },
-            entities,             // 包含同节点的其他Agent
-            nearby_items: vec![], // TODO: 添加场景物品
-            events_log: events,   // 传递本 Tick 发生的事件
+            entities, // 包含同节点的其他Agent
+            // 注意：nearby_items 暂未实现，场景物品功能未开发
+            nearby_items: vec![],
+            events_log: events, // 传递本 Tick 发生的事件
             available_actions,
         }
     }

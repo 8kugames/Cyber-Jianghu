@@ -139,6 +139,7 @@ mod tests {
                     attrs.insert("thirst".to_string(), 50);
                     attrs
                 },
+                derived_attributes: std::collections::HashMap::new(),
                 attribute_descriptions: std::collections::HashMap::new(),
                 status_effects: vec![],
                 inventory: vec![],

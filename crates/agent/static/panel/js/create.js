@@ -4,7 +4,8 @@
 async function checkCharacterAndBlock() {
     try {
         const data = await apiGet('/api/v1/character');
-        if (data.agent_id && data.status !== '归隐') {
+        // status 是 'active', 'retired', 'dead'，不是中文
+        if (data.agent_id && data.status === 'active') {
             document.getElementById('character-form').classList.add('hidden');
             document.getElementById('character-blocked').classList.remove('hidden');
             return;

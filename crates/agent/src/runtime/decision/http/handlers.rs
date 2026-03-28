@@ -1142,26 +1142,28 @@ pub(super) async fn generate_character_handler(
 
 ## 世界观
 时代：北宋前期（约10世纪中国），冷兵器时代。
-允许的概念：内力、轻功、武功、点穴、暗器、毒术、医术、易容、阵法。
+允许的概念：内力、轻功、武功、点穴，暗器、毒术、医术、易容、阵法。
 禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
 
-## 要求
-请生成一个随机但符合世界观的武侠角色，以 JSON 格式返回。
+## 核心要求
+1. **多样性**：生成的每个角色必须在姓名、身份背景、性格、价值观、语言风格、目标等方面与常见角色有明显差异
+2. **避免重复**：不要生成重复或相似的角色，不同角色应该有截然不同的背景故事和个性
+3. **真实性**：角色应该像一个真实的人，有复杂的动机和独特的说话方式
 
 ## 字段要求
 - name: 姓名（2-6个汉字）
 - age: 年龄（16-60的整数）
 - gender: 性别（"男"或"女"）
-- appearance: 外貌描述（20-50字）
-- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字）
-- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾）
-- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平）
+- appearance: 外貌描述（20-50字），要有特色
+- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字），要有独特的故事
+- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾），避免只选正面或只选负面，性格特征需要与身份背景吻合。
+- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平），核心价值观需要与身份背景吻合。
 - language_style: 对象，包含：
   - tone: 语调（从以下选项中选1个：豪迈、温和、冷漠、狡黠、文雅）
   - speech_patterns: 说话特点数组（从以下选项中选1-3个：喜欢引用古诗词、说话简洁、喜欢用成语、说话带方言、喜欢开玩笑、说话谨慎）
 - goals: 对象，包含：
-  - short_term: 短期目标（不超过100字）
-  - long_term: 长远目标（不超过100字）
+  - short_term: 短期目标（不超过100字），要具体且有个人特色
+  - long_term: 长远目标（不超过100字），要有野心或深度
 
 ## 输出格式
 请严格输出 JSON，不要包含其他文字。"#;
@@ -1464,6 +1466,8 @@ pub struct CharacterInfoResponse {
     // === 状态 ===
     /// 角色状态（alive, dead, etc.）
     pub status: Option<String>,
+    /// 数据是否来自缓存（true = 数据可能已过时）
+    pub is_stale: bool,
 }
 
 /// 获取角色信息
@@ -1506,10 +1510,13 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     };
 
     // 3. 加载叙事配置（用于属性描述）
-    let narrative_config = load_narrative_config(&state.config_path);
+    let narrative_config = state.narrative_config.read().await.clone();
 
     // 4. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
+
+    // 是否使用缓存数据（当服务器未连接时）
+    let is_stale = current.is_none();
 
     let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
         match current.as_ref() {
@@ -1521,22 +1528,34 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 let time = serde_json::to_value(&ws.world_time).ok();
                 (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
             }
-            None => (
-                character.agent_id.map(|id| id.to_string()),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
+            None => {
+                // 降级使用配置数据（birth_attributes 作为 attributes 的兜底）
+                let fallback_attrs = character
+                    .birth_attributes
+                    .as_ref()
+                    .and_then(|a| serde_json::to_value(a).ok());
+                (
+                    character.agent_id.map(|id| id.to_string()),
+                    fallback_attrs,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
         };
 
     // 5. 计算角色状态（在 move attributes 之前）
-    let status = raw_attributes
-        .as_ref()
-        .and_then(|a| a.get("hp"))
-        .and_then(|hp| hp.as_i64())
-        .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string());
+    // 优先使用 is_dead 标志（当 AgentDied 消息已收到但 WorldState 尚未更新时）
+    let status = if state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
+        Some("dead".to_string())
+    } else {
+        raw_attributes
+            .as_ref()
+            .and_then(|a| a.get("hp"))
+            .and_then(|hp| hp.as_i64())
+            .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
+    };
 
     // 6. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
@@ -1562,30 +1581,10 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         tick_id,
         world_time,
         status,
+        is_stale,
     };
 
     Json(response).into_response()
-}
-
-/// 加载叙事配置
-fn load_narrative_config(
-    config_path: &std::path::Path,
-) -> Option<crate::ai::cognitive::narrative::NarrativeConfig> {
-    let config_dir = config_path.parent()?;
-    let narrative_path = config_dir.join("narrative_config.json");
-
-    if narrative_path.exists() {
-        match crate::ai::cognitive::narrative::NarrativeConfig::from_file(&narrative_path) {
-            Ok(config) => {
-                info!("已加载叙事配置: {:?}", narrative_path);
-                return Some(config);
-            }
-            Err(e) => {
-                error!("加载叙事配置失败: {}", e);
-            }
-        }
-    }
-    None
 }
 
 /// 属性元数据响应
@@ -1595,29 +1594,44 @@ pub struct AttributeMetaResponse {
     pub categories: HashMap<String, Vec<String>>,
 }
 
-/// 获取属性元数据（分类、中文名等，从 narrative_config 解析）
 pub(super) async fn get_attribute_meta_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let narrative_config = load_narrative_config(&state.config_path);
-    let categories = narrative_config
-        .map(|cfg| cfg.attribute_categories)
+    let categories = state
+        .narrative_config
+        .read()
+        .await
+        .as_ref()
+        .map(|c| c.attribute_categories.clone())
         .unwrap_or_default();
-
     Json(AttributeMetaResponse { categories }).into_response()
 }
 
 /// 丰富属性数据，添加叙事描述
+///
+/// 从服务器返回的原始属性中：
+/// - 提取 `{key}_max` 字段作为属性最大值（服务器通过 max_value_formula 计算）
+/// - 如果没有 `{key}_max` 字段，说明该属性没有上限（如声望、派生属性）
 fn enrich_attributes_with_descriptions(
     raw_attributes: Option<serde_json::Value>,
     narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let attrs = raw_attributes?;
+    let attrs_obj = attrs.as_object()?;
 
-    // 将属性转换为带描述的格式
-    let enriched: serde_json::Map<String, serde_json::Value> = attrs
-        .as_object()?
+    // 预先收集所有 _max 字段
+    let max_values: std::collections::HashMap<&str, i64> = attrs_obj
         .iter()
+        .filter_map(|(key, value)| {
+            key.strip_suffix("_max")
+                .and_then(|base| value.as_i64().map(|v| (base, v)))
+        })
+        .collect();
+
+    // 将属性转换为带描述的格式（排除 _max 冗余字段）
+    let enriched: serde_json::Map<String, serde_json::Value> = attrs_obj
+        .iter()
+        .filter(|(key, _)| !key.ends_with("_max")) // 排除 _max 字段
         .filter_map(|(key, value)| {
             // 获取当前值
             let current = match value.as_i64() {
@@ -1643,20 +1657,26 @@ fn enrich_attributes_with_descriptions(
                 })
                 .unwrap_or_else(|| (key.clone(), format!("{}: {}", key, current)));
 
-            // 从叙事配置获取最大值（取最大 threshold 的 max）
-            let max = narrative_config
-                .as_ref()
-                .and_then(|cfg| cfg.attributes.get(key))
-                .and_then(|attr_cfg| attr_cfg.thresholds.iter().map(|t| t.max as i64).max())
-                .unwrap_or(100);
+            // 从服务器返回的 {key}_max 字段获取最大值
+            // 如果没有 _max 字段，说明该属性没有上限（如声望、派生属性）
+            let max = max_values.get(key.as_str()).copied();
 
             // 构建属性对象
-            let attr_obj = serde_json::json!({
-                "name": display_name,
-                "current": current,
-                "max": max,
-                "description": description
-            });
+            let attr_obj = if let Some(max_val) = max {
+                serde_json::json!({
+                    "name": display_name,
+                    "current": current,
+                    "max": max_val,
+                    "description": description
+                })
+            } else {
+                // 没有上限的属性，不设置 max 字段
+                serde_json::json!({
+                    "name": display_name,
+                    "current": current,
+                    "description": description
+                })
+            };
 
             Some((key.clone(), attr_obj))
         })
@@ -1699,10 +1719,10 @@ pub struct ExperiencesResponse {
 ///
 /// GET /api/v1/character/experiences?page=1&limit=20
 ///
-/// 数据来源：
-/// - event: WorldState.events_log
-/// - observer_thought: IntentHistoryStore（Observer Agent 审查时记录）
-/// - intent_summary: IntentHistoryStore（Agent 提交 Intent 时的 thought_log）
+/// 数据来源：IntentHistoryStore（SQLite 持久化，按角色隔离）
+/// - event: WorldState.events_log 中的事件描述
+/// - observer_thought: Observer Agent 审查时的思维链
+/// - intent_summary: Agent 提交 Intent 时的 thought_log
 pub(super) async fn get_experiences_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -1713,71 +1733,39 @@ pub(super) async fn get_experiences_handler(
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
 
-    // 从当前 WorldState 获取 events_log
-    let current = state.current_state.read().await;
-
-    // 预加载 intent_history 数据（如果可用）
-    let history_entries = if let Some(ref history) = state.intent_history {
-        if let Some(ws) = current.as_ref() {
-            let tick_ids: Vec<i64> = ws
-                .events_log
-                .iter()
-                .enumerate()
-                .map(|(i, _)| ws.tick_id - (ws.events_log.len() - i - 1) as i64)
-                .collect();
-            Some(history.get_by_ticks(&tick_ids).await)
-        } else {
-            None
-        }
-    } else {
-        None
+    let (entries, total) = match &state.intent_history {
+        Some(history) => match history.get_page(page, limit).await {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!("[experiences] Failed to query intent history: {}", e);
+                (vec![], 0)
+            }
+        },
+        None => (vec![], 0),
     };
 
-    let experiences: Vec<ExperienceEntry> = match current.as_ref() {
-        Some(ws) => ws
-            .events_log
-            .iter()
-            .enumerate()
-            .map(|(i, event)| {
-                let tick_id = ws.tick_id - (ws.events_log.len() - i - 1) as i64;
+    let experiences: Vec<ExperienceEntry> = entries
+        .into_iter()
+        .map(|e| {
+            let world_time = e.world_time.and_then(|s| serde_json::from_str(&s).ok());
+            ExperienceEntry {
+                tick_id: e.tick_id,
+                world_time,
+                event: e.event.unwrap_or_default(),
+                observer_thought: e.observer_thought,
+                intent_summary: e.thought_log,
+            }
+        })
+        .collect();
 
-                // 从 history store 获取 observer_thought 和 intent_summary
-                let (observer_thought, intent_summary) = match &history_entries {
-                    Some(entries) => entries
-                        .get(&tick_id)
-                        .map(|e| (e.observer_thought.clone(), e.thought_log.clone()))
-                        .unwrap_or((None, None)),
-                    None => (None, None),
-                };
-
-                ExperienceEntry {
-                    tick_id,
-                    world_time: serde_json::to_value(&ws.world_time).ok(),
-                    event: event.description.clone(),
-                    observer_thought,
-                    intent_summary,
-                }
-            })
-            .collect(),
-        None => vec![],
-    };
-
-    let total = experiences.len() as u32;
-    let start = ((page - 1) * limit) as usize;
-    let end = std::cmp::min(start + limit as usize, experiences.len());
-
-    let paginated = if start < experiences.len() {
-        experiences[start..end].to_vec()
-    } else {
-        vec![]
-    };
+    let has_more = (page * limit) < total;
 
     Json(ExperiencesResponse {
         page,
         limit,
         total,
-        has_more: end < experiences.len(),
-        experiences: paginated,
+        has_more,
+        experiences,
     })
 }
 
@@ -1881,10 +1869,11 @@ pub(super) async fn rebirth_character_handler(
         }
     };
 
-    // 4. 服务器必须成功才继续
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let skip_retire = body.contains("没有活跃的角色") || body.contains("无需归隐");
+
+    if !status.is_success() && !skip_retire {
         error!("服务器转生请求失败: {} - {}", status, body);
         return (
             StatusCode::BAD_GATEWAY,
@@ -1895,8 +1884,8 @@ pub(super) async fn rebirth_character_handler(
         )
             .into_response();
     }
+    let is_dead_character = skip_retire;
 
-    // 5. 重置 agent_id 为 nil（表示未注册状态）
     {
         let mut agent_id_guard = state.agent_id.write().await;
         *agent_id_guard = Uuid::nil();
@@ -1908,24 +1897,45 @@ pub(super) async fn rebirth_character_handler(
         *current = None;
     }
 
-    // 7. 更新本地配置：标记角色归隐，保留服务器/LLM/身份配置
+    // 7. 更新本地配置：区分死亡角色和正常归隐
     {
         let agent_config = &state.config_path;
         if agent_config.exists() {
             match crate::config::Config::from_file(agent_config) {
                 Ok(mut config) => {
-                    config.retire_current_character();
+                    // 死亡角色不需要调用 retire_current_character（status 已是 active，is_alive 已是 false）
+                    // 正常归隐角色才需要标记为 retired
+                    if !is_dead_character {
+                        config.retire_current_character();
+                    }
                     config.agent = None;
                     if let Err(e) = config.save_to_file(agent_config) {
                         error!("保存配置文件失败: {}", e);
                     } else {
-                        info!("角色已归隐，配置已更新: {:?}", agent_config);
+                        if is_dead_character {
+                            info!("死亡角色已清理本地状态，配置已更新: {:?}", agent_config);
+                        } else {
+                            info!("角色已归隐，配置已更新: {:?}", agent_config);
+                        }
                     }
                 }
                 Err(e) => {
                     error!("读取配置文件失败: {}", e);
                 }
             }
+        }
+    }
+
+    // 8. 触发重连，让主循环重新注册新角色
+    if let Some(ref tx) = state.reconnect_tx {
+        let server_ws_url = state.server_ws_url.read().await.clone();
+        let reconnect_req = super::ReconnectRequest {
+            ws_url: server_ws_url,
+        };
+        if let Err(e) = tx.send(reconnect_req).await {
+            error!("发送重连请求失败: {}", e);
+        } else {
+            info!("转生后触发 WebSocket 重连");
         }
     }
 
@@ -3007,7 +3017,7 @@ pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
         },
         dto::LlmProviderInfo {
             value: "openai_compatible".to_string(),
-            label: "OpenAI Compatible (DeepSeek/GLM/Kimi/Minimax等)".to_string(),
+            label: "OpenAI Compatible".to_string(),
             requires_base_url: true,
             disabled: None,
             disabled_reason: None,
@@ -3463,27 +3473,44 @@ pub(super) async fn get_cognitive_context_handler(
 ///
 /// 用于 Web 面板实时接收死亡等事件通知
 pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    let mut rx = state.death_event_tx.subscribe();
+    let mut death_rx = state.death_event_tx.subscribe();
+    let mut tick_rx = state.tick_update_tx.subscribe();
 
     let stream = async_stream::stream! {
         let data = Bytes::from_static(b"event: connected\ndata: {\"status\":\"connected\"}\n\n");
         yield Ok::<_, std::convert::Infallible>(Frame::data(data));
 
         loop {
-            match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await {
-                Ok(Ok(msg)) => {
-                    if matches!(msg, ServerMessage::AgentDied { .. })
-                        && let Ok(json) = serde_json::to_string(&msg) {
-                            let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+            tokio::select! {
+                death_result = tokio::time::timeout(Duration::from_secs(30), death_rx.recv()) => {
+                    match death_result {
+                        Ok(Ok(msg)) => {
+                            if matches!(msg, ServerMessage::AgentDied { .. })
+                                && let Ok(json) = serde_json::to_string(&msg) {
+                                let data = Bytes::from(format!("event: agent_died\ndata: {}\n\n", json));
+                                yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                            }
+                        }
+                        Ok(Err(_)) => {
+                            break;
+                        }
+                        Err(_) => {
+                            let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
                             yield Ok::<_, std::convert::Infallible>(Frame::data(data));
                         }
+                    }
                 }
-                Ok(Err(_)) => {
-                    break;
-                }
-                Err(_) => {
-                    let data = Bytes::from(b"event: heartbeat\ndata: {}\n\n".to_vec());
-                    yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                tick_result = tick_rx.recv() => {
+                    match tick_result {
+                        Ok(tick_id) => {
+                            let json = serde_json::json!({"tick_id": tick_id}).to_string();
+                            let data = Bytes::from(format!("event: tick_update\ndata: {}\n\n", json));
+                            yield Ok::<_, std::convert::Infallible>(Frame::data(data));
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
                 }
             }
         }

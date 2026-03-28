@@ -544,10 +544,14 @@ pub async fn rebirth_agent(
         anyhow::bail!("设备认证失败");
     }
 
-    // 2. 获取当前设备的活跃 Agent 信息
     let agent_info: Option<(Uuid, String)> = sqlx::query_as(
         r#"
-        SELECT agent_id, name FROM agents WHERE device_id = $1 AND status = 'active'
+        SELECT a.agent_id, a.name 
+        FROM agents a
+        INNER JOIN agent_states s ON a.agent_id = s.agent_id
+        WHERE a.device_id = $1 AND a.status = 'active' AND s.is_alive = true
+        ORDER BY s.tick_id DESC
+        LIMIT 1
         "#,
     )
     .bind(device_id)

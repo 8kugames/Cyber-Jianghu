@@ -115,11 +115,9 @@ impl Default for MemoryEntry {
 /// 嵌入服务状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbedderStatus {
-    /// 使用 OpenClaw 嵌入
-    OpenClaw,
-    /// 使用本地模型
+    /// 使用本地模型（bge-small-zh-v1.5）
     Local,
-    /// 不可用（向量记忆关闭）
+    /// 不可用（向量记忆关闭，降级到 FTS5）
     Unavailable,
 }
 
