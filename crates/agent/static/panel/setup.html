@@ -173,12 +173,13 @@
 
                 // 更新表单字段显示
                 var isLocal = this.value === 'ollama';
-                document.getElementById('base-url-group').classList.toggle('hidden', isLocal);
+                // ollama 也需要显示 base_url（支持 MLX 等自定义端口）
+                document.getElementById('base-url-group').classList.toggle('hidden', false);
                 document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
 
                 if (isLocal) {
                     document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
-                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b';
+                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b 或 llama3.2:3b';
                 } else if (this.value === 'openclaw') {
                     // 尝试加载 OpenClaw 默认配置
                     try {
