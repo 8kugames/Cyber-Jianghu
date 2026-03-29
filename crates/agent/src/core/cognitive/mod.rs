@@ -16,8 +16,8 @@ pub mod stages;
 
 // 导出公共接口
 pub use stages::{
-    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionResponse, PlanningResponse,
-    StageOutput,
+    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionMotivationPlanningResponse,
+    PerceptionResponse, PlanningResponse, StageOutput,
 };
 
 pub use chain::CognitiveChain;
