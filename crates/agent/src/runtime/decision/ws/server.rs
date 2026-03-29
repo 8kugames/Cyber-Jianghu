@@ -112,13 +112,31 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
         while let Some(msg) = ws_rx.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    debug!("Received message");
+                    debug!("Received message: {}", text);
 
-                    if let Ok(DownstreamMessage::LLMResponse {
-                        request_id,
-                        content,
-                        error,
-                    }) = serde_json::from_str::<DownstreamMessage>(&text)
+                    if let Ok(parsed) = serde_json::from_str::<DownstreamMessage>(&text) {
+                        if matches!(parsed, DownstreamMessage::LLMResponse { .. }) {
+                            if let DownstreamMessage::LLMResponse {
+                                request_id,
+                                content,
+                                error,
+                            } = parsed
+                            {
+                                let result = if let Some(err) = error {
+                                    Err(err)
+                                } else {
+                                    Ok(content)
+                                };
+                                if let Err(e) = llm_response_tx.send((request_id, result)).await {
+                                    warn!("Failed to send LLM response to bridge: {}", e);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+
+                    if text.contains("llm_response") {
+                        warn!("DownstreamMessage::LLMResponse parse failed for: {}", text);
                     {
                         let result = if let Some(err) = error {
                             Err(err)

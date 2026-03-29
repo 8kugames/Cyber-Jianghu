@@ -10,6 +10,41 @@ let hasMoreDreamRecords = false;
 let allCharacters = [];
 let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
 
+function formatWorldTime(worldTime) {
+    if (!worldTime) return '-';
+    if (typeof worldTime === 'string' || typeof worldTime === 'number') {
+        return String(worldTime);
+    }
+    if (typeof worldTime === 'object') {
+        if (worldTime.display) return String(worldTime.display);
+        if (worldTime.text) return String(worldTime.text);
+        if (worldTime.label) return String(worldTime.label);
+        const year = worldTime.year ?? worldTime.y;
+        const month = worldTime.month ?? worldTime.m;
+        const day = worldTime.day ?? worldTime.d;
+        const hour = worldTime.hour ?? worldTime.h;
+        const minute = worldTime.minute ?? worldTime.min;
+        if (year || month || day || hour || minute) {
+            const datePart = [year, month, day].filter(v => v !== undefined).join('-');
+            const timePart = [hour, minute].filter(v => v !== undefined).join(':');
+            return [datePart, timePart].filter(Boolean).join(' ');
+        }
+        try {
+            return JSON.stringify(worldTime);
+        } catch {
+            return '-';
+        }
+    }
+    return '-';
+}
+
+function formatRealTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts);
+    return d.toLocaleString('zh-CN');
+}
+
 // 加载属性元数据（分类信息，从 narrative_config 解析）
 async function loadAttributeMeta() {
     try {
@@ -369,11 +404,16 @@ async function loadExperiences(page = 1) {
                 const div = document.createElement('div');
                 div.className = 'exp-item';
 
+                const worldTimeText = formatWorldTime(exp.world_time);
+                const realTimeText = formatRealTime(exp.created_at);
+                const tickLabel = `Tick ${exp.tick_id}（游戏时间：${worldTimeText}，现实时间：${realTimeText}）`;
+                const eventText = exp.event ? exp.event : '-';
+
                 let html = `
                     <div class="exp-header">
-                        <span class="exp-tick">Tick ${exp.tick_id}</span>
+                        <span class="exp-tick">${escapeHtml(tickLabel)}</span>
                     </div>
-                    <div class="exp-content">${escapeHtml(exp.event)}</div>
+                    <div class="exp-content">${escapeHtml(eventText)}</div>
                 `;
                 if (exp.intent_summary) {
                     html += `<div class="exp-thought">
