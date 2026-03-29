@@ -70,9 +70,10 @@ impl Broadcaster {
             .collect();
 
         // 获取当前在线的 Agent ID 集合
+        // 注意：ConnectionManager 的 key 是 device_id，但我们需要 agent_id
         let online_agent_ids: std::collections::HashSet<Uuid> = {
             let connections = connection_manager.read().await;
-            connections.keys().copied().collect()
+            connections.values().map(|c| c.agent_id).collect()
         };
 
         // 批量加载所有 Agent 的背包
