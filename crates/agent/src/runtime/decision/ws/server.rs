@@ -118,30 +118,30 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                     debug!("Received message: {}", text);
 
                     // 尝试直接解析 llm_response（扁平格式，跳过 DownstreamMessage 的 tag 包装）
-                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if response.get("type").and_then(|t| t.as_str()) == Some("llm_response") {
-                            let request_id = response.get("request_id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            let content = response.get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            let error = response.get("error")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string());
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text)
+                        && response.get("type").and_then(|t| t.as_str()) == Some("llm_response")
+                    {
+                        let request_id = response.get("request_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let content = response.get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let error = response.get("error")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
 
-                            let result = if let Some(err) = error {
-                                Err(err)
-                            } else {
-                                Ok(content)
-                            };
-                            if let Err(e) = llm_response_tx.send((request_id, result)).await {
-                                warn!("Failed to send LLM response to bridge: {}", e);
-                            }
-                            continue;
+                        let result = if let Some(err) = error {
+                            Err(err)
+                        } else {
+                            Ok(content)
+                        };
+                        if let Err(e) = llm_response_tx.send((request_id, result)).await {
+                            warn!("Failed to send LLM response to bridge: {}", e);
                         }
+                        continue;
                     }
 
                     match serde_json::from_str::<UpstreamMessage>(&text) {
@@ -409,7 +409,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
             };
             if let Ok(json) = serde_json::to_string(&ping) {
                 let mut tx = ws_tx.lock().await;
-                if let Err(_) = tx.send(Message::Text(json.into())).await {
+                if tx.send(Message::Text(json.into())).await.is_err() {
                     break;
                 }
             }
