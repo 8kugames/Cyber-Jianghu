@@ -1452,6 +1452,8 @@ pub struct CharacterInfoResponse {
     // === WorldState 实时数据 ===
     /// 当前属性（带叙事描述）
     pub attributes: Option<serde_json::Value>,
+    /// 派生属性（带叙事描述，浮点值）
+    pub derived_attributes: Option<serde_json::Value>,
     /// 先天属性（注册时的属性值）
     pub birth_attributes: Option<serde_json::Value>,
     /// 持有物品
@@ -1518,18 +1520,18 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     // 是否使用缓存数据（当服务器未连接时）
     let is_stale = current.is_none();
 
-    let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
+    let (agent_id, raw_attributes, raw_derived, inventory, location, tick_id, world_time) =
         match current.as_ref() {
             Some(ws) => {
                 let agent_id = ws.agent_id.map(|id| id.to_string());
                 let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
+                let derived = serde_json::to_value(&ws.self_state.derived_attributes).ok();
                 let inv = serde_json::to_value(&ws.self_state.inventory).ok();
                 let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
                 let time = serde_json::to_value(&ws.world_time).ok();
-                (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
+                (agent_id, attrs, derived, inv, loc, Some(ws.tick_id), time)
             }
             None => {
-                // 降级使用配置数据（birth_attributes 作为 attributes 的兜底）
                 let fallback_attrs = character
                     .birth_attributes
                     .as_ref()
@@ -1537,6 +1539,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 (
                     character.agent_id.map(|id| id.to_string()),
                     fallback_attrs,
+                    None,
                     None,
                     None,
                     None,
@@ -1559,6 +1562,8 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
 
     // 6. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
+    let derived_attributes =
+        enrich_derived_attributes(raw_derived, &narrative_config);
 
     // 7. 构建响应
     let response = CharacterInfoResponse {
@@ -1572,6 +1577,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         values: character.values.clone(),
         registered_at: character.registered_at.map(|t| t.to_rfc3339()),
         attributes,
+        derived_attributes,
         birth_attributes: character
             .birth_attributes
             .as_ref()
@@ -1685,6 +1691,51 @@ fn enrich_attributes_with_descriptions(
     Some(serde_json::Value::Object(enriched))
 }
 
+fn enrich_derived_attributes(
+    raw_derived: Option<serde_json::Value>,
+    narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
+) -> Option<serde_json::Value> {
+    let derived = raw_derived?;
+    let derived_obj = derived.as_object()?;
+
+    let enriched: serde_json::Map<String, serde_json::Value> = derived_obj
+        .iter()
+        .filter_map(|(key, value)| {
+            let current = match value.as_f64() {
+                Some(v) => v,
+                None => return None,
+            };
+
+            let is_rate = key.ends_with("_rate") || key.ends_with("_bonus");
+            let display_current = if is_rate {
+                format!("{:.2}%", current * 100.0)
+            } else {
+                format!("{:.2}", current)
+            };
+
+            let (display_name, description) = narrative_config
+                .as_ref()
+                .and_then(|cfg| cfg.attributes.get(key))
+                .map(|attr_cfg| {
+                    let name = attr_cfg.display_name.clone();
+                    let desc = format!("{}: {}", name, display_current);
+                    (name, desc)
+                })
+                .unwrap_or_else(|| (key.clone(), format!("{}: {}", key, display_current)));
+
+            let attr_obj = serde_json::json!({
+                "name": display_name,
+                "current": display_current,
+                "description": description
+            });
+
+            Some((key.clone(), attr_obj))
+        })
+        .collect();
+
+    Some(serde_json::Value::Object(enriched))
+}
+
 /// 经历日志条目
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperienceEntry {
@@ -1692,6 +1743,8 @@ pub struct ExperienceEntry {
     pub tick_id: i64,
     /// 游戏时间
     pub world_time: Option<serde_json::Value>,
+    /// 现实时间（RFC3339）
+    pub created_at: String,
     /// 事件描述
     pub event: String,
     /// 观察者思维链（可选）
@@ -1751,6 +1804,7 @@ pub(super) async fn get_experiences_handler(
             ExperienceEntry {
                 tick_id: e.tick_id,
                 world_time,
+                created_at: e.created_at.to_rfc3339(),
                 event: e.event.unwrap_or_default(),
                 observer_thought: e.observer_thought,
                 intent_summary: e.thought_log,
@@ -2402,6 +2456,21 @@ pub(super) async fn list_characters_handler(
                 registered_at: current_char.registered_at.map(|t| t.to_rfc3339()),
                 is_current: true,
             });
+        }
+    }
+
+    let current = state.current_state.read().await;
+    if let Some(ref ws) = *current {
+        let ws_agent_id = ws.agent_id.map(|id| id.to_string());
+        for char in characters.iter_mut() {
+            if char.agent_id == ws_agent_id {
+                if state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
+                    char.status = "dead".to_string();
+                } else if let Some(&hp) = ws.self_state.attributes.get("hp") {
+                    char.status = if hp > 0 { "alive" } else { "dead" }.to_string();
+                }
+                break;
+            }
         }
     }
 
