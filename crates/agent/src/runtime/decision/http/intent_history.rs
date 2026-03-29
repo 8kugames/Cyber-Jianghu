@@ -175,29 +175,39 @@ impl IntentHistoryStore {
         }
     }
 
-    /// 更新 Observer 思维链
+    /// 更新 Observer 思维链（Upsert 模式）
+    ///
+    /// ReflectorSoul 审查可能在 ActorSoul 记录 intent 之前完成，
+    /// 因此使用 upsert：先尝试 UPDATE，若行不存在则 INSERT 占位行，
+    /// 等 `record_intent()` 调用时再补全字段。
     pub async fn update_observer_thought(&self, tick_id: i64, thought: String) {
         let conn = self.conn.lock().expect("intent_history lock not poisoned");
 
-        let result = conn.execute(
-            "UPDATE intent_history SET observer_thought = ?1 WHERE tick_id = ?2",
-            params![thought, tick_id],
-        );
+        let updated = conn
+            .execute(
+                "UPDATE intent_history SET observer_thought = ?1 WHERE tick_id = ?2",
+                params![thought, tick_id],
+            )
+            .unwrap_or(0);
 
-        match result {
-            Ok(0) => tracing::warn!(
-                "[intent_history] No entry found for tick {} when updating observer thought",
+        if updated == 0 {
+            // ReflectorSoul 先于 record_intent() 完成，插入占位行
+            let created_at = Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO intent_history
+                 (tick_id, intent_id, action_type, observer_thought, created_at)
+                 VALUES (?1, ?2, '', ?3, ?4)",
+                params![tick_id, Uuid::nil().to_string(), thought, created_at],
+            );
+            tracing::debug!(
+                "[intent_history] Inserted stub for tick {} (observer thought arrived first)",
                 tick_id
-            ),
-            Ok(_) => tracing::debug!(
+            );
+        } else {
+            tracing::debug!(
                 "[intent_history] Updated observer thought for tick {}",
                 tick_id
-            ),
-            Err(e) => tracing::warn!(
-                "[intent_history] Failed to update observer thought for tick {}: {}",
-                tick_id,
-                e
-            ),
+            );
         }
     }
 
