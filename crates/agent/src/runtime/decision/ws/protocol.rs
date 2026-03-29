@@ -169,6 +169,18 @@ pub enum DownstreamMessage {
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
     },
+
+    /// 心跳探测（OpenClaw -> Agent）
+    Ping {
+        /// 探测时间戳（Unix timestamp, 毫秒）
+        timestamp: i64,
+    },
+
+    /// 心跳响应（Agent -> OpenClaw）
+    Pong {
+        /// 回显时间戳（Unix timestamp, 毫秒）
+        timestamp: i64,
+    },
 }
 
 // ============================================================================
@@ -199,6 +211,19 @@ pub enum UpstreamMessage {
         request_id: String,
         /// LLM 提示词
         prompt: String,
+    },
+
+    /// 心跳请求（OpenClaw -> Agent）
+    Ping {
+        /// 时间戳（Unix timestamp, 毫秒）
+        #[serde(default)]
+        timestamp: Option<i64>,
+    },
+
+    /// 心跳响应（Agent -> OpenClaw）
+    Pong {
+        /// 回显时间戳（Unix timestamp, 毫秒）
+        timestamp: i64,
     },
 }
 
@@ -233,8 +258,9 @@ impl From<UpstreamMessage> for Option<WsIntent> {
                 action_data,
                 thought_log,
             }),
-            // LLMRequest 不是 Intent，返回 None
             UpstreamMessage::LLMRequest { .. } => None,
+            UpstreamMessage::Pong { .. } => None,
+            UpstreamMessage::Ping { .. } => None,
         }
     }
 }

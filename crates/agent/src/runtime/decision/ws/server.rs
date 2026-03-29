@@ -13,6 +13,9 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use chrono::Utc;
 
 use axum::{
     Router,
@@ -114,43 +117,46 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                 Ok(Message::Text(text)) => {
                     debug!("Received message: {}", text);
 
-                    if let Ok(parsed) = serde_json::from_str::<DownstreamMessage>(&text) {
-                        if matches!(parsed, DownstreamMessage::LLMResponse { .. }) {
-                            if let DownstreamMessage::LLMResponse {
-                                request_id,
-                                content,
-                                error,
-                            } = parsed
-                            {
-                                let result = if let Some(err) = error {
-                                    Err(err)
-                                } else {
-                                    Ok(content)
-                                };
-                                if let Err(e) = llm_response_tx.send((request_id, result)).await {
-                                    warn!("Failed to send LLM response to bridge: {}", e);
-                                }
-                                continue;
-                            }
-                        }
-                    }
+                    // 尝试直接解析 llm_response（扁平格式，跳过 DownstreamMessage 的 tag 包装）
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if response.get("type").and_then(|t| t.as_str()) == Some("llm_response") {
+                            let request_id = response.get("request_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            let content = response.get("content")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            let error = response.get("error")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
 
-                    if text.contains("llm_response") {
-                        warn!("DownstreamMessage::LLMResponse parse failed for: {}", text);
-                    {
-                        let result = if let Some(err) = error {
-                            Err(err)
-                        } else {
-                            Ok(content)
-                        };
-                        if let Err(e) = llm_response_tx.send((request_id, result)).await {
-                            warn!("Failed to send LLM response to bridge: {}", e);
+                            let result = if let Some(err) = error {
+                                Err(err)
+                            } else {
+                                Ok(content)
+                            };
+                            if let Err(e) = llm_response_tx.send((request_id, result)).await {
+                                warn!("Failed to send LLM response to bridge: {}", e);
+                            }
+                            continue;
                         }
-                        continue;
                     }
 
                     match serde_json::from_str::<UpstreamMessage>(&text) {
                         Ok(upstream) => {
+                            // 处理 Ping 消息（OpenClaw -> Agent）
+                            if let UpstreamMessage::Ping { timestamp } = upstream {
+                                let pong_timestamp = timestamp.unwrap_or_else(|| Utc::now().timestamp_millis());
+                                let pong = DownstreamMessage::Pong { timestamp: pong_timestamp };
+                                if let Ok(json) = serde_json::to_string(&pong) {
+                                    let mut tx = ws_tx.lock().await;
+                                    let _ = tx.send(Message::Text(json.into())).await;
+                                }
+                                continue;
+                            }
+
                             // 使用 From trait 转换
                             let intent_opt: Option<WsIntent> = upstream.into();
                             if let Some(intent) = intent_opt {
@@ -393,10 +399,28 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
         }
     };
 
+    // 心跳任务（独立于 tick）
+    let heartbeat_task = async {
+        let mut interval = tokio::time::interval(Duration::from_secs(15));
+        loop {
+            interval.tick().await;
+            let ping = DownstreamMessage::Ping {
+                timestamp: Utc::now().timestamp_millis(),
+            };
+            if let Ok(json) = serde_json::to_string(&ping) {
+                let mut tx = ws_tx.lock().await;
+                if let Err(_) = tx.send(Message::Text(json.into())).await {
+                    break;
+                }
+            }
+        }
+    };
+
     // 并行运行读写任务
     tokio::select! {
         _ = read_task => debug!("Read task ended"),
         _ = write_task => debug!("Write task ended"),
+        _ = heartbeat_task => debug!("Heartbeat task ended"),
     }
 
     // 重置连接标志
