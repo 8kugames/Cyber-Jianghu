@@ -18,6 +18,7 @@ use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
 use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{IntentValidator, Validator};
 use crate::config::{Config, ReviewConfig};
+use crate::core::cognitive::MultiStageCognitiveEngine;
 use crate::runtime::claw::LlmClientContainer;
 use crate::runtime::decision::http::{HttpApiState, ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
@@ -56,6 +57,8 @@ pub struct AgentBuilder {
     config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
+    /// 认知引擎引用（可选，用于 config reload 时更新人设）
+    cognitive_engine: Option<Arc<MultiStageCognitiveEngine>>,
 }
 
 impl AgentBuilder {
@@ -81,6 +84,7 @@ impl AgentBuilder {
             reconnect_rx: None,
             config_reload_rx: None,
             http_api_state: None,
+            cognitive_engine: None,
         }
     }
 
@@ -187,6 +191,12 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置认知引擎引用（用于 config reload 时更新人设）
+    pub fn with_cognitive_engine(mut self, engine: Arc<MultiStageCognitiveEngine>) -> Self {
+        self.cognitive_engine = Some(engine);
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -258,6 +268,7 @@ impl AgentBuilder {
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
+            cognitive_engine: self.cognitive_engine,
         }
     }
 }

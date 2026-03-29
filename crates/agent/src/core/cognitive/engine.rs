@@ -137,7 +137,13 @@ impl MultiStageCognitiveEngine {
     pub fn update_persona(&self, name: &str, system_prompt: &str) {
         let mut cfg = self.config.write().unwrap();
         cfg.agent_name = name.to_string();
-        cfg.persona = DynamicPersona::new(uuid::Uuid::new_v4(), name, system_prompt);
+        // 保留旧 persona 的 agent_id，避免打断记忆/关系链
+        let old_agent_id = cfg.persona.agent_id.clone();
+        cfg.persona = DynamicPersona::new(
+            uuid::Uuid::parse_str(&old_agent_id).unwrap_or(uuid::Uuid::new_v4()),
+            name,
+            system_prompt,
+        );
         info!("认知引擎人设已更新: {}", name);
     }
 

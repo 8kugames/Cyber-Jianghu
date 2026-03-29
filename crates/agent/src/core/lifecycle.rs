@@ -309,7 +309,9 @@ impl super::Agent {
                 // 重置状态，准备重新连接
                 self.death_reported = false;
                 if let Some(ref api_state) = self.http_api_state {
-                    api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                    api_state
+                        .is_dead
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
                 }
                 self.client.close().await;
 
@@ -339,7 +341,9 @@ impl super::Agent {
                             // 重置死亡标记
                             self.death_reported = false;
                             if let Some(ref api_state) = self.http_api_state {
-                                api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                api_state
+                                    .is_dead
+                                    .store(false, std::sync::atomic::Ordering::Relaxed);
                             }
                             // 继续执行到下面的主循环
                             info!("角色已就绪，进入游戏主循环");
@@ -349,7 +353,9 @@ impl super::Agent {
                             info!("角色仍未创建，继续等待...");
                             self.death_reported = true;
                             if let Some(ref api_state) = self.http_api_state {
-                                api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                                api_state
+                                    .is_dead
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
                             }
                         }
                     }
@@ -453,6 +459,16 @@ impl super::Agent {
                                         info!("ActorSoul LLM 容器已更新（真正热重载）");
                                     }
 
+                                    // 更新认知引擎人设（角色名/人设热重载）
+                                    if let Some(ref engine) = self.cognitive_engine
+                                        && let Some(ref agent) = new_config.agent
+                                    {
+                                        engine.update_persona(
+                                            &agent.name,
+                                            &agent.generate_system_prompt(),
+                                        );
+                                    }
+
                                     self.config = new_config;
                                     info!("ActorSoul LLM 已重载");
                                 }
@@ -551,9 +567,24 @@ impl super::Agent {
                         continue;
                     }
 
-                    // 5. 调用决策回调（带验证和记忆上下文）
+                    // 5. 计算全局 pipeline deadline（贯穿认知+验证+审查）
+                    // 使用 deadline_ms * 0.8 作为安全边界（与认知引擎一致）
+                    const DEADLINE_SAFETY_RATIO: f64 = 0.8;
+                    const MIN_PIPELINE_TIME_SECS: u64 = 5;
+                    let pipeline_deadline = if world_state.deadline_ms > 0 {
+                        let adjusted = (world_state.deadline_ms as f64 * DEADLINE_SAFETY_RATIO) as u64;
+                        if adjusted < MIN_PIPELINE_TIME_SECS * 1000 {
+                            None // 剩余不足，不设 deadline（让各阶段自行决定）
+                        } else {
+                            Some(std::time::Instant::now() + std::time::Duration::from_millis(adjusted))
+                        }
+                    } else {
+                        None
+                    };
+
+                    // 6. 调用决策回调（带验证和记忆上下文）
                     let intent = if self.validator.is_some() {
-                        self.decide_with_validation(&world_state).await?
+                        self.decide_with_validation(&world_state, pipeline_deadline).await?
                     } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
                         // 优先使用带记忆上下文的回调
                         memory_callback(&world_state, &memory_context).await
@@ -561,14 +592,14 @@ impl super::Agent {
                         (self.decision_callback)(&world_state).await
                     };
 
-                    // 5.5 审查（ReflectorSoul - 反思之魂）
+                    // 6.5 审查（ReflectorSoul - 反思之魂）
                     let final_intent = if let Some(ref store) = self.review_store {
-                        self.submit_for_review(intent, &world_state, store).await?
+                        self.submit_for_review(intent, &world_state, store, pipeline_deadline).await?
                     } else {
                         intent
                     };
 
-                    // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
+                    // 6.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state
                         && let Some(ref history) = api_state.intent_history {
                             history
@@ -581,7 +612,7 @@ impl super::Agent {
                                 .await;
                         }
 
-                    // 6. 更新寿命状态（如果启用）
+                    // 7. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {
                         let status = calculator.process_tick();
                         if status.is_deceased() {
@@ -605,7 +636,7 @@ impl super::Agent {
                         }
                     }
 
-                    // 7. 发送意图
+                    // 8. 发送意图
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
                         // 尝试重连

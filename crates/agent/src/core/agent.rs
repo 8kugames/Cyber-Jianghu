@@ -21,6 +21,7 @@ use crate::ai::memory::types::MemoryEntry;
 use crate::ai::relationship::RelationshipStore;
 use crate::ai::validator::{PersonaInfo, Validator};
 use crate::config::{Config, ReviewConfig};
+use crate::core::cognitive::MultiStageCognitiveEngine;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
 use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
@@ -130,6 +131,9 @@ pub struct Agent {
 
     /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::runtime::decision::http::HttpApiState>>,
+
+    /// 认知引擎引用（可选，用于 config reload 时更新人设）
+    pub(crate) cognitive_engine: Option<std::sync::Arc<MultiStageCognitiveEngine>>,
 }
 
 impl Agent {
@@ -183,6 +187,7 @@ impl Agent {
             actor_llm_container: None,
             config_reload_rx: None,
             http_api_state: None,
+            cognitive_engine: None,
         }
     }
 
@@ -488,7 +493,13 @@ impl Agent {
     }
 
     /// 带验证的决策循环
-    pub async fn decide_with_validation(&mut self, world_state: &WorldState) -> Result<Intent> {
+    ///
+    /// `pipeline_deadline`: 整个 pipeline（认知+验证+审查）的绝对截止时间
+    pub async fn decide_with_validation(
+        &mut self,
+        world_state: &WorldState,
+        pipeline_deadline: Option<std::time::Instant>,
+    ) -> Result<Intent> {
         use std::time::Instant;
         use tracing::warn;
 
@@ -505,9 +516,13 @@ impl Agent {
         loop {
             attempt += 1;
 
-            // 检查剩余时间
+            // 检查剩余时间（取 pipeline deadline 和 tick duration 的更紧约束）
             let elapsed = tick_start.elapsed();
-            let remaining = tick_duration.saturating_sub(elapsed);
+            let remaining_tick = tick_duration.saturating_sub(elapsed);
+            let remaining = pipeline_deadline
+                .and_then(|dl| dl.checked_duration_since(Instant::now()))
+                .map(|rd| rd.min(remaining_tick))
+                .unwrap_or(remaining_tick);
 
             if remaining < min_retry_time {
                 warn!("Tick time exhausted, forcing idle");
@@ -591,11 +606,14 @@ impl Agent {
     ///
     /// ActorSoul 生成 Intent 后，提交给 ReflectorSoul 进行审查
     /// 等待审查结果后返回最终 Intent（通过、拒绝或超时降级）
+    ///
+    /// `pipeline_deadline`: 整个 pipeline 的绝对截止时间，审查超时取 min(配置超时, 剩余时间)
     pub async fn submit_for_review(
         &self,
         intent: Intent,
         world_state: &WorldState,
         review_store: &std::sync::Arc<ReviewStore>,
+        pipeline_deadline: Option<std::time::Instant>,
     ) -> Result<Intent> {
         use cyber_jianghu_protocol::PersonaSummary;
         use std::time::Instant;
@@ -633,8 +651,25 @@ impl Agent {
         );
 
         // 等待 ReflectorSoul 审查结果（带超时）
-        let timeout = std::time::Duration::from_secs(self.review_config.timeout_seconds);
-        let deadline = Instant::now() + timeout;
+        // 优先使用 pipeline_deadline 的剩余时间，fallback 到配置超时
+        let configured_timeout =
+            std::time::Duration::from_secs(self.review_config.timeout_seconds);
+        let deadline = match pipeline_deadline {
+            Some(dl) => {
+                let remaining = dl.saturating_duration_since(Instant::now());
+                // 剩余时间不足 5s，直接跳过审查
+                if remaining < std::time::Duration::from_secs(5) {
+                    warn!(
+                        "[ActorSoul] Pipeline deadline exhausted, skipping review for intent {}",
+                        intent_id
+                    );
+                    return Ok(intent);
+                }
+                // 取 min(配置超时, 剩余时间)
+                Instant::now() + remaining.min(configured_timeout)
+            }
+            None => Instant::now() + configured_timeout,
+        };
 
         loop {
             // 检查超时

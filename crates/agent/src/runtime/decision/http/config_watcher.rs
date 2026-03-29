@@ -5,8 +5,13 @@
 use anyhow::Result;
 use notify::Watcher;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Instant;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
+
+/// 防抖间隔（毫秒）
+const DEBOUNCE_MS: u64 = 500;
 
 /// LLM 配置文件监听器
 pub struct ConfigWatcher {
@@ -22,15 +27,24 @@ impl ConfigWatcher {
     /// # 参数
     /// - `config_path`: 要监听的配置文件路径
     pub fn new(config_path: PathBuf) -> Result<Self> {
-        let (tx, _) = broadcast::channel(1);
+        let (tx, _) = broadcast::channel(4);
         let tx_clone = tx.clone();
+        let last_sent = Mutex::new(Instant::now()
+            .checked_sub(std::time::Duration::from_secs(10))
+            .unwrap_or(Instant::now()));
 
         let mut watcher =
             notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                 match res {
                     Ok(event) if event.kind.is_modify() || event.kind.is_create() => {
+                        let now = Instant::now();
+                        let mut last = last_sent.lock().unwrap();
+                        if now.duration_since(*last) < std::time::Duration::from_millis(DEBOUNCE_MS) {
+                            return; // 防抖：500ms 内重复事件忽略
+                        }
+                        *last = now;
+                        drop(last);
                         info!("检测到配置文件变更: {:?}", event.paths);
-                        // 忽略发送错误（可能没有接收端）
                         let _ = tx_clone.send(());
                     }
                     Err(e) => {
