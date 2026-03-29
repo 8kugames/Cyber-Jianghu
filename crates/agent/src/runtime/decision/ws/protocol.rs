@@ -206,6 +206,7 @@ pub enum UpstreamMessage {
     },
 
     /// LLM 请求（Agent -> OpenClaw，用于 Claw 模式）
+    #[serde(rename = "llm_request")]
     LLMRequest {
         /// 请求 ID（用于匹配响应）
         request_id: String,
