@@ -1111,38 +1111,57 @@ button[type="button"]:disabled {
    ============================================================================ */
 
 .experience-list {
-    max-height: 500px;
+    position: relative;
+    max-height: 600px;
     overflow-y: auto;
-    padding-right: 4px;
+    padding: 16px 16px 16px 28px;
     background: var(--bg-secondary);
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
-    padding: 14px 16px;
-    background-clip: padding-box;
+}
+
+/* 时间线竖线（仅经历日志） */
+#experiences.experience-list::before {
+    content: "";
+    position: absolute;
+    left: 16px;
+    top: 28px;
+    bottom: 16px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), var(--border));
+    border-radius: 1px;
 }
 
 .exp-item {
     position: relative;
-    padding: 14px 16px 14px 20px;
+    padding: 14px 16px 14px 18px;
     background: var(--bg-card);
     border-radius: var(--radius-sm);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     border: 1px solid var(--border-light);
     box-shadow: var(--shadow-sm);
     transition: all 0.2s;
-    background-clip: padding-box;
 }
 
-.exp-item::before {
+/* 时间线圆点（仅经历日志） */
+#experiences.experience-list > .exp-item {
+    margin-left: 12px;
+}
+
+#experiences.experience-list > .exp-item::before {
     content: "";
     position: absolute;
-    left: -8px;
+    left: -19px;
     top: 18px;
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 4px var(--accent-light);
+    border: 2px solid var(--bg-secondary);
+}
+
+.exp-item:last-child {
+    margin-bottom: 0;
 }
 
 .exp-item:hover {
@@ -1153,31 +1172,73 @@ button[type="button"]:disabled {
 
 .exp-header {
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 6px;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
     flex-wrap: wrap;
 }
 
-.exp-tick {
+.exp-tick-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 20px;
+    padding: 0 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.exp-time-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.exp-world-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.exp-real-time {
     font-size: 11px;
-    color: var(--accent);
-    font-weight: 600;
-    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.exp-body {
+    margin-bottom: 4px;
 }
 
 .exp-content {
     font-size: 13px;
     color: var(--text-primary);
-    line-height: 1.6;
+    line-height: 1.7;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
+.exp-action-tag {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--info);
+    background: var(--info-light);
+    border-radius: 4px;
+    font-weight: 500;
+}
+
 .exp-thought,
 .exp-observer {
-    margin-top: 10px;
-    padding: 10px 12px;
+    margin-top: 8px;
+    padding: 8px 12px;
     background: var(--bg-secondary);
     border-radius: var(--radius-sm);
     font-size: 12px;
@@ -1505,6 +1566,43 @@ button[type="button"]:disabled {
     height: 6px;
     border-radius: 50%;
     background: currentColor;
+}
+
+.online-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.online-tag::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+}
+
+.online-tag.online {
+    background: rgba(79, 192, 141, 0.12);
+    color: var(--success);
+}
+
+.online-tag.online::before {
+    background: var(--success);
+    box-shadow: 0 0 4px var(--success);
+}
+
+.online-tag.offline {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+
+.online-tag.offline::before {
+    background: var(--text-muted);
 }
 
 /* ============================================================================
