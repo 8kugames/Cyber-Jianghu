@@ -668,6 +668,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                     CognitiveDecisionConfig::default().max_retries,
                 ));
 
+            let cognitive_engine_for_builder = cognitive_engine.clone();
             let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                 let engine = cognitive_engine.clone();
                 let ws = ws.clone();
@@ -720,6 +721,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 .with_review_store(review_store.clone())
                 .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
+                .with_cognitive_engine(cognitive_engine_for_builder)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx)
@@ -828,6 +830,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                     CognitiveDecisionConfig::default().max_retries,
                 ));
 
+            let cognitive_engine_for_builder = cognitive_engine.clone();
             let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                 let engine = cognitive_engine.clone();
                 let ws = ws.clone();
@@ -853,6 +856,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 .with_reconnect_rx(setup.reconnect_rx)
                 .with_review_store(review_store.clone())
                 .with_llm_client(llm_client.clone(), None)
+                .with_cognitive_engine(cognitive_engine_for_builder)
                 .with_http_api_state(Arc::new(setup.api_state.clone()))
                 .build();
 
@@ -1146,7 +1150,8 @@ async fn run_reflector_soul_task(
         llm_client.model_name()
     );
 
-    let poll_interval = tokio::time::Duration::from_secs(5);
+    let review_notify = review_store.notify();
+    let fallback_interval = tokio::time::Duration::from_secs(30);
 
     loop {
         tokio::select! {
@@ -1176,13 +1181,34 @@ async fn run_reflector_soul_task(
                     }
                 }
             }
-            // 定期轮询待审查意图
-            _ = tokio::time::sleep(poll_interval) => {
-                let reviews = review_store.get_pending().await;
-                if reviews.is_empty() {
-                    debug!("[ReflectorSoul] 暂无待审查意图");
-                } else {
+            // ReviewStore 通知唤醒（即时响应 ActorSoul 提交）
+            _ = review_notify.notified() => {
+                // 处理所有 pending（可能连续多个）
+                loop {
+                    let reviews = review_store.get_pending().await;
+                    if reviews.is_empty() {
+                        break;
+                    }
                     info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
+                    for review in reviews {
+                        if let Err(e) = process_review_with_store(
+                            &llm_client,
+                            &review_store,
+                            &review,
+                            intent_history.as_ref(),
+                        )
+                        .await
+                        {
+                            warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
+                        }
+                    }
+                }
+            }
+            // 兜底轮询（防止 notify 遗漏）
+            _ = tokio::time::sleep(fallback_interval) => {
+                let reviews = review_store.get_pending().await;
+                if !reviews.is_empty() {
+                    info!("[ReflectorSoul] 兜底轮询发现 {} 个待审查意图", reviews.len());
                     for review in reviews {
                         if let Err(e) = process_review_with_store(
                             &llm_client,
@@ -1210,6 +1236,7 @@ async fn process_review_with_store(
         &Arc<cyber_jianghu_agent::runtime::decision::http::intent_history::IntentHistoryStore>,
     >,
 ) -> Result<()> {
+    use cyber_jianghu_agent::ai::llm::LlmClientExt;
     use cyber_jianghu_agent::runtime::decision::http::review::ReviewDecision;
     use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
 
@@ -1219,23 +1246,56 @@ async fn process_review_with_store(
     );
 
     let validation_prompt = format!(
-        "审查以下意图是否符合角色人设和世界观规则：\n\n意图: {}\n人设: {:?}\n世界上下文: {}",
+        r#"审查以下意图是否符合角色人设和世界观规则。
+
+## 意图
+{}
+
+## 人设
+{:?}
+
+## 世界上下文
+{}
+
+请按以下 JSON 格式输出（不要输出其他内容）：
+{{"result": "approved" 或 "rejected", "reason": "通过/驳回的原因"}}"#,
         serde_json::to_string(&review.intent)?,
         review.persona_summary,
         review.world_context
     );
 
-    let response_text = llm_client.complete(&validation_prompt).await?;
-
-    let result = if response_text.to_lowercase().contains("approve")
-        || response_text.to_lowercase().contains("通过")
+    // 结构化 JSON 解析，失败时 fallback 为 Rejected
+    let (result, response_text) = match llm_client
+        .complete_json::<serde_json::Value>(&validation_prompt)
+        .await
     {
-        ReviewDecision::Approved
-    } else {
-        ReviewDecision::Rejected
+        Ok(json) => {
+            let result_str = json
+                .get("result")
+                .and_then(|v| v.as_str())
+                .unwrap_or("rejected");
+            let is_approved = result_str.eq_ignore_ascii_case("approved");
+            let reason = json
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("无原因");
+            let decision = if is_approved {
+                ReviewDecision::Approved
+            } else {
+                ReviewDecision::Rejected
+            };
+            let text = format!("{}\n\n{}", result_str, reason);
+            (decision, text)
+        }
+        Err(e) => {
+            warn!("[ReflectorSoul] JSON 解析失败，默认 Approved: {}", e);
+            (
+                ReviewDecision::Approved,
+                format!("ReflectorSoul JSON 解析失败，自动放行: {}", e),
+            )
+        }
     };
 
-    // 使用 protocol 的 ReviewSubmission（reason 是 String 不是 Option）
     let submission = ProtocolReviewSubmission {
         result,
         reason: response_text.clone(),
