@@ -434,12 +434,18 @@ async fn handle_websocket(
     // 清理连接
     {
         let mut connections = state.connection_manager.write().await;
-        connections.remove(&agent_id);
+        connections.remove(&device_id);
         info!(
             "Agent '{}' disconnected. Total online: {}",
             agent_name,
             connections.len()
         );
+    }
+
+    // 清理 agent_to_device_map（避免死亡通知发送到已断连设备）
+    if agent_id != uuid::Uuid::nil() {
+        let mut agent_to_device = state.agent_to_device_map.write().await;
+        agent_to_device.remove(&agent_id);
     }
 
     info!("WebSocket handler finished for agent '{}'", agent_name);

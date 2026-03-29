@@ -1156,18 +1156,22 @@ button[type="button"]:disabled {
     justify-content: space-between;
     margin-bottom: 6px;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .exp-tick {
     font-size: 11px;
     color: var(--accent);
     font-weight: 600;
+    line-height: 1.5;
 }
 
 .exp-content {
     font-size: 13px;
     color: var(--text-primary);
     line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .exp-thought,
@@ -1178,6 +1182,14 @@ button[type="button"]:disabled {
     border-radius: var(--radius-sm);
     font-size: 12px;
     line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.thought-content,
+.observer-content {
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .exp-thought { border-left: 3px solid var(--success); }
