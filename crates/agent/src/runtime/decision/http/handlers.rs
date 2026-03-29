@@ -1378,6 +1378,9 @@ pub(super) async fn register_character_handler(
                     if !result.initial_attributes.is_empty() {
                         agent.birth_attributes = Some(result.initial_attributes.clone());
                     }
+                    // 写入 characters 数组（供世界树展示历史角色）
+                    let char_clone = agent.clone();
+                    config.upsert_character(char_clone);
                 }
                 if let Err(e) = config.save_to_file(&state.config_path) {
                     error!("保存配置文件失败: {}", e);
@@ -1747,6 +1750,8 @@ pub struct ExperienceEntry {
     pub created_at: String,
     /// 事件描述
     pub event: String,
+    /// 动作类型
+    pub action_type: Option<String>,
     /// 观察者思维链（可选）
     pub observer_thought: Option<String>,
     /// 意图摘要（可选）
@@ -1806,6 +1811,7 @@ pub(super) async fn get_experiences_handler(
                 world_time,
                 created_at: e.created_at.to_rfc3339(),
                 event: e.event.unwrap_or_default(),
+                action_type: Some(e.action_type).filter(|s| !s.is_empty()),
                 observer_thought: e.observer_thought,
                 intent_summary: e.thought_log,
             }
@@ -1957,9 +1963,16 @@ pub(super) async fn rebirth_character_handler(
         if agent_config.exists() {
             match crate::config::Config::from_file(agent_config) {
                 Ok(mut config) => {
-                    // 死亡角色不需要调用 retire_current_character（status 已是 active，is_alive 已是 false）
-                    // 正常归隐角色才需要标记为 retired
-                    if !is_dead_character {
+                    // 死亡/归隐角色都需要写入 characters 数组（供世界树展示）
+                    if is_dead_character {
+                        // 死亡角色：标记为 dead 并写入 characters 数组
+                        if let Some(ref mut agent) = config.agent {
+                            agent.status = crate::config::CharacterStatus::Dead;
+                        }
+                        if let Some(agent) = config.agent.clone() {
+                            config.upsert_character(agent);
+                        }
+                    } else {
                         config.retire_current_character();
                     }
                     config.agent = None;
