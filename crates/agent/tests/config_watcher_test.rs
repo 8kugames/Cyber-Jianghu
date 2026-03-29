@@ -62,6 +62,9 @@ async fn test_config_watcher_multiple_changes() {
     let result1 = timeout(Duration::from_secs(2), rx.recv()).await;
     assert!(result1.is_ok(), "未收到第一次文件变更通知");
 
+    // 等待防抖窗口过期（500ms）
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
     // 第二次变更
     tokio::fs::write(&config_path, b"test: value2")
         .await

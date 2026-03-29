@@ -10,7 +10,7 @@ use axum::{
 use chrono::{Duration, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -51,7 +51,6 @@ pub struct PendingReviewEntry {
 /// 审查状态存储
 ///
 /// 管理待审查意图和审查结果
-#[derive(Debug, Default)]
 pub struct ReviewStore {
     /// 待审查意图（intent_id -> entry）
     pending: RwLock<HashMap<Uuid, PendingReviewEntry>>,
@@ -59,6 +58,8 @@ pub struct ReviewStore {
     results: RwLock<HashMap<Uuid, ReviewResult>>,
     /// 审查配置
     config: ReviewConfig,
+    /// 通知 ReflectorSoul 立即处理（替代轮询）
+    notify: Arc<Notify>,
 }
 
 impl ReviewStore {
@@ -68,7 +69,13 @@ impl ReviewStore {
             pending: RwLock::new(HashMap::new()),
             results: RwLock::new(HashMap::new()),
             config,
+            notify: Arc::new(Notify::new()),
         }
+    }
+
+    /// 获取 Notify 引用（ReflectorSoul 用以等待唤醒）
+    pub fn notify(&self) -> Arc<Notify> {
+        self.notify.clone()
     }
 
     /// 添加待审查意图
@@ -95,6 +102,10 @@ impl ReviewStore {
 
         let mut pending = self.pending.write().await;
         pending.insert(intent_id, entry);
+        drop(pending);
+
+        // 释放锁后再唤醒 ReflectorSoul，避免无谓争用
+        self.notify.notify_one();
 
         debug!("[review] Added pending review: intent_id={}", intent_id);
         intent_id

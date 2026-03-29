@@ -22,6 +22,48 @@ pub trait LlmClient: Send + Sync {
     async fn complete(&self, prompt: &str) -> Result<String>;
 }
 
+/// 从 LLM 响应中提取第一个合法的 JSON object
+///
+/// LLM 可能在 JSON 前输出分析文字，简单的 find('{') + rfind('}')
+/// 会跨越分析文字提取到无效 JSON。此函数逐个 '{' 尝试 brace-depth 匹配。
+fn extract_first_json_object(input: &str) -> &str {
+    for (i, ch) in input.char_indices() {
+        if ch == '{' {
+            // 从此位置开始 brace-depth 匹配
+            let mut depth = 0i32;
+            let mut in_string = false;
+            let mut escape = false;
+            let bytes_iter = input[i..].char_indices();
+
+            for (offset, c) in bytes_iter {
+                if escape {
+                    escape = false;
+                    continue;
+                }
+                match c {
+                    '\\' if in_string => escape = true,
+                    '"' => in_string = !in_string,
+                    '{' if !in_string => depth += 1,
+                    '}' if !in_string => {
+                        depth -= 1;
+                        if depth == 0 {
+                            let candidate = &input[i..i + offset + c.len_utf8()];
+                            // 快速验证是否合法 JSON
+                            if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
+                                return candidate;
+                            }
+                            break; // depth 归零但不合法，跳到下一个 '{'
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    // 全部失败，fallback 到 trim
+    input.trim()
+}
+
 /// LlmClient 扩展 Trait
 ///
 /// 提供 complete_json 等辅助方法
@@ -35,8 +77,8 @@ pub trait LlmClientExt {
 impl<T: LlmClient + ?Sized> LlmClientExt for T {
     async fn complete_json<D: DeserializeOwned + Send>(&self, prompt: &str) -> Result<D> {
         let response = self.complete(prompt).await?;
-        // 尝试从响应中解析 JSON
-        // 这里假设 LLM 返回的内容就是 JSON，或者包含在 markdown 代码块中
+
+        // 优先从 markdown 代码块提取
         let json_str = if let Some(start) = response.find("```json") {
             let after_marker = start + 7;
             if let Some(end) = response[after_marker..].find("```") {
@@ -44,18 +86,17 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             } else {
                 response[after_marker..].trim()
             }
-        } else if let Some(start) = response.find('{') {
-            if let Some(end) = response.rfind('}') {
-                &response[start..=end]
-            } else {
-                response.trim()
-            }
         } else {
-            response.trim()
+            // 逐个 '{' 位置尝试 brace-depth 匹配，找第一个合法 JSON object
+            extract_first_json_object(&response)
         };
 
         let parsed: D = serde_json::from_str(json_str).map_err(|e| {
-            tracing::error!("[complete_json] Failed to parse JSON: {}\nRaw JSON: {}", e, json_str);
+            tracing::error!(
+                "[complete_json] Failed to parse JSON: {}\nRaw JSON: {}",
+                e,
+                json_str
+            );
             e
         })?;
         Ok(parsed)
