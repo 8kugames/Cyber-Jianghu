@@ -16,7 +16,7 @@
 
 use anyhow::Result;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
@@ -33,6 +33,20 @@ use crate::runtime::decision::http::thinking_log;
 
 /// 每阶段 LLM 调用超时（秒）
 const STAGE_TIMEOUT_SECS: u64 = 45;
+/// Deadline 安全系数（为 review + intent 提交保留 20% 时间）
+const DEADLINE_SAFETY_RATIO: f64 = 0.8;
+/// 最小阶段执行时间（不足则跳过，单位：秒）
+const MIN_STAGE_TIME_SECS: u64 = 10;
+
+/// 认知流程结果
+enum CognitiveOutcome {
+    /// 正常完成（或超时回退 idle），chain 已通过 &mut 修改
+    Done,
+    /// 阶段 LLM 错误
+    Failed(anyhow::Error),
+    /// Deadline 不足，需要调用方回退 idle
+    DeadlineExceeded,
+}
 
 /// 多阶段认知引擎配置
 #[derive(Clone, Debug)]
@@ -73,6 +87,34 @@ pub struct MultiStageCognitiveEngine {
 }
 
 impl MultiStageCognitiveEngine {
+    /// 计算调整后的 deadline（考虑安全系数）
+    /// Returns None if deadline_ms is 0 (老服务器未发送 deadline)
+    fn compute_deadline(deadline_ms: u64) -> Option<Instant> {
+        if deadline_ms == 0 {
+            return None;
+        }
+        let adjusted = (deadline_ms as f64 * DEADLINE_SAFETY_RATIO) as u64;
+        Some(Instant::now() + Duration::from_millis(adjusted))
+    }
+
+    /// 计算当前阶段的 timeout
+    /// 若 deadline 存在，取 min(stage_timeout, remaining)；否则使用固定 stage_timeout
+    /// Returns None if 剩余时间不足 MIN_STAGE_TIME_SECS（应跳过该阶段）
+    fn stage_timeout(deadline: Option<Instant>, default_secs: u64) -> Option<Duration> {
+        match deadline {
+            Some(dl) => {
+                let remaining = dl.saturating_duration_since(Instant::now());
+                let remaining_secs = remaining.as_secs();
+                if remaining_secs < MIN_STAGE_TIME_SECS {
+                    None
+                } else {
+                    Some(Duration::from_secs(default_secs.min(remaining_secs)))
+                }
+            }
+            None => Some(Duration::from_secs(default_secs)),
+        }
+    }
+
     /// 创建新的多阶段认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         Self {
@@ -95,11 +137,7 @@ impl MultiStageCognitiveEngine {
     pub fn update_persona(&self, name: &str, system_prompt: &str) {
         let mut cfg = self.config.write().unwrap();
         cfg.agent_name = name.to_string();
-        cfg.persona = DynamicPersona::new(
-            uuid::Uuid::new_v4(),
-            name,
-            system_prompt,
-        );
+        cfg.persona = DynamicPersona::new(uuid::Uuid::new_v4(), name, system_prompt);
         info!("认知引擎人设已更新: {}", name);
     }
 
@@ -113,39 +151,98 @@ impl MultiStageCognitiveEngine {
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
         let cfg = self.config_snapshot();
-        let start_time = std::time::Instant::now();
+        let start_time = Instant::now();
         let tick_id = world_state.tick_id;
+        let deadline = Self::compute_deadline(world_state.deadline_ms);
+        let name = cfg.agent_name.clone();
 
-        info!("[{}-{}] 开始认知流程...", cfg.agent_name, tick_id);
+        info!(
+            "[{}-{}] 开始认知流程... (deadline: {}ms)",
+            name, tick_id, world_state.deadline_ms
+        );
 
         let mut chain = CognitiveChain::from_persona(&cfg.persona, tick_id);
 
-        let log_partial_and_fail =
-            |chain: &CognitiveChain, stage: &str, err: anyhow::Error| -> anyhow::Error {
-                let summary = format!(
-                    "认知流程在 {} 阶段失败: {}\n\n已完成的阶段:\n{}",
-                    stage, err, chain.summarize()
-                );
-                thinking_log::log_thinking(&cfg.agent_name, tick_id, &summary);
-                err
-            };
+        let outcome = self
+            .run_cognitive_stages(
+                world_state,
+                validation_feedback,
+                &cfg,
+                &mut chain,
+                deadline,
+                &start_time,
+            )
+            .await;
 
-        // === Stage 1: Perception (带超时) ===
+        match outcome {
+            CognitiveOutcome::Done => {}
+            CognitiveOutcome::Failed(e) => return Err(e),
+            CognitiveOutcome::DeadlineExceeded => {
+                let agent_id = world_state.agent_id.unwrap_or_default();
+                let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
+                    .with_thought("认知时间不足，保守选择休息".to_string());
+                let default_decision = StageOutput::new(
+                    CognitiveStage::Decision,
+                    "思考: deadline 不足\n行动: idle".to_string(),
+                );
+                chain.add_stage(default_decision);
+                chain.final_intent = idle_intent;
+                chain.duration_ms = start_time.elapsed().as_millis() as u64;
+                info!(
+                    "[{}-{}] 认知跳过(deadline不足)，耗时 {}ms",
+                    name, tick_id, chain.duration_ms
+                );
+                thinking_log::log_thinking(&name, tick_id, &chain.summarize());
+            }
+        }
+
+        Ok(chain)
+    }
+
+    /// 认知流程核心阶段执行（deadline-aware）
+    async fn run_cognitive_stages(
+        &self,
+        world_state: &WorldState,
+        validation_feedback: Option<&str>,
+        cfg: &CognitiveEngineConfig,
+        chain: &mut CognitiveChain,
+        deadline: Option<Instant>,
+        start_time: &Instant,
+    ) -> CognitiveOutcome {
+        let name = &cfg.agent_name;
+        let tick_id = world_state.tick_id;
+
+        // === Stage 1: Perception ===
         let perception_prompt =
-            self.build_perception_prompt_with_memory(world_state, "", validation_feedback, &cfg);
+            self.build_perception_prompt_with_memory(world_state, "", validation_feedback, cfg);
+        let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
+            Some(t) => t,
+            None => {
+                warn!("[{}-{}] 剩余时间不足，跳过 Perception 阶段", name, tick_id);
+                return CognitiveOutcome::DeadlineExceeded;
+            }
+        };
         let perception_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.perceive_with_memory(world_state, "", validation_feedback, &cfg),
+            stage_timeout,
+            self.perceive_with_memory(world_state, "", validation_feedback, cfg),
         )
         .await;
 
         let (perception_response, perception) = match perception_result {
             Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "Perception", e)),
+            Ok(Err(e)) => {
+                let summary = format!(
+                    "认知流程在 Perception 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    e,
+                    chain.summarize()
+                );
+                thinking_log::log_thinking(name, tick_id, &summary);
+                return CognitiveOutcome::Failed(e);
+            }
             Err(_) => {
                 warn!(
                     "[{}-{}] Perception 阶段超时 ({}s)，使用默认感知",
-                    cfg.agent_name, tick_id, STAGE_TIMEOUT_SECS
+                    name, tick_id, stage_timeout.as_secs()
                 );
                 let default = StageOutput::new(
                     CognitiveStage::Perception,
@@ -155,31 +252,40 @@ impl MultiStageCognitiveEngine {
             }
         };
         chain.add_stage(perception);
-        thinking_log::log_llm(
-            &cfg.agent_name,
-            tick_id,
-            "Perception",
-            &perception_prompt,
-            &perception_response,
-        );
+        thinking_log::log_llm(name, tick_id, "Perception", &perception_prompt, &perception_response);
 
-        // === Stage 2+3: Motivation + Planning 合并 (带超时) ===
+        // === Stage 2+3: Motivation + Planning 合并 ===
         debug!("执行 Stage 2+3: MotivationPlanning (合并)");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let mp_prompt = self.build_motivation_planning_prompt(world_state, &perception_output, &cfg);
+        let mp_prompt = self.build_motivation_planning_prompt(world_state, &perception_output, cfg);
+        let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
+            Some(t) => t,
+            None => {
+                warn!("[{}-{}] 剩余时间不足，跳过 MotivationPlanning 阶段", name, tick_id);
+                return CognitiveOutcome::DeadlineExceeded;
+            }
+        };
         let mp_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.motivate_and_plan(world_state, &perception_output, &cfg),
+            stage_timeout,
+            self.motivate_and_plan(world_state, &perception_output, cfg),
         )
         .await;
 
         let (motivation, planning) = match mp_result {
             Ok(Ok((mot, plan))) => (mot, plan),
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "MotivationPlanning", e)),
+            Ok(Err(e)) => {
+                let summary = format!(
+                    "认知流程在 MotivationPlanning 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    e,
+                    chain.summarize()
+                );
+                thinking_log::log_thinking(name, tick_id, &summary);
+                return CognitiveOutcome::Failed(e);
+            }
             Err(_) => {
                 warn!(
                     "[{}-{}] MotivationPlanning 阶段超时 ({}s)，使用默认动机+规划",
-                    cfg.agent_name, tick_id, STAGE_TIMEOUT_SECS
+                    name, tick_id, stage_timeout.as_secs()
                 );
                 let default_motivation = StageOutput::new(
                     CognitiveStage::Motivation,
@@ -195,29 +301,40 @@ impl MultiStageCognitiveEngine {
         chain.add_stage(motivation);
         chain.add_stage(planning);
         thinking_log::log_llm(
-            &cfg.agent_name,
+            name,
             tick_id,
             "MotivationPlanning",
             &mp_prompt,
             &format!("{{merged: perception={}}}", perception_output.content.len()),
         );
 
-        // === Stage 4: Decision (带超时) ===
+        // === Stage 4: Decision ===
         debug!("执行 Stage 4: Decision");
-        let decision_prompt = self.build_decision_prompt(world_state, &chain, &cfg);
-        let decision_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.decide(world_state, &chain, &cfg),
-        )
-        .await;
+        let decision_prompt = self.build_decision_prompt(world_state, chain, cfg);
+        let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
+            Some(t) => t,
+            None => {
+                warn!("[{}-{}] 剩余时间不足，跳过 Decision 阶段", name, tick_id);
+                return CognitiveOutcome::DeadlineExceeded;
+            }
+        };
+        let decision_result = timeout(stage_timeout, self.decide(world_state, chain, cfg)).await;
 
         let (decision_response, decision, intent) = match decision_result {
             Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "Decision", e)),
+            Ok(Err(e)) => {
+                let summary = format!(
+                    "认知流程在 Decision 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    e,
+                    chain.summarize()
+                );
+                thinking_log::log_thinking(name, tick_id, &summary);
+                return CognitiveOutcome::Failed(e);
+            }
             Err(_) => {
                 warn!(
                     "[{}-{}] Decision 阶段超时 ({}s)，回退 idle",
-                    cfg.agent_name, tick_id, STAGE_TIMEOUT_SECS
+                    name, tick_id, stage_timeout.as_secs()
                 );
                 let agent_id = world_state.agent_id.unwrap_or_default();
                 let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
@@ -226,158 +343,29 @@ impl MultiStageCognitiveEngine {
                     CognitiveStage::Decision,
                     "思考: 决策超时\n行动: idle".to_string(),
                 );
-                return Ok({
-                    chain.add_stage(default_decision);
-                    chain.final_intent = idle_intent;
-                    chain.duration_ms = start_time.elapsed().as_millis() as u64;
-                    info!(
-                        "[{}-{}] 认知完成(含超时回退)，耗时 {}ms",
-                        cfg.agent_name, tick_id, chain.duration_ms
-                    );
-                    thinking_log::log_thinking(&cfg.agent_name, tick_id, &chain.summarize());
-                    chain
-                });
+                chain.add_stage(default_decision);
+                chain.final_intent = idle_intent;
+                chain.duration_ms = start_time.elapsed().as_millis() as u64;
+                info!(
+                    "[{}-{}] 认知完成(含超时回退)，耗时 {}ms",
+                    name, tick_id, chain.duration_ms
+                );
+                thinking_log::log_thinking(name, tick_id, &chain.summarize());
+                return CognitiveOutcome::Done;
             }
         };
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(
-            &cfg.agent_name,
-            tick_id,
-            "Decision",
-            &decision_prompt,
-            &decision_response,
-        );
+        thinking_log::log_llm(name, tick_id, "Decision", &decision_prompt, &decision_response);
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
         info!(
             "[{}-{}] 认知完成，耗时 {}ms",
-            cfg.agent_name, tick_id, chain.duration_ms
+            name, tick_id, chain.duration_ms
         );
-        thinking_log::log_thinking(&cfg.agent_name, tick_id, &chain.summarize());
+        thinking_log::log_thinking(name, tick_id, &chain.summarize());
 
-        Ok(chain)
-    }
-
-    /// 使用记忆上下文执行完整认知流程（合并动机+规划版）
-    pub async fn think_with_memory(
-        &self,
-        world_state: &WorldState,
-        memory_context: &str,
-    ) -> Result<CognitiveChain> {
-        let start_time = std::time::Instant::now();
-        let tick_id = world_state.tick_id;
-        let cfg = self.config_snapshot();
-
-        let mut chain = CognitiveChain::from_persona(&cfg.persona, tick_id);
-
-        let log_partial_and_fail =
-            |chain: &CognitiveChain, stage: &str, err: anyhow::Error| -> anyhow::Error {
-                let summary = format!(
-                    "认知流程在 {} 阶段失败: {}\n\n已完成的阶段:\n{}",
-                    stage, err, chain.summarize()
-                );
-                thinking_log::log_thinking(&cfg.agent_name, tick_id, &summary);
-                err
-            };
-
-        // === Stage 1: Perception (带超时) ===
-        let perception_prompt =
-            self.build_perception_prompt_with_memory(world_state, memory_context, None, &cfg);
-        let perception_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.perceive_with_memory(world_state, memory_context, None, &cfg),
-        )
-        .await;
-
-        let (perception_response, perception) = match perception_result {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "Perception", e)),
-            Err(_) => {
-                warn!("[{}-{}] Perception 超时，使用默认感知", cfg.agent_name, tick_id);
-                let default = StageOutput::new(
-                    CognitiveStage::Perception,
-                    "自身状态正常，环境平静，无特别观察。".to_string(),
-                );
-                ("{}".to_string(), default)
-            }
-        };
-        chain.add_stage(perception);
-        thinking_log::log_llm(
-            &cfg.agent_name, tick_id, "Perception", &perception_prompt, &perception_response,
-        );
-
-        // === Stage 2+3: Motivation + Planning 合并 (带超时) ===
-        debug!("执行 Stage 2+3: MotivationPlanning (合并)");
-        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let mp_prompt = self.build_motivation_planning_prompt(world_state, &perception_output, &cfg);
-        let mp_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.motivate_and_plan(world_state, &perception_output, &cfg),
-        )
-        .await;
-
-        let (motivation, planning) = match mp_result {
-            Ok(Ok((mot, plan))) => (mot, plan),
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "MotivationPlanning", e)),
-            Err(_) => {
-                warn!("[{}-{}] MotivationPlanning 超时，使用默认", cfg.agent_name, tick_id);
-                let default_motivation = StageOutput::new(
-                    CognitiveStage::Motivation,
-                    "主要驱动力: 维持生存 (强度: 5/10)\n原因: 本能驱使".to_string(),
-                );
-                let default_planning = StageOutput::new(
-                    CognitiveStage::Planning,
-                    "计划步骤:\n1. 原地休息观察\n预期结果: 保持现状 (优先级: 5/10)".to_string(),
-                );
-                (default_motivation, default_planning)
-            }
-        };
-        chain.add_stage(motivation);
-        chain.add_stage(planning);
-        thinking_log::log_llm(
-            &cfg.agent_name, tick_id, "MotivationPlanning", &mp_prompt, "{merged}",
-        );
-
-        // === Stage 4: Decision (带超时) ===
-        debug!("执行 Stage 4: Decision");
-        let decision_prompt = self.build_decision_prompt(world_state, &chain, &cfg);
-        let decision_result = timeout(
-            Duration::from_secs(STAGE_TIMEOUT_SECS),
-            self.decide(world_state, &chain, &cfg),
-        )
-        .await;
-
-        let (decision_response, decision, intent) = match decision_result {
-            Ok(Ok(r)) => r,
-            Ok(Err(e)) => return Err(log_partial_and_fail(&chain, "Decision", e)),
-            Err(_) => {
-                warn!("[{}-{}] Decision 超时，回退 idle", cfg.agent_name, tick_id);
-                let agent_id = world_state.agent_id.unwrap_or_default();
-                let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
-                    .with_thought("决策超时，保守选择休息".to_string());
-                let default_decision = StageOutput::new(
-                    CognitiveStage::Decision, "思考: 决策超时\n行动: idle".to_string(),
-                );
-                chain.add_stage(default_decision);
-                chain.final_intent = idle_intent;
-                chain.duration_ms = start_time.elapsed().as_millis() as u64;
-                info!("[{}-{}] 认知完成(含超时回退)，耗时 {}ms", cfg.agent_name, tick_id, chain.duration_ms);
-                thinking_log::log_thinking(&cfg.agent_name, tick_id, &chain.summarize());
-                return Ok(chain);
-            }
-        };
-        chain.add_stage(decision);
-        chain.final_intent = intent;
-        thinking_log::log_llm(
-            &cfg.agent_name, tick_id, "Decision", &decision_prompt, &decision_response,
-        );
-
-        chain.duration_ms = start_time.elapsed().as_millis() as u64;
-        info!("[{}-{}] 认知完成，耗时 {}ms", cfg.agent_name, tick_id, chain.duration_ms);
-        thinking_log::log_thinking(&cfg.agent_name, tick_id, &chain.summarize());
-
-        Ok(chain)
+        CognitiveOutcome::Done
     }
 
     // ========================================================================
@@ -578,7 +566,11 @@ impl MultiStageCognitiveEngine {
     // ========================================================================
 
     #[allow(dead_code)]
-    fn build_perception_prompt(&self, world_state: &WorldState, cfg: &CognitiveEngineConfig) -> String {
+    fn build_perception_prompt(
+        &self,
+        world_state: &WorldState,
+        cfg: &CognitiveEngineConfig,
+    ) -> String {
         self.build_perception_prompt_with_memory(world_state, "", None, cfg)
     }
 
@@ -809,7 +801,12 @@ impl MultiStageCognitiveEngine {
         )
     }
 
-    fn build_decision_prompt(&self, _world_state: &WorldState, chain: &CognitiveChain, cfg: &CognitiveEngineConfig) -> String {
+    fn build_decision_prompt(
+        &self,
+        _world_state: &WorldState,
+        chain: &CognitiveChain,
+        cfg: &CognitiveEngineConfig,
+    ) -> String {
         // 获取各阶段输出作为上下文
         let perception = chain
             .get_stage(CognitiveStage::Perception)
