@@ -2,15 +2,16 @@
 // 多阶段认知引擎核心
 // ============================================================================
 //
-// 实现 Perception → MotivationPlanning → Decision 的认知流程
+// 实现 PerceptionMotivationPlanning → Decision 的认知流程
 //
 // 优化历史：
 // - v1: Perception → Motivation → Planning → Decision (4 次 LLM，~181s)
 // - v2: Perception → MotivationPlanning → Decision (3 次 LLM，~135s)
+// - v3: PerceptionMotivationPlanning → Decision (2 次 LLM，persona 缓存)
 //
 // 核心设计理念：
-// - 每个阶段独立调用 LLM，确保深度思考
-// - 动机+规划合并为一次调用，减少延迟
+// - 感知+动机+规划合并为一次 LLM 调用，减少延迟
+// - Persona 描述按 tick 缓存，避免重复生成
 // - 每阶段有超时保护，超时时回退到默认响应
 // ============================================================================
 
@@ -23,7 +24,7 @@ use tracing::{debug, info, warn};
 use super::chain::CognitiveChain;
 use super::stages::{
     CognitiveStage, DecisionResponse, MotivationPlanningResponse, MotivationResponse,
-    PerceptionResponse, PlanningResponse, StageOutput,
+    PerceptionMotivationPlanningResponse, PerceptionResponse, PlanningResponse, StageOutput,
 };
 use crate::ai::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
 use crate::ai::llm::{LlmClient, LlmClientExt};
@@ -77,13 +78,16 @@ impl Default for CognitiveEngineConfig {
 
 /// 多阶段认知引擎
 ///
-/// 通过强制执行 Perception → MotivationPlanning → Decision 流程，
+/// 通过强制执行 PerceptionMotivationPlanning → Decision 流程，
 /// 确保 LLM 进行深度思考而非简单的条件反射。
 ///
-/// Motivation + Planning 合并为一次 LLM 调用，减少延迟。
+/// 感知+动机+规划合并为一次 LLM 调用，减少延迟。
+/// Persona 描述按 tick 缓存，避免重复生成。
 pub struct MultiStageCognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: std::sync::RwLock<CognitiveEngineConfig>,
+    /// Persona 描述缓存: (tick_id, description)
+    persona_cache: std::sync::RwLock<(i64, String)>,
 }
 
 impl MultiStageCognitiveEngine {
@@ -120,6 +124,7 @@ impl MultiStageCognitiveEngine {
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
+            persona_cache: std::sync::RwLock::new((-1, String::new())),
         }
     }
 
@@ -218,27 +223,36 @@ impl MultiStageCognitiveEngine {
         let name = &cfg.agent_name;
         let tick_id = world_state.tick_id;
 
-        // === Stage 1: Perception ===
-        let perception_prompt =
-            self.build_perception_prompt_with_memory(world_state, "", validation_feedback, cfg);
+        // 获取 persona 缓存描述
+        let persona_desc = self.get_or_create_persona_description(tick_id, &cfg.persona);
+
+        // === Stage 1+2+3: Perception + Motivation + Planning 合并 ===
+        debug!("执行 Stage 1+2+3: PerceptionMotivationPlanning (合并)");
+        let pmp_prompt = self.build_perception_motivation_planning_prompt(
+            world_state,
+            "",
+            validation_feedback,
+            &persona_desc,
+            cfg,
+        );
         let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
             Some(t) => t,
             None => {
-                warn!("[{}-{}] 剩余时间不足，跳过 Perception 阶段", name, tick_id);
+                warn!("[{}-{}] 剩余时间不足，跳过 PerceptionMotivationPlanning 阶段", name, tick_id);
                 return CognitiveOutcome::DeadlineExceeded;
             }
         };
-        let perception_result = timeout(
+        let pmp_result = timeout(
             stage_timeout,
-            self.perceive_with_memory(world_state, "", validation_feedback, cfg),
+            self.perceive_motivate_and_plan(world_state, "", validation_feedback, &persona_desc, cfg),
         )
         .await;
 
-        let (perception_response, perception) = match perception_result {
+        let (pmp_response_json, perception, motivation, planning) = match pmp_result {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 let summary = format!(
-                    "认知流程在 Perception 阶段失败: {}\n\n已完成的阶段:\n{}",
+                    "认知流程在 PerceptionMotivationPlanning 阶段失败: {}\n\n已完成的阶段:\n{}",
                     e,
                     chain.summarize()
                 );
@@ -247,51 +261,12 @@ impl MultiStageCognitiveEngine {
             }
             Err(_) => {
                 warn!(
-                    "[{}-{}] Perception 阶段超时 ({}s)，使用默认感知",
+                    "[{}-{}] PerceptionMotivationPlanning 阶段超时 ({}s)，使用默认响应",
                     name, tick_id, stage_timeout.as_secs()
                 );
-                let default = StageOutput::new(
+                let default_perception = StageOutput::new(
                     CognitiveStage::Perception,
                     "自身状态正常，环境平静，无特别观察。".to_string(),
-                );
-                ("{}".to_string(), default)
-            }
-        };
-        chain.add_stage(perception);
-        thinking_log::log_llm(name, tick_id, "Perception", &perception_prompt, &perception_response);
-
-        // === Stage 2+3: Motivation + Planning 合并 ===
-        debug!("执行 Stage 2+3: MotivationPlanning (合并)");
-        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let mp_prompt = self.build_motivation_planning_prompt(world_state, &perception_output, cfg);
-        let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
-            Some(t) => t,
-            None => {
-                warn!("[{}-{}] 剩余时间不足，跳过 MotivationPlanning 阶段", name, tick_id);
-                return CognitiveOutcome::DeadlineExceeded;
-            }
-        };
-        let mp_result = timeout(
-            stage_timeout,
-            self.motivate_and_plan(world_state, &perception_output, cfg),
-        )
-        .await;
-
-        let (motivation, planning) = match mp_result {
-            Ok(Ok((mot, plan))) => (mot, plan),
-            Ok(Err(e)) => {
-                let summary = format!(
-                    "认知流程在 MotivationPlanning 阶段失败: {}\n\n已完成的阶段:\n{}",
-                    e,
-                    chain.summarize()
-                );
-                thinking_log::log_thinking(name, tick_id, &summary);
-                return CognitiveOutcome::Failed(e);
-            }
-            Err(_) => {
-                warn!(
-                    "[{}-{}] MotivationPlanning 阶段超时 ({}s)，使用默认动机+规划",
-                    name, tick_id, stage_timeout.as_secs()
                 );
                 let default_motivation = StageOutput::new(
                     CognitiveStage::Motivation,
@@ -301,22 +276,23 @@ impl MultiStageCognitiveEngine {
                     CognitiveStage::Planning,
                     "计划步骤:\n1. 原地休息观察\n预期结果: 保持现状 (优先级: 5/10)".to_string(),
                 );
-                (default_motivation, default_planning)
+                ("{}".to_string(), default_perception, default_motivation, default_planning)
             }
         };
+        chain.add_stage(perception);
         chain.add_stage(motivation);
         chain.add_stage(planning);
         thinking_log::log_llm(
             name,
             tick_id,
-            "MotivationPlanning",
-            &mp_prompt,
-            &format!("{{merged: perception={}}}", perception_output.content.len()),
+            "PerceptionMotivationPlanning",
+            &pmp_prompt,
+            &pmp_response_json,
         );
 
         // === Stage 4: Decision ===
         debug!("执行 Stage 4: Decision");
-        let decision_prompt = self.build_decision_prompt(world_state, chain, cfg);
+        let decision_prompt = self.build_decision_prompt(world_state, chain, &persona_desc, cfg);
         let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
             Some(t) => t,
             None => {
@@ -324,7 +300,7 @@ impl MultiStageCognitiveEngine {
                 return CognitiveOutcome::DeadlineExceeded;
             }
         };
-        let decision_result = timeout(stage_timeout, self.decide(world_state, chain, cfg)).await;
+        let decision_result = timeout(stage_timeout, self.decide(world_state, chain, &persona_desc, cfg)).await;
 
         let (decision_response, decision, intent) = match decision_result {
             Ok(Ok(r)) => r,
@@ -401,6 +377,7 @@ impl MultiStageCognitiveEngine {
         ))
     }
 
+    #[allow(dead_code)]
     async fn perceive_with_memory(
         &self,
         world_state: &WorldState,
@@ -412,6 +389,7 @@ impl MultiStageCognitiveEngine {
             world_state,
             memory_context,
             validation_feedback,
+            &cfg.persona.generate_description(),
             cfg,
         );
 
@@ -433,13 +411,14 @@ impl MultiStageCognitiveEngine {
     }
 
     /// Stage 2+3 合并: 动机 + 规划 - 一次 LLM 调用同时生成
+    #[allow(dead_code)]
     async fn motivate_and_plan(
         &self,
         world_state: &WorldState,
         perception: &StageOutput,
         cfg: &CognitiveEngineConfig,
     ) -> Result<(StageOutput, StageOutput)> {
-        let prompt = self.build_motivation_planning_prompt(world_state, perception, cfg);
+        let prompt = self.build_motivation_planning_prompt(world_state, perception, &cfg.persona.generate_description(), cfg);
 
         let response: MotivationPlanningResponse = self.llm_client.complete_json(&prompt).await?;
 
@@ -535,9 +514,10 @@ impl MultiStageCognitiveEngine {
         &self,
         world_state: &WorldState,
         chain: &CognitiveChain,
+        persona_desc: &str,
         cfg: &CognitiveEngineConfig,
     ) -> Result<(String, StageOutput, Intent)> {
-        let prompt = self.build_decision_prompt(world_state, chain, cfg);
+        let prompt = self.build_decision_prompt(world_state, chain, persona_desc, cfg);
 
         let response: DecisionResponse = self.llm_client.complete_json(&prompt).await?;
 
@@ -568,6 +548,221 @@ impl MultiStageCognitiveEngine {
     }
 
     // ========================================================================
+    // Persona 缓存
+    // ========================================================================
+
+    /// 获取或创建 persona 描述（按 tick 缓存，同一 tick 内只生成一次）
+    fn get_or_create_persona_description(&self, tick_id: i64, persona: &DynamicPersona) -> String {
+        let cache = self.persona_cache.read().unwrap();
+        if cache.0 == tick_id {
+            return cache.1.clone();
+        }
+        drop(cache);
+
+        let desc = persona.generate_description();
+        let mut cache = self.persona_cache.write().unwrap();
+        *cache = (tick_id, desc.clone());
+        desc
+    }
+
+    // ========================================================================
+    // 合并阶段: Perception + Motivation + Planning
+    // ========================================================================
+
+    /// 合并的感知+动机+规划 Prompt（一次 LLM 调用完成三个阶段）
+    fn build_perception_motivation_planning_prompt(
+        &self,
+        world_state: &WorldState,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+        persona_desc: &str,
+        cfg: &CognitiveEngineConfig,
+    ) -> String {
+        let self_state = &world_state.self_state;
+
+        let engine = NarrativeEngine::default();
+        let narrative = PerceptionNarrative::from_attributes_with_engine(
+            &engine,
+            &self_state.attributes,
+            &self_state.status_effects,
+        );
+        let self_status_section = narrative.to_prompt_section();
+
+        let inventory_str = if self_state.inventory.is_empty() {
+            "空".to_string()
+        } else {
+            self_state
+                .inventory
+                .iter()
+                .map(|i| format!("{} x{}", i.name, i.quantity))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let entities_str = if world_state.entities.is_empty() {
+            "无".to_string()
+        } else {
+            world_state
+                .entities
+                .iter()
+                .map(|e| format!("{}({})", e.name, e.state))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let items_str = if world_state.nearby_items.is_empty() {
+            "无".to_string()
+        } else {
+            world_state
+                .nearby_items
+                .iter()
+                .map(|i| i.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let memory_section = if memory_context.is_empty() {
+            String::new()
+        } else {
+            format!(
+                r#"
+### 相关记忆
+{memory_context}
+
+"#
+            )
+        };
+
+        let feedback_section = match validation_feedback {
+            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            None => String::new(),
+        };
+
+        format!(
+            r#"# 感知、动机与规划阶段 (Perception, Motivation & Planning)
+{feedback_section}
+你是 {agent_name}。
+{persona}
+
+## 当前游戏状态 (Tick {tick_id})
+
+{self_status_section}
+### 背包物品
+{inventory}
+
+### 位置
+- 地点: {location}
+
+### 环境
+- 附近的人: {entities}
+- 地上的物品: {items}
+{memory_section}
+## 任务
+请完成以下三步，输出 JSON 格式的结果：
+
+1. **感知**：客观描述你看到的状态
+2. **动机**：基于人设和感知，说明你的内在驱动力
+3. **规划**：制定行动计划
+
+## 输出格式
+{{
+  "self_status": "你的状态简述 (30字以内)",
+  "environment": "环境描述 (30字以内)",
+  "key_observations": ["观察1", "观察2", "..."],
+  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
+  "drive_intensity": 1-10,
+  "reasoning": "为什么有这个动机 (50字以内)",
+  "steps": ["步骤1", "步骤2", "..."],
+  "priority": 1-10,
+  "expected_outcome": "预期结果 (30字以内)"
+}}
+"#,
+            agent_name = cfg.agent_name,
+            persona = persona_desc,
+            tick_id = world_state.tick_id,
+            self_status_section = self_status_section,
+            inventory = inventory_str,
+            location = world_state.location.name,
+            entities = entities_str,
+            items = items_str,
+            memory_section = memory_section,
+            feedback_section = feedback_section,
+        )
+    }
+
+    /// 合并执行: 感知 + 动机 + 规划（一次 LLM 调用）
+    async fn perceive_motivate_and_plan(
+        &self,
+        world_state: &WorldState,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+        persona_desc: &str,
+        cfg: &CognitiveEngineConfig,
+    ) -> Result<(String, StageOutput, StageOutput, StageOutput)> {
+        let prompt = self.build_perception_motivation_planning_prompt(
+            world_state,
+            memory_context,
+            validation_feedback,
+            persona_desc,
+            cfg,
+        );
+
+        let response: PerceptionMotivationPlanningResponse =
+            self.llm_client.complete_json(&prompt).await?;
+
+        let response_json = serde_json::to_string(&response)?;
+
+        // 拆分为三个 StageOutput
+        let perception_content = format!(
+            "自身状态: {}\n环境: {}\n关键观察: {}",
+            response.self_status,
+            response.environment,
+            response.key_observations.join(", ")
+        );
+        let perception = StageOutput::with_metadata(
+            CognitiveStage::Perception,
+            perception_content,
+            serde_json::json!({
+                "self_status": response.self_status,
+                "environment": response.environment,
+                "key_observations": response.key_observations,
+            }),
+        );
+
+        let motivation_content = format!(
+            "主要驱动力: {} (强度: {}/10)\n原因: {}",
+            response.primary_drive, response.drive_intensity, response.reasoning
+        );
+        let motivation = StageOutput::with_metadata(
+            CognitiveStage::Motivation,
+            motivation_content,
+            serde_json::json!({
+                "primary_drive": response.primary_drive,
+                "drive_intensity": response.drive_intensity,
+                "reasoning": response.reasoning,
+            }),
+        );
+
+        let planning_content = format!(
+            "计划步骤:\n1. {}\n预期结果: {} (优先级: {}/10)",
+            response.steps.join("\n2. "),
+            response.expected_outcome,
+            response.priority
+        );
+        let planning = StageOutput::with_metadata(
+            CognitiveStage::Planning,
+            planning_content,
+            serde_json::json!({
+                "steps": response.steps,
+                "priority": response.priority,
+                "expected_outcome": response.expected_outcome,
+            }),
+        );
+
+        Ok((response_json, perception, motivation, planning))
+    }
+
+    // ========================================================================
     // Prompt 构建方法
     // ========================================================================
 
@@ -577,14 +772,17 @@ impl MultiStageCognitiveEngine {
         world_state: &WorldState,
         cfg: &CognitiveEngineConfig,
     ) -> String {
-        self.build_perception_prompt_with_memory(world_state, "", None, cfg)
+        let persona_desc = cfg.persona.generate_description();
+        self.build_perception_prompt_with_memory(world_state, "", None, &persona_desc, cfg)
     }
 
+    #[allow(dead_code)]
     fn build_perception_prompt_with_memory(
         &self,
         world_state: &WorldState,
         memory_context: &str,
         validation_feedback: Option<&str>,
+        persona_desc: &str,
         cfg: &CognitiveEngineConfig,
     ) -> String {
         let self_state = &world_state.self_state;
@@ -683,7 +881,7 @@ impl MultiStageCognitiveEngine {
 }}
 "#,
             agent_name = cfg.agent_name,
-            persona = cfg.persona.generate_description(),
+            persona = persona_desc,
             tick_id = world_state.tick_id,
             self_status_section = self_status_section,
             inventory = inventory_str,
@@ -702,6 +900,7 @@ impl MultiStageCognitiveEngine {
         perception: &StageOutput,
         cfg: &CognitiveEngineConfig,
     ) -> String {
+        let persona_desc = cfg.persona.generate_description();
         format!(
             r#"# 动机阶段 (Motivation)
 
@@ -725,16 +924,18 @@ impl MultiStageCognitiveEngine {
 }}
 "#,
             agent_name = cfg.agent_name,
-            persona = cfg.persona.generate_description(),
+            persona = persona_desc,
             perception_content = perception.content
         )
     }
 
     /// 合并的动机+规划 Prompt（一次 LLM 调用完成两个阶段）
+    #[allow(dead_code)]
     fn build_motivation_planning_prompt(
         &self,
         _world_state: &WorldState,
         perception: &StageOutput,
+        persona_desc: &str,
         cfg: &CognitiveEngineConfig,
     ) -> String {
         format!(
@@ -762,7 +963,7 @@ impl MultiStageCognitiveEngine {
 }}
 "#,
             agent_name = cfg.agent_name,
-            persona = cfg.persona.generate_description(),
+            persona = persona_desc,
             perception_content = perception.content
         )
     }
@@ -775,6 +976,7 @@ impl MultiStageCognitiveEngine {
         motivation: &StageOutput,
         cfg: &CognitiveEngineConfig,
     ) -> String {
+        let persona_desc = cfg.persona.generate_description();
         format!(
             r#"# 规划阶段 (Planning)
 
@@ -801,7 +1003,7 @@ impl MultiStageCognitiveEngine {
 }}
 "#,
             agent_name = cfg.agent_name,
-            persona = cfg.persona.generate_description(),
+            persona = persona_desc,
             perception = perception.content,
             motivation = motivation.content
         )
@@ -811,6 +1013,7 @@ impl MultiStageCognitiveEngine {
         &self,
         _world_state: &WorldState,
         chain: &CognitiveChain,
+        persona_desc: &str,
         cfg: &CognitiveEngineConfig,
     ) -> String {
         // 获取各阶段输出作为上下文
@@ -882,7 +1085,7 @@ impl MultiStageCognitiveEngine {
 注意：target_agent_id 从 entities 列表中获取，item_id 从 inventory 或 nearby_items 中获取。
 "#,
             agent_name = cfg.agent_name,
-            persona = cfg.persona.generate_description()
+            persona = persona_desc
         )
     }
 }

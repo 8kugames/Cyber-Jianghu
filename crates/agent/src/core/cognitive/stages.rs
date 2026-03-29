@@ -151,6 +151,43 @@ pub struct MotivationPlanningResponse {
     pub expected_outcome: String,
 }
 
+/// 感知+动机+规划 合并阶段响应（一次 LLM 调用完成三个阶段）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerceptionMotivationPlanningResponse {
+    // --- 感知字段 ---
+    /// 自身状态摘要
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub self_status: String,
+    /// 环境观察
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub environment: String,
+    /// 识别到的关键信息
+    #[serde(default)]
+    pub key_observations: Vec<String>,
+
+    // --- 动机字段 ---
+    /// 当前主要驱动力
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub primary_drive: String,
+    /// 驱动强度 (1-10)
+    #[serde(default)]
+    pub drive_intensity: u8,
+    /// 为什么有这个动机
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub reasoning: String,
+
+    // --- 规划字段 ---
+    /// 计划步骤
+    #[serde(default)]
+    pub steps: Vec<String>,
+    /// 优先级 (1-10)
+    #[serde(default)]
+    pub priority: u8,
+    /// 预期结果
+    #[serde(default, deserialize_with = "deserialize_null_string")]
+    pub expected_outcome: String,
+}
+
 /// 决策阶段响应
 ///
 /// 数据驱动：action 为动作名，action_data 直接透传到服务端。
