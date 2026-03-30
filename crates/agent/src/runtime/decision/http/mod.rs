@@ -63,7 +63,7 @@ pub struct ReconnectRequest {
 pub use handlers::DreamState;
 
 // 导入 AI 模块类型
-use crate::ai::cognitive::narrative::NarrativeEngine;
+use crate::core::cognitive::narrative::NarrativeEngine;
 use crate::ai::dialogue::{DialogueClient, DialogueEventHandler};
 use crate::ai::lifespan::LifespanCalculator;
 use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
@@ -175,7 +175,7 @@ pub struct HttpApiState {
     pub tick_update_tx: broadcast::Sender<i64>,
     pub runtime_mode: crate::config::RuntimeMode,
     pub narrative_config:
-        std::sync::Arc<RwLock<Option<crate::ai::cognitive::narrative::NarrativeConfig>>>,
+        std::sync::Arc<RwLock<Option<crate::core::cognitive::narrative::NarrativeConfig>>>,
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// LLM 调用开关（与认知引擎共享，用于紧急停止 token 消耗）
     pub llm_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -649,7 +649,7 @@ pub fn create_http_state(
     let narrative_config = if let Some(config_dir) = config_path.parent() {
         let narrative_path = config_dir.join("narrative_config.json");
         if narrative_path.exists() {
-            crate::ai::cognitive::narrative::NarrativeConfig::from_file(&narrative_path).ok()
+            crate::core::cognitive::narrative::NarrativeConfig::from_file(&narrative_path).ok()
         } else {
             None
         }

@@ -26,7 +26,7 @@ use super::chain::CognitiveChain;
 use super::stages::{
     CognitiveStage, DecisionResponse, PerceptionMotivationPlanningResponse, StageOutput,
 };
-use crate::ai::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
+use super::narrative::{NarrativeEngine, PerceptionNarrative};
 use crate::ai::llm::{LlmClient, LlmClientExt};
 use crate::ai::persona::DynamicPersona;
 use crate::models::{Intent, WorldState};

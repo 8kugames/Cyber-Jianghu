@@ -7,8 +7,8 @@
 // - 叙事化规则从 narrative_config.json 加载
 // - 外部系统（OpenClaw）通过 /api/v1/attributes 获取"梦中一瞥"数值
 
-use crate::ai::cognitive::narrative::{NarrativeConfig, NarrativeEngine};
 use crate::ai::relationship::RelationshipStore;
+use crate::core::cognitive::narrative::{NarrativeConfig, NarrativeEngine};
 use cyber_jianghu_protocol::WorldState;
 use serde::Serialize;
 use std::collections::HashMap;
