@@ -38,18 +38,6 @@ function formatDuration(seconds) {
     return h + "小时 " + m + "分";
 }
 
-function formatGameTime(time) {
-    var pad = function (n) { return String(n).padStart(2, "0"); };
-    return time.season + " | " + time.year + "-" + pad(time.month) + "-" + pad(time.day) +
-        " " + pad(time.hour) + ":" + pad(time.minute) + ":" + pad(time.second);
-}
-
-function formatGameTimeDate(time) {
-    var pad = function (n) { return String(n).padStart(2, "0"); };
-    return time.year + "-" + pad(time.month) + "-" + pad(time.day) +
-        " " + pad(time.hour) + ":" + pad(time.minute) + ":" + pad(time.second);
-}
-
 function formatTimeAgo(timestamp) {
     if (!timestamp) return "未知";
     var date = new Date(timestamp);

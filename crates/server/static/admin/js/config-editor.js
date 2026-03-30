@@ -9,9 +9,9 @@ async function loadConfigList() {
         var files = await res.json();
 
         var listHtml = files.map(function (f) {
-            return '<div onclick="loadConfigContent(\'' + f.name + '\')" class="file-item' +
+            return '<div data-name="' + escapeHtml(f.name) + '" onclick="loadConfigContent(this.dataset.name)" class="file-item' +
                 (currentFile === f.name ? " active" : "") + '">' +
-                f.name + '<div style="font-size: 10px; color: #999;">' +
+                escapeHtml(f.name) + '<div style="font-size: 10px; color: #999;">' +
                 (f.size / 1024).toFixed(1) + " KB</div></div>";
         }).join("");
 
