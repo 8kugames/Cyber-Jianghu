@@ -7,9 +7,9 @@
 // - 引导 OpenClaw 的 LLM 按 Perception → Motivation → Planning → Decision 顺序推理
 // - 不内置 LLM 调用，仅提供上下文数据
 
-use crate::ai::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
 use crate::ai::persona::dynamic_persona::DynamicPersona;
 use crate::ai::relationship::RelationshipStore;
+use crate::core::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
 use cyber_jianghu_protocol::WorldState;
 use serde::{Deserialize, Serialize};
 
