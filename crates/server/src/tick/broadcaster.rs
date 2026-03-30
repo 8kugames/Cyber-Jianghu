@@ -371,6 +371,7 @@ pub fn build_initial_world_state(
     agent_state: &AgentState,
     game_data_cache: &Arc<GameDataCache>,
     deadline_ms: u64,
+    initial_inventory: Vec<crate::models::InventoryItem>,
 ) -> crate::models::WorldState {
     let tick_id = agent_state.tick_id;
 
@@ -484,7 +485,7 @@ pub fn build_initial_world_state(
             derived_attributes,
             attribute_descriptions,
             status_effects: vec![],
-            inventory: vec![], // 连接时不含背包，首次 tick 广播时会包含
+            inventory: initial_inventory,
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items: vec![],
