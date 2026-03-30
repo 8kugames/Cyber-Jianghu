@@ -228,6 +228,16 @@ async function loadCharacter() {
                     : '<span class="online-tag online">在线</span>')
                 : '';
             statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>' + onlineTag;
+
+            // 死亡角色显示常驻提示气泡
+            const deathNotice = document.getElementById('death-notice');
+            if (deathNotice) {
+                if (data.status === 'dead') {
+                    deathNotice.classList.remove('hidden');
+                } else {
+                    deathNotice.classList.add('hidden');
+                }
+            }
         }
 
         // 注册时间
@@ -868,6 +878,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 location: data.location,
                 world_time: data.world_time,
                 attributes: data.attributes,
+                derived_attributes: data.derived_attributes,
                 inventory: data.inventory
             });
             
