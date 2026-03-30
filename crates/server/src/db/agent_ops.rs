@@ -585,14 +585,13 @@ pub async fn rebirth_agent(
 
     // 4. 插入 is_alive=false 的状态快照，防止归隐角色继续参与 Tick 处理
     // load_agent_states 先 DISTINCT ON 取最新记录再过滤 is_alive，确保最新记录为 false 即可排除
-    let latest_tick: Option<i64> = sqlx::query_scalar(
-        "SELECT MAX(tick_id) FROM agent_states WHERE agent_id = $1",
-    )
-    .bind(agent_id)
-    .fetch_optional(pool)
-    .await
-    .context("查询 Agent 最新 tick_id 失败")?
-    .flatten();
+    let latest_tick: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(tick_id) FROM agent_states WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_optional(pool)
+            .await
+            .context("查询 Agent 最新 tick_id 失败")?
+            .flatten();
 
     // 使用下一个 tick_id 避免违反 UNIQUE(agent_id, tick_id) 约束
     let retired_tick_id = latest_tick.map(|t| t + 1).unwrap_or(0);

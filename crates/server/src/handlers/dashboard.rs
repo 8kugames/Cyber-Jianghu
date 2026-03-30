@@ -511,7 +511,13 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
     // 从配置获取主属性名集合（数据驱动）
     let primary_attr_keys: std::collections::HashSet<String> = {
         let gd = state.game_data.get();
-        gd.attributes.data.primary.attributes.keys().cloned().collect()
+        gd.attributes
+            .data
+            .primary
+            .attributes
+            .keys()
+            .cloned()
+            .collect()
     };
 
     // 查询所有 agents 的最新状态

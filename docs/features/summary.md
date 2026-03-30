@@ -1,13 +1,14 @@
 # Cyber-Jianghu 已实现功能摘要 (Feature Summary)
 
-本文档为开发者提供当前赛博江湖架构中**已实际实现并可用**的核心业务功能摘要。所有模块遵循数据驱动设计，通过 Tick 引擎和 Agent SDK 交互。
+ 本文档为开发者提供当前赛博江湖架构中**已实际实现并可用**的核心业务功能摘要。所有模块遵循数据驱动设计，通过 Tick 引擎和 Agent SDK 交互。
 
-## 一、 服务端 (天道引擎)
+ ## 一、 服务端 (天道引擎)
 
-### 1. 核心运行机制
-- [x] **Tick 驱动**: 固定 TPS 循环（可配置），执行意图收集、衰减结算（饥饿/口渴/环境伤害）、动作执行、状态持久化与广播。
-- [x] **公式引擎**: `evalexpr`（战斗伤害等运行时计算）+ 自研 AST 引擎（派生属性动态计算），均支持 YAML 编写表达式。
-- [x] **数据驱动配置**: 所有核心数据（属性、物品、地图、动作、叙事配置等）通过 YAML 加载，支持热更新 (`POST /api/admin/reload-config`)。
+ ### 1. 核心运行机制
+ - [x] **Tick 驱动**: 可配置 TPS 循环（可配置），执行意图收集、衰减结算（饥饿/口渴/环境伤害）、动作执行、状态持久化与广播。
+ - [x] **tick_id 秒级时间戳**: `tick_id` 改为 Unix 秒级时间戳，支持 `real_seconds_per_tick` 动态调整游戏时间流速。
+ - [x] **公式引擎**: `evalexpr`（战斗伤害等运行时计算）+ 自研 AST 引擎（派生属性动态计算），均支持 YAML 编写表达式。
+ - [x] **数据驱动配置**: 所有核心数据（属性、物品、地图、动作、叙事配置等）通过 YAML 加载，支持热更新 (`POST /api/admin/reload-config`)。
 
 ### 2. 实体与状态管理
 - [x] **Agent 生命周期**: 注册降生、属性初始化、存活状态维护、寿命衰减与死亡判定。
@@ -60,9 +61,12 @@ attack:
 支持内置 LLM 自主决策（Cognitive 模式）或外部调度（Claw 模式）。
 
 ### 1. 运行模式
-- [x] **Cognitive 模式**（默认）: 内置多阶段认知引擎，Agent 完全自主。
-- [x] **Claw 模式**: WebSocket + HTTP API 供 OpenClaw 接入，内置认知能力作为 API。
-- [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
+ - [x] **Cognitive 模式**（默认）: 内置多阶段认知引擎，Agent 完全自主。
+ - [x] **Claw 模式**: WebSocket + HTTP API 供 OpenClaw 接入，内置认知能力作为 API。
+ - [x] **默认 LLM**: 默认改为 openclaw，支持 ollama 自定义端口配置。
+ - [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
+ - [x] **WebSocket 心跳**: 内置 Ping/Pong 消息机制，保持连接活跃。
+ - [x] **LLM 开关闸**: 紧急停止 token 消耗的控制机制，Web 面板可操作。
 
 ### 2. AI 与认知核心
 
@@ -77,26 +81,38 @@ attack:
   - [ ] `ensure_embedding(memory_id)` 未实现
 
 **四阶段认知流水线**（Cognitive 模式内置运行，Claw 模式通过 WebSocket Tick 消息下发）:
-- **Perception**: 数值状态 → 叙事化自然语言
-- **Motivation**: 基于人设推断内在驱动力
-- **Planning**: 制定行动计划与可用动作
-- **Decision**: 引导最终行动决策
+ - **Perception**: 数值状态 → 叙事化自然语言
+ - **Motivation**: 基于人设推断内在驱动力
+ - **Planning**: 制定行动计划与可用动作
+ - **Decision**: 引导最终行动决策
+ - [x] **合并优化**: Perception + Motivation + Planning 合并为一次 LLM 调用，减少 token 消耗
+ - [x] **persona 缓存**: 认知引擎缓存人设，减少重复计算
+ - [x] **deadline 感知**: 认知引擎感知 tick 截止时间，避免过期被拒
 
 **叙事引擎**: 将生硬数值（`health: 30%`）转化为自然语言（"身负重伤、头晕目眩"），方便 LLM 理解。
 
-**动态人设**: `Persona` 根据外界反馈（被攻击/被治愈）动态偏移；支持好感度/信任度关系图谱。
+ **动态人设**: `Persona` 根据外界反馈（被攻击/被治愈）动态偏移；支持好感度/信任度关系图谱。
+
+ **双 Soul 架构**:
+ - ActorSoul (行动之魂/本我): 生成意图，执行行动
+ - ReflectorSoul (反思之魂/超我): 审查意图，道德判断（默认启用）
+ - `ReviewStore` 共享内存用于进程内审查通信
 
 ### 3. 意图控制（双层架构）
 
 **第一层: 规则/LLM 验证**（接入 intent 提交链路）:
-- [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
-- [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
-- [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
+ - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
+ - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
+ - [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
+ - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: 新增 `llm_reflector` 字段
+ - [x] **LLM 配置热重载**: 文件监听自动热重载 + API Key 验证 + zeroize 内存安全
 
-**第二层: 超我审查**（ActorSoul + ReflectorSoul，已接入 intent 提交链路）:
-- [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送
-- [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore`，超时 30 秒自动通过
-- [x] Observer Agent API: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
+**第二层: 超我审查**（ActorSoul + ReflectorSoul，进程内双 Soul 架构）:
+ - [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送
+ - [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore`，超时 30 秒自动通过
+ - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: `llm_reflector` 字段支持独立配置审查 LLM
+ - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
+ - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
 
 ## 三、 通信协议 (Protocol)
 
@@ -105,10 +121,12 @@ attack:
 
 ## 四、 OpenClaw 集成
 
-- [x] npm 包 `@8kugames/cyber-jianghu-openclaw` 已独立发布
-- [x] 提供 `jianghu_act` 动作执行工具、注册 Hook、内存插件
-- [x] Claw 模式 WebSocket Tick 消息携带四阶段认知上下文，引导外部 AI 结构化推理
-- [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
+ - [x] npm 包 `@8kugames/cyber-jianghu-openclaw` 已独立发布
+ - [x] 提供 `jianghu_act` 动作执行工具、注册 Hook、内存插件
+ - [x] Claw 模式 WebSocket Tick 消息携带四阶段认知上下文，引导外部 AI 结构化推理
+ - [x] WebSocket 心跳机制（Ping/Pong）保持连接活跃
+ - [x] LLMRequest 消息字段: `llm_request`（注意：旧版本为 `l_l_m_request`）
+ - [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
 
 ---
 
@@ -124,9 +142,10 @@ attack:
 - [x] `/api/v1/agent/rebirth` 归隐机制：死亡角色标记 `retired`，保留历史数据
 
 ### 3. Web 管理面板
-- [x] `GET /` → Web 面板入口（角色创建/信息/管理导航）
-- [x] `GET /character.html` → 角色属性、背包、经历
-- [x] `GET /manage.html` → 梦境注入与转生
+ - [x] `GET /admin/` → Admin Dashboard 入口（agent 列表、统计数据）
+ - [x] `GET /` → Web 面板入口（角色创建/信息/管理导航）
+ - [x] `GET /character.html` → 角色属性、背包、经历
+ - [x] `GET /manage.html` → 梦境注入与转生
 
 ## 六、 生产部署（Phase 4）
 
