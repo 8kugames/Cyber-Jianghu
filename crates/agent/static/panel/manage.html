@@ -103,6 +103,60 @@
                 user-select: none;
             }
 
+            .toggle-switch {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                user-select: none;
+                position: relative;
+            }
+
+            .toggle-switch input {
+                display: none;
+            }
+
+            .toggle-slider {
+                width: 36px;
+                height: 20px;
+                background: var(--border, #444);
+                border-radius: 10px;
+                position: relative;
+                transition: background 0.2s;
+                flex-shrink: 0;
+            }
+
+            .toggle-slider::after {
+                content: '';
+                position: absolute;
+                width: 16px;
+                height: 16px;
+                background: #fff;
+                border-radius: 50%;
+                top: 2px;
+                left: 2px;
+                transition: transform 0.2s;
+            }
+
+            .toggle-switch input:checked + .toggle-slider {
+                background: var(--success, #4caf50);
+            }
+
+            .toggle-switch input:checked + .toggle-slider::after {
+                transform: translateX(16px);
+            }
+
+            .toggle-label {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                white-space: nowrap;
+            }
+
+            .toggle-switch input:not(:checked) ~ .toggle-label {
+                color: var(--danger, #f44336);
+            }
+
             .disabled-form {
                 opacity: 0.6;
                 background: var(--bg-secondary);
@@ -184,6 +238,11 @@
                             </p>
                         </div>
                         <div class="llm-meta">
+                            <label class="toggle-switch" title="关闭后 Agent 将不再调用 LLM API，立即停止 token 消耗">
+                                <input type="checkbox" id="llm-toggle" checked />
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label" id="llm-toggle-label">LLM 已启用</span>
+                            </label>
                             <span
                                 id="llm-runtime-badge"
                                 class="badge badge-muted"

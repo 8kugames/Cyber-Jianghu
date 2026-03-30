@@ -748,6 +748,7 @@ pub(super) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> i
 /// 获取近期记忆
 pub(super) async fn get_recent_memory_handler(
     State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let manager = match &state.memory_manager {
         Some(m) => m,
@@ -760,11 +761,14 @@ pub(super) async fn get_recent_memory_handler(
         }
     };
 
-    let mut mgr = manager.lock().await;
-    let service = MemoryService::new(&mut mgr);
-    let memories = service.get_recent();
+    let page: usize = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let limit: usize = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(20);
 
-    Json(memories_to_json_response(&memories)).into_response()
+    let mut mgr = manager.lock().await;
+    let mut service = MemoryService::new(&mut mgr);
+    let (memories, total) = service.get_recent(page, limit).await;
+
+    Json(memories_to_json_response(&memories, total, page, limit)).into_response()
 }
 
 /// 搜索记忆
@@ -788,7 +792,7 @@ pub(super) async fn search_memory_handler(
     let limit = request.limit.unwrap_or(10);
 
     match service.search(&request.query, limit).await {
-        Ok(memories) => Json(memories_to_json_response(&memories)).into_response(),
+        Ok(memories) => Json(memories_to_json_response(&memories, memories.len(), 1, limit)).into_response(),
         Err(e) => {
             error!("[http] Failed to search memory: {}", e);
             (
@@ -1736,7 +1740,12 @@ fn enrich_derived_attributes(
         })
         .collect();
 
-    Some(serde_json::Value::Object(enriched))
+    // 空结果返回 None，而非空对象，保持 API 响应简洁
+    if enriched.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(enriched))
+    }
 }
 
 /// 经历日志条目
@@ -3170,6 +3179,7 @@ pub(super) async fn get_llm_config_handler(State(state): State<HttpApiState>) ->
         reflector,
         reflector_inherits_actor: config.llm_reflector.is_none(),
         runtime_mode: state.runtime_mode.to_string(),
+        llm_enabled: state.llm_enabled.load(std::sync::atomic::Ordering::Relaxed),
     };
 
     Json(response).into_response()
@@ -3436,6 +3446,7 @@ pub(super) async fn update_llm_config_handler(
         reflector,
         reflector_inherits_actor: config.llm_reflector.is_none(),
         runtime_mode: state.runtime_mode.to_string(),
+        llm_enabled: state.llm_enabled.load(std::sync::atomic::Ordering::Relaxed),
     };
 
     (
@@ -3452,6 +3463,28 @@ pub(super) async fn update_llm_config_handler(
 /// GET /api/v1/config/llm/usage - 获取 LLM Token 累计使用统计
 pub(super) async fn get_llm_usage_handler() -> impl IntoResponse {
     Json(crate::ai::llm::token_usage_tracker().snapshot())
+}
+
+/// GET /api/v1/config/llm/toggle - 获取 LLM 开关状态
+pub(super) async fn get_llm_toggle_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    Json(dto::LlmToggleResponse {
+        enabled: state.llm_enabled.load(std::sync::atomic::Ordering::Relaxed),
+    })
+}
+
+/// POST /api/v1/config/llm/toggle - 设置 LLM 开关状态
+pub(super) async fn set_llm_toggle_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<dto::LlmToggleRequest>,
+) -> impl IntoResponse {
+    state
+        .llm_enabled
+        .store(req.enabled, std::sync::atomic::Ordering::Relaxed);
+    let status = if req.enabled { "启用" } else { "关闭" };
+    info!("[llm] LLM 调用已{}", status);
+    Json(dto::LlmToggleResponse { enabled: req.enabled })
 }
 
 // ============================================================================

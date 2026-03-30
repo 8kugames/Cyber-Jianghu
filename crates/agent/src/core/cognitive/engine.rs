@@ -17,6 +17,7 @@
 
 use anyhow::Result;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
@@ -88,6 +89,8 @@ pub struct MultiStageCognitiveEngine {
     config: std::sync::RwLock<CognitiveEngineConfig>,
     /// Persona 描述缓存: (tick_id, description)
     persona_cache: std::sync::RwLock<(i64, String)>,
+    /// LLM 调用开关（与 HttpApiState 共享，用于紧急停止 token 消耗）
+    llm_enabled: Arc<AtomicBool>,
 }
 
 impl MultiStageCognitiveEngine {
@@ -125,12 +128,18 @@ impl MultiStageCognitiveEngine {
             llm_client,
             config: std::sync::RwLock::new(config),
             persona_cache: std::sync::RwLock::new((-1, String::new())),
+            llm_enabled: Arc::new(AtomicBool::new(true)),
         }
     }
 
     /// 使用默认配置创建
     pub fn with_defaults(llm_client: Arc<dyn LlmClient>) -> Self {
         Self::new(llm_client, CognitiveEngineConfig::default())
+    }
+
+    /// 获取 LLM 开关的共享引用（用于注入到 HttpApiState）
+    pub fn llm_enabled_handle(&self) -> Arc<AtomicBool> {
+        self.llm_enabled.clone()
     }
 
     /// 获取配置的快照（用于 prompt 构建等只读场景）
@@ -164,8 +173,22 @@ impl MultiStageCognitiveEngine {
         let cfg = self.config_snapshot();
         let start_time = Instant::now();
         let tick_id = world_state.tick_id;
-        let deadline = Self::compute_deadline(world_state.deadline_ms);
         let name = cfg.agent_name.clone();
+
+        // LLM 开关检查：关闭时立即返回 idle，不消耗 token
+        if !self.llm_enabled.load(Ordering::Relaxed) {
+            info!("[{}-{}] LLM 已关闭，跳过认知流程", name, tick_id);
+            let agent_id = world_state.agent_id.unwrap_or_default();
+            let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
+                .with_thought("LLM 已关闭，等待重新启用".to_string());
+            let mut chain = CognitiveChain::from_persona(&cfg.persona, tick_id);
+            chain.final_intent = idle_intent;
+            chain.duration_ms = start_time.elapsed().as_millis() as u64;
+            thinking_log::log_thinking(&name, tick_id, "LLM 已关闭，跳过认知流程");
+            return Ok(chain);
+        }
+
+        let deadline = Self::compute_deadline(world_state.deadline_ms);
 
         info!(
             "[{}-{}] 开始认知流程... (deadline: {}ms)",
