@@ -593,24 +593,11 @@ impl super::Agent {
                     };
 
                     // 6.5 审查（ReflectorSoul - 反思之魂）
-                    let final_intent = if let Some(ref store) = self.review_store {
+                    let mut final_intent = if let Some(ref store) = self.review_store {
                         self.submit_for_review(intent, &world_state, store, pipeline_deadline).await?
                     } else {
                         intent
                     };
-
-                    // 6.6 记录 Intent 到经历日志（供 Web Panel 查询）
-                    if let Some(ref api_state) = self.http_api_state
-                        && let Some(ref history) = api_state.intent_history {
-                            history
-                                .record_intent(
-                                    final_intent.tick_id,
-                                    final_intent.intent_id,
-                                    final_intent.action_type.to_string(),
-                                    final_intent.thought_log.clone(),
-                                )
-                                .await;
-                        }
 
                     // 7. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {
@@ -636,7 +623,30 @@ impl super::Agent {
                         }
                     }
 
-                    // 8. 发送意图
+                    // 8. 发送意图（先检查 tick 是否在认知周期中过期）
+                    if let Some(new_tick) = self.client.try_peek_latest_tick().await
+                        && new_tick != final_intent.tick_id
+                    {
+                        warn!(
+                            "Tick expired during cognitive cycle ({} -> {}), updating intent",
+                            final_intent.tick_id, new_tick
+                        );
+                        final_intent.tick_id = new_tick;
+                    }
+
+                    // 8.5 记录 Intent 到经历日志（tick 调整之后，确保记录正确的 tick_id）
+                    if let Some(ref api_state) = self.http_api_state
+                        && let Some(ref history) = api_state.intent_history {
+                            history
+                                .record_intent(
+                                    final_intent.tick_id,
+                                    final_intent.intent_id,
+                                    final_intent.action_type.to_string(),
+                                    final_intent.thought_log.clone(),
+                                )
+                                .await;
+                        }
+
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
                         // 尝试重连
