@@ -121,7 +121,6 @@ data:
 
   use:
     description: "使用物品（如食物、水等）"
-    tags: [survival]
     validation:
       required_fields:
         - item_id

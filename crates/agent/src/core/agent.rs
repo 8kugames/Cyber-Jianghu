@@ -639,11 +639,15 @@ impl Agent {
                 let thirst = world_state.self_state.thirst();
 
                 if hunger < survival_threshold || thirst < survival_threshold {
+                    let action_str = intent.action_type.to_string();
                     info!(
                         "[ActorSoul] Survival mode bypass: hunger={}, thirst={}, action={}, threshold={}",
-                        hunger, thirst, intent.action_type, survival_threshold
+                        hunger, thirst, action_str, survival_threshold
                     );
-                    return Ok(intent);
+                    return Ok(intent.with_observer_thought(format!(
+                        "[生存底线] hunger={}, thirst={}, 自动批准{}",
+                        hunger, thirst, action_str
+                    )));
                 }
             }
         }
