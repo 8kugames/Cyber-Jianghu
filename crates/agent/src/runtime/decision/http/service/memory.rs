@@ -54,11 +54,7 @@ impl<'a> MemoryService<'a> {
 
         let total = all_memories.len();
         let offset = (page.saturating_sub(1)) * limit;
-        let paged: Vec<MemoryEntry> = all_memories
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect();
+        let paged: Vec<MemoryEntry> = all_memories.into_iter().skip(offset).take(limit).collect();
 
         (paged, total)
     }
@@ -105,7 +101,12 @@ pub fn memory_to_json(memory: &MemoryEntry) -> serde_json::Value {
 }
 
 /// 记忆列表转换为 JSON 响应
-pub fn memories_to_json_response(memories: &[MemoryEntry], total: usize, page: usize, limit: usize) -> serde_json::Value {
+pub fn memories_to_json_response(
+    memories: &[MemoryEntry],
+    total: usize,
+    page: usize,
+    limit: usize,
+) -> serde_json::Value {
     let results: Vec<serde_json::Value> = memories.iter().map(memory_to_json).collect();
     let has_more = (page * limit) < total;
     serde_json::json!({

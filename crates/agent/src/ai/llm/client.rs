@@ -281,7 +281,9 @@ mod tests {
         #[derive(serde::Deserialize)]
         struct ReviewResponse {
             result: String,
+            #[allow(dead_code)]
             reason: String,
+            #[allow(dead_code)]
             narrative: String,
         }
 
@@ -319,6 +321,7 @@ mod tests {
         #[derive(serde::Deserialize)]
         struct NormalResponse {
             action: String,
+            #[allow(dead_code)]
             narrative: String,
         }
 

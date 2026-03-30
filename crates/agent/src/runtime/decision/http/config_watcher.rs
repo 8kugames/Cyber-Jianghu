@@ -29,9 +29,11 @@ impl ConfigWatcher {
     pub fn new(config_path: PathBuf) -> Result<Self> {
         let (tx, _) = broadcast::channel(4);
         let tx_clone = tx.clone();
-        let last_sent = Mutex::new(Instant::now()
-            .checked_sub(std::time::Duration::from_secs(10))
-            .unwrap_or(Instant::now()));
+        let last_sent = Mutex::new(
+            Instant::now()
+                .checked_sub(std::time::Duration::from_secs(10))
+                .unwrap_or(Instant::now()),
+        );
 
         let mut watcher =
             notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
@@ -39,7 +41,8 @@ impl ConfigWatcher {
                     Ok(event) if event.kind.is_modify() || event.kind.is_create() => {
                         let now = Instant::now();
                         let mut last = last_sent.lock().unwrap();
-                        if now.duration_since(*last) < std::time::Duration::from_millis(DEBOUNCE_MS) {
+                        if now.duration_since(*last) < std::time::Duration::from_millis(DEBOUNCE_MS)
+                        {
                             return; // 防抖：500ms 内重复事件忽略
                         }
                         *last = now;
