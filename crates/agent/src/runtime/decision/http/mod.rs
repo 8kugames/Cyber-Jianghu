@@ -177,6 +177,8 @@ pub struct HttpApiState {
     pub narrative_config:
         std::sync::Arc<RwLock<Option<crate::ai::cognitive::narrative::NarrativeConfig>>>,
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// LLM 调用开关（与认知引擎共享，用于紧急停止 token 消耗）
+    pub llm_enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// HTTP 决策状态
@@ -454,6 +456,14 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/config/llm/usage",
             get(handlers::get_llm_usage_handler),
         ) // 获取 LLM Token 累计使用统计
+        .route(
+            "/api/v1/config/llm/toggle",
+            get(handlers::get_llm_toggle_handler),
+        ) // 获取 LLM 开关状态
+        .route(
+            "/api/v1/config/llm/toggle",
+            post(handlers::set_llm_toggle_handler),
+        ) // 设置 LLM 开关状态
 }
 
 /// 获取静态文件服务目录（供 claw 模式复用）
@@ -573,6 +583,7 @@ pub fn create_http_state(
     config_path: PathBuf,
     ws_shared_state: Option<Arc<super::ws::WsSharedState>>,
     runtime_mode: crate::config::RuntimeMode,
+    llm_enabled: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
@@ -673,6 +684,9 @@ pub fn create_http_state(
         runtime_mode,
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        llm_enabled: llm_enabled.unwrap_or_else(|| {
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))
+        }),
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -743,6 +757,12 @@ impl HttpApiState {
     /// 设置托梦存储
     pub fn with_dream_store(mut self, store: Arc<RwLock<DreamState>>) -> Self {
         self.dream_store = Some(store);
+        self
+    }
+
+    /// 设置 LLM 开关（与认知引擎共享）
+    pub fn with_llm_enabled(mut self, enabled: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.llm_enabled = enabled;
         self
     }
 

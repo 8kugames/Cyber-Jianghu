@@ -183,6 +183,19 @@ pub struct LlmConfigResponse {
     pub reflector: Option<LlmConfigInfo>,
     pub reflector_inherits_actor: bool,
     pub runtime_mode: String,
+    pub llm_enabled: bool,
+}
+
+/// LLM 开关切换请求
+#[derive(Debug, Deserialize)]
+pub struct LlmToggleRequest {
+    pub enabled: bool,
+}
+
+/// LLM 开关状态响应
+#[derive(Debug, Serialize)]
+pub struct LlmToggleResponse {
+    pub enabled: bool,
 }
 
 /// LLM 配置更新请求

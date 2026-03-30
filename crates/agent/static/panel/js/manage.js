@@ -120,6 +120,13 @@ function updateRuntimeBadge(mode) {
     setBadgeState(badge, '模式：--', 'badge-muted');
 }
 
+function updateLlmToggle(enabled) {
+    const toggle = document.getElementById('llm-toggle');
+    const label = document.getElementById('llm-toggle-label');
+    if (toggle) toggle.checked = enabled;
+    if (label) label.textContent = enabled ? 'LLM 已启用' : 'LLM 已关闭';
+}
+
 function updateReflectorBadge(isInherit) {
     const badge = document.getElementById('reflector-inherit-badge');
     if (!badge) return;
@@ -234,6 +241,7 @@ async function loadLlmConfig() {
         }
 
         updateRuntimeBadge(data.runtime_mode);
+        updateLlmToggle(data.llm_enabled !== false);
 
         if (data.runtime_mode === 'claw') {
             section.classList.add('claw-mode-disabled');
@@ -425,6 +433,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadProviders();
     await loadLlmConfig();
     bindLlmDirtyTracking();
+
+    // LLM 开关切换
+    const llmToggle = document.getElementById('llm-toggle');
+    if (llmToggle) {
+        llmToggle.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            try {
+                await apiPost('/api/v1/config/llm/toggle', { enabled });
+                updateLlmToggle(enabled);
+                showSuccess(enabled ? 'LLM 已启用' : 'LLM 已关闭，Agent 将不再消耗 token');
+            } catch (err) {
+                e.target.checked = !enabled;
+                updateLlmToggle(!enabled);
+                showError('切换 LLM 开关失败: ' + err.message);
+            }
+        });
+    }
 
     // Token 使用统计：立即加载 + 每分钟刷新
     await loadTokenUsage();
