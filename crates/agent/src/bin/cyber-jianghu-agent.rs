@@ -660,6 +660,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 llm_arc.clone(),
                 cognitive_config,
             ));
+            let llm_enabled = cognitive_engine.llm_enabled_handle();
 
             let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
                 Arc::new(cognitive_decision_with_retry(
@@ -688,7 +689,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
             let (api_state, actual_port) =
-                start_http_api_server(port, device_id.clone(), &config, Some(reconnect_tx))?;
+                start_http_api_server(port, device_id.clone(), &config, Some(reconnect_tx), Some(llm_enabled))?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -1009,6 +1010,7 @@ fn start_claw_server(
         config_path(),
         Some(shared_state.clone()),
         config.runtime.mode,
+        None,
     );
 
     let api_state_clone = api_state.clone();
@@ -1036,6 +1038,7 @@ fn start_http_api_server(
     reconnect_tx: Option<
         mpsc::Sender<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>,
     >,
+    llm_enabled: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(
     Arc<cyber_jianghu_agent::runtime::decision::http::HttpApiState>,
     u16,
@@ -1075,6 +1078,7 @@ fn start_http_api_server(
             config_path(),
             None,
             config.runtime.mode,
+            llm_enabled,
         );
 
     let api_state_clone = api_state.clone();
