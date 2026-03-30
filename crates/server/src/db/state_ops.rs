@@ -33,13 +33,17 @@ use crate::models::{AgentAction, AgentState, TickLog};
 pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<AgentState>> {
     debug!("查询所有存活Agent的最新状态");
 
-    // 使用DISTINCT ON获取每个Agent的最新状态
+    // 先取每个 agent 的最新记录，再过滤 is_alive
+    // 不能在 DISTINCT ON 之前加 WHERE is_alive = true，
+    // 否则会忽略最新的死亡记录、找到旧的存活记录，导致已死亡 agent 被加载
     let states = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT DISTINCT ON (agent_id) *
-        FROM agent_states
+        SELECT * FROM (
+            SELECT DISTINCT ON (agent_id) *
+            FROM agent_states
+            ORDER BY agent_id, tick_id DESC
+        ) latest
         WHERE is_alive = true
-        ORDER BY agent_id, tick_id DESC
         "#,
     )
     .fetch_all(pool)
