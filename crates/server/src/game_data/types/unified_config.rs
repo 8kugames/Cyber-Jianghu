@@ -233,11 +233,27 @@ pub struct AgentStateRulesData {
     /// Tick配置
     pub tick: TickRulesData,
 
+    /// 生存底线配置
+    #[serde(default)]
+    pub survival: SurvivalRulesData,
+
     /// 位置配置
     pub location: LocationRulesData,
 
     /// 游戏时间配置
     pub game_time: GameTimeRulesData,
+}
+
+/// 生存底线规则数据
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct SurvivalRulesData {
+    /// hunger/thirst 低于此阈值时，survival 动作绕过 ReflectorSoul 审查
+    #[serde(default = "default_survival_threshold")]
+    pub critical_threshold: i32,
+}
+
+fn default_survival_threshold() -> i32 {
+    30
 }
 
 /// Tick规则数据（现实时间 → Tick 转换）
