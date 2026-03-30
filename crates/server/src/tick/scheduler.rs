@@ -439,7 +439,7 @@ impl TickScheduler {
         if !dead_agents.is_empty() {
             for agent_id in &dead_agents {
                 if let Err(e) = sqlx::query(
-                    r#"UPDATE agents SET status = 'retired', retired_at = CURRENT_TIMESTAMP
+                    r#"UPDATE agents SET status = 'dead', retired_at = CURRENT_TIMESTAMP
                        WHERE agent_id = $1 AND status = 'active'"#,
                 )
                 .bind(*agent_id)
@@ -449,7 +449,7 @@ impl TickScheduler {
                     warn!("Failed to retire dead agent {}: {}", agent_id, e);
                 }
             }
-            info!("已将 {} 个死亡 Agent 状态更新为 retired", dead_agents.len());
+            info!("已将 {} 个死亡 Agent 状态更新为 dead", dead_agents.len());
         }
 
         let phase2_2_duration = phase2_2_start.elapsed();
