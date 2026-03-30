@@ -417,7 +417,7 @@ async function loadExperiences(page = 1) {
                     html += `<div class="exp-action-tag">${escapeHtml(actionType)}</div>`;
                 }
                 if (exp.intent_summary) {
-                    html += `<div class="exp-thought"><span class="thought-label">意图:</span><span class="thought-content">${escapeHtml(exp.intent_summary)}</span></div>`;
+                    html += `<div class="exp-thought"><span class="thought-label">意图:\n</span><span class="thought-content">${escapeHtml(exp.intent_summary)}</span></div>`;
                 }
                 if (exp.observer_thought) {
                     html += `<div class="exp-observer"><span class="observer-label">审查:</span><span class="observer-content">${escapeHtml(exp.observer_thought)}</span></div>`;
@@ -666,7 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAttributeMeta().then(async () => {
         await loadCharacterList();
         const currentChar = allCharacters.find(c => c.is_current);
-        
+
         // 当前角色非存活时，切换到世界树分页（不建立 SSE 连接）
         if (!currentChar || currentChar.status !== 'alive') {
             hide('#loading');
@@ -677,10 +677,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('tab-worldtree').classList.add('active');
             return;
         }
-        
+
         // 仅对存活角色建立 SSE 连接
         connectDeathEvents();
-        
+
         // 角色数据通过 HTTP API 获取，立即可用
         loadCharacter();
         loadRelationships();
@@ -871,7 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function incrementalRefresh() {
         try {
             const data = await apiGet('/api/v1/character');
-            
+
             // 记录当前数据用于下次比较
             const newDataHash = JSON.stringify({
                 tick_id: data.tick_id,
@@ -881,7 +881,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 derived_attributes: data.derived_attributes,
                 inventory: data.inventory
             });
-            
+
             // 数据没变化，跳过
             if (newDataHash === lastRefreshData) return;
             lastRefreshData = newDataHash;
