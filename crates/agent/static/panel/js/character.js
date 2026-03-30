@@ -10,6 +10,13 @@ let hasMoreDreamRecords = false;
 let allCharacters = [];
 let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
 
+const STATUS_MAP = {
+    alive:   { label: '存活', treeLabel: '存活', tag: '' },
+    dead:    { label: '死亡', treeLabel: '已故', tag: ' [已故]' },
+    retired: { label: '归隐', treeLabel: '归隐', tag: ' [归隐]' },
+};
+function statusOf(s) { return STATUS_MAP[s] || { label: s, treeLabel: s, tag: '' }; }
+
 function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
     if (typeof worldTime === 'string' || typeof worldTime === 'number') {
@@ -70,8 +77,7 @@ async function loadCharacterList() {
             selectorSection.classList.add('hidden');
         } else {
             selectEl.innerHTML = allCharacters.map(c => {
-                const statusText = c.status === 'alive' ? '' :
-                                  c.status === 'dead' ? ' [已故]' : ' [归隐]';
+                const statusText = statusOf(c.status).tag;
                 const serverInfo = c.server_url
                     ? ` (${c.server_url.replace(/^https?:\/\//, '').split('/')[0]})`
                     : '';
@@ -98,8 +104,8 @@ function renderWorldTree() {
     }
 
     listEl.innerHTML = allCharacters.map(c => {
-        const statusClass = c.status === 'alive' ? 'alive' : c.status === 'dead' ? 'dead' : 'retired';
-        const statusText = c.status === 'alive' ? '存活' : c.status === 'dead' ? '已故' : '归隐';
+        const statusClass = c.status;
+        const statusText = statusOf(c.status).treeLabel;
         const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
         const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
         return `
@@ -135,8 +141,8 @@ function renderWorldTree() {
 function showCharacterDetail(char) {
     const dialog = document.getElementById('character-detail-dialog');
     const content = document.getElementById('character-detail-content');
-    const statusClass = char.status === 'alive' ? 'alive' : char.status === 'dead' ? 'dead' : 'retired';
-    const statusText = char.status === 'alive' ? '存活' : char.status === 'dead' ? '已故' : '归隐';
+    const statusClass = char.status;
+    const statusText = statusOf(char.status).treeLabel;
     const registeredAt = char.registered_at ? new Date(char.registered_at).toLocaleString('zh-CN') : '未知';
 
     content.innerHTML = `
@@ -221,7 +227,7 @@ async function loadCharacter() {
 
         if (data.status) {
             const statusEl = document.getElementById('status');
-            const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
+            const text = statusOf(data.status).label;
             const onlineTag = data.status === 'alive'
                 ? (data.is_stale
                     ? '<span class="online-tag offline">离线</span>'
@@ -893,7 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 更新状态
             if (data.status) {
-                const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
+                const text = statusOf(data.status).label;
                 const statusEl = document.getElementById('status');
                 const onlineTag = data.status === 'alive'
                     ? (data.is_stale
@@ -901,6 +907,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         : '<span class="online-tag online">在线</span>')
                     : '';
                 statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>' + onlineTag;
+
+                // 同步世界树中当前角色的状态（局部更新，避免全量重渲染）
+                const worldTreeChar = allCharacters.find(c => c.is_current);
+                if (worldTreeChar && worldTreeChar.status !== data.status) {
+                    worldTreeChar.status = data.status;
+                    const card = document.querySelector(`.world-tree-card[data-agent-id="${worldTreeChar.agent_id || ''}"]`);
+                    if (card) {
+                        const statusEl = card.querySelector('.char-status');
+                        if (statusEl) {
+                            const info = statusOf(data.status);
+                            statusEl.className = 'char-status ' + data.status;
+                            statusEl.textContent = info.treeLabel;
+                        }
+                    }
+                }
             }
 
             // 更新属性（全量重渲染，包含 derived_attributes）
