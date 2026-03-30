@@ -24,8 +24,7 @@ use tracing::{debug, info, warn};
 
 use super::chain::CognitiveChain;
 use super::stages::{
-    CognitiveStage, DecisionResponse, MotivationPlanningResponse, MotivationResponse,
-    PerceptionMotivationPlanningResponse, PerceptionResponse, PlanningResponse, StageOutput,
+    CognitiveStage, DecisionResponse, PerceptionMotivationPlanningResponse, StageOutput,
 };
 use crate::ai::cognitive::narrative::{NarrativeEngine, PerceptionNarrative};
 use crate::ai::llm::{LlmClient, LlmClientExt};
@@ -401,170 +400,6 @@ impl MultiStageCognitiveEngine {
         CognitiveOutcome::Done
     }
 
-    // ========================================================================
-    // 各阶段实现
-    // ========================================================================
-
-    /// Stage 1: 感知 - 理解当前世界状态
-    #[allow(dead_code)]
-    async fn perceive(&self, world_state: &WorldState) -> Result<(String, StageOutput)> {
-        let cfg = self.config_snapshot();
-        let prompt = self.build_perception_prompt(world_state, &cfg);
-
-        let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
-
-        let content = format!(
-            "自身状态: {}\n环境: {}\n关键观察: {}",
-            response.self_status,
-            response.environment,
-            response.key_observations.join(", ")
-        );
-
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
-        ))
-    }
-
-    #[allow(dead_code)]
-    async fn perceive_with_memory(
-        &self,
-        world_state: &WorldState,
-        memory_context: &str,
-        validation_feedback: Option<&str>,
-        cfg: &CognitiveEngineConfig,
-    ) -> Result<(String, StageOutput)> {
-        let prompt = self.build_perception_prompt_with_memory(
-            world_state,
-            memory_context,
-            validation_feedback,
-            &cfg.persona.generate_description(),
-            cfg,
-        );
-
-        let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
-
-        let content = format!(
-            "自身状态: {}\n环境: {}\n关键观察: {}",
-            response.self_status,
-            response.environment,
-            response.key_observations.join(", ")
-        );
-
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
-        ))
-    }
-
-    /// Stage 2+3 合并: 动机 + 规划 - 一次 LLM 调用同时生成
-    #[allow(dead_code)]
-    async fn motivate_and_plan(
-        &self,
-        world_state: &WorldState,
-        perception: &StageOutput,
-        cfg: &CognitiveEngineConfig,
-    ) -> Result<(StageOutput, StageOutput)> {
-        let prompt = self.build_motivation_planning_prompt(
-            world_state,
-            perception,
-            &cfg.persona.generate_description(),
-            cfg,
-        );
-
-        let response: MotivationPlanningResponse = self.llm_client.complete_json(&prompt).await?;
-
-        // 拆分为两个 StageOutput
-        let motivation_content = format!(
-            "主要驱动力: {} (强度: {}/10)\n原因: {}",
-            response.primary_drive, response.drive_intensity, response.reasoning
-        );
-        let motivation = StageOutput::with_metadata(
-            CognitiveStage::Motivation,
-            motivation_content,
-            serde_json::json!({
-                "primary_drive": response.primary_drive,
-                "drive_intensity": response.drive_intensity,
-                "reasoning": response.reasoning,
-            }),
-        );
-
-        let planning_content = format!(
-            "计划步骤:\n1. {}\n预期结果: {} (优先级: {}/10)",
-            response.steps.join("\n2. "),
-            response.expected_outcome,
-            response.priority
-        );
-        let planning = StageOutput::with_metadata(
-            CognitiveStage::Planning,
-            planning_content,
-            serde_json::json!({
-                "steps": response.steps,
-                "priority": response.priority,
-                "expected_outcome": response.expected_outcome,
-            }),
-        );
-
-        Ok((motivation, planning))
-    }
-
-    /// Stage 2: 动机 - 基于人设生成内在驱动力（保留用于向后兼容）
-    #[allow(dead_code)]
-    async fn motivate(
-        &self,
-        world_state: &WorldState,
-        perception: &StageOutput,
-    ) -> Result<(String, StageOutput)> {
-        let cfg = self.config_snapshot();
-        let prompt = self.build_motivation_prompt(world_state, perception, &cfg);
-
-        let response: MotivationResponse = self.llm_client.complete_json(&prompt).await?;
-
-        let content = format!(
-            "主要驱动力: {} (强度: {}/10)\n原因: {}",
-            response.primary_drive, response.drive_intensity, response.reasoning
-        );
-
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Motivation, content, metadata),
-        ))
-    }
-
-    /// Stage 3: 规划 - 制定行动计划
-    #[allow(dead_code)]
-    async fn plan(
-        &self,
-        world_state: &WorldState,
-        perception: &StageOutput,
-        motivation: &StageOutput,
-    ) -> Result<(String, StageOutput)> {
-        let cfg = self.config_snapshot();
-        let prompt = self.build_planning_prompt(world_state, perception, motivation, &cfg);
-
-        let response: PlanningResponse = self.llm_client.complete_json(&prompt).await?;
-
-        let content = format!(
-            "计划步骤:\n1. {}\n预期结果: {} (优先级: {}/10)",
-            response.steps.join("\n2. "),
-            response.expected_outcome,
-            response.priority
-        );
-
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Planning, content, metadata),
-        ))
-    }
-
     /// Stage 4: 决策 - 选择最终行动
     async fn decide(
         &self,
@@ -644,11 +479,20 @@ impl MultiStageCognitiveEngine {
         );
         let self_status_section = narrative.to_prompt_section();
 
-        let inventory_str = if self_state.inventory.is_empty() {
-            "空".to_string()
+        // 过滤已耗尽的物品，防止 LLM 对数量为 0 的物品发起 use 动作
+        let available_items: Vec<_> = self_state
+            .inventory
+            .iter()
+            .filter(|i| i.quantity > 0)
+            .collect();
+        let inventory_str = if available_items.is_empty() {
+            if self_state.inventory.is_empty() {
+                "空".to_string()
+            } else {
+                "空（物品已耗尽）".to_string()
+            }
         } else {
-            self_state
-                .inventory
+            available_items
                 .iter()
                 .map(|i| format!("{} x{}", i.name, i.quantity))
                 .collect::<Vec<_>>()
@@ -713,6 +557,14 @@ impl MultiStageCognitiveEngine {
 - 附近的人: {entities}
 - 地上的物品: {items}
 {memory_section}
+## 生存铁律
+你是血肉之躯，不是铁石之身。饥饿与口渴是身体发出的真实信号，绝非可以忽视的小事。
+
+- 饥肠辘辘时觅食为当务之急
+- 口干舌燥时寻水刻不容缓
+- 饥渴交迫莫存侥幸
+- 温饱无忧方可追求更高目标
+
 ## 任务
 请完成以下三步，输出 JSON 格式的结果：
 
@@ -821,249 +673,6 @@ impl MultiStageCognitiveEngine {
     // ========================================================================
     // Prompt 构建方法
     // ========================================================================
-
-    #[allow(dead_code)]
-    fn build_perception_prompt(
-        &self,
-        world_state: &WorldState,
-        cfg: &CognitiveEngineConfig,
-    ) -> String {
-        let persona_desc = cfg.persona.generate_description();
-        self.build_perception_prompt_with_memory(world_state, "", None, &persona_desc, cfg)
-    }
-
-    #[allow(dead_code)]
-    fn build_perception_prompt_with_memory(
-        &self,
-        world_state: &WorldState,
-        memory_context: &str,
-        validation_feedback: Option<&str>,
-        persona_desc: &str,
-        cfg: &CognitiveEngineConfig,
-    ) -> String {
-        let self_state = &world_state.self_state;
-
-        // 使用叙事引擎生成叙事化描述（数据驱动）
-        let engine = NarrativeEngine::default();
-        let narrative = PerceptionNarrative::from_attributes_with_engine(
-            &engine,
-            &self_state.attributes,
-            &self_state.status_effects,
-        );
-
-        // 生成叙事化的状态描述
-        let self_status_section = narrative.to_prompt_section();
-
-        let inventory_str = if self_state.inventory.is_empty() {
-            "空".to_string()
-        } else {
-            self_state
-                .inventory
-                .iter()
-                .map(|i| format!("{} x{}", i.name, i.quantity))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let entities_str = if world_state.entities.is_empty() {
-            "无".to_string()
-        } else {
-            world_state
-                .entities
-                .iter()
-                .map(|e| format!("{}({})", e.name, e.state))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let items_str = if world_state.nearby_items.is_empty() {
-            "无".to_string()
-        } else {
-            world_state
-                .nearby_items
-                .iter()
-                .map(|i| i.name.clone())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        // 记忆上下文（如果有）
-        let memory_section = if memory_context.is_empty() {
-            String::new()
-        } else {
-            format!(
-                r#"
-### 相关记忆
-{memory_context}
-
-"#
-            )
-        };
-
-        let feedback_section = match validation_feedback {
-            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
-            None => String::new(),
-        };
-
-        format!(
-            r#"# 感知阶段 (Perception)
-{feedback_section}
-你是 {agent_name}。
-{persona}
-
-## 当前游戏状态 (Tick {tick_id})
-
-{self_status_section}
-### 背包物品
-{inventory}
-
-### 位置
-- 地点: {location}
-
-### 环境
-- 附近的人: {entities}
-- 地上的物品: {items}
-{memory_section}
-## 任务
-请分析你感知到的信息，输出 JSON 格式的感知结果。
-
-**注意**：只需客观描述你看到的状态，不需要做任何决策。
-
-## 输出格式
-{{
-  "self_status": "你的状态简述 (30字以内)",
-  "environment": "环境描述 (30字以内)",
-  "key_observations": ["观察1", "观察2", "..."]
-}}
-"#,
-            agent_name = cfg.agent_name,
-            persona = persona_desc,
-            tick_id = world_state.tick_id,
-            self_status_section = self_status_section,
-            inventory = inventory_str,
-            location = world_state.location.name,
-            entities = entities_str,
-            items = items_str,
-            memory_section = memory_section,
-            feedback_section = feedback_section,
-        )
-    }
-
-    #[allow(dead_code)]
-    fn build_motivation_prompt(
-        &self,
-        _world_state: &WorldState,
-        perception: &StageOutput,
-        cfg: &CognitiveEngineConfig,
-    ) -> String {
-        let persona_desc = cfg.persona.generate_description();
-        format!(
-            r#"# 动机阶段 (Motivation)
-
-你是 {agent_name}。
-{persona}
-
-## 你感知到的
-{perception_content}
-
-## 任务
-基于你的感知和性格，说明你的内在驱动力。
-- 你现在最想要什么？
-- 为什么想要这个？
-- 这个动机有多强烈？
-
-## 输出格式
-{{
-  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
-  "drive_intensity": 1-10,
-  "reasoning": "为什么有这个动机 (50字以内)"
-}}
-"#,
-            agent_name = cfg.agent_name,
-            persona = persona_desc,
-            perception_content = perception.content
-        )
-    }
-
-    /// 合并的动机+规划 Prompt（一次 LLM 调用完成两个阶段）
-    #[allow(dead_code)]
-    fn build_motivation_planning_prompt(
-        &self,
-        _world_state: &WorldState,
-        perception: &StageOutput,
-        persona_desc: &str,
-        cfg: &CognitiveEngineConfig,
-    ) -> String {
-        format!(
-            r#"# 动机与规划阶段 (Motivation & Planning)
-
-你是 {agent_name}。
-{persona}
-
-## 你感知到的
-{perception_content}
-
-## 任务
-基于你的感知和性格，完成以下两步：
-1. 说明你的内在驱动力（你想做什么？为什么？有多强烈？）
-2. 制定行动计划（步骤、优先级、预期结果）
-
-## 输出格式
-{{
-  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
-  "drive_intensity": 1-10,
-  "reasoning": "为什么有这个动机 (50字以内)",
-  "steps": ["步骤1", "步骤2", "..."],
-  "priority": 1-10,
-  "expected_outcome": "预期结果 (30字以内)"
-}}
-"#,
-            agent_name = cfg.agent_name,
-            persona = persona_desc,
-            perception_content = perception.content
-        )
-    }
-
-    #[allow(dead_code)]
-    fn build_planning_prompt(
-        &self,
-        _world_state: &WorldState,
-        perception: &StageOutput,
-        motivation: &StageOutput,
-        cfg: &CognitiveEngineConfig,
-    ) -> String {
-        let persona_desc = cfg.persona.generate_description();
-        format!(
-            r#"# 规划阶段 (Planning)
-
-你是 {agent_name}。
-{persona}
-
-## 感知
-{perception}
-
-## 动机
-{motivation}
-
-## 任务
-基于你的感知和动机，制定行动计划。
-- 你打算怎么做？
-- 分成几个步骤？
-- 预期结果是什么？
-
-## 输出格式
-{{
-  "steps": ["步骤1", "步骤2", "..."],
-  "priority": 1-10,
-  "expected_outcome": "预期结果 (30字以内)"
-}}
-"#,
-            agent_name = cfg.agent_name,
-            persona = persona_desc,
-            perception = perception.content,
-            motivation = motivation.content
-        )
-    }
 
     fn build_decision_prompt(
         &self,
