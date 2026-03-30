@@ -24,6 +24,8 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 use crate::dialogue::DialogueResponse;
+use crate::game_data::registry::ItemRegistry;
+use crate::inventory::InventoryManager;
 use crate::models::Intent;
 use cyber_jianghu_protocol::{ClientMessage, DialogueMessage, ServerMessage};
 
@@ -255,11 +257,35 @@ async fn handle_websocket(
                     tick_secs * 1000
                 };
 
+                // 加载初始背包物品
+                let initial_inventory =
+                    match InventoryManager::get_all_items(&state.db_pool, agent_id).await {
+                        Ok(items) => items
+                            .into_iter()
+                            .map(|item| {
+                                let name = ItemRegistry::get(&item.item_id)
+                                    .map(|config| config.name.clone())
+                                    .unwrap_or_else(|| item.item_id.clone());
+                                crate::models::InventoryItem {
+                                    item_id: item.item_id,
+                                    name,
+                                    quantity: item.quantity,
+                                    is_equipped: item.is_equipped,
+                                }
+                            })
+                            .collect(),
+                        Err(e) => {
+                            warn!("加载 Agent {} 初始背包失败: {}", agent_id, e);
+                            vec![]
+                        }
+                    };
+
                 // 构建 WorldState（简化版，不含其他 agent entities）
                 let world_state = crate::tick::build_initial_world_state(
                     &agent_state,
                     &state.game_data,
                     deadline_ms,
+                    initial_inventory,
                 );
                 let ws_msg =
                     cyber_jianghu_protocol::ServerMessage::WorldState { data: world_state };
@@ -555,6 +581,24 @@ async fn handle_intent(
     if !agent_state.is_alive {
         warn!("Intent rejected: agent {} is dead", agent_id);
         return Err("Agent 已死亡，无法执行此动作。请重新转生入世。".into());
+    }
+
+    // 纵深防御：检查 agents.status，拒绝已归隐/已死亡角色的意图
+    let agent_status: Option<String> = sqlx::query_scalar(
+        "SELECT status FROM agents WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .context("查询 Agent 状态失败")?
+    .flatten();
+
+    if agent_status.as_deref() != Some("active") {
+        warn!(
+            "Intent rejected: agent {} status is {:?}, expected 'active'",
+            agent_id, agent_status
+        );
+        return Err("角色已失效，无法执行此动作。请重新转生入世。".into());
     }
 
     // tick_id 校验：只接受当前 tick 的意图（硬性要求）
