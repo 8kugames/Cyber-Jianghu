@@ -234,6 +234,7 @@ mod tests {
                     agent_state: AgentStateRulesData {
                         tick: TickRulesData {
                             real_seconds_per_tick: 60,
+                            collection_window_secs: 5,
                         },
                         location: LocationRulesData {
                             spawn_location: "longmen_inn".to_string(),

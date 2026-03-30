@@ -618,6 +618,36 @@ impl Agent {
         use cyber_jianghu_protocol::PersonaSummary;
         use std::time::Instant;
 
+        // --- 生存底线检查 ---
+        // 当 hunger/thirst 低于阈值时，自动批准生存相关行动，绕过 ReflectorSoul 审查
+        // 防止"孤僻多疑"等人设因拒绝进食/饮水而陷入死锁
+        // survival_actions 列表来自 actions.yaml 中 tags: [survival] 的动作
+        const SURVIVAL_THRESHOLD: i32 = 30;
+
+        let survival_actions: &[String] = &self
+            .config
+            .game_rules
+            .as_ref()
+            .map(|gr| gr.survival_actions.clone())
+            .unwrap_or_default();
+
+        let is_survival_action = survival_actions
+            .iter()
+            .any(|a| a == intent.action_type.as_str());
+
+        if is_survival_action {
+            let hunger = world_state.self_state.hunger();
+            let thirst = world_state.self_state.thirst();
+
+            if hunger < SURVIVAL_THRESHOLD || thirst < SURVIVAL_THRESHOLD {
+                info!(
+                    "[ActorSoul] Survival mode bypass: hunger={}, thirst={}, action={}",
+                    hunger, thirst, intent.action_type
+                );
+                return Ok(intent);
+            }
+        }
+
         let persona = self.extract_persona();
         let character_name = self
             .config
@@ -689,31 +719,51 @@ impl Agent {
                             "[ActorSoul] Intent approved by ReflectorSoul: {:?}",
                             result.reason
                         );
-                        return Ok(intent);
+                        let mut final_intent = intent;
+                        if let Some(reason) = &result.reason {
+                            final_intent = final_intent.with_observer_thought(reason.clone());
+                        }
+                        if let Some(narrative) = &result.narrative {
+                            final_intent = final_intent.with_narrative(narrative.clone());
+                        }
+                        return Ok(final_intent);
                     }
                     ReviewStatus::Rejected => {
                         warn!(
                             "[ActorSoul] Intent rejected by ReflectorSoul: {:?}",
                             result.reason
                         );
-                        // 拒绝后返回 idle
-                        return Ok(Intent::new(
+                        let mut idle_intent = Intent::new(
                             self.client.agent_id().await.unwrap_or_default(),
                             world_state.tick_id,
                             "idle",
                             None,
-                        )
-                        .with_thought(format!(
+                        );
+                        idle_intent = idle_intent.with_thought(format!(
                             "被反思之魂驳回: {}",
-                            result.reason.unwrap_or_default()
-                        )));
+                            result.reason.clone().unwrap_or_default()
+                        ));
+                        if let Some(reason) = &result.reason {
+                            idle_intent = idle_intent.with_observer_thought(reason.clone());
+                        }
+                        if let Some(narrative) = &result.narrative {
+                            idle_intent = idle_intent.with_narrative(narrative.clone());
+                        }
+                        return Ok(idle_intent);
                     }
                     ReviewStatus::TimeoutApproved => {
                         info!(
                             "[ActorSoul] Review timeout approved for intent {}",
                             intent_id
                         );
-                        return Ok(intent);
+                        let mut final_intent = intent;
+                        if let Some(reason) = &result.reason {
+                            final_intent = final_intent.with_observer_thought(reason.clone());
+                        }
+                        if let Some(narrative) = &result.narrative {
+                            final_intent = final_intent.with_narrative(narrative.clone());
+                        }
+                        return Ok(final_intent);
                     }
                     ReviewStatus::Pending => {
                         // 继续等待
