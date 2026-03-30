@@ -33,6 +33,9 @@ use uuid::Uuid;
 use cyber_jianghu_agent::ai::llm::{
     DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider,
 };
+use cyber_jianghu_agent::ai::validator::{
+    CognitiveValidator, PersonaInfo, ValidationRequest, ValidationResult, Validator,
+};
 use cyber_jianghu_agent::config::{
     CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode,
 };
@@ -41,11 +44,14 @@ use cyber_jianghu_agent::{
     core::cognitive::{CognitiveEngineConfig, MultiStageCognitiveEngine},
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::decision::create_http_state,
-    runtime::decision::http::{ConfigWatcher, review::ReviewStore, thinking_log},
+    runtime::decision::http::{
+        ConfigWatcher, intent_history::{IntentHistoryStore, ObserverThought},
+        review::{PendingReview, ReviewStore}, thinking_log,
+    },
     runtime::decision::ws::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::decision::{
         CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
-        cognitive_decision_with_retry,
+        cognitive_decision_with_retry_with_chain_store,
     },
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
@@ -632,8 +638,8 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             let agent_name = config
                 .agent
                 .as_ref()
-                .map(|c| c.name.as_str())
-                .unwrap_or("(未创建)");
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "(未创建)".to_string());
             let agent_id = config
                 .identity
                 .as_ref()
@@ -650,7 +656,7 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 agent_name: agent_name.to_string(),
                 persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(
                     agent_id,
-                    agent_name,
+                    &agent_name,
                     &persona_description,
                 ),
                 temperature: config.llm.temperature,
@@ -662,11 +668,13 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             ));
             let llm_enabled = cognitive_engine.llm_enabled_handle();
 
+            let last_cognitive_chain = Arc::new(tokio::sync::RwLock::new(None::<cyber_jianghu_agent::core::cognitive::CognitiveChain>));
             let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
-                Arc::new(cognitive_decision_with_retry(
+                Arc::new(cognitive_decision_with_retry_with_chain_store(
                     agent_id,
                     cognitive_engine.clone(),
                     CognitiveDecisionConfig::default().max_retries,
+                    Some(last_cognitive_chain.clone()),
                 ));
 
             let cognitive_engine_for_builder = cognitive_engine.clone();
@@ -728,16 +736,22 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
                 .with_cognitive_engine(cognitive_engine_for_builder)
+                .with_cognitive_validator(Arc::new(CognitiveValidator::new(
+                    agent_name.to_string(),
+                )))
+                .with_last_cognitive_chain_store(last_cognitive_chain.clone())
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx)
                 .build();
             let intent_history = api_state.intent_history.clone();
+            let validator = agent.validator().unwrap();
             tokio::spawn(async move {
                 if let Err(e) = run_reflector_soul_task(
                     reflector_config_watcher.subscribe(),
                     review_store,
                     intent_history,
+                    validator,
                 )
                 .await
                 {
@@ -798,8 +812,8 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             let agent_name = config
                 .agent
                 .as_ref()
-                .map(|c| c.name.as_str())
-                .unwrap_or("(未创建)");
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "(未创建)".to_string());
             let agent_id = config
                 .identity
                 .as_ref()
@@ -812,10 +826,10 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
 
             let cognitive_config = CognitiveEngineConfig {
-                agent_name: agent_name.to_string(),
+                agent_name: agent_name.clone(),
                 persona: cyber_jianghu_agent::ai::persona::DynamicPersona::new(
                     agent_id,
-                    agent_name,
+                    &agent_name,
                     &persona_description,
                 ),
                 temperature: config.llm.temperature,
@@ -829,11 +843,13 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             ));
             info!("MultiStageCognitiveEngine 已创建（Claw 模式统一认知架构）");
 
+            let last_cognitive_chain = Arc::new(tokio::sync::RwLock::new(None::<cyber_jianghu_agent::core::cognitive::CognitiveChain>));
             let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
-                Arc::new(cognitive_decision_with_retry(
+                Arc::new(cognitive_decision_with_retry_with_chain_store(
                     agent_id,
                     cognitive_engine.clone(),
                     CognitiveDecisionConfig::default().max_retries,
+                    Some(last_cognitive_chain.clone()),
                 ));
 
             let cognitive_engine_for_builder = cognitive_engine.clone();
@@ -863,15 +879,21 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 .with_review_store(review_store.clone())
                 .with_llm_client(llm_client.clone(), None)
                 .with_cognitive_engine(cognitive_engine_for_builder)
+                .with_cognitive_validator(Arc::new(CognitiveValidator::new(
+                    agent_name.to_string(),
+                )))
+                .with_last_cognitive_chain_store(last_cognitive_chain.clone())
                 .with_http_api_state(Arc::new(setup.api_state.clone()))
                 .build();
 
             let intent_history = setup.api_state.intent_history.clone();
+            let validator = agent.validator().unwrap();
             tokio::spawn(async move {
                 if let Err(e) = run_reflector_soul_task(
                     tokio::sync::broadcast::channel::<()>(1).1,
                     review_store,
                     intent_history,
+                    validator,
                 )
                 .await
                 {
@@ -1146,18 +1168,9 @@ async fn run_reflector_soul_task(
     intent_history: Option<
         Arc<cyber_jianghu_agent::runtime::decision::http::intent_history::IntentHistoryStore>,
     >,
+    validator: Arc<dyn cyber_jianghu_agent::ai::validator::Validator>,
 ) -> Result<()> {
     info!("ReflectorSoul 启动（反思之魂），审查 ActorSoul 意图");
-
-    let config_path = config_path();
-    let config = Config::from_file(&config_path)?;
-    let llm_client = create_llm_client(config.get_reflector_llm_config())?;
-    let mut llm_client = Arc::new(llm_client);
-    info!(
-        "ReflectorSoul LLM 配置: provider={}, model={}",
-        llm_client.provider_name(),
-        llm_client.model_name()
-    );
 
     let review_notify = review_store.notify();
     let fallback_interval = tokio::time::Duration::from_secs(30);
@@ -1167,28 +1180,6 @@ async fn run_reflector_soul_task(
             // 配置变更通知（与 ActorSoul 同步热重载）
             Ok(()) = config_reload_rx.recv() => {
                 info!("ReflectorSoul 检测到配置变更...");
-                let old_client = llm_client.clone();
-                match Config::from_file(&config_path) {
-                    Ok(new_config) => {
-                        match create_llm_client(new_config.get_reflector_llm_config()) {
-                            Ok(client) => {
-                                llm_client = Arc::new(client);
-                                info!(
-                                    "ReflectorSoul LLM 已重载: provider={}, model={}",
-                                    llm_client.provider_name(),
-                                    llm_client.model_name()
-                                );
-                            }
-                            Err(e) => {
-                                warn!("ReflectorSoul LLM 重载失败: {}，保持旧配置", e);
-                                llm_client = old_client;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("ReflectorSoul 配置读取失败: {}，保持旧配置", e);
-                    }
-                }
             }
             // ReviewStore 通知唤醒（即时响应 ActorSoul 提交）
             _ = review_notify.notified() => {
@@ -1201,10 +1192,10 @@ async fn run_reflector_soul_task(
                     info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
                     for review in reviews {
                         if let Err(e) = process_review_with_store(
-                            &llm_client,
                             &review_store,
                             &review,
                             intent_history.as_ref(),
+                            &validator,
                         )
                         .await
                         {
@@ -1220,10 +1211,10 @@ async fn run_reflector_soul_task(
                     info!("[ReflectorSoul] 兜底轮询发现 {} 个待审查意图", reviews.len());
                     for review in reviews {
                         if let Err(e) = process_review_with_store(
-                            &llm_client,
                             &review_store,
                             &review,
                             intent_history.as_ref(),
+                            &validator,
                         )
                         .await
                         {
@@ -1238,14 +1229,11 @@ async fn run_reflector_soul_task(
 
 /// 处理单个审查请求（ReflectorSoul）
 async fn process_review_with_store(
-    llm_client: &DirectLlmClient,
     review_store: &Arc<ReviewStore>,
-    review: &cyber_jianghu_agent::runtime::decision::http::review::PendingReview,
-    intent_history: Option<
-        &Arc<cyber_jianghu_agent::runtime::decision::http::intent_history::IntentHistoryStore>,
-    >,
+    review: &PendingReview,
+    intent_history: Option<&Arc<IntentHistoryStore>>,
+    validator: &Arc<dyn Validator>,
 ) -> Result<()> {
-    use cyber_jianghu_agent::ai::llm::LlmClientExt;
     use cyber_jianghu_agent::runtime::decision::http::review::ReviewDecision;
     use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
 
@@ -1254,64 +1242,48 @@ async fn process_review_with_store(
         review.intent_id, review.intent.action_type
     );
 
-    let validation_prompt = format!(
-        r#"审查以下意图是否符合角色人设和世界观规则。
+    // PersonaSummary → PersonaInfo 映射（丢弃 name 字段）
+    let persona = PersonaInfo {
+        gender: review.persona_summary.gender.clone(),
+        age: review.persona_summary.age,
+        personality: review.persona_summary.personality.clone(),
+        values: review.persona_summary.values.clone(),
+    };
 
-## 意图
-{}
+    let request = ValidationRequest {
+        intent: review.intent.clone(),
+        persona,
+        world_context: review.world_context.clone(),
+    };
 
-## 人设
-{:?}
-
-## 世界上下文
-{}
-
-请按以下 JSON 格式输出（不要输出其他内容）：
-{{"result": "approved" 或 "rejected", "reason": "通过/驳回的原因"}}"#,
-        serde_json::to_string(&review.intent)?,
-        review.persona_summary,
-        review.world_context
-    );
-
-    // 结构化 JSON 解析，失败时 fallback 为 Rejected
-    let (result, response_text) = match llm_client
-        .complete_json::<serde_json::Value>(&validation_prompt)
-        .await
-    {
-        Ok(json) => {
-            let result_str = json
-                .get("result")
-                .and_then(|v| v.as_str())
-                .unwrap_or("rejected");
-            let is_approved = result_str.eq_ignore_ascii_case("approved");
-            let reason = json
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("无原因");
-            let decision = if is_approved {
-                ReviewDecision::Approved
-            } else {
-                ReviewDecision::Rejected
-            };
-            let text = format!("{}\n\n{}", result_str, reason);
-            (decision, text)
+    let (result, reason_text, narrative_text) = match validator.validate(request).await {
+        Ok(ValidationResult::Approved { reason, narrative }) => {
+            (ReviewDecision::Approved, reason.unwrap_or_default(), narrative)
+        }
+        Ok(ValidationResult::Rejected { reason, .. }) => {
+            (ReviewDecision::Rejected, reason, String::new())
         }
         Err(e) => {
-            warn!("[ReflectorSoul] JSON 解析失败，默认 Approved: {}", e);
+            // 验证失败默认为 Rejected（安全优先）
+            warn!("[ReflectorSoul] 验证失败，默认 Rejected: {}", e);
             (
-                ReviewDecision::Approved,
-                format!("ReflectorSoul JSON 解析失败，自动放行: {}", e),
+                ReviewDecision::Rejected,
+                format!("验证系统异常: {}", e),
+                String::new(),
             )
         }
     };
 
     let submission = ProtocolReviewSubmission {
         result,
-        reason: response_text.clone(),
-        narrative: None,
+        reason: reason_text.clone(),
+        narrative: if narrative_text.is_empty() {
+            None
+        } else {
+            Some(narrative_text.clone())
+        },
     };
 
-    // submit_review 需要拥有的值，不是引用
     review_store
         .submit_review(review.intent_id, submission)
         .await
@@ -1319,8 +1291,13 @@ async fn process_review_with_store(
 
     // 更新经历日志中的 observer_thought（供 Web Panel 查询）
     if let Some(history) = intent_history {
+        let observer_thought = ObserverThought {
+            result: format!("{:?}", result).to_lowercase(),
+            reason: reason_text.clone(),
+            narrative: Some(narrative_text.clone()),
+        };
         history
-            .update_observer_thought(review.intent.tick_id, response_text.clone())
+            .update_observer_thought(review.intent.tick_id, observer_thought)
             .await;
         info!(
             "[ReflectorSoul] Updated observer thought for tick {} in intent_history",

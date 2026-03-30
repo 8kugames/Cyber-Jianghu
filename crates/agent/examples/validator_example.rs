@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     // 3. 创建 IntentValidator
     // 注意：IntentValidator 是泛型的，需要指定 LLM 客户端类型
     let validator: Arc<dyn Validator> =
-        Arc::new(IntentValidator::new(world_rules.clone(), llm_client));
+        Arc::new(IntentValidator::new(world_rules.clone(), llm_client, None));
     println!("IntentValidator 已创建\n");
 
     // 4. 创建 LifespanCalculator

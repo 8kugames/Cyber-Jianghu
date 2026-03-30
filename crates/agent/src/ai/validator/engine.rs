@@ -61,12 +61,19 @@ pub struct IntentValidator {
 }
 
 impl IntentValidator {
-    /// 创建新的验证器
-    pub fn new(rules: WorldBuildingRules, llm_client: Arc<dyn LlmClient>) -> Self {
+    pub fn new(
+        rules: WorldBuildingRules,
+        llm_client: Arc<dyn LlmClient>,
+        observer_system_prompt: Option<String>,
+    ) -> Self {
+        let observer_prompt = match observer_system_prompt {
+            Some(prompt) => ObserverPrompt::with_system_prompt(prompt),
+            None => ObserverPrompt::default(),
+        };
         Self {
             rules: Arc::new(RwLock::new(rules)),
             llm_client,
-            observer_prompt: ObserverPrompt::default(),
+            observer_prompt,
         }
     }
 
@@ -239,7 +246,7 @@ mod tests {
         }"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client), None);
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -268,7 +275,7 @@ mod tests {
         }"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client), None);
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -299,7 +306,7 @@ mod tests {
             r#"{"result": "approved", "reason": "", "narrative": ""}"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client), None);
 
         // Test that update_rules doesn't panic
         let new_rules = WorldBuildingRules::default();
