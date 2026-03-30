@@ -245,14 +245,22 @@ pub fn http_decision(
             state.api_state.maybe_update_narratives(&world_state).await;
 
             // 持久化 events_log 到 IntentHistory（供经历日志查询）
+            // 即使 events_log 为空，也需要记录 world_time（用于经历日志的时间显示）
             if let Some(ref history) = state.api_state.intent_history {
                 let world_time_str = serde_json::to_string(&world_state.world_time).ok();
-                for (i, event) in world_state.events_log.iter().enumerate() {
-                    let tick_id =
-                        world_state.tick_id - (world_state.events_log.len() - i - 1) as i64;
+                if world_state.events_log.is_empty() {
+                    // 无事件时，仍记录 world_time（UPDATE 现有行或 INSERT 新行）
                     history
-                        .record_event(tick_id, &event.description, world_time_str.clone())
+                        .record_event(world_state.tick_id, "", world_time_str.clone())
                         .await;
+                } else {
+                    for (i, event) in world_state.events_log.iter().enumerate() {
+                        let tick_id =
+                            world_state.tick_id - (world_state.events_log.len() - i - 1) as i64;
+                        history
+                            .record_event(tick_id, &event.description, world_time_str.clone())
+                            .await;
+                    }
                 }
             }
 
@@ -684,9 +692,8 @@ pub fn create_http_state(
         runtime_mode,
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        llm_enabled: llm_enabled.unwrap_or_else(|| {
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))
-        }),
+        llm_enabled: llm_enabled
+            .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true))),
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -761,7 +768,10 @@ impl HttpApiState {
     }
 
     /// 设置 LLM 开关（与认知引擎共享）
-    pub fn with_llm_enabled(mut self, enabled: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+    pub fn with_llm_enabled(
+        mut self,
+        enabled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
         self.llm_enabled = enabled;
         self
     }
