@@ -8,7 +8,7 @@ use anyhow::Result;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::ai::memory::backend::MemoryBackend;
+use crate::ai::memory::backend::{MemoryBackend, SearchableBackend};
 use crate::ai::memory::{MemoryEntry, MemoryManager};
 
 /// 记忆服务
@@ -22,9 +22,45 @@ impl<'a> MemoryService<'a> {
         Self { manager }
     }
 
-    /// 获取近期记忆（工作记忆）
-    pub fn get_recent(&self) -> Vec<MemoryEntry> {
-        self.manager.working().to_vec()
+    /// 获取近期记忆（合并工作记忆 + 情景记忆，支持分页）
+    pub async fn get_recent(&mut self, page: usize, limit: usize) -> (Vec<MemoryEntry>, usize) {
+        let working = self.manager.working().to_vec();
+
+        let episodic = self
+            .manager
+            .episodic()
+            .get_recent(1000)
+            .await
+            .unwrap_or_default();
+
+        let mut seen = std::collections::HashSet::new();
+        let mut all_memories: Vec<MemoryEntry> = Vec::new();
+
+        for m in episodic {
+            let key = (m.tick_id, m.content.clone());
+            if seen.insert(key) {
+                all_memories.push(m);
+            }
+        }
+
+        for m in working {
+            let key = (m.tick_id, m.content.clone());
+            if seen.insert(key) {
+                all_memories.push(m);
+            }
+        }
+
+        all_memories.sort_by(|a, b| b.tick_id.cmp(&a.tick_id));
+
+        let total = all_memories.len();
+        let offset = (page.saturating_sub(1)) * limit;
+        let paged: Vec<MemoryEntry> = all_memories
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+
+        (paged, total)
     }
 
     /// 搜索归档记忆
@@ -69,12 +105,14 @@ pub fn memory_to_json(memory: &MemoryEntry) -> serde_json::Value {
 }
 
 /// 记忆列表转换为 JSON 响应
-pub fn memories_to_json_response(memories: &[MemoryEntry]) -> serde_json::Value {
+pub fn memories_to_json_response(memories: &[MemoryEntry], total: usize, page: usize, limit: usize) -> serde_json::Value {
     let results: Vec<serde_json::Value> = memories.iter().map(memory_to_json).collect();
+    let has_more = (page * limit) < total;
     serde_json::json!({
         "memories": results,
         "count": results.len(),
-        "has_more": false,
+        "total": total,
+        "has_more": has_more,
     })
 }
 
