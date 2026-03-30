@@ -652,8 +652,7 @@ impl Agent {
 
         // 等待 ReflectorSoul 审查结果（带超时）
         // 优先使用 pipeline_deadline 的剩余时间，fallback 到配置超时
-        let configured_timeout =
-            std::time::Duration::from_secs(self.review_config.timeout_seconds);
+        let configured_timeout = std::time::Duration::from_secs(self.review_config.timeout_seconds);
         let deadline = match pipeline_deadline {
             Some(dl) => {
                 let remaining = dl.saturating_duration_since(Instant::now());

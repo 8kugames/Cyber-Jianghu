@@ -121,15 +121,18 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                     if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text)
                         && response.get("type").and_then(|t| t.as_str()) == Some("llm_response")
                     {
-                        let request_id = response.get("request_id")
+                        let request_id = response
+                            .get("request_id")
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_string();
-                        let content = response.get("content")
+                        let content = response
+                            .get("content")
                             .and_then(|v| v.as_str())
                             .unwrap_or_default()
                             .to_string();
-                        let error = response.get("error")
+                        let error = response
+                            .get("error")
                             .and_then(|v| v.as_str())
                             .map(|s| s.to_string());
 
@@ -148,8 +151,11 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                         Ok(upstream) => {
                             // 处理 Ping 消息（OpenClaw -> Agent）
                             if let UpstreamMessage::Ping { timestamp } = upstream {
-                                let pong_timestamp = timestamp.unwrap_or_else(|| Utc::now().timestamp_millis());
-                                let pong = DownstreamMessage::Pong { timestamp: pong_timestamp };
+                                let pong_timestamp =
+                                    timestamp.unwrap_or_else(|| Utc::now().timestamp_millis());
+                                let pong = DownstreamMessage::Pong {
+                                    timestamp: pong_timestamp,
+                                };
                                 if let Ok(json) = serde_json::to_string(&pong) {
                                     let mut tx = ws_tx.lock().await;
                                     let _ = tx.send(Message::Text(json.into())).await;

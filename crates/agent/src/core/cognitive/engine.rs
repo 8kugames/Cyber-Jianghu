@@ -261,13 +261,22 @@ impl MultiStageCognitiveEngine {
         let stage_timeout = match Self::stage_timeout(deadline, STAGE_TIMEOUT_SECS) {
             Some(t) => t,
             None => {
-                warn!("[{}-{}] 剩余时间不足，跳过 PerceptionMotivationPlanning 阶段", name, tick_id);
+                warn!(
+                    "[{}-{}] 剩余时间不足，跳过 PerceptionMotivationPlanning 阶段",
+                    name, tick_id
+                );
                 return CognitiveOutcome::DeadlineExceeded;
             }
         };
         let pmp_result = timeout(
             stage_timeout,
-            self.perceive_motivate_and_plan(world_state, "", validation_feedback, &persona_desc, cfg),
+            self.perceive_motivate_and_plan(
+                world_state,
+                "",
+                validation_feedback,
+                &persona_desc,
+                cfg,
+            ),
         )
         .await;
 
@@ -285,7 +294,9 @@ impl MultiStageCognitiveEngine {
             Err(_) => {
                 warn!(
                     "[{}-{}] PerceptionMotivationPlanning 阶段超时 ({}s)，使用默认响应",
-                    name, tick_id, stage_timeout.as_secs()
+                    name,
+                    tick_id,
+                    stage_timeout.as_secs()
                 );
                 let default_perception = StageOutput::new(
                     CognitiveStage::Perception,
@@ -299,7 +310,12 @@ impl MultiStageCognitiveEngine {
                     CognitiveStage::Planning,
                     "计划步骤:\n1. 原地休息观察\n预期结果: 保持现状 (优先级: 5/10)".to_string(),
                 );
-                ("{}".to_string(), default_perception, default_motivation, default_planning)
+                (
+                    "{}".to_string(),
+                    default_perception,
+                    default_motivation,
+                    default_planning,
+                )
             }
         };
         chain.add_stage(perception);
@@ -323,7 +339,11 @@ impl MultiStageCognitiveEngine {
                 return CognitiveOutcome::DeadlineExceeded;
             }
         };
-        let decision_result = timeout(stage_timeout, self.decide(world_state, chain, &persona_desc, cfg)).await;
+        let decision_result = timeout(
+            stage_timeout,
+            self.decide(world_state, chain, &persona_desc, cfg),
+        )
+        .await;
 
         let (decision_response, decision, intent) = match decision_result {
             Ok(Ok(r)) => r,
@@ -339,7 +359,9 @@ impl MultiStageCognitiveEngine {
             Err(_) => {
                 warn!(
                     "[{}-{}] Decision 阶段超时 ({}s)，回退 idle",
-                    name, tick_id, stage_timeout.as_secs()
+                    name,
+                    tick_id,
+                    stage_timeout.as_secs()
                 );
                 let agent_id = world_state.agent_id.unwrap_or_default();
                 let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
@@ -361,7 +383,13 @@ impl MultiStageCognitiveEngine {
         };
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(name, tick_id, "Decision", &decision_prompt, &decision_response);
+        thinking_log::log_llm(
+            name,
+            tick_id,
+            "Decision",
+            &decision_prompt,
+            &decision_response,
+        );
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
         info!(
@@ -441,7 +469,12 @@ impl MultiStageCognitiveEngine {
         perception: &StageOutput,
         cfg: &CognitiveEngineConfig,
     ) -> Result<(StageOutput, StageOutput)> {
-        let prompt = self.build_motivation_planning_prompt(world_state, perception, &cfg.persona.generate_description(), cfg);
+        let prompt = self.build_motivation_planning_prompt(
+            world_state,
+            perception,
+            &cfg.persona.generate_description(),
+            cfg,
+        );
 
         let response: MotivationPlanningResponse = self.llm_client.complete_json(&prompt).await?;
 
