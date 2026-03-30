@@ -38,8 +38,7 @@ async function loadStats() {
         document.getElementById("stats-grid").innerHTML = statsHtml;
         document.getElementById("world-overview").textContent = data.world_overview || "暂无世界事件日志...";
 
-        await loadStatusConfigs();
-        await loadAllAgents();
+        await Promise.all([loadStatusConfigs(), loadAllAgents()]);
     } catch (e) {
         console.error("Failed to load stats", e);
     }
