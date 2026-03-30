@@ -60,6 +60,8 @@ struct ConnectionState {
     world_building_rules_callback: Option<Arc<dyn Fn(WorldBuildingRules) + Send + Sync>>,
     /// Server 消息透传回调（用于 OpenClaw 集成）
     server_msg_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
+    /// 缓冲的 WorldState（try_peek_latest_tick 探测到的更新 tick）
+    pending_world_state: Option<WorldState>,
 }
 
 impl WebSocketClient {
@@ -78,6 +80,7 @@ impl WebSocketClient {
                 dialogue_callback: None,
                 world_building_rules_callback: None,
                 server_msg_callback: None,
+                pending_world_state: None,
             })),
         }
     }
@@ -439,10 +442,114 @@ impl WebSocketClient {
 
     /// 接收 WorldState（阻塞直到收到）
     pub async fn receive_world_state(&self) -> Result<WorldState> {
+        // 先检查缓冲（try_peek_latest_tick 可能已探测到更新的 WorldState）
+        {
+            let mut state = self.state.write().await;
+            if let Some(ws) = state.pending_world_state.take() {
+                debug!("Returning buffered WorldState: tick_id={}", ws.tick_id);
+                return Ok(ws);
+            }
+        }
         loop {
             match self.receive_and_handle_message().await? {
                 Some(world_state) => return Ok(world_state),
                 None => continue,
+            }
+        }
+    }
+
+    /// 非阻塞探测最新的 tick_id
+    ///
+    /// 在发送 intent 前调用，检测认知周期期间是否收到了新的 WorldState。
+    /// 如果有，缓冲该 WorldState（下次 receive_world_state 会优先返回）并返回新 tick_id。
+    pub async fn try_peek_latest_tick(&self) -> Option<i64> {
+        // 50ms 超时：足够检测已缓冲的消息，不会阻塞太久
+        let timeout = tokio::time::Duration::from_millis(50);
+
+        // 获取回调的克隆
+        let (game_rules_cb, _dialogue_cb, _world_building_rules_cb, server_msg_cb) = {
+            let state = self.state.read().await;
+            (
+                state.game_rules_callback.clone(),
+                state.dialogue_callback.clone(),
+                state.world_building_rules_callback.clone(),
+                state.server_msg_callback.clone(),
+            )
+        };
+
+        let mut iterations = 0u32;
+        const MAX_PEEK_ITERATIONS: u32 = 10;
+        loop {
+            iterations += 1;
+            if iterations > MAX_PEEK_ITERATIONS {
+                debug!("Peek loop hit max iterations, stopping");
+                return None;
+            }
+            let message_result = {
+                let mut state = self.state.write().await;
+                let ws = match state.ws.as_mut() {
+                    Some(ws) => ws,
+                    None => return None,
+                };
+                tokio::select! {
+                    msg = ws.next() => msg,
+                    _ = tokio::time::sleep(timeout) => return None,
+                }
+            };
+
+            match message_result {
+                Some(Ok(Message::Text(text))) => {
+                    match serde_json::from_str::<ServerMessage>(&text) {
+                        Ok(ServerMessage::WorldState { data }) => {
+                            let new_tick = data.tick_id;
+                            debug!("Peeked newer WorldState: tick_id={}, buffering", new_tick);
+                            let mut state = self.state.write().await;
+                            state.pending_world_state = Some(data);
+                            return Some(new_tick);
+                        }
+                        Ok(msg @ ServerMessage::GameRulesUpdate { .. }) => {
+                            if let ServerMessage::GameRulesUpdate { ref game_rules } = msg {
+                                let mut state = self.state.write().await;
+                                state.game_rules = Some(game_rules.clone());
+                                if let Some(ref cb) = game_rules_cb {
+                                    cb(game_rules.clone());
+                                }
+                            }
+                            // 继续探测
+                        }
+                        Ok(msg @ ServerMessage::Error { .. }) => {
+                            if let ServerMessage::Error { ref message } = msg {
+                                warn!("Server error (during peek): {}", message);
+                            }
+                            if let Some(ref cb) = server_msg_cb {
+                                cb(msg);
+                            }
+                            // 继续探测
+                        }
+                        Ok(msg) => {
+                            // 其他消息正常处理
+                            if let Some(ref cb) = server_msg_cb {
+                                cb(msg);
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                Some(Ok(Message::Close(_))) | None => {
+                    let mut state = self.state.write().await;
+                    state.connected = false;
+                    state.ws = None;
+                    return None;
+                }
+                Some(Err(e)) => {
+                    error!("WebSocket error (during peek): {}", e);
+                    let mut state = self.state.write().await;
+                    state.connected = false;
+                    state.ws = None;
+                    return None;
+                }
+                _ => {}
             }
         }
     }
@@ -533,6 +640,12 @@ impl AgentClient {
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
         let client = self.client.read().await;
         client.send_intent(intent).await
+    }
+
+    /// 非阻塞探测最新的 tick_id（委托到 WebSocketClient）
+    pub async fn try_peek_latest_tick(&self) -> Option<i64> {
+        let client = self.client.read().await;
+        client.try_peek_latest_tick().await
     }
 
     pub async fn is_connected(&self) -> bool {
