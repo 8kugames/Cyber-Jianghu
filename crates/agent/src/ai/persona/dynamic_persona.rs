@@ -268,12 +268,15 @@ impl ThreadSafePersona {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::prompts;
+    use crate::ai::prompts::AgentPrompt;
 
     #[test]
     fn test_persona_from_preset() {
         let agent_id = Uuid::new_v4();
-        let preset = prompts::liu_yunnang();
+        let preset = AgentPrompt {
+            name: "柳云娘",
+            system_prompt: "你是龙门客栈的老板娘柳云娘。三十出头，精明能干，八面玲珑。",
+        };
         let persona = DynamicPersona::from_preset(agent_id, &preset);
 
         assert_eq!(persona.name, "柳云娘");

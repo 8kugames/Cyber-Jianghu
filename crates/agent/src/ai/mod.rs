@@ -36,11 +36,12 @@ pub use persona::{
 };
 
 // 重导出 Prompt 模板
-pub use prompts::{AgentPrompt, get_agent_prompt, get_all_agent_prompts};
+pub use prompts::AgentPrompt;
 
 // 重导出验证器
 pub use validator::{
-    IntentValidator, PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
+    CognitiveValidator, IntentValidator, PersonaInfo, RejectionType, ValidationRequest,
+    ValidationResult, Validator,
 };
 
 // 重导出记忆系统
