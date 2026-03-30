@@ -41,6 +41,7 @@ logs/
 
 # Docker相关
 docker compose.override.yml
+docker-compose.test.yml
 
 # 数据库文件（本地开发）
 *.db
@@ -76,12 +77,14 @@ venv/
 env/
 ENV/
 .venv
+.ruff_cache
 
 # IDE配置文件
 .claude/
 docs/superpowers/*
 .trae/
 .vscode/
+
 *.swp
 *.swo
 *~
@@ -104,6 +107,9 @@ $RECYCLE.BIN/
 *.backup
 *~
 
+agent.yaml
+scripts/test/
+
 # 测试覆盖率报告
 coverage/
 *.lcov
@@ -119,5 +125,3 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
-agent.yaml
-integration/openclaw/docker-compose.yml
