@@ -16,9 +16,9 @@ use crate::ai::lifespan::LifespanCalculator;
 use crate::ai::llm::LlmClient;
 use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
 use crate::ai::relationship::RelationshipStore;
-use crate::ai::validator::{IntentValidator, Validator};
+use crate::ai::validator::{CognitiveValidator, IntentValidator, Validator};
 use crate::config::{Config, ReviewConfig};
-use crate::core::cognitive::MultiStageCognitiveEngine;
+use crate::core::cognitive::{CognitiveChain, MultiStageCognitiveEngine};
 use crate::runtime::claw::LlmClientContainer;
 use crate::runtime::decision::http::{HttpApiState, ReconnectRequest, review::ReviewStore};
 use crate::transport::websocket::AgentClient;
@@ -59,6 +59,9 @@ pub struct AgentBuilder {
     http_api_state: Option<Arc<HttpApiState>>,
     /// 认知引擎引用（可选，用于 config reload 时更新人设）
     cognitive_engine: Option<Arc<MultiStageCognitiveEngine>>,
+    /// 认知链验证器（可选，用于验证认知链质量）
+    cognitive_validator: Option<std::sync::Arc<CognitiveValidator>>,
+    last_cognitive_chain_store: Option<Arc<tokio::sync::RwLock<Option<CognitiveChain>>>>,
 }
 
 impl AgentBuilder {
@@ -85,6 +88,8 @@ impl AgentBuilder {
             config_reload_rx: None,
             http_api_state: None,
             cognitive_engine: None,
+            cognitive_validator: None,
+            last_cognitive_chain_store: None,
         }
     }
 
@@ -132,14 +137,17 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 LLM 客户端（自动创建 IntentValidator）
     pub fn with_llm_client(
         mut self,
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
         let rules = rules.unwrap_or_default();
-        let validator = Arc::new(IntentValidator::new(rules, llm_client.clone()));
+        let validator = Arc::new(IntentValidator::new(
+            rules,
+            llm_client.clone(),
+            self.validator_config.observer_system_prompt.clone(),
+        ));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
         self
@@ -197,8 +205,25 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置认知验证器（用于验证认知链质量）
+    pub fn with_cognitive_validator(
+        mut self,
+        validator: std::sync::Arc<CognitiveValidator>,
+    ) -> Self {
+        self.cognitive_validator = Some(validator);
+        self
+    }
+
+    pub fn with_last_cognitive_chain_store(
+        mut self,
+        store: Arc<tokio::sync::RwLock<Option<CognitiveChain>>>,
+    ) -> Self {
+        self.last_cognitive_chain_store = Some(store);
+        self
+    }
+
     /// 构建 Agent
-    pub fn build(self) -> Agent {
+    pub fn build(mut self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
 
         // 设置设备身份（如果已存在）
@@ -246,6 +271,35 @@ impl AgentBuilder {
             None
         };
 
+        let last_cognitive_chain = self
+            .last_cognitive_chain_store
+            .unwrap_or_else(|| Arc::new(tokio::sync::RwLock::new(None::<CognitiveChain>)));
+
+        // 如果有认知引擎，包装决策回调以捕获认知链
+        if let Some(ref engine) = self.cognitive_engine {
+            let chain_store = last_cognitive_chain.clone();
+            let cb = self.decision_callback;
+            let engine = engine.clone();
+            self.decision_callback = std::sync::Arc::new(move |ws: &cyber_jianghu_protocol::WorldState| {
+                let engine = engine.clone();
+                let cb = cb.clone();
+                let ws = ws.clone();
+                let chain_store = chain_store.clone();
+                Box::pin(async move {
+                    match engine.think(&ws).await {
+                        Ok(chain) => {
+                            let mut locked = chain_store.write().await;
+                            *locked = Some(chain.clone());
+                            chain.final_intent
+                        }
+                        Err(_) => cb(&ws).await,
+                    }
+                })
+            });
+        }
+
+        let cognitive_engine = self.cognitive_engine.clone();
+
         Agent {
             config: self.config,
             client,
@@ -268,7 +322,9 @@ impl AgentBuilder {
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
-            cognitive_engine: self.cognitive_engine,
+            cognitive_engine,
+            cognitive_validator: self.cognitive_validator,
+            last_cognitive_chain,
         }
     }
 }
