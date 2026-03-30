@@ -73,7 +73,7 @@ pub use core::{Agent, AgentBuilder};
 pub use runtime::{
     CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
     DecisionWithMemoryCallback, HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest,
-    claw, cognitive_decision, cognitive_decision_with_retry, create_http_state, http_decision,
+    claw, cognitive_decision, cognitive_decision_with_retry, cognitive_decision_with_retry_with_chain_store, create_http_state, http_decision,
     run_http_server,
 };
 
@@ -93,10 +93,11 @@ pub use ai::persona::{
     event_mapper::{EventTraitMapper, TraitMappingRule},
     trait_types::{Trait, TraitChange, TraitType},
 };
-pub use ai::prompts::{AgentPrompt, get_agent_prompt, get_all_agent_prompts};
+pub use ai::prompts::AgentPrompt;
 pub use ai::relationship::{KeyEvent, RelationshipMemory, RelationshipStore};
 pub use ai::validator::{
-    IntentValidator, PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
+    CognitiveValidator, IntentValidator, PersonaInfo, RejectionType, ValidationRequest,
+    ValidationResult, Validator,
 };
 
 // 配置

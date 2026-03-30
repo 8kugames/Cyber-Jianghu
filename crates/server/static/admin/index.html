@@ -87,6 +87,7 @@
                                 "
                             >
                                 <h2
+                                    id="agents-total-title"
                                     style="
                                         margin: 0;
                                         color: var(--primary-color);
@@ -169,8 +170,8 @@
                         >
                     </div>
                     <div class="modal-tabs">
-                        <button class="modal-tab active" onclick="switchModalTab('basic')">基本信息</button>
-                        <button class="modal-tab" onclick="switchModalTab('experiences')">经历日志</button>
+                        <button class="modal-tab active" data-tab="basic" onclick="switchModalTab('basic')">基本信息</button>
+                        <button class="modal-tab" data-tab="experiences" onclick="switchModalTab('experiences')">经历日志</button>
                     </div>
                     <div class="modal-body" id="modal-agent-body">
                         <div id="modal-tab-basic" class="modal-tab-content active"></div>

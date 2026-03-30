@@ -6,6 +6,7 @@
 async function loadStatusConfigs() {
     try {
         var res = await fetch("/api/dashboard/status-configs", { headers: getAuthHeaders() });
+        if (handleAuthError(res)) return;
         if (res.ok) {
             var configs = await res.json();
             configs.forEach(function (cfg) {
@@ -52,8 +53,8 @@ function renderAgents() {
     }
 
     var filteredAgents = sourceData.filter(function (agent) {
-        return agent.name.toLowerCase().includes(filterText) ||
-            agent.location.toLowerCase().includes(filterText);
+        return (agent.name || "").toLowerCase().includes(filterText) ||
+            (agent.location || "").toLowerCase().includes(filterText);
     });
 
     if (filteredAgents.length === 0) {
@@ -116,8 +117,8 @@ function renderAgents() {
 
             '<div class="device-id">' + deviceIdShort + '</div>' +
             '<div class="agent-id">' + agentIdShort + '</div>' +
-            '<div class="agent-name">' + agent.name + '</div>' +
-            '<div class="location">' + getLocationName(agent.location) + '</div>' +
+            '<div class="agent-name">' + escapeHtml(agent.name) + '</div>' +
+            '<div class="location">' + escapeHtml(getLocationName(agent.location)) + '</div>' +
             '<div class="status"><span class="status-badge status-' + agent.status + '">' + getStatusText(agent.status) + '</span></div>' +
             '<div class="last-active">' + formatLastActive(agent.last_active) + '</div>' +
             '<div class="last-tick">' + (agent.last_tick_id || '-') + '</div>' +
@@ -141,7 +142,7 @@ function updateAgentCounts() {
         dead: allAgents.filter(function (a) { return a.status === "dead"; }).length
     } : { total: 0, online: 0, offline: 0, dead: 0 };
 
-    document.querySelector("#dashboard h2").textContent = "所有角色 (" + counts.total + ")";
+    document.getElementById("agents-total-title").textContent = "所有角色 (" + counts.total + ")";
     document.getElementById("online-count").textContent = counts.online;
     document.getElementById("offline-count").textContent = counts.offline;
     document.getElementById("dead-count").textContent = counts.dead;
@@ -198,8 +199,9 @@ async function openAgentModal(agentId) {
 
 function switchModalTab(tab) {
     document.querySelectorAll(".modal-tab").forEach(function (t) { t.classList.remove("active"); });
-    event.target.classList.add("active");
     document.querySelectorAll(".modal-tab-content").forEach(function (c) { c.classList.remove("active"); });
+    var tabBtn = document.querySelector('.modal-tab[data-tab="' + tab + '"]');
+    if (tabBtn) tabBtn.classList.add("active");
     document.getElementById("modal-tab-" + tab).classList.add("active");
 }
 
@@ -213,12 +215,12 @@ window.onclick = function (event) {
 };
 
 function renderBasicInfo(agent) {
-    var inventoryHtml = agent.inventory.length === 0
+    var inventoryHtml = (agent.inventory || []).length === 0
         ? '<div style="color: #999; font-size: 13px; text-align: center; padding: 10px;">空空如也</div>'
         : '<div class="inventory-grid">' +
         agent.inventory.map(function (item) {
             return '<div class="inventory-item ' + (item.is_equipped ? "equipped" : "") + '">' +
-                '<div style="margin-bottom: 2px;">' + item.name + '</div>' +
+                '<div style="margin-bottom: 2px;">' + escapeHtml(item.name) + '</div>' +
                 '<div style="font-weight: 600; color: #666;">x' + item.count + '</div></div>';
         }).join("") + '</div>';
 
@@ -260,7 +262,7 @@ function renderBasicInfo(agent) {
         '<div class="detail-section">' +
         '<div class="detail-title">人设 Prompt</div>' +
         '<div style="font-size: 12px; color: #555; background: #f8f9fa; padding: 10px; border-radius: 4px; line-height: 1.4; max-height: 150px; overflow-y: auto;">' +
-        (agent.system_prompt || "") +
+        escapeHtml(agent.system_prompt || "") +
         '</div></div>' +
         '</div>';
 }
@@ -274,42 +276,72 @@ function renderExperiences(data) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
         var actionData = exp.action_data || {};
         var actionSummary = formatActionSummary(exp.action_type, actionData);
+
+        var narrativeBlocks = '';
+
+        if (exp.thought_log) {
+            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #6c5ce7; background: #f8f4ff; padding: 8px; border-radius: 4px; border-left: 2px solid #6c5ce7;">' +
+                '<strong style="display: block; margin-bottom: 4px;">&#x1F916; ActorSoul 思考:</strong>' +
+                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.thought_log) + '</div></div>';
+        }
+
+        if (exp.observer_thought) {
+            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #e17055; background: #fff4f0; padding: 8px; border-radius: 4px; border-left: 2px solid #e17055;">' +
+                '<strong style="display: block; margin-bottom: 4px;">&#x1F9D9; ReflectorSoul 审查:</strong>' +
+                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.observer_thought) + '</div></div>';
+        }
+
+        if (exp.narrative) {
+            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #00b894; background: #f0fff4; padding: 8px; border-radius: 4px; border-left: 2px solid #00b894;">' +
+                '<strong style="display: block; margin-bottom: 4px;">&#x1F4DD; 叙事:</strong>' +
+                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.narrative) + '</div></div>';
+        }
+
         return '<div style="border-left: 3px solid var(--accent-color); padding: 12px; margin-bottom: 12px; background: #f8f9fa; border-radius: 0 8px 8px 0;">' +
             '<div style="display: flex; justify-content: space-between; margin-bottom: 8px;">' +
-            '<span style="font-weight: 600; color: var(--primary-color);">' + exp.action_type + '</span>' +
+            '<span style="font-weight: 600; color: var(--primary-color);">' + escapeHtml(exp.action_type) + '</span>' +
             '<span style="font-size: 12px; color: #999;">' + time + '</span></div>' +
             '<div style="font-size: 14px; margin-bottom: 6px;">' + actionSummary + '</div>' +
-            (exp.result ? '<div style="font-size: 13px; color: #27ae60; font-style: italic; background: white; padding: 8px; border-radius: 4px;"><strong>结果:</strong> ' + exp.result + '</div>' : '') +
+            narrativeBlocks +
+            (exp.result ? '<div style="font-size: 13px; color: #27ae60; font-style: italic; background: white; padding: 8px; border-radius: 4px; margin-top: 8px;"><strong>结果:</strong> ' + escapeHtml(exp.result) + '</div>' : '') +
             '</div>';
     }).join("");
 
     return '<div class="experiences-list">' + expHtml + '</div>';
 }
 
+function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function formatActionSummary(actionType, actionData) {
+    actionData = actionData || {};
     switch (actionType) {
         case "move":
-            return "<strong>移动至:</strong> " + getLocationName(actionData.target_location || actionData.target || "未知");
+            return "<strong>移动至:</strong> " + escapeHtml(getLocationName(actionData.target_location || actionData.target || "未知"));
         case "rest":
             return "<strong>休息恢复</strong>";
         case "eat":
-            return "<strong>进食:</strong> " + (actionData.item_name || actionData.food || "食物");
+            return "<strong>进食:</strong> " + escapeHtml(actionData.item_name || actionData.food || "食物");
         case "drink":
-            return "<strong>饮水:</strong> " + (actionData.item_name || actionData.drink || "水");
+            return "<strong>饮水:</strong> " + escapeHtml(actionData.item_name || actionData.drink || "水");
         case "speak":
             var content = actionData.content || "...";
             var preview = content.length > 50 ? content.substring(0, 50) + "..." : content;
-            return '<strong>对话:</strong> "' + preview + '"';
+            return '<strong>对话:</strong> "' + escapeHtml(preview) + '"';
         case "idle":
             return "<strong>静待时机</strong>";
         case "craft":
-            return "<strong>制作:</strong> " + (actionData.recipe_id || actionData.recipe || "物品");
+            return "<strong>制作:</strong> " + escapeHtml(actionData.recipe_id || actionData.recipe || "物品");
         case "pickup":
-            return "<strong>拾取:</strong> " + (actionData.item_name || actionData.item || "物品");
+            return "<strong>拾取:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
         case "drop":
-            return "<strong>丢弃:</strong> " + (actionData.item_name || actionData.item || "物品");
+            return "<strong>丢弃:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
         default:
-            return "<strong>" + actionType + "</strong>";
+            return "<strong>" + escapeHtml(actionType) + "</strong>";
     }
 }
 
