@@ -166,6 +166,10 @@ pub struct GameRulesData {
     /// Agent状态配置
     pub agent_state: AgentStateRulesData,
 
+    /// Agent状态定义（数据驱动）
+    #[serde(default)]
+    pub agent_statuses: std::collections::HashMap<String, AgentStatusConfig>,
+
     /// 验证配置
     pub validation: ValidationRulesData,
 
@@ -175,6 +179,19 @@ pub struct GameRulesData {
     /// 死亡默认配置（当属性未配置 death_cause/death_message 时使用）
     #[serde(default)]
     pub death_defaults: Option<DeathDefaultsData>,
+}
+
+/// Agent 状态配置（数据驱动）
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AgentStatusConfig {
+    /// 显示名称
+    pub display_name: String,
+    /// 描述
+    pub description: String,
+    /// 颜色（十六进制）
+    pub color: String,
+    /// 排序顺序
+    pub sort_order: i32,
 }
 
 /// 运维与监控规则数据
