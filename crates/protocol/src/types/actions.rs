@@ -130,6 +130,16 @@ pub struct Intent {
     /// 优先级（1-10，1 最高）
     #[serde(default = "default_priority")]
     pub priority: i32,
+
+    /// 反思之魂的审查意见（result + reason）
+    ///
+    /// 审查通过时包含 reason，审查拒绝时也包含 reason
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observer_thought: Option<String>,
+
+    /// 叙事化描述（ReflectorSoul 生成的经历描述）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrative: Option<String>,
 }
 
 fn default_priority() -> i32 {
@@ -152,6 +162,8 @@ impl Intent {
             action_type: action_type.into(),
             action_data,
             priority: 5,
+            observer_thought: None,
+            narrative: None,
         }
     }
 
@@ -171,12 +183,26 @@ impl Intent {
             action_type: action_type.into(),
             action_data,
             priority: 5,
+            observer_thought: None,
+            narrative: None,
         }
     }
 
     /// 设置思考日志
     pub fn with_thought(mut self, thought: String) -> Self {
         self.thought_log = Some(thought);
+        self
+    }
+
+    /// 设置反思之魂审查意见
+    pub fn with_observer_thought(mut self, thought: String) -> Self {
+        self.observer_thought = Some(thought);
+        self
+    }
+
+    /// 设置叙事化描述
+    pub fn with_narrative(mut self, narrative: String) -> Self {
+        self.narrative = Some(narrative);
         self
     }
 }

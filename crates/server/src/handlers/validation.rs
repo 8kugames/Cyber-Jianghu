@@ -106,6 +106,8 @@ pub async fn validate_action(
         action_type,
         action_data: req.data,
         priority: 5,
+        observer_thought: None,
+        narrative: None,
     };
 
     // For now, just return valid for alive agents
