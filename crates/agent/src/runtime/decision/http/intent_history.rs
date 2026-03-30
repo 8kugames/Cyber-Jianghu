@@ -17,6 +17,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+/// Observer 反思之魂的审查意见
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ObserverThought {
+    /// 审查结果（approved/rejected）
+    pub result: String,
+    /// 审查原因
+    pub reason: String,
+    /// 叙事化描述
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narrative: Option<String>,
+}
+
 /// Intent 历史条目
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntentHistoryEntry {
@@ -28,8 +40,8 @@ pub struct IntentHistoryEntry {
     pub action_type: String,
     /// Agent 思考日志（intent_summary 的来源）
     pub thought_log: Option<String>,
-    /// Observer 思维链
-    pub observer_thought: Option<String>,
+    /// Observer 思维链（结构化）
+    pub observer_thought: Option<ObserverThought>,
     /// 事件描述（来自 WorldState.events_log）
     pub event: Option<String>,
     /// 世界时间（来自 WorldState.world_time）
@@ -180,24 +192,24 @@ impl IntentHistoryStore {
     /// ReflectorSoul 审查可能在 ActorSoul 记录 intent 之前完成，
     /// 因此使用 upsert：先尝试 UPDATE，若行不存在则 INSERT 占位行，
     /// 等 `record_intent()` 调用时再补全字段。
-    pub async fn update_observer_thought(&self, tick_id: i64, thought: String) {
+    pub async fn update_observer_thought(&self, tick_id: i64, thought: ObserverThought) {
         let conn = self.conn.lock().expect("intent_history lock not poisoned");
+        let json = serde_json::to_string(&thought).unwrap_or_default();
 
         let updated = conn
             .execute(
                 "UPDATE intent_history SET observer_thought = ?1 WHERE tick_id = ?2",
-                params![thought, tick_id],
+                params![json, tick_id],
             )
             .unwrap_or(0);
 
         if updated == 0 {
-            // ReflectorSoul 先于 record_intent() 完成，插入占位行
             let created_at = Utc::now().to_rfc3339();
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO intent_history
                  (tick_id, intent_id, action_type, observer_thought, created_at)
                  VALUES (?1, ?2, '', ?3, ?4)",
-                params![tick_id, Uuid::nil().to_string(), thought, created_at],
+                params![tick_id, Uuid::nil().to_string(), json, created_at],
             );
             tracing::debug!(
                 "[intent_history] Inserted stub for tick {} (observer thought arrived first)",
@@ -264,6 +276,11 @@ impl IntentHistoryStore {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
 
+        let observer_thought: Option<ObserverThought> = row
+            .get::<_, String>(4)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok());
+
         IntentHistoryEntry {
             tick_id: row.get(0).unwrap_or(0),
             intent_id: row
@@ -273,7 +290,7 @@ impl IntentHistoryStore {
                 .unwrap_or(Uuid::nil()),
             action_type: row.get(2).unwrap_or_default(),
             thought_log: row.get(3).ok(),
-            observer_thought: row.get(4).ok(),
+            observer_thought,
             event: row.get(5).ok(),
             world_time: row.get(6).ok(),
             created_at,
@@ -355,11 +372,25 @@ mod tests {
             .await;
 
         store
-            .update_observer_thought(1, "这个行为符合人设".to_string())
+            .update_observer_thought(
+                1,
+                ObserverThought {
+                    result: "approved".to_string(),
+                    reason: "这个行为符合人设".to_string(),
+                    narrative: Some("在江湖中行走，乐于助人是美德".to_string()),
+                },
+            )
             .await;
 
         let entry = store.get_by_tick(1).await.unwrap();
-        assert_eq!(entry.observer_thought, Some("这个行为符合人设".to_string()));
+        assert!(entry.observer_thought.is_some());
+        let ot = entry.observer_thought.unwrap();
+        assert_eq!(ot.result, "approved");
+        assert_eq!(ot.reason, "这个行为符合人设");
+        assert_eq!(
+            ot.narrative,
+            Some("在江湖中行走，乐于助人是美德".to_string())
+        );
     }
 
     #[tokio::test]

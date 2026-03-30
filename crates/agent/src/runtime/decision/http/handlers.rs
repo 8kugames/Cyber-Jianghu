@@ -1829,7 +1829,9 @@ pub(super) async fn get_experiences_handler(
                 created_at: e.created_at.to_rfc3339(),
                 event: e.event.unwrap_or_default(),
                 action_type: Some(e.action_type).filter(|s| !s.is_empty()),
-                observer_thought: e.observer_thought,
+                observer_thought: e
+                    .observer_thought
+                    .map(|ot| serde_json::to_string(&ot).unwrap_or_default()),
                 intent_summary: e.thought_log,
             }
         })

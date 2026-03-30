@@ -306,11 +306,14 @@ pub async fn submit_review(
         .await
     {
         Ok(result) => {
-            // 更新 intent_history 中的 observer_thought
             if let (Some(tick_id), Some(history)) = (tick_id, &api_state.intent_history) {
-                // 使用 reason 作为 observer_thought（审查原因即 Observer 的思维链）
+                let observer_thought = super::intent_history::ObserverThought {
+                    result: format!("{:?}", submission.result).to_lowercase(),
+                    reason: submission.reason.clone(),
+                    narrative: submission.narrative.clone(),
+                };
                 history
-                    .update_observer_thought(tick_id, submission.reason.clone())
+                    .update_observer_thought(tick_id, observer_thought)
                     .await;
                 info!(
                     "[review] Updated observer thought for tick {} in intent_history",
