@@ -41,6 +41,11 @@ data:
       # 设为 0 可禁用收集窗口
       collection_window_secs: 5
 
+    # 生存底线配置
+    survival:
+      # hunger/thirst 低于此阈值时，survival 动作绕过 ReflectorSoul 审查
+      critical_threshold: 30
+
     # 出生点配置
     location:
       spawn_location: "longmen_lobby"

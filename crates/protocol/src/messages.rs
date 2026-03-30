@@ -102,6 +102,7 @@ pub struct DialogueSession {
 ///     available_actions: vec![],
 ///     initial_items: vec![],
 ///     survival_actions: vec![],
+///     survival_threshold: 30,
 ///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
 /// };
@@ -343,6 +344,7 @@ mod tests {
             available_actions: vec![],
             initial_items: vec![],
             survival_actions: vec![],
+            survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };
@@ -481,6 +483,7 @@ mod tests {
             available_actions: vec![],
             initial_items: vec![],
             survival_actions: vec![],
+            survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };

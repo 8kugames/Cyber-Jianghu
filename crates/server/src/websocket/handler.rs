@@ -210,10 +210,15 @@ async fn handle_websocket(
         // 从配置构建 GameRules
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
+        let survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
         let game_rules_version = gd.game_rules.version.clone();
         drop(gd);
 
-        let game_rules = build_game_rules_from_config(tick_duration_secs, game_rules_version);
+        let game_rules = build_game_rules_from_config(
+            tick_duration_secs,
+            survival_threshold,
+            game_rules_version,
+        );
 
         // 加载世界观规则（可选）
         let world_building_rules = load_world_building_rules();
@@ -634,6 +639,8 @@ async fn handle_intent(
         action_type: action,
         action_data,
         priority,
+        observer_thought: None,
+        narrative: None,
     };
 
     // 保存到 IntentManager（临时缓存）

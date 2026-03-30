@@ -4,6 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_survival_threshold() -> i32 {
+    30
+}
+
 use super::entities::{AvailableAction, InitialItem};
 
 /// 游戏规则
@@ -23,6 +27,10 @@ pub struct GameRules {
     /// 生存相关动作列表（hunger/thirst 低于阈值时绕过 ReflectorSoul 审查）
     #[serde(default)]
     pub survival_actions: Vec<String>,
+
+    /// 生存底线阈值（hunger/thirst 低于此值时触发 survival 动作绕过审查）
+    #[serde(default = "default_survival_threshold")]
+    pub survival_threshold: i32,
 
     /// 规则版本（用于检测变更）
     pub version: String,

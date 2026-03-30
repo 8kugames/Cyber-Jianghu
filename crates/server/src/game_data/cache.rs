@@ -236,6 +236,9 @@ mod tests {
                             real_seconds_per_tick: 60,
                             collection_window_secs: 5,
                         },
+                        survival: SurvivalRulesData {
+                            critical_threshold: 30,
+                        },
                         location: LocationRulesData {
                             spawn_location: "longmen_inn".to_string(),
                         },
