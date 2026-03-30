@@ -20,6 +20,10 @@ pub struct GameRules {
     /// 初始物品（注册时发放）
     pub initial_items: Vec<InitialItem>,
 
+    /// 生存相关动作列表（hunger/thirst 低于阈值时绕过 ReflectorSoul 审查）
+    #[serde(default)]
+    pub survival_actions: Vec<String>,
+
     /// 规则版本（用于检测变更）
     pub version: String,
 

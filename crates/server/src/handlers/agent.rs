@@ -205,6 +205,7 @@ pub async fn agent_register(
                 description: item.description,
             })
             .collect(),
+        survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
         version: state.game_data.get().game_rules.version.clone(),
         last_updated: chrono::Utc::now().to_rfc3339(),
     };

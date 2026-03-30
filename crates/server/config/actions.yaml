@@ -121,6 +121,37 @@ data:
 
   use:
     description: "使用物品（如食物、水等）"
+    tags: [survival]
+    validation:
+      required_fields:
+        - item_id
+      field_validations:
+        - field: item_id
+          validation_type: not_empty
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  eat:
+    description: "进食（恢复饥饿值）"
+    tags: [survival]
+    validation:
+      required_fields:
+        - item_id
+      field_validations:
+        - field: item_id
+          validation_type: not_empty
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  drink:
+    description: "饮水（恢复口渴值）"
+    tags: [survival]
     validation:
       required_fields:
         - item_id

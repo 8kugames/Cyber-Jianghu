@@ -61,7 +61,7 @@ impl ActionExecutor {
             ),
             "give" => InteractionActionExecutor::execute_give(intent, agent_state),
             "steal" => InteractionActionExecutor::execute_steal(intent, agent_state),
-            "use" => CombatActionExecutor::execute_use(intent, agent_state),
+            "use" | "eat" | "drink" => CombatActionExecutor::execute_use(intent, agent_state),
             "pickup" => BasicActionExecutor::execute_pickup(
                 intent,
                 intent.action_data.clone(),

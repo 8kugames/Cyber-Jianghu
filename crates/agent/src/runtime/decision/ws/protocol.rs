@@ -797,6 +797,7 @@ mod tests {
                 tick_duration_secs: 30,
                 available_actions: vec![],
                 initial_items: vec![],
+                survival_actions: vec![],
                 version: "0.0.6".to_string(),
                 last_updated: "2024-03-22T12:00:00Z".to_string(),
             },

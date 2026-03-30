@@ -73,10 +73,14 @@ pub fn build_game_rules_from_config(tick_duration_secs: u64, version: String) ->
         })
         .collect();
 
+    // 从动作配置中提取 survival 标签的动作名称
+    let survival_actions = ActionRegistry::action_names_with_tag("survival");
+
     GameRules {
         tick_duration_secs,
         available_actions,
         initial_items,
+        survival_actions,
         version,
         last_updated: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
     }

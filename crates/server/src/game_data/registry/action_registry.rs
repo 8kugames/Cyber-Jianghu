@@ -49,6 +49,18 @@ impl ActionRegistry {
             .map(|r| r.get().actions.data.keys().cloned().collect())
             .unwrap_or_default()
     }
+
+    /// 获取带有指定标签的 action 名称列表
+    pub fn action_names_with_tag(tag: &str) -> Vec<String> {
+        Self::all_action_names()
+            .into_iter()
+            .filter(|name| {
+                Self::get(name)
+                    .map(|config| config.tags.iter().any(|t| t == tag))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
 }
 
 /// Action 字段枚举

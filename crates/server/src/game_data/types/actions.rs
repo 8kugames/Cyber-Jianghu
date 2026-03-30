@@ -19,6 +19,10 @@ pub struct ActionConfigEntry {
     #[serde(default)]
     pub description: String,
 
+    /// 动作标签（用于分类和逻辑判断，如 [survival]）
+    #[serde(default)]
+    pub tags: Vec<String>,
+
     /// 基础伤害（attack）
     pub base_damage: Option<i32>,
 

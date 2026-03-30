@@ -146,6 +146,29 @@ impl TickScheduler {
             let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
             self.current_tick_id = new_tick_id;
 
+            let collection_window_secs = {
+                let gd = self.game_data_cache.get();
+                let window = gd.game_rules.data.agent_state.tick.collection_window_secs as u64;
+                let period = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
+                if window >= period {
+                    error!(
+                        "collection_window_secs({}) >= real_seconds_per_tick({}), 已禁用收集窗口",
+                        window, period
+                    );
+                    0
+                } else {
+                    window
+                }
+            };
+
+            if collection_window_secs > 0 {
+                info!(
+                    "Tick {} 等待收集窗口 {}秒...",
+                    self.current_tick_id, collection_window_secs
+                );
+                tokio::time::sleep(Duration::from_secs(collection_window_secs)).await;
+            }
+
             // 执行一次Tick（F-06：失败时写入 tick_logs）
             if let Err(e) = self.execute_tick().await {
                 error!("Tick {} 执行失败: {}", self.current_tick_id, e);
@@ -511,6 +534,8 @@ impl TickScheduler {
         let phase5_start = Instant::now();
         let deadline_ms = {
             let gd = self.game_data_cache.get();
+            // Agent 从广播到下次收单截止的实际时间约为 tick_period
+            // 收集窗口在下次周期开始后，不影响 Agent 的可用决策时间
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64 * 1000
         };
         self.broadcaster
