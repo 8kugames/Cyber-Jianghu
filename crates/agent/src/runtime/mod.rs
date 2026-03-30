@@ -15,7 +15,7 @@ pub mod decision;
 pub use decision::{
     CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
     DecisionWithMemoryCallback, HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest,
-    cognitive_decision, cognitive_decision_with_retry, create_http_state, http_decision,
+    cognitive_decision, cognitive_decision_with_retry, cognitive_decision_with_retry_with_chain_store, create_http_state, http_decision,
     run_http_server,
 };
 

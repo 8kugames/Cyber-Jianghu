@@ -19,7 +19,7 @@ use crate::ai::memory::backend::MemoryBackend;
 use crate::ai::memory::tools::{MemoryToolDefinition, MemoryToolResult};
 use crate::ai::memory::types::MemoryEntry;
 use crate::ai::relationship::RelationshipStore;
-use crate::ai::validator::{PersonaInfo, Validator};
+use crate::ai::validator::{CognitiveValidator, PersonaInfo, Validator};
 use crate::config::{Config, ReviewConfig};
 use crate::core::cognitive::MultiStageCognitiveEngine;
 use crate::models::{Intent, WorldState};
@@ -45,6 +45,8 @@ pub struct ValidatorConfig {
 
     /// 连续驳回后强制 idle 的阈值
     pub consecutive_rejection_threshold: u32,
+
+    pub observer_system_prompt: Option<String>,
 }
 
 impl Default for ValidatorConfig {
@@ -53,6 +55,7 @@ impl Default for ValidatorConfig {
             max_retry_attempts: 5,
             min_retry_time_secs: 10,
             consecutive_rejection_threshold: 3,
+            observer_system_prompt: None,
         }
     }
 }
@@ -134,6 +137,13 @@ pub struct Agent {
 
     /// 认知引擎引用（可选，用于 config reload 时更新人设）
     pub(crate) cognitive_engine: Option<std::sync::Arc<MultiStageCognitiveEngine>>,
+
+    /// 认知链验证器（可选，用于验证认知链质量）
+    pub(crate) cognitive_validator: Option<std::sync::Arc<CognitiveValidator>>,
+
+    /// 最近一次生成的认知链（由认知引擎设置，供验证器使用）
+    pub(crate) last_cognitive_chain:
+        std::sync::Arc<tokio::sync::RwLock<Option<crate::core::cognitive::CognitiveChain>>>,
 }
 
 impl Agent {
@@ -188,6 +198,8 @@ impl Agent {
             config_reload_rx: None,
             http_api_state: None,
             cognitive_engine: None,
+            cognitive_validator: None,
+            last_cognitive_chain: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -279,6 +291,11 @@ impl Agent {
         self.validator_config = config;
     }
 
+    /// 设置认知验证器（用于验证认知链质量）
+    pub fn set_cognitive_validator(&mut self, validator: std::sync::Arc<CognitiveValidator>) {
+        self.cognitive_validator = Some(validator);
+    }
+
     /// 设置注册成功回调（用于更新外部状态如 HTTP API 的 agent_id）
     pub fn set_registration_callback(
         &mut self,
@@ -309,6 +326,11 @@ impl Agent {
     /// 检查是否启用验证器
     pub fn has_validator(&self) -> bool {
         self.validator.is_some()
+    }
+
+    /// 获取意图验证器
+    pub fn validator(&self) -> Option<std::sync::Arc<dyn Validator>> {
+        self.validator.clone()
     }
 
     /// 获取记忆上下文字符串（用于 LLM）
@@ -551,6 +573,34 @@ impl Agent {
             } else {
                 (self.decision_callback)(world_state).await
             };
+
+            // 认知链质量验证（如果配置了认知验证器）
+            if let Some(ref cv) = self.cognitive_validator
+                && let Some(chain) = self.last_cognitive_chain.read().await.as_ref()
+            {
+                let cv_result = cv.validate(chain);
+                if !cv_result.is_valid {
+                    consecutive_rejections += 1;
+                    warn!(
+                        "Cognitive chain rejected (attempt {}): {} | Suggestion: {}",
+                        attempt,
+                        cv_result.reason.as_deref().unwrap_or("unknown"),
+                        cv_result.suggestion.as_deref().unwrap_or("none")
+                    );
+                    if consecutive_rejections
+                        >= self.validator_config.consecutive_rejection_threshold
+                    {
+                        let agent_id = self.client.agent_id().await.unwrap_or_default();
+                        return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
+                    }
+                    last_rejection_reason = Some(format!(
+                        "[认知链质量] {}. {}",
+                        cv_result.reason.as_deref().unwrap_or("invalid"),
+                        cv_result.suggestion.as_deref().unwrap_or("")
+                    ));
+                    continue;
+                }
+            }
 
             // 如果没有验证器，直接返回意图
             let validator = match &self.validator {

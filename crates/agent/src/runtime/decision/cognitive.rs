@@ -59,23 +59,49 @@ pub fn cognitive_decision_with_retry(
     engine: Arc<MultiStageCognitiveEngine>,
     max_retries: usize,
 ) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
+    cognitive_decision_with_retry_internal(agent_id, engine, max_retries, None)
+}
+
+pub fn cognitive_decision_with_retry_with_chain_store(
+    agent_id: Uuid,
+    engine: Arc<MultiStageCognitiveEngine>,
+    max_retries: usize,
+    last_cognitive_chain: Option<Arc<tokio::sync::RwLock<Option<crate::core::cognitive::CognitiveChain>>>>,
+) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
+    cognitive_decision_with_retry_internal(agent_id, engine, max_retries, last_cognitive_chain)
+}
+
+fn cognitive_decision_with_retry_internal(
+    agent_id: Uuid,
+    engine: Arc<MultiStageCognitiveEngine>,
+    max_retries: usize,
+    last_cognitive_chain: Option<Arc<tokio::sync::RwLock<Option<crate::core::cognitive::CognitiveChain>>>>,
+) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
     move |world_state: &WorldState, feedback: Option<&str>| {
         let engine = engine.clone();
         let world_state = world_state.clone();
         let feedback = feedback.map(|s| s.to_string());
+        let chain_store = last_cognitive_chain.clone();
 
         Box::pin(async move {
             let mut last_error = String::new();
 
-            for attempt in 0..=max_retries {
+            for i in 0..=max_retries {
                 match engine
                     .think_with_feedback(&world_state, feedback.as_deref())
                     .await
                 {
-                    Ok(chain) => return chain.final_intent,
+                    Ok(chain) => {
+                        let intent = chain.final_intent.clone();
+                        if let Some(ref store) = chain_store {
+                            let mut locked = store.write().await;
+                            *locked = Some(chain);
+                        }
+                        return intent;
+                    }
                     Err(e) => {
                         last_error = e.to_string();
-                        error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
+                        error!("[cognitive] Attempt {} failed: {}", i + 1, e);
                     }
                 }
             }

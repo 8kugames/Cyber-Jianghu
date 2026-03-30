@@ -26,7 +26,7 @@ pub mod http;
 pub mod ws;
 
 // 重导出 cognitive
-pub use cognitive::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_retry};
+pub use cognitive::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_retry, cognitive_decision_with_retry_with_chain_store};
 // 重导出 http
 pub use http::{
     HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest, create_http_state,
