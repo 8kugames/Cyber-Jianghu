@@ -621,30 +621,30 @@ impl Agent {
         // --- 生存底线检查 ---
         // 当 hunger/thirst 低于阈值时，自动批准生存相关行动，绕过 ReflectorSoul 审查
         // 防止"孤僻多疑"等人设因拒绝进食/饮水而陷入死锁
-        // survival_actions 列表来自 actions.yaml 中 tags: [survival] 的动作
-        const SURVIVAL_THRESHOLD: i32 = 30;
-
-        let survival_actions: &[String] = &self
+        // survival_actions 和 survival_threshold 均来自服务端 game_rules 配置
+        let (survival_actions, survival_threshold) = self
             .config
             .game_rules
             .as_ref()
-            .map(|gr| gr.survival_actions.clone())
+            .map(|gr| (gr.survival_actions.clone(), gr.survival_threshold))
             .unwrap_or_default();
 
-        let is_survival_action = survival_actions
-            .iter()
-            .any(|a| a == intent.action_type.as_str());
+        if !survival_actions.is_empty() {
+            let is_survival_action = survival_actions
+                .iter()
+                .any(|a| a == intent.action_type.as_str());
 
-        if is_survival_action {
-            let hunger = world_state.self_state.hunger();
-            let thirst = world_state.self_state.thirst();
+            if is_survival_action {
+                let hunger = world_state.self_state.hunger();
+                let thirst = world_state.self_state.thirst();
 
-            if hunger < SURVIVAL_THRESHOLD || thirst < SURVIVAL_THRESHOLD {
-                info!(
-                    "[ActorSoul] Survival mode bypass: hunger={}, thirst={}, action={}",
-                    hunger, thirst, intent.action_type
-                );
-                return Ok(intent);
+                if hunger < survival_threshold || thirst < survival_threshold {
+                    info!(
+                        "[ActorSoul] Survival mode bypass: hunger={}, thirst={}, action={}, threshold={}",
+                        hunger, thirst, intent.action_type, survival_threshold
+                    );
+                    return Ok(intent);
+                }
             }
         }
 

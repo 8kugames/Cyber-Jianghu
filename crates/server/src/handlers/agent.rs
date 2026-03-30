@@ -181,6 +181,10 @@ pub async fn agent_register(
         let gd = state.game_data.get();
         gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64
     };
+    let survival_threshold = {
+        let gd = state.game_data.get();
+        gd.game_rules.data.agent_state.survival.critical_threshold
+    };
     let game_rules = GameRules {
         tick_duration_secs,
         available_actions: game_data::ActionRegistry::all_action_names()
@@ -206,6 +210,7 @@ pub async fn agent_register(
             })
             .collect(),
         survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
+        survival_threshold,
         version: state.game_data.get().game_rules.version.clone(),
         last_updated: chrono::Utc::now().to_rfc3339(),
     };

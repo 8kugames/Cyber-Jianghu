@@ -46,7 +46,11 @@ pub type IntentManager = Arc<RwLock<HashMap<Uuid, Intent>>>;
 // ============================================================================
 
 /// 构建游戏规则（从配置注册表）
-pub fn build_game_rules_from_config(tick_duration_secs: u64, version: String) -> GameRules {
+pub fn build_game_rules_from_config(
+    tick_duration_secs: u64,
+    survival_threshold: i32,
+    version: String,
+) -> GameRules {
     let available_actions = ActionRegistry::all_action_names()
         .into_iter()
         .map(|action_name| {
@@ -81,6 +85,7 @@ pub fn build_game_rules_from_config(tick_duration_secs: u64, version: String) ->
         available_actions,
         initial_items,
         survival_actions,
+        survival_threshold,
         version,
         last_updated: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
     }
