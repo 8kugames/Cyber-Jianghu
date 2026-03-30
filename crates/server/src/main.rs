@@ -272,15 +272,6 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
-            "/api/dashboard/agents",
-            get(handlers::dashboard::get_online_agents).layer(
-                axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_read_token,
-                ),
-            ),
-        )
-        .route(
             "/api/dashboard/agents/offline",
             get(handlers::dashboard::get_offline_agents).layer(
                 axum::middleware::from_fn_with_state(
@@ -299,6 +290,31 @@ async fn main() -> Result<()> {
         .route(
             "/api/dashboard/agent/{id}",
             get(handlers::dashboard::get_agent_details).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agent/{id}/experiences",
+            get(handlers::dashboard::get_agent_experiences).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents",
+            get(handlers::dashboard::get_all_agents).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/status-configs",
+            get(handlers::dashboard::get_status_configs).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,

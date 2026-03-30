@@ -57,6 +57,40 @@ data:
     max_system_prompt_length: 102400
     max_speak_content_length: 500
 
+  # Agent 状态定义（数据驱动）
+  # 用于前端显示状态标签、颜色和描述
+  agent_statuses:
+    # 在线（活跃+已连接）
+    online:
+      display_name: "在线"
+      description: "当前在线的角色"
+      color: "#2196F3"
+      sort_order: 0
+    # 活跃状态
+    active:
+      display_name: "活跃"
+      description: "当前活跃的角色"
+      color: "#4CAF50"
+      sort_order: 1
+    # 离线（活跃+未连接）
+    offline:
+      display_name: "离线"
+      description: "暂时离线的角色"
+      color: "#9E9E9E"
+      sort_order: 2
+    # 归隐（主动转生）
+    retired:
+      display_name: "归隐"
+      description: "主动归隐的角色"
+      color: "#FF9800"
+      sort_order: 3
+    # 死亡（被动死亡）
+    dead:
+      display_name: "死亡"
+      description: "因饥饿、口渴或战斗而死亡的角色"
+      color: "#F44336"
+      sort_order: 4
+
   # 运维与监控配置
   ops:
     # 单个 Tick 自然死亡人数告警阈值

@@ -243,6 +243,7 @@ mod tests {
                             timezone_offset: 8, // UTC+8 北京时间
                         },
                     },
+                    agent_statuses: std::collections::HashMap::new(),
                     validation: ValidationRulesData {
                         action_validation: ActionValidationRulesData {
                             max_content_length: 500,
