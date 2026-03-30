@@ -28,7 +28,7 @@ use std::time::Duration;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::ai::cognitive::narrative::NarrativeEngine;
+use crate::core::cognitive::narrative::NarrativeEngine;
 use crate::ai::lifespan::LifespanStatus;
 use crate::ai::validator::{PersonaInfo, ValidationRequest, ValidationResult};
 use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
@@ -418,10 +418,10 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
                 .unwrap_or_else(|| {
                     // 如果没有初始化，使用内置配置创建临时引擎
                     static DEFAULT_ENGINE: std::sync::OnceLock<
-                        crate::ai::cognitive::narrative::NarrativeEngine,
+                        crate::core::cognitive::narrative::NarrativeEngine,
                     > = std::sync::OnceLock::new();
                     DEFAULT_ENGINE.get_or_init(
-                        crate::ai::cognitive::narrative::NarrativeEngine::with_builtin_config,
+                        crate::core::cognitive::narrative::NarrativeEngine::with_builtin_config,
                     )
                 });
 
@@ -465,10 +465,10 @@ pub(super) async fn get_attributes_handler(State(state): State<HttpApiState>) ->
                 .map(|e| e.as_ref())
                 .unwrap_or_else(|| {
                     static DEFAULT_ENGINE: std::sync::OnceLock<
-                        crate::ai::cognitive::narrative::NarrativeEngine,
+                        crate::core::cognitive::narrative::NarrativeEngine,
                     > = std::sync::OnceLock::new();
                     DEFAULT_ENGINE.get_or_init(
-                        crate::ai::cognitive::narrative::NarrativeEngine::with_builtin_config,
+                        crate::core::cognitive::narrative::NarrativeEngine::with_builtin_config,
                     )
                 });
 
@@ -1635,7 +1635,7 @@ pub(super) async fn get_attribute_meta_handler(
 /// - 如果没有 `{key}_max` 字段，说明该属性没有上限（如声望、派生属性）
 fn enrich_attributes_with_descriptions(
     raw_attributes: Option<serde_json::Value>,
-    narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
+    narrative_config: &Option<crate::core::cognitive::narrative::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let attrs = raw_attributes?;
     let attrs_obj = attrs.as_object()?;
@@ -1708,7 +1708,7 @@ fn enrich_attributes_with_descriptions(
 
 fn enrich_derived_attributes(
     raw_derived: Option<serde_json::Value>,
-    narrative_config: &Option<crate::ai::cognitive::narrative::NarrativeConfig>,
+    narrative_config: &Option<crate::core::cognitive::narrative::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let derived = raw_derived?;
     let derived_obj = derived.as_object()?;

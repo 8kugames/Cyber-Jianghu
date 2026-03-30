@@ -315,7 +315,7 @@ pub struct WsSharedState {
     pub agent_id: Arc<AtomicI64>,
 
     /// 叙事引擎（可选，用于生成上下文）
-    pub narrative_engine: Option<Arc<crate::ai::cognitive::narrative::NarrativeEngine>>,
+    pub narrative_engine: Option<Arc<crate::core::cognitive::narrative::NarrativeEngine>>,
 
     /// 认知上下文构建器（可选，用于生成四阶段认知上下文）
     pub cognitive_context_builder:
@@ -460,7 +460,7 @@ impl WsSharedState {
     ///
     /// 如果配置了叙事引擎，使用叙事引擎生成；否则返回 None
     pub fn generate_context(&self, world_state: &WorldState) -> Option<String> {
-        use crate::ai::cognitive::narrative::NarrativeEngine;
+        use crate::core::cognitive::narrative::NarrativeEngine;
 
         // 获取叙事引擎（配置的或默认的）
         let engine: &NarrativeEngine = self.narrative_engine.as_deref().unwrap_or_else(|| {

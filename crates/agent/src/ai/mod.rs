@@ -15,7 +15,6 @@
 // - `relationship/` - 关系管理
 // - `prompts.rs` - Prompt 模板
 
-pub mod cognitive;
 pub mod dialogue;
 pub mod lifespan;
 pub mod llm;
