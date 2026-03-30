@@ -762,7 +762,10 @@ pub(super) async fn get_recent_memory_handler(
     };
 
     let page: usize = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let limit: usize = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(20);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
 
     let mut mgr = manager.lock().await;
     let mut service = MemoryService::new(&mut mgr);
@@ -792,7 +795,13 @@ pub(super) async fn search_memory_handler(
     let limit = request.limit.unwrap_or(10);
 
     match service.search(&request.query, limit).await {
-        Ok(memories) => Json(memories_to_json_response(&memories, memories.len(), 1, limit)).into_response(),
+        Ok(memories) => Json(memories_to_json_response(
+            &memories,
+            memories.len(),
+            1,
+            limit,
+        ))
+        .into_response(),
         Err(e) => {
             error!("[http] Failed to search memory: {}", e);
             (
@@ -1569,8 +1578,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
 
     // 6. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
-    let derived_attributes =
-        enrich_derived_attributes(raw_derived, &narrative_config);
+    let derived_attributes = enrich_derived_attributes(raw_derived, &narrative_config);
 
     // 7. 构建响应
     let response = CharacterInfoResponse {
@@ -3466,9 +3474,7 @@ pub(super) async fn get_llm_usage_handler() -> impl IntoResponse {
 }
 
 /// GET /api/v1/config/llm/toggle - 获取 LLM 开关状态
-pub(super) async fn get_llm_toggle_handler(
-    State(state): State<HttpApiState>,
-) -> impl IntoResponse {
+pub(super) async fn get_llm_toggle_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     Json(dto::LlmToggleResponse {
         enabled: state.llm_enabled.load(std::sync::atomic::Ordering::Relaxed),
     })
@@ -3484,7 +3490,9 @@ pub(super) async fn set_llm_toggle_handler(
         .store(req.enabled, std::sync::atomic::Ordering::Relaxed);
     let status = if req.enabled { "启用" } else { "关闭" };
     info!("[llm] LLM 调用已{}", status);
-    Json(dto::LlmToggleResponse { enabled: req.enabled })
+    Json(dto::LlmToggleResponse {
+        enabled: req.enabled,
+    })
 }
 
 // ============================================================================

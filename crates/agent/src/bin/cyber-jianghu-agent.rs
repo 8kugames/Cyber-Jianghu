@@ -688,8 +688,13 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
 
-            let (api_state, actual_port) =
-                start_http_api_server(port, device_id.clone(), &config, Some(reconnect_tx), Some(llm_enabled))?;
+            let (api_state, actual_port) = start_http_api_server(
+                port,
+                device_id.clone(),
+                &config,
+                Some(reconnect_tx),
+                Some(llm_enabled),
+            )?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
