@@ -584,14 +584,13 @@ async fn handle_intent(
     }
 
     // 纵深防御：检查 agents.status，拒绝已归隐/已死亡角色的意图
-    let agent_status: Option<String> = sqlx::query_scalar(
-        "SELECT status FROM agents WHERE agent_id = $1",
-    )
-    .bind(agent_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .context("查询 Agent 状态失败")?
-    .flatten();
+    let agent_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM agents WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .context("查询 Agent 状态失败")?
+            .flatten();
 
     if agent_status.as_deref() != Some("active") {
         warn!(
