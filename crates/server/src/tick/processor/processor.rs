@@ -120,6 +120,9 @@ impl StateProcessor {
                 } else {
                     ActionResult::Failed
                 },
+                thought_log: intent.thought_log.clone(),
+                observer_thought: intent.observer_thought.clone(),
+                narrative: intent.narrative.clone(),
                 created_at: chrono::Utc::now(),
             };
 

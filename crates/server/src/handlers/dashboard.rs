@@ -885,6 +885,9 @@ pub struct ExperienceEntry {
     pub action_type: String,
     pub action_data: serde_json::Value,
     pub result: Option<String>,
+    pub thought_log: Option<String>,
+    pub observer_thought: Option<String>,
+    pub narrative: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -921,7 +924,7 @@ pub async fn get_agent_experiences(
 
     // 获取经历日志
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_data, result, created_at
+        "SELECT tick_id, action_type, action_data, result, thought_log, observer_thought, narrative, created_at
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -946,6 +949,9 @@ pub async fn get_agent_experiences(
                 .get::<Option<serde_json::Value>, _>("action_data")
                 .unwrap_or(serde_json::Value::Null),
             result: row.get("result"),
+            thought_log: row.get("thought_log"),
+            observer_thought: row.get("observer_thought"),
+            narrative: row.get("narrative"),
             created_at: row.get("created_at"),
         })
         .collect();

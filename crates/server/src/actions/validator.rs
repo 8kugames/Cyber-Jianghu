@@ -392,6 +392,8 @@ mod tests {
             action_type,
             action_data,
             priority: 5,
+            observer_thought: None,
+            narrative: None,
         }
     }
 
