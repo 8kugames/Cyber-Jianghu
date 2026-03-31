@@ -605,9 +605,14 @@ impl super::Agent {
             .set_identity(device_id, result.auth_token.clone())
             .await;
 
-        // 更新本地 device_config
+        // 更新本地 device_config 并持久化
         if let Some(ref mut device) = self.device_config {
-            device.auth_token = result.auth_token;
+            device.auth_token = result.auth_token.clone();
+            if let Err(e) = device.save_to_file(
+                &self.config.device_yaml_path(&device.server_url),
+            ) {
+                warn!("Failed to persist refreshed token: {}", e);
+            }
         }
 
         Ok(())

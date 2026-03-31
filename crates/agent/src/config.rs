@@ -335,12 +335,17 @@ impl CharacterConfig {
             .with_context(|| format!("Failed to parse character config from {:?}", path.as_ref()))
     }
 
-    /// 保存角色配置到文件
+    /// 保存角色配置到文件（原子写入：先写临时文件再 rename）
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let content = serde_yaml::to_string(self)
             .context("Failed to serialize character config")?;
-        std::fs::write(&path, content)
-            .with_context(|| format!("Failed to write character config to {:?}", path.as_ref()))
+        let path = path.as_ref();
+        let tmp_path = path.with_extension("tmp");
+        std::fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write character config to {:?}", tmp_path))?;
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename character config at {:?}", path))?;
+        Ok(())
     }
 }
 

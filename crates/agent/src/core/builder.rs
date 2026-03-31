@@ -242,7 +242,10 @@ impl AgentBuilder {
 
         // 初始化记忆系统
         let memory_manager = if self.enable_memory {
-            let agent_id = Uuid::new_v4();
+            let agent_id = self.character_config
+                .as_ref()
+                .and_then(|c| c.agent_id)
+                .unwrap_or_else(Uuid::new_v4);
             let config = self.memory_config.unwrap_or_else(|| MemoryManagerConfig {
                 agent_id,
                 db_dir: self.data_dir.clone(),
