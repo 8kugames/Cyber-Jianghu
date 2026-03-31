@@ -411,7 +411,7 @@ async fn main() -> Result<()> {
         // Admin Static Files (protected by cookie middleware)
         .route("/admin", get(handlers::admin_auth::login_page))
         .route(
-            "/admin/*path",
+            "/admin/{*path}",
             get(serve_admin_file).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 handlers::admin_auth::admin_cookie_middleware,
