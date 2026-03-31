@@ -23,19 +23,42 @@ use cyber_jianghu_server::*;
 
 use anyhow::Result;
 use axum::{
-    Router,
+    body::Body,
     routing::{get, post},
+    Router,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tower_http::services::ServeDir;
-use tracing::{Level, error, info};
+use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 // ============================================================================
 // Tick引擎启动
 // ============================================================================
+
+async fn serve_admin_file(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Result<axum::response::Response<Body>, StatusCode> {
+    let static_dir = crate::paths::get_static_dir().join("admin");
+    let file_path = static_dir.join(&path);
+
+    if !file_path.exists() || !file_path.is_file() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let mime = mime_guess::from_path(&file_path).first_or_octet_stream();
+    let body = Body::from(std::fs::read(&file_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+    Ok(axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, mime.as_ref())
+        .body(body)
+        .unwrap_or_else(|_| {
+            axum::response::Response::new(Body::empty())
+        }))
+}
+
+use axum::http::StatusCode;
 
 /// 启动Tick引擎（后台任务）
 ///
@@ -157,6 +180,16 @@ async fn main() -> Result<()> {
         .admin_write_token
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // Session secret for cookie signing (use separate env var or generate)
+    let session_secret = std::env::var("ADMIN_SESSION_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            // Generate random secret using UUID v4
+            uuid::Uuid::new_v4().to_string()
+        });
+
     let read_token_source = if config.server.admin_read_token.is_some() {
         "配置/环境变量"
     } else {
@@ -218,6 +251,7 @@ async fn main() -> Result<()> {
         dialogue_manager.clone(),
         admin_read_token,
         admin_write_token,
+        session_secret,
         crate::paths::get_config_dir(),
     ));
 
@@ -361,8 +395,33 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
-        // Static files (Admin panel)
-        .nest_service("/admin", ServeDir::new(crate::paths::get_static_dir().join("admin")))
+        // Admin Auth API (Cookie Session)
+        .route(
+            "/api/admin/login",
+            post(handlers::admin_auth::login),
+        )
+        .route(
+            "/api/admin/logout",
+            post(handlers::admin_auth::logout),
+        )
+        .route(
+            "/api/admin/session",
+            get(handlers::admin_auth::check_session),
+        )
+        // Admin Static Files (protected by cookie middleware)
+        .route("/admin", get(handlers::admin_auth::login_page))
+        .route(
+            "/admin/*path",
+            get(serve_admin_file).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::admin_auth::admin_cookie_middleware,
+            )),
+        )
+        // Handle /admin/ (with trailing slash) same as /admin
+        .route(
+            "/admin/",
+            get(handlers::admin_auth::login_page),
+        )
         .with_state(state);
 
     // 12. 启动Web服务器
