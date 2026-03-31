@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use url::Url;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -52,6 +53,53 @@ impl IdentityConfig {
     pub fn matches_server(&self, server_url: &str) -> bool {
         self.server_url.as_deref() == Some(server_url)
     }
+}
+
+// ============================================================================
+// 每服务器设备身份配置（device.yaml）
+// ============================================================================
+
+/// 每服务器设备身份（device.yaml）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceConfig {
+    pub device_id: Uuid,
+    pub auth_token: String,
+    pub server_url: String,
+}
+
+impl DeviceConfig {
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let yaml = serde_yaml::to_string(self).context("Failed to serialize DeviceConfig")?;
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &yaml)?;
+        fs::rename(&tmp_path, path)?;
+        Ok(())
+    }
+
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let yaml = fs::read_to_string(path).context("Failed to read device.yaml")?;
+        serde_yaml::from_str(&yaml).context("Failed to parse device.yaml")
+    }
+
+    pub fn ws_url_with_token(&self, ws_url: &str) -> String {
+        format!(
+            "{}?device_id={}&token={}",
+            ws_url, self.device_id, self.auth_token
+        )
+    }
+}
+
+/// 计算服务器目录 key（从 WebSocket URL 派生）
+pub fn server_key(ws_url: &str) -> String {
+    let url = Url::parse(ws_url)
+        .unwrap_or_else(|_| Url::parse(&format!("ws://{}", ws_url)).unwrap());
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port().map(|p| format!("-{}", p)).unwrap_or_default();
+    format!(
+        "{}{}",
+        host.replace(['.', ':', '[', ']'], "-"),
+        port
+    )
 }
 
 // ============================================================================
@@ -634,6 +682,11 @@ pub struct Config {
     /// 配置文件路径（运行时设置，不序列化）
     #[serde(skip)]
     pub config_path: PathBuf,
+
+    /// 服务器数据目录（运行时设置，不序列化）
+    /// 默认 ~/.cyber-jianghu/servers/
+    #[serde(skip)]
+    pub servers_dir: PathBuf,
 }
 
 impl Config {
@@ -717,6 +770,10 @@ impl Config {
             observer: None,
             game_rules: None,
             config_path: PathBuf::new(),
+            servers_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cyber-jianghu")
+                .join("servers"),
         })
     }
 
@@ -846,6 +903,16 @@ impl Config {
     /// 获取 ReflectorSoul LLM 配置（带回退逻辑）
     pub fn get_reflector_llm_config(&self) -> &LlmConfig {
         self.llm_reflector.as_ref().unwrap_or(&self.llm)
+    }
+
+    /// 获取指定服务器的数据目录
+    pub fn server_dir(&self, ws_url: &str) -> PathBuf {
+        self.servers_dir.join(server_key(ws_url))
+    }
+
+    /// 获取指定服务器的 device.yaml 路径
+    pub fn device_yaml_path(&self, ws_url: &str) -> PathBuf {
+        self.server_dir(ws_url).join("device.yaml")
     }
 }
 
