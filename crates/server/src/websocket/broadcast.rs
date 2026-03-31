@@ -19,20 +19,13 @@ use super::connection::{AgentToDeviceMap, ConnectionManager};
 // 消息广播函数
 // ============================================================================
 
-/// 向指定 Agent 发送 WorldState
-///
-/// 通过 agent_id 查找对应的 device_id，再找到 WebSocket 连接并发送
 pub async fn send_world_state(
     agent_id: uuid::Uuid,
     world_state: crate::models::WorldState,
     connection_manager: &ConnectionManager,
     agent_to_device_map: &AgentToDeviceMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = connection_manager.read().await;
-
-    let device_id = if let Some(conn) = connections.get(&agent_id) {
-        conn.device_id
-    } else {
+    let device_id = {
         let agent_to_device = agent_to_device_map.read().await;
         match agent_to_device.get(&agent_id) {
             Some(&device_id) => device_id,
@@ -46,13 +39,22 @@ pub async fn send_world_state(
         }
     };
 
-    if let Some(connection) = connections.get(&device_id) {
-        let protocol_world_state = world_state;
-        let msg = ServerMessage::WorldState {
-            data: protocol_world_state,
-        };
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, skipping WorldState send",
+                agent_id
+            );
+            return Ok(());
+        }
+        let msg = ServerMessage::WorldState { data: world_state };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!("Agent {} send failed, marking connection as dead", agent_id);
+            return Ok(());
+        }
         debug!(
             "WorldState sent to agent {} via device {}",
             agent_id, device_id
@@ -67,23 +69,48 @@ pub async fn send_world_state(
     Ok(())
 }
 
-/// 转发对话消息给指定 Agent
-///
-/// 通过 WebSocket 连接发送对话消息
 pub async fn forward_dialogue_message(
     to_agent_id: uuid::Uuid,
     message: DialogueMessage,
     connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = connection_manager.read().await;
+    let device_id = {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&to_agent_id) {
+            Some(&device_id) => device_id,
+            None => {
+                warn!(
+                    "Agent {} has no device mapping, cannot send dialogue",
+                    to_agent_id
+                );
+                return Err("Agent not online".into());
+            }
+        }
+    };
 
-    if let Some(connection) = connections.get(&to_agent_id) {
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, cannot send dialogue",
+                to_agent_id
+            );
+            return Err("Connection dead".into());
+        }
         let msg = ServerMessage::Dialogue { message };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!("Agent {} dialogue send failed, marking dead", to_agent_id);
+            return Err("Send failed".into());
+        }
         debug!("对话消息已发送给 agent {}", to_agent_id);
     } else {
-        warn!("Agent {} 不在线，无法发送对话消息", to_agent_id);
+        warn!(
+            "Agent {} is not online (device {} not connected)",
+            to_agent_id, device_id
+        );
         return Err("Agent not online".into());
     }
 
@@ -106,8 +133,6 @@ pub async fn send_agent_died_notification(
     died_at: i64,
     ctx: &DeathNotificationContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = ctx.connection_manager.read().await;
-
     let device_id = {
         let agent_to_device = ctx.agent_to_device_map.read().await;
         match agent_to_device.get(&agent_id) {
@@ -122,7 +147,16 @@ pub async fn send_agent_died_notification(
         }
     };
 
-    if let Some(connection) = connections.get(&device_id) {
+    let mut connections = ctx.connection_manager.write().await;
+
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, cannot send AgentDied notification",
+                agent_id
+            );
+            return Ok(());
+        }
         let msg = ServerMessage::AgentDied {
             agent_id,
             cause,
@@ -133,11 +167,18 @@ pub async fn send_agent_died_notification(
             rebirth_delay_ticks: 0,
         };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
-        debug!(
-            "AgentDied notification sent to agent {} via device {}",
-            agent_id, device_id
-        );
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!(
+                "Agent {} AgentDied send failed, marking connection dead",
+                agent_id
+            );
+        } else {
+            debug!(
+                "AgentDied notification sent to agent {} via device {}",
+                agent_id, device_id
+            );
+        }
     } else {
         warn!(
             "Agent {} is not online (device {} not connected), cannot send AgentDied notification",

@@ -21,6 +21,7 @@ use axum::{
 use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use tracing::{debug, error, info, warn};
 
 use crate::dialogue::DialogueResponse;
@@ -168,9 +169,16 @@ async fn handle_websocket(
     // 创建消息通道（用于向 Agent 发送消息），限制容量以提供背压
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
 
+    // 心跳追踪：连续未收到 Pong 的次数
+    let pings_without_pong = Arc::new(AtomicU8::new(0));
+    const MAX_MISSED_PONGS: u8 = 3;
+
     // 添加到连接管理器（使用 device_id 作为 key）
+    // 重连时：先移除旧连接，确保旧 send_task 收到通道关闭信号并退出
     {
         let mut connections = state.connection_manager.write().await;
+        // 如果该 device_id 已有连接，先移除（触发旧 send_task 退出）
+        connections.remove(&device_id);
         let connection = Connection::new(agent_id, device_id, agent_name.clone(), tx.clone());
         connections.insert(device_id, connection);
         info!(
@@ -329,12 +337,12 @@ async fn handle_websocket(
     // 心跳任务（主动发送 Ping 检测连接活性）
     let tx_for_heartbeat = tx.clone();
     let agent_name_for_heartbeat = agent_name.clone();
+    let pings_without_pong_for_heartbeat = pings_without_pong.clone();
     let heartbeat_task = tokio::spawn(async move {
-        // 每 30 秒发送一次 Ping
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
-            // 发送 Ping 消息
+            pings_without_pong_for_heartbeat.fetch_add(1, Ordering::Relaxed);
             if tx_for_heartbeat
                 .send(Message::Ping(Bytes::new()))
                 .await
@@ -346,6 +354,13 @@ async fn handle_websocket(
                 );
                 break;
             }
+            if pings_without_pong_for_heartbeat.load(Ordering::Relaxed) >= MAX_MISSED_PONGS {
+                warn!(
+                    "Agent '{}' missed {} pongs, closing connection",
+                    agent_name_for_heartbeat, MAX_MISSED_PONGS
+                );
+                break;
+            }
             debug!(
                 "Sent heartbeat Ping to agent '{}'",
                 agent_name_for_heartbeat
@@ -354,10 +369,10 @@ async fn handle_websocket(
     });
 
     // 接收消息循环
-    // Clone values for use in recv_task
     let state_for_recv = state.clone();
     let agent_name_for_recv = agent_name.clone();
     let device_id_for_recv = device_id;
+    let pings_without_pong_for_recv = pings_without_pong.clone();
 
     let recv_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
@@ -431,6 +446,7 @@ async fn handle_websocket(
                         let _ = tx.send(Message::Pong(data)).await;
                     }
                     Message::Pong(_) => {
+                        pings_without_pong_for_recv.store(0, Ordering::Relaxed);
                         debug!("Received Pong from agent '{}'", agent_name_for_recv);
                     }
                     Message::Close(_) => {
@@ -692,6 +708,7 @@ async fn handle_dialogue_message(
                         target_agent_id,
                         forward_msg,
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     debug!(
@@ -713,12 +730,14 @@ async fn handle_dialogue_message(
                         agent_a,
                         started_msg.clone(),
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     super::broadcast::forward_dialogue_message(
                         agent_b,
                         started_msg,
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     debug!("会话已建立，双方已通知: session={}", session_id);
@@ -738,6 +757,7 @@ async fn handle_dialogue_message(
                         requester,
                         rejected_msg,
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     debug!(
@@ -767,6 +787,7 @@ async fn handle_dialogue_message(
                         to_agent_id,
                         content_msg,
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     debug!(
@@ -788,6 +809,7 @@ async fn handle_dialogue_message(
                         other_participant,
                         end_msg,
                         &state.connection_manager,
+                        &state.agent_to_device_map,
                     )
                     .await?;
                     debug!(
@@ -799,14 +821,20 @@ async fn handle_dialogue_message(
         }
         Err(e) => {
             warn!("对话消息处理失败: {}", e);
-            // 发送错误消息给发起者
+            // 发送错误消息给发起者（通过 agent_to_device_map 解析 device_id）
             let error_msg = ServerMessage::Error {
                 message: format!("Dialogue failed: {}", e),
             };
             let json = serde_json::to_string(&error_msg)?;
-            let connections = state.connection_manager.read().await;
-            if let Some(connection) = connections.get(&agent_id) {
-                let _ = connection.send(Message::Text(json.into())).await;
+            let device_id = {
+                let agent_to_device = state.agent_to_device_map.read().await;
+                agent_to_device.get(&agent_id).copied()
+            };
+            if let Some(device_id) = device_id {
+                let connections = state.connection_manager.read().await;
+                if let Some(connection) = connections.get(&device_id) {
+                    let _ = connection.send(Message::Text(json.into())).await;
+                }
             }
         }
     }
