@@ -102,6 +102,17 @@ pub fn server_key(ws_url: &str) -> String {
     )
 }
 
+/// Convert WebSocket URL to HTTP URL.
+/// e.g. `ws://localhost:23333/ws` -> `http://localhost:23333`
+pub fn ws_to_http_url(ws_url: &str) -> String {
+    ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://")
+        .rsplit_once('/')
+        .map(|(base, _)| base.to_string())
+        .unwrap_or_else(|| ws_url.to_string())
+}
+
 // ============================================================================
 // 服务器配置
 // ============================================================================
