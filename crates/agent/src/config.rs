@@ -512,10 +512,6 @@ pub struct MemoryConfig {
     /// 情景记忆保存阈值（重要性 >= 此值的事件会被保存）
     #[serde(default = "default_episodic_threshold")]
     pub episodic_threshold: f32,
-
-    /// 数据库存储路径（默认 ~/.cyber-jianghu/data/）
-    #[serde(default)]
-    pub db_path: Option<String>,
 }
 
 fn default_memory_enabled() -> bool {
@@ -536,7 +532,6 @@ impl Default for MemoryConfig {
             enabled: true,
             working_memory_size: 20,
             episodic_threshold: 0.5,
-            db_path: None,
         }
     }
 }
@@ -777,127 +772,9 @@ impl Config {
         })
     }
 
-    /// 检查 Agent 是否已注册身份
-    pub fn has_identity(&self) -> bool {
-        self.identity.is_some()
-    }
-
-    /// 检查身份是否匹配当前服务器
-    ///
-    /// 返回 (has_identity, needs_reset):
-    /// - has_identity: 是否有身份
-    /// - needs_reset: 是否需要重置（服务器地址变化）
-    pub fn check_identity_server_match(&self) -> (bool, bool) {
-        match &self.identity {
-            None => (false, false),
-            Some(identity) => {
-                let matches = identity.matches_server(&self.server.http_url);
-                (true, !matches)
-            }
-        }
-    }
-
-    /// 清除身份（用于服务器切换时重新注册）
-    pub fn clear_identity(&mut self) {
-        self.identity = None;
-    }
-
-    /// 检查是否已创建角色
-    pub fn has_character(&self) -> bool {
-        self.agent
-            .as_ref()
-            .map(|c| c.is_registered())
-            .unwrap_or(false)
-    }
-
-    /// 生成 WebSocket URL（带认证）
-    pub fn ws_url_with_token(&self) -> Option<String> {
-        self.identity.as_ref().map(|id| {
-            format!(
-                "{}?device_id={}&token={}",
-                self.server.ws_url, id.device_id, id.auth_token
-            )
-        })
-    }
-
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         self.game_rules = Some(game_rules);
-    }
-
-    /// 获取指定服务器的所有角色
-    pub fn get_characters_by_server(&self, server_url: &str) -> Vec<&CharacterConfig> {
-        self.characters
-            .iter()
-            .filter(|c| c.server_url.as_deref() == Some(server_url))
-            .collect()
-    }
-
-    /// 获取指定服务器的存活角色
-    pub fn get_alive_character_by_server(&self, server_url: &str) -> Option<&CharacterConfig> {
-        self.characters.iter().find(|c| {
-            c.server_url.as_deref() == Some(server_url)
-                && c.status == CharacterStatus::Alive
-                && c.agent_id.is_some()
-        })
-    }
-
-    /// 添加或更新角色到历史记录
-    pub fn upsert_character(&mut self, character: CharacterConfig) {
-        if let Some(agent_id) = character.agent_id {
-            // 查找是否已存在
-            if let Some(existing) = self
-                .characters
-                .iter_mut()
-                .find(|c| c.agent_id == Some(agent_id))
-            {
-                *existing = character.clone();
-            } else {
-                self.characters.push(character.clone());
-            }
-        }
-        // 更新当前活跃角色
-        if character.status == CharacterStatus::Alive {
-            self.agent = Some(character);
-        }
-    }
-
-    /// 切换到指定角色
-    pub fn switch_to_character(&mut self, agent_id: Uuid) -> bool {
-        if let Some(character) = self
-            .characters
-            .iter()
-            .find(|c| c.agent_id == Some(agent_id))
-        {
-            self.agent = Some(character.clone());
-            return true;
-        }
-        false
-    }
-
-    /// 标记当前角色为归隐状态
-    pub fn retire_current_character(&mut self) {
-        if let Some(ref mut character) = self.agent {
-            character.status = CharacterStatus::Retired;
-            // 更新 characters 列表中的记录
-            if let Some(agent_id) = character.agent_id
-                && let Some(existing) = self
-                    .characters
-                    .iter_mut()
-                    .find(|c| c.agent_id == Some(agent_id))
-            {
-                existing.status = CharacterStatus::Retired;
-            }
-        }
-    }
-
-    /// 检查指定服务器是否有存活角色
-    pub fn has_alive_character_for_server(&self, server_url: &str) -> bool {
-        self.characters.iter().any(|c| {
-            c.server_url.as_deref() == Some(server_url)
-                && c.status == CharacterStatus::Alive
-                && c.agent_id.is_some()
-        })
     }
 
     /// 获取 ReflectorSoul LLM 配置（带回退逻辑）
