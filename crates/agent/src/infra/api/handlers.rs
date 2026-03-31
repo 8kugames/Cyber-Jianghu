@@ -2861,6 +2861,13 @@ pub(super) async fn set_server_handler(
     // 检查是否切换到了不同的服务器
     let server_changed = old_ws_url != req.ws_url;
 
+    // 预计算新服务器目录（server_changed 时两处共用）
+    let new_server_dir = state.server_dir.read().await.parent()
+        .unwrap_or(state.server_dir.read().await.as_path())
+        .to_path_buf()
+        .join(crate::config::server_key(&req.ws_url));
+    let new_character_dir = new_server_dir.join("characters");
+
     let mut needs_device_registration = false;
     let mut needs_character_creation = false;
     let mut previous_characters: Vec<CharacterSummary> = vec![];
@@ -2876,12 +2883,6 @@ pub(super) async fn set_server_handler(
         needs_device_registration = true;
 
         // 检查是否有该服务器上的存活角色
-        // 使用新服务器地址计算目标目录
-        let new_server_dir = state.server_dir.read().await.parent()
-            .unwrap_or(state.server_dir.read().await.as_path())
-            .to_path_buf()
-            .join(crate::config::server_key(&req.ws_url));
-        let new_character_dir = new_server_dir.join("characters");
         match list_characters_from_fs(&new_character_dir) {
             Ok(all_characters) => {
                 // 过滤出该服务器的角色
@@ -2953,11 +2954,6 @@ pub(super) async fn set_server_handler(
 
     // 1.5 更新 server_dir 和 character_dir（服务器切换后指向新目录）
     if server_changed {
-        let new_server_dir = state.server_dir.read().await.parent()
-            .unwrap_or(state.server_dir.read().await.as_path())
-            .to_path_buf()
-            .join(crate::config::server_key(&req.ws_url));
-        let new_character_dir = new_server_dir.join("characters");
         *state.server_dir.write().await = new_server_dir;
         *state.character_dir.write().await = new_character_dir;
         info!(

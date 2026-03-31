@@ -211,108 +211,6 @@ async fn create_character_via_api(agent_port: u16, character: CharacterConfig) -
 }
 
 // ============================================================================
-// 配置迁移（从旧版 flat 布局迁移到新版 server-scoped 布局）
-// ============================================================================
-
-/// Migrate old flat config to server-scoped layout.
-/// Called once on first startup when servers/ directory doesn't exist yet
-/// but old agent.yaml has identity/character fields.
-fn migrate_old_config(config_path: &std::path::Path, servers_dir: &std::path::Path) -> Result<()> {
-    use std::fs;
-    use cyber_jianghu_agent::config::{DeviceConfig, server_key};
-
-    // Skip if servers/ already has content (already migrated or fresh install with new layout)
-    if servers_dir.exists()
-        && let Ok(entries) = fs::read_dir(servers_dir)
-        && entries.count() > 0
-    {
-        return Ok(());
-    }
-
-    // Load old config
-    let config = match cyber_jianghu_agent::config::Config::from_file(config_path) {
-        Ok(c) => c,
-        Err(_) => return Ok(()), // No config file, fresh install
-    };
-
-    let identity = match &config.identity {
-        Some(i) => i,
-        None => return Ok(()), // No identity, nothing to migrate
-    };
-
-    let agent = match &config.agent {
-        Some(a) => a,
-        None => return Ok(()), // No character, nothing to migrate
-    };
-
-    let agent_id = match agent.agent_id {
-        Some(id) => id,
-        None => return Ok(()), // Not registered yet
-    };
-
-    // Determine server key
-    let ws_url = identity.server_url.as_deref()
-        .unwrap_or(&config.server.ws_url);
-    let key = server_key(ws_url);
-    let server_dir = servers_dir.join(&key);
-
-    // Create directory structure
-    let char_dir = server_dir.join("characters").join(agent_id.to_string());
-    let data_dir = char_dir.join("data");
-    fs::create_dir_all(&data_dir)?;
-
-    // Save device.yaml
-    let device = DeviceConfig {
-        device_id: identity.device_id,
-        auth_token: identity.auth_token.clone(),
-        server_url: ws_url.to_string(),
-    };
-    device.save_to_file(&server_dir.join("device.yaml"))?;
-
-    // Save character.yaml
-    agent.save_to_file(char_dir.join("character.yaml"))?;
-
-    // Copy DB files with WAL checkpoint
-    let old_data_dir = config_path.parent()
-        .unwrap_or(config_path)
-        .join("..")
-        .join("data");
-
-    if old_data_dir.exists() {
-        let patterns = [
-            format!("agent_{}.db", agent_id),
-            format!("agent_{}_archive.db", agent_id),
-            format!("{}_fts.db", agent_id),
-            "semantic.db".to_string(),
-            format!("relationships_{}.db", agent_id),
-            format!("intent_history_{}.db", agent_id),
-        ];
-
-        for pattern in &patterns {
-            let src = old_data_dir.join(pattern);
-            if !src.exists() { continue; }
-
-            // Open read-only, checkpoint WAL
-            if let Ok(conn) = rusqlite::Connection::open_with_flags(
-                &src,
-                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-            ) {
-                let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-                drop(conn);
-            }
-
-            let dst = data_dir.join(pattern);
-            if let Err(e) = fs::copy(&src, &dst) {
-                tracing::warn!("Failed to copy {}: {}", pattern, e);
-            }
-        }
-    }
-
-    tracing::info!("Migrated old config to server-scoped layout: {}", key);
-    Ok(())
-}
-
-// ============================================================================
 // 确保设备身份存在（server-scoped）
 // ============================================================================
 
@@ -644,8 +542,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     });
 
     // Migrate old flat config if needed
-    migrate_old_config(&config_path(), &config.servers_dir)?;
-
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {
             info!("使用 Cognitive 模式（内置 LLM 决策）");
