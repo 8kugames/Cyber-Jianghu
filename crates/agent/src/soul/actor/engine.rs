@@ -1,0 +1,689 @@
+// ============================================================================
+// 多阶段认知引擎核心
+// ============================================================================
+//
+// 实现 Perception → Motivation → Planning → Decision 的强制认知流程
+//
+// 核心设计理念：
+// - 每个阶段独立调用 LLM，确保深度思考
+// - 后阶段接收前阶段的输出，形成认知链
+// - 最终决策必须基于完整的认知链
+// ============================================================================
+
+use anyhow::Result;
+use std::sync::Arc;
+use tracing::{debug, info};
+
+use super::chain::CognitiveChain;
+use super::stages::{
+    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionResponse, PlanningResponse,
+    StageOutput,
+};
+use crate::component::llm::{LlmClient, LlmClientExt};
+use crate::component::persona::DynamicPersona;
+use crate::infra::api::thinking_log;
+use crate::models::{Intent, WorldState};
+use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
+
+/// 多阶段认知引擎配置
+#[derive(Clone, Debug)]
+pub struct CognitiveEngineConfig {
+    /// Agent 名称
+    pub agent_name: String,
+    /// Agent 动态人设
+    pub persona: DynamicPersona,
+    /// 温度参数
+    pub temperature: f32,
+    /// 每阶段最大 token 数
+    pub max_tokens_per_stage: u32,
+}
+
+impl Default for CognitiveEngineConfig {
+    fn default() -> Self {
+        let agent_id = uuid::Uuid::new_v4();
+        let persona = DynamicPersona::new(agent_id, "无名侠客", "你是一名行走在江湖中的侠客。");
+
+        Self {
+            agent_name: "无名侠客".to_string(),
+            persona,
+            temperature: 0.7,
+            max_tokens_per_stage: 1024,
+        }
+    }
+}
+
+/// 多阶段认知引擎
+///
+/// 通过强制执行 Perception → Motivation → Planning → Decision 流程，
+/// 确保 LLM 进行深度思考而非简单的条件反射。
+pub struct MultiStageCognitiveEngine {
+    llm_client: Arc<dyn LlmClient>,
+    config: CognitiveEngineConfig,
+}
+
+impl MultiStageCognitiveEngine {
+    /// 创建新的多阶段认知引擎
+    pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
+        Self { llm_client, config }
+    }
+
+    /// 使用默认配置创建
+    pub fn with_defaults(llm_client: Arc<dyn LlmClient>) -> Self {
+        Self::new(llm_client, CognitiveEngineConfig::default())
+    }
+
+    pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
+        self.think_with_feedback(world_state, None).await
+    }
+
+    pub async fn think_with_feedback(
+        &self,
+        world_state: &WorldState,
+        validation_feedback: Option<&str>,
+    ) -> Result<CognitiveChain> {
+        let start_time = std::time::Instant::now();
+        let tick_id = world_state.tick_id;
+
+        info!("[{}-{}] 开始认知流程...", self.config.agent_name, tick_id);
+
+        let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
+
+        let (perception_response, perception) = self
+            .perceive_with_memory(world_state, "", validation_feedback)
+            .await?;
+        chain.add_stage(perception);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Perception",
+            &self.build_perception_prompt_with_memory(world_state, "", validation_feedback),
+            &perception_response,
+        );
+
+        // === Stage 2: Motivation (动机) ===
+        debug!("执行 Stage 2: Motivation");
+        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
+        let (motivation_response, motivation) =
+            self.motivate(world_state, &perception_output).await?;
+        chain.add_stage(motivation);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output),
+            &motivation_response,
+        );
+
+        // === Stage 3: Planning (规划) ===
+        debug!("执行 Stage 3: Planning");
+        let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
+        let (planning_response, planning) = self
+            .plan(world_state, &perception_output, &motivation_output)
+            .await?;
+        chain.add_stage(planning);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output),
+            &planning_response,
+        );
+
+        // === Stage 4: Decision (决策) ===
+        debug!("执行 Stage 4: Decision");
+        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
+        chain.add_stage(decision);
+        chain.final_intent = intent;
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Decision",
+            &self.build_decision_prompt(world_state, &chain),
+            &decision_response,
+        );
+
+        // 记录耗时
+        chain.duration_ms = start_time.elapsed().as_millis() as u64;
+
+        info!(
+            "[{}-{}] 认知完成，耗时 {}ms",
+            self.config.agent_name, tick_id, chain.duration_ms
+        );
+
+        thinking_log::log_thinking(&self.config.agent_name, tick_id, &chain.summarize());
+
+        Ok(chain)
+    }
+
+    /// 使用记忆上下文执行完整认知流程
+    pub async fn think_with_memory(
+        &self,
+        world_state: &WorldState,
+        memory_context: &str,
+    ) -> Result<CognitiveChain> {
+        let start_time = std::time::Instant::now();
+        let tick_id = world_state.tick_id;
+
+        let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
+
+        let (perception_response, perception) = self
+            .perceive_with_memory(world_state, memory_context, None)
+            .await?;
+        chain.add_stage(perception);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Perception",
+            &self.build_perception_prompt_with_memory(world_state, memory_context, None),
+            &perception_response,
+        );
+
+        // === Stage 2: Motivation (动机) ===
+        debug!("执行 Stage 2: Motivation");
+        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
+        let (motivation_response, motivation) =
+            self.motivate(world_state, &perception_output).await?;
+        chain.add_stage(motivation);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Motivation",
+            &self.build_motivation_prompt(world_state, &perception_output),
+            &motivation_response,
+        );
+
+        // === Stage 3: Planning (规划) ===
+        debug!("执行 Stage 3: Planning");
+        let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
+        let (planning_response, planning) = self
+            .plan(world_state, &perception_output, &motivation_output)
+            .await?;
+        chain.add_stage(planning);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Planning",
+            &self.build_planning_prompt(world_state, &perception_output, &motivation_output),
+            &planning_response,
+        );
+
+        // === Stage 4: Decision (决策) ===
+        debug!("执行 Stage 4: Decision");
+        let (decision_response, decision, intent) = self.decide(world_state, &chain).await?;
+        chain.add_stage(decision);
+        chain.final_intent = intent;
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Decision",
+            &self.build_decision_prompt(world_state, &chain),
+            &decision_response,
+        );
+
+        // 记录耗时
+        chain.duration_ms = start_time.elapsed().as_millis() as u64;
+
+        info!(
+            "[{}-{}] 认知完成，耗时 {}ms",
+            self.config.agent_name, tick_id, chain.duration_ms
+        );
+
+        thinking_log::log_thinking(&self.config.agent_name, tick_id, &chain.summarize());
+
+        Ok(chain)
+    }
+
+    // ========================================================================
+    // 各阶段实现
+    // ========================================================================
+
+    /// Stage 1: 感知 - 理解当前世界状态
+    #[allow(dead_code)]
+    async fn perceive(&self, world_state: &WorldState) -> Result<(String, StageOutput)> {
+        let prompt = self.build_perception_prompt(world_state);
+
+        let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
+
+        let content = format!(
+            "自身状态: {}\n环境: {}\n关键观察: {}",
+            response.self_status,
+            response.environment,
+            response.key_observations.join(", ")
+        );
+
+        let metadata = serde_json::to_value(&response)?;
+        let response_json = serde_json::to_string(&response)?;
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
+        ))
+    }
+
+    async fn perceive_with_memory(
+        &self,
+        world_state: &WorldState,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+    ) -> Result<(String, StageOutput)> {
+        let prompt = self.build_perception_prompt_with_memory(
+            world_state,
+            memory_context,
+            validation_feedback,
+        );
+
+        let response: PerceptionResponse = self.llm_client.complete_json(&prompt).await?;
+
+        let content = format!(
+            "自身状态: {}\n环境: {}\n关键观察: {}",
+            response.self_status,
+            response.environment,
+            response.key_observations.join(", ")
+        );
+
+        let metadata = serde_json::to_value(&response)?;
+        let response_json = serde_json::to_string(&response)?;
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
+        ))
+    }
+
+    /// Stage 2: 动机 - 基于人设生成内在驱动力
+    async fn motivate(
+        &self,
+        world_state: &WorldState,
+        perception: &StageOutput,
+    ) -> Result<(String, StageOutput)> {
+        let prompt = self.build_motivation_prompt(world_state, perception);
+
+        let response: MotivationResponse = self.llm_client.complete_json(&prompt).await?;
+
+        let content = format!(
+            "主要驱动力: {} (强度: {}/10)\n原因: {}",
+            response.primary_drive, response.drive_intensity, response.reasoning
+        );
+
+        let metadata = serde_json::to_value(&response)?;
+        let response_json = serde_json::to_string(&response)?;
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Motivation, content, metadata),
+        ))
+    }
+
+    /// Stage 3: 规划 - 制定行动计划
+    async fn plan(
+        &self,
+        world_state: &WorldState,
+        perception: &StageOutput,
+        motivation: &StageOutput,
+    ) -> Result<(String, StageOutput)> {
+        let prompt = self.build_planning_prompt(world_state, perception, motivation);
+
+        let response: PlanningResponse = self.llm_client.complete_json(&prompt).await?;
+
+        let content = format!(
+            "计划步骤:\n1. {}\n预期结果: {} (优先级: {}/10)",
+            response.steps.join("\n2. "),
+            response.expected_outcome,
+            response.priority
+        );
+
+        let metadata = serde_json::to_value(&response)?;
+        let response_json = serde_json::to_string(&response)?;
+        Ok((
+            response_json,
+            StageOutput::with_metadata(CognitiveStage::Planning, content, metadata),
+        ))
+    }
+
+    /// Stage 4: 决策 - 选择最终行动
+    async fn decide(
+        &self,
+        world_state: &WorldState,
+        chain: &CognitiveChain,
+    ) -> Result<(String, StageOutput, Intent)> {
+        let prompt = self.build_decision_prompt(world_state, chain);
+
+        let response: DecisionResponse = self.llm_client.complete_json(&prompt).await?;
+
+        let agent_id = world_state.agent_id.unwrap_or_default();
+        let tick_id = world_state.tick_id;
+        let action_type = response.action.to_lowercase();
+
+        let response_json = serde_json::to_string(&response)?;
+        let metadata = serde_json::to_value(&response)?;
+
+        let action_data = if response.action_data.is_null() {
+            None
+        } else {
+            Some(response.action_data)
+        };
+
+        let intent = Intent::new(agent_id, tick_id, action_type.as_str(), action_data)
+            .with_thought(response.thought_process.clone());
+
+        let content = format!(
+            "思考: {}\n行动: {}",
+            response.thought_process, intent.action_type
+        );
+
+        let stage_output = StageOutput::with_metadata(CognitiveStage::Decision, content, metadata);
+
+        Ok((response_json, stage_output, intent))
+    }
+
+    // ========================================================================
+    // Prompt 构建方法
+    // ========================================================================
+
+    #[allow(dead_code)]
+    fn build_perception_prompt(&self, world_state: &WorldState) -> String {
+        self.build_perception_prompt_with_memory(world_state, "", None)
+    }
+
+    fn build_perception_prompt_with_memory(
+        &self,
+        world_state: &WorldState,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+    ) -> String {
+        let self_state = &world_state.self_state;
+
+        // 使用叙事引擎生成叙事化描述（数据驱动）
+        let engine = NarrativeEngine::default();
+        let narrative = PerceptionNarrative::from_attributes_with_engine(
+            &engine,
+            &self_state.attributes,
+            &self_state.status_effects,
+        );
+
+        // 生成叙事化的状态描述
+        let self_status_section = narrative.to_prompt_section();
+
+        let inventory_str = if self_state.inventory.is_empty() {
+            "空".to_string()
+        } else {
+            self_state
+                .inventory
+                .iter()
+                .map(|i| format!("{} x{}", i.name, i.quantity))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let entities_str = if world_state.entities.is_empty() {
+            "无".to_string()
+        } else {
+            world_state
+                .entities
+                .iter()
+                .map(|e| format!("{}({})", e.name, e.state))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let items_str = if world_state.nearby_items.is_empty() {
+            "无".to_string()
+        } else {
+            world_state
+                .nearby_items
+                .iter()
+                .map(|i| i.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        // 记忆上下文（如果有）
+        let memory_section = if memory_context.is_empty() {
+            String::new()
+        } else {
+            format!(
+                r#"
+### 相关记忆
+{memory_context}
+
+"#
+            )
+        };
+
+        let feedback_section = match validation_feedback {
+            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            None => String::new(),
+        };
+
+        format!(
+            r#"# 感知阶段 (Perception)
+{feedback_section}
+你是 {agent_name}。
+{persona}
+
+## 当前游戏状态 (Tick {tick_id})
+
+{self_status_section}
+### 背包物品
+{inventory}
+
+### 位置
+- 地点: {location}
+
+### 环境
+- 附近的人: {entities}
+- 地上的物品: {items}
+{memory_section}
+## 任务
+请分析你感知到的信息，输出 JSON 格式的感知结果。
+
+**注意**：只需客观描述你看到的状态，不需要做任何决策。
+
+## 输出格式
+{{
+  "self_status": "你的状态简述 (30字以内)",
+  "environment": "环境描述 (30字以内)",
+  "key_observations": ["观察1", "观察2", "..."]
+}}
+"#,
+            agent_name = self.config.agent_name,
+            persona = self.config.persona.generate_description(),
+            tick_id = world_state.tick_id,
+            self_status_section = self_status_section,
+            inventory = inventory_str,
+            location = world_state.location.name,
+            entities = entities_str,
+            items = items_str,
+            memory_section = memory_section,
+            feedback_section = feedback_section,
+        )
+    }
+
+    fn build_motivation_prompt(
+        &self,
+        _world_state: &WorldState,
+        perception: &StageOutput,
+    ) -> String {
+        format!(
+            r#"# 动机阶段 (Motivation)
+
+你是 {agent_name}。
+{persona}
+
+## 你感知到的
+{perception_content}
+
+## 任务
+基于你的感知和性格，说明你的内在驱动力。
+- 你现在最想要什么？
+- 为什么想要这个？
+- 这个动机有多强烈？
+
+## 输出格式
+{{
+  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
+  "drive_intensity": 1-10,
+  "reasoning": "为什么有这个动机 (50字以内)"
+}}
+"#,
+            agent_name = self.config.agent_name,
+            persona = self.config.persona.generate_description(),
+            perception_content = perception.content
+        )
+    }
+
+    fn build_planning_prompt(
+        &self,
+        _world_state: &WorldState,
+        perception: &StageOutput,
+        motivation: &StageOutput,
+    ) -> String {
+        format!(
+            r#"# 规划阶段 (Planning)
+
+你是 {agent_name}。
+{persona}
+
+## 感知
+{perception}
+
+## 动机
+{motivation}
+
+## 任务
+基于你的感知和动机，制定行动计划。
+- 你打算怎么做？
+- 分成几个步骤？
+- 预期结果是什么？
+
+## 输出格式
+{{
+  "steps": ["步骤1", "步骤2", "..."],
+  "priority": 1-10,
+  "expected_outcome": "预期结果 (30字以内)"
+}}
+"#,
+            agent_name = self.config.agent_name,
+            persona = self.config.persona.generate_description(),
+            perception = perception.content,
+            motivation = motivation.content
+        )
+    }
+
+    fn build_decision_prompt(&self, _world_state: &WorldState, chain: &CognitiveChain) -> String {
+        // 获取各阶段输出作为上下文
+        let perception = chain
+            .get_stage(CognitiveStage::Perception)
+            .map(|s| s.content.as_str())
+            .unwrap_or("");
+        let motivation = chain
+            .get_stage(CognitiveStage::Motivation)
+            .map(|s| s.content.as_str())
+            .unwrap_or("");
+        let planning = chain
+            .get_stage(CognitiveStage::Planning)
+            .map(|s| s.content.as_str())
+            .unwrap_or("");
+
+        format!(
+            r#"# 决策阶段 (Decision)
+
+你是 {agent_name}。
+{persona}
+
+## 前面的思考
+
+### 感知
+{perception}
+
+### 动机
+{motivation}
+
+### 规划
+{planning}
+
+## 任务
+基于你前面的思考，做出最终决策。
+- 你要执行什么动作？
+- 为什么选择这个动作？
+- 动作的目标是谁？（如果适用）
+
+## 重要约束
+1. **必须引用前面的思考**：在 thought_process 中说明你的决策如何基于感知、动机和规划。
+2. **不能跳过思考**：不能直接说"因为饿了所以吃"，必须体现完整的认知链条。
+3. **必须以 JSON 格式输出**：不要包含其他文本。
+
+## 输出格式
+{{
+  "thought_process": "你的完整思考过程，必须引用感知、动机和规划 (300字以内)",
+  "action": "动作名称",
+  "action_data": {{}}
+}}
+
+## 可用动作及 action_data 字段（字段名必须严格匹配，否则服务端会拒绝）
+
+| action | action_data 必填字段 | 说明 |
+|--------|---------------------|------|
+| idle | (无) | 休息 |
+| speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
+| move | {{"target_location": "位置名"}} | 移动到指定位置 |
+| use | {{"item_id": "物品名"}} | 使用背包中的物品 |
+| attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
+| pickup | {{"item_id": "物品名"}} | 从地面拾取物品 |
+| give | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "quantity": 数量}} | 给予物品 |
+| steal | {{"target_agent_id": "目标AgentID", "item_id": "物品名"}} | 偷取物品 |
+| trade | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "price": 价格}} | 交易 |
+| drop | {{"item_id": "物品名", "quantity": 数量}} | 丢弃物品 |
+| gather | {{"target_id": "采集目标ID"}} | 采集资源 |
+| craft | {{"recipe_id": "配方ID"}} | 制造物品 |
+
+注意：target_agent_id 从 entities 列表中获取，item_id 从 inventory 或 nearby_items 中获取。
+"#,
+            agent_name = self.config.agent_name,
+            persona = self.config.persona.generate_description()
+        )
+    }
+
+    // ========================================================================
+    // 辅助方法
+    // ========================================================================
+}
+
+// ============================================================================
+// 创建 DecisionCallback 的便捷方法
+// ============================================================================
+
+impl MultiStageCognitiveEngine {
+    /// 创建决策回调（兼容现有 Agent 接口）
+    pub fn create_decision_callback(self) -> crate::runtime::DecisionCallback {
+        let engine = Arc::new(self);
+        Arc::new(move |world_state: &WorldState| {
+            let engine = engine.clone();
+            let world_state = world_state.clone();
+            Box::pin(async move {
+                match engine.think(&world_state).await {
+                    Ok(chain) => chain.final_intent,
+                    Err(e) => {
+                        tracing::error!("多阶段认知失败: {}", e);
+                        Intent::new(
+                            world_state.agent_id.unwrap_or_default(),
+                            world_state.tick_id,
+                            "idle",
+                            None,
+                        )
+                        .with_thought(format!("认知受阻: {}", e))
+                    }
+                }
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cognitive_engine_config_default() {
+        let config = CognitiveEngineConfig::default();
+        assert_eq!(config.agent_name, "无名侠客");
+        assert_eq!(config.temperature, 0.7);
+    }
+}
