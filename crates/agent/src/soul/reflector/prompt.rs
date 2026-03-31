@@ -65,28 +65,22 @@ impl ObserverPrompt {
         world_rules: &cyber_jianghu_protocol::WorldBuildingRules,
         world_context: &str,
     ) -> String {
+        // 截断 world_context 防止 prompt 过长
+        let world_context = super::sanitize_for_prompt(world_context);
+
         format!(
             r#"## 世界观规则
 
 ### 时代设定
 - 时代：{}
 - 技术水平：{}
-- 社会形态：{}
-
-### 允许的概念
-{}
 
 ### 禁止的概念
 {}
 
-### 叙事规则
-{}
-
 ## 玩家人设
 - 性别：{}
-- 年龄：{}
 - 性格：{}
-- 价值观：{}
 
 ## 当前世界状态
 {}
@@ -99,14 +93,9 @@ impl ObserverPrompt {
 请审核以上意图是否符合世界观和人物设定，并按指定 JSON 格式输出。"#,
             world_rules.era.name,
             world_rules.era.tech_level,
-            world_rules.era.social_structure,
-            world_rules.allowed_concepts.join("、"),
             world_rules.forbidden_concepts.join("、"),
-            world_rules.narrative_rules,
             persona.gender,
-            persona.age,
             persona.personality.join("、"),
-            persona.values.join("、"),
             world_context,
             intent.action_type,
             intent.thought_log.as_deref().unwrap_or("无"),
@@ -115,11 +104,11 @@ impl ObserverPrompt {
     }
 }
 
-/// 输入清洗（防止 prompt 注入）
+/// 输入清洗（防止 prompt 过长和注入）
 pub fn sanitize_for_prompt(input: &str) -> String {
     input
         .chars()
-        .take(1000) // 限制长度
+        .take(500) // 限制长度，为 LLM 输出留足空间
         .collect::<String>()
         .replace("{{", "{{{{") // 转义模板语法
         .replace("}}", "}}}}")
@@ -147,7 +136,7 @@ mod tests {
     fn test_sanitize_truncates_long_input() {
         let long_input = "a".repeat(2000);
         let sanitized = sanitize_for_prompt(&long_input);
-        assert_eq!(sanitized.len(), 1000);
+        assert_eq!(sanitized.len(), 500);
     }
 
     #[test]
