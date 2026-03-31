@@ -490,13 +490,14 @@ pub(super) async fn submit_intent_handler(
         Err(resp) => return resp,
     };
 
-    let current_tick = state
-        .current_state
-        .read()
-        .await
-        .as_ref()
-        .map(|s| s.tick_id)
-        .unwrap_or(0);
+    let (current_tick, world_time_str) = {
+        let current = state.current_state.read().await;
+        let tick = current.as_ref().map(|s| s.tick_id).unwrap_or(0);
+        let wt = current
+            .as_ref()
+            .and_then(|s| serde_json::to_string(&s.world_time).ok());
+        (tick, wt)
+    };
     if tick_id < current_tick {
         return (
             StatusCode::CONFLICT,
@@ -545,6 +546,7 @@ pub(super) async fn submit_intent_handler(
                 intent.intent_id,
                 action_type_str,
                 req.thought_log.clone(),
+                world_time_str,
             )
             .await;
     }

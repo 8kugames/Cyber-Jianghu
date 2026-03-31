@@ -111,25 +111,27 @@ impl IntentHistoryStore {
         intent_id: Uuid,
         action_type: String,
         thought_log: Option<String>,
+        world_time: Option<String>,
     ) {
         let conn = self.conn.lock().expect("intent_history lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
-        // INSERT ON CONFLICT: 同一 tick 可能被重新提交，保留已有 observer_thought/event/world_time
         let result = conn.execute(
             "INSERT INTO intent_history
-             (tick_id, intent_id, action_type, thought_log, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+             (tick_id, intent_id, action_type, thought_log, world_time, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(tick_id) DO UPDATE SET
                 intent_id = excluded.intent_id,
                 action_type = excluded.action_type,
                 thought_log = excluded.thought_log,
+                world_time = COALESCE(excluded.world_time, world_time),
                 created_at = excluded.created_at",
             params![
                 tick_id,
                 intent_id.to_string(),
                 action_type,
                 thought_log,
+                world_time,
                 created_at
             ],
         );
@@ -220,6 +222,52 @@ impl IntentHistoryStore {
                 "[intent_history] Updated observer thought for tick {}",
                 tick_id
             );
+        }
+    }
+
+    /// 获取最近的行动历史（用于认知引擎记忆上下文）
+    pub async fn get_recent_history(&self, limit: usize) -> Vec<IntentHistoryEntry> {
+        let conn = match self.conn.lock() {
+            Ok(conn) => conn,
+            Err(e) => {
+                tracing::warn!("[intent_history] Lock poisoned: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let mut stmt = match conn.prepare_cached(
+            "SELECT tick_id, intent_id, action_type, thought_log, observer_thought, event, world_time, created_at
+             FROM intent_history
+             ORDER BY tick_id DESC
+             LIMIT ?1",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                tracing::warn!("[intent_history] Failed to prepare query: {}", e);
+                return Vec::new();
+            }
+        };
+
+        match stmt.query_map(params![limit as i64], |row| {
+            Ok(IntentHistoryEntry {
+                tick_id: row.get(0)?,
+                intent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+                action_type: row.get(2)?,
+                thought_log: row.get(3)?,
+                observer_thought: row.get::<_, Option<String>>(4)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                event: row.get(5)?,
+                world_time: row.get(6)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            })
+        }) {
+            Ok(rows) => rows.filter_map(Result::ok).collect(),
+            Err(e) => {
+                tracing::warn!("[intent_history] Failed to query recent history: {}", e);
+                Vec::new()
+            }
         }
     }
 
@@ -350,6 +398,7 @@ mod tests {
                 intent_id,
                 "idle".to_string(),
                 Some("思考中...".to_string()),
+                None,
             )
             .await;
 
@@ -368,7 +417,7 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(1, intent_id, "idle".to_string(), None)
+            .record_intent(1, intent_id, "idle".to_string(), None, None)
             .await;
 
         store
@@ -404,6 +453,7 @@ mod tests {
                 intent_id,
                 "speak".to_string(),
                 Some("想说点什么".to_string()),
+                None,
             )
             .await;
 
@@ -438,6 +488,7 @@ mod tests {
                     Uuid::new_v4(),
                     "idle".to_string(),
                     Some(format!("thought {}", i)),
+                    None,
                 )
                 .await;
         }
@@ -469,6 +520,7 @@ mod tests {
                 intent_id,
                 "move".to_string(),
                 Some("去集市".to_string()),
+                None,
             )
             .await;
         drop(store);
