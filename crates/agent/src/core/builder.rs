@@ -223,13 +223,9 @@ impl AgentBuilder {
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
 
-        // 设置设备身份（优先使用 device_config，回退到 config.identity）
+        // 设置设备身份
         let device_ref = self.device_config.as_ref().map(|dc| {
             (dc.device_id, dc.auth_token.clone())
-        }).or_else(|| {
-            self.config.identity.as_ref().map(|id| {
-                (id.device_id, id.auth_token.clone())
-            })
         });
 
         if let Some((device_id, auth_token)) = device_ref {
@@ -261,7 +257,6 @@ impl AgentBuilder {
                         .character_config
                         .as_ref()
                         .map(|c| c.name.as_str())
-                        .or_else(|| self.config.agent.as_ref().map(|c| c.name.as_str()))
                         .unwrap_or("(未创建)");
                     info!("Memory system initialized for agent '{}'", agent_name);
                     Some(manager)

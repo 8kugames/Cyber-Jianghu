@@ -332,13 +332,7 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
     info!("生成设备 ID: {}", device_id);
 
     // 2. Derive HTTP URL from WS URL
-    let http_base = ws_url
-        .replace("ws://", "http://")
-        .replace("wss://", "https://");
-    let http_url = http_base
-        .rsplit_once('/')
-        .map(|(base, _)| base)
-        .unwrap_or(&http_base);
+    let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
 
     // 3. 向服务器注册
     let client = reqwest::Client::new();
@@ -1144,13 +1138,7 @@ fn start_claw_server(
     ws_state.spawn_validation_task((*shared_state).clone());
 
     // Derive HTTP URL from WS URL
-    let http_base = ws_url
-        .replace("ws://", "http://")
-        .replace("wss://", "https://");
-    let http_url = http_base
-        .rsplit_once('/')
-        .map(|(base, _)| base)
-        .unwrap_or(&http_base);
+    let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
 
     let (_http_decision_state, api_state) = create_http_state(
         device_id,
@@ -1215,13 +1203,7 @@ fn start_http_api_server(
     print_startup_banner(actual_port, ws_url, &config_path_str);
 
     // Derive HTTP URL from WS URL
-    let http_base = ws_url
-        .replace("ws://", "http://")
-        .replace("wss://", "https://");
-    let http_url = http_base
-        .rsplit_once('/')
-        .map(|(base, _)| base)
-        .unwrap_or(&http_base);
+    let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
 
     let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::create_http_state(
         device_id,

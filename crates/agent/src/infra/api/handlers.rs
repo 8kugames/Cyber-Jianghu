@@ -79,8 +79,9 @@ fn list_characters_from_fs(characters_dir: &Path) -> Result<Vec<CharacterConfig>
 }
 
 /// Get active (alive) character from state
-fn get_active_character(state: &HttpApiState) -> Result<Option<CharacterConfig>, anyhow::Error> {
-    let chars = list_characters_from_fs(&state.character_dir)?;
+async fn get_active_character(state: &HttpApiState) -> Result<Option<CharacterConfig>, anyhow::Error> {
+    let character_dir = state.character_dir.read().await.clone();
+    let chars = list_characters_from_fs(&character_dir)?;
     Ok(chars.into_iter().find(|c| c.status == CharacterStatus::Alive))
 }
 
@@ -94,9 +95,9 @@ fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(),
     config.save_to_file(dir.join("character.yaml"))
 }
 
-/// Get device identity from state
-fn get_device_id(state: &HttpApiState) -> Result<(Uuid, String), anyhow::Error> {
-    let device = state.device_config.blocking_read();
+/// Get device identity from state (async-safe)
+async fn get_device_id(state: &HttpApiState) -> Result<(Uuid, String), anyhow::Error> {
+    let device = state.device_config.read().await;
     let d = device.as_ref().context("No device identity")?;
     Ok((d.device_id, d.auth_token.clone()))
 }
@@ -1272,7 +1273,7 @@ pub(super) async fn register_character_handler(
     use tracing::info;
 
     // 1. 检查设备身份
-    let (device_id, auth_token) = match get_device_id(&state) {
+    let (device_id, auth_token) = match get_device_id(&state).await {
         Ok(id) => id,
         Err(e) => {
             error!("设备身份未初始化: {}", e);
@@ -1443,7 +1444,7 @@ pub(super) async fn register_character_handler(
                 server_url: Some(server_http_url.clone()),
             };
 
-            if let Err(e) = save_character(&new_character, &state.character_dir) {
+            if let Err(e) = save_character(&new_character, &state.character_dir.read().await) {
                 error!("保存角色配置失败: {}", e);
                 config_warning = Some(format!("角色配置保存失败: {}", e));
             }
@@ -1542,7 +1543,7 @@ pub struct CharacterInfoResponse {
 /// - WorldState：attributes, inventory, location, tick_id, world_time
 pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     // 1. 从文件系统读取活跃角色配置
-    let character = match get_active_character(&state) {
+    let character = match get_active_character(&state).await {
         Ok(Some(ch)) => ch,
         Ok(None) => {
             return (
@@ -1866,7 +1867,7 @@ pub(super) async fn rebirth_character_handler(
     }
 
     // 1. 检查设备身份
-    let (device_id, auth_token) = match get_device_id(&state) {
+    let (device_id, auth_token) = match get_device_id(&state).await {
         Ok(id) => id,
         Err(e) => {
             return (
@@ -1958,7 +1959,8 @@ pub(super) async fn rebirth_character_handler(
     // 7. 更新文件系统中的角色配置：标记为 Retired
     if !is_dead_character {
         // 正常归隐：读取角色配置，标记为 Retired
-        let char_dir = state.character_dir.join(agent_id.to_string());
+        let character_dir = state.character_dir.read().await.clone();
+        let char_dir = character_dir.join(agent_id.to_string());
         let char_yaml = char_dir.join("character.yaml");
         if char_yaml.exists() {
             match CharacterConfig::from_file(&char_yaml) {
@@ -2034,6 +2036,12 @@ pub struct DreamRecord {
     pub duration: u32,
 }
 
+/// Compute dream data directory for a specific character.
+/// Returns `character_dir / agent_id / data`.
+async fn dream_data_dir(state: &HttpApiState, agent_id: uuid::Uuid) -> std::path::PathBuf {
+    state.character_dir.read().await.join(agent_id.to_string()).join("data")
+}
+
 /// 托梦状态（存储在 HttpApiState 中）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DreamState {
@@ -2051,60 +2059,60 @@ pub struct DreamState {
 }
 
 impl DreamState {
-    pub fn load_from_file(config_path: &std::path::Path, agent_id: &uuid::Uuid) -> Option<Self> {
+    pub fn load_from_file(data_dir: &std::path::Path, agent_id: &uuid::Uuid) -> Option<Self> {
         if agent_id.is_nil() {
             return None;
         }
-        if let Some(dir) = config_path.parent() {
-            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
-            if file_path.exists() {
-                match std::fs::read_to_string(&file_path) {
-                    Ok(content) => match serde_json::from_str::<Self>(&content) {
-                        Ok(mut state) => {
-                            state.loaded = true;
-                            state.current_agent_id = Some(*agent_id);
-                            return Some(state);
-                        }
-                        Err(e) => {
-                            tracing::error!("反序列化托梦记录失败 {:?}: {}", file_path, e);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!("读取托梦记录文件失败 {:?}: {}", file_path, e);
+        let file_path = data_dir.join(format!("dream_state_{}.json", agent_id));
+        if file_path.exists() {
+            match std::fs::read_to_string(&file_path) {
+                Ok(content) => match serde_json::from_str::<Self>(&content) {
+                    Ok(mut state) => {
+                        state.loaded = true;
+                        state.current_agent_id = Some(*agent_id);
+                        return Some(state);
                     }
+                    Err(e) => {
+                        tracing::error!("反序列化托梦记录失败 {:?}: {}", file_path, e);
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("读取托梦记录文件失败 {:?}: {}", file_path, e);
                 }
             }
         }
         None
     }
 
-    pub fn save_to_file(&self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+    pub fn save_to_file(&self, data_dir: &std::path::Path, agent_id: &uuid::Uuid) {
         if agent_id.is_nil() {
             return;
         }
-        if let Some(dir) = config_path.parent() {
-            let file_path = dir.join(format!("dream_state_{}.json", agent_id));
-            match serde_json::to_string_pretty(self) {
-                Ok(json) => {
-                    if let Err(e) = std::fs::write(&file_path, json) {
-                        tracing::error!("写入托梦记录文件失败 {:?}: {}", file_path, e);
-                    }
+        if let Err(e) = std::fs::create_dir_all(data_dir) {
+            tracing::error!("创建托梦数据目录失败 {:?}: {}", data_dir, e);
+            return;
+        }
+        let file_path = data_dir.join(format!("dream_state_{}.json", agent_id));
+        match serde_json::to_string_pretty(self) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&file_path, json) {
+                    tracing::error!("写入托梦记录文件失败 {:?}: {}", file_path, e);
                 }
-                Err(e) => {
-                    tracing::error!("序列化托梦记录失败: {}", e);
-                }
+            }
+            Err(e) => {
+                tracing::error!("序列化托梦记录失败: {}", e);
             }
         }
     }
 
-    pub fn ensure_loaded(&mut self, config_path: &std::path::Path, agent_id: &uuid::Uuid) {
+    pub fn ensure_loaded(&mut self, data_dir: &std::path::Path, agent_id: &uuid::Uuid) {
         if agent_id.is_nil() {
             return;
         }
         if self.loaded && self.current_agent_id == Some(*agent_id) {
             return;
         }
-        if let Some(loaded) = Self::load_from_file(config_path, agent_id) {
+        if let Some(loaded) = Self::load_from_file(data_dir, agent_id) {
             *self = loaded;
         } else {
             self.thought = None;
@@ -2187,7 +2195,8 @@ pub(super) async fn dream_character_handler(
     {
         let mut dream = dream_store.write().await;
         let agent_id = *state.agent_id.read().await;
-        dream.ensure_loaded(&state.config_path, &agent_id);
+        let dd = dream_data_dir(&state, agent_id).await;
+        dream.ensure_loaded(&dd, &agent_id);
 
         if let Some(ref last_date) = dream.last_used_game_date
             && last_date == &current_date
@@ -2213,7 +2222,8 @@ pub(super) async fn dream_character_handler(
     // 更新托梦状态
     let mut dream = dream_store.write().await;
     let agent_id = *state.agent_id.read().await;
-    dream.ensure_loaded(&state.config_path, &agent_id);
+    let dd = dream_data_dir(&state, agent_id).await;
+    dream.ensure_loaded(&dd, &agent_id);
 
     dream.thought = Some(req.thought.clone());
     dream.remaining_ticks = req.duration;
@@ -2229,7 +2239,7 @@ pub(super) async fn dream_character_handler(
     if dream.records.len() > 200 {
         dream.records.truncate(200);
     }
-    dream.save_to_file(&state.config_path, &agent_id);
+    dream.save_to_file(&dream_data_dir(&state, agent_id).await, &agent_id);
 
     Json(DreamResponse {
         success: true,
@@ -2258,7 +2268,8 @@ pub(super) async fn get_dream_handler(State(state): State<HttpApiState>) -> impl
 
     let mut dream = dream_store.write().await;
     let agent_id = *state.agent_id.read().await;
-    dream.ensure_loaded(&state.config_path, &agent_id);
+    let dd = dream_data_dir(&state, agent_id).await;
+    dream.ensure_loaded(&dd, &agent_id);
 
     // 获取当前游戏日期，判断今天是否还能使用
     let can_use_today = {
@@ -2323,7 +2334,8 @@ pub(super) async fn get_dream_records_handler(
 
     let mut dream = dream_store.write().await;
     let agent_id = *state.agent_id.read().await;
-    dream.ensure_loaded(&state.config_path, &agent_id);
+    let dd = dream_data_dir(&state, agent_id).await;
+    dream.ensure_loaded(&dd, &agent_id);
 
     let total = dream.records.len() as u32;
     let start = ((page - 1) * limit) as usize;
@@ -2391,7 +2403,7 @@ pub(super) async fn list_characters_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
     // 从文件系统读取所有角色
-    let characters = match list_characters_from_fs(&state.character_dir) {
+    let characters = match list_characters_from_fs(&state.character_dir.read().await) {
         Ok(chars) => chars,
         Err(e) => {
             error!("读取角色列表失败: {}", e);
@@ -2490,7 +2502,7 @@ pub(super) async fn switch_character_handler(
     };
 
     // 从文件系统查找目标角色
-    let characters = match list_characters_from_fs(&state.character_dir) {
+    let characters = match list_characters_from_fs(&state.character_dir.read().await) {
         Ok(chars) => chars,
         Err(e) => {
             error!("读取角色列表失败: {}", e);
@@ -2670,13 +2682,13 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
     let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
 
     // 从文件系统检查是否有活跃角色
-    let has_character = match get_active_character(&state) {
+    let has_character = match get_active_character(&state).await {
         Ok(Some(_)) => true,
         Ok(None) => false,
         Err(_) => false,
     };
 
-    let current_character = match get_active_character(&state) {
+    let current_character = match get_active_character(&state).await {
         Ok(Some(c)) => Some(c.name.clone()),
         Ok(None) => None,
         Err(_) => None,
@@ -2843,10 +2855,7 @@ pub(super) async fn set_server_handler(
 
     // 计算新的 http_url
     let http_url_value = req.http_url.clone().unwrap_or_else(|| {
-        req.ws_url
-            .replace("ws://", "http://")
-            .replace("wss://", "https://")
-            .replace("/ws", "")
+        crate::config::ws_to_http_url(&req.ws_url)
     });
 
     // 检查是否切换到了不同的服务器
@@ -2867,7 +2876,13 @@ pub(super) async fn set_server_handler(
         needs_device_registration = true;
 
         // 检查是否有该服务器上的存活角色
-        match list_characters_from_fs(&state.character_dir) {
+        // 使用新服务器地址计算目标目录
+        let new_server_dir = state.server_dir.read().await.parent()
+            .unwrap_or(state.server_dir.read().await.as_path())
+            .to_path_buf()
+            .join(crate::config::server_key(&req.ws_url));
+        let new_character_dir = new_server_dir.join("characters");
+        match list_characters_from_fs(&new_character_dir) {
             Ok(all_characters) => {
                 // 过滤出该服务器的角色
                 let server_characters: Vec<_> = all_characters
@@ -2934,6 +2949,21 @@ pub(super) async fn set_server_handler(
     {
         let mut url = state.server_http_url.write().await;
         *url = http_url_value.clone();
+    }
+
+    // 1.5 更新 server_dir 和 character_dir（服务器切换后指向新目录）
+    if server_changed {
+        let new_server_dir = state.server_dir.read().await.parent()
+            .unwrap_or(state.server_dir.read().await.as_path())
+            .to_path_buf()
+            .join(crate::config::server_key(&req.ws_url));
+        let new_character_dir = new_server_dir.join("characters");
+        *state.server_dir.write().await = new_server_dir;
+        *state.character_dir.write().await = new_character_dir;
+        info!(
+            "[config] server_dir 更新为: {}",
+            state.server_dir.read().await.display()
+        );
     }
 
     // 2. 持久化到配置文件（config_path 是文件路径，非目录）

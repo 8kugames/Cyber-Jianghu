@@ -139,10 +139,10 @@ pub struct HttpApiState {
     pub server_ws_url: Arc<RwLock<String>>,
     /// 设备配置（device_id + auth_token），运行时可通过注册更新
     pub device_config: Arc<RwLock<Option<crate::config::DeviceConfig>>>,
-    /// 服务器配置目录路径
-    pub server_dir: PathBuf,
-    /// 角色配置目录路径
-    pub character_dir: PathBuf,
+    /// 服务器配置目录路径（运行时可通过服务器切换更新）
+    pub server_dir: Arc<RwLock<PathBuf>>,
+    /// 角色配置目录路径（运行时可通过服务器切换更新）
+    pub character_dir: Arc<RwLock<PathBuf>>,
     /// 配置文件路径（用于读取角色配置）
     pub config_path: PathBuf,
 
@@ -664,8 +664,8 @@ pub fn create_http_state(
         server_http_url: Arc::new(RwLock::new(server_http_url)),
         server_ws_url: Arc::new(RwLock::new(server_ws_url)),
         device_config: Arc::new(RwLock::new(device_config)),
-        server_dir,
-        character_dir,
+        server_dir: Arc::new(RwLock::new(server_dir)),
+        character_dir: Arc::new(RwLock::new(character_dir)),
         config_path,
         dialogue_client,
         relationship_store,
@@ -776,7 +776,8 @@ impl HttpApiState {
         let mut dream = dream_store.write().await;
 
         let agent_id = *self.agent_id.read().await;
-        dream.ensure_loaded(&self.config_path, &agent_id);
+        let dream_dir = self.character_dir.read().await.join(agent_id.to_string()).join("data");
+        dream.ensure_loaded(&dream_dir, &agent_id);
 
         let mut changed = false;
 
@@ -800,7 +801,7 @@ impl HttpApiState {
         };
 
         if changed {
-            dream.save_to_file(&self.config_path, &agent_id);
+            dream.save_to_file(&dream_dir, &agent_id);
         }
 
         result

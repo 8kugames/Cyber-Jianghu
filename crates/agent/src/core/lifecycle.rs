@@ -210,10 +210,7 @@ impl super::Agent {
                 } => {
                     info!("[main] 收到重连请求: {}", req.ws_url);
                     // 推断 HTTP URL
-                    let http_url = req.ws_url
-                        .replace("ws://", "http://")
-                        .replace("wss://", "https://")
-                        .replace("/ws", "");
+                    let http_url = crate::config::ws_to_http_url(&req.ws_url);
                     // 更新客户端 URL
                     self.client.update_server_url(req.ws_url.clone(), http_url).await;
                     // 触发重连
