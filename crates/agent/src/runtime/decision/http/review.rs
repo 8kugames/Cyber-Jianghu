@@ -42,6 +42,8 @@ pub struct PendingReviewEntry {
     pub persona_summary: PersonaSummary,
     /// 世界上下文
     pub world_context: String,
+    /// 认知链 JSON（用于 ReflectorSoul 本地质量检查）
+    pub cognitive_chain: Option<String>,
     /// 创建时间
     pub created_at: chrono::DateTime<Utc>,
     /// 审查截止时间
@@ -85,6 +87,7 @@ impl ReviewStore {
         agent_id: Uuid,
         persona_summary: PersonaSummary,
         world_context: String,
+        cognitive_chain: Option<String>,
     ) -> Uuid {
         let intent_id = Uuid::new_v4();
         let now = Utc::now();
@@ -96,6 +99,7 @@ impl ReviewStore {
             intent,
             persona_summary,
             world_context,
+            cognitive_chain,
             created_at: now,
             deadline,
         };
@@ -122,6 +126,7 @@ impl ReviewStore {
                 intent: e.intent.clone(),
                 persona_summary: e.persona_summary.clone(),
                 world_context: e.world_context.clone(),
+                cognitive_chain: e.cognitive_chain.clone(),
                 created_at: e.created_at,
                 deadline: e.deadline,
             })
@@ -413,7 +418,7 @@ mod tests {
         };
 
         let intent_id = store
-            .add_pending(intent, Uuid::new_v4(), persona, "测试上下文".to_string())
+            .add_pending(intent, Uuid::new_v4(), persona, "测试上下文".to_string(), None)
             .await;
 
         let pending = store.get_pending().await;
@@ -436,7 +441,7 @@ mod tests {
         };
 
         let intent_id = store
-            .add_pending(intent, Uuid::new_v4(), persona, "".to_string())
+            .add_pending(intent, Uuid::new_v4(), persona, "".to_string(), None)
             .await;
 
         let submission = ReviewSubmission {

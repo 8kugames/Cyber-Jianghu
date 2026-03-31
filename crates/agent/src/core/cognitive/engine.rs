@@ -161,13 +161,14 @@ impl MultiStageCognitiveEngine {
     }
 
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
-        self.think_with_feedback(world_state, None).await
+        self.think_with_feedback(world_state, None, None).await
     }
 
     pub async fn think_with_feedback(
         &self,
         world_state: &WorldState,
         validation_feedback: Option<&str>,
+        memory_context: Option<&str>,
     ) -> Result<CognitiveChain> {
         let cfg = self.config_snapshot();
         let start_time = Instant::now();
@@ -199,6 +200,7 @@ impl MultiStageCognitiveEngine {
         let outcome = self
             .run_cognitive_stages(
                 world_state,
+                memory_context.unwrap_or(""),
                 validation_feedback,
                 &cfg,
                 &mut chain,
@@ -233,9 +235,11 @@ impl MultiStageCognitiveEngine {
     }
 
     /// 认知流程核心阶段执行（deadline-aware）
+    #[allow(clippy::too_many_arguments)]
     async fn run_cognitive_stages(
         &self,
         world_state: &WorldState,
+        memory_context: &str,
         validation_feedback: Option<&str>,
         cfg: &CognitiveEngineConfig,
         chain: &mut CognitiveChain,
@@ -252,7 +256,7 @@ impl MultiStageCognitiveEngine {
         debug!("执行 Stage 1+2+3: PerceptionMotivationPlanning (合并)");
         let pmp_prompt = self.build_perception_motivation_planning_prompt(
             world_state,
-            "",
+            memory_context,
             validation_feedback,
             &persona_desc,
             cfg,
@@ -271,7 +275,7 @@ impl MultiStageCognitiveEngine {
             stage_timeout,
             self.perceive_motivate_and_plan(
                 world_state,
-                "",
+                memory_context,
                 validation_feedback,
                 &persona_desc,
                 cfg,
@@ -552,6 +556,7 @@ impl MultiStageCognitiveEngine {
 
 ### 位置
 - 地点: {location}
+- 可到达: {adjacent_nodes}
 
 ### 环境
 - 附近的人: {entities}
@@ -591,6 +596,15 @@ impl MultiStageCognitiveEngine {
             self_status_section = self_status_section,
             inventory = inventory_str,
             location = world_state.location.name,
+            adjacent_nodes = if world_state.location.adjacent_nodes.is_empty() {
+                "无".to_string()
+            } else {
+                world_state.location.adjacent_nodes
+                    .iter()
+                    .map(|n| format!("{} ({}tick)", n.name, n.travel_cost))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
             entities = entities_str,
             items = items_str,
             memory_section = memory_section,

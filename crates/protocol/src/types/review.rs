@@ -62,6 +62,9 @@ pub struct PendingReview {
     pub persona_summary: PersonaSummary,
     /// 世界上下文摘要
     pub world_context: String,
+    /// 认知链 JSON（用于 ReflectorSoul 本地质量检查）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cognitive_chain: Option<String>,
     /// 创建时间
     pub created_at: DateTime<Utc>,
     /// 审查截止时间

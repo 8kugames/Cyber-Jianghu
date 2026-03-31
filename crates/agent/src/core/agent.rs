@@ -471,6 +471,7 @@ impl Agent {
     }
 
     /// 保存观察者叙事到情景记忆
+    #[allow(dead_code)]
     pub(crate) async fn save_observer_narrative(
         &mut self,
         tick_id: i64,
@@ -511,144 +512,6 @@ impl Agent {
                 reason,
                 rejection_type,
             }),
-        }
-    }
-
-    /// 带验证的决策循环
-    ///
-    /// `pipeline_deadline`: 整个 pipeline（认知+验证+审查）的绝对截止时间
-    pub async fn decide_with_validation(
-        &mut self,
-        world_state: &WorldState,
-        pipeline_deadline: Option<std::time::Instant>,
-    ) -> Result<Intent> {
-        use std::time::Instant;
-        use tracing::warn;
-
-        let tick_start = Instant::now();
-        let tick_duration = self.get_tick_duration().await;
-        let min_retry_time =
-            std::time::Duration::from_secs(self.validator_config.min_retry_time_secs);
-        let max_attempts = self.validator_config.max_retry_attempts;
-
-        let mut attempt = 0;
-        let mut consecutive_rejections = 0;
-        let mut last_rejection_reason: Option<String> = None;
-
-        loop {
-            attempt += 1;
-
-            // 检查剩余时间（取 pipeline deadline 和 tick duration 的更紧约束）
-            let elapsed = tick_start.elapsed();
-            let remaining_tick = tick_duration.saturating_sub(elapsed);
-            let remaining = pipeline_deadline
-                .and_then(|dl| dl.checked_duration_since(Instant::now()))
-                .map(|rd| rd.min(remaining_tick))
-                .unwrap_or(remaining_tick);
-
-            if remaining < min_retry_time {
-                warn!("Tick time exhausted, forcing idle");
-                let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
-            }
-
-            if attempt > max_attempts {
-                warn!("Max validation attempts reached, forcing idle");
-                let agent_id = self.client.agent_id().await.unwrap_or_default();
-                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
-            }
-
-            // 调用决策回调（可能包含驳回反馈）
-            let intent = if let Some(ref reason) = last_rejection_reason {
-                if let Some(ref callback) = self.decision_with_feedback_callback {
-                    callback(world_state, Some(reason.as_str())).await
-                } else {
-                    // 如果没有带反馈的回调，记录警告并使用普通回调
-                    warn!(
-                        "Validation feedback available but no feedback callback set: {}",
-                        reason
-                    );
-                    (self.decision_callback)(world_state).await
-                }
-            } else {
-                (self.decision_callback)(world_state).await
-            };
-
-            // 认知链质量验证（如果配置了认知验证器）
-            if let Some(ref cv) = self.cognitive_validator
-                && let Some(chain) = self.last_cognitive_chain.read().await.as_ref()
-            {
-                let cv_result = cv.validate(chain);
-                if !cv_result.is_valid {
-                    consecutive_rejections += 1;
-                    warn!(
-                        "Cognitive chain rejected (attempt {}): {} | Suggestion: {}",
-                        attempt,
-                        cv_result.reason.as_deref().unwrap_or("unknown"),
-                        cv_result.suggestion.as_deref().unwrap_or("none")
-                    );
-                    if consecutive_rejections
-                        >= self.validator_config.consecutive_rejection_threshold
-                    {
-                        let agent_id = self.client.agent_id().await.unwrap_or_default();
-                        return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
-                    }
-                    last_rejection_reason = Some(format!(
-                        "[认知链质量] {}. {}",
-                        cv_result.reason.as_deref().unwrap_or("invalid"),
-                        cv_result.suggestion.as_deref().unwrap_or("")
-                    ));
-                    continue;
-                }
-            }
-
-            // 如果没有验证器，直接返回意图
-            let validator = match &self.validator {
-                Some(v) => v,
-                None => return Ok(intent),
-            };
-
-            // 构建验证请求（世界观规则由验证器内部维护）
-            let request = crate::ai::validator::ValidationRequest {
-                intent: intent.clone(),
-                persona: self.extract_persona(),
-                world_context: self.build_world_context(world_state),
-            };
-
-            // 验证意图
-            match validator.validate(request).await? {
-                crate::ai::validator::ValidationResult::Approved { reason, narrative } => {
-                    info!("Intent approved (attempt {}): {:?}", attempt, reason);
-
-                    // 保存叙事摘要到情景记忆
-                    self.save_observer_narrative(world_state.tick_id, &narrative)
-                        .await?;
-
-                    return Ok(intent);
-                }
-                crate::ai::validator::ValidationResult::Rejected {
-                    reason,
-                    rejection_type,
-                } => {
-                    consecutive_rejections += 1;
-                    warn!(
-                        "Intent rejected (attempt {}, consecutive: {}): {} [{:?}]",
-                        attempt, consecutive_rejections, reason, rejection_type
-                    );
-
-                    // 连续驳回次数过多，强制 idle
-                    if consecutive_rejections
-                        >= self.validator_config.consecutive_rejection_threshold
-                    {
-                        warn!("Too many consecutive rejections, forcing idle");
-                        let agent_id = self.client.agent_id().await.unwrap_or_default();
-                        return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
-                    }
-
-                    // 记录驳回原因，用于下一次决策
-                    last_rejection_reason = Some(reason);
-                }
-            }
         }
     }
 
@@ -720,12 +583,17 @@ impl Agent {
         };
 
         // 添加到待审查队列
+        let cognitive_chain_json = self.last_cognitive_chain.read().await
+            .as_ref()
+            .and_then(|chain| serde_json::to_string(chain).ok());
+
         let intent_id = review_store
             .add_pending(
                 intent.clone(),
                 self.client.agent_id().await.unwrap_or_default(),
                 persona_summary,
                 self.build_world_context(world_state),
+                cognitive_chain_json,
             )
             .await;
 
