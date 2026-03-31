@@ -186,8 +186,8 @@ pub async fn admin_cookie_middleware(
         return Ok(next.run(req).await);
     }
 
-    // Allow unauthenticated access to /admin/ so frontend can handle login flow
-    if path == "/admin/" {
+    // Allow unauthenticated access to static assets (js, css, images, html)
+    if is_static_asset(path) {
         return Ok(next.run(req).await);
     }
 
@@ -199,4 +199,22 @@ pub async fn admin_cookie_middleware(
 
     tracing::warn!("Admin access denied: no valid session cookie for path={}", path);
     Err(StatusCode::UNAUTHORIZED)
+}
+
+fn is_static_asset(path: &str) -> bool {
+    path == "/admin/"
+        || path == "/admin"
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".html")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".gif")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+        || path.ends_with(".woff")
+        || path.ends_with(".woff2")
+        || path.ends_with(".ttf")
+        || path.ends_with(".eot")
 }
