@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::config::CharacterStatus;
+use crate::infra::transport::ConnectError;
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -61,16 +62,33 @@ impl super::Agent {
             connect_attempt += 1;
             match self.client.connect().await {
                 Ok(()) => break,
-                Err(e) => {
+                Err(ConnectError::AuthFailed) => {
+                    warn!("WebSocket auth failed (attempt {}), refreshing token...", connect_attempt);
+                    match self.refresh_device_token().await {
+                        Ok(()) => {
+                            info!("Token refreshed, retrying connection...");
+                            continue;
+                        }
+                        Err(e) => {
+                            if should_log_retry(connect_attempt) {
+                                warn!(
+                                    "Token refresh failed (attempt {}): {}, 5秒后重试...",
+                                    connect_attempt, e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(ConnectError::ConnectionFailed(e)) => {
                     if should_log_retry(connect_attempt) {
                         warn!(
                             "连接游戏服务器失败 (尝试 {}): {}, 5秒后重试...",
                             connect_attempt, e
                         );
                     }
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 }
             }
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
         info!("Agent '{}' connected to server", self.character_name());
 
@@ -510,7 +528,25 @@ impl super::Agent {
                     self.reconnect_backoff = 0;
                     return Ok(());
                 }
-                Err(e) => {
+                Err(ConnectError::AuthFailed) => {
+                    warn!("重连 auth failed (attempt {}), refreshing token...", attempt);
+                    match self.refresh_device_token().await {
+                        Ok(()) => {
+                            info!("Token refreshed, retrying reconnection...");
+                            // 不增加退避计数器，因为 token 已刷新
+                            continue;
+                        }
+                        Err(e) => {
+                            if should_log_retry(attempt) {
+                                warn!("重连 token refresh 失败 (attempt {}): {}", attempt, e);
+                            }
+                            // 增加退避计数器（逐步降低频率）
+                            self.reconnect_backoff = self.reconnect_backoff.saturating_add(1);
+                            // 继续循环，不退出
+                        }
+                    }
+                }
+                Err(ConnectError::ConnectionFailed(e)) => {
                     if should_log_retry(attempt) {
                         warn!("重连尝试 {} 失败: {}", attempt, e);
                     }
@@ -520,6 +556,61 @@ impl super::Agent {
                 }
             }
         }
+    }
+
+    /// 刷新设备 token（WebSocket 400 认证失败时自动调用）
+    ///
+    /// 调用 `POST {server_http_url}/api/v1/agent/connect` 获取新的 auth_token，
+    /// 然后更新客户端身份和本地 device_config。
+    async fn refresh_device_token(&mut self) -> Result<()> {
+        let device_id = self
+            .device_config
+            .as_ref()
+            .map(|d| d.device_id)
+            .ok_or_else(|| anyhow::anyhow!("No device_config, cannot refresh token"))?;
+
+        let http_url = &self.config.server.http_url;
+        let url = format!("{}/api/v1/agent/connect", http_url);
+
+        debug!("Refreshing device token for {} at {}", device_id, url);
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .json(&serde_json::json!({ "device_id": device_id }))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Server returned error {}: {}", status, body);
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ConnectResponse {
+            auth_token: String,
+        }
+
+        let result: ConnectResponse = response
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?;
+
+        info!("Token refreshed successfully for device {}", device_id);
+
+        // 更新客户端身份
+        self.client
+            .set_identity(device_id, result.auth_token.clone())
+            .await;
+
+        // 更新本地 device_config
+        if let Some(ref mut device) = self.device_config {
+            device.auth_token = result.auth_token;
+        }
+
+        Ok(())
     }
 
     /// 关闭连接
