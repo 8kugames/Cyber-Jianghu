@@ -415,18 +415,32 @@ async function loadExperiences(page = 1) {
 
                 const worldTimeText = formatWorldTime(exp.world_time);
                 const realTimeText = formatRealTime(exp.created_at);
-                const eventText = exp.event ? exp.event : '-';
+                const eventText = (exp.event !== undefined && exp.event !== null) ? exp.event : '-';
                 const actionType = exp.action_type || '';
 
-                let html = `<div class="exp-header"><span class="exp-tick-badge">T${exp.tick_id || '-'}</span><span class="exp-time-info"><span class="exp-world-time">${escapeHtml(worldTimeText)}</span><span class="exp-real-time">${escapeHtml(realTimeText)}</span></span></div><div class="exp-body"><div class="exp-content">${escapeHtml(eventText)}</div></div>`;
+                // 解析 observer_thought JSON
+                let observerData = null;
+                if (exp.observer_thought) {
+                    try {
+                        observerData = JSON.parse(exp.observer_thought);
+                    } catch (e) {
+                        // ignore parse error
+                    }
+                }
+
+                let html = `<div class="exp-header"><span class="exp-tick-badge">T${exp.tick_id || '-'}</span><span class="exp-time-info"><span class="exp-world-time">${escapeHtml(worldTimeText)}</span><span class="exp-real-time">${escapeHtml(realTimeText)}</span></span></div>`;
                 if (actionType) {
                     html += `<div class="exp-action-tag">${escapeHtml(actionType)}</div>`;
                 }
-                if (exp.intent_summary) {
-                    html += `<div class="exp-thought"><span class="thought-label">意图:\n</span><span class="thought-content">${escapeHtml(exp.intent_summary)}</span></div>`;
+                html += `<div class="exp-body"><div class="exp-content">${escapeHtml(eventText)}</div></div>`;
+                if (observerData && observerData.narrative) {
+                    html += `<div class="exp-review-narrative">${escapeHtml(observerData.narrative)}</div>`;
                 }
-                if (exp.observer_thought) {
-                    html += `<div class="exp-observer"><span class="observer-label">审查:</span><span class="observer-content">${escapeHtml(exp.observer_thought)}</span></div>`;
+                if (exp.intent_summary) {
+                    html += `<div class="exp-thought">意图: ${escapeHtml(exp.intent_summary)}</div>`;
+                }
+                if (observerData) {
+                    html += `<div class="exp-observer">审查: ${escapeHtml(observerData.result || '-')} - ${escapeHtml(observerData.reason || '-')}</div>`;
                 }
                 div.innerHTML = html;
                 expEl.appendChild(div);
