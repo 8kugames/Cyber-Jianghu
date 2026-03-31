@@ -21,16 +21,41 @@ function showAuthModal() {
 async function submitAuthToken() {
     var token = document.getElementById("auth-token-input").value.trim();
     if (token) {
-        authToken = token;
-        localStorage.setItem("admin_token", token);
-        document.getElementById("auth-modal").style.display = "none";
-        if (Object.keys(locationNames).length === 0) {
-            await initLocationMapping();
-        }
-        if (document.getElementById("dashboard").classList.contains("active")) {
-            loadStats();
-        } else {
-            loadConfigList();
+        try {
+            const res = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token })
+            });
+
+            if (res.ok) {
+                authToken = token;
+                localStorage.setItem("admin_token", token);
+                document.getElementById("auth-modal").style.display = "none";
+                if (Object.keys(locationNames).length === 0) {
+                    await initLocationMapping();
+                }
+                if (document.getElementById("dashboard").classList.contains("active")) {
+                    loadStats();
+                } else {
+                    loadConfigList();
+                }
+            } else {
+                alert('Token 无效');
+            }
+        } catch (e) {
+            alert('请求失败，请重试');
         }
     }
+}
+
+async function logout() {
+    try {
+        await fetch('/api/admin/logout', { method: 'POST' });
+    } catch (e) {
+        console.warn('Logout request failed', e);
+    }
+    localStorage.removeItem("admin_token");
+    authToken = null;
+    window.location.href = '/admin';
 }
