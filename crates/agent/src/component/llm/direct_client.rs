@@ -501,6 +501,87 @@ impl DirectLlmClient {
             anyhow::bail!("LLM returned empty response")
         }
     }
+
+    /// 调用 OpenAI 兼容 API（system + user 分离）
+    ///
+    /// 使用 system role 发送系统指令，user role 发送用户 prompt，
+    /// 利用 LLM 的 system message 优先级机制确保角色指令不被截断。
+    async fn call_openai_compatible_api_with_system(
+        &self,
+        system: &str,
+        prompt: &str,
+    ) -> Result<String> {
+        let client = self.build_http_client()?;
+        let base_url = self.config.get_base_url()?;
+        let model = self.config.get_model_with_default();
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+        let request = OpenAIRequest {
+            model,
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system.to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: prompt.to_string(),
+                },
+            ],
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+        };
+
+        debug!(
+            "Calling OpenAI-compatible API (system+user): {}",
+            url
+        );
+        debug!("Request model: {}", request.model);
+
+        let mut request_builder = client.post(&url).header("Content-Type", "application/json");
+
+        if let Some(ref api_key) = self.config.api_key {
+            request_builder =
+                request_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        let response = request_builder
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send request to LLM API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read error body".to_string());
+            error!("LLM API error {}: {}", status, error_body);
+            anyhow::bail!("LLM API error {}: {}", status, error_body);
+        }
+
+        let response_data: OpenAIResponse = response
+            .json()
+            .await
+            .context("Failed to parse LLM response")?;
+
+        if let Some(ref usage) = response_data.usage {
+            token_usage_tracker().record(usage.prompt_tokens, usage.completion_tokens);
+            debug!(
+                "Token usage: prompt={}, completion={}",
+                usage.prompt_tokens, usage.completion_tokens
+            );
+        }
+
+        if let Some(choice) = response_data.choices.first() {
+            let content = choice.message.content.trim().to_string();
+            debug!("LLM response length: {} chars", content.len());
+            Ok(content)
+        } else {
+            anyhow::bail!("LLM returned empty response")
+        }
+    }
 }
 
 #[async_trait]
@@ -508,6 +589,11 @@ impl LlmClient for DirectLlmClient {
     async fn complete(&self, prompt: &str) -> Result<String> {
         // 所有三种 provider 都使用 OpenAI 兼容接口
         self.call_openai_compatible_api(prompt).await
+    }
+
+    async fn complete_with_system(&self, system: &str, prompt: &str) -> Result<String> {
+        self.call_openai_compatible_api_with_system(system, prompt)
+            .await
     }
 }
 
