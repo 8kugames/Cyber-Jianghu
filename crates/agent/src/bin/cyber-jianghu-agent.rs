@@ -23,7 +23,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
@@ -34,7 +34,7 @@ use cyber_jianghu_agent::component::llm::{
     DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider,
 };
 use cyber_jianghu_agent::config::{
-    CharacterConfig, Config, IdentityConfig, LlmConfig, RuntimeMode,
+    CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
 };
 use cyber_jianghu_agent::{
     AgentBuilder,
@@ -76,6 +76,10 @@ enum Commands {
         /// - cognitive: 内置 LLM 决策，无需外部调度器
         #[arg(long, default_value = "cognitive")]
         mode: String,
+
+        /// Server WebSocket URL (overrides agent.yaml)
+        #[arg(long)]
+        server: Option<String>,
     },
 
     /// 显示当前配置
@@ -165,50 +169,6 @@ fn save_config(config: &Config) -> Result<()> {
 }
 
 // ============================================================================
-// Agent 接入 API
-// ============================================================================
-
-#[derive(Debug, Serialize)]
-struct AgentConnectRequest {
-    device_id: Uuid,
-}
-
-#[derive(Debug, Deserialize)]
-struct AgentConnectResponse {
-    auth_token: String,
-    message: String,
-}
-
-/// 向服务器注册设备身份
-async fn register_agent_identity(server_url: &str, device_id: Uuid) -> Result<String> {
-    let client = Client::new();
-    let url = format!("{}/api/v1/agent/connect", server_url);
-
-    info!("向服务器注册设备: {} -> {}", device_id, url);
-
-    let response = client
-        .post(&url)
-        .json(&AgentConnectRequest { device_id })
-        .send()
-        .await
-        .context("Failed to connect to server")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Server returned error {}: {}", status, body);
-    }
-
-    let result: AgentConnectResponse = response
-        .json()
-        .await
-        .context("Failed to parse server response")?;
-
-    info!("服务器响应: {}", result.message);
-    Ok(result.auth_token)
-}
-
-// ============================================================================
 // 角色注册 API
 // ============================================================================
 
@@ -251,30 +211,16 @@ async fn create_character_via_api(agent_port: u16, character: CharacterConfig) -
 }
 
 // ============================================================================
-// 确保 Agent 身份存在
+// 确保设备身份存在（server-scoped）
 // ============================================================================
 
-async fn ensure_identity(config: &mut Config) -> Result<()> {
-    // 检查是否需要重置身份（服务器地址变化）
-    let (has_identity, needs_reset) = config.check_identity_server_match();
+async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
+    let device_path = config.device_yaml_path(ws_url);
 
-    if needs_reset {
-        warn!(
-            "检测到服务器地址变化: {} -> {}",
-            config
-                .identity
-                .as_ref()
-                .and_then(|i| i.server_url.as_deref())
-                .unwrap_or("(未知)"),
-            config.server.http_url
-        );
-        warn!("将清除旧身份并重新注册...");
-        config.clear_identity();
-    }
-
-    if has_identity && !needs_reset {
-        info!("使用已有 Agent 身份");
-        return Ok(());
+    if device_path.exists() {
+        let device = DeviceConfig::from_file(&device_path)?;
+        info!("使用已有设备身份: {}", device.device_id);
+        return Ok(device);
     }
 
     info!("首次启动，生成设备身份...");
@@ -283,21 +229,76 @@ async fn ensure_identity(config: &mut Config) -> Result<()> {
     let device_id = Uuid::new_v4();
     info!("生成设备 ID: {}", device_id);
 
-    // 2. 向服务器注册
-    let auth_token = register_agent_identity(&config.server.http_url, device_id).await?;
+    // 2. Derive HTTP URL from WS URL
+    let http_base = ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://");
+    let http_url = http_base
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or(&http_base);
 
-    // 3. 保存身份（包含服务器 URL）
-    config.identity = Some(IdentityConfig {
+    // 3. 向服务器注册
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/api/v1/agent/connect", http_url))
+        .json(&serde_json::json!({"device_id": device_id.to_string()}))
+        .send()
+        .await
+        .context("Failed to register device with server")?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse device registration response")?;
+    let auth_token = body["auth_token"]
+        .as_str()
+        .context("No auth_token in response")?
+        .to_string();
+
+    // 4. 创建 DeviceConfig
+    let device = DeviceConfig {
         device_id,
         auth_token,
-        server_url: Some(config.server.http_url.clone()),
-    });
+        server_url: ws_url.to_string(),
+    };
 
-    // 4. 持久化
-    save_config(config)?;
-    info!("Agent 身份已创建并保存");
+    // 5. 持久化
+    if let Some(parent) = device_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    device.save_to_file(&device_path)?;
 
-    Ok(())
+    info!("设备身份已创建并保存: {} (server: {})", device_id, ws_url);
+    Ok(device)
+}
+
+// ============================================================================
+// 选择角色（从 filesystem）
+// ============================================================================
+
+fn select_character(server_dir: &PathBuf) -> Option<CharacterConfig> {
+    let chars_dir = server_dir.join("characters");
+    if !chars_dir.exists() {
+        return None;
+    }
+
+    let mut alive: Vec<CharacterConfig> = vec![];
+    if let Ok(entries) = std::fs::read_dir(&chars_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().ok()?.is_dir() {
+                continue;
+            }
+            let path = entry.path().join("character.yaml");
+            if let Ok(config) = CharacterConfig::from_file(&path) {
+                if config.status == CharacterStatus::Alive {
+                    alive.push(config);
+                }
+            }
+        }
+    }
+
+    alive.into_iter().next()
 }
 
 // ============================================================================
@@ -355,8 +356,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Run { port, mode }) => {
-            run_agent(port, mode).await?;
+        Some(Commands::Run { port, mode, server }) => {
+            run_agent(port, mode, server).await?;
         }
 
         Some(Commands::Show) => {
@@ -382,7 +383,7 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            run_agent(0, "cognitive".to_string()).await?;
+            run_agent(0, "cognitive".to_string(), None).await?;
         }
     }
 
@@ -401,21 +402,28 @@ fn show_config() -> Result<()> {
 
     println!("=== Agent 配置 ===\n");
 
-    if let Some(ref identity) = config.identity {
-        println!("Device ID: {}", identity.device_id);
-        println!(
-            "Auth Token: {}...",
-            &identity.auth_token.chars().take(16).collect::<String>()
-        );
-    } else {
-        println!("Device ID: (未注册)");
-    }
-
-    println!("\n服务器配置:");
+    println!("服务器配置:");
     println!("  WebSocket: {}", config.server.ws_url);
     println!("  HTTP: {}", config.server.http_url);
 
-    if let Some(ref character) = config.agent {
+    // Show device status for default server
+    let server_dir = config.server_dir(&config.server.ws_url);
+    let device_path = config.device_yaml_path(&config.server.ws_url);
+    if device_path.exists() {
+        if let Ok(device) = DeviceConfig::from_file(&device_path) {
+            println!("\n设备身份:");
+            println!("  Device ID: {}", device.device_id);
+            println!(
+                "  Auth Token: {}...",
+                &device.auth_token.chars().take(16).collect::<String>()
+            );
+        }
+    } else {
+        println!("\n设备身份: (未注册)");
+    }
+
+    // Show characters for this server
+    if let Some(character) = select_character(&server_dir) {
         println!("\n当前角色:");
         println!("  姓名: {}", character.name);
         println!("  年龄: {}", character.age);
@@ -533,8 +541,8 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // 运行 Agent
 // ============================================================================
 
-async fn run_agent(port: u16, mode: String) -> Result<()> {
-    let mut config = load_config()?.unwrap_or_else(|| {
+async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()> {
+    let config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
@@ -553,35 +561,47 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             RuntimeMode::Cognitive
         }
     };
-    config.runtime.mode = runtime_mode;
 
-    // 设置配置文件路径（用于热重载）
+    // Determine server URL (CLI arg overrides config)
+    let ws_url = server.as_deref().unwrap_or(&config.server.ws_url);
+    info!("连接服务器: {}", ws_url);
+
+    // Set config path for hot reload
     let config_path = config_path();
-    config.config_path = config_path.clone();
+    let mut config_for_builder = config.clone();
+    config_for_builder.config_path = config_path.clone();
+    config_for_builder.runtime.mode = runtime_mode;
 
-    ensure_identity(&mut config).await?;
-
-    let identity_clone = config
-        .identity
-        .as_ref()
-        .expect("Identity should exist after ensure_identity")
-        .clone();
-    let device_id_value = identity_clone.device_id;
+    // Ensure device identity
+    let device = ensure_device(&config, ws_url).await?;
+    let device_id_value = device.device_id;
     info!("Device ID: {}", device_id_value);
 
-    if !config.has_character() {
+    // Select character from filesystem
+    let server_dir = config.server_dir(ws_url);
+    let character = select_character(&server_dir);
+
+    if character.is_none() {
         warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
         warn!("请通过以下方式创建角色:");
         warn!("  1. Web 面板: http://localhost:23340/manage.html");
         warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
     }
 
+    // Compute data directory
+    let data_dir = match &character {
+        Some(c) if c.agent_id.is_some() => {
+            server_dir
+                .join("characters")
+                .join(c.agent_id.unwrap().to_string())
+                .join("data")
+        }
+        _ => server_dir.join("data"),
+    };
+
     let device_id = Arc::new(RwLock::new(device_id_value));
 
-    let persona_info =
-        config
-            .agent
-            .as_ref()
+    let persona_info = character.as_ref()
             .map(|c| cyber_jianghu_agent::soul::reflector::PersonaInfo {
                 gender: c.gender.clone(),
                 age: c.age,
@@ -608,19 +628,13 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
             let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
             info!("LLM Client 容器已创建（支持热重载）");
 
-            let agent_name = config
-                .agent
+            let agent_name = character
                 .as_ref()
                 .map(|c| c.name.as_str())
                 .unwrap_or("(未创建)");
-            let agent_id = config
-                .identity
-                .as_ref()
-                .map(|i| i.device_id)
-                .unwrap_or_else(Uuid::new_v4);
+            let agent_id = device.device_id;
 
-            let persona_description = config
-                .agent
+            let persona_description = character
                 .as_ref()
                 .map(|c| c.generate_system_prompt())
                 .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
@@ -666,7 +680,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
 
             let (api_state, actual_port) =
-                start_http_api_server(port, device_id.clone(), &config, Some(reconnect_tx))?;
+                start_http_api_server(port, device_id.clone(), &config, ws_url, &device, server_dir.clone(), data_dir.clone(), Some(reconnect_tx))?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -694,15 +708,23 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
 
             let reflector_config_watcher = config_watcher.clone();
 
-            let agent = AgentBuilder::new(config, decision)
+            let mut builder = AgentBuilder::new(config_for_builder, decision)
+                .device_config(device.clone())
+                .data_dir(data_dir.clone())
                 .with_decision_feedback(cognitive_decision_with_feedback)
                 .with_review_store(review_store.clone())
                 .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
-                .with_reconnect_rx(reconnect_rx)
-                .build();
+                .with_reconnect_rx(reconnect_rx);
+
+            // Add character config if available
+            if let Some(char) = character.clone() {
+                builder = builder.character_config(char);
+            }
+
+            let agent = builder.build();
             let intent_history = api_state.intent_history.clone();
             tokio::spawn(async move {
                 if let Err(e) = run_reflector_soul_task(
@@ -724,7 +746,7 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
-            let setup = start_claw_server(port, device_id.clone(), &config, &identity_clone)?;
+            let setup = start_claw_server(port, device_id.clone(), &config, ws_url, &device, server_dir.clone(), data_dir.clone())?;
             cognitive_death_event_tx = None;
             cognitive_api_state = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
@@ -771,18 +793,12 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 }
 
                 // 创建 MultiStageCognitiveEngine（与 Cognitive 模式共享架构）
-                let agent_name = config
-                    .agent
+                let agent_name = character
                     .as_ref()
                     .map(|c| c.name.as_str())
                     .unwrap_or("(未创建)");
-                let agent_id = config
-                    .identity
-                    .as_ref()
-                    .map(|i| i.device_id)
-                    .unwrap_or_else(Uuid::new_v4);
-                let persona_description = config
-                    .agent
+                let agent_id = device.device_id;
+                let persona_description = character
                     .as_ref()
                     .map(|c| c.generate_system_prompt())
                     .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
@@ -832,22 +848,26 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                     tokio::sync::broadcast::channel::<()>(1);
 
                 // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
-                AgentBuilder::new(config, decision)
+                let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
+                    .device_config(device.clone())
+                    .data_dir(data_dir.clone())
                     .with_decision_feedback(cognitive_decision_with_feedback)
                     .with_reconnect_rx(setup.reconnect_rx)
                     .with_review_store(review_store.clone())
-                    .with_llm_client(llm_client.clone(), None)
-                    .build()
+                    .with_llm_client(llm_client.clone(), None);
+
+                // Add character config if available
+                if let Some(char) = character.clone() {
+                    builder = builder.character_config(char);
+                }
+
+                builder.build()
             } else {
                 // === Legacy 路径（http_decision） ===
                 // Agent 被动等待 OpenClaw 提交完整 Intent，不使用认知引擎
                 info!("使用 Legacy 路径，等待 OpenClaw 提交 Intent");
 
-                let agent_id = config
-                    .identity
-                    .as_ref()
-                    .map(|i| i.device_id)
-                    .unwrap_or_else(Uuid::new_v4);
+                let agent_id = device.device_id;
 
                 let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                     let agent_id = agent_id;
@@ -861,10 +881,18 @@ async fn run_agent(port: u16, mode: String) -> Result<()> {
                 let (_reflector_config_reload_tx, _reflector_config_reload_rx) =
                     tokio::sync::broadcast::channel::<()>(1);
 
-                AgentBuilder::new(config, decision)
+                let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
+                    .device_config(device.clone())
+                    .data_dir(data_dir.clone())
                     .with_reconnect_rx(setup.reconnect_rx)
-                    .with_review_store(review_store.clone())
-                    .build()
+                    .with_review_store(review_store.clone());
+
+                // Add character config if available
+                if let Some(char) = character.clone() {
+                    builder = builder.character_config(char);
+                }
+
+                builder.build()
             };
 
             let intent_history = setup.api_state.intent_history.clone();
@@ -981,7 +1009,10 @@ fn start_claw_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
     config: &Config,
-    identity: &IdentityConfig,
+    ws_url: &str,
+    device: &DeviceConfig,
+    server_dir: PathBuf,
+    data_dir: PathBuf,
 ) -> Result<ServerSetup> {
     let actual_port = if port == 0 {
         use rand::RngExt;
@@ -998,7 +1029,7 @@ fn start_claw_server(
     );
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+    print_startup_banner(actual_port, ws_url, &config_path_str);
 
     let (reconnect_tx, reconnect_rx) =
         mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
@@ -1007,11 +1038,22 @@ fn start_claw_server(
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
     ws_state.spawn_validation_task((*shared_state).clone());
 
+    // Derive HTTP URL from WS URL
+    let http_base = ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://");
+    let http_url = http_base
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or(&http_base);
+
     let (_http_decision_state, api_state) = create_http_state(
         device_id,
-        config.server.http_url.clone(),
-        config.server.ws_url.clone(),
-        Some(identity.clone()),
+        http_url.to_string(),
+        ws_url.to_string(),
+        Some(device.clone()),
+        server_dir,
+        data_dir.clone(),
         Some(reconnect_tx),
         config_path(),
         Some(shared_state.clone()),
@@ -1040,6 +1082,10 @@ fn start_http_api_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
     config: &Config,
+    ws_url: &str,
+    device: &DeviceConfig,
+    server_dir: PathBuf,
+    data_dir: PathBuf,
     reconnect_tx: Option<mpsc::Sender<cyber_jianghu_agent::infra::api::ReconnectRequest>>,
 ) -> Result<(Arc<cyber_jianghu_agent::infra::api::HttpApiState>, u16)> {
     let port_range_start = 23340u16;
@@ -1060,13 +1106,24 @@ fn start_http_api_server(
     info!("启动 HTTP API 服务器，端口: {}", actual_port);
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, &config.server.ws_url, &config_path_str);
+    print_startup_banner(actual_port, ws_url, &config_path_str);
+
+    // Derive HTTP URL from WS URL
+    let http_base = ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://");
+    let http_url = http_base
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or(&http_base);
 
     let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::create_http_state(
         device_id,
-        config.server.http_url.clone(),
-        config.server.ws_url.clone(),
-        config.identity.clone(),
+        http_url.to_string(),
+        ws_url.to_string(),
+        Some(device.clone()),
+        server_dir,
+        data_dir.clone(),
         reconnect_tx,
         config_path(),
         None,
