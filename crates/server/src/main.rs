@@ -23,29 +23,27 @@ use cyber_jianghu_server::*;
 
 use anyhow::Result;
 use axum::{
+    Router,
     body::Body,
     routing::{get, post},
-    Router,
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::{error, info, Level};
+use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 // ============================================================================
 // Tick引擎启动
 // ============================================================================
 
-async fn serve_admin(
-    axum::extract::Path(path): axum::extract::Path<String>,
-) -> Result<axum::response::Response<Body>, StatusCode> {
+fn serve_admin_file(path: &str) -> Result<axum::response::Response<Body>, StatusCode> {
     let static_dir = crate::paths::get_static_dir().join("admin");
 
     let file_path = if path.is_empty() || path == "index.html" {
         static_dir.join("index.html")
     } else {
-        static_dir.join(&path)
+        static_dir.join(path)
     };
 
     if !file_path.exists() || !file_path.is_file() {
@@ -53,14 +51,25 @@ async fn serve_admin(
     }
 
     let mime = mime_guess::from_path(&file_path).first_or_octet_stream();
-    let body = Body::from(std::fs::read(&file_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+    let body =
+        Body::from(std::fs::read(&file_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
     Ok(axum::response::Response::builder()
         .status(StatusCode::OK)
         .header(axum::http::header::CONTENT_TYPE, mime.as_ref())
         .body(body)
-        .unwrap_or_else(|_| {
-            axum::response::Response::new(Body::empty())
-        }))
+        .unwrap_or_else(|_| axum::response::Response::new(Body::empty())))
+}
+
+/// /admin/ → serve index.html (no path parameter to extract)
+async fn serve_admin_index() -> Result<axum::response::Response<Body>, StatusCode> {
+    serve_admin_file("index.html")
+}
+
+/// /admin/{*path} → serve the specific file
+async fn serve_admin(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Result<axum::response::Response<Body>, StatusCode> {
+    serve_admin_file(&path)
 }
 
 use axum::http::StatusCode;
@@ -186,15 +195,6 @@ async fn main() -> Result<()> {
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    // Session secret for cookie signing (use separate env var or generate)
-    let session_secret = std::env::var("ADMIN_SESSION_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| {
-            // Generate random secret using UUID v4
-            uuid::Uuid::new_v4().to_string()
-        });
-
     let read_token_source = if config.server.admin_read_token.is_some() {
         "配置/环境变量"
     } else {
@@ -208,22 +208,13 @@ async fn main() -> Result<()> {
 
     use std::fs::File;
     use std::io::Write;
-    use std::path::PathBuf;
 
-    let tokens_file = "cyber_jianghu_admin.tmp";
-    let mut token_paths = vec![PathBuf::from(tokens_file)];
-    let logs_token_path = crate::paths::get_logs_dir().join(tokens_file);
-    if logs_token_path.as_os_str() != tokens_file {
-        token_paths.push(logs_token_path);
+    let token_path = crate::paths::get_logs_dir().join("cyber_jianghu_admin.tmp");
+    if let Some(parent) = token_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    for token_path in token_paths {
-        if let Some(parent) = token_path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-
+    {
         let mut file = File::create(&token_path).map_err(|e| {
             anyhow::anyhow!("无法创建admin token文件 {}: {}", token_path.display(), e)
         })?;
@@ -236,13 +227,11 @@ async fn main() -> Result<()> {
         writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
         writeln!(file, "  {}", admin_write_token)?;
         writeln!(file)?;
-        // writeln!(file, "可直接写入 .env:")?;
-        // writeln!(file, "ADMIN_READ_TOKEN={} ADMIN_WRITE_TOKEN={}", admin_read_token, admin_write_token)?;
         writeln!(file, "========================================")?;
-
-        info!("管理员访问凭证已保存到: {}", token_path.display());
-        info!("查看凭证: cat {}", token_path.display());
     }
+
+    info!("管理员访问凭证已保存到: {}", token_path.display());
+    info!("查看凭证: cat {}", token_path.display());
 
     // 9. 创建应用状态
     let state = Arc::new(AppState::new(
@@ -256,7 +245,6 @@ async fn main() -> Result<()> {
         dialogue_manager.clone(),
         admin_read_token,
         admin_write_token,
-        session_secret,
         crate::paths::get_config_dir(),
     ));
 
@@ -401,26 +389,17 @@ async fn main() -> Result<()> {
             ),
         )
         // Admin Auth API (Cookie Session)
-        .route(
-            "/api/admin/login",
-            post(handlers::admin_auth::login),
-        )
-        .route(
-            "/api/admin/logout",
-            post(handlers::admin_auth::logout),
-        )
+        .route("/api/admin/login", post(handlers::admin_auth::login))
+        .route("/api/admin/logout", post(handlers::admin_auth::logout))
         .route(
             "/api/admin/session",
             get(handlers::admin_auth::check_session),
         )
-        // Admin Static Files (all protected by cookie middleware)
-        .route(
-            "/admin/{*path}",
-            get(serve_admin).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::admin_auth::admin_cookie_middleware,
-            )),
-        )
+        // Admin Static Files (no auth - login page must be accessible without token)
+        // Auth is enforced client-side: frontend stores token in localStorage,
+        // sends it via Bearer header on API calls. API routes have their own middleware.
+        .route("/admin/", get(serve_admin_index))
+        .route("/admin/{*path}", get(serve_admin))
         // Redirect /admin to /admin/
         .route(
             "/admin",

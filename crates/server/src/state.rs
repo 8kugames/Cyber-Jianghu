@@ -130,9 +130,6 @@ pub struct AppState {
     /// 管理员读写 Token (RW)
     pub admin_write_token: String,
 
-    /// Session cookie signing secret
-    pub session_secret: String,
-
     /// 服务器启动时间
     pub start_time: chrono::DateTime<chrono::Utc>,
 
@@ -153,7 +150,6 @@ impl AppState {
         dialogue_manager: Arc<dialogue::DialogueManager>,
         admin_read_token: String,
         admin_write_token: String,
-        session_secret: String,
         config_dir: std::path::PathBuf,
     ) -> Self {
         Self {
@@ -167,7 +163,6 @@ impl AppState {
             dialogue_manager,
             admin_read_token,
             admin_write_token,
-            session_secret,
             start_time: chrono::Utc::now(),
             config_dir,
         }
