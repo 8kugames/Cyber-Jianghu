@@ -13,14 +13,13 @@
 // │   └── reflector/#   意图验证 + 审查存储
 // ├── component/    # 共享能力组件
 // │   ├── memory/   #   三级记忆系统
-// │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化）
+// │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化 + 预设）
 // │   ├── social/   #   社交系统（关系 + 对话）
 // │   └── llm/      #   LLM 客户端抽象层
 // ├── infra/        # 基础设施
 // │   ├── api/      #   HTTP API 服务器
 // │   └── transport/#   游戏服务器 WebSocket 客户端
 // ├── runtime/      # 模式入口（cognitive / claw）
-// ├── ai/           # 兼容层（重导出至 component/ 和 soul/）
 // ├── config.rs     # 配置（数据）
 // ├── models.rs     # 数据模型
 // └── bin/          # CLI 入口（组装）
@@ -62,9 +61,6 @@ pub mod infra;
 
 // 运行模式（决策函数）
 pub mod runtime;
-
-// 兼容层（重导出至 component/ 和 soul/）
-pub mod ai;
 
 // 配置和数据模型
 pub mod config;
@@ -112,14 +108,11 @@ pub use component::memory::{
     RecallArchivedParams, SearchMemoryParams, WorkingMemoryBackend,
 };
 pub use component::persona::{
-    AgingEffectValues, AgingEffects, AgingStage, DynamicPersona, EventTraitMapper,
+    AgentPrompt, AgingEffectValues, AgingEffects, AgingStage, DynamicPersona, EventTraitMapper,
     LifespanCalculator, LifespanConfig, LifespanStatus, PersonaState, ThreadSafePersona, Trait,
-    TraitChange, TraitMappingRule, TraitType,
+    TraitChange, TraitMappingRule, TraitType, get_agent_prompt, get_all_agent_prompts,
 };
 pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
-
-// 兼容层（向后兼容）
-pub use ai::prompts::{AgentPrompt, get_agent_prompt, get_all_agent_prompts};
 
 // 配置
 pub use config::{
