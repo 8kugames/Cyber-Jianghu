@@ -71,7 +71,7 @@ pub mod models;
 // ============================================================================
 
 // 通信层
-pub use infra::transport::{AgentClient, ServerConfig as TransportServerConfig, WebSocketClient};
+pub use infra::transport::{AgentClient, ConnectError, ServerConfig as TransportServerConfig, WebSocketClient};
 
 // 核心
 pub use core::{Agent, AgentBuilder};
