@@ -31,6 +31,19 @@ use cyber_jianghu_protocol::{
 pub use crate::config::ServerConfig;
 
 // ============================================================================
+// ConnectError - 区分认证失败和其他连接错误
+// ============================================================================
+
+/// WebSocket connection error with auth failure distinction
+#[derive(Debug, thiserror::Error)]
+pub enum ConnectError {
+    #[error("Authentication failed (HTTP 400)")]
+    AuthFailed,
+    #[error("Connection failed: {0}")]
+    ConnectionFailed(#[from] anyhow::Error),
+}
+
+// ============================================================================
 // WebSocket 客户端
 // ============================================================================
 
@@ -94,30 +107,43 @@ impl WebSocketClient {
     }
 
     /// 连接到服务器
-    pub async fn connect(&self) -> Result<()> {
-        let (device_id, auth_token) = self
-            .identity
-            .as_ref()
-            .context("Identity not set. Call set_identity() first.")?;
+    pub async fn connect(&self) -> Result<(), ConnectError> {
+        let (device_id, auth_token) = self.identity.as_ref().ok_or_else(|| {
+            ConnectError::ConnectionFailed(anyhow::anyhow!(
+                "Identity not set. Call set_identity() first."
+            ))
+        })?;
 
         let url_with_token = self.config.ws_url_with_token(*device_id, auth_token);
-        let url = Url::parse(&url_with_token).context("Invalid WebSocket URL")?;
+        let url = Url::parse(&url_with_token)
+            .map_err(|e| ConnectError::ConnectionFailed(e.into()))?;
 
         info!("Connecting to {}", self.config.ws_url);
 
-        let (ws, _) = tokio_tungstenite::connect_async(url.as_str())
-            .await
-            .context("Failed to connect to WebSocket server")?;
-
-        let mut state = self.state.write().await;
-        state.ws = Some(ws);
-        state.connected = true;
-        state.agent_id = None;
-        state.game_rules = None;
-        state.world_building_rules = None;
-
-        info!("Connected to server");
-        Ok(())
+        match tokio_tungstenite::connect_async(url.as_str()).await {
+            Ok((ws, _)) => {
+                let mut state = self.state.write().await;
+                state.ws = Some(ws);
+                state.connected = true;
+                state.agent_id = None;
+                state.game_rules = None;
+                state.world_building_rules = None;
+                info!("Connected to server");
+                Ok(())
+            }
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp))
+                if resp.status().as_u16() == 400 =>
+            {
+                warn!("WebSocket auth failed (HTTP 400)");
+                Err(ConnectError::AuthFailed)
+            }
+            Err(e) => {
+                Err(ConnectError::ConnectionFailed(anyhow::anyhow!(
+                    "Failed to connect to WebSocket server: {}",
+                    e
+                )))
+            }
+        }
     }
 
     /// 获取 Agent ID
@@ -514,7 +540,7 @@ impl AgentClient {
         client.update_server_url(ws_url, http_url);
     }
 
-    pub async fn connect(&self) -> Result<()> {
+    pub async fn connect(&self) -> Result<(), ConnectError> {
         let client = self.client.read().await;
         client.connect().await
     }
