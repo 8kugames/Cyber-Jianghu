@@ -38,17 +38,16 @@ impl super::Agent {
         // 检查角色状态：若已死亡或已归隐，跳过服务器连接
         let skip_connection = self.death_reported
             || self
-                .config
-                .agent
+                .character_config
                 .as_ref()
                 .map(|c| c.status != CharacterStatus::Alive)
                 .unwrap_or(false);
 
         if skip_connection {
-            if let Some(ref agent) = self.config.agent {
+            if let Some(ref character) = self.character_config {
                 warn!(
                     "Agent '{}' status is {:?}, skipping server connection (waiting for rebirth)",
-                    agent.name, agent.status
+                    character.name, character.status
                 );
             } else {
                 warn!("No active character, skipping server connection");
