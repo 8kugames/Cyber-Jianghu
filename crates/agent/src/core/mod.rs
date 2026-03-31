@@ -11,7 +11,6 @@
 
 mod agent;
 mod builder;
-pub mod cognitive;
 mod lifecycle;
 pub mod tools;
 pub mod utils;
@@ -19,11 +18,13 @@ pub mod utils;
 // 重新导出核心类型
 pub use agent::{Agent, PersonaValidationResult, ValidatorConfig};
 pub use builder::AgentBuilder;
-pub use cognitive::{
+
+// 从 soul::actor 重导出认知引擎类型（向后兼容）
+pub use crate::soul::actor::{
     CognitiveChain, CognitiveEngineConfig, CognitiveStage, MultiStageCognitiveEngine, StageOutput,
 };
 
-// 从 runtime::decision 模块重导出决策类型
-pub use crate::runtime::decision::{
+// 从 runtime 模块重导出决策类型
+pub use crate::runtime::{
     DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback,
 };
