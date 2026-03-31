@@ -42,10 +42,9 @@ pub struct MemoryManagerConfig {
 
 impl Default for MemoryManagerConfig {
     fn default() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         Self {
             agent_id: Uuid::nil(),
-            db_dir: home.join(".cyber-jianghu").join("data"),
+            db_dir: PathBuf::from("."),
             working_memory_size: 20,
             episodic_threshold: 0.5,
             ebbinghaus_config: EbbinghausConfig::default(),
