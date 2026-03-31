@@ -1,16 +1,5 @@
 // Auth Functions
-
-let authToken = localStorage.getItem("admin_token") || null;
-
-async function checkSession() {
-    try {
-        const res = await fetch('/api/admin/session');
-        const data = await res.json();
-        return data.authenticated;
-    } catch {
-        return false;
-    }
-}
+// Note: authToken is declared in utils.js (loaded first)
 
 function getAuthHeaders() {
     return authToken ? { Authorization: "Bearer " + authToken } : {};
@@ -74,9 +63,8 @@ async function logout() {
     window.location.href = '/admin';
 }
 
-async function initAuth() {
-    const isAuthenticated = await checkSession();
-    if (!isAuthenticated) {
+function initAuth() {
+    if (!authToken) {
         showAuthModal();
     }
 }
