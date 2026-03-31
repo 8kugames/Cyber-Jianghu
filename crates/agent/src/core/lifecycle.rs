@@ -5,13 +5,13 @@
 // 处理 Agent 的连接、重连、主循环和关闭
 // ============================================================================
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use cyber_jianghu_protocol::ServerMessage;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::config::CharacterStatus;
 use crate::models::Intent;
 
@@ -27,46 +27,6 @@ fn should_log_retry(attempt: u32) -> bool {
     // 检查是否为完全平方数
     let sqrt = (attempt as f64).sqrt() as u32;
     sqrt * sqrt == attempt
-}
-
-/// 向服务器注册设备身份
-async fn register_device_identity(server_url: &str, device_id: Uuid) -> Result<String> {
-    let client = reqwest::Client::new();
-    let url = format!("{}/api/v1/agent/connect", server_url);
-
-    info!("向服务器注册设备: {} -> {}", device_id, url);
-
-    #[derive(serde::Serialize)]
-    struct AgentConnectRequest {
-        device_id: Uuid,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct AgentConnectResponse {
-        auth_token: String,
-        message: String,
-    }
-
-    let response = client
-        .post(&url)
-        .json(&AgentConnectRequest { device_id })
-        .send()
-        .await
-        .context("Failed to connect to server")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Server returned error {}: {}", status, body);
-    }
-
-    let result: AgentConnectResponse = response
-        .json()
-        .await
-        .context("Failed to parse server response")?;
-
-    info!("服务器响应: {}", result.message);
-    Ok(result.auth_token)
 }
 
 impl super::Agent {
@@ -173,54 +133,16 @@ impl super::Agent {
             );
         }
 
-        // 等待注册确认（包含游戏规则和存活状态）
-        let registration_result = self.client.wait_for_registration().await;
-
-        // 处理 "Invalid device credentials" 错误：清除身份并重新注册
-        if let Err(ref e) = registration_result {
-            let err_msg = e.to_string();
-            if err_msg.contains("Invalid device credentials") {
-                warn!("服务器拒绝设备凭证，将清除旧身份并重新注册...");
-                self.config.clear_identity();
-                // 重新连接并注册
-                self.client.close().await;
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                // 生成新身份并注册
-                let new_device_id = Uuid::new_v4();
-                let http_url = self.config.server.http_url.clone();
-                match register_device_identity(&http_url, new_device_id).await {
-                    Ok(auth_token) => {
-                        self.config.identity = Some(crate::config::IdentityConfig {
-                            device_id: new_device_id,
-                            auth_token,
-                            server_url: Some(http_url),
-                        });
-                        if let Err(save_err) = self.config.save_to_file(&self.config.config_path) {
-                            warn!("保存新身份失败: {}", save_err);
-                        }
-                        info!("新身份已注册: {}", new_device_id);
-                    }
-                    Err(reg_err) => {
-                        error!("重新注册失败: {}", reg_err);
-                    }
-                }
-            }
-        }
-
-        let (agent_id, game_rules, is_alive) = registration_result?;
+        // 等待注册确认（包含游戏规则）
+        let (agent_id, game_rules) = self.client.wait_for_registration().await?;
         info!("Agent '{}' registered with server", self.character_name());
-        info!(
-            "Server-assigned Agent ID: {} (alive={})",
-            agent_id, is_alive
-        );
+        info!("Server-assigned Agent ID: {}", agent_id);
 
-        // is_alive == false = 角色已死亡/归隐/未创建，跳过主循环，等待转生/创建角色
-        // 覆盖两种情况：agent_id 为 nil（已归隐）或 agent_id 非 nil 但已死亡（竞态窗口）
-        if !is_alive {
+        // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
+        if agent_id == Uuid::nil() {
             warn!(
-                "Agent '{}' is not alive (agent_id={})",
-                self.character_name(),
-                agent_id
+                "Agent '{}' retired (agent_id is nil)",
+                self.character_name()
             );
             self.death_reported = true;
 
@@ -229,9 +151,9 @@ impl super::Agent {
                     .is_dead
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 let death_msg = ServerMessage::AgentDied {
-                    agent_id,
+                    agent_id: Uuid::nil(),
                     cause: "retired".to_string(),
-                    description: "角色已归隐或尚未创建，请创建新角色".to_string(),
+                    description: "角色已归隐，请创建新角色".to_string(),
                     location: String::new(),
                     tick_id: 0,
                     died_at: chrono::Utc::now().timestamp_millis(),
@@ -240,133 +162,7 @@ impl super::Agent {
                 let _ = api_state.death_event_tx.send(death_msg);
             }
 
-            // 不退出！等待配置重载（角色创建会触发配置重载）后重新连接
-            info!(
-                "Agent '{}' 等待角色创建，HTTP API 保持运行...",
-                self.character_name()
-            );
-
-            loop {
-                tokio::select! {
-                    // 等待配置重载（角色创建会触发配置重载）
-                    _ = async {
-                        if let Some(ref mut rx) = self.config_reload_rx {
-                            rx.recv().await
-                        } else {
-                            std::future::pending().await
-                        }
-                    } => {
-                        info!("检测到配置变更，重新加载...");
-                        match crate::config::Config::from_file(&self.config.config_path) {
-                            Ok(new_config) => {
-                                self.config = new_config;
-                                info!("配置已重载，尝试重新连接...");
-                            }
-                            Err(e) => {
-                                warn!("配置读取失败: {}，继续等待", e);
-                                continue;
-                            }
-                        }
-                    }
-                    // 等待重连请求（转生/角色切换）
-                    Some(req) = async {
-                        if let Some(ref mut rx) = self.reconnect_rx {
-                            rx.recv().await
-                        } else {
-                            std::future::pending().await
-                        }
-                    } => {
-                        info!("[main] 收到重连请求: {}", req.ws_url);
-                        let http_url = req.ws_url
-                            .replace("ws://", "http://")
-                            .replace("wss://", "https://")
-                            .replace("/ws", "");
-                        self.client.update_server_url(req.ws_url.clone(), http_url).await;
-                        break; // 跳出循环，执行重连
-                    }
-                    // 定期检查配置是否有角色信息
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
-                        info!("定期检查配置是否有角色创建...");
-                        match crate::config::Config::from_file(&self.config.config_path) {
-                            Ok(new_config) => {
-                                let had_character_before = self.config.agent.is_some();
-                                let has_character_now = new_config.agent.is_some();
-                                // 检查是否有新角色被创建
-                                if !had_character_before && has_character_now {
-                                    info!("检测到新角色，重新连接...");
-                                    self.config = new_config;
-                                    break;
-                                }
-                                self.config = new_config;
-                            }
-                            Err(e) => {
-                                debug!("配置读取失败（定期检查）: {}", e);
-                            }
-                        }
-                    }
-                }
-
-                // 重置状态，准备重新连接
-                self.death_reported = false;
-                if let Some(ref api_state) = self.http_api_state {
-                    api_state
-                        .is_dead
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                }
-                self.client.close().await;
-
-                // 重新连接并注册
-                match self.client.connect().await {
-                    Ok(()) => info!("重新连接成功"),
-                    Err(e) => {
-                        warn!("重新连接失败: {}，5秒后重试...", e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                }
-
-                match self.client.wait_for_registration().await {
-                    Ok((new_agent_id, new_game_rules, new_is_alive)) => {
-                        info!(
-                            "重新注册成功: agent_id={} (alive={})",
-                            new_agent_id, new_is_alive
-                        );
-
-                        if new_is_alive {
-                            // 角色已创建，更新状态并进入主循环
-                            if let Some(ref callback) = self.registration_callback {
-                                callback(new_agent_id);
-                            }
-                            self.config.update_game_rules(new_game_rules);
-                            // 重置死亡标记
-                            self.death_reported = false;
-                            if let Some(ref api_state) = self.http_api_state {
-                                api_state
-                                    .is_dead
-                                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            // 继续执行到下面的主循环
-                            info!("角色已就绪，进入游戏主循环");
-                            break; // 退出等待循环，继续到主循环
-                        } else {
-                            // 仍然不存活，继续等待
-                            info!("角色仍未创建，继续等待...");
-                            self.death_reported = true;
-                            if let Some(ref api_state) = self.http_api_state {
-                                api_state
-                                    .is_dead
-                                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("重新注册失败: {}，继续等待...", e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    }
-                }
-            }
-
-            // 如果到这里，说明角色已创建（alive=true），继续执行到主循环
+            return Ok(());
         }
 
         // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
@@ -459,16 +255,6 @@ impl super::Agent {
                                         info!("ActorSoul LLM 容器已更新（真正热重载）");
                                     }
 
-                                    // 更新认知引擎人设（角色名/人设热重载）
-                                    if let Some(ref engine) = self.cognitive_engine
-                                        && let Some(ref agent) = new_config.agent
-                                    {
-                                        engine.update_persona(
-                                            &agent.name,
-                                            &agent.generate_system_prompt(),
-                                        );
-                                    }
-
                                     self.config = new_config;
                                     info!("ActorSoul LLM 已重载");
                                 }
@@ -552,52 +338,37 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
-                    // 4.5 检查 WebSocket 层面的死亡通知（is_dead 标志由 AgentDied 消息设置）
-                    // 避免 events_log 检测与 AgentDied 消息之间的时序竞争
-                    if let Some(ref api_state) = self.http_api_state
-                        && api_state.is_dead.load(std::sync::atomic::Ordering::Relaxed)
-                    {
-                        if !self.death_reported {
-                            warn!(
-                                "Agent '{}' detected dead via is_dead flag (WebSocket AgentDied), skipping decision",
-                                self.character_name()
-                            );
-                            self.death_reported = true;
-                        }
-                        continue;
-                    }
-
-                    // 5. 计算全局 pipeline deadline（贯穿认知+验证+审查）
-                    // 使用 deadline_ms * 0.8 作为安全边界（与认知引擎一致）
-                    const DEADLINE_SAFETY_RATIO: f64 = 0.8;
-                    const MIN_PIPELINE_TIME_SECS: u64 = 5;
-                    let pipeline_deadline = if world_state.deadline_ms > 0 {
-                        let adjusted = (world_state.deadline_ms as f64 * DEADLINE_SAFETY_RATIO) as u64;
-                        if adjusted < MIN_PIPELINE_TIME_SECS * 1000 {
-                            None // 剩余不足，不设 deadline（让各阶段自行决定）
-                        } else {
-                            Some(std::time::Instant::now() + std::time::Duration::from_millis(adjusted))
-                        }
-                    } else {
-                        None
-                    };
-
-                    // 6. 调用决策回调（验证已移至 ReflectorSoul，避免重复 LLM 调用）
-                    let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                    // 5. 调用决策回调（带验证和记忆上下文）
+                    let intent = if self.validator.is_some() {
+                        self.decide_with_validation(&world_state).await?
+                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
                         // 优先使用带记忆上下文的回调
                         memory_callback(&world_state, &memory_context).await
                     } else {
                         (self.decision_callback)(&world_state).await
                     };
 
-                    // 6.5 审查（ReflectorSoul - 反思之魂）
-                    let mut final_intent = if let Some(ref store) = self.review_store {
-                        self.submit_for_review(intent, &world_state, store, pipeline_deadline).await?
+                    // 5.5 审查（ReflectorSoul - 反思之魂）
+                    let final_intent = if let Some(ref store) = self.review_store {
+                        self.submit_for_review(intent, &world_state, store).await?
                     } else {
                         intent
                     };
 
-                    // 7. 更新寿命状态（如果启用）
+                    // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
+                    if let Some(ref api_state) = self.http_api_state
+                        && let Some(ref history) = api_state.intent_history {
+                            history
+                                .record_intent(
+                                    final_intent.tick_id,
+                                    final_intent.intent_id,
+                                    final_intent.action_type.to_string(),
+                                    final_intent.thought_log.clone(),
+                                )
+                                .await;
+                        }
+
+                    // 6. 更新寿命状态（如果启用）
                     if let Some(ref mut calculator) = self.lifespan_calculator {
                         let status = calculator.process_tick();
                         if status.is_deceased() {
@@ -621,33 +392,7 @@ impl super::Agent {
                         }
                     }
 
-                    // 8. 发送意图（先检查 tick 是否在认知周期中过期）
-                    if let Some(new_tick) = self.client.try_peek_latest_tick().await
-                        && new_tick != final_intent.tick_id
-                    {
-                        warn!(
-                            "Tick expired during cognitive cycle ({} -> {}), updating intent",
-                            final_intent.tick_id, new_tick
-                        );
-                        final_intent.tick_id = new_tick;
-                    }
-
-                    // 8.5 记录 Intent 到经历日志（tick 调整之后，确保记录正确的 tick_id）
-                    if let Some(ref api_state) = self.http_api_state
-                        && let Some(ref history) = api_state.intent_history {
-                            let world_time_str =
-                                serde_json::to_string(&world_state.world_time).ok();
-                            history
-                                .record_intent(
-                                    final_intent.tick_id,
-                                    final_intent.intent_id,
-                                    final_intent.action_type.to_string(),
-                                    final_intent.thought_log.clone(),
-                                    world_time_str,
-                                )
-                                .await;
-                        }
-
+                    // 7. 发送意图
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
                         // 尝试重连
@@ -702,19 +447,19 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok((agent_id, game_rules, is_alive)) => {
-                            info!("重连后注册确认: agent_id={} (alive={})", agent_id, is_alive);
+                        Ok((agent_id, game_rules)) => {
+                            info!("重连后注册确认: agent_id={}", agent_id);
 
-                            // is_alive == false = 角色已死亡/归隐（可能在等待期间被删除）
-                            if !is_alive {
-                                warn!("重连后角色不存活 (agent_id={})", agent_id);
+                            // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
+                            if agent_id == Uuid::nil() {
+                                warn!("重连后收到 nil agent_id，角色已归隐");
                                 self.death_reported = true;
                                 if let Some(ref api_state) = self.http_api_state {
                                     api_state
                                         .is_dead
                                         .store(true, std::sync::atomic::Ordering::Relaxed);
                                     let death_msg = ServerMessage::AgentDied {
-                                        agent_id,
+                                        agent_id: Uuid::nil(),
                                         cause: "retired".to_string(),
                                         description: "角色已归隐，请创建新角色".to_string(),
                                         location: String::new(),
