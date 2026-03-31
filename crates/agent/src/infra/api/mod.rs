@@ -137,8 +137,12 @@ pub struct HttpApiState {
     pub server_http_url: Arc<RwLock<String>>,
     /// Server WebSocket URL（用于实时通信）
     pub server_ws_url: Arc<RwLock<String>>,
-    /// 设备身份（device_id + auth_token）
-    pub identity: Option<crate::config::IdentityConfig>,
+    /// 设备配置（device_id + auth_token），运行时可通过注册更新
+    pub device_config: Arc<RwLock<Option<crate::config::DeviceConfig>>>,
+    /// 服务器配置目录路径
+    pub server_dir: PathBuf,
+    /// 角色配置目录路径
+    pub character_dir: PathBuf,
     /// 配置文件路径（用于读取角色配置）
     pub config_path: PathBuf,
 
@@ -550,7 +554,9 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// - `agent_id`: 当前 Agent ID (共享引用，注册后会被更新)
 /// - `server_http_url`: Server HTTP URL（用于角色注册等 API 调用）
-/// - `identity`: 设备身份（device_id + auth_token）
+/// - `device_config`: 设备配置（device_id + auth_token）
+/// - `server_dir`: 服务器配置目录路径
+/// - `character_dir`: 角色配置目录路径
 ///
 /// # 返回值
 ///
@@ -574,7 +580,9 @@ pub fn create_http_state(
     agent_id: Arc<RwLock<Uuid>>,
     server_http_url: String,
     server_ws_url: String,
-    identity: Option<crate::config::IdentityConfig>,
+    device_config: Option<crate::config::DeviceConfig>,
+    server_dir: PathBuf,
+    character_dir: PathBuf,
     reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
     config_path: PathBuf,
     ws_shared_state: Option<Arc<crate::runtime::claw::WsSharedState>>,
@@ -655,7 +663,9 @@ pub fn create_http_state(
         tick_duration_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)), // 默认 60 秒，注册后更新
         server_http_url: Arc::new(RwLock::new(server_http_url)),
         server_ws_url: Arc::new(RwLock::new(server_ws_url)),
-        identity,
+        device_config: Arc::new(RwLock::new(device_config)),
+        server_dir,
+        character_dir,
         config_path,
         dialogue_client,
         relationship_store,
