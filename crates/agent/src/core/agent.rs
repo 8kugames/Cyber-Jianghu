@@ -19,7 +19,7 @@ use crate::component::memory::types::MemoryEntry;
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
-use crate::config::{Config, ReviewConfig};
+use crate::config::{CharacterConfig, Config, DeviceConfig, ReviewConfig};
 use crate::infra::api::ReconnectRequest;
 use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
@@ -131,6 +131,12 @@ pub struct Agent {
 
     /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
+
+    /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
+    pub(crate) device_config: Option<DeviceConfig>,
+
+    /// 角色配置（当前活跃角色）
+    pub(crate) character_config: Option<CharacterConfig>,
 }
 
 impl Agent {
@@ -147,18 +153,20 @@ impl Agent {
     /// * `config` - Agent 配置
     /// * `decision_callback` - 决策回调函数
     /// * `reconnect_rx` - 重连请求接收通道（Claw 模式下用于热切换）
+    /// * `device_config` - 设备身份配置（可选，首次启动时为 None）
     pub async fn new(
         config: Config,
         decision_callback: DecisionCallback,
         reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+        device_config: Option<DeviceConfig>,
     ) -> Self {
         let client = AgentClient::new(config.server.clone());
         let review_config = config.review.clone().unwrap_or_default();
 
         // 设置设备身份（如果已存在）
-        if let Some(ref identity) = config.identity {
+        if let Some(ref device) = device_config {
             client
-                .set_identity(identity.device_id, identity.auth_token.clone())
+                .set_identity(device.device_id, device.auth_token.clone())
                 .await;
         }
 
@@ -184,13 +192,14 @@ impl Agent {
             actor_llm_container: None,
             config_reload_rx: None,
             http_api_state: None,
+            device_config,
+            character_config: None,
         }
     }
 
     /// 获取角色名称（如果已创建）
     pub(crate) fn character_name(&self) -> &str {
-        self.config
-            .agent
+        self.character_config
             .as_ref()
             .map(|c| c.name.as_str())
             .unwrap_or("(未创建)")
@@ -366,6 +375,26 @@ impl Agent {
         self.memory_manager.as_ref()
     }
 
+    /// 设置设备身份配置
+    pub fn set_device_config(&mut self, config: DeviceConfig) {
+        self.device_config = Some(config);
+    }
+
+    /// 设置角色配置
+    pub fn set_character_config(&mut self, config: CharacterConfig) {
+        self.character_config = Some(config);
+    }
+
+    /// 获取设备身份配置的引用
+    pub fn device_config(&self) -> Option<&DeviceConfig> {
+        self.device_config.as_ref()
+    }
+
+    /// 获取角色配置的引用
+    pub fn character_config(&self) -> Option<&CharacterConfig> {
+        self.character_config.as_ref()
+    }
+
     /// 获取所有记忆工具定义（供 LLM function calling）
     pub fn get_memory_tools() -> Vec<MemoryToolDefinition> {
         super::tools::get_memory_tools()
@@ -418,7 +447,7 @@ impl Agent {
 
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
-        match &self.config.agent {
+        match &self.character_config {
             Some(character) => PersonaInfo {
                 gender: character.gender.clone(),
                 age: self
@@ -605,8 +634,7 @@ impl Agent {
 
         let persona = self.extract_persona();
         let character_name = self
-            .config
-            .agent
+            .character_config
             .as_ref()
             .map(|c| c.name.as_str())
             .unwrap_or("(未创建)");
