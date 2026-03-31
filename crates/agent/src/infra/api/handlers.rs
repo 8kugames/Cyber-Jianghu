@@ -24,9 +24,13 @@ use http_body::Frame;
 use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
+use anyhow::Context;
+
+use crate::config::{CharacterConfig, CharacterStatus};
 
 use crate::component::persona::LifespanStatus;
 use crate::soul::actor::narrative::NarrativeEngine;
@@ -44,6 +48,58 @@ use super::dto::{
 };
 use super::service::{MemoryService, RelationshipService, memories_to_json_response};
 use super::{HttpApiState, IntentRequest};
+
+// ============================================================================
+// Helper Functions for Character Management
+// ============================================================================
+
+/// List all characters from filesystem
+fn list_characters_from_fs(characters_dir: &Path) -> Result<Vec<CharacterConfig>, anyhow::Error> {
+    if !characters_dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut chars = vec![];
+    for entry in std::fs::read_dir(characters_dir)
+        .context("Failed to read characters dir")?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let char_yaml = entry.path().join("character.yaml");
+        if !char_yaml.exists() {
+            continue;
+        }
+        match CharacterConfig::from_file(&char_yaml) {
+            Ok(c) => chars.push(c),
+            Err(e) => warn!("Skipping corrupted character.yaml in {:?}: {}", entry.path(), e),
+        }
+    }
+    Ok(chars)
+}
+
+/// Get active (alive) character from state
+fn get_active_character(state: &HttpApiState) -> Result<Option<CharacterConfig>, anyhow::Error> {
+    let chars = list_characters_from_fs(&state.character_dir)?;
+    Ok(chars.into_iter().find(|c| c.status == CharacterStatus::Alive))
+}
+
+/// Save character config to its directory
+fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(), anyhow::Error> {
+    let agent_id = config.agent_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let dir = characters_dir.join(&agent_id);
+    std::fs::create_dir_all(&dir)?;
+    config.save_to_file(&dir.join("character.yaml"))
+}
+
+/// Get device identity from state
+fn get_device_id(state: &HttpApiState) -> Result<(Uuid, String), anyhow::Error> {
+    let device = state.device_config.blocking_read();
+    let d = device.as_ref().context("No device identity")?;
+    Ok((d.device_id, d.auth_token.clone()))
+}
 
 // ============================================================================
 // API 发现端点
@@ -1216,10 +1272,10 @@ pub(super) async fn register_character_handler(
     use tracing::info;
 
     // 1. 检查设备身份
-    let identity = match &state.identity {
-        Some(id) => id,
-        None => {
-            error!("设备身份未初始化，请先启动 Agent 进行设备注册");
+    let (device_id, auth_token) = match get_device_id(&state) {
+        Ok(id) => id,
+        Err(e) => {
+            error!("设备身份未初始化: {}", e);
             return (
                 StatusCode::PRECONDITION_FAILED,
                 Json(CharacterRegisterResponse {
@@ -1252,8 +1308,8 @@ pub(super) async fn register_character_handler(
 
     // 3. 构建发送到 Server 的请求
     let server_request = serde_json::json!({
-        "device_id": identity.device_id,
-        "auth_token": identity.auth_token,
+        "device_id": device_id,
+        "auth_token": auth_token,
         "name": payload.name,
         "age": payload.age,
         "gender": payload.gender,
@@ -1340,55 +1396,60 @@ pub(super) async fn register_character_handler(
                 }
             }
 
-            // 8. 更新本地配置文件（添加 agent_id、注册时间、先天属性和游戏规则）
+            // 8. 创建并保存角色配置到文件系统
             let mut config_warning = None;
-            if let Ok(mut config) = crate::config::Config::from_file(&state.config_path) {
-                if let Some(ref game_rules) = result.game_rules {
-                    config.update_game_rules(game_rules.clone());
+            let agent_uuid = match uuid::Uuid::parse_str(&result.agent_id) {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("解析 agent_id 失败: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(CharacterRegisterResponse {
+                            agent_id: String::new(),
+                            message: format!("解析 agent_id 失败: {}", e),
+                            warning: None,
+                        }),
+                    )
+                        .into_response();
                 }
+            };
 
-                // 如果 agent 不存在，创建新的 CharacterConfig
-                if config.agent.is_none() {
-                    config.agent = Some(crate::config::CharacterConfig {
-                        name: payload.name.clone(),
-                        age: payload.age,
-                        gender: payload.gender.clone(),
-                        appearance: payload.appearance.clone(),
-                        identity: payload.identity.clone(),
-                        personality: payload.personality.clone(),
-                        values: payload.values.clone(),
-                        language_style: crate::config::LanguageStyleConfig {
-                            tone: payload.language_style.tone.clone(),
-                            speech_patterns: payload.language_style.speech_patterns.clone(),
-                        },
-                        goals: crate::config::GoalsConfig {
-                            short_term: payload.goals.short_term.clone(),
-                            long_term: payload.goals.long_term.clone(),
-                        },
-                        system_prompt: Some(system_prompt.clone()),
-                        ..Default::default()
-                    });
-                }
+            let new_character = CharacterConfig {
+                agent_id: Some(agent_uuid),
+                name: payload.name.clone(),
+                age: payload.age,
+                gender: payload.gender.clone(),
+                appearance: payload.appearance.clone(),
+                identity: payload.identity.clone(),
+                personality: payload.personality.clone(),
+                values: payload.values.clone(),
+                language_style: crate::config::LanguageStyleConfig {
+                    tone: payload.language_style.tone.clone(),
+                    speech_patterns: payload.language_style.speech_patterns.clone(),
+                },
+                goals: crate::config::GoalsConfig {
+                    short_term: payload.goals.short_term.clone(),
+                    long_term: payload.goals.long_term.clone(),
+                },
+                system_prompt: Some(system_prompt.clone()),
+                registered_at: Some(chrono::Utc::now()),
+                birth_attributes: if result.initial_attributes.is_empty() {
+                    None
+                } else {
+                    Some(result.initial_attributes.clone())
+                },
+                status: CharacterStatus::Alive,
+                server_url: Some(server_http_url.clone()),
+                ..Default::default()
+            };
 
-                if let Some(ref mut agent) = config.agent {
-                    // 保存服务器返回的 agent_id
-                    if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
-                        agent.agent_id = Some(agent_uuid);
-                    }
-                    agent.registered_at = Some(chrono::Utc::now());
-                    // 保存先天属性（只保存先天属性，不包含状态值）
-                    if !result.initial_attributes.is_empty() {
-                        agent.birth_attributes = Some(result.initial_attributes.clone());
-                    }
-                }
-                if let Err(e) = config.save_to_file(&state.config_path) {
-                    error!("保存配置文件失败: {}", e);
-                    config_warning = Some(format!("配置保存失败: {}", e));
-                }
+            if let Err(e) = save_character(&new_character, &state.character_dir) {
+                error!("保存角色配置失败: {}", e);
+                config_warning = Some(format!("角色配置保存失败: {}", e));
             }
 
             // 9. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
-            if let Ok(agent_uuid) = uuid::Uuid::parse_str(&result.agent_id) {
+            {
                 let mut id = state.agent_id.write().await;
                 *id = agent_uuid;
                 info!(
@@ -1480,26 +1541,10 @@ pub struct CharacterInfoResponse {
 /// - 配置文件：name, age, gender, appearance, identity, personality, values
 /// - WorldState：attributes, inventory, location, tick_id, world_time
 pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    // 1. 从配置文件读取角色配置
-    let config = match crate::config::Config::from_file(&state.config_path) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            error!("读取配置文件失败: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error_code: "config_read_error".to_string(),
-                    message: format!("读取配置文件失败: {}", e),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    // 2. 从配置中提取角色信息
-    let character = match &config.agent {
-        Some(ch) => ch,
-        None => {
+    // 1. 从文件系统读取活跃角色配置
+    let character = match get_active_character(&state) {
+        Ok(Some(ch)) => ch,
+        Ok(None) => {
             return (
                 StatusCode::PRECONDITION_FAILED,
                 Json(ErrorResponse {
@@ -1509,12 +1554,23 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
             )
                 .into_response();
         }
+        Err(e) => {
+            error!("读取角色配置失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "character_read_error".to_string(),
+                    message: format!("读取角色配置失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
     };
 
-    // 3. 加载叙事配置（用于属性描述）
+    // 2. 加载叙事配置（用于属性描述）
     let narrative_config = state.narrative_config.read().await.clone();
 
-    // 4. 从当前 WorldState 获取实时状态
+    // 3. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
     // 是否使用缓存数据（当服务器未连接时）
@@ -1547,7 +1603,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
             }
         };
 
-    // 5. 计算角色状态（在 move attributes 之前）
+    // 4. 计算角色状态（在 move attributes 之前）
     // 优先使用 is_dead 标志（当 AgentDied 消息已收到但 WorldState 尚未更新时）
     let status = if state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
         Some("dead".to_string())
@@ -1559,10 +1615,10 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
             .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
     };
 
-    // 6. 丰富属性数据（添加叙事描述）
+    // 5. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
 
-    // 7. 构建响应
+    // 6. 构建响应
     let response = CharacterInfoResponse {
         agent_id,
         name: character.name.clone(),
@@ -1810,14 +1866,14 @@ pub(super) async fn rebirth_character_handler(
     }
 
     // 1. 检查设备身份
-    let identity = match &state.identity {
-        Some(id) => id,
-        None => {
+    let (device_id, auth_token) = match get_device_id(&state) {
+        Ok(id) => id,
+        Err(e) => {
             return (
                 StatusCode::PRECONDITION_FAILED,
                 Json(RebirthResponse {
                     success: false,
-                    message: "设备身份未初始化".to_string(),
+                    message: format!("设备身份未初始化: {}", e),
                 }),
             )
                 .into_response();
@@ -1852,8 +1908,8 @@ pub(super) async fn rebirth_character_handler(
     }
 
     let request_body = ServerRebirthRequest {
-        device_id: identity.device_id,
-        auth_token: identity.auth_token.clone(),
+        device_id,
+        auth_token,
     };
 
     let response = match client.post(&server_url).json(&request_body).send().await {
@@ -1899,33 +1955,29 @@ pub(super) async fn rebirth_character_handler(
         *current = None;
     }
 
-    // 7. 更新本地配置：区分死亡角色和正常归隐
-    {
-        let agent_config = &state.config_path;
-        if agent_config.exists() {
-            match crate::config::Config::from_file(agent_config) {
-                Ok(mut config) => {
-                    // 死亡角色不需要调用 retire_current_character（status 已是 active，is_alive 已是 false）
-                    // 正常归隐角色才需要标记为 retired
-                    if !is_dead_character {
-                        config.retire_current_character();
-                    }
-                    config.agent = None;
-                    if let Err(e) = config.save_to_file(agent_config) {
-                        error!("保存配置文件失败: {}", e);
+    // 7. 更新文件系统中的角色配置：标记为 Retired
+    if !is_dead_character {
+        // 正常归隐：读取角色配置，标记为 Retired
+        let char_dir = state.character_dir.join(agent_id.to_string());
+        let char_yaml = char_dir.join("character.yaml");
+        if char_yaml.exists() {
+            match CharacterConfig::from_file(&char_yaml) {
+                Ok(mut char_config) => {
+                    char_config.status = CharacterStatus::Retired;
+                    if let Err(e) = char_config.save_to_file(&char_yaml) {
+                        error!("保存角色配置失败: {}", e);
                     } else {
-                        if is_dead_character {
-                            info!("死亡角色已清理本地状态，配置已更新: {:?}", agent_config);
-                        } else {
-                            info!("角色已归隐，配置已更新: {:?}", agent_config);
-                        }
+                        info!("角色已归隐，配置已更新: {:?}", char_yaml);
                     }
                 }
                 Err(e) => {
-                    error!("读取配置文件失败: {}", e);
+                    error!("读取角色配置失败: {}", e);
                 }
             }
         }
+    } else {
+        // 死亡角色：配置已经是 Dead 状态，无需修改
+        info!("死亡角色已清理本地状态");
     }
 
     // 8. 触发重连，让主循环重新注册新角色
@@ -2338,11 +2390,11 @@ pub struct CharacterInfo {
 pub(super) async fn list_characters_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    // 从配置文件读取完整角色列表
-    let config = match crate::config::Config::from_file(&state.config_path) {
-        Ok(c) => c,
+    // 从文件系统读取所有角色
+    let characters = match list_characters_from_fs(&state.character_dir) {
+        Ok(chars) => chars,
         Err(e) => {
-            error!("读取配置文件失败: {}", e);
+            error!("读取角色列表失败: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(CharacterListResponse {
@@ -2356,14 +2408,17 @@ pub(super) async fn list_characters_handler(
     };
 
     let current_server_url = state.server_http_url.read().await.clone();
-    let current_agent_id = config
-        .agent
-        .as_ref()
-        .and_then(|c| c.agent_id.map(|id| id.to_string()));
+    let current_agent_id = {
+        let agent_id = state.agent_id.read().await;
+        if agent_id.is_nil() {
+            None
+        } else {
+            Some(agent_id.to_string())
+        }
+    };
 
-    // 从 characters 数组构建列表
-    let mut characters: Vec<CharacterInfo> = config
-        .characters
+    // 构建角色列表
+    let character_infos: Vec<CharacterInfo> = characters
         .iter()
         .map(|c| {
             let is_current = c.agent_id.map(|id| id.to_string()) == current_agent_id;
@@ -2374,9 +2429,9 @@ pub(super) async fn list_characters_handler(
                 gender: c.gender.clone(),
                 identity: c.identity.clone(),
                 status: match c.status {
-                    crate::config::CharacterStatus::Alive => "alive".to_string(),
-                    crate::config::CharacterStatus::Dead => "dead".to_string(),
-                    crate::config::CharacterStatus::Retired => "retired".to_string(),
+                    CharacterStatus::Alive => "alive".to_string(),
+                    CharacterStatus::Dead => "dead".to_string(),
+                    CharacterStatus::Retired => "retired".to_string(),
                 },
                 server_url: c.server_url.clone(),
                 registered_at: c.registered_at.map(|t| t.to_rfc3339()),
@@ -2385,30 +2440,8 @@ pub(super) async fn list_characters_handler(
         })
         .collect();
 
-    // 如果当前 agent 不在 characters 数组中，单独添加
-    if let Some(ref current_char) = config.agent {
-        let current_char_id = current_char.agent_id.map(|id| id.to_string());
-        if !characters.iter().any(|c| c.agent_id == current_char_id) {
-            characters.push(CharacterInfo {
-                agent_id: current_char_id.clone(),
-                name: current_char.name.clone(),
-                age: current_char.age,
-                gender: current_char.gender.clone(),
-                identity: current_char.identity.clone(),
-                status: match current_char.status {
-                    crate::config::CharacterStatus::Alive => "alive".to_string(),
-                    crate::config::CharacterStatus::Dead => "dead".to_string(),
-                    crate::config::CharacterStatus::Retired => "retired".to_string(),
-                },
-                server_url: current_char.server_url.clone(),
-                registered_at: current_char.registered_at.map(|t| t.to_rfc3339()),
-                is_current: true,
-            });
-        }
-    }
-
     Json(CharacterListResponse {
-        characters,
+        characters: character_infos,
         current_agent_id,
         current_server_url,
     })
@@ -2456,16 +2489,16 @@ pub(super) async fn switch_character_handler(
         }
     };
 
-    // 读取配置文件
-    let mut config = match crate::config::Config::from_file(&state.config_path) {
-        Ok(c) => c,
+    // 从文件系统查找目标角色
+    let characters = match list_characters_from_fs(&state.character_dir) {
+        Ok(chars) => chars,
         Err(e) => {
-            error!("读取配置文件失败: {}", e);
+            error!("读取角色列表失败: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(SwitchCharacterResponse {
                     success: false,
-                    message: format!("读取配置文件失败: {}", e),
+                    message: format!("读取角色列表失败: {}", e),
                     character: None,
                 }),
             )
@@ -2473,13 +2506,7 @@ pub(super) async fn switch_character_handler(
         }
     };
 
-    // 查找目标角色
-    let target_character = config
-        .characters
-        .iter()
-        .find(|c| c.agent_id == Some(agent_id));
-
-    let character = match target_character {
+    let character = match characters.iter().find(|c| c.agent_id == Some(agent_id)) {
         Some(c) => c.clone(),
         None => {
             return (
@@ -2495,7 +2522,7 @@ pub(super) async fn switch_character_handler(
     };
 
     // 检查角色状态
-    if character.status != crate::config::CharacterStatus::Alive {
+    if character.status != CharacterStatus::Alive {
         return (
             StatusCode::BAD_REQUEST,
             Json(SwitchCharacterResponse {
@@ -2503,38 +2530,11 @@ pub(super) async fn switch_character_handler(
                 message: format!(
                     "无法切换到{}角色",
                     match character.status {
-                        crate::config::CharacterStatus::Dead => "已故",
-                        crate::config::CharacterStatus::Retired => "归隐",
-                        crate::config::CharacterStatus::Alive => "存活",
+                        CharacterStatus::Dead => "已故",
+                        CharacterStatus::Retired => "归隐",
+                        CharacterStatus::Alive => "存活",
                     }
                 ),
-                character: None,
-            }),
-        )
-            .into_response();
-    }
-
-    // 执行切换
-    if !config.switch_to_character(agent_id) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(SwitchCharacterResponse {
-                success: false,
-                message: "切换角色失败".to_string(),
-                character: None,
-            }),
-        )
-            .into_response();
-    }
-
-    // 保存配置
-    if let Err(e) = config.save_to_file(&state.config_path) {
-        error!("保存配置文件失败: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(SwitchCharacterResponse {
-                success: false,
-                message: format!("保存配置文件失败: {}", e),
                 character: None,
             }),
         )
@@ -2668,12 +2668,20 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
 
     let has_server = !config.server.ws_url.is_empty();
     let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
-    let has_character = config.agent.as_ref().is_some_and(|c| c.is_registered());
-    let current_character = config
-        .agent
-        .as_ref()
-        .filter(|c| c.is_registered())
-        .map(|c| c.name.clone());
+
+    // 从文件系统检查是否有活跃角色
+    let has_character = match get_active_character(&state) {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(_) => false,
+    };
+
+    let current_character = match get_active_character(&state) {
+        Ok(Some(c)) => Some(c.name.clone()),
+        Ok(None) => None,
+        Err(_) => None,
+    };
+
     let needs_setup = !has_server || !has_llm;
 
     Json(dto::SetupStatusResponse {
@@ -2859,31 +2867,38 @@ pub(super) async fn set_server_handler(
         needs_device_registration = true;
 
         // 检查是否有该服务器上的存活角色
-        let config = crate::config::Config::from_file(&state.config_path).ok();
-        if let Some(config) = config {
-            // 获取该服务器上的所有角色
-            let server_characters = config.get_characters_by_server(&http_url_value);
-            previous_characters = server_characters
-                .iter()
-                .map(|c| CharacterSummary {
-                    agent_id: c.agent_id.map(|id| id.to_string()).unwrap_or_default(),
-                    name: c.name.clone(),
-                    status: match c.status {
-                        crate::config::CharacterStatus::Alive => "alive".to_string(),
-                        crate::config::CharacterStatus::Dead => "dead".to_string(),
-                        crate::config::CharacterStatus::Retired => "retired".to_string(),
-                    },
-                    registered_at: c.registered_at.map(|t| t.to_rfc3339()),
-                })
-                .collect();
+        match list_characters_from_fs(&state.character_dir) {
+            Ok(all_characters) => {
+                // 过滤出该服务器的角色
+                let server_characters: Vec<_> = all_characters
+                    .iter()
+                    .filter(|c| c.server_url.as_ref().map(|u| u == &http_url_value).unwrap_or(false))
+                    .collect();
 
-            // 检查是否有存活角色
-            let has_alive = config.has_alive_character_for_server(&http_url_value);
-            if !has_alive {
+                previous_characters = server_characters
+                    .iter()
+                    .map(|c| CharacterSummary {
+                        agent_id: c.agent_id.map(|id| id.to_string()).unwrap_or_default(),
+                        name: c.name.clone(),
+                        status: match c.status {
+                            CharacterStatus::Alive => "alive".to_string(),
+                            CharacterStatus::Dead => "dead".to_string(),
+                            CharacterStatus::Retired => "retired".to_string(),
+                        },
+                        registered_at: c.registered_at.map(|t| t.to_rfc3339()),
+                    })
+                    .collect();
+
+                // 检查是否有存活角色
+                let has_alive = server_characters.iter().any(|c| c.status == CharacterStatus::Alive);
+                if !has_alive {
+                    needs_character_creation = true;
+                }
+            }
+            Err(e) => {
+                error!("读取角色列表失败: {}", e);
                 needs_character_creation = true;
             }
-        } else {
-            needs_character_creation = true;
         }
     }
 

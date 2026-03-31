@@ -326,6 +326,22 @@ impl CharacterConfig {
     pub fn is_registered(&self) -> bool {
         self.agent_id.is_some()
     }
+
+    /// 从文件加载角色配置
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read character config from {:?}", path.as_ref()))?;
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse character config from {:?}", path.as_ref()))
+    }
+
+    /// 保存角色配置到文件
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let content = serde_yaml::to_string(self)
+            .context("Failed to serialize character config")?;
+        std::fs::write(&path, content)
+            .with_context(|| format!("Failed to write character config to {:?}", path.as_ref()))
+    }
 }
 
 // ============================================================================
