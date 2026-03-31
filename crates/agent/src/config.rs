@@ -26,36 +26,6 @@ pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
 
 // ============================================================================
-// Agent 身份配置（持久化）
-// ============================================================================
-
-/// 设备身份配置
-///
-/// 首次启动时生成，之后持久化保存。
-/// 不随角色变化，角色死亡转世时 identity 保持不变。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IdentityConfig {
-    /// 设备唯一标识（客户端生成 UUID v4）
-    pub device_id: Uuid,
-
-    /// Server 返回的认证令牌
-    pub auth_token: String,
-
-    /// 注册时的服务器 HTTP URL（用于检测服务器切换）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_url: Option<String>,
-}
-
-impl IdentityConfig {
-    /// 检查身份是否匹配当前服务器
-    ///
-    /// 如果身份中没有记录 server_url（旧版本配置），则认为不匹配
-    pub fn matches_server(&self, server_url: &str) -> bool {
-        self.server_url.as_deref() == Some(server_url)
-    }
-}
-
-// ============================================================================
 // 每服务器设备身份配置（device.yaml）
 // ============================================================================
 
@@ -653,22 +623,9 @@ impl Default for ObserverConfig {
 /// 完整配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
-    /// Agent 身份（首次启动自动生成）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub identity: Option<IdentityConfig>,
-
     /// 服务器配置
     #[serde(default)]
     pub server: ServerConfig,
-
-    /// 当前角色配置（通过 Web/API 创建）
-    /// 使用 `agent` 字段名以保持与现有代码的兼容性
-    #[serde(skip_serializing_if = "Option::is_none", alias = "character")]
-    pub agent: Option<CharacterConfig>,
-
-    /// 所有角色历史（包括已故、归隐的角色）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub characters: Vec<CharacterConfig>,
 
     /// 运行时配置
     #[serde(default)]
@@ -783,10 +740,7 @@ impl Config {
         };
 
         Ok(Config {
-            identity: None,
             server,
-            agent: None,
-            characters: vec![],
             runtime,
             claw: ClawConfig::default(),
             llm: LlmConfig::from_env(),
@@ -864,8 +818,6 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert!(config.identity.is_none());
-        assert!(config.agent.is_none());
         assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
     }
 

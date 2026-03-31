@@ -590,10 +590,6 @@ pub fn create_http_state(
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
-    // 初始化数据目录
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let data_dir = home.join(".cyber-jianghu").join("data");
-
     // 读取 agent_id（使用 block_in_place 在同步上下文中读取异步锁）
     let current_agent_id = {
         let guard = tokio::task::block_in_place(|| {
@@ -601,6 +597,13 @@ pub fn create_http_state(
         });
         *guard
     }; // guard 在这里释放
+
+    // 初始化数据目录（server-scoped）
+    let data_dir = if !current_agent_id.is_nil() {
+        character_dir.join(current_agent_id.to_string()).join("data")
+    } else {
+        server_dir.join("data")
+    };
 
     // 初始化关系存储
     let relationship_store = RelationshipStore::open(
@@ -641,15 +644,13 @@ pub fn create_http_state(
     // 初始化叙事引擎（用于属性叙事化描述）
     let narrative_engine = Some(Arc::new(create_narrative_engine()));
 
-    let narrative_config = if let Some(config_dir) = config_path.parent() {
-        let narrative_path = config_dir.join("narrative_config.json");
+    let narrative_config = {
+        let narrative_path = server_dir.join("narrative_config.json");
         if narrative_path.exists() {
             crate::soul::actor::narrative::NarrativeConfig::from_file(&narrative_path).ok()
         } else {
             None
         }
-    } else {
-        None
     };
 
     let (death_event_tx, _) = broadcast::channel(100);
