@@ -362,7 +362,7 @@ async fn main() -> Result<()> {
             ),
         )
         // Static files (Admin panel)
-        .nest_service("/admin", ServeDir::new(crate::paths::get_static_dir()))
+        .nest_service("/admin", ServeDir::new(crate::paths::get_static_dir().join("admin")))
         .with_state(state);
 
     // 12. 启动Web服务器
