@@ -104,12 +104,6 @@ ensure_secure_db_password() {
     local server_dir="$PROJECT_ROOT/crates/server"
     local env_file="$server_dir/.env"
 
-    # # 只在生产环境检查
-    # if [ "$mode" != "prod" ]; then
-    #     return 0
-    # fi
-
-    # 检查 .env 文件是否存在
     if [ ! -f "$env_file" ]; then
         # 从 .env.example 复制
         if [ -f "$server_dir/.env.example" ]; then
@@ -207,7 +201,6 @@ ensure_network() {
 cmd_server_start() {
     local mode
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
-    # 确保生产环境有安全的数据库密码
     ensure_secure_db_password "$mode"
     local compose_file="docker-compose.yml"
     [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
@@ -216,20 +209,16 @@ cmd_server_start() {
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
 
-    # 尝试读取 admin token 并拼接到 URL
     local admin_token_file="$PROJECT_ROOT/crates/server/cyber_jianghu_admin.tmp"
     local read_token=""
     local write_token=""
     if [ -f "$admin_token_file" ]; then
         echo ""
         info "管理员令牌已生成，查看: cat $admin_token_file"
-        # 提取 Read Token（在 "Read Token" 行的下一行）
         read_token=$(grep -A1 "Read Token" "$admin_token_file" | tail -1 | tr -d ' ')
-        # 提取 Write Token（在 "Write Token" 行的下一行）
         write_token=$(grep -A1 "Write Token" "$admin_token_file" | tail -1 | tr -d ' ')
     fi
 
-    # 提示用户查看生成的密码和令牌（如果有）
     local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
     if [ -f "$password_file" ]; then
         echo ""
@@ -258,20 +247,17 @@ cmd_server_stop() {
     success "服务端已停止"
 }
 cmd_server_restart() {
-    local mode=""
-    local no_cache=""
-    for arg in "$1" "$2"; do
-        [ "$arg" = "--prod" ] && mode="prod"
-        [ "$arg" = "--no-cache" ] && no_cache="yes"
+    local mode="--dev"
+    local build_args=""
+    for arg in "$@"; do
+        case "$arg" in
+            --prod) mode="--prod" ;;
+            --no-cache) build_args="--no-cache" ;;
+        esac
     done
-    ensure_network "cyber-jianghu-network"
-    enter_component_dir "server"
-    info "重建服务端镜像并重启..."
-    local compose_file="docker-compose.yml"
-    [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    [ -n "$no_cache" ] && docker compose -f "$compose_file" build --no-cache || docker compose -f "$compose_file" build
-    docker compose -f "$compose_file" up -d --force-recreate
-    success "服务端已重启"
+    cmd_server_stop
+    cmd_server_build "$build_args"
+    cmd_server_start "$mode"
 }
 cmd_server_status() {
     enter_component_dir "server"
@@ -286,9 +272,7 @@ cmd_server_build() {
     local no_cache="${1:-}"
     enter_component_dir "server"
     info "构建服务端镜像..."
-    local build_args=""
-    [ "$no_cache" = "--no-cache" ] && build_args="--no-cache"
-    docker compose build $build_args
+    [ "$no_cache" = "--no-cache" ] && docker compose build --no-cache || docker compose build
     success "构建完成"
 }
 cmd_server_reset() {
@@ -326,51 +310,41 @@ cmd_agent_start() {
     echo "  - Health:     http://localhost:${agent_port}/api/v1/health"
 }
 cmd_agent_stop() {
-    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "停止 Agent..."
     docker compose down
     success "Agent 已停止"
 }
 cmd_agent_restart() {
-    local mode=""
-    local no_cache=""
-    for arg in "$1" "$2"; do
-        [ "$arg" = "--prod" ] && mode="prod"
-        [ "$arg" = "--no-cache" ] && no_cache="yes"
+    local mode="--dev"
+    local build_args=""
+    for arg in "$@"; do
+        case "$arg" in
+            --prod) mode="--prod" ;;
+            --no-cache) build_args="--no-cache" ;;
+        esac
     done
-    ensure_network "cyber-jianghu-network"
-    enter_component_dir "agent"
-    info "重建 Agent 镜像并重启..."
-    local compose_file="docker-compose.yml"
-    [ "$mode" = "prod" ] && compose_file="docker-compose.prod.yml"
-    [ -n "$no_cache" ] && docker compose -f "$compose_file" build --no-cache || docker compose -f "$compose_file" build
-    docker compose -f "$compose_file" up -d --force-recreate
-    success "Agent 已重启"
+    cmd_agent_stop
+    cmd_agent_build "$build_args"
+    cmd_agent_start "$mode"
 }
 cmd_agent_status() {
-    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "Agent 状态:"
     docker compose ps
 }
 cmd_agent_logs() {
-    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     docker compose logs -f
 }
 cmd_agent_build() {
     local no_cache="${1:-}"
-    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     info "构建 Agent 镜像..."
-    local build_args=""
-    [ "$no_cache" = "--no-cache" ] && build_args="--no-cache"
-    docker compose build $build_args
+    [ "$no_cache" = "--no-cache" ] && docker compose build --no-cache || docker compose build
     success "构建完成"
 }
 cmd_agent_reset() {
-    ensure_network "cyber-jianghu-network"
     enter_component_dir "agent"
     warn "将删除所有数据!"
     prompt "确认重置 Agent 数据? (y/N): "
@@ -388,12 +362,10 @@ cmd_all_start() {
     local mode
     mode="$(resolve_mode "${1:-}")" || error "无效模式参数: ${1:-} (仅支持 --prod)"
     show_banner
-    # 确保生产环境有安全的数据库密码（在启动服务前）
     ensure_secure_db_password "$mode"
     cmd_server_start "$mode"
     echo ""
     cmd_agent_start "$mode"
-    # 提示用户查看生成的密码（如果有）
     local password_file="$PROJECT_ROOT/crates/server/cyber_jianghu_db_password.tmp"
     if [ -f "$password_file" ]; then
         echo ""
@@ -405,14 +377,8 @@ cmd_all_stop() {
     cmd_agent_stop
 }
 cmd_all_restart() {
-    local mode=""
-    local no_cache=""
-    for arg in "$1" "$2"; do
-        [ "$arg" = "--prod" ] && mode="prod"
-        [ "$arg" = "--no-cache" ] && no_cache="yes"
-    done
-    cmd_server_restart "$mode" "$no_cache"
-    cmd_agent_restart "$mode" "$no_cache"
+    cmd_server_restart "$@"
+    cmd_agent_restart "$@"
 }
 cmd_all_status() {
     echo "=== 服务端 ==="
@@ -424,9 +390,11 @@ cmd_all_status() {
 cmd_all_logs() {
     echo "=== 服务端日志 ==="
     cmd_server_logs &
+    local server_pid=$!
     echo ""
     echo "=== Agent 日志 ==="
     cmd_agent_logs
+    kill "$server_pid" 2>/dev/null
 }
 cmd_all_build() {
     local no_cache="${1:-}"
@@ -498,10 +466,10 @@ main() {
             case "$cmd" in
                 start)     cmd_server_start "${3:-}" ;;
                 stop)       cmd_server_stop ;;
-                restart)    cmd_server_restart "${3:-}" "${4:-}" ;;
+                restart)    cmd_server_restart "${@:3}" ;;
                 status)     cmd_server_status ;;
                 logs)       cmd_server_logs ;;
-                build)      cmd_server_build "${3:-}" ;;
+                build)      cmd_server_build "${@:3}" ;;
                 reset)      cmd_server_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
@@ -510,10 +478,10 @@ main() {
             case "$cmd" in
                 start)     cmd_agent_start "${3:-}" ;;
                 stop)       cmd_agent_stop ;;
-                restart)    cmd_agent_restart "${3:-}" "${4:-}" ;;
+                restart)    cmd_agent_restart "${@:3}" ;;
                 status)     cmd_agent_status ;;
                 logs)       cmd_agent_logs ;;
-                build)      cmd_agent_build "${3:-}" ;;
+                build)      cmd_agent_build "${@:3}" ;;
                 reset)      cmd_agent_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
@@ -522,10 +490,10 @@ main() {
             case "$cmd" in
                 start)     cmd_all_start "${3:-}" ;;
                 stop)       cmd_all_stop ;;
-                restart)    cmd_all_restart "${3:-}" "${4:-}" ;;
+                restart)    cmd_all_restart "${@:3}" ;;
                 status)     cmd_all_status ;;
                 logs)       cmd_all_logs ;;
-                build)      cmd_all_build "${3:-}" ;;
+                build)      cmd_all_build "${@:3}" ;;
                 reset)      cmd_all_reset ;;
                 *)          error "未知命令: $cmd" ;;
             esac
