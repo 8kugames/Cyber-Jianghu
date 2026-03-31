@@ -536,10 +536,18 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 // ============================================================================
 
 async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()> {
-    let config = load_config()?.unwrap_or_else(|| {
+    let mut config = load_config()?.unwrap_or_else(|| {
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
+
+    // Ensure servers_dir is set (#[serde(skip)] means it's empty after from_file)
+    if config.servers_dir.as_os_str().is_empty() {
+        config.servers_dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".cyber-jianghu")
+            .join("servers");
+    }
 
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {

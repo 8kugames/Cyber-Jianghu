@@ -86,15 +86,17 @@ impl IntentValidator {
 
         debug!("Validation prompt:\n{}", prompt);
 
-        // 调用 LLM
-        let full_prompt = format!("{}\n\n{}", self.observer_prompt.system_prompt(), prompt);
-        let response: LlmValidationResponse = self.llm_client.complete_json(&full_prompt).await?;
+        // 调用 LLM（system + user 分离，利用 system message 优先级）
+        let response: LlmValidationResponse = self
+            .llm_client
+            .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
+            .await?;
 
         thinking_log::log_llm(
             &format!("Agent({})", request.intent.agent_id),
             request.intent.tick_id,
             "ReflectorSoul",
-            &full_prompt,
+            &prompt,
             &format!("{:?}", response),
         );
 
@@ -183,11 +185,7 @@ impl IntentValidator {
 
         let response: LlmValidationResponse = self
             .llm_client
-            .complete_json(&format!(
-                "{}\n\n{}",
-                self.observer_prompt.system_prompt(),
-                prompt
-            ))
+            .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
             .await?;
 
         Ok(response.into_validation_result())
@@ -214,10 +212,18 @@ impl LlmValidationResponse {
                 reason: self.reason,
                 rejection_type: super::types::RejectionType::parse(&self.rejection_type),
             },
-            _ => ValidationResult::Rejected {
-                reason: format!("无效的响应结果: {}", self.result),
-                rejection_type: super::types::RejectionType::Other,
-            },
+            _ => {
+                // 空 result 或无法识别 → 宽容策略：降级为通过
+                // 避免 LLM 截断导致验证拒绝，触发无意义的重试循环
+                tracing::warn!(
+                    "Unrecognized validation result '{}', auto-approving (lenient policy)",
+                    self.result
+                );
+                ValidationResult::Approved {
+                    reason: None,
+                    narrative: self.narrative,
+                }
+            }
         }
     }
 }

@@ -160,6 +160,15 @@ impl LlmClient for OpenClawBridge {
             )),
         }
     }
+
+    /// Send an LLM completion request with system prompt to OpenClaw
+    ///
+    /// Note: OpenClaw bridge protocol doesn't support system role separation,
+    /// so system + user are concatenated as a single prompt.
+    async fn complete_with_system(&self, system: &str, prompt: &str) -> Result<String> {
+        let full_prompt = format!("{}\n\n{}", system, prompt);
+        self.complete(&full_prompt).await
+    }
 }
 
 #[cfg(test)]

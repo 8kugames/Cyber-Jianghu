@@ -33,6 +33,14 @@ impl LlmClient for ExampleLlmClient {
         }"#
         .to_string())
     }
+
+    async fn complete_with_system(
+        &self,
+        _system: &str,
+        _prompt: &str,
+    ) -> anyhow::Result<String> {
+        self.complete(_prompt).await
+    }
 }
 
 // ============================================================================

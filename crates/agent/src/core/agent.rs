@@ -582,8 +582,18 @@ impl Agent {
                 world_context: self.build_world_context(world_state),
             };
 
-            // 验证意图
-            match validator.validate(request).await? {
+            // 验证意图（验证失败时降级为通过，不中断 agent）
+            let validation_result = match validator.validate(request).await {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("Validation failed, auto-approving intent: {}", e);
+                    crate::soul::reflector::ValidationResult::Approved {
+                        reason: None,
+                        narrative: String::new(),
+                    }
+                }
+            };
+            match validation_result {
                 crate::soul::reflector::ValidationResult::Approved { reason, narrative } => {
                     info!("Intent approved (attempt {}): {:?}", attempt, reason);
 
