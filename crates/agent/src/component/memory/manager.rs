@@ -91,9 +91,10 @@ impl MemoryManager {
         let episodic_db_path = config.db_dir.join(format!("agent_{}.db", config.agent_id));
         let semantic_config =
             crate::component::memory::backends::semantic::backend::SemanticMemoryConfig {
+                dimension: 512,
                 db_path: config.db_dir.join("semantic.db"),
                 episodic_db_path,
-                ..Default::default()
+                embedding_threshold: 0.7,
             };
 
         let semantic = match SemanticMemoryBackend::new(config.agent_id, semantic_config, embedder)
