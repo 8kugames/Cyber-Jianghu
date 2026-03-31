@@ -224,8 +224,8 @@ impl AgentBuilder {
         let client = AgentClient::new(self.config.server.clone());
 
         // 设置设备身份（优先使用 device_config，回退到 config.identity）
-        let device_ref = self.device_config.as_ref().and_then(|dc| {
-            Some((dc.device_id, dc.auth_token.clone()))
+        let device_ref = self.device_config.as_ref().map(|dc| {
+            (dc.device_id, dc.auth_token.clone())
         }).or_else(|| {
             self.config.identity.as_ref().map(|id| {
                 (id.device_id, id.auth_token.clone())

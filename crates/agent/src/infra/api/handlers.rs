@@ -91,7 +91,7 @@ fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(),
         .unwrap_or_else(|| "unknown".to_string());
     let dir = characters_dir.join(&agent_id);
     std::fs::create_dir_all(&dir)?;
-    config.save_to_file(&dir.join("character.yaml"))
+    config.save_to_file(dir.join("character.yaml"))
 }
 
 /// Get device identity from state
@@ -1364,6 +1364,7 @@ pub(super) async fn register_character_handler(
     struct ServerRegisterResponse {
         agent_id: String,
         message: String,
+        #[allow(dead_code)]
         game_rules: Option<cyber_jianghu_protocol::GameRules>,
         narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
         #[serde(default)]
@@ -1440,7 +1441,6 @@ pub(super) async fn register_character_handler(
                 },
                 status: CharacterStatus::Alive,
                 server_url: Some(server_http_url.clone()),
-                ..Default::default()
             };
 
             if let Err(e) = save_character(&new_character, &state.character_dir) {
