@@ -1,60 +1,34 @@
 // ============================================================================
-// AI Module - 智能增强模块
+// AI Module - 兼容层
 // ============================================================================
 //
-// 提供各种 AI 相关的功能，包括认知引擎、记忆系统、人设系统等
-//
-// ## 子模块
-// - `cognitive/` - 认知引擎（多阶段决策 + 叙事化）
-// - `llm/` - LLM 客户端
-// - `memory/` - 记忆系统
-// - `persona/` - 人设系统
-// - `validator/` - 意图验证
-// - `dialogue/` - 对话系统
-// - `lifespan/` - 寿命计算
-// - `relationship/` - 关系管理
-// - `prompts.rs` - Prompt 模板
+// 核心子模块已迁移至 component/ 和 soul/ 目录
+// 此模块仅保留 prompts 和兼容性重导出
+// ============================================================================
 
-pub mod dialogue;
-pub mod lifespan;
-pub mod llm;
-pub mod memory;
-pub mod persona;
+pub mod cognitive;
 pub mod prompts;
-pub mod relationship;
-pub mod validator;
 
-// 重导出常用的 LLM 类型
-pub use llm::LlmClient;
-
-// 重导出人设系统
-pub use persona::{
-    dynamic_persona::{DynamicPersona, PersonaState, ThreadSafePersona},
-    event_mapper::{EventTraitMapper, TraitMappingRule},
-    trait_types::{Trait, TraitChange, TraitType},
-};
-
-// 重导出 Prompt 模板
-pub use prompts::AgentPrompt;
-
-// 重导出验证器
-pub use validator::{
-    CognitiveValidator, IntentValidator, PersonaInfo, RejectionType, ValidationRequest,
-    ValidationResult, Validator,
-};
-
-// 重导出记忆系统
-pub use memory::{
+// 向后兼容：从 component/ 重导出
+pub use crate::component::llm::LlmClient;
+pub use crate::component::memory::{
     ArchiveMemoryBackend, ClientMemory, EbbinghausConfig, EmbedderService, EpisodicMemoryBackend,
     ForgettingReport, ForgettingScheduler, ImportanceScorer, LocalEmbedder, MemoryEntry,
     MemoryManager, MemoryManagerConfig, MemoryManagerStats, MemoryToolDefinition,
     RecallArchivedParams, SearchMemoryParams, WorkingMemoryBackend,
 };
-
-// 重导出关系系统
-pub use relationship::{KeyEvent, RelationshipMemory, RelationshipStore};
-
-// 重导出寿命系统
-pub use lifespan::{
-    AgingEffectValues, AgingEffects, AgingStage, LifespanCalculator, LifespanConfig, LifespanStatus,
+pub use crate::component::persona::{
+    AgingEffectValues, AgingEffects, AgingStage, DynamicPersona, EventTraitMapper,
+    LifespanCalculator, LifespanConfig, LifespanStatus, PersonaState, ThreadSafePersona, Trait,
+    TraitChange, TraitMappingRule, TraitType,
 };
+pub use crate::component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
+
+// 从 soul::reflector 重导出验证器类型
+pub use crate::soul::reflector::{
+    CognitiveValidator, IntentValidator, PersonaInfo, RejectionType, ValidationRequest,
+    ValidationResult, Validator,
+};
+
+// 本地模块
+pub use prompts::{AgentPrompt, get_agent_prompt, get_all_agent_prompts};

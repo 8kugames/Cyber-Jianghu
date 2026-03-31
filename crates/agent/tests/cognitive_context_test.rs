@@ -2,7 +2,7 @@
 //!
 //! 测试 CognitiveContextBuilder 从 WorldState 生成结构化认知上下文
 
-use cyber_jianghu_agent::runtime::decision::http::cognitive_context::{
+use cyber_jianghu_agent::infra::api::cognitive_context::{
     CognitiveContext, CognitiveContextBuilder, Drive,
 };
 use cyber_jianghu_protocol::{
@@ -23,6 +23,7 @@ fn create_test_world_state() -> WorldState {
         event_type: "world_state".to_string(),
         tick_id: 100,
         agent_id: Some(Uuid::new_v4()),
+        deadline_ms: 50000,
         world_time: WorldTime {
             year: 2024,
             month: 3,
@@ -97,7 +98,6 @@ fn create_test_world_state() -> WorldState {
                 valid_targets: Some(vec!["wine_bottle".to_string()]),
             },
         ],
-        deadline_ms: 0,
     }
 }
 

@@ -9,7 +9,7 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -20,15 +20,6 @@ use zeroize::Zeroize;
 // ============================================================================
 
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
-
-/// 反序列化辅助：将 null 视为默认值（空字符串）
-fn deserialize_null_string<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let opt = Option::<String>::deserialize(deserializer)?;
-    Ok(opt.unwrap_or_default())
-}
 
 /// 支持的 LLM Provider
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
@@ -111,7 +102,7 @@ impl ServerConfig {
 // ============================================================================
 
 /// 语言风格配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LanguageStyleConfig {
     /// 语调：豪迈/温和/冷漠/狡黠
     #[serde(default)]
@@ -123,7 +114,7 @@ pub struct LanguageStyleConfig {
 }
 
 /// 角色目标配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GoalsConfig {
     /// 短期目标
     #[serde(default)]
@@ -151,7 +142,7 @@ pub enum CharacterStatus {
 ///
 /// 通过 Web 面板或 HTTP API 创建。
 /// 角色死亡后可以转世，此时 agent_id 会变化。
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CharacterConfig {
     /// 服务器分配的角色 ID（注册后由服务器返回）
     #[serde(skip_serializing_if = "Option::is_none", alias = "user_id")]
@@ -159,7 +150,6 @@ pub struct CharacterConfig {
 
     // === 基本信息 ===
     /// 姓名
-    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub name: String,
 
     /// 年龄
@@ -167,10 +157,7 @@ pub struct CharacterConfig {
     pub age: u8,
 
     /// 性别
-    #[serde(
-        default = "default_gender",
-        deserialize_with = "deserialize_null_string"
-    )]
+    #[serde(default = "default_gender")]
     pub gender: String,
 
     /// 外貌描述
@@ -342,10 +329,36 @@ impl Default for RuntimeConfig {
 }
 
 // ============================================================================
+// Claw 模式配置
+// ============================================================================
+
+/// Claw 模式专用配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClawConfig {
+    /// 是否使用统一认知架构（OpenClawBridge + MultiStageCognitiveEngine）
+    /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
+    /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
+    #[serde(default = "default_use_unified_cognitive")]
+    pub use_unified_cognitive: bool,
+}
+
+fn default_use_unified_cognitive() -> bool {
+    true
+}
+
+impl Default for ClawConfig {
+    fn default() -> Self {
+        Self {
+            use_unified_cognitive: true,
+        }
+    }
+}
+
+// ============================================================================
 // LLM 配置（仅 Cognitive 模式使用）
 // ============================================================================
 
-const DEFAULT_LLM_PROVIDER: &str = "openclaw";
+const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
 
@@ -512,7 +525,7 @@ pub struct ReviewConfig {
 }
 
 fn default_review_timeout() -> u64 {
-    60
+    30
 }
 
 fn default_review_enabled() -> bool {
@@ -522,7 +535,7 @@ fn default_review_enabled() -> bool {
 impl Default for ReviewConfig {
     fn default() -> Self {
         Self {
-            timeout_seconds: 60,
+            timeout_seconds: 30,
             enabled: true,
             auth_token: None,
         }
@@ -586,6 +599,10 @@ pub struct Config {
     #[serde(default)]
     pub runtime: RuntimeConfig,
 
+    /// Claw 模式专用配置
+    #[serde(default)]
+    pub claw: ClawConfig,
+
     /// LLM 配置（仅 Cognitive 模式使用）
     #[serde(default)]
     pub llm: LlmConfig,
@@ -622,14 +639,12 @@ pub struct Config {
 impl Config {
     /// 从文件加载配置
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path_ref = path.as_ref();
-        let path_display = path_ref.display().to_string();
-        let content = std::fs::read_to_string(path_ref)
+        let path_display = path.as_ref().display().to_string();
+        let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read config file: {}", path_display))?;
 
-        let mut config: Config =
+        let config: Config =
             serde_yaml::from_str(&content).with_context(|| "Failed to parse config file")?;
-        config.config_path = path_ref.to_path_buf();
 
         Ok(config)
     }
@@ -693,6 +708,7 @@ impl Config {
             agent: None,
             characters: vec![],
             runtime,
+            claw: ClawConfig::default(),
             llm: LlmConfig::from_env(),
             llm_reflector: None,
             memory: MemoryConfig::default(),
