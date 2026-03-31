@@ -582,10 +582,8 @@ impl super::Agent {
                         None
                     };
 
-                    // 6. 调用决策回调（带验证和记忆上下文）
-                    let intent = if self.validator.is_some() {
-                        self.decide_with_validation(&world_state, pipeline_deadline).await?
-                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                    // 6. 调用决策回调（验证已移至 ReflectorSoul，避免重复 LLM 调用）
+                    let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
                         // 优先使用带记忆上下文的回调
                         memory_callback(&world_state, &memory_context).await
                     } else {
@@ -637,12 +635,15 @@ impl super::Agent {
                     // 8.5 记录 Intent 到经历日志（tick 调整之后，确保记录正确的 tick_id）
                     if let Some(ref api_state) = self.http_api_state
                         && let Some(ref history) = api_state.intent_history {
+                            let world_time_str =
+                                serde_json::to_string(&world_state.world_time).ok();
                             history
                                 .record_intent(
                                     final_intent.tick_id,
                                     final_intent.intent_id,
                                     final_intent.action_type.to_string(),
                                     final_intent.thought_log.clone(),
+                                    world_time_str,
                                 )
                                 .await;
                         }
