@@ -1,17 +1,19 @@
 #!/bin/bash
 # ============================================================================
 # Docker Container Entrypoint
-# 在容器启动前检查并修复权限问题，执行数据库迁移
+# 权限修复、数据库迁移、启动服务
 # ============================================================================
 
-set -e
+set -euo pipefail
 
-# 容器内运行用户的 UID/GID
 TARGET_UID=${CONTAINER_UID:-1000}
 TARGET_GID=${CONTAINER_GID:-1000}
 TARGET_USER=${CONTAINER_USER:-cyberjianghu}
+MIGRATION_DIR="/app/migrations"
 
+# ---------------------------------------------------------------------------
 # 等待数据库就绪
+# ---------------------------------------------------------------------------
 wait_for_db() {
     echo "[INFO] 等待数据库就绪..."
     local max_attempts=30
@@ -29,32 +31,43 @@ wait_for_db() {
     return 1
 }
 
-# 执行数据库迁移
+# ---------------------------------------------------------------------------
+# 执行数据库迁移（严格模式：任何错误立即终止）
+# ---------------------------------------------------------------------------
 run_migrations() {
     echo "[INFO] 执行数据库迁移..."
-    local migration_dir="/app/migrations"
-    
-    if [ -d "$migration_dir" ]; then
-        # 按文件名顺序执行迁移
-        for sql_file in $(ls "$migration_dir"/*.sql 2>/dev/null | sort); do
-            filename=$(basename "$sql_file")
-            echo "[INFO] 执行迁移: $filename"
-            if psql "${DATABASE_URL}" -f "$sql_file" >/dev/null 2>&1; then
-                echo "[INFO] 迁移完成: $filename"
-            else
-                # 迁移可能已执行过，忽略错误
-                echo "[INFO] 迁移跳过（可能已执行）: $filename"
-            fi
-        done
-        echo "[INFO] 数据库迁移完成"
-    else
-        echo "[WARN] 迁移目录不存在: $migration_dir"
+
+    if [ ! -d "$MIGRATION_DIR" ]; then
+        echo "[ERROR] 迁移目录不存在: $MIGRATION_DIR"
+        return 1
     fi
+
+    for sql_file in "$MIGRATION_DIR"/*.sql; do
+        [ -f "$sql_file" ] || continue
+        local filename
+        filename=$(basename "$sql_file")
+        echo "[INFO] 执行迁移: $filename"
+
+        # ON_ERROR_STOP=1: 遇到错误立即中止，不做静默吞错
+        # --single-transaction: 整个文件包在事务里，失败自动回滚
+        if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 --single-transaction -f "$sql_file" 2>&1; then
+            echo "[ERROR] 迁移失败: $filename"
+            return 1
+        fi
+
+        echo "[INFO] 迁移完成: $filename"
+    done
+
+    echo "[INFO] 数据库迁移完成"
 }
 
-# 以 root 用户运行时，检查并修复权限问题
+# ---------------------------------------------------------------------------
+# 主逻辑
+# ---------------------------------------------------------------------------
+
+# 以 root 用户运行时：修复权限、迁移数据库、切换到非 root 用户
 if [ "$(id -u)" = "0" ]; then
-    # 检查 logs 目录是否可写
+    # 修复 logs 目录权限
     if [ -d "/app/logs" ]; then
         CURRENT_OWNER=$(stat -c '%u:%g' /app/logs 2>/dev/null || stat -f '%u:%g' /app/logs)
         if [ "$CURRENT_OWNER" != "$TARGET_UID:$TARGET_GID" ]; then
@@ -63,15 +76,19 @@ if [ "$(id -u)" = "0" ]; then
         fi
     fi
 
-    # 执行数据库迁移（在切换用户前）
-    if [ -n "${DATABASE_URL}" ]; then
-        wait_for_db && run_migrations
+    # 执行数据库迁移
+    if [ -n "${DATABASE_URL:-}" ]; then
+        wait_for_db
+        run_migrations
     fi
 
-    # 切换到非 root 用户执行命令
     echo "[INFO] 切换到用户 $TARGET_USER (UID=$TARGET_UID) 运行服务"
     exec runuser -u "$TARGET_USER" -- "$@"
 else
-    # 已经是非 root 用户，直接执行
+    # 非 root 用户也需要执行迁移（如果 DATABASE_URL 存在且 psql 可用）
+    if [ -n "${DATABASE_URL:-}" ] && command -v psql >/dev/null 2>&1; then
+        wait_for_db
+        run_migrations
+    fi
     exec "$@"
 fi
