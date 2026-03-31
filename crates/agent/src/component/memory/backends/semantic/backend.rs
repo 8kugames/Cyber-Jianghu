@@ -18,19 +18,6 @@ pub struct SemanticMemoryConfig {
     pub embedding_threshold: f32,
 }
 
-impl Default for SemanticMemoryConfig {
-    fn default() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let data_dir = home.join(".cyber-jianghu").join("data");
-        Self {
-            dimension: 512,
-            db_path: data_dir.join("semantic.db"),
-            episodic_db_path: data_dir.join("episodic.db"),
-            embedding_threshold: 0.7,
-        }
-    }
-}
-
 pub struct SemanticMemoryBackend {
     #[allow(dead_code)]
     agent_id: Uuid,
@@ -240,20 +227,3 @@ impl SemanticSearchable for SemanticMemoryBackend {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_config_default() {
-        let config = SemanticMemoryConfig::default();
-        assert_eq!(config.dimension, 512);
-        assert_eq!(config.embedding_threshold, 0.7);
-    }
-
-    #[test]
-    fn test_semantic_memory_backend_creation() {
-        let config = SemanticMemoryConfig::default();
-        assert!(config.db_path.to_string_lossy().contains("cyber-jianghu"));
-    }
-}
