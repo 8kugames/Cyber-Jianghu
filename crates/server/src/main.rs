@@ -413,27 +413,18 @@ async fn main() -> Result<()> {
             "/api/admin/session",
             get(handlers::admin_auth::check_session),
         )
-        // Admin Static Files (protected by cookie middleware)
-        .route(
-            "/admin",
-            get(serve_admin).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::admin_auth::admin_cookie_middleware,
-            )),
-        )
-        .route(
-            "/admin/",
-            get(serve_admin).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::admin_auth::admin_cookie_middleware,
-            )),
-        )
+        // Admin Static Files (all protected by cookie middleware)
         .route(
             "/admin/{*path}",
             get(serve_admin).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 handlers::admin_auth::admin_cookie_middleware,
             )),
+        )
+        // Redirect /admin to /admin/
+        .route(
+            "/admin",
+            get(|| async { axum::response::Redirect::temporary("/admin/") }),
         )
         .with_state(state);
 
