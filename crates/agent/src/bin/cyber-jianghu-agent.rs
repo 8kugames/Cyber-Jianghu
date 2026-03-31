@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{Level, debug, error, info, warn};
@@ -222,12 +222,11 @@ fn migrate_old_config(config_path: &std::path::Path, servers_dir: &std::path::Pa
     use cyber_jianghu_agent::config::{DeviceConfig, server_key};
 
     // Skip if servers/ already has content (already migrated or fresh install with new layout)
-    if servers_dir.exists() {
-        if let Ok(entries) = fs::read_dir(servers_dir) {
-            if entries.count() > 0 {
-                return Ok(());
-            }
-        }
+    if servers_dir.exists()
+        && let Ok(entries) = fs::read_dir(servers_dir)
+        && entries.count() > 0
+    {
+        return Ok(());
     }
 
     // Load old config
@@ -271,7 +270,7 @@ fn migrate_old_config(config_path: &std::path::Path, servers_dir: &std::path::Pa
     device.save_to_file(&server_dir.join("device.yaml"))?;
 
     // Save character.yaml
-    agent.save_to_file(&char_dir.join("character.yaml"))?;
+    agent.save_to_file(char_dir.join("character.yaml"))?;
 
     // Copy DB files with WAL checkpoint
     let old_data_dir = config_path.parent()
@@ -380,7 +379,7 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
 // 选择角色（从 filesystem）
 // ============================================================================
 
-fn select_character(server_dir: &PathBuf) -> Option<CharacterConfig> {
+fn select_character(server_dir: &Path) -> Option<CharacterConfig> {
     let chars_dir = server_dir.join("characters");
     if !chars_dir.exists() {
         return None;
@@ -393,10 +392,10 @@ fn select_character(server_dir: &PathBuf) -> Option<CharacterConfig> {
                 continue;
             }
             let path = entry.path().join("character.yaml");
-            if let Ok(config) = CharacterConfig::from_file(&path) {
-                if config.status == CharacterStatus::Alive {
-                    alive.push(config);
-                }
+            if let Ok(config) = CharacterConfig::from_file(&path)
+                && config.status == CharacterStatus::Alive
+            {
+                alive.push(config);
             }
         }
     }
@@ -1184,6 +1183,7 @@ fn start_claw_server(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_http_api_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
