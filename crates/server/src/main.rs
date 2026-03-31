@@ -37,11 +37,16 @@ use tracing_subscriber::FmtSubscriber;
 // Tick引擎启动
 // ============================================================================
 
-async fn serve_admin_file(
+async fn serve_admin(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Result<axum::response::Response<Body>, StatusCode> {
     let static_dir = crate::paths::get_static_dir().join("admin");
-    let file_path = static_dir.join(&path);
+
+    let file_path = if path.is_empty() || path == "index.html" {
+        static_dir.join("index.html")
+    } else {
+        static_dir.join(&path)
+    };
 
     if !file_path.exists() || !file_path.is_file() {
         return Err(StatusCode::NOT_FOUND);
@@ -409,18 +414,26 @@ async fn main() -> Result<()> {
             get(handlers::admin_auth::check_session),
         )
         // Admin Static Files (protected by cookie middleware)
-        .route("/admin", get(handlers::admin_auth::login_page))
         .route(
-            "/admin/{*path}",
-            get(serve_admin_file).layer(axum::middleware::from_fn_with_state(
+            "/admin",
+            get(serve_admin).layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 handlers::admin_auth::admin_cookie_middleware,
             )),
         )
-        // Handle /admin/ (with trailing slash) same as /admin
         .route(
             "/admin/",
-            get(handlers::admin_auth::login_page),
+            get(serve_admin).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::admin_auth::admin_cookie_middleware,
+            )),
+        )
+        .route(
+            "/admin/{*path}",
+            get(serve_admin).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::admin_auth::admin_cookie_middleware,
+            )),
         )
         .with_state(state);
 

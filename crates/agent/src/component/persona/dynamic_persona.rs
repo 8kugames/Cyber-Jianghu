@@ -11,7 +11,7 @@
 // - 追踪人设演化历史
 // ============================================================================
 
-use crate::ai::prompts::AgentPrompt;
+use super::prompts::AgentPrompt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -268,7 +268,7 @@ impl ThreadSafePersona {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::prompts;
+    use crate::component::persona::prompts;
 
     #[test]
     fn test_persona_from_preset() {

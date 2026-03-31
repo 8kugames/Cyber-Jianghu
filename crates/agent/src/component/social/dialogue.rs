@@ -52,7 +52,7 @@ pub trait DialogueEventHandler: Send + Sync {
 /// # 示例
 ///
 /// ```rust
-/// use cyber_jianghu_agent::ai::dialogue::{DialogueClient, DialogueEventHandler};
+/// use cyber_jianghu_agent::component::social::dialogue::{DialogueClient, DialogueEventHandler};
 /// use uuid::Uuid;
 /// use std::sync::Arc;
 ///
@@ -100,7 +100,7 @@ impl DialogueClient {
     /// # 示例
     ///
     /// ```rust
-    /// # use cyber_jianghu_agent::ai::dialogue::{DialogueClient, DialogueEventHandler};
+    /// # use cyber_jianghu_agent::component::social::dialogue::{DialogueClient, DialogueEventHandler};
     /// # use uuid::Uuid;
     /// # use std::sync::Arc;
     /// # struct MyHandler;
@@ -128,7 +128,7 @@ impl DialogueClient {
     /// # 示例
     ///
     /// ```rust
-    /// # use cyber_jianghu_agent::ai::dialogue::{DialogueClient, DialogueEventHandler};
+    /// # use cyber_jianghu_agent::component::social::dialogue::{DialogueClient, DialogueEventHandler};
     /// # use uuid::Uuid;
     /// # use std::sync::Arc;
     /// # struct MyHandler;
@@ -226,7 +226,7 @@ impl DialogueClient {
     /// # 示例
     ///
     /// ```rust
-    /// # use cyber_jianghu_agent::ai::dialogue::{DialogueClient, DialogueEventHandler};
+    /// # use cyber_jianghu_agent::component::social::dialogue::{DialogueClient, DialogueEventHandler};
     /// # use cyber_jianghu_protocol::ServerMessage;
     /// # use cyber_jianghu_protocol::DialogueMessage;
     /// # use uuid::Uuid;
