@@ -166,13 +166,13 @@ attack:
 
 ### Agent SDK
 
-- [ ] **语义记忆向量生成**: `crates/agent/src/ai/memory/backends/semantic/backend.rs`
+- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/backend.rs`
   - 基础设施已就绪（HNSW 向量索引 + FTS fallback + LocalEmbedder）
   - 需要实现：`SemanticMemoryBackend::add()` 空操作 → 改为真正写入向量存储
   - 需要实现：`ensure_embeddings_for_priority()` stub → 实现优先级记忆的向量生成
   - 需要实现：`ensure_embedding(memory_id)` stub → 实现单个记忆的向量生成
 
-- [ ] **记忆归档与强度更新**: `crates/agent/src/ai/memory/backends/episodic.rs:166-178`
+- [ ] **记忆归档与强度更新**: `crates/agent/src/component/memory/backends/episodic.rs:166-178`
   - 已实现：Ebbinghaus 遗忘曲线计算、重要性评分器
   - 需要实现：`archive_memories()` stub → 改为调用 `ArchiveMemoryBackend::archive()` 真正移动到归档表
   - 需要实现：`strengthen_memory()` stub → 需要 `MemoryStore` schema 支持 `strength`/`access_count`/`last_accessed_at` 列

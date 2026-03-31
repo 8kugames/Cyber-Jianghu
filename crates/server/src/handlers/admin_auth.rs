@@ -186,6 +186,11 @@ pub async fn admin_cookie_middleware(
         return Ok(next.run(req).await);
     }
 
+    // Allow unauthenticated access to /admin/ so frontend can handle login flow
+    if path == "/admin/" {
+        return Ok(next.run(req).await);
+    }
+
     if let Some(token) = extract_session_cookie(&req)
         && let Some(_session) = verify_session_token(&token, &state.session_secret)
     {

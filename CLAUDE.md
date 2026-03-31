@@ -176,17 +176,16 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 - All tiers use SQLite backends with Ebbinghaus forgetting curve implementation
 
 Key agent modules:
-- `src/core/` - WebSocket client to game server
-- `src/runtime/decision/` - Decision modes (ws required, http auxiliary)
-- `src/transport/` - WebSocket communication layer
-- `src/ai/` - AI components:
-  - `cognitive/` - Narrative engine for attribute descriptions
-  - `memory/` - Three-tier memory system with SQLite backends
-  - `relationship/` - Relationship store with AI narrative descriptions
-  - `persona/` - Dynamic persona with trait evolution
-  - `validator/` - Intent validation against persona
-  - `lifespan/` - Age and aging effects calculation
-  - `llm/` - LLM client for AI decision-making
+- `src/core/` - Agent struct, builder, lifecycle (orchestrator)
+- `src/soul/actor/` - ActorSoul: cognitive engine, narrative engine, intent generation
+- `src/soul/reflector/` - ReflectorSoul: intent validation, rule engine, review store
+- `src/component/memory/` - Three-tier memory system with SQLite backends
+- `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
+- `src/component/social/` - Relationship store, dialogue client
+- `src/component/llm/` - LLM client abstraction
+- `src/infra/transport/` - WebSocket communication layer
+- `src/infra/api/` - HTTP API server, handlers, services
+- `src/runtime/` - Decision modes (cognitive + claw)
 
 **Runtime modes** (decision module):
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
