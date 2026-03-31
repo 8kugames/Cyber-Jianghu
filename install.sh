@@ -209,7 +209,7 @@ cmd_server_start() {
     info "启动服务端 ($mode)..."
     docker compose -f "$compose_file" up -d
 
-    local admin_token_file="$PROJECT_ROOT/crates/server/cyber_jianghu_admin.tmp"
+    local admin_token_file="$PROJECT_ROOT/crates/server/logs/cyber_jianghu_admin.tmp"
     local read_token=""
     local write_token=""
     if [ -f "$admin_token_file" ]; then

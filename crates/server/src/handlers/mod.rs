@@ -1,5 +1,5 @@
-pub mod agent;
 pub mod admin_auth;
+pub mod agent;
 pub mod auth;
 pub mod config_editor;
 pub mod config_reload;

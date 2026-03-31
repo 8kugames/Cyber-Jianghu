@@ -63,10 +63,12 @@ async function loadServerVersion() {
 // ============================================================================
 
 async function bootstrap() {
-    await Promise.all([initLocationMapping(), initAttributeMeta()]);
-    await initAuth();
-    loadStats();
-    startAutoRefresh();
+    initAuth();
+    if (authToken) {
+        await Promise.all([initLocationMapping(), initAttributeMeta()]);
+        loadStats();
+        startAutoRefresh();
+    }
     loadServerVersion();
 }
 
