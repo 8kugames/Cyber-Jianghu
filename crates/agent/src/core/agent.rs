@@ -11,21 +11,21 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::ai::dialogue::DialogueClient;
-use crate::ai::lifespan::LifespanCalculator;
-use crate::ai::llm::LlmClient;
-use crate::ai::memory::MemoryManager;
-use crate::ai::memory::backend::MemoryBackend;
-use crate::ai::memory::tools::{MemoryToolDefinition, MemoryToolResult};
-use crate::ai::memory::types::MemoryEntry;
-use crate::ai::relationship::RelationshipStore;
-use crate::ai::validator::{CognitiveValidator, PersonaInfo, Validator};
+use crate::component::llm::LlmClient;
+use crate::component::memory::MemoryManager;
+use crate::component::memory::backend::MemoryBackend;
+use crate::component::memory::tools::{MemoryToolDefinition, MemoryToolResult};
+use crate::component::memory::types::MemoryEntry;
+use crate::component::persona::LifespanCalculator;
+use crate::component::social::DialogueClient;
+use crate::component::social::RelationshipStore;
 use crate::config::{Config, ReviewConfig};
-use crate::core::cognitive::MultiStageCognitiveEngine;
+use crate::infra::api::ReconnectRequest;
+use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
-use crate::runtime::decision::http::{ReconnectRequest, review::ReviewStore};
-use crate::transport::websocket::AgentClient;
+use crate::soul::reflector::ReviewStore;
+use crate::soul::reflector::{PersonaInfo, Validator};
 
 use super::builder::AgentBuilder;
 use super::{DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
@@ -45,8 +45,6 @@ pub struct ValidatorConfig {
 
     /// 连续驳回后强制 idle 的阈值
     pub consecutive_rejection_threshold: u32,
-
-    pub observer_system_prompt: Option<String>,
 }
 
 impl Default for ValidatorConfig {
@@ -55,7 +53,6 @@ impl Default for ValidatorConfig {
             max_retry_attempts: 5,
             min_retry_time_secs: 10,
             consecutive_rejection_threshold: 3,
-            observer_system_prompt: None,
         }
     }
 }
@@ -133,17 +130,7 @@ pub struct Agent {
     pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
 
     /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
-    pub(crate) http_api_state: Option<std::sync::Arc<crate::runtime::decision::http::HttpApiState>>,
-
-    /// 认知引擎引用（可选，用于 config reload 时更新人设）
-    pub(crate) cognitive_engine: Option<std::sync::Arc<MultiStageCognitiveEngine>>,
-
-    /// 认知链验证器（可选，用于验证认知链质量）
-    pub(crate) cognitive_validator: Option<std::sync::Arc<CognitiveValidator>>,
-
-    /// 最近一次生成的认知链（由认知引擎设置，供验证器使用）
-    pub(crate) last_cognitive_chain:
-        std::sync::Arc<tokio::sync::RwLock<Option<crate::core::cognitive::CognitiveChain>>>,
+    pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 }
 
 impl Agent {
@@ -197,9 +184,6 @@ impl Agent {
             actor_llm_container: None,
             config_reload_rx: None,
             http_api_state: None,
-            cognitive_engine: None,
-            cognitive_validator: None,
-            last_cognitive_chain: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -291,11 +275,6 @@ impl Agent {
         self.validator_config = config;
     }
 
-    /// 设置认知验证器（用于验证认知链质量）
-    pub fn set_cognitive_validator(&mut self, validator: std::sync::Arc<CognitiveValidator>) {
-        self.cognitive_validator = Some(validator);
-    }
-
     /// 设置注册成功回调（用于更新外部状态如 HTTP API 的 agent_id）
     pub fn set_registration_callback(
         &mut self,
@@ -326,11 +305,6 @@ impl Agent {
     /// 检查是否启用验证器
     pub fn has_validator(&self) -> bool {
         self.validator.is_some()
-    }
-
-    /// 获取意图验证器
-    pub fn validator(&self) -> Option<std::sync::Arc<dyn Validator>> {
-        self.validator.clone()
     }
 
     /// 获取记忆上下文字符串（用于 LLM）
@@ -366,7 +340,9 @@ impl Agent {
     }
 
     /// 获取记忆统计信息
-    pub async fn memory_stats(&self) -> Option<crate::ai::memory::manager::MemoryManagerStats> {
+    pub async fn memory_stats(
+        &self,
+    ) -> Option<crate::component::memory::manager::MemoryManagerStats> {
         if let Some(ref manager) = self.memory_manager {
             Some(manager.stats().await)
         } else {
@@ -419,11 +395,11 @@ impl Agent {
     pub async fn run_forgetting(
         &mut self,
         current_tick: i64,
-    ) -> Result<crate::ai::memory::types::ForgettingReport> {
+    ) -> Result<crate::component::memory::types::ForgettingReport> {
         if let Some(ref mut manager) = self.memory_manager {
             manager.run_forgetting(current_tick).await
         } else {
-            Ok(crate::ai::memory::types::ForgettingReport {
+            Ok(crate::component::memory::types::ForgettingReport {
                 checked_count: 0,
                 archived_count: 0,
                 retained_count: 0,
@@ -471,7 +447,6 @@ impl Agent {
     }
 
     /// 保存观察者叙事到情景记忆
-    #[allow(dead_code)]
     pub(crate) async fn save_observer_narrative(
         &mut self,
         tick_id: i64,
@@ -502,10 +477,10 @@ impl Agent {
         let persona = self.extract_persona();
 
         match validator.validate_persona(&persona).await? {
-            crate::ai::validator::ValidationResult::Approved { .. } => {
+            crate::soul::reflector::ValidationResult::Approved { .. } => {
                 Ok(PersonaValidationResult::Approved)
             }
-            crate::ai::validator::ValidationResult::Rejected {
+            crate::soul::reflector::ValidationResult::Rejected {
                 reason,
                 rejection_type,
             } => Ok(PersonaValidationResult::NeedsRevision {
@@ -515,55 +490,118 @@ impl Agent {
         }
     }
 
+    /// 带验证的决策循环
+    pub async fn decide_with_validation(&mut self, world_state: &WorldState) -> Result<Intent> {
+        use std::time::Instant;
+        use tracing::warn;
+
+        let tick_start = Instant::now();
+        let tick_duration = self.get_tick_duration().await;
+        let min_retry_time =
+            std::time::Duration::from_secs(self.validator_config.min_retry_time_secs);
+        let max_attempts = self.validator_config.max_retry_attempts;
+
+        let mut attempt = 0;
+        let mut consecutive_rejections = 0;
+        let mut last_rejection_reason: Option<String> = None;
+
+        loop {
+            attempt += 1;
+
+            // 检查剩余时间
+            let elapsed = tick_start.elapsed();
+            let remaining = tick_duration.saturating_sub(elapsed);
+
+            if remaining < min_retry_time {
+                warn!("Tick time exhausted, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
+                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
+            }
+
+            if attempt > max_attempts {
+                warn!("Max validation attempts reached, forcing idle");
+                let agent_id = self.client.agent_id().await.unwrap_or_default();
+                return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
+            }
+
+            // 调用决策回调（可能包含驳回反馈）
+            let intent = if let Some(ref reason) = last_rejection_reason {
+                if let Some(ref callback) = self.decision_with_feedback_callback {
+                    callback(world_state, Some(reason.as_str())).await
+                } else {
+                    // 如果没有带反馈的回调，记录警告并使用普通回调
+                    warn!(
+                        "Validation feedback available but no feedback callback set: {}",
+                        reason
+                    );
+                    (self.decision_callback)(world_state).await
+                }
+            } else {
+                (self.decision_callback)(world_state).await
+            };
+
+            // 如果没有验证器，直接返回意图
+            let validator = match &self.validator {
+                Some(v) => v,
+                None => return Ok(intent),
+            };
+
+            // 构建验证请求（世界观规则由验证器内部维护）
+            let request = crate::soul::reflector::ValidationRequest {
+                intent: intent.clone(),
+                persona: self.extract_persona(),
+                world_context: self.build_world_context(world_state),
+            };
+
+            // 验证意图
+            match validator.validate(request).await? {
+                crate::soul::reflector::ValidationResult::Approved { reason, narrative } => {
+                    info!("Intent approved (attempt {}): {:?}", attempt, reason);
+
+                    // 保存叙事摘要到情景记忆
+                    self.save_observer_narrative(world_state.tick_id, &narrative)
+                        .await?;
+
+                    return Ok(intent);
+                }
+                crate::soul::reflector::ValidationResult::Rejected {
+                    reason,
+                    rejection_type,
+                } => {
+                    consecutive_rejections += 1;
+                    warn!(
+                        "Intent rejected (attempt {}, consecutive: {}): {} [{:?}]",
+                        attempt, consecutive_rejections, reason, rejection_type
+                    );
+
+                    // 连续驳回次数过多，强制 idle
+                    if consecutive_rejections
+                        >= self.validator_config.consecutive_rejection_threshold
+                    {
+                        warn!("Too many consecutive rejections, forcing idle");
+                        let agent_id = self.client.agent_id().await.unwrap_or_default();
+                        return Ok(Intent::new(agent_id, world_state.tick_id, "idle", None));
+                    }
+
+                    // 记录驳回原因，用于下一次决策
+                    last_rejection_reason = Some(reason);
+                }
+            }
+        }
+    }
+
     /// 提交 Intent 给 ReflectorSoul 审查
     ///
     /// ActorSoul 生成 Intent 后，提交给 ReflectorSoul 进行审查
     /// 等待审查结果后返回最终 Intent（通过、拒绝或超时降级）
-    ///
-    /// `pipeline_deadline`: 整个 pipeline 的绝对截止时间，审查超时取 min(配置超时, 剩余时间)
     pub async fn submit_for_review(
         &self,
         intent: Intent,
         world_state: &WorldState,
         review_store: &std::sync::Arc<ReviewStore>,
-        pipeline_deadline: Option<std::time::Instant>,
     ) -> Result<Intent> {
         use cyber_jianghu_protocol::PersonaSummary;
         use std::time::Instant;
-
-        // --- 生存底线检查 ---
-        // 当 hunger/thirst 低于阈值时，自动批准生存相关行动，绕过 ReflectorSoul 审查
-        // 防止"孤僻多疑"等人设因拒绝进食/饮水而陷入死锁
-        // survival_actions 和 survival_threshold 均来自服务端 game_rules 配置
-        let (survival_actions, survival_threshold) = self
-            .config
-            .game_rules
-            .as_ref()
-            .map(|gr| (gr.survival_actions.clone(), gr.survival_threshold))
-            .unwrap_or_default();
-
-        if !survival_actions.is_empty() {
-            let is_survival_action = survival_actions
-                .iter()
-                .any(|a| a == intent.action_type.as_str());
-
-            if is_survival_action {
-                let hunger = world_state.self_state.hunger();
-                let thirst = world_state.self_state.thirst();
-
-                if hunger < survival_threshold || thirst < survival_threshold {
-                    let action_str = intent.action_type.to_string();
-                    info!(
-                        "[ActorSoul] Survival mode bypass: hunger={}, thirst={}, action={}, threshold={}",
-                        hunger, thirst, action_str, survival_threshold
-                    );
-                    return Ok(intent.with_observer_thought(format!(
-                        "[生存底线] hunger={}, thirst={}, 自动批准{}",
-                        hunger, thirst, action_str
-                    )));
-                }
-            }
-        }
 
         let persona = self.extract_persona();
         let character_name = self
@@ -583,17 +621,12 @@ impl Agent {
         };
 
         // 添加到待审查队列
-        let cognitive_chain_json = self.last_cognitive_chain.read().await
-            .as_ref()
-            .and_then(|chain| serde_json::to_string(chain).ok());
-
         let intent_id = review_store
             .add_pending(
                 intent.clone(),
                 self.client.agent_id().await.unwrap_or_default(),
                 persona_summary,
                 self.build_world_context(world_state),
-                cognitive_chain_json,
             )
             .await;
 
@@ -603,24 +636,8 @@ impl Agent {
         );
 
         // 等待 ReflectorSoul 审查结果（带超时）
-        // 优先使用 pipeline_deadline 的剩余时间，fallback 到配置超时
-        let configured_timeout = std::time::Duration::from_secs(self.review_config.timeout_seconds);
-        let deadline = match pipeline_deadline {
-            Some(dl) => {
-                let remaining = dl.saturating_duration_since(Instant::now());
-                // 剩余时间不足 5s，直接跳过审查
-                if remaining < std::time::Duration::from_secs(5) {
-                    warn!(
-                        "[ActorSoul] Pipeline deadline exhausted, skipping review for intent {}",
-                        intent_id
-                    );
-                    return Ok(intent);
-                }
-                // 取 min(配置超时, 剩余时间)
-                Instant::now() + remaining.min(configured_timeout)
-            }
-            None => Instant::now() + configured_timeout,
-        };
+        let timeout = std::time::Duration::from_secs(self.review_config.timeout_seconds);
+        let deadline = Instant::now() + timeout;
 
         loop {
             // 检查超时
@@ -634,58 +651,38 @@ impl Agent {
 
             // 检查审查状态
             if let Some(result) = review_store.get_status(intent_id).await {
-                use crate::runtime::decision::http::review::ReviewStatus;
+                use crate::soul::reflector::ReviewStatus;
                 match result.status {
                     ReviewStatus::Approved => {
                         info!(
                             "[ActorSoul] Intent approved by ReflectorSoul: {:?}",
                             result.reason
                         );
-                        let mut final_intent = intent;
-                        if let Some(reason) = &result.reason {
-                            final_intent = final_intent.with_observer_thought(reason.clone());
-                        }
-                        if let Some(narrative) = &result.narrative {
-                            final_intent = final_intent.with_narrative(narrative.clone());
-                        }
-                        return Ok(final_intent);
+                        return Ok(intent);
                     }
                     ReviewStatus::Rejected => {
                         warn!(
                             "[ActorSoul] Intent rejected by ReflectorSoul: {:?}",
                             result.reason
                         );
-                        let mut idle_intent = Intent::new(
+                        // 拒绝后返回 idle
+                        return Ok(Intent::new(
                             self.client.agent_id().await.unwrap_or_default(),
                             world_state.tick_id,
                             "idle",
                             None,
-                        );
-                        idle_intent = idle_intent.with_thought(format!(
+                        )
+                        .with_thought(format!(
                             "被反思之魂驳回: {}",
-                            result.reason.clone().unwrap_or_default()
-                        ));
-                        if let Some(reason) = &result.reason {
-                            idle_intent = idle_intent.with_observer_thought(reason.clone());
-                        }
-                        if let Some(narrative) = &result.narrative {
-                            idle_intent = idle_intent.with_narrative(narrative.clone());
-                        }
-                        return Ok(idle_intent);
+                            result.reason.unwrap_or_default()
+                        )));
                     }
                     ReviewStatus::TimeoutApproved => {
                         info!(
                             "[ActorSoul] Review timeout approved for intent {}",
                             intent_id
                         );
-                        let mut final_intent = intent;
-                        if let Some(reason) = &result.reason {
-                            final_intent = final_intent.with_observer_thought(reason.clone());
-                        }
-                        if let Some(narrative) = &result.narrative {
-                            final_intent = final_intent.with_narrative(narrative.clone());
-                        }
-                        return Ok(final_intent);
+                        return Ok(intent);
                     }
                     ReviewStatus::Pending => {
                         // 继续等待
@@ -706,7 +703,7 @@ pub enum PersonaValidationResult {
     /// 需要修改
     NeedsRevision {
         reason: String,
-        rejection_type: crate::ai::validator::RejectionType,
+        rejection_type: crate::soul::reflector::RejectionType,
     },
     /// 跳过验证（无验证器）
     Skipped,
