@@ -678,20 +678,6 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 ));
 
             let cognitive_engine_for_builder = cognitive_engine.clone();
-            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
-                let engine = cognitive_engine.clone();
-                let ws = ws.clone();
-                Box::pin(async move {
-                    match engine.think(&ws).await {
-                        Ok(chain) => chain.final_intent,
-                        Err(e) => {
-                            error!("[cognitive] Decision failed: {}", e);
-                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
-                                .with_thought(format!("认知失败: {}", e))
-                        }
-                    }
-                })
-            });
 
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::runtime::decision::http::ReconnectRequest>(10);
@@ -729,6 +715,38 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
             info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
 
             let reflector_config_watcher = config_watcher.clone();
+
+            let intent_history_for_decision = api_state.intent_history.clone();
+            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                let engine = cognitive_engine.clone();
+                let intent_history = intent_history_for_decision.clone();
+                let ws = ws.clone();
+                Box::pin(async move {
+                    let memory_context = if let Some(history) = intent_history {
+                        let recent = history.get_recent_history(10).await;
+                        if recent.is_empty() {
+                            String::new()
+                        } else {
+                            recent.iter().rev()
+                                .map(|e| format!("- [Tick {}] {}: {}", e.tick_id, e.action_type,
+                                    e.thought_log.as_deref().unwrap_or("无")))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    match engine.think_with_feedback(&ws, None, Some(&memory_context)).await {
+                        Ok(chain) => chain.final_intent,
+                        Err(e) => {
+                            error!("[cognitive] Decision failed: {}", e);
+                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                .with_thought(format!("认知失败: {}", e))
+                        }
+                    }
+                })
+            });
 
             let agent = AgentBuilder::new(config, decision)
                 .with_decision_feedback(cognitive_decision_with_feedback)
@@ -853,11 +871,28 @@ async fn run_agent(port: u16, mode: Option<String>) -> Result<()> {
                 ));
 
             let cognitive_engine_for_builder = cognitive_engine.clone();
+            let intent_history_for_decision = setup.api_state.intent_history.clone();
             let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                 let engine = cognitive_engine.clone();
+                let intent_history = intent_history_for_decision.clone();
                 let ws = ws.clone();
                 Box::pin(async move {
-                    match engine.think(&ws).await {
+                    let memory_context = if let Some(history) = intent_history {
+                        let recent = history.get_recent_history(10).await;
+                        if recent.is_empty() {
+                            String::new()
+                        } else {
+                            recent.iter().rev()
+                                .map(|e| format!("- [Tick {}] {}: {}", e.tick_id, e.action_type,
+                                    e.thought_log.as_deref().unwrap_or("无")))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    match engine.think_with_feedback(&ws, None, Some(&memory_context)).await {
                         Ok(chain) => chain.final_intent,
                         Err(e) => {
                             error!("[claw-cognitive] Decision failed: {}", e);
@@ -1234,6 +1269,7 @@ async fn process_review_with_store(
     intent_history: Option<&Arc<IntentHistoryStore>>,
     validator: &Arc<dyn Validator>,
 ) -> Result<()> {
+    use cyber_jianghu_agent::core::cognitive::{CognitiveChain, stages::CognitiveStage};
     use cyber_jianghu_agent::runtime::decision::http::review::ReviewDecision;
     use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
 
@@ -1242,7 +1278,63 @@ async fn process_review_with_store(
         review.intent_id, review.intent.action_type
     );
 
-    // PersonaSummary → PersonaInfo 映射（丢弃 name 字段）
+    // 1. 认知链质量验证（本地规则，零 LLM 成本）
+    if let Some(ref chain_json) = review.cognitive_chain
+        && let Ok(chain) = serde_json::from_str::<CognitiveChain>(chain_json)
+    {
+        if chain.stages.is_empty() {
+            warn!("[ReflectorSoul] Cognitive chain empty, auto-reject");
+            let submission = ProtocolReviewSubmission {
+                result: ReviewDecision::Rejected,
+                reason: "认知链为空".to_string(),
+                narrative: None,
+            };
+            review_store
+                .submit_review(review.intent_id, submission)
+                .await
+                .map_err(|e| anyhow::anyhow!("ReflectorSoul submit_review failed: {:?}", e))?;
+            if let Some(history) = intent_history {
+                history
+                    .update_observer_thought(
+                        review.intent.tick_id,
+                        ObserverThought {
+                            result: "rejected".to_string(),
+                            reason: "认知链为空".to_string(),
+                            narrative: None,
+                        },
+                    )
+                    .await;
+            }
+            return Ok(());
+        }
+        if chain.get_stage(CognitiveStage::Decision).is_none() {
+            warn!("[ReflectorSoul] Decision stage missing, auto-reject");
+            let submission = ProtocolReviewSubmission {
+                result: ReviewDecision::Rejected,
+                reason: "缺少决策阶段".to_string(),
+                narrative: None,
+            };
+            review_store
+                .submit_review(review.intent_id, submission)
+                .await
+                .map_err(|e| anyhow::anyhow!("ReflectorSoul submit_review failed: {:?}", e))?;
+            if let Some(history) = intent_history {
+                history
+                    .update_observer_thought(
+                        review.intent.tick_id,
+                        ObserverThought {
+                            result: "rejected".to_string(),
+                            reason: "缺少决策阶段".to_string(),
+                            narrative: None,
+                        },
+                    )
+                    .await;
+            }
+            return Ok(());
+        }
+    }
+
+    // 2. 人设+世界观+意图综合验证（唯一 LLM 调用）
     let persona = PersonaInfo {
         gender: review.persona_summary.gender.clone(),
         age: review.persona_summary.age,
@@ -1299,6 +1391,18 @@ async fn process_review_with_store(
         history
             .update_observer_thought(review.intent.tick_id, observer_thought)
             .await;
+
+        // 将叙事作为事件记录（供记忆上下文和 Web Panel 查询）
+        if !narrative_text.is_empty() {
+            history
+                .record_event(
+                    review.intent.tick_id,
+                    &format!("[反思之魂] {}", narrative_text),
+                    None,
+                )
+                .await;
+        }
+
         info!(
             "[ReflectorSoul] Updated observer thought for tick {} in intent_history",
             review.intent.tick_id

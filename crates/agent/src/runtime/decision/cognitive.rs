@@ -88,7 +88,7 @@ fn cognitive_decision_with_retry_internal(
 
             for i in 0..=max_retries {
                 match engine
-                    .think_with_feedback(&world_state, feedback.as_deref())
+                    .think_with_feedback(&world_state, feedback.as_deref(), None)
                     .await
                 {
                     Ok(chain) => {
