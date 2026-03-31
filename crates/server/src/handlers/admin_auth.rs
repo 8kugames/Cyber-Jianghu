@@ -191,6 +191,11 @@ pub async fn admin_cookie_middleware(
         return Ok(next.run(req).await);
     }
 
+    if path == "/admin" || path == "/admin/" {
+        let response = login_page().await.into_response();
+        return Ok(response);
+    }
+
     tracing::warn!("Admin access denied: no valid session cookie for path={}", path);
     Err(StatusCode::UNAUTHORIZED)
 }
