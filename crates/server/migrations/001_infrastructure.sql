@@ -1,19 +1,11 @@
 -- ============================================================================
 -- 001_infrastructure.sql
 -- ============================================================================
--- PostgreSQL extensions, schema version tracking, utility functions.
--- Must execute first.
+-- PostgreSQL extensions and utility functions. Must execute first.
 -- ============================================================================
 
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Schema version tracking
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    description TEXT
-);
 
 -- Generic updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -23,3 +15,5 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION update_updated_at_column() IS '通用触发器函数：自动更新 updated_at 字段';

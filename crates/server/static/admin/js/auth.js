@@ -1,6 +1,16 @@
-// ============================================================================
 // Auth Functions
-// ============================================================================
+
+let authToken = localStorage.getItem("admin_token") || null;
+
+async function checkSession() {
+    try {
+        const res = await fetch('/api/admin/session');
+        const data = await res.json();
+        return data.authenticated;
+    } catch {
+        return false;
+    }
+}
 
 function getAuthHeaders() {
     return authToken ? { Authorization: "Bearer " + authToken } : {};
@@ -18,6 +28,10 @@ function showAuthModal() {
     document.getElementById("auth-modal").style.display = "flex";
 }
 
+function hideAuthModal() {
+    document.getElementById("auth-modal").style.display = "none";
+}
+
 async function submitAuthToken() {
     var token = document.getElementById("auth-token-input").value.trim();
     if (token) {
@@ -31,7 +45,7 @@ async function submitAuthToken() {
             if (res.ok) {
                 authToken = token;
                 localStorage.setItem("admin_token", token);
-                document.getElementById("auth-modal").style.display = "none";
+                hideAuthModal();
                 if (Object.keys(locationNames).length === 0) {
                     await initLocationMapping();
                 }
@@ -58,4 +72,11 @@ async function logout() {
     localStorage.removeItem("admin_token");
     authToken = null;
     window.location.href = '/admin';
+}
+
+async function initAuth() {
+    const isAuthenticated = await checkSession();
+    if (!isAuthenticated) {
+        showAuthModal();
+    }
 }

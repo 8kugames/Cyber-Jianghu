@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::{header::SET_COOKIE, Response, StatusCode},
     middleware::Next,
-    response::{Html, IntoResponse, Json},
+    response::{IntoResponse, Json},
 };
 use std::sync::Arc;
 
@@ -181,6 +181,7 @@ pub async fn admin_cookie_middleware(
     next: Next,
 ) -> Result<Response<Body>, StatusCode> {
     let path = req.uri().path();
+
     if path == "/api/admin/login" || path == "/api/admin/logout" || path == "/api/admin/session" {
         return Ok(next.run(req).await);
     }
@@ -191,120 +192,6 @@ pub async fn admin_cookie_middleware(
         return Ok(next.run(req).await);
     }
 
-    if path == "/admin" || path == "/admin/" {
-        let response = login_page().await.into_response();
-        return Ok(response);
-    }
-
     tracing::warn!("Admin access denied: no valid session cookie for path={}", path);
     Err(StatusCode::UNAUTHORIZED)
-}
-
-// ============================================================================
-// Login Page Handler (for when accessing /admin without session)
-// ============================================================================
-
-/// Returns a simple login page HTML
-pub async fn login_page() -> Html<&'static str> {
-    Html(r#"<!doctype html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>登录 | Cyber-Jianghu Admin</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-        }
-        .login-box {
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 320px;
-        }
-        h1 { font-size: 24px; margin-bottom: 8px; text-align: center; }
-        .subtitle { color: #aaa; font-size: 14px; margin-bottom: 30px; text-align: center; }
-        label { display: block; margin-bottom: 8px; font-size: 14px; color: #ccc; }
-        input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 6px;
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-        input::placeholder { color: #888; }
-        button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            background: #4a9eff;
-            color: #fff;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover { background: #3a8eef; }
-        .error { color: #ff6b6b; font-size: 13px; margin-bottom: 15px; text-align: center; display: none; }
-    </style>
-</head>
-<body>
-    <div class="login-box">
-        <h1>天道</h1>
-        <p class="subtitle">Cyber-Jianghu Admin</p>
-        <div class="error" id="error"></div>
-        <form id="login-form">
-            <label for="token">管理 Token</label>
-            <input type="text" id="token" name="token" placeholder="输入 Token..." autocomplete="off" />
-            <button type="submit">登录</button>
-        </form>
-    </div>
-    <script>
-        const form = document.getElementById('login-form');
-        const errorEl = document.getElementById('error');
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            errorEl.style.display = 'none';
-
-            const token = document.getElementById('token').value.trim();
-            if (!token) {
-                errorEl.textContent = '请输入 Token';
-                errorEl.style.display = 'block';
-                return;
-            }
-
-            try {
-                const res = await fetch('/api/admin/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token })
-                });
-
-                if (res.ok) {
-                    window.location.href = '/admin/';
-                } else {
-                    errorEl.textContent = 'Token 无效';
-                    errorEl.style.display = 'block';
-                }
-            } catch (e) {
-                errorEl.textContent = '请求失败，请重试';
-                errorEl.style.display = 'block';
-            }
-        });
-    </script>
-</body>
-</html>"#)
 }
