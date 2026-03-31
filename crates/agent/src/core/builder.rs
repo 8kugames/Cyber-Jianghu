@@ -91,10 +91,7 @@ impl AgentBuilder {
             http_api_state: None,
             device_config: None,
             character_config: None,
-            data_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".cyber-jianghu")
-                .join("data"),
+            data_dir: PathBuf::from("."),
         }
     }
 
