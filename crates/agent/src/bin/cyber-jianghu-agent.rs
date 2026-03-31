@@ -541,7 +541,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         Config::from_env().unwrap_or_default()
     });
 
-    // Migrate old flat config if needed
     let runtime_mode = match mode.to_lowercase().as_str() {
         "cognitive" => {
             info!("使用 Cognitive 模式（内置 LLM 决策）");

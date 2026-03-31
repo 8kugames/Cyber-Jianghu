@@ -605,13 +605,17 @@ pub fn create_http_state(
         server_dir.join("data")
     };
 
-    // 初始化关系存储
-    let relationship_store = RelationshipStore::open(
-        current_agent_id,
-        &data_dir.join(format!("relationships_{}.db", current_agent_id)),
-    )
-    .ok()
-    .map(Arc::new);
+    // 初始化关系存储（仅在有有效 agent_id 时创建）
+    let relationship_store = if current_agent_id.is_nil() {
+        None
+    } else {
+        RelationshipStore::open(
+            current_agent_id,
+            &data_dir.join(format!("relationships_{}.db", current_agent_id)),
+        )
+        .ok()
+        .map(Arc::new)
+    };
 
     // 初始化记忆管理器（无 LLM 版本，基础功能可用）
     // TODO: 语义搜索功能下一阶段实现，需要 LLM Client 提供嵌入能力
