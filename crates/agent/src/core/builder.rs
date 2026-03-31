@@ -5,6 +5,7 @@
 // 提供流式接口构建 Agent
 // ============================================================================
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, mpsc};
@@ -16,7 +17,7 @@ use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
-use crate::config::{Config, ReviewConfig};
+use crate::config::{CharacterConfig, Config, DeviceConfig, ReviewConfig};
 use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
@@ -57,6 +58,12 @@ pub struct AgentBuilder {
     config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
+    /// 设备身份配置（可选，从 device.yaml 加载）
+    device_config: Option<DeviceConfig>,
+    /// 角色配置（可选，当前活跃角色）
+    character_config: Option<CharacterConfig>,
+    /// 数据目录
+    data_dir: PathBuf,
 }
 
 impl AgentBuilder {
@@ -82,6 +89,12 @@ impl AgentBuilder {
             reconnect_rx: None,
             config_reload_rx: None,
             http_api_state: None,
+            device_config: None,
+            character_config: None,
+            data_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cyber-jianghu")
+                .join("data"),
         }
     }
 
@@ -188,14 +201,38 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置设备身份配置
+    pub fn device_config(mut self, config: DeviceConfig) -> Self {
+        self.device_config = Some(config);
+        self
+    }
+
+    /// 设置角色配置
+    pub fn character_config(mut self, config: CharacterConfig) -> Self {
+        self.character_config = Some(config);
+        self
+    }
+
+    /// 设置数据目录
+    pub fn data_dir(mut self, path: PathBuf) -> Self {
+        self.data_dir = path;
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
 
-        // 设置设备身份（如果已存在）
-        if let Some(ref identity) = self.config.identity {
-            let device_id = identity.device_id;
-            let auth_token = identity.auth_token.clone();
+        // 设置设备身份（优先使用 device_config，回退到 config.identity）
+        let device_ref = self.device_config.as_ref().and_then(|dc| {
+            Some((dc.device_id, dc.auth_token.clone()))
+        }).or_else(|| {
+            self.config.identity.as_ref().map(|id| {
+                (id.device_id, id.auth_token.clone())
+            })
+        });
+
+        if let Some((device_id, auth_token)) = device_ref {
             tokio::task::block_in_place(|| {
                 Handle::current().block_on(async {
                     client.set_identity(device_id, auth_token).await;
@@ -208,6 +245,7 @@ impl AgentBuilder {
             let agent_id = Uuid::new_v4();
             let config = self.memory_config.unwrap_or_else(|| MemoryManagerConfig {
                 agent_id,
+                db_dir: self.data_dir.clone(),
                 ..Default::default()
             });
 
@@ -217,10 +255,10 @@ impl AgentBuilder {
             match result {
                 Ok(manager) => {
                     let agent_name = self
-                        .config
-                        .agent
+                        .character_config
                         .as_ref()
                         .map(|c| c.name.as_str())
+                        .or_else(|| self.config.agent.as_ref().map(|c| c.name.as_str()))
                         .unwrap_or("(未创建)");
                     info!("Memory system initialized for agent '{}'", agent_name);
                     Some(manager)
@@ -259,6 +297,8 @@ impl AgentBuilder {
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
+            device_config: self.device_config,
+            character_config: self.character_config,
         }
     }
 }
