@@ -26,17 +26,17 @@ pub struct Agent {
     /// 定义Agent的性格、行为规则等
     pub system_prompt: String,
 
+    /// Agent 状态（active/retired/dead）
+    pub status: String,
+
+    /// 归隐时间（转生时设置）
+    pub retired_at: Option<DateTime<Utc>>,
+
     /// 创建时间
     pub created_at: DateTime<Utc>,
 
     /// 最后一次上报意图的时间
     pub last_tick_online: Option<DateTime<Utc>>,
-
-    /// Agent 状态（active/retired）
-    pub status: String,
-
-    /// 归隐时间（转生时设置）
-    pub retired_at: Option<DateTime<Utc>>,
 }
 
 /// Agent状态

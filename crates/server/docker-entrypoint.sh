@@ -85,10 +85,14 @@ if [ "$(id -u)" = "0" ]; then
     echo "[INFO] 切换到用户 $TARGET_USER (UID=$TARGET_UID) 运行服务"
     exec runuser -u "$TARGET_USER" -- "$@"
 else
-    # 非 root 用户也需要执行迁移（如果 DATABASE_URL 存在且 psql 可用）
-    if [ -n "${DATABASE_URL:-}" ] && command -v psql >/dev/null 2>&1; then
-        wait_for_db
-        run_migrations
+    # 非 root 用户：需要迁移时执行，否则显式提示
+    if [ -n "${DATABASE_URL:-}" ]; then
+        if command -v psql >/dev/null 2>&1; then
+            wait_for_db
+            run_migrations
+        else
+            echo "[WARN] DATABASE_URL 已设置但 psql 未找到，跳过迁移"
+        fi
     fi
     exec "$@"
 fi
