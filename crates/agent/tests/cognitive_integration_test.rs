@@ -13,7 +13,7 @@ use cyber_jianghu_agent::soul::actor::stages::{
 use cyber_jianghu_agent::soul::actor::{
     CognitiveChain, CognitiveEngineConfig, MultiStageCognitiveEngine,
 };
-use cyber_jianghu_agent::soul::reflector::CognitiveValidator;
+use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
 // ============================================================================
 // 辅助函数
