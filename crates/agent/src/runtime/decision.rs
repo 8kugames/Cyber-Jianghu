@@ -69,7 +69,7 @@ pub fn cognitive_decision_with_retry(
 
             for attempt in 0..=max_retries {
                 match engine
-                    .think_with_feedback(&world_state, feedback.as_deref())
+                    .think_with_memory_and_feedback(&world_state, "", feedback.as_deref())
                     .await
                 {
                     Ok(chain) => return chain.final_intent,
