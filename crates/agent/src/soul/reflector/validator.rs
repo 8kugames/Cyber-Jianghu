@@ -1,5 +1,5 @@
 // ============================================================================
-// 意图验证引擎
+// ReflectorSoul — 意图审查引擎
 // ============================================================================
 
 use anyhow::Result;
@@ -34,9 +34,9 @@ pub trait Validator: Send + Sync {
     async fn update_rules(&self, rules: WorldBuildingRules);
 }
 
-/// 为 IntentValidator 实现 Validator trait
+/// 为 ReflectorSoul 实现 Validator trait
 #[async_trait]
-impl Validator for IntentValidator {
+impl Validator for ReflectorSoul {
     async fn validate(&self, request: ValidationRequest) -> Result<ValidationResult> {
         self.validate(request).await
     }
@@ -50,8 +50,11 @@ impl Validator for IntentValidator {
     }
 }
 
-/// 意图验证引擎
-pub struct IntentValidator {
+/// ReflectorSoul — 意图审查引擎
+///
+/// 同步串联在认知链路中，ActorSoul 生成的 Intent 必须经过审查才能提交。
+/// 单次结构化 LLM 调用，无 retry 循环。
+pub struct ReflectorSoul {
     /// 世界观规则
     rules: Arc<RwLock<WorldBuildingRules>>,
     /// LLM 客户端（注入的外部实现）
@@ -60,8 +63,8 @@ pub struct IntentValidator {
     observer_prompt: ObserverPrompt,
 }
 
-impl IntentValidator {
-    /// 创建新的验证器
+impl ReflectorSoul {
+    /// 创建新的 ReflectorSoul
     pub fn new(rules: WorldBuildingRules, llm_client: Arc<dyn LlmClient>) -> Self {
         Self {
             rules: Arc::new(RwLock::new(rules)),
@@ -243,7 +246,7 @@ mod tests {
         }"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -272,7 +275,7 @@ mod tests {
         }"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -303,7 +306,7 @@ mod tests {
             r#"{"result": "approved", "reason": "", "narrative": ""}"#,
         );
 
-        let validator = IntentValidator::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
 
         // Test that update_rules doesn't panic
         let new_rules = WorldBuildingRules::default();

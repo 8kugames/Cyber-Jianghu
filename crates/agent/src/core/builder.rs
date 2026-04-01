@@ -17,18 +17,14 @@ use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
-use crate::config::{CharacterConfig, Config, DeviceConfig, ReviewConfig};
+use crate::config::{CharacterConfig, Config, DeviceConfig};
 use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::ReviewStore;
-use crate::soul::reflector::{IntentValidator, Validator};
+use crate::soul::reflector::{ReflectorSoul, Validator};
 use cyber_jianghu_protocol::WorldBuildingRules;
 
-use super::{
-    Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback,
-    ValidatorConfig,
-};
+use super::{Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
 
 /// Agent 构建器
 pub struct AgentBuilder {
@@ -47,11 +43,6 @@ pub struct AgentBuilder {
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
     lifespan_calculator: Option<LifespanCalculator>,
-    validator_config: ValidatorConfig,
-    /// 审查存储（ReflectorSoul 共享）
-    review_store: Option<Arc<ReviewStore>>,
-    /// 审查配置
-    review_config: ReviewConfig,
     /// 重连请求接收通道（Claw 模式）
     reconnect_rx: Option<mpsc::Receiver<crate::infra::api::ReconnectRequest>>,
     /// 配置重载通知接收通道
@@ -69,7 +60,6 @@ pub struct AgentBuilder {
 impl AgentBuilder {
     /// 创建新的构建器
     pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
-        let review_config = config.review.clone().unwrap_or_default();
         Self {
             config,
             decision_callback,
@@ -83,9 +73,6 @@ impl AgentBuilder {
             relationship_store: None,
             validator: None,
             lifespan_calculator: None,
-            validator_config: ValidatorConfig::default(),
-            review_store: None,
-            review_config,
             reconnect_rx: None,
             config_reload_rx: None,
             http_api_state: None,
@@ -139,14 +126,14 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 LLM 客户端（自动创建 IntentValidator）
+    /// 设置 LLM 客户端（自动创建 ReflectorSoul）
     pub fn with_llm_client(
         mut self,
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
         let rules = rules.unwrap_or_default();
-        let validator = Arc::new(IntentValidator::new(rules, llm_client.clone()));
+        let validator = Arc::new(ReflectorSoul::new(rules, llm_client.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
         self
@@ -165,18 +152,6 @@ impl AgentBuilder {
     /// 设置寿命计算器
     pub fn with_lifespan_calculator(mut self, calculator: LifespanCalculator) -> Self {
         self.lifespan_calculator = Some(calculator);
-        self
-    }
-
-    /// 设置验证器配置
-    pub fn with_validator_config(mut self, config: ValidatorConfig) -> Self {
-        self.validator_config = config;
-        self
-    }
-
-    /// 设置审查存储（ActorSoul + ReflectorSoul）
-    pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
-        self.review_store = Some(store);
         self
     }
 
@@ -281,13 +256,11 @@ impl AgentBuilder {
             relationship_store: self.relationship_store,
             validator: self.validator,
             lifespan_calculator: self.lifespan_calculator,
-            validator_config: self.validator_config,
+            last_rejection_reason: None,
             registration_callback: None,
             reconnect_backoff: 0,
             reconnect_rx: self.reconnect_rx,
             death_reported: false,
-            review_store: self.review_store,
-            review_config: self.review_config,
             actor_llm_client: self.llm_client,
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,

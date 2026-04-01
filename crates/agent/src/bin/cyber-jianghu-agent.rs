@@ -38,7 +38,7 @@ use cyber_jianghu_agent::config::{
 };
 use cyber_jianghu_agent::{
     AgentBuilder,
-    infra::api::{ConfigWatcher, ReviewStore, thinking_log},
+    infra::api::{ConfigWatcher, thinking_log},
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::claw::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::create_http_state,
@@ -701,20 +701,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 }
             });
 
-            let review_store =
-                Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
-            info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
-
             let config_watcher = Arc::new(ConfigWatcher::new(config_path.clone())?);
             info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
-
-            let reflector_config_watcher = config_watcher.clone();
 
             let mut builder = AgentBuilder::new(config_for_builder, decision)
                 .device_config(device.clone())
                 .data_dir(data_dir.clone())
                 .with_decision_feedback(cognitive_decision_with_feedback)
-                .with_review_store(review_store.clone())
                 .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
@@ -727,19 +720,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             }
 
             let agent = builder.build();
-            let intent_history = api_state.intent_history.clone();
-            tokio::spawn(async move {
-                if let Err(e) = run_reflector_soul_task(
-                    reflector_config_watcher.subscribe(),
-                    review_store,
-                    intent_history,
-                )
-                .await
-                {
-                    error!("ReflectorSoul 任务异常退出: {}", e);
-                }
-            });
-            info!("ReflectorSoul 任务已启动（反思之魂）");
 
             maybe_callback_setup = None;
             cognitive_death_event_tx = Some(api_state.death_event_tx.clone());
@@ -763,12 +743,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let use_unified_cognitive = config.claw.use_unified_cognitive;
             info!("Claw 模式 use_unified_cognitive={}", use_unified_cognitive);
 
-            // 创建 ReviewStore（ActorSoul + ReflectorSoul 共享）
-            let review_store =
-                Arc::new(ReviewStore::new(config.review.clone().unwrap_or_default()));
-            info!("ReviewStore 已创建（ReflectorSoul 默认启用）");
-
-            let agent = if use_unified_cognitive {
+            if use_unified_cognitive {
                 // === 统一认知架构路径 ===
                 // 获取 LLM 通信通道
                 let upstream_tx = setup.shared_state.upstream_tx.clone();
@@ -855,7 +830,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .data_dir(data_dir.clone())
                     .with_decision_feedback(cognitive_decision_with_feedback)
                     .with_reconnect_rx(setup.reconnect_rx)
-                    .with_review_store(review_store.clone())
                     .with_llm_client(llm_client.clone(), None);
 
                 // Add character config if available
@@ -886,8 +860,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
                     .data_dir(data_dir.clone())
-                    .with_reconnect_rx(setup.reconnect_rx)
-                    .with_review_store(review_store.clone());
+                    .with_reconnect_rx(setup.reconnect_rx);
 
                 // Add character config if available
                 if let Some(char) = character.clone() {
@@ -895,23 +868,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 }
 
                 builder.build()
-            };
-
-            let intent_history = setup.api_state.intent_history.clone();
-            tokio::spawn(async move {
-                if let Err(e) = run_reflector_soul_task(
-                    tokio::sync::broadcast::channel::<()>(1).1,
-                    review_store,
-                    intent_history,
-                )
-                .await
-                {
-                    error!("ReflectorSoul 任务异常退出: {}", e);
-                }
-            });
-            info!("ReflectorSoul 任务已启动（反思之魂）");
-
-            agent
+            }
         }
     };
 
@@ -1164,164 +1121,3 @@ fn start_http_api_server(
     Ok((Arc::new(api_state), final_port))
 }
 
-// ============================================================================
-// ReflectorSoul (反思之魂)
-// ============================================================================
-
-/// 运行 ReflectorSoul 任务（默认启用）
-///
-/// ReflectorSoul 作为反思之魂（超我），审查 ActorSoul 生成的意图
-/// 通过 ReviewStore 共享内存进行通信（进程内双 Soul 架构）
-async fn run_reflector_soul_task(
-    mut config_reload_rx: tokio::sync::broadcast::Receiver<()>,
-    review_store: Arc<ReviewStore>,
-    intent_history: Option<
-        Arc<cyber_jianghu_agent::infra::api::intent_history::IntentHistoryStore>,
-    >,
-) -> Result<()> {
-    info!("ReflectorSoul 启动（反思之魂），审查 ActorSoul 意图");
-
-    let config_path = config_path();
-    let config = Config::from_file(&config_path)?;
-    let llm_client = create_llm_client(config.get_reflector_llm_config())?;
-    let mut llm_client = Arc::new(llm_client);
-    info!(
-        "ReflectorSoul LLM 配置: provider={}, model={}",
-        llm_client.provider_name(),
-        llm_client.model_name()
-    );
-
-    let poll_interval = tokio::time::Duration::from_secs(5);
-
-    loop {
-        tokio::select! {
-            // 配置变更通知（与 ActorSoul 同步热重载）
-            Ok(()) = config_reload_rx.recv() => {
-                info!("ReflectorSoul 检测到配置变更...");
-                let old_client = llm_client.clone();
-                match Config::from_file(&config_path) {
-                    Ok(new_config) => {
-                        match create_llm_client(new_config.get_reflector_llm_config()) {
-                            Ok(client) => {
-                                llm_client = Arc::new(client);
-                                info!(
-                                    "ReflectorSoul LLM 已重载: provider={}, model={}",
-                                    llm_client.provider_name(),
-                                    llm_client.model_name()
-                                );
-                            }
-                            Err(e) => {
-                                warn!("ReflectorSoul LLM 重载失败: {}，保持旧配置", e);
-                                llm_client = old_client;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!("ReflectorSoul 配置读取失败: {}，保持旧配置", e);
-                    }
-                }
-            }
-            // 定期轮询待审查意图
-            _ = tokio::time::sleep(poll_interval) => {
-                let reviews = review_store.get_pending().await;
-                if reviews.is_empty() {
-                    debug!("[ReflectorSoul] 暂无待审查意图");
-                } else {
-                    info!("[ReflectorSoul] 发现 {} 个待审查意图", reviews.len());
-                    for review in reviews {
-                        if let Err(e) = process_review_with_store(
-                            &llm_client,
-                            &review_store,
-                            &review,
-                            intent_history.as_ref(),
-                        )
-                        .await
-                        {
-                            warn!("[ReflectorSoul] 审查失败 {}: {}", review.intent_id, e);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// 处理单个审查请求（ReflectorSoul）
-async fn process_review_with_store(
-    llm_client: &DirectLlmClient,
-    review_store: &Arc<ReviewStore>,
-    review: &cyber_jianghu_agent::soul::reflector::PendingReview,
-    intent_history: Option<
-        &Arc<cyber_jianghu_agent::infra::api::intent_history::IntentHistoryStore>,
-    >,
-) -> Result<()> {
-    use cyber_jianghu_agent::soul::reflector::ReviewDecision;
-    use cyber_jianghu_protocol::ReviewSubmission as ProtocolReviewSubmission;
-
-    info!(
-        "[ReflectorSoul] 审查意图 {}: action={}",
-        review.intent_id, review.intent.action_type
-    );
-
-    let validation_prompt = format!(
-        "审查以下意图是否符合角色人设和世界观规则：\n\n意图: {}\n人设: {:?}\n世界上下文: {}",
-        serde_json::to_string(&review.intent)?,
-        review.persona_summary,
-        review.world_context
-    );
-
-    let response_text = llm_client.complete(&validation_prompt).await?;
-
-    let lower = response_text.to_lowercase();
-    let result = if lower.contains("approve")
-        || lower.contains("通过")
-        || lower.contains("符合规则")
-        || lower.contains("可以执行")
-        || lower.contains("符合角色人设")
-    {
-        ReviewDecision::Approved
-    } else if lower.contains("不符合")
-        || lower.contains("驳回")
-        || lower.contains("拒绝")
-        || lower.contains("reject")
-    {
-        ReviewDecision::Rejected
-    } else {
-        // 无法判断时宽容处理：默认通过
-        tracing::warn!(
-            "[ReflectorSoul] 无法判断审查结果，默认通过: {}",
-            &response_text[..response_text.len().min(100)]
-        );
-        ReviewDecision::Approved
-    };
-
-    // 使用 protocol 的 ReviewSubmission（reason 是 String 不是 Option）
-    let submission = ProtocolReviewSubmission {
-        result,
-        reason: response_text.clone(),
-        narrative: None,
-    };
-
-    // submit_review 需要拥有的值，不是引用
-    review_store
-        .submit_review(review.intent_id, submission)
-        .await
-        .map_err(|e| anyhow::anyhow!("ReflectorSoul submit_review failed: {:?}", e))?;
-
-    // 更新经历日志中的 observer_thought（供 Web Panel 查询）
-    if let Some(history) = intent_history {
-        history
-            .update_observer_thought(review.intent.tick_id, response_text.clone())
-            .await;
-        info!(
-            "[ReflectorSoul] Updated observer thought for tick {} in intent_history",
-            review.intent.tick_id
-        );
-    }
-
-    info!(
-        "[ReflectorSoul] 审查结果已提交: {} -> {:?}",
-        review.intent_id, result
-    );
-    Ok(())
-}
