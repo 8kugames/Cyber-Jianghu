@@ -124,8 +124,8 @@ OpenClaw（外置大脑）**必须**通过 WebSocket 连接 Agent：
 ### WebSocket 消息格式
 
 ```json
-// 接收 Tick
-{"type": "tick", "tick_id": 123, "deadline_ms": 50000, "state": {...}}
+// 接收 Tick (deadline_ms 为关单绝对时间戳)
+{"type": "tick", "tick_id": 123, "deadline_ms": 1710937800000, "state": {...}}
 
 // 提交意图
 {"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "思考..."}
