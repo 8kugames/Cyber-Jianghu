@@ -52,6 +52,8 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
 
+use anyhow::Context;
+
 /// 重连请求（通过 channel 发送给主循环）
 #[derive(Debug, Clone)]
 pub struct ReconnectRequest {
@@ -860,5 +862,64 @@ impl HttpApiState {
                     .await;
             });
         }
+    }
+
+    /// 刷新设备认证令牌（HTTP 401 时调用）
+    ///
+    /// 调用 `POST {server_http_url}/api/v1/agent/connect` 获取新的 auth_token，
+    /// 然后更新本地 device_config 并持久化到 device.yaml。
+    pub async fn refresh_auth_token(&self) -> anyhow::Result<()> {
+        // 1. 获取当前设备配置
+        let device = self.device_config.read().await;
+        let device = device.as_ref().context("设备身份未初始化")?;
+        let device_id = device.device_id;
+        let _ = device; // 释放锁，避免死锁
+
+        // 2. 获取 HTTP URL
+        let http_url = self.server_http_url.read().await.clone();
+        let url = format!("{}/api/v1/agent/connect", http_url);
+
+        // 3. 调用 connect API 获取新 token
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .json(&serde_json::json!({ "device_id": device_id }))
+            .send()
+            .await
+            .context("刷新令牌请求失败")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("刷新令牌失败 {}: {}", status, body);
+        }
+
+        #[derive(Deserialize)]
+        struct ConnectResponse {
+            auth_token: String,
+        }
+
+        let result: ConnectResponse = response
+            .json()
+            .await
+            .context("解析刷新令牌响应失败")?;
+
+        info!("设备 {} 的令牌刷新成功", device_id);
+
+        // 4. 更新 device_config 并持久化
+        let mut device_guard = self.device_config.write().await;
+        if let Some(ref mut device) = *device_guard {
+            device.auth_token = result.auth_token.clone();
+            let server_dir = self.server_dir.read().await;
+            let device_path = server_dir.join("device.yaml");
+            if let Some(parent) = device_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if let Err(e) = device.save_to_file(&device_path) {
+                error!("持久化刷新后的令牌失败: {}", e);
+            }
+        }
+
+        Ok(())
     }
 }
