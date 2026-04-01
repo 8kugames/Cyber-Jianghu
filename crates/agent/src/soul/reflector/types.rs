@@ -41,8 +41,8 @@ pub struct LlmValidationResponse {
     /// 原因
     #[serde(default)]
     pub reason: String,
-    /// 驳回类型
-    #[serde(default)]
+    /// 驳回类型（approved 时为 null 或缺失）
+    #[serde(default, deserialize_with = "deserialize_null_string")]
     pub rejection_type: String,
     /// 叙事摘要（仅 approved 时有值）
     #[serde(default)]
@@ -120,6 +120,15 @@ pub struct ValidationRequest {
     pub persona: PersonaInfo,
     /// 当前世界状态（自然语言描述）
     pub world_context: String,
+}
+
+/// Deserializer that treats `null` as empty string
+fn deserialize_null_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
 }
 
 #[cfg(test)]

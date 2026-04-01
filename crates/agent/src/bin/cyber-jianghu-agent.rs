@@ -1272,12 +1272,27 @@ async fn process_review_with_store(
 
     let response_text = llm_client.complete(&validation_prompt).await?;
 
-    let result = if response_text.to_lowercase().contains("approve")
-        || response_text.to_lowercase().contains("通过")
+    let lower = response_text.to_lowercase();
+    let result = if lower.contains("approve")
+        || lower.contains("通过")
+        || lower.contains("符合规则")
+        || lower.contains("可以执行")
+        || lower.contains("符合角色人设")
     {
         ReviewDecision::Approved
-    } else {
+    } else if lower.contains("不符合")
+        || lower.contains("驳回")
+        || lower.contains("拒绝")
+        || lower.contains("reject")
+    {
         ReviewDecision::Rejected
+    } else {
+        // 无法判断时宽容处理：默认通过
+        tracing::warn!(
+            "[ReflectorSoul] 无法判断审查结果，默认通过: {}",
+            &response_text[..response_text.len().min(100)]
+        );
+        ReviewDecision::Approved
     };
 
     // 使用 protocol 的 ReviewSubmission（reason 是 String 不是 Option）
