@@ -148,7 +148,7 @@ impl TickScheduler {
             self.current_tick_id = new_tick_id;
 
             // 1. 开单 + 广播
-            self.accepting_tick_id.store(new_tick_id, Ordering::Relaxed);
+            self.accepting_tick_id.store(new_tick_id, Ordering::Release);
 
             let collection_window_secs = {
                 let gd = self.game_data_cache.get();
@@ -183,6 +183,8 @@ impl TickScheduler {
             }
 
             // 3. 关单 + 结算
+            // 关单：设为 0，结算期间不再接受新 intent
+            self.accepting_tick_id.store(0, Ordering::Release);
             if let Err(e) = self.execute_tick_settlement(new_tick_id).await {
                 error!("Tick {} 结算失败: {}", new_tick_id, e);
             }
@@ -321,7 +323,8 @@ impl TickScheduler {
     ) -> Result<(i32, i32)> {
         let start_time = Instant::now();
 
-        self.event_manager.clear();
+        // event_manager 在 broadcast_new_tick 中已 clear，结算阶段直接添加事件
+        // 这些事件会在下一个 tick 的广播中发送给 Agent
 
         let phase1_start = Instant::now();
         let agent_states = persistence::load_agent_states(&self.db_pool)
@@ -590,7 +593,7 @@ impl TickScheduler {
 fn calculate_deadline_abs_ms(collection_window_secs: u64) -> u64 {
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64;
     now_ms + collection_window_secs * 1000
 }

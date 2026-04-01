@@ -628,7 +628,7 @@ async fn handle_intent(
     // tick_id 校验：从内存读取当前接受意图的 tick_id
     let current_tick = state
         .current_accepting_tick_id
-        .load(std::sync::atomic::Ordering::Relaxed);
+        .load(std::sync::atomic::Ordering::Acquire);
 
     if current_tick == 0 {
         return Err("服务器尚未开始接受意图".into());
