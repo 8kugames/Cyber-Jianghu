@@ -17,6 +17,7 @@
 use anyhow::{Context, Result};
 use chrono::FixedOffset;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
@@ -68,6 +69,9 @@ pub struct TickScheduler {
 
     /// 状态处理器
     state_processor: StateProcessor,
+
+    /// 当前接受意图的 tick_id（与 AppState 共享）
+    accepting_tick_id: Arc<AtomicI64>,
 }
 
 impl TickScheduler {
@@ -78,6 +82,7 @@ impl TickScheduler {
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
         intent_manager: IntentManager,
+        accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
         Self {
             game_data_cache,
@@ -91,12 +96,14 @@ impl TickScheduler {
             intent_collector: IntentCollector::new(),
             broadcaster: Broadcaster::new(),
             state_processor: StateProcessor::new(db_pool),
+            accepting_tick_id,
         }
     }
 
     /// 启动Tick循环
     ///
-    /// 这是一个无限循环，直到收到停止信号
+    /// 新时序：广播 → sleep(收集窗口) → 结算
+    /// Agent 收到广播后有完整窗口提交 intent
     pub async fn run(&mut self) -> Result<()> {
         // 从 game_data_cache 读取 tick 配置（克隆值以避免持有锁）
         let tick_duration_secs = {
@@ -116,8 +123,6 @@ impl TickScheduler {
         let game_epoch = self.parse_game_epoch()?;
 
         // 获取基于真实时间的当前 tick ID
-        // 使用数据库中的最大值和基于时间的计算值中的较大者
-        // 这样可以避免时间回退（如果系统时钟调整）
         let db_max_tick_id = crate::db::get_current_world_tick_id(&self.db_pool)
             .await
             .unwrap_or(0);
@@ -133,18 +138,17 @@ impl TickScheduler {
         );
 
         let mut interval = tokio::time::interval(Duration::from_secs(tick_duration_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        // 设置错开第一次无延迟的 tick（如果有需要）
-        // interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        // 主循环
+        // 主循环：广播 → sleep → 结算
         while self.is_running {
             interval.tick().await;
 
-            // 每次循环重新计算 tick_id（分钟级时间戳）
-            // tick_id 直接基于时间，不存在序号回退问题
             let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
             self.current_tick_id = new_tick_id;
+
+            // 1. 开单 + 广播
+            self.accepting_tick_id.store(new_tick_id, Ordering::Relaxed);
 
             let collection_window_secs = {
                 let gd = self.game_data_cache.get();
@@ -161,23 +165,61 @@ impl TickScheduler {
                 }
             };
 
+            // deadline_ms = 绝对时间戳
+            let deadline_ms = calculate_deadline_abs_ms(collection_window_secs);
+
+            // 广播新 tick（加载上一次持久化的 agent_states）
+            if let Err(e) = self.broadcast_new_tick(new_tick_id, deadline_ms).await {
+                error!("Tick {} 广播失败: {}", new_tick_id, e);
+            }
+
+            // 2. 等待 Agent 提交 intent
             if collection_window_secs > 0 {
                 info!(
                     "Tick {} 等待收集窗口 {}秒...",
-                    self.current_tick_id, collection_window_secs
+                    new_tick_id, collection_window_secs
                 );
                 tokio::time::sleep(Duration::from_secs(collection_window_secs)).await;
             }
 
-            // 执行一次Tick（F-06：失败时写入 tick_logs）
-            if let Err(e) = self.execute_tick().await {
-                error!("Tick {} 执行失败: {}", self.current_tick_id, e);
-                // 不要因为一次失败就停止整个引擎
-                // 继续下一个Tick
+            // 3. 关单 + 结算
+            if let Err(e) = self.execute_tick_settlement(new_tick_id).await {
+                error!("Tick {} 结算失败: {}", new_tick_id, e);
             }
         }
 
         info!("Tick引擎已停止");
+        Ok(())
+    }
+
+    /// 广播新 tick 的 WorldState（基于上一次持久化的 agent_states）
+    async fn broadcast_new_tick(&mut self, tick_id: i64, deadline_ms: u64) -> Result<()> {
+        let agent_states = persistence::load_agent_states(&self.db_pool)
+            .await
+            .context("广播: 加载Agent状态失败")?;
+
+        self.event_manager.clear();
+
+        self.broadcaster
+            .broadcast_states(
+                tick_id,
+                &agent_states,
+                &self.db_pool,
+                &self.connection_manager,
+                &self.agent_to_device_map,
+                &self.event_manager,
+                &self.game_data_cache,
+                deadline_ms,
+            )
+            .await
+            .context("广播: 广播状态失败")?;
+
+        info!(
+            "Tick {} 广播完成: {}个Agent, deadline={}ms",
+            tick_id,
+            agent_states.len(),
+            deadline_ms
+        );
         Ok(())
     }
 
@@ -238,13 +280,12 @@ impl TickScheduler {
         Ok(timestamp)
     }
 
-    /// 执行一次Tick
+    /// 执行一次Tick结算（关单后调用）
     ///
-    /// 这是Tick引擎的核心方法，包含完整的Tick执行流程
-    async fn execute_tick(&mut self) -> Result<()> {
-        let tick_id = self.current_tick_id;
+    /// 包含：收集意图 → 结算 → 衰减 → 持久化（不含广播）
+    async fn execute_tick_settlement(&mut self, tick_id: i64) -> Result<()> {
         let mut tick_log = TickLog::new(tick_id);
-        info!("Tick {} 开始执行", tick_id);
+        info!("Tick {} 开始结算", tick_id);
 
         if let Err(e) = crate::db::create_tick_log(&self.db_pool, &tick_log).await {
             warn!("创建Tick日志失败: {}", e);
@@ -531,32 +572,9 @@ impl TickScheduler {
         let phase4_duration = phase4_start.elapsed();
         info!("阶段4完成 - 持久化状态, 耗时: {:?}", phase4_duration);
 
-        let phase5_start = Instant::now();
-        let deadline_ms = {
-            let gd = self.game_data_cache.get();
-            // Agent 从广播到下次收单截止的实际时间约为 tick_period
-            // 收集窗口在下次周期开始后，不影响 Agent 的可用决策时间
-            gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64 * 1000
-        };
-        self.broadcaster
-            .broadcast_states(
-                tick_id,
-                &updated_states,
-                &self.db_pool,
-                &self.connection_manager,
-                &self.agent_to_device_map,
-                &self.event_manager,
-                &self.game_data_cache,
-                deadline_ms,
-            )
-            .await
-            .context("广播状态失败")?;
-        let phase5_duration = phase5_start.elapsed();
-        info!("阶段5完成 - 广播状态, 耗时: {:?}", phase5_duration);
-
         let total_duration = start_time.elapsed();
         info!(
-            "Tick {} 完成 - 总耗时: {:?}, 处理Agent: {}, 执行动作: {}",
+            "Tick {} 结算完成 - 总耗时: {:?}, 处理Agent: {}, 执行动作: {}",
             tick_id, total_duration, agents_processed, actions_executed
         );
 
@@ -566,6 +584,15 @@ impl TickScheduler {
 
         Ok((agents_processed, actions_executed))
     }
+}
+
+/// 计算关单时刻的绝对 Unix 毫秒时间戳
+fn calculate_deadline_abs_ms(collection_window_secs: u64) -> u64 {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    now_ms + collection_window_secs * 1000
 }
 
 // ============================================================================

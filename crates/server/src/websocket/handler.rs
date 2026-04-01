@@ -22,6 +22,7 @@ use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use crate::dialogue::DialogueResponse;
@@ -260,14 +261,17 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil() {
         match crate::db::get_latest_agent_state(&state.db_pool, agent_id).await {
             Ok(agent_state) => {
-                // 计算 deadline：距离下次 tick 的剩余毫秒数
+                // 计算 deadline：绝对时间戳（当前时间 + 一个 tick 周期）
                 let deadline_ms = {
                     let gd = state.game_data.get();
                     let tick_secs =
                         gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
                     drop(gd);
-                    // 简化：给一个完整 tick 周期，因为 agent 刚连接
-                    tick_secs * 1000
+                    let now_ms = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    now_ms + tick_secs * 1000
                 };
 
                 // 加载初始背包物品
@@ -621,14 +625,18 @@ async fn handle_intent(
         return Err("角色已失效，无法执行此动作。请重新转生入世。".into());
     }
 
-    // tick_id 校验：只接受当前 tick 的意图（硬性要求）
-    let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
-        .await
-        .unwrap_or(0);
+    // tick_id 校验：从内存读取当前接受意图的 tick_id
+    let current_tick = state
+        .current_accepting_tick_id
+        .load(std::sync::atomic::Ordering::Relaxed);
+
+    if current_tick == 0 {
+        return Err("服务器尚未开始接受意图".into());
+    }
 
     if tick_id != current_tick {
         warn!(
-            "Intent tick_id mismatch: agent={}, intent_tick={}, current_tick={}",
+            "Intent tick_id mismatch: agent={}, intent_tick={}, accepting_tick={}",
             agent_id, tick_id, current_tick
         );
         return Err(format!(

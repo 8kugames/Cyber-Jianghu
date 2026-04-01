@@ -90,9 +90,8 @@ pub struct WorldState {
     #[serde(default)]
     pub available_actions: Vec<AvailableAction>,
 
-    /// 距离下次 tick 收单的剩余毫秒数
-    /// Agent 应在此时间内完成决策并提交意图
-    /// 0 表示当前 tick 即将结算或已过期
+    /// 关单时刻的 Unix 毫秒时间戳（绝对时间）
+    /// Agent 应在此时刻之前提交意图
     #[serde(default)]
     pub deadline_ms: u64,
 }
