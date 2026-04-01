@@ -122,11 +122,11 @@ MVP 旨在验证以下三个核心假设：
 
 ## 5. 交互流程
 
-1. 服务端广播 `Tick N` 的 `WorldState`
+1. 服务端广播 `Tick N` 的 `WorldState`（`deadline_ms` 为关单绝对时间戳）
 2. 客户端接收状态，调用 LLM 推理
-3. 客户端在 30 秒内返回 `Intent`
-4. 服务端收集全部 `Intent`，按优先级结算
-5. 服务端更新世界状态，进入 `Tick N+1`
+3. 客户端在 `deadline_ms` 前提交 `Intent`（`tick_id` 必须匹配当前 `accepting_tick_id`）
+4. 收集窗口关闭，服务端结算全部 `Intent`
+5. 服务端持久化状态，结算事件在 `Tick N+1` 的广播中推送
 
 ## 6. 成功标准
 
