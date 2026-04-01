@@ -16,8 +16,8 @@ use tracing::{debug, info};
 
 use super::chain::CognitiveChain;
 use super::stages::{
-    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionResponse, PlanningResponse,
-    StageOutput,
+    CognitiveStage, DecisionResponse, PerceptionMotivationResponse,
+    PlanningResponse, StageOutput,
 };
 use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
@@ -107,36 +107,30 @@ impl MultiStageCognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
 
-        // 缓存 persona description（同一 tick 内人设不变，避免 4 次重复序列化）
+        // 缓存 persona description（同一 tick 内人设不变）
         let persona_desc = self.config.persona.generate_description();
 
-        // === Stage 1: Perception (感知) ===
-        let prompt = self.build_perception_prompt(
+        // === Stage 1: Perception+Motivation (感知+动机，合并为单次 LLM 调用) ===
+        let prompt = self.build_perception_motivation_prompt(
             world_state, memory_context, validation_feedback, &persona_desc,
         );
-        let (perception_response, perception) =
-            self.perceive_with_prompt(&prompt).await?;
+        let (pm_response, perception, motivation) =
+            self.perceive_and_motivate(&prompt).await?;
         chain.add_stage(perception);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception", &prompt, &perception_response);
-
-        // === Stage 2: Motivation (动机) ===
-        debug!("执行 Stage 2: Motivation");
-        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
-        let prompt = self.build_motivation_prompt(world_state, &perception_output, &persona_desc);
-        let (motivation_response, motivation) = self.motivate_with_prompt(&prompt).await?;
         chain.add_stage(motivation);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Motivation", &prompt, &motivation_response);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception+Motivation", &prompt, &pm_response);
 
-        // === Stage 3: Planning (规划) ===
-        debug!("执行 Stage 3: Planning");
+        // === Stage 2: Planning (规划) ===
+        debug!("执行 Stage 2: Planning");
+        let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
         let prompt = self.build_planning_prompt(world_state, &perception_output, &motivation_output, &persona_desc);
         let (planning_response, planning) = self.plan_with_prompt(&prompt).await?;
         chain.add_stage(planning);
         thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning", &prompt, &planning_response);
 
-        // === Stage 4: Decision (决策) ===
-        debug!("执行 Stage 4: Decision");
+        // === Stage 3: Decision (决策) ===
+        debug!("执行 Stage 3: Decision");
         let prompt = self.build_decision_prompt(world_state, &chain, &persona_desc);
         let (decision_response, decision, intent) = self.decide_with_prompt(&prompt, world_state).await?;
         chain.add_stage(decision);
@@ -160,43 +154,50 @@ impl MultiStageCognitiveEngine {
     // 各阶段实现（接收预构建的 prompt，避免重复构建）
     // ========================================================================
 
-    /// Stage 1: 感知
-    async fn perceive_with_prompt(&self, prompt: &str) -> Result<(String, StageOutput)> {
-        let response: PerceptionResponse = self.llm_client.complete_json(prompt).await?;
+    /// Stage 1: 感知+动机（合并为单次 LLM 调用）
+    async fn perceive_and_motivate(
+        &self,
+        prompt: &str,
+    ) -> Result<(String, StageOutput, StageOutput)> {
+        let response: PerceptionMotivationResponse = self.llm_client.complete_json(prompt).await?;
 
-        let content = format!(
+        let response_json = serde_json::to_string(&response)?;
+        let _metadata = serde_json::to_value(&response)?;
+
+        let perception_content = format!(
             "自身状态: {}\n环境: {}\n关键观察: {}",
             response.self_status,
             response.environment,
             response.key_observations.join(", ")
         );
+        let perception = StageOutput::with_metadata(
+            CognitiveStage::Perception,
+            perception_content,
+            serde_json::json!({
+                "self_status": response.self_status,
+                "environment": response.environment,
+                "key_observations": response.key_observations,
+            }),
+        );
 
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Perception, content, metadata),
-        ))
-    }
-
-    /// Stage 2: 动机
-    async fn motivate_with_prompt(&self, prompt: &str) -> Result<(String, StageOutput)> {
-        let response: MotivationResponse = self.llm_client.complete_json(prompt).await?;
-
-        let content = format!(
+        let motivation_content = format!(
             "主要驱动力: {} (强度: {}/10)\n原因: {}",
             response.primary_drive, response.drive_intensity, response.reasoning
         );
+        let motivation = StageOutput::with_metadata(
+            CognitiveStage::Motivation,
+            motivation_content,
+            serde_json::json!({
+                "primary_drive": response.primary_drive,
+                "drive_intensity": response.drive_intensity,
+                "reasoning": response.reasoning,
+            }),
+        );
 
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Motivation, content, metadata),
-        ))
+        Ok((response_json, perception, motivation))
     }
 
-    /// Stage 3: 规划
+    /// Stage 2: 规划
     async fn plan_with_prompt(&self, prompt: &str) -> Result<(String, StageOutput)> {
         let response: PlanningResponse = self.llm_client.complete_json(prompt).await?;
 
@@ -254,7 +255,7 @@ impl MultiStageCognitiveEngine {
     // Prompt 构建方法
     // ========================================================================
 
-    fn build_perception_prompt(
+    fn build_perception_motivation_prompt(
         &self,
         world_state: &WorldState,
         memory_context: &str,
@@ -263,15 +264,12 @@ impl MultiStageCognitiveEngine {
     ) -> String {
         let self_state = &world_state.self_state;
 
-        // 使用叙事引擎生成叙事化描述（数据驱动）
         let engine = NarrativeEngine::default();
         let narrative = PerceptionNarrative::from_attributes_with_engine(
             &engine,
             &self_state.attributes,
             &self_state.status_effects,
         );
-
-        // 生成叙事化的状态描述
         let self_status_section = narrative.to_prompt_section();
 
         let inventory_str = if self_state.inventory.is_empty() {
@@ -307,17 +305,10 @@ impl MultiStageCognitiveEngine {
                 .join(", ")
         };
 
-        // 记忆上下文（如果有）
         let memory_section = if memory_context.is_empty() {
             String::new()
         } else {
-            format!(
-                r#"
-### 相关记忆
-{memory_context}
-
-"#
-            )
+            format!("\n### 相关记忆\n{memory_context}\n")
         };
 
         let feedback_section = match validation_feedback {
@@ -326,7 +317,7 @@ impl MultiStageCognitiveEngine {
         };
 
         format!(
-            r#"# 感知阶段 (Perception)
+            r#"# 感知与动机阶段 (Perception + Motivation)
 {feedback_section}
 你是 {agent_name}。
 {persona}
@@ -345,15 +336,16 @@ impl MultiStageCognitiveEngine {
 - 地上的物品: {items}
 {memory_section}
 ## 任务
-请分析你感知到的信息，输出 JSON 格式的感知结果。
-
-**注意**：只需客观描述你看到的状态，不需要做任何决策。
+分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
 ## 输出格式
 {{
   "self_status": "你的状态简述 (30字以内)",
   "environment": "环境描述 (30字以内)",
-  "key_observations": ["观察1", "观察2", "..."]
+  "key_observations": ["观察1", "观察2", "..."],
+  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
+  "drive_intensity": 5,
+  "reasoning": "为什么有这个动机 (50字以内)"
 }}
 "#,
             agent_name = self.config.agent_name,
@@ -366,40 +358,6 @@ impl MultiStageCognitiveEngine {
             items = items_str,
             memory_section = memory_section,
             feedback_section = feedback_section,
-        )
-    }
-
-    fn build_motivation_prompt(
-        &self,
-        _world_state: &WorldState,
-        perception: &StageOutput,
-        persona_desc: &str,
-    ) -> String {
-        format!(
-            r#"# 动机阶段 (Motivation)
-
-你是 {agent_name}。
-{persona}
-
-## 你感知到的
-{perception_content}
-
-## 任务
-基于你的感知和性格，说明你的内在驱动力。
-- 你现在最想要什么？
-- 为什么想要这个？
-- 这个动机有多强烈？
-
-## 输出格式
-{{
-  "primary_drive": "你当前的主要驱动力 (如'获取食物'、'避免危险'、'赚取银两')",
-  "drive_intensity": 1-10,
-  "reasoning": "为什么有这个动机 (50字以内)"
-}}
-"#,
-            agent_name = self.config.agent_name,
-            persona = persona_desc,
-            perception_content = perception.content
         )
     }
 
