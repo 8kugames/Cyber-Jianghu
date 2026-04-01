@@ -5,7 +5,7 @@
  ## 一、 服务端 (天道引擎)
 
  ### 1. 核心运行机制
- - [x] **Tick 驱动**: 可配置 TPS 循环（可配置），执行意图收集、衰减结算（饥饿/口渴/环境伤害）、动作执行、状态持久化与广播。
+ - [x] **Tick 驱动**: 可配置周期循环，时序为 **广播(开单) → 收集窗口 → 关单 → 结算 → 持久化**。Agent 在收到广播后有完整窗口提交意图。
  - [x] **tick_id 秒级时间戳**: `tick_id` 改为 Unix 秒级时间戳，支持 `real_seconds_per_tick` 动态调整游戏时间流速。
  - [x] **公式引擎**: `evalexpr`（战斗伤害等运行时计算）+ 自研 AST 引擎（派生属性动态计算），均支持 YAML 编写表达式。
  - [x] **数据驱动配置**: 所有核心数据（属性、物品、地图、动作、叙事配置等）通过 YAML 加载，支持热更新 (`POST /api/admin/reload-config`)。
@@ -19,19 +19,26 @@
 
 动作系统完全由 `crates/server/config/actions.yaml` 定义，无需修改代码即可新增或修改动作。
 
-**Tick 结算流水线**（8 阶段）:
+**Tick 循环时序**:
 ```
-意图收集 --> 验证 --> 冲突解析 --> 执行 --> 状态变更 --> 衰减 --> 广播 --> 持久化
+广播(开单) --> 收集窗口(sleep) --> 关单 --> 结算 --> 持久化
 ```
 
-- **意图收集**: 仅接受当前 tick_id 的意图，过期拒绝
+结算内部流水线:
+```
+加载状态 --> 收集意图 --> 验证 --> 冲突解析 --> 执行 --> 状态变更 --> 衰减 --> 统计 --> 持久化
+```
+
+- **广播**: 新 Tick 开始时立即推送 `WorldState`，设置 `accepting_tick_id` 开单
+- **收集窗口**: 等待 `collection_window_secs` 秒，Agent 提交意图（`deadline_ms` 为绝对 Unix 毫秒时间戳）
+- **关单**: `accepting_tick_id` 归零，拒收新意图
+- **意图收集**: 从 `IntentManager` 提取已提交意图
 - **验证**: `IntentValidator` 检查动作合法性、属性充足性、目标状态
 - **冲突解析**: `IntentResolver` 处理位置冲突和资源竞争
 - **执行**: `ActionExecutor` 根据 `actions.yaml` 中的定义执行动作
 - **状态变更**: `AttributeMutator`/`InventoryMutator`/`LocationMutator` 等 `StateMutator` 应用变更
 - **衰减**: 饥饿、口渴、物品耐久等被动损耗
-- **广播**: `WorldState` 推送所有 Agent
-- **持久化**: 写入 PostgreSQL
+- **持久化**: 写入 PostgreSQL（结算事件在下一个 Tick 的广播中推送）
 
 **动作定义结构**（`actions.yaml`）:
 ```yaml

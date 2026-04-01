@@ -50,9 +50,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Run clippy with auto-fix
 cargo clippy --workspace --all-targets --fix --allow-dirty
 
-# Build agent with cargo install
-cargo install --path crates/agent
-
 # Run agent in Cognitive mode (default, uses built-in LLM)
 cyber-jianghu-agent run
 
@@ -125,18 +122,22 @@ The server is the authoritative "physics engine" of the world:
 - **Action System**: Data-driven action validation and execution
 - **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
 
-**Tick Processing Flow** (60-second configurable cycle):
+**Tick Processing Flow** (configurable cycle, e.g. 60s/120s):
 ```
-意图收集 --> 验证 --> 冲突解析 --> 执行 --> 状态更新 --> 衰减处理 --> 广播 --> 持久化
+广播(开单) --> 收集窗口(sleep) --> 关单 --> 结算 --> 持久化
+                                               │
+                        加载状态 --> 收集意图 --> 验证 --> 冲突解析 --> 执行 --> 衰减
 ```
-1. **Collect intents** - Only accept intents with current tick_id
-2. **Validate** - Check agent alive, action legal, resources sufficient
-3. **Resolve conflicts** - Priority ordering, position/resource conflicts
-4. **Execute** - Apply actions in deterministic order
-5. **Update state** - Apply attribute changes, generate events
-6. **Decay** - Hunger, thirst, item durability
-7. **Broadcast** - Push WorldState to all agents
-8. **Persist** - Save to PostgreSQL
+1. **Broadcast** - New tick begins: broadcast WorldState, set accepting_tick_id (agents have full collection window)
+2. **Collect window** - Sleep for `collection_window_secs`, agents submit intents
+3. **Close** - Set accepting_tick_id to 0, reject new intents
+4. **Load states** - Load agent states from PostgreSQL
+5. **Collect intents** - Gather submitted intents from IntentManager
+6. **Validate** - Check agent alive, action legal, resources sufficient
+7. **Resolve conflicts** - Priority ordering, position/resource conflicts
+8. **Execute** - Apply actions in deterministic order, update state
+9. **Decay** - Hunger, thirst, item durability
+10. **Persist** - Save updated states to PostgreSQL (events carry to next tick's broadcast)
 
 Key server modules:
 - `src/tick/` - Tick loop and intent processing
@@ -222,8 +223,8 @@ The `protocol` crate defines all shared types:
 
 **OpenClaw WebSocket Message Format** (Agent <-> OpenClaw):
 ```json
-// Downstream: Tick notification
-{"type": "tick", "tick_id": 123, "deadline_ms": 50000, "state": {...}, "context": "..."}
+// Downstream: Tick notification (deadline_ms is absolute Unix timestamp in ms)
+{"type": "tick", "tick_id": 123, "deadline_ms": 1710937800000, "state": {...}, "context": "..."}
 
 // Upstream: Intent submission (MUST match current tick_id)
 {"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "..."}
