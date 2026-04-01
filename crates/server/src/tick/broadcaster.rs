@@ -43,7 +43,7 @@ impl Broadcaster {
     /// 广播新状态给所有Agent
     ///
     /// 为每个Agent构建个性化WorldState并通过WebSocket发送
-    /// deadline_ms: 距离下次 tick 收单的剩余毫秒数
+    /// deadline_ms: 关单时刻的 Unix 毫秒时间戳（绝对时间）
     #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
