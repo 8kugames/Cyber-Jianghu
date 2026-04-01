@@ -1328,7 +1328,7 @@ pub(super) async fn register_character_handler(
     let server_http_url = state.server_http_url.read().await.clone();
     let server_url = format!("{}/api/v1/agent/register", server_http_url);
 
-    let response = match client.post(&server_url).json(&server_request).send().await {
+    let mut response = match client.post(&server_url).json(&server_request).send().await {
         Ok(resp) => resp,
         Err(e) => {
             error!("连接服务器失败: {}", e);
@@ -1347,17 +1347,100 @@ pub(super) async fn register_character_handler(
     // 5. 处理 Server 响应
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        error!("服务器拒绝注册: {} - {}", status, body);
-        return (
-            status,
-            Json(CharacterRegisterResponse {
-                agent_id: String::new(),
-                message: format!("服务器拒绝: {}", body),
-                warning: None,
-            }),
-        )
-            .into_response();
+
+        if status == StatusCode::UNAUTHORIZED {
+            warn!("收到 401，尝试刷新令牌后重试...");
+            if let Err(e) = state.refresh_auth_token().await {
+                error!("刷新令牌失败: {}", e);
+                let _body = response.text().await.unwrap_or_default();
+                return (
+                    status,
+                    Json(CharacterRegisterResponse {
+                        agent_id: String::new(),
+                        message: format!("认证失败且刷新令牌失败: {}", e),
+                        warning: None,
+                    }),
+                )
+                    .into_response();
+            }
+
+            let (device_id, auth_token) = match get_device_id(&state).await {
+                Ok(id) => id,
+                Err(e) => {
+                    error!("刷新令牌后获取设备ID失败: {}", e);
+                    let _body = response.text().await.unwrap_or_default();
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(CharacterRegisterResponse {
+                            agent_id: String::new(),
+                            message: format!("刷新令牌后获取设备ID失败: {}", e),
+                            warning: None,
+                        }),
+                    )
+                        .into_response();
+                }
+            };
+
+            let server_request = serde_json::json!({
+                "device_id": device_id,
+                "auth_token": auth_token,
+                "name": payload.name,
+                "age": payload.age,
+                "gender": payload.gender,
+                "appearance": payload.appearance,
+                "identity": payload.identity,
+                "personality": payload.personality,
+                "values": payload.values,
+                "language_style": payload.language_style,
+                "goals": payload.goals,
+                "system_prompt": system_prompt,
+            });
+
+            let retry_response = match client.post(&server_url).json(&server_request).send().await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    error!("重试连接服务器失败: {}", e);
+                    return (
+                        StatusCode::BAD_GATEWAY,
+                        Json(CharacterRegisterResponse {
+                            agent_id: String::new(),
+                            message: format!("连接服务器失败: {}", e),
+                            warning: None,
+                        }),
+                    )
+                        .into_response();
+                }
+            };
+
+            if !retry_response.status().is_success() {
+                let status = retry_response.status();
+                let body = retry_response.text().await.unwrap_or_default();
+                error!("重试后服务器拒绝注册: {} - {}", status, body);
+                return (
+                    status,
+                    Json(CharacterRegisterResponse {
+                        agent_id: String::new(),
+                        message: format!("服务器拒绝: {}", body),
+                        warning: None,
+                    }),
+                )
+                    .into_response();
+            }
+
+            response = retry_response;
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            error!("服务器拒绝注册: {} - {}", status, body);
+            return (
+                status,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: format!("服务器拒绝: {}", body),
+                    warning: None,
+                }),
+            )
+                .into_response();
+        }
     }
 
     // 6. 解析成功响应
