@@ -127,6 +127,27 @@ pub struct PlanningResponse {
     pub expected_outcome: String,
 }
 
+/// 规划+决策合并阶段响应
+///
+/// Planning 和 Decision 合并为单次 LLM 调用，
+/// 同时输出行动计划和最终决策。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanDecisionResponse {
+    /// 计划步骤
+    pub steps: Vec<String>,
+    /// 优先级 (1-10)
+    pub priority: u8,
+    /// 预期结果
+    pub expected_outcome: String,
+    /// 思考过程（必须引用前面的感知和动机）
+    pub thought_process: String,
+    /// 选择的动作（对应 actions.yaml 中的 key）
+    pub action: String,
+    /// 动作参数（直接透传到服务端）
+    #[serde(default)]
+    pub action_data: serde_json::Value,
+}
+
 /// 决策阶段响应
 ///
 /// 数据驱动：action 为动作名，action_data 直接透传到服务端。

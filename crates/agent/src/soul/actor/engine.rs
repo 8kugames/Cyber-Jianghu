@@ -1,13 +1,11 @@
 // ============================================================================
-// 多阶段认知引擎核心
+// 两阶段认知引擎核心
 // ============================================================================
 //
-// 实现 Perception → Motivation → Planning → Decision 的强制认知流程
-//
-// 核心设计理念：
-// - 每个阶段独立调用 LLM，确保深度思考
-// - 后阶段接收前阶段的输出，形成认知链
-// - 最终决策必须基于完整的认知链
+// 实现 Perception+Motivation → Planning+Decision 的认知流程
+// 通过合并 LLM 调用减少 token 消耗和延迟：
+//   - Stage 1: 感知+动机（单次 LLM 调用，输出观察 + 驱动力）
+//   - Stage 2: 规划+决策（单次 LLM 调用，输出计划 + 最终行动）
 // ============================================================================
 
 use anyhow::Result;
@@ -16,8 +14,7 @@ use tracing::{debug, info};
 
 use super::chain::CognitiveChain;
 use super::stages::{
-    CognitiveStage, DecisionResponse, PerceptionMotivationResponse,
-    PlanningResponse, StageOutput,
+    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };
 use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
@@ -52,10 +49,10 @@ impl Default for CognitiveEngineConfig {
     }
 }
 
-/// 多阶段认知引擎
+/// 两阶段认知引擎
 ///
-/// 通过强制执行 Perception → Motivation → Planning → Decision 流程，
-/// 确保 LLM 进行深度思考而非简单的条件反射。
+/// 通过强制执行 Perception+Motivation → Planning+Decision 流程，
+/// 在保留深度思考的同时将 LLM 调用从 4 次减少到 2 次。
 pub struct MultiStageCognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: CognitiveEngineConfig,
@@ -120,22 +117,19 @@ impl MultiStageCognitiveEngine {
         chain.add_stage(motivation);
         thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception+Motivation", &prompt, &pm_response);
 
-        // === Stage 2: Planning (规划) ===
-        debug!("执行 Stage 2: Planning");
+        // === Stage 2: Plan+Decide (规划+决策，合并为单次 LLM 调用) ===
+        debug!("执行 Stage 2: Plan+Decide");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
-        let prompt = self.build_planning_prompt(world_state, &perception_output, &motivation_output, &persona_desc);
-        let (planning_response, planning) = self.plan_with_prompt(&prompt).await?;
+        let pd_prompt = self.build_plan_decision_prompt(
+            &perception_output, &motivation_output, &persona_desc,
+        );
+        let (pd_response, planning, decision, intent) =
+            self.plan_and_decide(&pd_prompt, world_state).await?;
         chain.add_stage(planning);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning", &prompt, &planning_response);
-
-        // === Stage 3: Decision (决策) ===
-        debug!("执行 Stage 3: Decision");
-        let prompt = self.build_decision_prompt(world_state, &chain, &persona_desc);
-        let (decision_response, decision, intent) = self.decide_with_prompt(&prompt, world_state).await?;
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Decision", &prompt, &decision_response);
+        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning+Decision", &pd_prompt, &pd_response);
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
@@ -197,58 +191,58 @@ impl MultiStageCognitiveEngine {
         Ok((response_json, perception, motivation))
     }
 
-    /// Stage 2: 规划
-    async fn plan_with_prompt(&self, prompt: &str) -> Result<(String, StageOutput)> {
-        let response: PlanningResponse = self.llm_client.complete_json(prompt).await?;
+    /// Stage 2: 规划+决策（合并为单次 LLM 调用）
+    async fn plan_and_decide(
+        &self,
+        prompt: &str,
+        world_state: &WorldState,
+    ) -> Result<(String, StageOutput, StageOutput, Intent)> {
+        let response: PlanDecisionResponse = self.llm_client.complete_json(prompt).await?;
 
-        let content = format!(
+        let response_json = serde_json::to_string(&response)?;
+
+        // Planning stage output
+        let planning_content = format!(
             "计划步骤:\n1. {}\n预期结果: {} (优先级: {}/10)",
             response.steps.join("\n2. "),
             response.expected_outcome,
             response.priority
         );
+        let planning = StageOutput::with_metadata(
+            CognitiveStage::Planning,
+            planning_content,
+            serde_json::json!({
+                "steps": response.steps,
+                "priority": response.priority,
+                "expected_outcome": response.expected_outcome,
+            }),
+        );
 
-        let metadata = serde_json::to_value(&response)?;
-        let response_json = serde_json::to_string(&response)?;
-        Ok((
-            response_json,
-            StageOutput::with_metadata(CognitiveStage::Planning, content, metadata),
-        ))
-    }
-
-    /// Stage 4: 决策
-    async fn decide_with_prompt(
-        &self,
-        prompt: &str,
-        world_state: &WorldState,
-    ) -> Result<(String, StageOutput, Intent)> {
-
-        let response: DecisionResponse = self.llm_client.complete_json(prompt).await?;
-
+        // Decision stage output
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
         let action_type = response.action.to_lowercase();
 
-        let response_json = serde_json::to_string(&response)?;
-        let metadata = serde_json::to_value(&response)?;
-
         let action_data = if response.action_data.is_null() {
             None
         } else {
-            Some(response.action_data)
+            Some(response.action_data.clone())
         };
 
         let intent = Intent::new(agent_id, tick_id, action_type.as_str(), action_data)
             .with_thought(response.thought_process.clone());
 
-        let content = format!(
+        let decision_content = format!(
             "思考: {}\n行动: {}",
             response.thought_process, intent.action_type
         );
+        let decision = StageOutput::with_metadata(
+            CognitiveStage::Decision,
+            decision_content,
+            serde_json::to_value(&response)?,
+        );
 
-        let stage_output = StageOutput::with_metadata(CognitiveStage::Decision, content, metadata);
-
-        Ok((response_json, stage_output, intent))
+        Ok((response_json, planning, decision, intent))
     }
 
     // ========================================================================
@@ -361,15 +355,14 @@ impl MultiStageCognitiveEngine {
         )
     }
 
-    fn build_planning_prompt(
+    fn build_plan_decision_prompt(
         &self,
-        _world_state: &WorldState,
         perception: &StageOutput,
         motivation: &StageOutput,
         persona_desc: &str,
     ) -> String {
         format!(
-            r#"# 规划阶段 (Planning)
+            r#"# 规划与决策阶段 (Planning + Decision)
 
 你是 {agent_name}。
 {persona}
@@ -381,71 +374,21 @@ impl MultiStageCognitiveEngine {
 {motivation}
 
 ## 任务
-基于你的感知和动机，制定行动计划。
-- 你打算怎么做？
-- 分成几个步骤？
-- 预期结果是什么？
-
-## 输出格式
-{{
-  "steps": ["步骤1", "步骤2", "..."],
-  "priority": 1-10,
-  "expected_outcome": "预期结果 (30字以内)"
-}}
-"#,
-            agent_name = self.config.agent_name,
-            persona = persona_desc,
-            perception = perception.content,
-            motivation = motivation.content
-        )
-    }
-
-    fn build_decision_prompt(&self, _world_state: &WorldState, chain: &CognitiveChain, persona_desc: &str) -> String {
-        // 获取各阶段输出作为上下文
-        let perception = chain
-            .get_stage(CognitiveStage::Perception)
-            .map(|s| s.content.as_str())
-            .unwrap_or("");
-        let motivation = chain
-            .get_stage(CognitiveStage::Motivation)
-            .map(|s| s.content.as_str())
-            .unwrap_or("");
-        let planning = chain
-            .get_stage(CognitiveStage::Planning)
-            .map(|s| s.content.as_str())
-            .unwrap_or("");
-
-        format!(
-            r#"# 决策阶段 (Decision)
-
-你是 {agent_name}。
-{persona}
-
-## 前面的思考
-
-### 感知
-{perception}
-
-### 动机
-{motivation}
-
-### 规划
-{planning}
-
-## 任务
-基于你前面的思考，做出最终决策。
-- 你要执行什么动作？
-- 为什么选择这个动作？
-- 动作的目标是谁？（如果适用）
+基于你的感知和动机，制定行动计划并做出最终决策。
+1. 先规划：你打算怎么做？分成几个步骤？
+2. 再决策：基于规划，选择一个具体的行动。
 
 ## 重要约束
-1. **必须引用前面的思考**：在 thought_process 中说明你的决策如何基于感知、动机和规划。
-2. **不能跳过思考**：不能直接说"因为饿了所以吃"，必须体现完整的认知链条。
+1. **必须引用前面的思考**：在 thought_process 中说明你的决策如何基于感知和动机。
+2. **不能跳过思考**：必须体现完整的认知链条。
 3. **必须以 JSON 格式输出**：不要包含其他文本。
 
 ## 输出格式
 {{
-  "thought_process": "你的完整思考过程，必须引用感知、动机和规划 (300字以内)",
+  "steps": ["步骤1", "步骤2", "..."],
+  "priority": 5,
+  "expected_outcome": "预期结果 (30字以内)",
+  "thought_process": "你的完整思考过程，必须引用感知和动机 (300字以内)",
   "action": "动作名称",
   "action_data": {{}}
 }}
@@ -470,7 +413,9 @@ impl MultiStageCognitiveEngine {
 注意：target_agent_id 从 entities 列表中获取，item_id 从 inventory 或 nearby_items 中获取。
 "#,
             agent_name = self.config.agent_name,
-            persona = persona_desc
+            persona = persona_desc,
+            perception = perception.content,
+            motivation = motivation.content
         )
     }
 
