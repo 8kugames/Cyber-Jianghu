@@ -667,9 +667,9 @@ pub struct Config {
     #[serde(skip)]
     pub config_path: PathBuf,
 
-    /// 服务器数据目录（运行时设置，不序列化）
+    /// 服务器数据目录
     /// 默认 ~/.cyber-jianghu/servers/
-    #[serde(skip)]
+    #[serde(default)]
     pub servers_dir: PathBuf,
 }
 
