@@ -94,7 +94,7 @@ impl MultiStageCognitiveEngine {
     }
 
     /// 核心认知流程：支持 memory context + validation feedback
-    async fn think_with_memory_and_feedback(
+    pub(crate) async fn think_with_memory_and_feedback(
         &self,
         world_state: &WorldState,
         memory_context: &str,
