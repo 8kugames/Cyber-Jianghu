@@ -353,16 +353,16 @@ impl super::Agent {
                     }
 
                     // 5. 调用决策回调（带验证和记忆上下文）
-                    let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                        // 优先使用带记忆上下文的回调
-                        memory_callback(&world_state, &memory_context).await
-                    } else if let Some(ref reason) = self.last_rejection_reason {
+                    let intent = if let Some(ref reason) = self.last_rejection_reason {
                         // 上次被 ReflectorSoul 驳回，带反馈重新决策
                         if let Some(ref callback) = self.decision_with_feedback_callback {
                             callback(&world_state, Some(reason.as_str())).await
                         } else {
                             (self.decision_callback)(&world_state).await
                         }
+                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                        // 带记忆上下文决策（记忆系统生效）
+                        memory_callback(&world_state, &memory_context).await
                     } else {
                         (self.decision_callback)(&world_state).await
                     };
