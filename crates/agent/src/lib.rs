@@ -86,8 +86,8 @@ pub use soul::reflector::rule_engine::{
     RuleValidationResult,
 };
 pub use soul::reflector::{
-    CognitiveValidator, IntentValidator, ObserverPrompt, PendingReview, PendingReviewEntry,
-    PersonaInfo, RejectionType, ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest,
+    CognitiveValidator, ObserverPrompt, PendingReview, PendingReviewEntry, PersonaInfo,
+    ReflectorSoul, RejectionType, ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest,
     ValidationResult, Validator, sanitize_for_prompt,
 };
 

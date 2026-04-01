@@ -353,21 +353,22 @@ impl super::Agent {
                     }
 
                     // 5. 调用决策回调（带验证和记忆上下文）
-                    let intent = if self.validator.is_some() {
-                        self.decide_with_validation(&world_state).await?
-                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                    let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
                         // 优先使用带记忆上下文的回调
                         memory_callback(&world_state, &memory_context).await
+                    } else if let Some(ref reason) = self.last_rejection_reason {
+                        // 上次被 ReflectorSoul 驳回，带反馈重新决策
+                        if let Some(ref callback) = self.decision_with_feedback_callback {
+                            callback(&world_state, Some(reason.as_str())).await
+                        } else {
+                            (self.decision_callback)(&world_state).await
+                        }
                     } else {
                         (self.decision_callback)(&world_state).await
                     };
 
-                    // 5.5 审查（ReflectorSoul - 反思之魂）
-                    let final_intent = if let Some(ref store) = self.review_store {
-                        self.submit_for_review(intent, &world_state, store).await?
-                    } else {
-                        intent
-                    };
+                    // 5.5 ReflectorSoul 同步审查（反思之魂）
+                    let final_intent = self.validate_with_reflector(intent, &world_state).await?;
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state

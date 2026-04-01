@@ -16,7 +16,7 @@ pub mod tools;
 pub mod utils;
 
 // 重新导出核心类型
-pub use agent::{Agent, PersonaValidationResult, ValidatorConfig};
+pub use agent::{Agent, PersonaValidationResult};
 pub use builder::AgentBuilder;
 
 // 从 soul::actor 重导出认知引擎类型（向后兼容）
