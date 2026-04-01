@@ -85,7 +85,27 @@ pub struct PerceptionResponse {
     pub key_observations: Vec<String>,
 }
 
-/// 动机阶段响应
+/// 感知+动机合并阶段响应
+///
+/// Perception 和 Motivation 合并为单次 LLM 调用，
+/// 同时输出观察结果和内在驱动力。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerceptionMotivationResponse {
+    /// 自身状态摘要
+    pub self_status: String,
+    /// 环境观察
+    pub environment: String,
+    /// 识别到的关键信息
+    pub key_observations: Vec<String>,
+    /// 当前主要驱动力
+    pub primary_drive: String,
+    /// 驱动强度 (1-10)
+    pub drive_intensity: u8,
+    /// 为什么有这个动机
+    pub reasoning: String,
+}
+
+/// 动机阶段响应（保留用于兼容）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MotivationResponse {
     /// 当前主要驱动力
