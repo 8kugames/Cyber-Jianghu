@@ -29,6 +29,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use tokio::task::JoinHandle;
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
@@ -83,6 +84,7 @@ fn start_tick_engine(
     connection_manager: websocket::ConnectionManager,
     agent_to_device_map: websocket::AgentToDeviceMap,
     intent_manager: websocket::IntentManager,
+    accepting_tick_id: Arc<AtomicI64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -91,6 +93,7 @@ fn start_tick_engine(
             connection_manager,
             agent_to_device_map,
             intent_manager,
+            accepting_tick_id,
         );
 
         info!("启动Tick引擎（后台任务）");
@@ -233,7 +236,10 @@ async fn main() -> Result<()> {
     info!("管理员访问凭证已保存到: {}", token_path.display());
     info!("查看凭证: cat {}", token_path.display());
 
-    // 9. 创建应用状态
+    // 9. 创建共享 tick_id（scheduler 和 AppState 共用）
+    let accepting_tick_id = Arc::new(AtomicI64::new(0));
+
+    // 9.1 创建应用状态
     let state = Arc::new(AppState::new(
         config.clone(),
         db_pool.clone(),
@@ -246,6 +252,7 @@ async fn main() -> Result<()> {
         admin_read_token,
         admin_write_token,
         crate::paths::get_config_dir(),
+        accepting_tick_id.clone(),
     ));
 
     // 10. 启动Tick引擎（后台任务）
@@ -255,6 +262,7 @@ async fn main() -> Result<()> {
         connection_manager.clone(),
         agent_to_device_map.clone(),
         intent_manager.clone(),
+        accepting_tick_id,
     );
 
     // 10.1 启动速率限制器清理任务
