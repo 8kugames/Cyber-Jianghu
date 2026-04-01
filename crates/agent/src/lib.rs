@@ -30,18 +30,20 @@
 // Server ─[WebSocket]→ Transport ─[WorldState]→ Runtime ─[Intent]→ Transport ─[WebSocket]→ Server
 // ```
 //
-// ## 双魂架构
+// ## 双魂架构（同步审查）
 // ```
 // ActorSoul（行动之魂/本我）     ReflectorSoul（反思之魂/超我）
 //        │                              │
-//        │  submit_for_review()        │  poll ReviewStore
-//        │  ─────────────────────────> │
-//        │                              │  LLM review
-//        │  <─────────────────────────  │  submit_review()
-//        │  await approval              │
-//        ▼
-//    send_intent()
+//        │  generate_intent()           │
+//        │  ─────────────────────────> │  validate_with_reflector()
+//        │                              │  LLM 同步审查（单次调用）
+//        │  approved → send_intent()    │
+//        │  rejected → idle + 反馈      │
+//        ▼                              │
+//    send_intent()                     │
 // ```
+// 驳回原因通过 last_rejection_reason 跨 tick 反馈给 ActorSoul，
+// 使下一 tick 的决策能参考上一次的驳回理由。
 
 // ============================================================================
 // 模块声明

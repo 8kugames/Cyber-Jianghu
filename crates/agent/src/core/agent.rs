@@ -499,6 +499,7 @@ impl Agent {
             Ok(result) => result,
             Err(e) => {
                 warn!("ReflectorSoul validation error, auto-approving: {}", e);
+                self.last_rejection_reason = None;
                 return Ok(intent);
             }
         };
