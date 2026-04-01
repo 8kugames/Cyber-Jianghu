@@ -663,6 +663,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     CognitiveDecisionConfig::default().max_retries,
                 ));
 
+            // 带记忆上下文的决策回调（让记忆真正注入认知流程）
+            let cognitive_engine_for_memory = cognitive_engine.clone();
+
             let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                 let engine = cognitive_engine.clone();
                 let ws = ws.clone();
@@ -677,6 +680,22 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     }
                 })
             });
+            let decision_with_memory: cyber_jianghu_agent::runtime::DecisionWithMemoryCallback =
+                Arc::new(move |ws: &WorldState, memory_context: &str| {
+                    let engine = cognitive_engine_for_memory.clone();
+                    let ws = ws.clone();
+                    let memory_context = memory_context.to_string();
+                    Box::pin(async move {
+                        match engine.think_with_memory(&ws, &memory_context).await {
+                            Ok(chain) => chain.final_intent,
+                            Err(e) => {
+                                error!("[cognitive] Decision with memory failed: {}", e);
+                                Intent::new(ws.agent_id.unwrap_or_default(), ws.tick_id, "idle", None)
+                                    .with_thought(format!("认知失败: {}", e))
+                            }
+                        }
+                    })
+                });
 
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
@@ -708,6 +727,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .device_config(device.clone())
                 .data_dir(data_dir.clone())
                 .with_decision_feedback(cognitive_decision_with_feedback)
+                .with_decision_memory(decision_with_memory)
                 .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())

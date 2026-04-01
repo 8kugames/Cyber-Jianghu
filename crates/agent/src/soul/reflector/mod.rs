@@ -13,9 +13,6 @@ pub mod store;
 pub mod types;
 pub mod validator;
 
-pub use cognitive_validator::{
-    CognitiveEngineWithRetry, CognitiveValidationResult, CognitiveValidator,
-};
 pub use prompt::{ObserverPrompt, sanitize_for_prompt};
 pub use rule_engine::RuleEngine as RuleEngineValidator;
 pub use rule_engine::{
