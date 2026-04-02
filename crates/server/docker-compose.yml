@@ -70,7 +70,8 @@ services:
     ports:
       - "${SERVER_PORT:-23333}:23333"
     volumes:
-      # 配置文件挂载（数据驱动架构 - 支持热插拔）
+      # 配置文件挂载（数据驱动架构）
+      # 如果 ./config 目录为空，entrypoint 会自动填充默认配置
       - ./config:/app/config
       # 日志持久化
       - ./logs:/app/logs

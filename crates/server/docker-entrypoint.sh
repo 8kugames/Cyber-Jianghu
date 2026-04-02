@@ -67,6 +67,15 @@ run_migrations() {
 
 # 以 root 用户运行时：修复权限、迁移数据库、切换到非 root 用户
 if [ "$(id -u)" = "0" ]; then
+    # 配置目录初始化：如果 /app/config 为空（volume 挂载了空目录），自动填充默认配置
+    if [ -d "/app/default_config" ] && [ -d "/app/config" ]; then
+        if [ -z "$(ls -A /app/config 2>/dev/null)" ]; then
+            echo "[INFO] /app/config 为空，从默认配置填充..."
+            cp -rT /app/default_config /app/config
+            echo "[INFO] 默认配置已填充到 /app/config"
+        fi
+    fi
+
     # 修复 logs 目录权限
     if [ -d "/app/logs" ]; then
         CURRENT_OWNER=$(stat -c '%u:%g' /app/logs 2>/dev/null || stat -f '%u:%g' /app/logs)
