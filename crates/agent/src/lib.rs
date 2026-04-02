@@ -73,14 +73,16 @@ pub mod models;
 // ============================================================================
 
 // 通信层
-pub use infra::transport::{AgentClient, ConnectError, ServerConfig as TransportServerConfig, WebSocketClient};
+pub use infra::transport::{
+    AgentClient, ConnectError, ServerConfig as TransportServerConfig, WebSocketClient,
+};
 
 // 核心
 pub use core::{Agent, AgentBuilder};
 
 // 双魂系统
 pub use soul::actor::{
-    CognitiveChain, CognitiveEngineConfig, CognitiveStage, CognitiveEngine, StageOutput,
+    CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
 pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{
@@ -88,9 +90,9 @@ pub use soul::reflector::rule_engine::{
     RuleValidationResult,
 };
 pub use soul::reflector::{
-    ObserverPrompt, PendingReview, PendingReviewEntry, PersonaInfo,
-    ReflectorSoul, RejectionType, ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest,
-    ValidationResult, Validator, sanitize_for_prompt,
+    ObserverPrompt, PendingReview, PendingReviewEntry, PersonaInfo, ReflectorSoul, RejectionType,
+    ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest, ValidationResult, Validator,
+    sanitize_for_prompt,
 };
 
 // 运行模式

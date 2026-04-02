@@ -7,12 +7,9 @@ use std::sync::Arc;
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
 use cyber_jianghu_agent::models::WorldState;
 use cyber_jianghu_agent::soul::actor::stages::{
-    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse,
-    StageOutput,
+    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };
-use cyber_jianghu_agent::soul::actor::{
-    CognitiveChain, CognitiveEngineConfig, CognitiveEngine,
-};
+use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine, CognitiveEngineConfig};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
 // ============================================================================

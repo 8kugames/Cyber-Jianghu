@@ -226,4 +226,3 @@ impl SemanticSearchable for SemanticMemoryBackend {
         Ok(())
     }
 }
-

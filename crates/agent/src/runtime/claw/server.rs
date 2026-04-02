@@ -247,7 +247,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
                             let deadline_ms = state.get_deadline_ms();
                             // 生成叙事化上下文
                             let context = state.generate_context(&world_state);
-                            // 生成四阶段认知上下文
+                            // 生成认知上下文
                             let cognitive_context = state.generate_cognitive_context(&world_state);
                             let msg = DownstreamMessage::Tick {
                                 tick_id: world_state.tick_id,

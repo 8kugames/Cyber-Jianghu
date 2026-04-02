@@ -46,7 +46,7 @@ use cyber_jianghu_agent::{
         CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
         cognitive_decision_with_retry,
     },
-    soul::actor::{CognitiveEngineConfig, CognitiveEngine},
+    soul::actor::{CognitiveEngine, CognitiveEngineConfig},
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
@@ -592,18 +592,18 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Compute data directory
     let data_dir = match &character {
-        Some(c) if c.agent_id.is_some() => {
-            server_dir
-                .join("characters")
-                .join(c.agent_id.unwrap().to_string())
-                .join("data")
-        }
+        Some(c) if c.agent_id.is_some() => server_dir
+            .join("characters")
+            .join(c.agent_id.unwrap().to_string())
+            .join("data"),
         _ => server_dir.join("data"),
     };
 
     let device_id = Arc::new(RwLock::new(device_id_value));
 
-    let persona_info = character.as_ref()
+    let persona_info =
+        character
+            .as_ref()
             .map(|c| cyber_jianghu_agent::soul::reflector::PersonaInfo {
                 gender: c.gender.clone(),
                 age: c.age,
@@ -651,10 +651,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 temperature: config.llm.temperature,
                 max_tokens_per_stage: config.llm.max_tokens,
             };
-            let cognitive_engine = Arc::new(CognitiveEngine::new(
-                llm_arc.clone(),
-                cognitive_config,
-            ));
+            let cognitive_engine =
+                Arc::new(CognitiveEngine::new(llm_arc.clone(), cognitive_config));
 
             let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
                 Arc::new(cognitive_decision_with_retry(
@@ -690,8 +688,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                             Ok(chain) => chain.final_intent,
                             Err(e) => {
                                 error!("[cognitive] Decision with memory failed: {}", e);
-                                Intent::new(ws.agent_id.unwrap_or_default(), ws.tick_id, "idle", None)
-                                    .with_thought(format!("认知失败: {}", e))
+                                Intent::new(
+                                    ws.agent_id.unwrap_or_default(),
+                                    ws.tick_id,
+                                    "idle",
+                                    None,
+                                )
+                                .with_thought(format!("认知失败: {}", e))
                             }
                         }
                     })
@@ -700,8 +703,16 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let (reconnect_tx, reconnect_rx) =
                 mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
 
-            let (api_state, actual_port) =
-                start_http_api_server(port, device_id.clone(), &config, ws_url, &device, server_dir.clone(), data_dir.clone(), Some(reconnect_tx))?;
+            let (api_state, actual_port) = start_http_api_server(
+                port,
+                device_id.clone(),
+                &config,
+                ws_url,
+                &device,
+                server_dir.clone(),
+                data_dir.clone(),
+                Some(reconnect_tx),
+            )?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -748,7 +759,15 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
-            let setup = start_claw_server(port, device_id.clone(), &config, ws_url, &device, server_dir.clone(), data_dir.clone())?;
+            let setup = start_claw_server(
+                port,
+                device_id.clone(),
+                &config,
+                ws_url,
+                &device,
+                server_dir.clone(),
+                data_dir.clone(),
+            )?;
             cognitive_death_event_tx = None;
             cognitive_api_state = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
@@ -812,10 +831,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 };
 
                 let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
-                let cognitive_engine = Arc::new(CognitiveEngine::new(
-                    llm_client.clone(),
-                    cognitive_config,
-                ));
+                let cognitive_engine =
+                    Arc::new(CognitiveEngine::new(llm_client.clone(), cognitive_config));
                 info!("CognitiveEngine 已创建（Claw 模式统一认知架构）");
 
                 let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
@@ -1140,4 +1157,3 @@ fn start_http_api_server(
     let final_port = actual_port;
     Ok((Arc::new(api_state), final_port))
 }
-

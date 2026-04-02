@@ -62,7 +62,7 @@ pub enum DownstreamMessage {
         /// 叙事化上下文（Markdown 格式，供 LLM 推理使用）
         #[serde(skip_serializing_if = "Option::is_none")]
         context: Option<String>,
-        /// 四阶段认知上下文（结构化 JSON，引导 OpenClaw 四阶段推理）
+        /// 认知上下文（结构化 JSON，引导 OpenClaw 按阶段推理）
         /// 包含：Perception → Motivation → Planning → Decision
         #[serde(skip_serializing_if = "Option::is_none")]
         cognitive_context: Option<crate::infra::api::cognitive_context::CognitiveContext>,

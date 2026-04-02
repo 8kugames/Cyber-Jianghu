@@ -11,7 +11,6 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::component::llm::LlmClient;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
 use crate::component::memory::tools::{MemoryToolDefinition, MemoryToolResult};
@@ -83,9 +82,6 @@ pub struct Agent {
     /// 死亡是否已报告（避免重复日志）
     pub(crate) death_reported: bool,
 
-    /// ActorSoul 当前 LLM Client
-    pub(crate) actor_llm_client: Option<std::sync::Arc<dyn LlmClient>>,
-
     /// ActorSoul LLM Client 容器（支持热重载）
     ///
     /// 与 `ClawDecisionState.llm` 共享同一个 `RwLock`，
@@ -151,7 +147,6 @@ impl Agent {
             reconnect_backoff: 0,
             reconnect_rx,
             death_reported: false,
-            actor_llm_client: None,
             actor_llm_container: None,
             config_reload_rx: None,
             http_api_state: None,
@@ -482,7 +477,11 @@ impl Agent {
     /// 单次 LLM 调用，无 retry 循环。
     /// 审查通过返回原始 Intent，审查拒绝返回 idle Intent。
     /// LLM 错误时 fail-open（自动通过）。
-    pub async fn validate_with_reflector(&mut self, intent: Intent, world_state: &WorldState) -> Result<Intent> {
+    pub async fn validate_with_reflector(
+        &mut self,
+        intent: Intent,
+        world_state: &WorldState,
+    ) -> Result<Intent> {
         let validator = match &self.validator {
             Some(v) => v,
             None => return Ok(intent),
@@ -507,11 +506,15 @@ impl Agent {
         match validation_result {
             crate::soul::reflector::ValidationResult::Approved { reason, narrative } => {
                 info!("ReflectorSoul approved: {:?}", reason);
-                self.save_observer_narrative(world_state.tick_id, &narrative).await?;
+                self.save_observer_narrative(world_state.tick_id, &narrative)
+                    .await?;
                 self.last_rejection_reason = None;
                 Ok(intent)
             }
-            crate::soul::reflector::ValidationResult::Rejected { reason, rejection_type } => {
+            crate::soul::reflector::ValidationResult::Rejected {
+                reason,
+                rejection_type,
+            } => {
                 warn!("ReflectorSoul rejected: {} [{:?}]", reason, rejection_type);
                 self.last_rejection_reason = Some(reason.clone());
                 let agent_id = self.client.agent_id().await.unwrap_or_default();

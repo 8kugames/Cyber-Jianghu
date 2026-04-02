@@ -358,7 +358,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/context", get(handlers::get_context_handler)) // 获取格式化上下文
         .route("/api/v1/attributes", get(handlers::get_attributes_handler)) // 梦中一瞥：属性数值
         .route("/api/v1/tick", get(handlers::get_tick_status_handler)) // 获取 Tick 状态（轮询用）
-        // === 认知上下文端点（引导 OpenClaw 四阶段推理）===
+        // === 认知上下文端点（引导 OpenClaw 按阶段推理）===
         .route(
             "/api/v1/cognitive",
             get(handlers::get_cognitive_context_handler),
@@ -606,7 +606,9 @@ pub fn create_http_state(
 
     // 初始化数据目录（server-scoped）
     let data_dir = if !current_agent_id.is_nil() {
-        character_dir.join(current_agent_id.to_string()).join("data")
+        character_dir
+            .join(current_agent_id.to_string())
+            .join("data")
     } else {
         server_dir.join("data")
     };
@@ -787,7 +789,12 @@ impl HttpApiState {
         let mut dream = dream_store.write().await;
 
         let agent_id = *self.agent_id.read().await;
-        let dream_dir = self.character_dir.read().await.join(agent_id.to_string()).join("data");
+        let dream_dir = self
+            .character_dir
+            .read()
+            .await
+            .join(agent_id.to_string())
+            .join("data");
         dream.ensure_loaded(&dream_dir, &agent_id);
 
         let mut changed = false;
@@ -899,10 +906,7 @@ impl HttpApiState {
             auth_token: String,
         }
 
-        let result: ConnectResponse = response
-            .json()
-            .await
-            .context("解析刷新令牌响应失败")?;
+        let result: ConnectResponse = response.json().await.context("解析刷新令牌响应失败")?;
 
         info!("设备 {} 的令牌刷新成功", device_id);
 

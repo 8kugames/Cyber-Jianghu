@@ -19,9 +19,9 @@ pub mod utils;
 pub use agent::{Agent, PersonaValidationResult};
 pub use builder::AgentBuilder;
 
-// 从 soul::actor 重导出认知引擎类型（向后兼容）
+// 从 soul::actor 重导出认知引擎类型
 pub use crate::soul::actor::{
-    CognitiveChain, CognitiveEngineConfig, CognitiveStage, CognitiveEngine, StageOutput,
+    CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
 
 // 从 runtime 模块重导出决策类型

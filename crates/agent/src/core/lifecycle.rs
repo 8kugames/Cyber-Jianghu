@@ -62,7 +62,10 @@ impl super::Agent {
             match self.client.connect().await {
                 Ok(()) => break,
                 Err(ConnectError::AuthFailed) => {
-                    warn!("WebSocket auth failed (attempt {}), refreshing token...", connect_attempt);
+                    warn!(
+                        "WebSocket auth failed (attempt {}), refreshing token...",
+                        connect_attempt
+                    );
                     match self.refresh_device_token().await {
                         Ok(()) => {
                             info!("Token refreshed, retrying connection...");
@@ -151,7 +154,34 @@ impl super::Agent {
         }
 
         // 等待注册确认（包含游戏规则）
-        let (agent_id, game_rules) = self.client.wait_for_registration().await?;
+        // 如果收到 "Pending registration" 错误，说明需要创建角色，等待后重连重试
+        const MAX_REGISTRATION_RETRIES: u32 = 12; // 最多等待 60 秒
+        let (agent_id, game_rules) = loop {
+            match self.client.wait_for_registration().await {
+                Ok((id, rules)) => break (id, rules),
+                Err(e) if format!("{}", e).contains("Pending registration") => {
+                    self.reconnect_backoff += 1;
+                    if self.reconnect_backoff > MAX_REGISTRATION_RETRIES {
+                        return Err(anyhow::anyhow!(
+                            "Timeout waiting for character creation (waited {} seconds)",
+                            self.reconnect_backoff * 5
+                        ));
+                    }
+                    info!(
+                        "等待角色创建，Agent '{}' 将于 5 秒后重连... (attempt {}/{})",
+                        self.character_name(),
+                        self.reconnect_backoff,
+                        MAX_REGISTRATION_RETRIES
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    self.client.close().await;
+                    self.client.connect().await?;
+                }
+                Err(e) => return Err(e),
+            }
+        };
+        // 重置重试计数器
+        self.reconnect_backoff = 0;
         info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
 
@@ -268,10 +298,7 @@ impl super::Agent {
                                 Ok(client) => {
                                     let new_client = std::sync::Arc::new(client);
 
-                                    // 更新 actor_llm_client（向后兼容）
-                                    self.actor_llm_client = Some(new_client.clone());
-
-                                    // 更新 actor_llm_container（真正热重载）
+                                    // 更新 actor_llm_container（热重载）
                                     // 决策回调会自动使用新的 LLM Client
                                     if let Some(ref container) = self.actor_llm_container {
                                         let mut guard = container.write().await;
@@ -547,7 +574,10 @@ impl super::Agent {
                     return Ok(());
                 }
                 Err(ConnectError::AuthFailed) => {
-                    warn!("重连 auth failed (attempt {}), refreshing token...", attempt);
+                    warn!(
+                        "重连 auth failed (attempt {}), refreshing token...",
+                        attempt
+                    );
                     match self.refresh_device_token().await {
                         Ok(()) => {
                             info!("Token refreshed, retrying reconnection...");
@@ -626,9 +656,7 @@ impl super::Agent {
         // 更新本地 device_config 并持久化
         if let Some(ref mut device) = self.device_config {
             device.auth_token = result.auth_token.clone();
-            if let Err(e) = device.save_to_file(
-                &self.config.device_yaml_path(&device.server_url),
-            ) {
+            if let Err(e) = device.save_to_file(&self.config.device_yaml_path(&device.server_url)) {
                 warn!("Failed to persist refreshed token: {}", e);
             }
         }
