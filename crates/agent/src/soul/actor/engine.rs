@@ -22,7 +22,7 @@ use crate::infra::api::thinking_log;
 use crate::models::{Intent, WorldState};
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
 
-/// 多阶段认知引擎配置
+/// 认知引擎配置
 #[derive(Clone, Debug)]
 pub struct CognitiveEngineConfig {
     /// Agent 名称
@@ -53,13 +53,13 @@ impl Default for CognitiveEngineConfig {
 ///
 /// 通过强制执行 Perception+Motivation → Planning+Decision 流程，
 /// 在保留深度思考的同时将 LLM 调用从 4 次减少到 2 次。
-pub struct MultiStageCognitiveEngine {
+pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: CognitiveEngineConfig,
 }
 
-impl MultiStageCognitiveEngine {
-    /// 创建新的多阶段认知引擎
+impl CognitiveEngine {
+    /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         Self { llm_client, config }
     }
@@ -197,7 +197,7 @@ impl MultiStageCognitiveEngine {
         prompt: &str,
         world_state: &WorldState,
     ) -> Result<(String, StageOutput, StageOutput, Intent)> {
-        let response: PlanDecisionResponse = self.llm_client.complete_json(prompt).await?;
+        let mut response: PlanDecisionResponse = self.llm_client.complete_json(prompt).await?;
 
         let response_json = serde_json::to_string(&response)?;
 
@@ -226,7 +226,7 @@ impl MultiStageCognitiveEngine {
         let action_data = if response.action_data.is_null() {
             None
         } else {
-            Some(response.action_data.clone())
+            Some(std::mem::take(&mut response.action_data))
         };
 
         let intent = Intent::new(agent_id, tick_id, action_type.as_str(), action_data)
@@ -419,7 +419,7 @@ impl MultiStageCognitiveEngine {
 |--------|---------------------|------|
 | idle | (无) | 休息 |
 | speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
-| move | {{"target_location": "位置名"}} | 移动到指定位置 |
+| move | {{"target_location": "可达位置名称（必须与感知阶段列出的可达位置完全一致，不能自行编造）"}} | 移动到指定位置 |
 | use | {{"item_id": "物品名"}} | 使用背包中的物品 |
 | attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
 | pickup | {{"item_id": "物品名"}} | 从地面拾取物品 |
@@ -448,7 +448,7 @@ impl MultiStageCognitiveEngine {
 // 创建 DecisionCallback 的便捷方法
 // ============================================================================
 
-impl MultiStageCognitiveEngine {
+impl CognitiveEngine {
     /// 创建决策回调（兼容现有 Agent 接口）
     pub fn create_decision_callback(self) -> crate::runtime::DecisionCallback {
         let engine = Arc::new(self);

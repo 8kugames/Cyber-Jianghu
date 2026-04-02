@@ -1,17 +1,17 @@
 //! 认知引擎集成测试
 //!
-//! 测试 MultiStageCognitiveEngine + CognitiveValidator 的完整认知流程
+//! 测试 CognitiveEngine + CognitiveValidator 的完整认知流程
 
 use std::sync::Arc;
 
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
 use cyber_jianghu_agent::models::WorldState;
 use cyber_jianghu_agent::soul::actor::stages::{
-    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionResponse, PlanningResponse,
+    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse,
     StageOutput,
 };
 use cyber_jianghu_agent::soul::actor::{
-    CognitiveChain, CognitiveEngineConfig, MultiStageCognitiveEngine,
+    CognitiveChain, CognitiveEngineConfig, CognitiveEngine,
 };
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
@@ -31,28 +31,20 @@ fn make_minimal_world_state(tick_id: i64) -> WorldState {
 }
 
 fn make_mock_client() -> MockLlmClient {
-    let perception = serde_json::to_string(&PerceptionResponse {
+    let perception_motivation = serde_json::to_string(&PerceptionMotivationResponse {
         self_status: "健康，饥饿度适中".to_string(),
         environment: "村口集市，人来人往".to_string(),
         key_observations: vec!["有个摊贩卖包子".to_string(), "远处有人在练武".to_string()],
-    })
-    .unwrap();
-
-    let motivation = serde_json::to_string(&MotivationResponse {
         primary_drive: "获取食物".to_string(),
         drive_intensity: 7,
         reasoning: "肚子有点饿了，需要补充体力".to_string(),
     })
     .unwrap();
 
-    let planning = serde_json::to_string(&PlanningResponse {
+    let plan_decision = serde_json::to_string(&PlanDecisionResponse {
         steps: vec!["走向包子摊".to_string(), "购买包子".to_string()],
         priority: 7,
         expected_outcome: "获得食物，恢复体力".to_string(),
-    })
-    .unwrap();
-
-    let decision = serde_json::to_string(&DecisionResponse {
         thought_process:
             "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作"
                 .to_string(),
@@ -61,11 +53,7 @@ fn make_mock_client() -> MockLlmClient {
     })
     .unwrap();
 
-    let all_responses = format!(
-        "{}\n---\n{}\n---\n{}\n---\n{}",
-        perception, motivation, planning, decision
-    );
-
+    let all_responses = format!("{}\n---\n{}", perception_motivation, plan_decision);
     MockLlmClient::with_response(&all_responses)
 }
 
@@ -92,7 +80,7 @@ mod tests {
     #[tokio::test]
     async fn test_cognitive_engine_with_defaults() {
         let mock = Arc::new(make_mock_client());
-        let _engine = MultiStageCognitiveEngine::with_defaults(mock);
+        let _engine = CognitiveEngine::with_defaults(mock);
     }
 
     #[tokio::test]
@@ -233,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_cognitive_engine_create_callback() {
         let mock = Arc::new(make_mock_client());
-        let engine = MultiStageCognitiveEngine::with_defaults(mock);
+        let engine = CognitiveEngine::with_defaults(mock);
         let callback = engine.create_decision_callback();
 
         let world_state = make_minimal_world_state(1);
@@ -247,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn test_cognitive_engine_full_flow() {
         let mock = Arc::new(make_mock_client());
-        let engine = MultiStageCognitiveEngine::with_defaults(mock);
+        let engine = CognitiveEngine::with_defaults(mock);
 
         let world_state = make_minimal_world_state(1);
         let result = engine.think(&world_state).await;

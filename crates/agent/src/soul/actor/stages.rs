@@ -74,17 +74,6 @@ impl StageOutput {
     }
 }
 
-/// 感知阶段响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PerceptionResponse {
-    /// 自身状态摘要
-    pub self_status: String,
-    /// 环境观察
-    pub environment: String,
-    /// 识别到的关键信息
-    pub key_observations: Vec<String>,
-}
-
 /// 感知+动机合并阶段响应
 ///
 /// Perception 和 Motivation 合并为单次 LLM 调用，
@@ -105,28 +94,6 @@ pub struct PerceptionMotivationResponse {
     pub reasoning: String,
 }
 
-/// 动机阶段响应（保留用于兼容）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MotivationResponse {
-    /// 当前主要驱动力
-    pub primary_drive: String,
-    /// 驱动强度 (1-10)
-    pub drive_intensity: u8,
-    /// 为什么有这个动机
-    pub reasoning: String,
-}
-
-/// 规划阶段响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanningResponse {
-    /// 计划步骤
-    pub steps: Vec<String>,
-    /// 优先级 (1-10)
-    pub priority: u8,
-    /// 预期结果
-    pub expected_outcome: String,
-}
-
 /// 规划+决策合并阶段响应
 ///
 /// Planning 和 Decision 合并为单次 LLM 调用，
@@ -144,21 +111,6 @@ pub struct PlanDecisionResponse {
     /// 选择的动作（对应 actions.yaml 中的 key）
     pub action: String,
     /// 动作参数（直接透传到服务端）
-    #[serde(default)]
-    pub action_data: serde_json::Value,
-}
-
-/// 决策阶段响应
-///
-/// 数据驱动：action 为动作名，action_data 直接透传到服务端。
-/// LLM 必须按服务端要求的字段名输出 action_data，无需 agent 端硬编码映射。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecisionResponse {
-    /// 思考过程（必须引用前面的阶段）
-    pub thought_process: String,
-    /// 选择的动作（对应 actions.yaml 中的 key）
-    pub action: String,
-    /// 动作参数（直接透传到服务端，字段名必须与 actions.yaml 中 required_fields 一致）
     #[serde(default)]
     pub action_data: serde_json::Value,
 }
