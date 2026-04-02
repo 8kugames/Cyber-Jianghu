@@ -125,3 +125,4 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
+crates/agent/docker-compose.integration.yml

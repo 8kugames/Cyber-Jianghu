@@ -111,9 +111,11 @@ WORKDIR /app
 # 从构建阶段复制编译后的二进制文件
 COPY --from=builder /app/server-bin /app/server
 
-# 复制默认配置文件（数据驱动架构 - 支持降级）
-# 运行时可通过 volume 挂载覆盖这些配置
-COPY crates/server/config /app/config
+# 复制默认配置文件到备用位置（数据驱动架构 - 支持降级）
+# 运行时：
+#   1. 如果 /app/config 通过 volume 挂载了外部配置 → 使用外部配置
+#   2. 如果 /app/config 为空 → 从 /app/default_config 自动填充
+COPY crates/server/config /app/default_config
 
 # 复制静态文件（Dashboard 管理面板）
 COPY crates/server/static /app/static
