@@ -80,7 +80,7 @@ pub use core::{Agent, AgentBuilder};
 
 // 双魂系统
 pub use soul::actor::{
-    CognitiveChain, CognitiveEngineConfig, CognitiveStage, MultiStageCognitiveEngine, StageOutput,
+    CognitiveChain, CognitiveEngineConfig, CognitiveStage, CognitiveEngine, StageOutput,
 };
 pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{

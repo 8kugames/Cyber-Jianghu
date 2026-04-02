@@ -11,9 +11,8 @@ pub mod narrative;
 pub mod stages;
 
 pub use chain::CognitiveChain;
-pub use engine::{CognitiveEngineConfig, MultiStageCognitiveEngine};
+pub use engine::{CognitiveEngine, CognitiveEngineConfig};
 pub use narrative::{NarrativeEngine, PerceptionNarrative};
 pub use stages::{
-    CognitiveStage, DecisionResponse, MotivationResponse, PerceptionMotivationResponse,
-    PerceptionResponse, PlanDecisionResponse, PlanningResponse, StageOutput,
+    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };

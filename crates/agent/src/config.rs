@@ -385,7 +385,7 @@ impl Default for RuntimeConfig {
 /// Claw 模式专用配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClawConfig {
-    /// 是否使用统一认知架构（OpenClawBridge + MultiStageCognitiveEngine）
+    /// 是否使用统一认知架构（OpenClawBridge + CognitiveEngine）
     /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
     /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
     #[serde(default = "default_use_unified_cognitive")]

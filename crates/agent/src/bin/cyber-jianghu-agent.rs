@@ -46,7 +46,7 @@ use cyber_jianghu_agent::{
         CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
         cognitive_decision_with_retry,
     },
-    soul::actor::{CognitiveEngineConfig, MultiStageCognitiveEngine},
+    soul::actor::{CognitiveEngineConfig, CognitiveEngine},
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
@@ -651,7 +651,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 temperature: config.llm.temperature,
                 max_tokens_per_stage: config.llm.max_tokens,
             };
-            let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(
+            let cognitive_engine = Arc::new(CognitiveEngine::new(
                 llm_arc.clone(),
                 cognitive_config,
             ));
@@ -789,7 +789,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     info!("LLM 响应转发任务已启动");
                 }
 
-                // 创建 MultiStageCognitiveEngine（与 Cognitive 模式共享架构）
+                // 创建 CognitiveEngine（与 Cognitive 模式共享架构）
                 let agent_name = character
                     .as_ref()
                     .map(|c| c.name.as_str())
@@ -812,11 +812,11 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 };
 
                 let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
-                let cognitive_engine = Arc::new(MultiStageCognitiveEngine::new(
+                let cognitive_engine = Arc::new(CognitiveEngine::new(
                     llm_client.clone(),
                     cognitive_config,
                 ));
-                info!("MultiStageCognitiveEngine 已创建（Claw 模式统一认知架构）");
+                info!("CognitiveEngine 已创建（Claw 模式统一认知架构）");
 
                 let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
                     Arc::new(cognitive_decision_with_retry(
