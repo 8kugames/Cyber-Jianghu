@@ -1,10 +1,11 @@
 // ============================================================================
-// 认知上下文构建器 - 为 OpenClaw 生成结构化四阶段认知上下文
+// 认知上下文构建器 - 为 OpenClaw 生成结构化认知上下文
 // ============================================================================
 //
 // 设计原则：
-// - 将 WorldState 转换为叙事化的四阶段认知上下文
+// - 将 WorldState 转换为叙事化的认知上下文
 // - 引导 OpenClaw 的 LLM 按 Perception → Motivation → Planning → Decision 顺序推理
+//   （验证阶段由 OpenClaw 外部处理，不包含在此上下文中）
 // - 不内置 LLM 调用，仅提供上下文数据
 
 use crate::component::persona::dynamic_persona::DynamicPersona;
@@ -17,7 +18,7 @@ use serde::{Deserialize, Serialize};
 // 认知上下文数据结构
 // ============================================================================
 
-/// 完整的认知上下文（四阶段推理）
+/// 完整的认知上下文（结构化推理引导）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CognitiveContext {
     /// 感知阶段上下文
@@ -152,7 +153,7 @@ impl Default for CognitiveContextConfig {
 
 /// 认知上下文构建器
 ///
-/// 从 WorldState 生成结构化的四阶段认知上下文
+/// 从 WorldState 生成结构化的认知上下文
 pub struct CognitiveContextBuilder {
     /// 叙事引擎
     narrative_engine: NarrativeEngine,

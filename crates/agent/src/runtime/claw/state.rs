@@ -317,7 +317,7 @@ pub struct WsSharedState {
     /// 叙事引擎（可选，用于生成上下文）
     pub narrative_engine: Option<Arc<crate::soul::actor::narrative::NarrativeEngine>>,
 
-    /// 认知上下文构建器（可选，用于生成四阶段认知上下文）
+    /// 认知上下文构建器（可选，用于生成结构化认知上下文）
     pub cognitive_context_builder:
         Option<Arc<crate::infra::api::cognitive_context::CognitiveContextBuilder>>,
 
@@ -480,11 +480,11 @@ impl WsSharedState {
         )
     }
 
-    /// 生成四阶段认知上下文
+    /// 生成认知上下文
     ///
     /// 如果配置了认知上下文构建器，使用构建器生成；否则返回 None
     ///
-    /// 认知上下文用于引导 OpenClaw 进行四阶段推理：
+    /// 认知上下文用于引导 OpenClaw 按以下顺序推理：
     /// 1. Perception (感知): 理解当前世界状态
     /// 2. Motivation (动机): 基于人设生成内在驱动力
     /// 3. Planning (规划): 制定行动计划

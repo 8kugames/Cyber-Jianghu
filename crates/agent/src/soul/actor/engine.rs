@@ -1,11 +1,11 @@
 // ============================================================================
-// 两阶段认知引擎核心
+// 认知引擎核心（5 阶段，非线性管道）
 // ============================================================================
 //
-// 实现 Perception+Motivation → Planning+Decision 的认知流程
-// 通过合并 LLM 调用减少 token 消耗和延迟：
-//   - Stage 1: 感知+动机（单次 LLM 调用，输出观察 + 驱动力）
-//   - Stage 2: 规划+决策（单次 LLM 调用，输出计划 + 最终行动）
+// 5 个认知阶段通过 2 次合并 LLM 调用执行，降低 token 消耗和延迟：
+//   1. 感知 + 2. 动机 → LLM Call 1（Perception+Motivation 合并）
+//   3. 规划 + 4. 决策 → LLM Call 2（Planning+Decision 合并）
+//   5. 验证           → ReflectorSoul（engine 外部执行）
 // ============================================================================
 
 use anyhow::Result;
@@ -49,10 +49,12 @@ impl Default for CognitiveEngineConfig {
     }
 }
 
-/// 两阶段认知引擎
+/// 认知引擎（5 阶段，非线性管道）
 ///
-/// 通过强制执行 Perception+Motivation → Planning+Decision 流程，
-/// 在保留深度思考的同时将 LLM 调用从 4 次减少到 2 次。
+/// 5 个认知阶段通过 2 次合并 LLM 调用执行：
+/// - LLM Call 1: Perception + Motivation（感知+动机）
+/// - LLM Call 2: Planning + Decision（规划+决策）
+/// - Validation 由 ReflectorSoul 在 engine 外部执行
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: CognitiveEngineConfig,
@@ -78,7 +80,8 @@ impl CognitiveEngine {
         world_state: &WorldState,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(world_state, "", validation_feedback).await
+        self.think_with_memory_and_feedback(world_state, "", validation_feedback)
+            .await
     }
 
     /// 使用记忆上下文执行认知流程
@@ -87,7 +90,8 @@ impl CognitiveEngine {
         world_state: &WorldState,
         memory_context: &str,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(world_state, memory_context, None).await
+        self.think_with_memory_and_feedback(world_state, memory_context, None)
+            .await
     }
 
     /// 核心认知流程：支持 memory context + validation feedback
@@ -109,27 +113,40 @@ impl CognitiveEngine {
 
         // === Stage 1: Perception+Motivation (感知+动机，合并为单次 LLM 调用) ===
         let prompt = self.build_perception_motivation_prompt(
-            world_state, memory_context, validation_feedback, &persona_desc,
+            world_state,
+            memory_context,
+            validation_feedback,
+            &persona_desc,
         );
-        let (pm_response, perception, motivation) =
-            self.perceive_and_motivate(&prompt).await?;
+        let (pm_response, perception, motivation) = self.perceive_and_motivate(&prompt).await?;
         chain.add_stage(perception);
         chain.add_stage(motivation);
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Perception+Motivation", &prompt, &pm_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Perception+Motivation",
+            &prompt,
+            &pm_response,
+        );
 
         // === Stage 2: Plan+Decide (规划+决策，合并为单次 LLM 调用) ===
         debug!("执行 Stage 2: Plan+Decide");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
-        let pd_prompt = self.build_plan_decision_prompt(
-            &perception_output, &motivation_output, &persona_desc,
-        );
+        let pd_prompt =
+            self.build_plan_decision_prompt(&perception_output, &motivation_output, &persona_desc);
         let (pd_response, planning, decision, intent) =
             self.plan_and_decide(&pd_prompt, world_state).await?;
         chain.add_stage(planning);
         chain.add_stage(decision);
         chain.final_intent = intent;
-        thinking_log::log_llm(&self.config.agent_name, tick_id, "Planning+Decision", &pd_prompt, &pd_response);
+        thinking_log::log_llm(
+            &self.config.agent_name,
+            tick_id,
+            "Planning+Decision",
+            &pd_prompt,
+            &pd_response,
+        );
 
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
