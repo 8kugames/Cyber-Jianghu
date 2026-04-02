@@ -105,10 +105,16 @@ attack:
  - ReflectorSoul (反思之魂/超我): 审查意图，道德判断（默认启用）
  - `ReviewStore` 共享内存用于进程内审查通信
 
-### 3. 意图控制（双层架构）
+### 3. 意图控制（三层架构）
 
-**第一层: 规则/LLM 验证**（接入 intent 提交链路）:
+**第一层: 认知链质量验证**（决策循环内，重试机制）:
+ - [x] `CognitiveValidator` - 5 条确定性规则（完整性、长度、状态引用、重复检测、连贯性），非 LLM
+ - [x] 验证失败自动重试（`cognitive_decision_with_retry`），反馈注入下一轮 LLM 调用
+ - [x] 达到最大重试后降级使用原始 intent
+
+**第二层: 规则引擎验证**（接入 intent 提交链路）:
  - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
+ - [x] 默认冷却规则: speak/move 动作冷却（`with_default_config()` 预注册）
  - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
  - [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
  - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: 新增 `llm_reflector` 字段

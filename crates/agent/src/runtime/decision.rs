@@ -7,7 +7,9 @@
 //   2. 动机 (Motivation)   ─┘ LLM Call 1（合并）
 //   3. 规划 (Planning)     ─┐
 //   4. 决策 (Decision)     ─┘ LLM Call 2（合并）
-//   5. 验证 (Validation)     ReflectorSoul 同步审查（lifecycle.rs）
+//   5. 验证 (Validation)
+//      5a. CognitiveValidator 认知链质量审查（本文件，重试循环内）
+//      5b. ReflectorSoul 规则/道德审查（lifecycle.rs，外部）
 
 use crate::soul::actor::CognitiveEngine;
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;

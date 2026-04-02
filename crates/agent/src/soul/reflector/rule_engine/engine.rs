@@ -69,7 +69,12 @@ impl RuleEngine {
 
     /// 创建带有默认配置的规则引擎（兼容性方法）
     ///
-    /// 预加载默认的验证规则
+    /// 预加载默认的验证规则（硬编码，未来从 YAML 配置加载）：
+    /// - cooldown_speak: speak 冷却检查（需 history_intents 数据）
+    /// - cooldown_move: move 冷却检查（需 history_intents 数据）
+    ///
+    /// 注意：当前 history_intents 为空，冷却规则暂不触发。
+    /// 当 decision pipeline 接入历史意图数据后自动生效。
     pub fn with_default_config() -> Self {
         let mut rule_set = RuleSet::new();
 
