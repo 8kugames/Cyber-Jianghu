@@ -289,7 +289,7 @@ impl CognitiveEngine {
             self_state
                 .inventory
                 .iter()
-                .map(|i| format!("{} x{}", i.name, i.quantity))
+                .map(|i| format!("{} [{}] x{}", i.name, i.item_id, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -311,7 +311,7 @@ impl CognitiveEngine {
             world_state
                 .nearby_items
                 .iter()
-                .map(|i| i.name.clone())
+                .map(|i| format!("{} [{}] x{}", i.name, i.item_id, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -320,6 +320,30 @@ impl CognitiveEngine {
             String::new()
         } else {
             format!("\n### 相关记忆\n{memory_context}\n")
+        };
+
+        // 从events_log中提取最近说过的话（用于去重）
+        let recent_speeches: Vec<String> = world_state
+            .events_log
+            .iter()
+            .rev()
+            .filter_map(|e| {
+                if e.event_type == "public_message" {
+                    e.metadata.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
+                } else {
+                    None
+                }
+            })
+            .take(5)
+            .collect();
+
+        let recent_speeches_section = if recent_speeches.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n### 最近说过的话（避免重复）\n{}\n",
+                recent_speeches.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n")
+            )
         };
 
         let feedback_section = match validation_feedback {
@@ -364,7 +388,7 @@ impl CognitiveEngine {
 ### 环境
 - 附近的人: {entities}
 - 地上的物品: {items}
-{memory_section}
+{memory_section}{recent_speeches_section}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -388,6 +412,7 @@ impl CognitiveEngine {
             entities = entities_str,
             items = items_str,
             memory_section = memory_section,
+            recent_speeches_section = recent_speeches_section,
             feedback_section = feedback_section,
         )
     }
@@ -436,18 +461,20 @@ impl CognitiveEngine {
 |--------|---------------------|------|
 | idle | (无) | 休息 |
 | speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
-| move | {{"target_location": "node_id（必须使用方括号内的node_id，如 longmen_backyard，不能使用中文名称）"}} | 移动到指定位置 |
-| use | {{"item_id": "物品名"}} | 使用背包中的物品 |
+| dialogue | {{"target_agent_id": "目标ID", "content": "说的话"}} | 私聊，仅目标可见 |
+| move | {{"target_location": "node_id"}} | 移动到指定位置。必须使用方括号内的node_id（如 longmen_backyard），不能使用中文名称 |
+| use | {{"item_id": "item_id"}} | 使用背包中的物品。必须使用方括号内的item_id（如 water、mantou），不能使用中文名称 |
 | attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
-| pickup | {{"item_id": "物品名"}} | 从地面拾取物品 |
-| give | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "quantity": 数量}} | 给予物品 |
-| steal | {{"target_agent_id": "目标AgentID", "item_id": "物品名"}} | 偷取物品 |
-| trade | {{"target_agent_id": "目标AgentID", "item_id": "物品名", "price": 价格}} | 交易 |
-| drop | {{"item_id": "物品名", "quantity": 数量}} | 丢弃物品 |
+| pickup | {{"item_id": "item_id"}} | 从地面拾取物品。必须使用方括号内的item_id |
+| give | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "quantity": 数量}} | 给予物品 |
+| steal | {{"target_agent_id": "目标AgentID", "item_id": "item_id"}} | 偷取物品 |
+| trade | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "price": 价格}} | 交易 |
+| drop | {{"item_id": "item_id", "quantity": 数量}} | 丢弃物品 |
 | gather | {{"target_id": "采集目标ID"}} | 采集资源 |
 | craft | {{"recipe_id": "配方ID"}} | 制造物品 |
 
-注意：target_agent_id 从 entities 列表中获取，item_id 从 inventory 或 nearby_items 中获取。
+**关键规则**: 所有 item_id 和 target_location 必须使用方括号内的英文ID，绝不能用中文名称。例如：物品显示为"清水 [water] x1"时，item_id 必须填 "water"；位置显示为"后院 [longmen_backyard]"时，target_location 必须填 "longmen_backyard"。
+target_agent_id 从 entities 列表中的 agent_id 获取。
 "#,
             agent_name = self.config.agent_name,
             persona = persona_desc,

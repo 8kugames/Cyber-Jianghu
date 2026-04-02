@@ -48,9 +48,9 @@ impl CognitiveValidationResult {
 /// 认知验证器 (Gatekeeper)
 ///
 /// 验证认知链质量，确保 LLM 进行了深度思考
-#[allow(dead_code)]
 pub struct CognitiveValidator {
     /// Agent 人设（预留：基于人设的验证逻辑）
+    #[allow(dead_code)]
     agent_persona: String,
     /// 最小思考长度阈值
     min_thought_length: usize,
