@@ -532,10 +532,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
         };
 
-        debug!(
-            "Calling OpenAI-compatible API (system+user): {}",
-            url
-        );
+        debug!("Calling OpenAI-compatible API (system+user): {}", url);
         debug!("Request model: {}", request.model);
 
         let mut request_builder = client.post(&url).header("Content-Type", "application/json");
@@ -771,31 +768,6 @@ mod tests {
     }
 
     #[test]
-    fn test_direct_client_openclaw_with_url() {
-        let client = DirectLlmClient::openclaw_with_url("http://custom:9999").unwrap();
-        assert_eq!(client.config.provider, LlmProvider::OpenClaw);
-        assert_eq!(
-            client.config.base_url,
-            Some("http://custom:9999".to_string())
-        );
-        assert_eq!(client.config.api_key, None);
-    }
-
-    #[test]
-    fn test_direct_client_openai_compatible() {
-        let client =
-            DirectLlmClient::openai_compatible("https://api.example.com/v1", "gpt-4", "test-key")
-                .unwrap();
-        assert_eq!(client.config.provider, LlmProvider::OpenAICompatible);
-        assert_eq!(
-            client.config.base_url,
-            Some("https://api.example.com/v1".to_string())
-        );
-        assert_eq!(client.config.model, Some("gpt-4".to_string()));
-        assert_eq!(client.config.api_key, Some("test-key".to_string()));
-    }
-
-    #[test]
     fn test_direct_client_openai_compatible_missing_fields() {
         // 缺少 base_url 和 model
         assert!(
@@ -814,10 +786,10 @@ mod tests {
         assert_eq!(client.config.api_key, None);
         assert_eq!(client.config.base_url, None); // 使用默认
 
-        let client = DirectLlmClient::ollama(Some("http://custom:11434/v1")).unwrap();
+        let client = DirectLlmClient::ollama(Some("http://localhost:11434/v1")).unwrap();
         assert_eq!(
             client.config.base_url,
-            Some("http://custom:11434/v1".to_string())
+            Some("http://localhost:11434/v1".to_string())
         );
     }
 

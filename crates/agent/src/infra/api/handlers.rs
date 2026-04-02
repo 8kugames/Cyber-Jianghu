@@ -14,6 +14,7 @@
 // - 记忆端点：memory recent/search/store
 // - 验证端点：intent validation
 
+use anyhow::Context;
 use axum::{
     extract::{Path as AxumPath, State},
     http::{Response, StatusCode},
@@ -28,7 +29,6 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use anyhow::Context;
 
 use crate::config::{CharacterConfig, CharacterStatus};
 
@@ -59,9 +59,7 @@ fn list_characters_from_fs(characters_dir: &Path) -> Result<Vec<CharacterConfig>
         return Ok(vec![]);
     }
     let mut chars = vec![];
-    for entry in std::fs::read_dir(characters_dir)
-        .context("Failed to read characters dir")?
-    {
+    for entry in std::fs::read_dir(characters_dir).context("Failed to read characters dir")? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -72,22 +70,31 @@ fn list_characters_from_fs(characters_dir: &Path) -> Result<Vec<CharacterConfig>
         }
         match CharacterConfig::from_file(&char_yaml) {
             Ok(c) => chars.push(c),
-            Err(e) => warn!("Skipping corrupted character.yaml in {:?}: {}", entry.path(), e),
+            Err(e) => warn!(
+                "Skipping corrupted character.yaml in {:?}: {}",
+                entry.path(),
+                e
+            ),
         }
     }
     Ok(chars)
 }
 
 /// Get active (alive) character from state
-async fn get_active_character(state: &HttpApiState) -> Result<Option<CharacterConfig>, anyhow::Error> {
+async fn get_active_character(
+    state: &HttpApiState,
+) -> Result<Option<CharacterConfig>, anyhow::Error> {
     let character_dir = state.character_dir.read().await.clone();
     let chars = list_characters_from_fs(&character_dir)?;
-    Ok(chars.into_iter().find(|c| c.status == CharacterStatus::Alive))
+    Ok(chars
+        .into_iter()
+        .find(|c| c.status == CharacterStatus::Alive))
 }
 
 /// Save character config to its directory
 fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(), anyhow::Error> {
-    let agent_id = config.agent_id
+    let agent_id = config
+        .agent_id
         .map(|id| id.to_string())
         .unwrap_or_else(|| "unknown".to_string());
     let dir = characters_dir.join(&agent_id);
@@ -206,7 +213,7 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
         ApiEndpoint {
             path: "/api/v1/cognitive".to_string(),
             method: "GET".to_string(),
-            description: "结构化认知上下文（引导 OpenClaw 四阶段推理）".to_string(),
+            description: "结构化认知上下文（引导 OpenClaw 按阶段推理）".to_string(),
             request_example: None,
             response_example: Some(serde_json::json!({
                 "cognitive_context": {
@@ -2122,7 +2129,12 @@ pub struct DreamRecord {
 /// Compute dream data directory for a specific character.
 /// Returns `character_dir / agent_id / data`.
 async fn dream_data_dir(state: &HttpApiState, agent_id: uuid::Uuid) -> std::path::PathBuf {
-    state.character_dir.read().await.join(agent_id.to_string()).join("data")
+    state
+        .character_dir
+        .read()
+        .await
+        .join(agent_id.to_string())
+        .join("data")
 }
 
 /// 托梦状态（存储在 HttpApiState 中）
@@ -2937,15 +2949,20 @@ pub(super) async fn set_server_handler(
     let old_ws_url = state.server_ws_url.read().await.clone();
 
     // 计算新的 http_url
-    let http_url_value = req.http_url.clone().unwrap_or_else(|| {
-        crate::config::ws_to_http_url(&req.ws_url)
-    });
+    let http_url_value = req
+        .http_url
+        .clone()
+        .unwrap_or_else(|| crate::config::ws_to_http_url(&req.ws_url));
 
     // 检查是否切换到了不同的服务器
     let server_changed = old_ws_url != req.ws_url;
 
     // 预计算新服务器目录（server_changed 时两处共用）
-    let new_server_dir = state.server_dir.read().await.parent()
+    let new_server_dir = state
+        .server_dir
+        .read()
+        .await
+        .parent()
         .unwrap_or(state.server_dir.read().await.as_path())
         .to_path_buf()
         .join(crate::config::server_key(&req.ws_url));
@@ -2971,7 +2988,12 @@ pub(super) async fn set_server_handler(
                 // 过滤出该服务器的角色
                 let server_characters: Vec<_> = all_characters
                     .iter()
-                    .filter(|c| c.server_url.as_ref().map(|u| u == &http_url_value).unwrap_or(false))
+                    .filter(|c| {
+                        c.server_url
+                            .as_ref()
+                            .map(|u| u == &http_url_value)
+                            .unwrap_or(false)
+                    })
                     .collect();
 
                 previous_characters = server_characters
@@ -2989,7 +3011,9 @@ pub(super) async fn set_server_handler(
                     .collect();
 
                 // 检查是否有存活角色
-                let has_alive = server_characters.iter().any(|c| c.status == CharacterStatus::Alive);
+                let has_alive = server_characters
+                    .iter()
+                    .any(|c| c.status == CharacterStatus::Alive);
                 if !has_alive {
                     needs_character_creation = true;
                 }
@@ -3536,7 +3560,7 @@ pub struct CognitiveContextResponse {
 
 /// GET /api/v1/cognitive - 获取结构化认知上下文
 ///
-/// 返回引导 OpenClaw LLM 进行四阶段推理的结构化上下文
+/// 返回引导 OpenClaw LLM 进行按阶段推理的结构化上下文
 pub(super) async fn get_cognitive_context_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {

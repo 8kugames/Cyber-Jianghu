@@ -196,9 +196,10 @@ impl AgentBuilder {
         let client = AgentClient::new(self.config.server.clone());
 
         // 设置设备身份
-        let device_ref = self.device_config.as_ref().map(|dc| {
-            (dc.device_id, dc.auth_token.clone())
-        });
+        let device_ref = self
+            .device_config
+            .as_ref()
+            .map(|dc| (dc.device_id, dc.auth_token.clone()));
 
         if let Some((device_id, auth_token)) = device_ref {
             tokio::task::block_in_place(|| {
@@ -210,7 +211,8 @@ impl AgentBuilder {
 
         // 初始化记忆系统
         let memory_manager = if self.enable_memory {
-            let agent_id = self.character_config
+            let agent_id = self
+                .character_config
                 .as_ref()
                 .and_then(|c| c.agent_id)
                 .unwrap_or_else(Uuid::new_v4);
@@ -261,7 +263,6 @@ impl AgentBuilder {
             reconnect_backoff: 0,
             reconnect_rx: self.reconnect_rx,
             death_reported: false,
-            actor_llm_client: self.llm_client,
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,

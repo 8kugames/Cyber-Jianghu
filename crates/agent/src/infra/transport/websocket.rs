@@ -115,8 +115,8 @@ impl WebSocketClient {
         })?;
 
         let url_with_token = self.config.ws_url_with_token(*device_id, auth_token);
-        let url = Url::parse(&url_with_token)
-            .map_err(|e| ConnectError::ConnectionFailed(e.into()))?;
+        let url =
+            Url::parse(&url_with_token).map_err(|e| ConnectError::ConnectionFailed(e.into()))?;
 
         info!("Connecting to {}", self.config.ws_url);
 
@@ -137,12 +137,10 @@ impl WebSocketClient {
                 warn!("WebSocket auth failed (HTTP 400)");
                 Err(ConnectError::AuthFailed)
             }
-            Err(e) => {
-                Err(ConnectError::ConnectionFailed(anyhow::anyhow!(
-                    "Failed to connect to WebSocket server: {}",
-                    e
-                )))
-            }
+            Err(e) => Err(ConnectError::ConnectionFailed(anyhow::anyhow!(
+                "Failed to connect to WebSocket server: {}",
+                e
+            ))),
         }
     }
 

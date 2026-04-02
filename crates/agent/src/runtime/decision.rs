@@ -1,13 +1,13 @@
 // ============================================================================
-// Cognitive Decision - 多阶段认知引擎决策
+// Cognitive Decision - 认知引擎决策
 // ============================================================================
 //
-// 使用内置的 LLM 进行多阶段认知决策：
-// 1. 感知 (Perception) - 理解世界状态
-// 2. 动机 (Motivation) - 生成行动动机
-// 3. 规划 (Planning) - 制定行动计划
-// 4. 决策 (Decision) - 选择最佳意图
-// 5. 验证 (Validation) - 验证意图合法性
+// 5 阶段认知管线（非线性管道）：
+//   1. 感知 (Perception)   ─┐
+//   2. 动机 (Motivation)   ─┘ LLM Call 1（合并）
+//   3. 规划 (Planning)     ─┐
+//   4. 决策 (Decision)     ─┘ LLM Call 2（合并）
+//   5. 验证 (Validation)     ReflectorSoul 同步审查（lifecycle.rs）
 
 use crate::soul::actor::CognitiveEngine;
 use cyber_jianghu_protocol::{Intent, WorldState};
@@ -30,7 +30,7 @@ impl Default for CognitiveDecisionConfig {
 
 /// 创建认知决策函数
 ///
-/// 使用多阶段认知引擎进行决策
+/// 使用认知引擎进行决策（5 阶段管线，2 次合并 LLM 调用）
 pub fn cognitive_decision(
     agent_id: Uuid,
     engine: Arc<CognitiveEngine>,

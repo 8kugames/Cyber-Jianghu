@@ -61,15 +61,11 @@ impl DeviceConfig {
 
 /// 计算服务器目录 key（从 WebSocket URL 派生）
 pub fn server_key(ws_url: &str) -> String {
-    let url = Url::parse(ws_url)
-        .unwrap_or_else(|_| Url::parse(&format!("ws://{}", ws_url)).unwrap());
+    let url =
+        Url::parse(ws_url).unwrap_or_else(|_| Url::parse(&format!("ws://{}", ws_url)).unwrap());
     let host = url.host_str().unwrap_or("localhost");
     let port = url.port().map(|p| format!("-{}", p)).unwrap_or_default();
-    format!(
-        "{}{}",
-        host.replace(['.', ':', '[', ']'], "-"),
-        port
-    )
+    format!("{}{}", host.replace(['.', ':', '[', ']'], "-"), port)
 }
 
 /// Convert WebSocket URL to HTTP URL.
@@ -318,8 +314,8 @@ impl CharacterConfig {
 
     /// 保存角色配置到文件（原子写入：先写临时文件再 rename）
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let content = serde_yaml::to_string(self)
-            .context("Failed to serialize character config")?;
+        let content =
+            serde_yaml::to_string(self).context("Failed to serialize character config")?;
         let path = path.as_ref();
         let tmp_path = path.with_extension("tmp");
         std::fs::write(&tmp_path, &content)
