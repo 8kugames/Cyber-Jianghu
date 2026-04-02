@@ -5,7 +5,14 @@
 // 5 个认知阶段通过 2 次合并 LLM 调用执行，降低 token 消耗和延迟：
 //   1. 感知 + 2. 动机 → LLM Call 1（Perception+Motivation 合并）
 //   3. 规划 + 4. 决策 → LLM Call 2（Planning+Decision 合并）
-//   5. 验证           → ReflectorSoul（engine 外部执行）
+//   5a. CognitiveValidator → 认知链质量审查（本文件/decision.rs 重试循环内，5 条规则）
+//   5b. ReflectorSoul → 规则/道德审查（engine 外部，lifecycle.rs）
+//
+// Prompt 注入上下文：
+//   - 背包/地面物品: "name [item_id] xN" 格式，确保 LLM 使用系统 ID
+//   - 可达位置: "name [node_id]" 格式，同上
+//   - 最近发言: 从 events_log 提取最近 5 条 public_message，用于去重
+//   - 动作表: 含 dialogue 私聊动作，item_id/target_location 强制使用方括号 ID
 // ============================================================================
 
 use anyhow::Result;
