@@ -310,6 +310,24 @@ impl MultiStageCognitiveEngine {
             None => String::new(),
         };
 
+        let adjacent_locations = if world_state.location.adjacent_nodes.is_empty() {
+            "无（当前位置无法移动）".to_string()
+        } else {
+            world_state
+                .location
+                .adjacent_nodes
+                .iter()
+                .map(|n| {
+                    if n.travel_cost > 1 {
+                        format!("{} (耗时{}tick)", n.name, n.travel_cost)
+                    } else {
+                        n.name.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
         format!(
             r#"# 感知与动机阶段 (Perception + Motivation)
 {feedback_section}
@@ -324,6 +342,7 @@ impl MultiStageCognitiveEngine {
 
 ### 位置
 - 地点: {location}
+- 可达位置: {adjacent_locations}
 
 ### 环境
 - 附近的人: {entities}
@@ -348,6 +367,7 @@ impl MultiStageCognitiveEngine {
             self_status_section = self_status_section,
             inventory = inventory_str,
             location = world_state.location.name,
+            adjacent_locations = adjacent_locations,
             entities = entities_str,
             items = items_str,
             memory_section = memory_section,
