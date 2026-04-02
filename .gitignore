@@ -81,9 +81,9 @@ ENV/
 
 # IDE配置文件
 .claude/
-docs/superpowers/*
 .trae/
 .vscode/
+docs/superpowers/*
 
 *.swp
 *.swo
