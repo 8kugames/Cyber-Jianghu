@@ -3,7 +3,7 @@
 //! 提供规则验证的统一入口点，协调注册表和评估器。
 
 use super::evaluator::{ConditionEvaluator, DefaultEvaluator};
-use super::registry::RuleRegistry;
+use super::registry::{RuleRegistry, RuleSet};
 use super::types::{Rule, RuleValidationContext};
 use crate::soul::reflector::{
     PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
@@ -71,8 +71,42 @@ impl RuleEngine {
     ///
     /// 预加载默认的验证规则
     pub fn with_default_config() -> Self {
-        // TODO: 这里可以加载默认规则
-        Self::new()
+        let mut rule_set = RuleSet::new();
+
+        // speak 冷却规则
+        rule_set.add_rule(Rule::new(
+            "cooldown_speak".to_string(),
+            "说话冷却: 连续说话需间隔".to_string(),
+            super::types::RuleType::ActionCooldown,
+            super::types::RuleCondition::And(vec![
+                super::types::RuleCondition::Equals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("speak"),
+                ),
+                super::types::RuleCondition::GreaterThan("cooldown_speak".to_string(), 0.0),
+            ]),
+            "刚说过话，等一会儿再说".to_string(),
+        ));
+
+        // move 冷却规则
+        rule_set.add_rule(Rule::new(
+            "cooldown_move".to_string(),
+            "移动冷却: 连续移动需间隔".to_string(),
+            super::types::RuleType::ActionCooldown,
+            super::types::RuleCondition::And(vec![
+                super::types::RuleCondition::Equals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("move"),
+                ),
+                super::types::RuleCondition::GreaterThan("cooldown_move".to_string(), 0.0),
+            ]),
+            "刚移动过，休息一下再走".to_string(),
+        ));
+
+        Self {
+            registry: Arc::new(RuleRegistry::from_rule_set(rule_set)),
+            evaluator: Box::new(DefaultEvaluator),
+        }
     }
 
     /// 使用自定义评估器创建规则引擎

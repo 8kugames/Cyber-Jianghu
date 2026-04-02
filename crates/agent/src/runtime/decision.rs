@@ -10,10 +10,11 @@
 //   5. 验证 (Validation)     ReflectorSoul 同步审查（lifecycle.rs）
 
 use crate::soul::actor::CognitiveEngine;
+use crate::soul::reflector::cognitive_validator::CognitiveValidator;
 use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 /// Cognitive 决策配置
@@ -72,7 +73,29 @@ pub fn cognitive_decision_with_retry(
                     .think_with_memory_and_feedback(&world_state, "", feedback.as_deref())
                     .await
                 {
-                    Ok(chain) => return chain.final_intent,
+                    Ok(chain) => {
+                        // CognitiveValidator: 验证认知链质量
+                        let validator = CognitiveValidator::new(chain.persona.clone());
+                        let validation = validator.validate(&chain);
+                        if validation.is_valid {
+                            return chain.final_intent;
+                        }
+
+                        let reason = validation.reason.unwrap_or_default();
+                        let suggestion = validation.suggestion.unwrap_or_default();
+                        warn!(
+                            "[cognitive] Validator rejected (attempt {}/{}): {} | suggestion: {}",
+                            attempt + 1,
+                            max_retries + 1,
+                            reason,
+                            suggestion
+                        );
+
+                        if attempt == max_retries {
+                            warn!("[cognitive] Max retries reached, using intent despite validation failure");
+                            return chain.final_intent;
+                        }
+                    }
                     Err(e) => {
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
