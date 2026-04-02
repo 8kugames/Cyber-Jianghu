@@ -336,9 +336,9 @@ impl CognitiveEngine {
                 .iter()
                 .map(|n| {
                     if n.travel_cost > 1 {
-                        format!("{} (耗时{}tick)", n.name, n.travel_cost)
+                        format!("{} [{}] (耗时{}tick)", n.name, n.node_id, n.travel_cost)
                     } else {
-                        n.name.clone()
+                        format!("{} [{}]", n.name, n.node_id)
                     }
                 })
                 .collect::<Vec<_>>()
@@ -436,7 +436,7 @@ impl CognitiveEngine {
 |--------|---------------------|------|
 | idle | (无) | 休息 |
 | speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
-| move | {{"target_location": "可达位置名称（必须与感知阶段列出的可达位置完全一致，不能自行编造）"}} | 移动到指定位置 |
+| move | {{"target_location": "node_id（必须使用方括号内的node_id，如 longmen_backyard，不能使用中文名称）"}} | 移动到指定位置 |
 | use | {{"item_id": "物品名"}} | 使用背包中的物品 |
 | attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
 | pickup | {{"item_id": "物品名"}} | 从地面拾取物品 |
