@@ -360,8 +360,8 @@ fn should_log_retry(attempt: u32) -> bool {
 | 组件                   | 说明                                     |
 | -------------------- | -------------------------------------- |
 | `Validator` Trait    | 验证器接口                                  |
-| `CognitiveValidator` | 基于 LLM 的认知验证器                          |
-| `RuleEngine`         | 规则引擎验证                                 |
+| `CognitiveValidator` | 认知链质量验证器（5 条确定性规则：完整性、长度、状态引用、重复检测、连贯性，**非 LLM**） |
+| `RuleEngine`         | 规则引擎验证（含默认冷却规则：speak/move）            |
 | `ValidationRequest`  | 验证请求 (intent, persona, world\_context) |
 | `ValidationResult`   | 验证结果 (Approved/Rejected)               |
 
