@@ -225,10 +225,27 @@ impl super::Agent {
                         std::future::pending().await
                     }
                 } => {
+                    // 防护：config_path 为空或文件不存在时跳过重载
+                    let config_path = &self.config.config_path;
+                    if config_path.as_os_str().is_empty() || !config_path.exists() {
+                        debug!("配置路径无效，跳过重载: {:?}", config_path);
+                        // drain broadcast channel 中积压的事件，防止死循环
+                        if let Some(ref mut rx) = self.config_reload_rx {
+                            while rx.try_recv().is_ok() {}
+                        }
+                        continue;
+                    }
+
+                    // debounce：drain 积压事件，只处理最后一次
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        while rx.try_recv().is_ok() {}
+                    }
+
                     info!("检测到配置变更，重新加载...");
                     let old_config = self.config.clone();
 
-                    match crate::config::Config::from_file(&self.config.config_path) {
+                    match crate::config::Config::from_file(config_path) {
                         Ok(new_config) => {
                             // 创建新的 LLM 客户端
                             let provider = LlmProvider::parse(&new_config.llm.provider);
