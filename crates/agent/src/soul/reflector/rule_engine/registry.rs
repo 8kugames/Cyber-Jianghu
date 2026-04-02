@@ -97,7 +97,14 @@ impl RuleRegistry {
     /// 创建新的规则注册表
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(RuleSet::new())),
+            inner: Arc::new(tokio::sync::RwLock::new(RuleSet::new())),
+        }
+    }
+
+    /// 从已有的规则集合创建注册表
+    pub fn from_rule_set(rule_set: RuleSet) -> Self {
+        Self {
+            inner: Arc::new(tokio::sync::RwLock::new(rule_set)),
         }
     }
 
