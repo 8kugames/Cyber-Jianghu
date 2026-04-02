@@ -9,7 +9,7 @@
 // 4. 决策 (Decision) - 选择最佳意图
 // 5. 验证 (Validation) - 验证意图合法性
 
-use crate::soul::actor::MultiStageCognitiveEngine;
+use crate::soul::actor::CognitiveEngine;
 use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ impl Default for CognitiveDecisionConfig {
 /// 使用多阶段认知引擎进行决策
 pub fn cognitive_decision(
     agent_id: Uuid,
-    engine: Arc<MultiStageCognitiveEngine>,
+    engine: Arc<CognitiveEngine>,
     _config: CognitiveDecisionConfig,
 ) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
     move |world_state: &WorldState| {
@@ -56,7 +56,7 @@ pub fn cognitive_decision(
 
 pub fn cognitive_decision_with_retry(
     agent_id: Uuid,
-    engine: Arc<MultiStageCognitiveEngine>,
+    engine: Arc<CognitiveEngine>,
     max_retries: usize,
 ) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
     move |world_state: &WorldState, feedback: Option<&str>| {
