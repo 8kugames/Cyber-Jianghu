@@ -450,8 +450,8 @@ mod tests {
     }
 
     #[test]
-    fn test_server_message_error_no_code_backward_compat() {
-        // 确保不带 code 字段的旧消息仍能反序列化
+    fn test_server_message_error_no_code() {
+        // 不带 code 字段时默认为空字符串
         let json = r#"{"type":"error","message":"Something went wrong"}"#;
         let msg: ServerMessage = serde_json::from_str(json).unwrap();
         match msg {

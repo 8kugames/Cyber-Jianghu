@@ -319,12 +319,7 @@ impl DownstreamMessage {
     pub fn from_server_message(msg: ServerMessage, current_tick: i64) -> Option<Self> {
         match msg {
             ServerMessage::Error { code, message } => {
-                let resolved_code = if code.is_empty() {
-                    // 旧版 server 不发 code，回退到文本推断
-                    Self::infer_error_code(&message)
-                } else {
-                    Self::resolve_error_code(&code)
-                };
+                let resolved_code = Self::resolve_error_code(&code);
                 let tick_id = Self::parse_tick_id(&message);
                 Some(DownstreamMessage::ServerError {
                     code: resolved_code,
@@ -425,30 +420,6 @@ impl DownstreamMessage {
             }),
             // 其他消息类型不透传
             _ => None,
-        }
-    }
-
-    /// 解析错误消息推断错误码（旧版 server 不发 code 时的回退方案）
-    fn infer_error_code(message: &str) -> ServerErrorCode {
-        if message.contains("已死亡") || message.contains("dead") || message.contains("死亡") {
-            ServerErrorCode::AgentDead
-        } else if message.contains("Rate limit")
-            || message.contains("速率")
-            || message.contains("limit exceeded")
-        {
-            ServerErrorCode::RateLimited
-        } else if message.contains("tick")
-            && (message.contains("too far")
-                || message.contains("过期")
-                || message.contains("不匹配"))
-        {
-            ServerErrorCode::TickExpired
-        } else if message.contains("Invalid") || message.contains("无效") {
-            ServerErrorCode::InvalidAction
-        } else if message.contains("Validation") || message.contains("验证") {
-            ServerErrorCode::ValidationFailed
-        } else {
-            ServerErrorCode::Unknown
         }
     }
 
@@ -937,51 +908,4 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_infer_error_code_agent_dead() {
-        assert_eq!(
-            DownstreamMessage::infer_error_code("Agent 已死亡"),
-            ServerErrorCode::AgentDead
-        );
-        assert_eq!(
-            DownstreamMessage::infer_error_code("Agent is dead"),
-            ServerErrorCode::AgentDead
-        );
-        assert_eq!(
-            DownstreamMessage::infer_error_code("角色死亡"),
-            ServerErrorCode::AgentDead
-        );
-    }
-
-    #[test]
-    fn test_infer_error_code_rate_limited() {
-        assert_eq!(
-            DownstreamMessage::infer_error_code("Rate limit exceeded"),
-            ServerErrorCode::RateLimited
-        );
-        assert_eq!(
-            DownstreamMessage::infer_error_code("速率限制"),
-            ServerErrorCode::RateLimited
-        );
-    }
-
-    #[test]
-    fn test_infer_error_code_tick_expired() {
-        assert_eq!(
-            DownstreamMessage::infer_error_code("tick too far in future"),
-            ServerErrorCode::TickExpired
-        );
-        assert_eq!(
-            DownstreamMessage::infer_error_code("tick 已过期"),
-            ServerErrorCode::TickExpired
-        );
-    }
-
-    #[test]
-    fn test_infer_error_code_unknown() {
-        assert_eq!(
-            DownstreamMessage::infer_error_code("Some unknown error"),
-            ServerErrorCode::Unknown
-        );
-    }
 }
