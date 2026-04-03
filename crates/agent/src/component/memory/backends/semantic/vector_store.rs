@@ -8,6 +8,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, Row};
+use std::cell::Cell;
 use std::collections::HashMap;
 
 /// 向量点（用于 instant-distance）
@@ -46,6 +47,7 @@ impl instant_distance::Point for VectorPoint {
 /// HNSW 向量存储
 ///
 /// 内存中的 HNSW 索引，支持快速向量检索
+/// 采用延迟重建策略：add()只更新points，search()时才重建索引
 pub struct HnswVectorStore {
     /// HNSW 索引
     index: Option<instant_distance::HnswMap<VectorPoint, ()>>,
@@ -53,6 +55,8 @@ pub struct HnswVectorStore {
     points: HashMap<i64, VectorPoint>,
     /// 向量维度
     dimension: usize,
+    /// 索引是否需要重建（add/remove后标记），使用 Cell 实现内部可变性
+    needs_rebuild: Cell<bool>,
 }
 
 impl HnswVectorStore {
@@ -62,6 +66,7 @@ impl HnswVectorStore {
             index: None,
             points: HashMap::new(),
             dimension,
+            needs_rebuild: Cell::new(false),
         }
     }
 
@@ -113,24 +118,27 @@ impl HnswVectorStore {
         let hnsw = instant_distance::Builder::default().build(points, vec![(); self.points.len()]);
 
         self.index = Some(hnsw);
+        self.needs_rebuild.set(false);
         tracing::info!("Loaded {} vectors from database", self.points.len());
 
         Ok(())
     }
 
-    /// 重建索引（添加新向量后需要调用）
+    /// 重建索引（add/remove后标记需要重建，search时自动触发）
     pub fn rebuild_index(&mut self) {
         if self.points.is_empty() {
             self.index = None;
+            self.needs_rebuild.set(false);
             return;
         }
 
         let points: Vec<VectorPoint> = self.points.values().cloned().collect();
         let hnsw = instant_distance::Builder::default().build(points, vec![(); self.points.len()]);
         self.index = Some(hnsw);
+        self.needs_rebuild.set(false);
     }
 
-    /// 添加新向量
+    /// 添加新向量（延迟重建策略：只更新points，search时才重建索引）
     pub fn add(&mut self, id: i64, vector: Vec<f32>) -> Result<()> {
         if vector.len() != self.dimension {
             anyhow::bail!(
@@ -140,32 +148,27 @@ impl HnswVectorStore {
             );
         }
 
-        // 检查是否已存在
         if self.points.contains_key(&id) {
             tracing::warn!("Vector {} already exists, updating", id);
         }
 
         let point = VectorPoint { id, vector };
         self.points.insert(id, point);
-
-        // 暂时不支持增量更新索引
-        // 重新构建索引
-        let points: Vec<VectorPoint> = self.points.values().cloned().collect();
-
-        // 构建 HNSW 索引
-        let hnsw = instant_distance::Builder::default().build(points, vec![(); self.points.len()]);
-
-        self.index = Some(hnsw);
+        self.needs_rebuild.set(true);
 
         tracing::debug!(
-            "Added new vector to HNSW index, total points: {}",
+            "Added new vector to HNSW store, total points: {} (rebuild pending)",
             self.points.len()
         );
         Ok(())
     }
 
-    /// 搜索最近邻
-    pub fn search(&self, query_vector: &[f32], limit: usize) -> Result<Vec<(i64, f32)>> {
+    /// 搜索最近邻（触发延迟索引重建）
+    pub fn search(&mut self, query_vector: &[f32], limit: usize) -> Result<Vec<(i64, f32)>> {
+        if self.needs_rebuild.get() {
+            self.rebuild_index();
+        }
+
         let Some(index) = &self.index else {
             return Ok(Vec::new());
         };
@@ -196,7 +199,11 @@ impl HnswVectorStore {
 
     /// 移除向量
     pub fn remove(&mut self, id: i64) -> bool {
-        self.points.remove(&id).is_some()
+        let removed = self.points.remove(&id).is_some();
+        if removed {
+            self.needs_rebuild.set(true);
+        }
+        removed
     }
 
     /// 获取向量数量
@@ -213,6 +220,7 @@ impl HnswVectorStore {
     pub fn clear(&mut self) {
         self.index = None;
         self.points.clear();
+        self.needs_rebuild.set(false);
     }
 
     /// 将向量编码为 BLOB
