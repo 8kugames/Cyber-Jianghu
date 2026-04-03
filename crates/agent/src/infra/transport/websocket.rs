@@ -375,22 +375,23 @@ impl WebSocketClient {
                             // 继续等待 WorldState
                         }
                         Ok(msg @ ServerMessage::Error { .. }) => {
-                            let (tick_mismatch, error_message) = if let ServerMessage::Error { message } = &msg {
-                                let is_mismatch = message.contains("tick") && message.contains("不匹配");
-                                (is_mismatch, message.clone())
+                            let message = if let ServerMessage::Error { message } = &msg {
+                                message.clone()
                             } else {
-                                (false, String::new())
+                                unreachable!()
                             };
 
+                            let tick_mismatch = message.contains("tick") && message.contains("不匹配");
+
                             if tick_mismatch {
-                                error!("Tick mismatch detected: {}", error_message);
+                                error!("Tick mismatch detected: {}", message);
                                 if let Some(ref callback) = server_msg_cb {
                                     callback(msg);
                                 }
-                                return Err(anyhow::anyhow!("Tick mismatch: {}", error_message));
+                                return Err(anyhow::anyhow!("Tick mismatch: {}", message));
                             }
 
-                            warn!("Server error: {}", error_message);
+                            warn!("Server error: {}", message);
                             if let Some(ref callback) = server_msg_cb {
                                 callback(msg);
                             }

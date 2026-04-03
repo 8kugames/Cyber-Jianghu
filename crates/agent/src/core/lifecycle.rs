@@ -177,7 +177,8 @@ impl super::Agent {
                             Err(ConnectError::AuthFailed) => {
                                 match self.refresh_device_token().await {
                                     Ok(()) => continue,
-                                    Err(_) => {
+                                    Err(token_err) => {
+                                        warn!("Token 刷新失败 (等待角色创建期间): {}, 5秒后重试", token_err);
                                         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                                     }
                                 }
@@ -339,16 +340,13 @@ impl super::Agent {
                         Ok(state) => state,
                         Err(e) => {
                             let error_msg = format!("{}", e);
-                            // 检查是否是 tick 不匹配错误
-                            if error_msg.contains("Tick mismatch") {
+                            // websocket.rs 已将 tick mismatch 转为 "Tick mismatch: Intent tick_id X 不匹配当前 tick Y..."
+                            if error_msg.starts_with("Tick mismatch") {
+                                // 从 "Intent tick_id X 不匹配当前 tick Y" 中提取服务端 tick
                                 let current_server_tick: Option<i64> = error_msg
                                     .split("当前 tick ")
                                     .nth(1)
-                                    .and_then(|s| s.split_whitespace().next())
-                                    .and_then(|s| {
-                                        let num_str: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-                                        num_str.parse().ok()
-                                    });
+                                    .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok());
                                 
                                 info!("Tick mismatch detected: {}. Server tick: {:?}. Reconnecting...", e, current_server_tick);
                                 
@@ -581,22 +579,10 @@ impl super::Agent {
                     // 7. 发送意图
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
-
-                        // 检查是否是 tick 不匹配错误
-                        let tick_mismatch = format!("{}", e).contains("tick_id")
-                            || format!("{}", e).contains("tick");
-
-                        if tick_mismatch {
-                            match self.recover_from_tick_mismatch().await {
-                                Ok(true) => info!("Tick mismatch recovery succeeded"),
-                                Ok(false) => info!("Tick mismatch recovery skipped, waiting next tick"),
-                                Err(e) => error!("Tick mismatch recovery failed: {}", e),
-                            }
-                        } else {
-                            // 非 tick 错误，简单重连
-                            if let Err(reconnect_err) = self.reconnect().await {
-                                error!("Reconnect failed: {}", reconnect_err);
-                            }
+                        // send_intent 是 fire-and-forget，tick mismatch 由 receive 路径处理
+                        // 此处只需重连
+                        if let Err(reconnect_err) = self.reconnect().await {
+                            error!("Reconnect failed: {}", reconnect_err);
                         }
                     } else {
                         info!(
@@ -605,91 +591,6 @@ impl super::Agent {
                         );
                     }
                 }
-            }
-        }
-    }
-
-    /// Tick 不匹配恢复：获取新 WorldState → 重新决策 → 发送意图
-    ///
-    /// 返回 Ok(true) 表示成功发送，Ok(false) 表示需要 continue
-    async fn recover_from_tick_mismatch(&mut self) -> Result<bool> {
-        // 重连
-        if let Err(e) = self.reconnect().await {
-            error!("Reconnect failed during tick mismatch recovery: {}", e);
-            return Ok(false);
-        }
-
-        // 接收新 WorldState
-        let new_world_state = match self.client.receive_world_state().await {
-            Ok(ws) => {
-                info!("Received fresh WorldState after reconnect: tick={}", ws.tick_id);
-                ws
-            }
-            Err(e) => {
-                error!("Failed to receive WorldState after tick mismatch: {}", e);
-                return Ok(false);
-            }
-        };
-
-        // 更新 HTTP API 状态
-        if let Some(ref api_state) = self.http_api_state {
-            let mut current = api_state.current_state.write().await;
-            *current = Some(new_world_state.clone());
-            let mut last_update = api_state.last_state_update.write().await;
-            *last_update = Some(std::time::Instant::now());
-        }
-
-        // 构建记忆上下文 + 驳回反馈
-        let memory_context = self.get_memory_context().await;
-        let combined_context = match &self.last_rejection_reason {
-            Some(reason) => {
-                if memory_context.is_empty() {
-                    format!("[上次意图被驳回: {}]", reason)
-                } else {
-                    format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
-                }
-            }
-            None => memory_context.clone(),
-        };
-
-        // 重新决策（优先级：memory_callback > feedback_callback > decision_callback）
-        let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
-            memory_callback(&new_world_state, &combined_context).await
-        } else if let Some(ref reason) = self.last_rejection_reason {
-            if let Some(ref callback) = self.decision_with_feedback_callback {
-                callback(&new_world_state, Some(reason.as_str())).await
-            } else {
-                (self.decision_callback)(&new_world_state).await
-            }
-        } else {
-            (self.decision_callback)(&new_world_state).await
-        };
-
-        // ReflectorSoul 验证
-        let final_intent = match self.validate_with_reflector(intent, &new_world_state).await {
-            Ok(validated) => validated,
-            Err(ref e) => {
-                error!("Re-validation failed after tick mismatch: {}", e);
-                return Ok(false);
-            }
-        };
-
-        // 发送意图
-        info!(
-            "Resending intent after tick mismatch: tick={}, action={}",
-            final_intent.tick_id, final_intent.action_type
-        );
-        match self.client.send_intent(&final_intent).await {
-            Ok(()) => {
-                info!(
-                    "Intent resent successfully: tick={}, action={}",
-                    final_intent.tick_id, final_intent.action_type
-                );
-                Ok(true)
-            }
-            Err(e) => {
-                error!("Resend failed: {}", e);
-                Ok(false)
             }
         }
     }

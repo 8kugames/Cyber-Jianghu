@@ -340,47 +340,11 @@ impl CognitiveEngine {
                         e.metadata.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
                     }
                     "action_result" => {
-                        // Server metadata keys: "action", "result", "item_id", "reason", "target", "from"
-                        let action = e.metadata.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                        let result = e.metadata.get("result").and_then(|v| v.as_str()).unwrap_or("");
-                        let reason = e.metadata.get("reason").and_then(|v| v.as_str());
-                        let item_id = e.metadata.get("item_id").and_then(|v| v.as_str());
-                        let target = e.metadata.get("target").and_then(|v| v.as_str());
-
-                        match action {
-                            "use" => {
-                                let item = item_id.unwrap_or("?");
-                                match result {
-                                    "success" => Some(format!("使用了 {}", item)),
-                                    "failed" => Some(format!("使用{}失败: {}", item, reason.unwrap_or("原因未知"))),
-                                    _ => None,
-                                }
-                            }
-                            "gather" => {
-                                let item = item_id.unwrap_or("?");
-                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
-                                Some(format!("采集了 {} 个 {}", qty, item))
-                            }
-                            "move" => {
-                                let new_loc = e.metadata.get("new_location").and_then(|v| v.as_str()).unwrap_or("?");
-                                Some(format!("移动到了 {}", new_loc))
-                            }
-                            "give" => {
-                                let item = item_id.unwrap_or("?");
-                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
-                                Some(format!("给了 {} {} 个 {}", target.unwrap_or("?"), qty, item))
-                            }
-                            "receive" => {
-                                let from = e.metadata.get("from").and_then(|v| v.as_str()).unwrap_or("?");
-                                let item = item_id.unwrap_or("?");
-                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
-                                Some(format!("收到 {} 的 {} 个 {}", from, qty, item))
-                            }
-                            "pickup" => {
-                                let item = item_id.unwrap_or("?");
-                                Some(format!("拾取了 {}", item))
-                            }
-                            _ => None,
+                        // 数据驱动：直接使用 server 提供的 description，不硬编码 action 类型
+                        if e.description.is_empty() {
+                            None
+                        } else {
+                            Some(e.description.clone())
                         }
                     }
                     _ => None
