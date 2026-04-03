@@ -170,7 +170,7 @@ pub struct HttpApiState {
     /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
     pub review_store: Option<Arc<ReviewStore>>,
     /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
-    pub intent_history: Option<Arc<intent_history::IntentHistoryStore>>,
+    pub intent_history: Arc<RwLock<Option<Arc<intent_history::IntentHistoryStore>>>>,
     /// 托梦存储，管理持续 n 回合的念头注入
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
@@ -249,7 +249,7 @@ pub fn http_decision(
             state.api_state.maybe_update_narratives(&world_state).await;
 
             // 持久化 events_log 到 IntentHistory（供经历日志查询）
-            if let Some(ref history) = state.api_state.intent_history {
+            if let Some(history) = state.api_state.intent_history.read().await.as_ref() {
                 let world_time_str = serde_json::to_string(&world_state.world_time).ok();
                 for (i, event) in world_state.events_log.iter().enumerate() {
                     let tick_id =
@@ -700,12 +700,14 @@ pub fn create_http_state(
         dynamic_persona: None,
         narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
-        intent_history: intent_history::IntentHistoryStore::open(
-            current_agent_id,
-            &data_dir.join(format!("intent_history_{}.db", current_agent_id)),
-        )
-        .ok()
-        .map(Arc::new),
+        intent_history: Arc::new(RwLock::new(
+            intent_history::IntentHistoryStore::open(
+                current_agent_id,
+                &data_dir.join(format!("intent_history_{}.db", current_agent_id)),
+            )
+            .ok()
+            .map(Arc::new),
+        )),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx,
         death_event_tx,

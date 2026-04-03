@@ -612,7 +612,7 @@ pub(super) async fn submit_intent_handler(
     };
 
     // 记录到 IntentHistoryStore（用于经历日志查询）
-    if let Some(history) = &state.intent_history {
+    if let Some(history) = state.intent_history.read().await.as_ref() {
         history
             .record_intent(
                 tick_id,
@@ -1642,8 +1642,8 @@ pub struct CharacterInfoResponse {
     pub birth_attributes: Option<serde_json::Value>,
     /// 持有物品
     pub inventory: Option<serde_json::Value>,
-    /// 派生属性
-    pub derived_attributes: Option<std::collections::HashMap<String, f32>>,
+    /// 派生属性（带叙事描述）
+    pub derived_attributes: Option<serde_json::Value>,
     /// 当前位置
     pub location: Option<String>,
     /// 当前 Tick
@@ -1739,6 +1739,13 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
             .and_then(|a| a.get("hp"))
             .and_then(|hp| hp.as_i64())
             .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
+            .or_else(|| {
+                match character.status {
+                    CharacterStatus::Dead => Some("dead".to_string()),
+                    CharacterStatus::Retired => Some("retired".to_string()),
+                    CharacterStatus::Alive => Some("alive".to_string()),
+                }
+            })
     };
 
     // 5. 丰富属性数据（添加叙事描述）
@@ -1771,9 +1778,10 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         world_time,
         status,
         is_stale,
-        derived_attributes: current
-            .as_ref()
-            .map(|ws| ws.self_state.derived_attributes.clone()),
+        derived_attributes: enrich_derived_attributes(
+            current.as_ref().map(|ws| ws.self_state.derived_attributes.clone()),
+            &narrative_config,
+        ),
     };
 
     Json(response).into_response()
@@ -1871,9 +1879,10 @@ pub(super) async fn get_character_by_id_handler(
             world_time,
             status,
             is_stale,
-            derived_attributes: current
-                .as_ref()
-                .map(|ws| ws.self_state.derived_attributes.clone()),
+            derived_attributes: enrich_derived_attributes(
+                current.as_ref().map(|ws| ws.self_state.derived_attributes.clone()),
+                &narrative_config,
+            ),
         })
         .into_response();
     }
@@ -2015,6 +2024,46 @@ fn enrich_attributes_with_descriptions(
     Some(serde_json::Value::Object(enriched))
 }
 
+fn enrich_derived_attributes(
+    derived: Option<std::collections::HashMap<String, f32>>,
+    narrative_config: &Option<crate::soul::actor::narrative::NarrativeConfig>,
+) -> Option<serde_json::Value> {
+    let derived = derived?;
+    let enriched: serde_json::Map<String, serde_json::Value> = derived
+        .into_iter()
+        .map(|(key, value)| {
+            let (display_name, description) = narrative_config
+                .as_ref()
+                .and_then(|cfg| cfg.attributes.get(&key))
+                .map(|attr_cfg| {
+                    let name = attr_cfg.display_name.clone();
+                    let desc = attr_cfg
+                        .thresholds
+                        .iter()
+                        .rev()
+                        .find(|t| (value as i32) >= t.min && (value as i32) <= t.max)
+                        .map(|t| t.description.clone())
+                        .unwrap_or_else(|| format!("{}: {:.1}", name, value));
+                    (name, desc)
+                })
+                .unwrap_or_else(|| (key.clone(), format!("{}: {:.1}", key, value)));
+
+            let attr_obj = serde_json::json!({
+                "name": display_name,
+                "current": value,
+                "description": description,
+            });
+            (key, attr_obj)
+        })
+        .collect();
+
+    if enriched.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(enriched))
+    }
+}
+
 /// 经历日志条目
 #[derive(Debug, Clone, Serialize)]
 pub struct ExperienceEntry {
@@ -2063,15 +2112,18 @@ pub(super) async fn get_experiences_handler(
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
 
-    let (entries, total) = match &state.intent_history {
-        Some(history) => match history.get_page(page, limit).await {
-            Ok(result) => result,
-            Err(e) => {
-                tracing::warn!("[experiences] Failed to query intent history: {}", e);
-                (vec![], 0)
-            }
-        },
-        None => (vec![], 0),
+    let (entries, total) = {
+        let history_guard = state.intent_history.read().await;
+        match history_guard.as_ref() {
+            Some(history) => match history.get_page(page, limit).await {
+                Ok(result) => result,
+                Err(e) => {
+                    tracing::warn!("[experiences] Failed to query intent history: {}", e);
+                    (vec![], 0)
+                }
+            },
+            None => (vec![], 0),
+        }
     };
 
     let experiences: Vec<ExperienceEntry> = entries
@@ -2658,8 +2710,14 @@ pub struct CharacterInfo {
     pub age: u8,
     /// 性别
     pub gender: String,
+    /// 外貌描述
+    pub appearance: Option<String>,
     /// 身份
     pub identity: Option<String>,
+    /// 性格特征
+    pub personality: Vec<String>,
+    /// 核心价值观
+    pub values: Vec<String>,
     /// 状态 (alive/dead/retired)
     pub status: String,
     /// 所属服务器 URL
@@ -2700,6 +2758,7 @@ pub(super) async fn list_characters_handler(
     };
 
     let current_server_url = state.server_http_url.read().await.clone();
+    let is_dead = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
     let current_agent_id = {
         let agent_id = state.agent_id.read().await;
         if agent_id.is_nil() {
@@ -2714,17 +2773,26 @@ pub(super) async fn list_characters_handler(
         .iter()
         .map(|c| {
             let is_current = c.agent_id.map(|id| id.to_string()) == current_agent_id;
+            // is_dead=true 时当前角色状态应显示为 dead（文件系统可能仍为 Alive）
+            let status_override = if is_current && is_dead {
+                Some("dead".to_string())
+            } else {
+                None
+            };
             CharacterInfo {
                 agent_id: c.agent_id.map(|id| id.to_string()),
                 name: c.name.clone(),
                 age: c.age,
                 gender: c.gender.clone(),
+                appearance: c.appearance.clone(),
                 identity: c.identity.clone(),
-                status: match c.status {
+                personality: c.personality.clone(),
+                values: c.values.clone(),
+                status: status_override.unwrap_or_else(|| match c.status {
                     CharacterStatus::Alive => "alive".to_string(),
                     CharacterStatus::Dead => "dead".to_string(),
                     CharacterStatus::Retired => "retired".to_string(),
-                },
+                }),
                 server_url: c.server_url.clone(),
                 registered_at: c.registered_at.map(|t| t.to_rfc3339()),
                 is_current,
@@ -2838,10 +2906,26 @@ pub(super) async fn switch_character_handler(
             .into_response();
     }
 
-    // 更新内存中的 agent_id
+    // 更新内存中的 agent_id 并重置死亡状态
     {
         let mut current_agent_id = state.agent_id.write().await;
         *current_agent_id = agent_id;
+    }
+    state
+        .is_dead
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+
+    // 重建 intent_history 以指向新角色的 SQLite 数据库
+    {
+        let characters_dir = state.character_dir.read().await.clone();
+        let data_dir = characters_dir.join(agent_id.to_string()).join("data");
+        let new_history = super::intent_history::IntentHistoryStore::open(
+            agent_id,
+            &data_dir.join(format!("intent_history_{}.db", agent_id)),
+        )
+        .ok()
+        .map(std::sync::Arc::new);
+        *state.intent_history.write().await = new_history;
     }
 
     info!("[character] 切换到角色: {} ({})", character.name, agent_id);
@@ -2854,7 +2938,10 @@ pub(super) async fn switch_character_handler(
             name: character.name.clone(),
             age: character.age,
             gender: character.gender.clone(),
+            appearance: character.appearance.clone(),
             identity: character.identity.clone(),
+            personality: character.personality.clone(),
+            values: character.values.clone(),
             status: "alive".to_string(),
             server_url: character.server_url.clone(),
             registered_at: character.registered_at.map(|t| t.to_rfc3339()),
@@ -2971,17 +3058,17 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
     let has_server = !config.server.ws_url.is_empty();
     let has_llm = config.llm.model.is_some() || config.llm.base_url.is_some();
 
-    // 从文件系统检查是否有活跃角色
-    let has_character = match get_active_character(&state).await {
-        Ok(Some(_)) => true,
-        Ok(None) => false,
-        Err(_) => false,
-    };
+    // is_dead=true 表示角色已死亡/等待转生，即使文件系统仍为 Alive
+    let is_dead = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
 
-    let current_character = match get_active_character(&state).await {
-        Ok(Some(c)) => Some(c.name.clone()),
-        Ok(None) => None,
-        Err(_) => None,
+    // 从文件系统检查是否有活跃角色（is_dead 时视为无活跃角色）
+    let (has_character, current_character) = if is_dead {
+        (false, None)
+    } else {
+        match get_active_character(&state).await {
+            Ok(Some(c)) => (true, Some(c.name.clone())),
+            _ => (false, None),
+        }
     };
 
     let needs_setup = !has_server || !has_llm;
