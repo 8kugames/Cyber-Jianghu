@@ -125,7 +125,7 @@ impl EventContext {
     /// 分类事件类型（静态辅助方法）
     pub fn classify_event(event: &WorldEvent) -> EventType {
         match event.event_type.as_str() {
-            "action_result" => {
+            cyber_jianghu_protocol::EVENT_TYPE_ACTION_RESULT => {
                 let desc = event.description.to_lowercase();
 
                 // 优先检查被动语态（被...攻击）
@@ -155,7 +155,7 @@ impl EventContext {
                 }
                 EventType::Other
             }
-            "environmental_change" => {
+            cyber_jianghu_protocol::EVENT_TYPE_ENVIRONMENTAL_CHANGE => {
                 let desc = event.description.to_lowercase();
                 if desc.contains("饥饿") {
                     return EventType::Hungry;
@@ -165,7 +165,7 @@ impl EventContext {
                 }
                 EventType::Other
             }
-            "social_interaction" => EventType::SocialInteraction,
+            cyber_jianghu_protocol::EVENT_TYPE_SOCIAL_INTERACTION => EventType::SocialInteraction,
             _ => EventType::Other,
         }
     }

@@ -94,7 +94,9 @@ pub fn cognitive_decision_with_retry(
                         );
 
                         if attempt == max_retries {
-                            warn!("[cognitive] Max retries reached, using intent despite validation failure");
+                            warn!(
+                                "[cognitive] Max retries reached, using intent despite validation failure"
+                            );
                             return chain.final_intent;
                         }
                     }
