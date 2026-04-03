@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
-use crate::game_data::registry::{ActionRegistry, ItemRegistry};
+use crate::game_data::registry::ItemRegistry;
 use crate::models::{AgentState, WorldEvent, WorldState};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
 use cyber_jianghu_protocol::{
@@ -286,9 +286,6 @@ impl Broadcaster {
             })
             .collect();
 
-        // 从 ActionRegistry 获取所有可用动作（数据驱动）
-        let available_actions = ActionRegistry::build_available_actions();
-
         // 获取天气描述（数据驱动，目前固定晴天）
         let weather = game_data_cache.get().display_messages.weather.sunny.clone();
 
@@ -345,7 +342,6 @@ impl Broadcaster {
             // 注意：nearby_items 暂未实现，场景物品功能未开发
             nearby_items: vec![],
             events_log: events, // 传递本 Tick 发生的事件
-            available_actions,
             deadline_ms,
         }
     }
@@ -425,9 +421,6 @@ pub fn build_initial_world_state(
         });
     }
 
-    // 可用动作
-    let available_actions = ActionRegistry::build_available_actions();
-
     let weather = game_data_cache.get().display_messages.weather.sunny.clone();
 
     // 属性
@@ -473,7 +466,6 @@ pub fn build_initial_world_state(
         entities: vec![], // 连接时不含其他 agent
         nearby_items: vec![],
         events_log: events,
-        available_actions,
         deadline_ms,
     }
 }

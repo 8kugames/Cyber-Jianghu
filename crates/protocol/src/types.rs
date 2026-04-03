@@ -147,7 +147,6 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
-            available_actions: vec![],
             deadline_ms: 0,
         };
 

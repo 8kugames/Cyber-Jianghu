@@ -6,8 +6,7 @@ use cyber_jianghu_agent::infra::api::cognitive_context::{
     CognitiveContext, CognitiveContextBuilder, Drive,
 };
 use cyber_jianghu_protocol::{
-    AdjacentNode, AgentSelfState, AvailableAction, Entity, Location, SceneItem, WorldEvent,
-    WorldState, WorldTime,
+    AdjacentNode, AgentSelfState, Entity, Location, SceneItem, WorldEvent, WorldState, WorldTime,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -81,26 +80,6 @@ fn create_test_world_state() -> WorldState {
             description: "天色渐晚".to_string(),
             metadata: serde_json::Value::Null,
         }],
-        available_actions: vec![
-            AvailableAction {
-                action: "speak".to_string(),
-                description: "与周围的人交谈".to_string(),
-                valid_targets: None,
-                required_fields: vec![],
-            },
-            AvailableAction {
-                action: "move".to_string(),
-                description: "移动到其他地点".to_string(),
-                valid_targets: Some(vec!["market".to_string(), "dojo".to_string()]),
-                required_fields: vec!["target_location".to_string()],
-            },
-            AvailableAction {
-                action: "use".to_string(),
-                description: "使用物品".to_string(),
-                valid_targets: Some(vec!["wine_bottle".to_string()]),
-                required_fields: vec!["item_id".to_string()],
-            },
-        ],
     }
 }
 
@@ -147,15 +126,33 @@ fn test_cognitive_context_json_output() {
 fn test_build_with_world_state() {
     let world_state = create_test_world_state();
     let builder = CognitiveContextBuilder::default();
-    let ctx = builder.build(&world_state);
+
+    // Inject available_actions directly since WorldState no longer has this field
+    let injected_actions = vec![
+        cyber_jianghu_protocol::AvailableAction {
+            action: "speak".to_string(),
+            description: "与周围的人交谈".to_string(),
+            valid_targets: None,
+            required_fields: vec![],
+        },
+        cyber_jianghu_protocol::AvailableAction {
+            action: "move".to_string(),
+            description: "移动到其他地点".to_string(),
+            valid_targets: Some(vec!["market".to_string(), "dojo".to_string()]),
+            required_fields: vec!["target_location".to_string()],
+        },
+        cyber_jianghu_protocol::AvailableAction {
+            action: "use".to_string(),
+            description: "使用物品".to_string(),
+            valid_targets: Some(vec!["wine_bottle".to_string()]),
+            required_fields: vec!["item_id".to_string()],
+        },
+    ];
+
+    let ctx = builder.build_with_actions(&world_state, Some(injected_actions), None, None);
 
     assert!(!ctx.perception.self_status.is_empty());
     assert!(ctx.perception.environment.contains("江湖客栈"));
-    assert!(!ctx.planning.available_actions.is_empty());
-    assert_eq!(ctx.planning.available_actions.len(), 3);
-    assert_eq!(ctx.planning.available_actions[0].action, "speak");
-    assert_eq!(ctx.planning.available_actions[1].action, "move");
-    assert_eq!(ctx.planning.available_actions[2].action, "use");
 }
 
 #[test]

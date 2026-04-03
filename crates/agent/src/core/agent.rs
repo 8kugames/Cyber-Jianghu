@@ -170,11 +170,7 @@ impl Agent {
     pub(crate) fn character_name(&self) -> &str {
         self.server_assigned_name
             .as_deref()
-            .or_else(|| {
-                self.character_config
-                    .as_ref()
-                    .map(|c| c.name.as_str())
-            })
+            .or_else(|| self.character_config.as_ref().map(|c| c.name.as_str()))
             .unwrap_or("(未创建)")
     }
 

@@ -86,10 +86,6 @@ pub struct WorldState {
     #[serde(default)]
     pub events_log: Vec<WorldEvent>,
 
-    /// 可用动作列表
-    #[serde(default)]
-    pub available_actions: Vec<AvailableAction>,
-
     /// 关单时刻的 Unix 毫秒时间戳（绝对时间）
     /// Agent 应在此时刻之前提交意图
     #[serde(default)]
