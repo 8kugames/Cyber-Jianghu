@@ -64,18 +64,25 @@ impl Default for CognitiveEngineConfig {
 /// - Validation 由 ReflectorSoul 在 engine 外部执行
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
-    config: CognitiveEngineConfig,
+    config: std::sync::RwLock<CognitiveEngineConfig>,
 }
 
 impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
-        Self { llm_client, config }
+        Self { llm_client, config: std::sync::RwLock::new(config) }
     }
 
     /// 使用默认配置创建
     pub fn with_defaults(llm_client: Arc<dyn LlmClient>) -> Self {
         Self::new(llm_client, CognitiveEngineConfig::default())
+    }
+
+    /// 更新 Agent 名称（注册新角色后调用）
+    pub fn update_agent_name(&self, new_name: &str) {
+        let mut config = self.config.write().unwrap();
+        config.agent_name = new_name.to_string();
+        config.persona.name = new_name.to_string();
     }
 
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
@@ -108,15 +115,21 @@ impl CognitiveEngine {
         memory_context: &str,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
+        // Extract owned values from config before any .await to keep the future Send-safe.
+        let (agent_name, persona) = {
+            let cfg = self.config.read().unwrap();
+            (cfg.agent_name.clone(), cfg.persona.clone())
+        };
+
         let start_time = std::time::Instant::now();
         let tick_id = world_state.tick_id;
 
-        info!("[{}-{}] 开始认知流程...", self.config.agent_name, tick_id);
+        info!("[{}-{}] 开始认知流程...", agent_name, tick_id);
 
-        let mut chain = CognitiveChain::from_persona(&self.config.persona, tick_id);
+        let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
         // 缓存 persona description（同一 tick 内人设不变）
-        let persona_desc = self.config.persona.generate_description();
+        let persona_desc = persona.generate_description();
 
         // === Stage 1: Perception+Motivation (感知+动机，合并为单次 LLM 调用) ===
         let prompt = self.build_perception_motivation_prompt(
@@ -124,12 +137,13 @@ impl CognitiveEngine {
             memory_context,
             validation_feedback,
             &persona_desc,
+            &agent_name,
         );
         let (pm_response, perception, motivation) = self.perceive_and_motivate(&prompt).await?;
         chain.add_stage(perception);
         chain.add_stage(motivation);
         thinking_log::log_llm(
-            &self.config.agent_name,
+            &agent_name,
             tick_id,
             "Perception+Motivation",
             &prompt,
@@ -145,6 +159,7 @@ impl CognitiveEngine {
             &motivation_output,
             &persona_desc,
             world_state,
+            &agent_name,
         );
         let (pd_response, planning, decision, intent) =
             self.plan_and_decide(&pd_prompt, world_state).await?;
@@ -152,7 +167,7 @@ impl CognitiveEngine {
         chain.add_stage(decision);
         chain.final_intent = intent;
         thinking_log::log_llm(
-            &self.config.agent_name,
+            &agent_name,
             tick_id,
             "Planning+Decision",
             &pd_prompt,
@@ -164,10 +179,10 @@ impl CognitiveEngine {
 
         info!(
             "[{}-{}] 认知完成，耗时 {}ms",
-            self.config.agent_name, tick_id, chain.duration_ms
+            agent_name, tick_id, chain.duration_ms
         );
 
-        thinking_log::log_thinking(&self.config.agent_name, tick_id, &chain.summarize());
+        thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
 
         Ok(chain)
     }
@@ -283,6 +298,7 @@ impl CognitiveEngine {
         memory_context: &str,
         validation_feedback: Option<&str>,
         persona_desc: &str,
+        agent_name: &str,
     ) -> String {
         let self_state = &world_state.self_state;
 
@@ -428,7 +444,7 @@ impl CognitiveEngine {
   "reasoning": "为什么有这个动机 (50字以内)"
 }}
 "#,
-            agent_name = self.config.agent_name,
+            agent_name = agent_name,
             persona = persona_desc,
             tick_id = world_state.tick_id,
             self_status_section = self_status_section,
@@ -449,6 +465,7 @@ impl CognitiveEngine {
         motivation: &StageOutput,
         persona_desc: &str,
         world_state: &WorldState,
+        agent_name: &str,
     ) -> String {
         // 从 WorldState 动态构建动作表
         let dynamic_action_table = Self::build_dynamic_action_table(world_state);
@@ -500,7 +517,7 @@ impl CognitiveEngine {
 
 target_agent_id 从 entities 列表中的 agent_id 获取。
 "#,
-            agent_name = self.config.agent_name,
+            agent_name = agent_name,
             persona = persona_desc,
             perception = perception.content,
             motivation = motivation.content,

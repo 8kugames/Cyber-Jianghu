@@ -9,6 +9,6 @@ pub use client::mock;
 pub use client::mock::MockLlmClient;
 pub use client::{LlmClient, LlmClientExt};
 pub use direct_client::{
-    DirectLlmClient, DirectLlmClientConfig, LlmProvider, OpenClawConfig, TokenUsageSnapshot,
-    token_usage_tracker,
+    DirectLlmClient, DirectLlmClientConfig, LlmProvider, ModelTokenStats, OpenClawConfig,
+    persist_and_reset, record_token_usage, snapshot_all_stats,
 };

@@ -224,7 +224,12 @@ impl WebSocketClient {
     }
 
     /// 等待注册响应
-    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
+    ///
+    /// 返回值：
+    /// - `Ok(Some((agent_id, game_rules, agent_name)))` - 正常注册
+    /// - `Ok(None)` - 已连接但等待角色注册（agent_id 为 nil，保持连接）
+    /// - `Err(e)` - 连接错误
+    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>)>> {
         let mut state = self.state.write().await;
 
         let ws = state.ws.as_mut().context("Not connected to server")?;
@@ -238,13 +243,13 @@ impl WebSocketClient {
                             agent_id,
                             game_rules,
                             world_building_rules,
-                            ..
+                            is_alive: _,
+                            agent_name,
                         }) => {
-                            // agent_id 为零 = 需要注册新角色
+                            // agent_id 为零 = 需要注册新角色，保持连接
                             if agent_id == Uuid::nil() {
-                                return Err(anyhow::anyhow!(
-                                    "Pending registration: no active character, please register"
-                                ));
+                                info!("已连接服务器，等待角色注册...");
+                                return Ok(None);
                             }
                             state.agent_id = Some(agent_id);
                             state.game_rules = Some(game_rules.clone());
@@ -252,7 +257,7 @@ impl WebSocketClient {
                                 state.world_building_rules = Some(rules);
                             }
                             info!("Agent registered with ID: {}", agent_id);
-                            return Ok((agent_id, game_rules));
+                            return Ok(Some((agent_id, game_rules, agent_name)));
                         }
                         Ok(ServerMessage::Error { message, .. }) => {
                             return Err(anyhow::anyhow!("Server error: {}", message));
@@ -384,7 +389,7 @@ impl WebSocketClient {
                             }
                             // 继续等待 WorldState
                         }
-                        Ok(ServerMessage::Error { code, message }) => {
+                        Ok(ServerMessage::Error { code, message, current_tick_id }) => {
                             let is_tick_mismatch =
                                 code == cyber_jianghu_protocol::ERROR_CODE_TICK_MISMATCH;
 
@@ -393,31 +398,30 @@ impl WebSocketClient {
                                 callback(ServerMessage::Error {
                                     code: code.clone(),
                                     message: message.clone(),
+                                    current_tick_id,
                                 });
                             }
 
                             if is_tick_mismatch {
                                 error!("Tick mismatch detected: {}", message);
-                                // 从 message 解析 current_tick_id（格式由 GameError::TickMismatch Display 决定）
-                                let current_tick_id = message
-                                    .rsplit("tick ")
-                                    .next()
-                                    .and_then(|s| {
-                                        s.chars()
-                                            .take_while(|c| c.is_ascii_digit())
-                                            .collect::<String>()
-                                            .parse::<i64>()
-                                            .ok()
-                                    });
-                                let err = match current_tick_id {
-                                    Some(tid) => TickMismatchError {
-                                        current_tick_id: tid,
-                                        message: message.clone(),
-                                    },
-                                    None => TickMismatchError {
-                                        current_tick_id: 0,
-                                        message: message.clone(),
-                                    },
+                                // 优先使用结构化 current_tick_id，回退到文本解析
+                                let tick_id = current_tick_id.unwrap_or_else(|| {
+                                    // 回退：从 message 文本解析
+                                    message
+                                        .rsplit("当前 tick ")
+                                        .next()
+                                        .and_then(|s| {
+                                            s.chars()
+                                                .take_while(|c| c.is_ascii_digit())
+                                                .collect::<String>()
+                                                .parse::<i64>()
+                                                .ok()
+                                        })
+                                        .unwrap_or(0)
+                                });
+                                let err = TickMismatchError {
+                                    current_tick_id: tick_id,
+                                    message: message.clone(),
                                 };
                                 return Err(err.into());
                             }
@@ -647,7 +651,12 @@ impl AgentClient {
     }
 
     /// 等待注册响应
-    pub async fn wait_for_registration(&self) -> Result<(Uuid, GameRules)> {
+    ///
+    /// 返回值：
+    /// - `Ok(Some((agent_id, game_rules, agent_name)))` - 正常注册
+    /// - `Ok(None)` - 已连接但等待角色注册（agent_id 为 nil）
+    /// - `Err(e)` - 连接错误
+    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>)>> {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }

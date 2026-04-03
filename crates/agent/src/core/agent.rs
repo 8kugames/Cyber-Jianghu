@@ -99,6 +99,13 @@ pub struct Agent {
 
     /// 角色配置（当前活跃角色）
     pub(crate) character_config: Option<CharacterConfig>,
+
+    /// 认知引擎引用（Cognitive 模式，用于注册后更新 agent_name）
+    pub(crate) cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
+
+    /// 服务器分配的角色名称（注册时由 ServerMessage::Registered.agent_name 填充）
+    /// 优先于 character_config.name，解决本地无 character.yaml 时显示"(未创建)"的问题
+    pub(crate) server_assigned_name: Option<String>,
 }
 
 impl Agent {
@@ -109,7 +116,7 @@ impl Agent {
 
     /// 创建新的 Agent（简单构造函数）
     ///
-    /// 注意：此构造函数不初始化记忆系统。如需启用记忆系统，请使用 `Agent::builder()`。
+    /// 注意：此构造函数不初始化记忆系统。如需启用记忆系统，请使用 `agent::builder()`。
     ///
     /// # Arguments
     /// * `config` - Agent 配置
@@ -152,14 +159,22 @@ impl Agent {
             http_api_state: None,
             device_config,
             character_config: None,
+            cognitive_engine: None,
+            server_assigned_name: None,
         }
     }
 
     /// 获取角色名称（如果已创建）
+    ///
+    /// 优先使用服务器返回的角色名，然后本地配置，最后是 "(未创建)"
     pub(crate) fn character_name(&self) -> &str {
-        self.character_config
-            .as_ref()
-            .map(|c| c.name.as_str())
+        self.server_assigned_name
+            .as_deref()
+            .or_else(|| {
+                self.character_config
+                    .as_ref()
+                    .map(|c| c.name.as_str())
+            })
             .unwrap_or("(未创建)")
     }
 

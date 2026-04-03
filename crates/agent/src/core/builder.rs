@@ -53,6 +53,8 @@ pub struct AgentBuilder {
     device_config: Option<DeviceConfig>,
     /// 角色配置（可选，当前活跃角色）
     character_config: Option<CharacterConfig>,
+    /// Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
     /// 数据目录
     data_dir: PathBuf,
 }
@@ -78,6 +80,7 @@ impl AgentBuilder {
             http_api_state: None,
             device_config: None,
             character_config: None,
+            cognitive_engine: None,
             data_dir: PathBuf::from("."),
         }
     }
@@ -185,6 +188,12 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置 Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    pub fn cognitive_engine(mut self, engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>) -> Self {
+        self.cognitive_engine = Some(engine);
+        self
+    }
+
     /// 设置数据目录
     pub fn data_dir(mut self, path: PathBuf) -> Self {
         self.data_dir = path;
@@ -268,6 +277,8 @@ impl AgentBuilder {
             http_api_state: self.http_api_state,
             device_config: self.device_config,
             character_config: self.character_config,
+            cognitive_engine: self.cognitive_engine,
+            server_assigned_name: None,
         }
     }
 }

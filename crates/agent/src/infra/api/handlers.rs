@@ -443,8 +443,9 @@ pub(super) async fn health_handler(State(state): State<HttpApiState>) -> impl In
     let current = state.current_state.read().await;
     let agent_id = *state.agent_id.read().await;
 
+    let is_dead = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
     let response = HealthResponse {
-        status: "ok".to_string(),
+        status: if is_dead { "dead" } else { "ok" }.to_string(),
         agent_id: if agent_id.is_nil() {
             None
         } else {
@@ -1301,11 +1302,11 @@ pub(super) async fn register_character_handler(
     // 2. 生成默认 system_prompt（如果未提供）
     let system_prompt = payload.system_prompt.clone().unwrap_or_else(|| {
         format!(
-            "你是{}，{}，{}岁。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
+            "你是{}，{}岁，{}。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
             payload.name,
-            payload.identity.as_deref().unwrap_or("江湖中人"),
             payload.age,
-            payload.appearance.as_deref().map(|a| format!("{}。", a)).unwrap_or_default(),
+            payload.identity.as_deref().unwrap_or("江湖中人"),
+            payload.appearance.as_deref().map(|a| format!("{}", a)).unwrap_or_default(),
             if !payload.personality.is_empty() {
                 format!("性格特点：{}。", payload.personality.join("、"))
             } else {
@@ -1549,6 +1550,24 @@ pub(super) async fn register_character_handler(
                 );
             }
 
+            // 10. 重置死亡状态（新角色 = 新生命）
+            state
+                .is_dead
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+
+            // 11. 触发 WebSocket 重连以注册新角色
+            if let Some(ref tx) = state.reconnect_tx {
+                let server_ws_url = state.server_ws_url.read().await.clone();
+                let reconnect_req = super::ReconnectRequest {
+                    ws_url: server_ws_url,
+                };
+                if let Err(e) = tx.send(reconnect_req).await {
+                    error!("[character] 注册后触发重连失败: {}", e);
+                } else {
+                    info!("[character] 注册后触发 WebSocket 重连");
+                }
+            }
+
             (
                 StatusCode::OK,
                 Json(CharacterRegisterResponse {
@@ -1584,6 +1603,8 @@ pub struct CharacterInfoResponse {
     // === 配置文件数据（注册时提供） ===
     /// 角色 ID
     pub agent_id: Option<String>,
+    /// 服务器地址
+    pub server_url: Option<String>,
     /// 姓名
     pub name: String,
     /// 年龄
@@ -1664,8 +1685,9 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     // 3. 从当前 WorldState 获取实时状态
     let current = state.current_state.read().await;
 
-    // 是否使用缓存数据（当服务器未连接时）
-    let is_stale = current.is_none();
+    // 是否使用缓存数据（当角色已死或服务器未连接时）
+    let is_dead_flag = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
+    let is_stale = current.is_none() || is_dead_flag;
 
     let (agent_id, raw_attributes, inventory, location, tick_id, world_time) =
         match current.as_ref() {
@@ -1709,9 +1731,14 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
     // 5. 丰富属性数据（添加叙事描述）
     let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
 
-    // 6. 构建响应
+    // 6. 获取服务器地址
+    let current_server_url = state.server_http_url.read().await.clone();
+    let server_url = character.server_url.clone().or(Some(current_server_url));
+
+    // 7. 构建响应
     let response = CharacterInfoResponse {
         agent_id,
+        server_url,
         name: character.name.clone(),
         age: character.age,
         gender: character.gender.clone(),
@@ -3519,7 +3546,7 @@ pub(super) async fn update_llm_config_handler(
 
 /// GET /api/v1/config/llm/usage - 获取 LLM Token 累计使用统计
 pub(super) async fn get_llm_usage_handler() -> impl IntoResponse {
-    Json(crate::component::llm::token_usage_tracker().snapshot())
+    Json(crate::component::llm::snapshot_all_stats())
 }
 
 // ============================================================================
