@@ -48,12 +48,10 @@ impl ConfigWatcher {
                 }
             })?;
 
-        match watcher.watch(&config_path, notify::RecursiveMode::NonRecursive) {
-            Ok(()) => {}
-            Err(e) if matches!(e.kind, notify::ErrorKind::PathNotFound) => {
-                info!("配置文件不存在，跳过监听: {:?}", config_path);
-            }
-            Err(e) => return Err(e.into()),
+        if config_path.exists() {
+            watcher.watch(&config_path, notify::RecursiveMode::NonRecursive)?;
+        } else {
+            info!("配置文件不存在，跳过监听: {:?}", config_path);
         }
 
         Ok(Self {
