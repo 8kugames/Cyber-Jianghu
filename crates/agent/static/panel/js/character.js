@@ -125,61 +125,209 @@ function renderWorldTree() {
             const agentId = card.dataset.agentId;
             const char = allCharacters.find(c => c.agent_id === agentId);
             if (!char) return;
-            if (char.is_current) {
-                document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
-                document.querySelector('[data-tab="current"]').classList.add('active');
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                document.getElementById('tab-current').classList.add('active');
-            } else {
-                showCharacterDetail(char);
-            }
+            openCharacterDrawer(char);
         });
     });
 }
 
-// 显示角色详情对话框
-function showCharacterDetail(char) {
-    const dialog = document.getElementById('character-detail-dialog');
-    const content = document.getElementById('character-detail-content');
-    const statusClass = char.status;
-    const statusText = statusOf(char.status).treeLabel;
-    const registeredAt = char.registered_at ? new Date(char.registered_at).toLocaleString('zh-CN') : '未知';
+// 打开角色抽屉
+async function openCharacterDrawer(char) {
+    const drawer = document.getElementById('character-drawer');
+    const overlay = document.getElementById('character-drawer-overlay');
+    const body = document.getElementById('char-drawer-body');
+    const title = document.getElementById('char-drawer-title');
 
-    content.innerHTML = `
-        <div class="info-grid">
-            <div class="info-item">
-                <span class="label">姓名</span>
-                <span class="value">${escapeHtml(char.name || '未知')}</span>
+    body.innerHTML = '<p class="loading-text">加载中...</p>';
+    title.textContent = '角色信息';
+
+    drawer.classList.add('open');
+    overlay.classList.add('open');
+
+    try {
+        await loadCharacterIntoDrawer(char);
+    } catch (err) {
+        body.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
+    }
+}
+
+// 关闭角色抽屉
+function closeCharacterDrawer() {
+    const drawer = document.getElementById('character-drawer');
+    const overlay = document.getElementById('character-drawer-overlay');
+    drawer.classList.remove('open');
+    overlay.classList.remove('open');
+}
+
+// 加载角色数据到抽屉
+async function loadCharacterIntoDrawer(char) {
+    const body = document.getElementById('char-drawer-body');
+    const isCurrent = char.is_current;
+
+    let charData = char;
+
+    // 当前角色从 /api/v1/character 取完整数据，非当前角色从 /api/v1/characters/{id}
+    try {
+        if (isCurrent) {
+            charData = await apiGet('/api/v1/character');
+        } else {
+            charData = await apiGet(`/api/v1/characters/${char.agent_id}`);
+        }
+    } catch (err) {
+        console.warn('获取角色详情失败，使用列表数据:', err);
+    }
+
+    const statusClass = charData.status || 'alive';
+    const statusText = statusOf(charData.status).label;
+    const registeredAt = charData.registered_at ? formatRealTime(charData.registered_at) : '未知';
+    const serverName = charData.server_url ? charData.server_url.replace(/^https?:\/\//, '').split('/')[0] : '-';
+
+    let html = `
+        <div class="character-hero">
+            <div class="hero-main">
+                <div class="hero-avatar" aria-hidden="true">魂</div>
+                <div class="hero-text">
+                    <div class="hero-name">${escapeHtml(charData.name || '未知')}</div>
+                    <div class="hero-status">
+                        <span class="status-badge ${statusClass}"><span class="status-dot"></span>${statusText}</span>
+                    </div>
+                    <div class="hero-meta">
+                        <span class="hero-meta-label">性别</span>
+                        <span class="hero-meta-value">${escapeHtml(charData.gender || '-')}</span>
+                        <span class="hero-meta-sep">·</span>
+                        <span class="hero-meta-label">年龄</span>
+                        <span class="hero-meta-value">${charData.age || '-'}</span>
+                    </div>
+                </div>
             </div>
-            <div class="info-item">
-                <span class="label">状态</span>
-                <span class="value status-${statusClass}">${statusText}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">年龄</span>
-                <span class="value">${char.age || '-'}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">性别</span>
-                <span class="value">${escapeHtml(char.gender || '-')}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">身份</span>
-                <span class="value">${escapeHtml(char.identity || '-')}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">注册时间</span>
-                <span class="value">${registeredAt}</span>
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <span class="hero-stat-label">Agent ID</span>
+                    <span class="hero-stat-value" style="font-family: monospace; font-size: 0.9em;">${escapeHtml(charData.agent_id || '-')}</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="hero-stat-label">服务器</span>
+                    <span class="hero-stat-value">${escapeHtml(serverName)}</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="hero-stat-label">注册时间</span>
+                    <span class="hero-stat-value">${registeredAt}</span>
+                </div>
             </div>
         </div>
     `;
-    dialog.style.display = 'flex';
-    document.getElementById('character-detail-close').onclick = () => {
-        dialog.style.display = 'none';
-    };
-    dialog.onclick = (e) => {
-        if (e.target === dialog) dialog.style.display = 'none';
-    };
+
+    if (charData.appearance || charData.identity) {
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">人物画像</div>
+                ${charData.appearance ? `<div class="info-item full-width"><span class="label">外貌</span><span class="value">${escapeHtml(charData.appearance)}</span></div>` : ''}
+                ${charData.identity ? `<div class="info-item full-width"><span class="label">身份背景</span><span class="value">${escapeHtml(charData.identity)}</span></div>` : ''}
+            </section>
+        `;
+    }
+
+    if ((charData.personality && charData.personality.length > 0) || (charData.values && charData.values.length > 0)) {
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">性格与价值观</div>
+                ${charData.personality && charData.personality.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.personality.map(p => `<span class="info-tag">${escapeHtml(p)}</span>`).join('')}</div>` : ''}
+                ${charData.values && charData.values.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.values.map(v => `<span class="info-tag">${escapeHtml(v)}</span>`).join('')}</div>` : ''}
+            </section>
+        `;
+    }
+
+    // 属性（使用 renderAttributes 的分组逻辑）
+    if (charData.attributes) {
+        const categories = attributeMeta ? attributeMeta.categories : null;
+        const statusKeys = new Set(categories?.status || []);
+        const primaryKeys = new Set(categories?.primary || []);
+        const knownKeys = new Set([...statusKeys, ...primaryKeys]);
+
+        const isRedundantMax = (key) => {
+            if (typeof key !== 'string' || !key.endsWith('_max')) return false;
+            const base = key.slice(0, -4);
+            return knownKeys.has(base);
+        };
+
+        let attrHtml = '';
+
+        // 先天属性
+        const primaryList = categories?.primary || [];
+        if (primaryList.length > 0) {
+            attrHtml += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+            primaryList.forEach(key => {
+                const attr = charData.attributes[key];
+                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                    attrHtml += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
+                }
+            });
+            attrHtml += '</div></div>';
+        }
+
+        // 状态属性
+        const statusList = categories?.status || [];
+        if (statusList.length > 0) {
+            attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+            statusList.forEach(key => {
+                const attr = charData.attributes[key];
+                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                    const displayValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : attr.current;
+                    attrHtml += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayValue}</span></div>`;
+                }
+            });
+            attrHtml += '</div></div>';
+        }
+
+        // 派生属性
+        const derivedList = Object.keys(charData.attributes)
+            .filter(k => !knownKeys.has(k))
+            .filter(k => !isRedundantMax(k))
+            .filter(k => charData.attributes[k] && typeof charData.attributes[k] === 'object');
+
+        if (derivedList.length > 0) {
+            attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+            derivedList.forEach(key => {
+                const attr = charData.attributes[key];
+                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                    const displayValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : attr.current;
+                    attrHtml += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayValue}</span></div>`;
+                }
+            });
+            attrHtml += '</div></div>';
+        }
+
+        if (attrHtml) {
+            html += `
+                <section class="drawer-section">
+                    <div class="drawer-section-title">属性</div>
+                    ${attrHtml}
+                </section>
+            `;
+        }
+    }
+
+    // 持有物品
+    if (charData.inventory && charData.inventory.length > 0) {
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">持有物品</div>
+                <div class="inventory-list">
+                    ${charData.inventory.map(item => `
+                        <div class="inv-item">
+                            <span class="inv-name">${escapeHtml(item.name || item.item_id || '未知物品')}</span>
+                            <span class="inv-qty">x${item.quantity || 1}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
+    }
+
+    body.innerHTML = html;
 }
 
 // 切换角色
@@ -720,8 +868,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // 关系抽屉关闭事件
     document.getElementById('drawer-close').addEventListener('click', closeRelationshipDrawer);
     document.getElementById('relationship-drawer-overlay').addEventListener('click', closeRelationshipDrawer);
+
+    // 角色抽屉关闭事件
+    document.getElementById('char-drawer-close').addEventListener('click', closeCharacterDrawer);
+    document.getElementById('character-drawer-overlay').addEventListener('click', closeCharacterDrawer);
+
+    // ESC 关闭所有抽屉
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeRelationshipDrawer();
+        if (e.key === 'Escape') {
+            closeRelationshipDrawer();
+            closeCharacterDrawer();
+        }
     });
 
     // 横向标签页切换
