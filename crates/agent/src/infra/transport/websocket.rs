@@ -43,6 +43,16 @@ pub enum ConnectError {
     ConnectionFailed(#[from] anyhow::Error),
 }
 
+/// Tick 不匹配错误（携带结构化数据）
+#[derive(Debug, thiserror::Error)]
+#[error("Tick mismatch: {message}")]
+pub struct TickMismatchError {
+    /// 服务端当前 tick
+    pub current_tick_id: i64,
+    /// 原始错误消息
+    pub message: String,
+}
+
 // ============================================================================
 // WebSocket 客户端
 // ============================================================================
@@ -388,7 +398,28 @@ impl WebSocketClient {
 
                             if is_tick_mismatch {
                                 error!("Tick mismatch detected: {}", message);
-                                return Err(anyhow::anyhow!("Tick mismatch: {}", message));
+                                // 从 message 解析 current_tick_id（格式由 GameError::TickMismatch Display 决定）
+                                let current_tick_id = message
+                                    .rsplit("tick ")
+                                    .next()
+                                    .and_then(|s| {
+                                        s.chars()
+                                            .take_while(|c| c.is_ascii_digit())
+                                            .collect::<String>()
+                                            .parse::<i64>()
+                                            .ok()
+                                    });
+                                let err = match current_tick_id {
+                                    Some(tid) => TickMismatchError {
+                                        current_tick_id: tid,
+                                        message: message.clone(),
+                                    },
+                                    None => TickMismatchError {
+                                        current_tick_id: 0,
+                                        message: message.clone(),
+                                    },
+                                };
+                                return Err(err.into());
                             }
 
                             warn!("Server error: {}", message);
