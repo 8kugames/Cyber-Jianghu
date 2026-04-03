@@ -140,8 +140,12 @@ impl CognitiveEngine {
         debug!("执行 Stage 2: Plan+Decide");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
-        let pd_prompt =
-            self.build_plan_decision_prompt(&perception_output, &motivation_output, &persona_desc);
+        let pd_prompt = self.build_plan_decision_prompt(
+            &perception_output,
+            &motivation_output,
+            &persona_desc,
+            world_state,
+        );
         let (pd_response, planning, decision, intent) =
             self.plan_and_decide(&pd_prompt, world_state).await?;
         chain.add_stage(planning);
@@ -336,10 +340,12 @@ impl CognitiveEngine {
             .rev()
             .filter_map(|e| {
                 match e.event_type.as_str() {
-                    "public_message" => {
-                        e.metadata.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
-                    }
-                    "action_result" => {
+                    cyber_jianghu_protocol::EVENT_TYPE_PUBLIC_MESSAGE => e
+                        .metadata
+                        .get("content")
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.to_string()),
+                    cyber_jianghu_protocol::EVENT_TYPE_ACTION_RESULT => {
                         // 数据驱动：直接使用 server 提供的 description，不硬编码 action 类型
                         if e.description.is_empty() {
                             None
@@ -347,7 +353,7 @@ impl CognitiveEngine {
                             Some(e.description.clone())
                         }
                     }
-                    _ => None
+                    _ => None,
                 }
             })
             .take(10)
@@ -358,7 +364,11 @@ impl CognitiveEngine {
         } else {
             format!(
                 "\n### 最近说过的话和对话结果（避免重复）\n{}\n",
-                recent_speeches.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n")
+                recent_speeches
+                    .iter()
+                    .map(|s| format!("- {}", s))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )
         };
 
@@ -438,7 +448,11 @@ impl CognitiveEngine {
         perception: &StageOutput,
         motivation: &StageOutput,
         persona_desc: &str,
+        world_state: &WorldState,
     ) -> String {
+        // 从 WorldState 动态构建动作表
+        let dynamic_action_table = Self::build_dynamic_action_table(world_state);
+
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
 
@@ -482,29 +496,51 @@ impl CognitiveEngine {
 
 ## 可用动作及 action_data 字段（字段名必须严格匹配，否则服务端会拒绝）
 
-| action | action_data 必填字段 | 说明 |
-|--------|---------------------|------|
-| idle | (无) | 休息 |
-| speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
-| dialogue | {{"target_agent_id": "目标ID", "content": "说的话"}} | 私聊，仅目标可见 |
-| move | {{"target_location": "node_id"}} | 移动到指定位置。必须使用方括号内的node_id |
-| use | {{"item_id": "item_id"}} | 使用背包中的物品。必须使用方括号内的item_id |
-| attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
-| pickup | {{"item_id": "item_id"}} | 从地面拾取物品。必须使用方括号内的item_id |
-| give | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "quantity": 数量}} | 给予物品 |
-| steal | {{"target_agent_id": "目标AgentID", "item_id": "item_id"}} | 偷取物品 |
-| trade | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "price": 价格}} | 交易 |
-| drop | {{"item_id": "item_id", "quantity": 数量}} | 丢弃物品 |
-| gather | {{"target_id": "采集目标ID"}} | 采集资源。必须使用方括号内的item_id |
-| craft | {{"recipe_id": "配方ID"}} | 制造物品 |
+{dynamic_action_table}
 
 target_agent_id 从 entities 列表中的 agent_id 获取。
 "#,
             agent_name = self.config.agent_name,
             persona = persona_desc,
             perception = perception.content,
-            motivation = motivation.content
+            motivation = motivation.content,
+            dynamic_action_table = dynamic_action_table,
         )
+    }
+
+    /// 从 WorldState 的 available_actions 动态构建动作表
+    fn build_dynamic_action_table(world_state: &WorldState) -> String {
+        if world_state.available_actions.is_empty() {
+            return "| idle | (无) | 休息 |".to_string();
+        }
+
+        let mut table = String::from(
+            "| action | action_data 必填字段 | 说明 |\n|--------|---------------------|------|\n",
+        );
+
+        for action in &world_state.available_actions {
+            let fields = if action.required_fields.is_empty() {
+                "(无)".to_string()
+            } else {
+                action
+                    .required_fields
+                    .iter()
+                    .map(|f| format!("\"{}\"", f))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let desc = if action.description.is_empty() {
+                &action.action
+            } else {
+                &action.description
+            };
+            table.push_str(&format!(
+                "| {} | {{{}}} | {} |\n",
+                action.action, fields, desc
+            ));
+        }
+
+        table
     }
 
     // ========================================================================

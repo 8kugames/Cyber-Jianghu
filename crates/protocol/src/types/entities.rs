@@ -129,6 +129,10 @@ pub struct AvailableAction {
     /// 有效目标（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub valid_targets: Option<Vec<String>>,
+
+    /// 必需的 action_data 字段名列表（如 ["content"]、["target_agent_id", "item_id"]）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_fields: Vec<String>,
 }
 
 /// 初始物品配置

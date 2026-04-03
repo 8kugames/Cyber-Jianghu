@@ -150,7 +150,14 @@ pub enum ServerMessage {
     Pong { timestamp: i64 },
 
     /// 错误消息
-    Error { message: String },
+    Error {
+        /// 机器可读错误码（如 "tick_mismatch", "agent_dead"）
+        /// 详见 `crate::ERROR_CODE_*` 常量
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        code: String,
+        /// 人类可读错误描述
+        message: String,
+    },
 
     /// 对话消息（转发）
     Dialogue {
@@ -431,6 +438,7 @@ mod tests {
     #[test]
     fn test_server_message_error() {
         let msg = ServerMessage::Error {
+            code: "unknown".to_string(),
             message: "Something went wrong".to_string(),
         };
         let json = msg.to_json().unwrap();
@@ -438,6 +446,21 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "error");
         assert_eq!(parsed["message"], "Something went wrong");
+        assert_eq!(parsed["code"], "unknown");
+    }
+
+    #[test]
+    fn test_server_message_error_no_code_backward_compat() {
+        // 确保不带 code 字段的旧消息仍能反序列化
+        let json = r#"{"type":"error","message":"Something went wrong"}"#;
+        let msg: ServerMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ServerMessage::Error { code, message } => {
+                assert!(code.is_empty());
+                assert_eq!(message, "Something went wrong");
+            }
+            _ => panic!("Expected Error"),
+        }
     }
 
     #[test]

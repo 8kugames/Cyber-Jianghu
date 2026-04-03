@@ -15,6 +15,15 @@ mod lifecycle;
 pub mod tools;
 pub mod utils;
 
+// ============================================================================
+// 运行时常量
+// ============================================================================
+
+/// 遗忘机制运行间隔（tick 数）
+///
+/// 基于艾宾浩斯遗忘曲线，每隔一定 tick 运行遗忘检查。
+pub const FORGETTING_INTERVAL_TICKS: i64 = 84;
+
 // 重新导出核心类型
 pub use agent::{Agent, PersonaValidationResult};
 pub use builder::AgentBuilder;
