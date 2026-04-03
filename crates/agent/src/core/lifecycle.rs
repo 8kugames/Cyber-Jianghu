@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
 use crate::config::CharacterStatus;
-use crate::infra::transport::ConnectError;
+use crate::infra::transport::{ConnectError, TickMismatchError};
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -343,23 +343,10 @@ impl super::Agent {
                     let world_state = match result {
                         Ok(state) => state,
                         Err(e) => {
-                            let error_msg = format!("{}", e);
-                            // websocket.rs 已将 tick mismatch 转为 "Tick mismatch: ..."
-                            if error_msg.starts_with("Tick mismatch") {
-                                // 从错误消息中提取服务端 tick（格式：任意位置包含 "current_tick_id: N" 或末尾数字）
-                                let current_server_tick: Option<i64> = error_msg
-                                    .rsplit("tick ")
-                                    .next()
-                                    .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
-                                    .or_else(|| {
-                                        // 回退：取消息中最后一个连续数字段
-                                        error_msg
-                                            .split(|c: char| !c.is_ascii_digit())
-                                            .rfind(|s| !s.is_empty())
-                                            .and_then(|s| s.parse().ok())
-                                    });
-
-                                info!("Tick mismatch detected: {}. Server tick: {:?}. Reconnecting...", e, current_server_tick);
+                            // 检查是否为 TickMismatchError（结构化数据）
+                            if let Some(tick_err) = e.downcast_ref::<TickMismatchError>() {
+                                let current_server_tick = tick_err.current_tick_id;
+                                info!("Tick mismatch detected: {}. Server tick: {}. Reconnecting...", tick_err.message, current_server_tick);
 
                                 // 重连
                                 if let Err(reconnect_err) = self.reconnect().await {
@@ -379,16 +366,14 @@ impl super::Agent {
                                     }
                                 };
 
-                                // 如果有 current_server_tick 且收到的 WorldState tick 太旧，
+                                // 如果 server tick 有效且 WorldState tick 太旧，
                                 // 直接用 server_tick 生成 idle intent，不要等待（会死锁）
-                                let intent_tick = if let Some(server_tick) = current_server_tick {
-                                    if new_world_state.tick_id < server_tick {
-                                        info!("WorldState tick {} < server tick {}, using server tick {} for intent",
-                                            new_world_state.tick_id, server_tick, server_tick);
-                                        server_tick
-                                    } else {
-                                        new_world_state.tick_id
-                                    }
+                                let intent_tick = if current_server_tick > 0
+                                    && new_world_state.tick_id < current_server_tick
+                                {
+                                    info!("WorldState tick {} < server tick {}, using server tick {} for intent",
+                                        new_world_state.tick_id, current_server_tick, current_server_tick);
+                                    current_server_tick
                                 } else {
                                     new_world_state.tick_id
                                 };
