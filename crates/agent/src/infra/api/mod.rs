@@ -657,9 +657,16 @@ pub fn create_http_state(
     let narrative_engine = Some(Arc::new(create_narrative_engine()));
 
     let narrative_config = {
-        let narrative_path = server_dir.join("narrative_config.json");
-        if narrative_path.exists() {
-            crate::soul::actor::narrative::NarrativeConfig::from_file(&narrative_path).ok()
+        if let Some(home) = dirs::home_dir() {
+            let narrative_path = home
+                .join(".cyber-jianghu")
+                .join("config")
+                .join("narrative_config.json");
+            if narrative_path.exists() {
+                crate::soul::actor::narrative::NarrativeConfig::from_file(&narrative_path).ok()
+            } else {
+                None
+            }
         } else {
             None
         }

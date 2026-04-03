@@ -318,9 +318,9 @@ impl DownstreamMessage {
     /// 返回 None 表示该消息类型不需要透传（如 WorldState 已通过 Tick 处理）
     pub fn from_server_message(msg: ServerMessage, current_tick: i64) -> Option<Self> {
         match msg {
-            ServerMessage::Error { code, message } => {
+            ServerMessage::Error { code, message, current_tick_id: server_tick_id } => {
                 let resolved_code = Self::resolve_error_code(&code);
-                let tick_id = Self::parse_tick_id(&message);
+                let tick_id = server_tick_id.or_else(|| Self::parse_tick_id(&message));
                 Some(DownstreamMessage::ServerError {
                     code: resolved_code,
                     message,
@@ -749,6 +749,7 @@ mod tests {
         let server_msg = ServerMessage::Error {
             code: cyber_jianghu_protocol::ERROR_CODE_AGENT_DEAD.to_string(),
             message: "Agent 已死亡，无法执行此动作。".to_string(),
+            current_tick_id: None,
         };
 
         let result = DownstreamMessage::from_server_message(server_msg, 100);
@@ -775,6 +776,7 @@ mod tests {
         let server_msg = ServerMessage::Error {
             code: String::new(),
             message: "tick 105: invalid action".to_string(),
+            current_tick_id: None,
         };
 
         let result = DownstreamMessage::from_server_message(server_msg, 100);

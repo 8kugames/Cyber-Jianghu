@@ -129,6 +129,9 @@ pub enum ServerMessage {
         /// 缺省 true：旧 server 不发此字段时假定存活（fail-open）
         #[serde(default = "default_true")]
         is_alive: bool,
+        /// 角色名称（可选，首次连接时由服务器填充）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_name: Option<String>,
     },
 
     /// 世界状态下发
@@ -157,6 +160,9 @@ pub enum ServerMessage {
         code: String,
         /// 人类可读错误描述
         message: String,
+        /// tick 不匹配时的当前 tick_id（仅 tick_mismatch 有值）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_tick_id: Option<i64>,
     },
 
     /// 对话消息（转发）
@@ -360,6 +366,7 @@ mod tests {
             game_rules,
             world_building_rules: None,
             is_alive: true,
+            agent_name: None,
         };
 
         let json = msg.to_json().unwrap();
@@ -440,6 +447,7 @@ mod tests {
         let msg = ServerMessage::Error {
             code: "unknown".to_string(),
             message: "Something went wrong".to_string(),
+            current_tick_id: None,
         };
         let json = msg.to_json().unwrap();
 
@@ -455,7 +463,7 @@ mod tests {
         let json = r#"{"type":"error","message":"Something went wrong"}"#;
         let msg: ServerMessage = serde_json::from_str(json).unwrap();
         match msg {
-            ServerMessage::Error { code, message } => {
+            ServerMessage::Error { code, message, current_tick_id: _ } => {
                 assert!(code.is_empty());
                 assert_eq!(message, "Something went wrong");
             }
@@ -517,6 +525,7 @@ mod tests {
             game_rules,
             world_building_rules: Some(world_rules),
             is_alive: true,
+            agent_name: None,
         };
 
         let json = msg.to_json().unwrap();

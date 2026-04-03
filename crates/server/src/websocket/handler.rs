@@ -237,6 +237,11 @@ async fn handle_websocket(
             game_rules,
             world_building_rules,
             is_alive,
+            agent_name: if agent_name != "Pending" {
+                Some(agent_name.clone())
+            } else {
+                None
+            },
         };
         serde_json::to_string(&registered_msg).ok()
     };
@@ -423,17 +428,26 @@ async fn handle_websocket(
                                     );
 
                                     // 发送错误消息给 Agent（尝试提取结构化错误码）
-                                    let (code, message) =
+                                    let (code, message, current_tick_id) =
                                         if let Some(ge) = e.downcast_ref::<GameError>() {
-                                            (ge.error_code().to_string(), ge.to_string())
+                                            (
+                                                ge.error_code().to_string(),
+                                                ge.to_string(),
+                                                ge.current_tick_id(),
+                                            )
                                         } else {
                                             (
                                                 cyber_jianghu_protocol::ERROR_CODE_ACTION_FAILED
                                                     .to_string(),
                                                 format!("Failed to process message: {}", e),
+                                                None,
                                             )
                                         };
-                                    let error_msg = ServerMessage::Error { code, message };
+                                    let error_msg = ServerMessage::Error {
+                                        code,
+                                        message,
+                                        current_tick_id,
+                                    };
                                     if let Ok(json) = serde_json::to_string(&error_msg) {
                                         let _ = tx.send(Message::Text(json.into())).await;
                                     }
@@ -450,6 +464,7 @@ async fn handle_websocket(
                                     code: cyber_jianghu_protocol::ERROR_CODE_INVALID_MESSAGE
                                         .to_string(),
                                     message: format!("Invalid message format: {}", e),
+                                    current_tick_id: None,
                                 };
                                 if let Ok(json) = serde_json::to_string(&error_msg) {
                                     let _ = tx.send(Message::Text(json.into())).await;
@@ -849,6 +864,7 @@ async fn handle_dialogue_message(
             let error_msg = ServerMessage::Error {
                 code: cyber_jianghu_protocol::ERROR_CODE_DIALOGUE_FAILED.to_string(),
                 message: format!("Dialogue failed: {}", e),
+                current_tick_id: None,
             };
             let json = serde_json::to_string(&error_msg)?;
             let device_id = {
