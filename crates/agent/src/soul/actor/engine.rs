@@ -329,26 +329,71 @@ impl CognitiveEngine {
             format!("\n### 相关记忆\n{memory_context}\n")
         };
 
-        // 从events_log中提取最近说过的话（用于去重）
+        // 从events_log中提取最近说过的话和行动反馈（用于去重和反馈）
         let recent_speeches: Vec<String> = world_state
             .events_log
             .iter()
             .rev()
             .filter_map(|e| {
-                if e.event_type == "public_message" {
-                    e.metadata.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
-                } else {
-                    None
+                match e.event_type.as_str() {
+                    "public_message" => {
+                        e.metadata.get("content").and_then(|c| c.as_str()).map(|s| s.to_string())
+                    }
+                    "action_result" => {
+                        // Server metadata keys: "action", "result", "item_id", "reason", "target", "from"
+                        let action = e.metadata.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                        let result = e.metadata.get("result").and_then(|v| v.as_str()).unwrap_or("");
+                        let reason = e.metadata.get("reason").and_then(|v| v.as_str());
+                        let item_id = e.metadata.get("item_id").and_then(|v| v.as_str());
+                        let target = e.metadata.get("target").and_then(|v| v.as_str());
+
+                        match action {
+                            "use" => {
+                                let item = item_id.unwrap_or("?");
+                                match result {
+                                    "success" => Some(format!("使用了 {}", item)),
+                                    "failed" => Some(format!("使用{}失败: {}", item, reason.unwrap_or("原因未知"))),
+                                    _ => None,
+                                }
+                            }
+                            "gather" => {
+                                let item = item_id.unwrap_or("?");
+                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+                                Some(format!("采集了 {} 个 {}", qty, item))
+                            }
+                            "move" => {
+                                let new_loc = e.metadata.get("new_location").and_then(|v| v.as_str()).unwrap_or("?");
+                                Some(format!("移动到了 {}", new_loc))
+                            }
+                            "give" => {
+                                let item = item_id.unwrap_or("?");
+                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+                                Some(format!("给了 {} {} 个 {}", target.unwrap_or("?"), qty, item))
+                            }
+                            "receive" => {
+                                let from = e.metadata.get("from").and_then(|v| v.as_str()).unwrap_or("?");
+                                let item = item_id.unwrap_or("?");
+                                let qty = e.metadata.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+                                Some(format!("收到 {} 的 {} 个 {}", from, qty, item))
+                            }
+                            "pickup" => {
+                                let item = item_id.unwrap_or("?");
+                                Some(format!("拾取了 {}", item))
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None
                 }
             })
-            .take(5)
+            .take(10)
             .collect();
 
         let recent_speeches_section = if recent_speeches.is_empty() {
             String::new()
         } else {
             format!(
-                "\n### 最近说过的话（避免重复）\n{}\n",
+                "\n### 最近说过的话和对话结果（避免重复）\n{}\n",
                 recent_speeches.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n")
             )
         };
@@ -452,6 +497,15 @@ impl CognitiveEngine {
 2. **不能跳过思考**：必须体现完整的认知链条。
 3. **必须以 JSON 格式输出**：不要包含其他文本。
 
+!!! 生死攸关的 ID 规则（违反必死）!!!
+
+物品、位置、采集目标必须使用方括号内的英文 ID，绝不能用中文名称：
+- 使用物品: item_id 填 "water" 而非 "水" → {{"item_id": "water"}}
+- 移动: target_location 填 "longmen_backyard" 而非 "后院" → {{"target_location": "longmen_backyard"}}
+- 采集: target_id 填 "water" 而非 "老井" → {{"target_id": "water"}}
+
+记住：方括号 [xxx] 里面的才是 ID。用中文名称 = 动作失败 = 资源耗尽 = 死亡。
+
 ## 输出格式
 {{
   "steps": ["步骤1", "步骤2", "..."],
@@ -469,18 +523,17 @@ impl CognitiveEngine {
 | idle | (无) | 休息 |
 | speak | {{"content": "说的话"}} | 公开说话，所有人可见 |
 | dialogue | {{"target_agent_id": "目标ID", "content": "说的话"}} | 私聊，仅目标可见 |
-| move | {{"target_location": "node_id"}} | 移动到指定位置。必须使用方括号内的node_id（如 longmen_backyard），不能使用中文名称 |
-| use | {{"item_id": "item_id"}} | 使用背包中的物品。必须使用方括号内的item_id（如 water、mantou），不能使用中文名称 |
+| move | {{"target_location": "node_id"}} | 移动到指定位置。必须使用方括号内的node_id |
+| use | {{"item_id": "item_id"}} | 使用背包中的物品。必须使用方括号内的item_id |
 | attack | {{"target_agent_id": "目标AgentID"}} | 攻击目标 |
 | pickup | {{"item_id": "item_id"}} | 从地面拾取物品。必须使用方括号内的item_id |
 | give | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "quantity": 数量}} | 给予物品 |
 | steal | {{"target_agent_id": "目标AgentID", "item_id": "item_id"}} | 偷取物品 |
 | trade | {{"target_agent_id": "目标AgentID", "item_id": "item_id", "price": 价格}} | 交易 |
 | drop | {{"item_id": "item_id", "quantity": 数量}} | 丢弃物品 |
-| gather | {{"target_id": "采集目标ID"}} | 采集资源 |
+| gather | {{"target_id": "采集目标ID"}} | 采集资源。必须使用方括号内的item_id |
 | craft | {{"recipe_id": "配方ID"}} | 制造物品 |
 
-**关键规则**: 所有 item_id 和 target_location 必须使用方括号内的英文ID，绝不能用中文名称。例如：物品显示为"清水 [water] x1"时，item_id 必须填 "water"；位置显示为"后院 [longmen_backyard]"时，target_location 必须填 "longmen_backyard"。
 target_agent_id 从 entities 列表中的 agent_id 获取。
 "#,
             agent_name = self.config.agent_name,

@@ -59,7 +59,8 @@ data:
       name: "厨房"
       type: "sub_scene"
       parent_id: "longmen_inn"
-      gatherable_items: []
+      gatherable_items:
+        - "water" # 缸中清水
       description: "客栈的厨房，飘着饭香"
 
     # --------------------------------------------------------------------------
