@@ -107,7 +107,7 @@ impl SemanticMemoryBackend {
         if self.is_vector_mode() {
             match self.embedder.embed(&params.query).await {
                 Ok(vector) => {
-                    let vector_store = self.vector_store.lock().unwrap();
+                    let mut vector_store = self.vector_store.lock().unwrap();
                     match vector_store.search(&vector, params.limit) {
                         Ok(results) => {
                             tracing::debug!("Vector search returned {} results", results.len());
