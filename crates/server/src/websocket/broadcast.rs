@@ -11,7 +11,7 @@
 
 use axum::extract::ws::Message;
 use cyber_jianghu_protocol::{DialogueMessage, ServerMessage};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::connection::{AgentToDeviceMap, ConnectionManager};
 
@@ -186,5 +186,49 @@ pub async fn send_agent_died_notification(
         );
     }
 
+    Ok(())
+}
+
+/// 广播动作配置更新到所有在线 Agent
+pub async fn broadcast_action_update(
+    action_update: ServerMessage,
+    connection_manager: &ConnectionManager,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let connections = connection_manager.read().await;
+    let mut success_count = 0;
+    let mut fail_count = 0;
+
+    for (device_id, connection) in connections.iter() {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, skipping ActionUpdate",
+                connection.agent_id
+            );
+            fail_count += 1;
+            continue;
+        }
+
+        let msg = action_update.clone();
+
+        let json = serde_json::to_string(&msg)?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            warn!(
+                "Agent {} ActionUpdate send failed, marking connection dead",
+                connection.agent_id
+            );
+            fail_count += 1;
+        } else {
+            debug!(
+                "ActionUpdate sent to agent {} via device {}",
+                connection.agent_id, device_id
+            );
+            success_count += 1;
+        }
+    }
+
+    info!(
+        "ActionUpdate broadcast complete: {} success, {} failed",
+        success_count, fail_count
+    );
     Ok(())
 }

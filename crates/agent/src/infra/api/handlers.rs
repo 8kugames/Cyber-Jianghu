@@ -91,6 +91,15 @@ async fn get_active_character(
         .find(|c| c.status == CharacterStatus::Alive))
 }
 
+/// Get character config by agent_id (sync version for use in handlers)
+fn get_character_by_id_sync(
+    characters_dir: &std::path::Path,
+    agent_id: Uuid,
+) -> Result<Option<CharacterConfig>, anyhow::Error> {
+    let chars = list_characters_from_fs(characters_dir)?;
+    Ok(chars.into_iter().find(|c| c.agent_id == Some(agent_id)))
+}
+
 /// Save character config to its directory
 fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(), anyhow::Error> {
     let agent_id = config
@@ -1306,7 +1315,7 @@ pub(super) async fn register_character_handler(
             payload.name,
             payload.age,
             payload.identity.as_deref().unwrap_or("江湖中人"),
-            payload.appearance.as_deref().map(|a| format!("{}", a)).unwrap_or_default(),
+            payload.appearance.as_deref().map(|a| a.to_string()).unwrap_or_default(),
             if !payload.personality.is_empty() {
                 format!("性格特点：{}。", payload.personality.join("、"))
             } else {
@@ -1533,6 +1542,8 @@ pub(super) async fn register_character_handler(
                 },
                 status: CharacterStatus::Alive,
                 server_url: Some(server_http_url.clone()),
+                last_connected_real_time: None,
+                last_connected_world_time: None,
             };
 
             if let Err(e) = save_character(&new_character, &state.character_dir.read().await) {
@@ -1631,6 +1642,8 @@ pub struct CharacterInfoResponse {
     pub birth_attributes: Option<serde_json::Value>,
     /// 持有物品
     pub inventory: Option<serde_json::Value>,
+    /// 派生属性
+    pub derived_attributes: Option<std::collections::HashMap<String, f32>>,
     /// 当前位置
     pub location: Option<String>,
     /// 当前 Tick
@@ -1758,6 +1771,147 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         world_time,
         status,
         is_stale,
+        derived_attributes: current
+            .as_ref()
+            .map(|ws| ws.self_state.derived_attributes.clone()),
+    };
+
+    Json(response).into_response()
+}
+
+/// GET /api/v1/characters/:id
+///
+/// 获取指定角色的完整信息（用于抽屉展示）
+pub(super) async fn get_character_by_id_handler(
+    State(state): State<HttpApiState>,
+    AxumPath(agent_id): AxumPath<Uuid>,
+) -> impl IntoResponse {
+    // 1. 从文件系统读取角色配置
+    let character_dir = state.character_dir.read().await.clone();
+    let character = match get_character_by_id_sync(&character_dir, agent_id) {
+        Ok(Some(ch)) => ch,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorResponse {
+                    error_code: "character_not_found".to_string(),
+                    message: "角色不存在".to_string(),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!("读取角色配置失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error_code: "character_read_error".to_string(),
+                    message: format!("读取角色配置失败: {}", e),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    // 2. 如果是当前角色，返回完整 WorldState 数据
+    let current_agent_id = *state.agent_id.read().await;
+    let is_current = current_agent_id == agent_id;
+
+    if is_current {
+        // 复用当前角色的 WorldState 数据
+        let narrative_config = state.narrative_config.read().await.clone();
+        let current = state.current_state.read().await;
+        let is_dead_flag = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
+        let is_stale = current.is_none() || is_dead_flag;
+
+        let (raw_attributes, inventory, location, tick_id, world_time) = match current.as_ref() {
+            Some(ws) => {
+                let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
+                let inv = serde_json::to_value(&ws.self_state.inventory).ok();
+                let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
+                let time = serde_json::to_value(&ws.world_time).ok();
+                (attrs, inv, loc, Some(ws.tick_id), time)
+            }
+            None => (None, None, None, None, None),
+        };
+
+        let status = if state.is_dead.load(std::sync::atomic::Ordering::Relaxed) {
+            Some("dead".to_string())
+        } else {
+            raw_attributes
+                .as_ref()
+                .and_then(|a| a.get("hp"))
+                .and_then(|hp| hp.as_i64())
+                .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
+        };
+
+        let attributes = enrich_attributes_with_descriptions(raw_attributes, &narrative_config);
+        let current_server_url = state.server_http_url.read().await.clone();
+        let server_url = character.server_url.clone().or(Some(current_server_url));
+
+        return Json(CharacterInfoResponse {
+            agent_id: character.agent_id.map(|id| id.to_string()),
+            server_url,
+            name: character.name.clone(),
+            age: character.age,
+            gender: character.gender.clone(),
+            appearance: character.appearance.clone(),
+            identity: character.identity.clone(),
+            personality: character.personality.clone(),
+            values: character.values.clone(),
+            registered_at: character.registered_at.map(|t| t.to_rfc3339()),
+            attributes,
+            birth_attributes: character
+                .birth_attributes
+                .as_ref()
+                .and_then(|a| serde_json::to_value(a).ok()),
+            inventory,
+            location,
+            tick_id,
+            world_time,
+            status,
+            is_stale,
+            derived_attributes: current
+                .as_ref()
+                .map(|ws| ws.self_state.derived_attributes.clone()),
+        })
+        .into_response();
+    }
+
+    // 3. 非当前角色，返回配置文件数据（不包含实时状态）
+    let current_server_url = state.server_http_url.read().await.clone();
+    let server_url = character.server_url.clone().or(Some(current_server_url));
+
+    let response = CharacterInfoResponse {
+        agent_id: character.agent_id.map(|id| id.to_string()),
+        server_url,
+        name: character.name.clone(),
+        age: character.age,
+        gender: character.gender.clone(),
+        appearance: character.appearance.clone(),
+        identity: character.identity.clone(),
+        personality: character.personality.clone(),
+        values: character.values.clone(),
+        registered_at: character.registered_at.map(|t| t.to_rfc3339()),
+        attributes: character
+            .birth_attributes
+            .as_ref()
+            .and_then(|a| serde_json::to_value(a).ok()),
+        birth_attributes: character
+            .birth_attributes
+            .as_ref()
+            .and_then(|a| serde_json::to_value(a).ok()),
+        inventory: None,
+        location: None,
+        tick_id: None,
+        world_time: None,
+        status: Some(match character.status {
+            CharacterStatus::Alive => "alive".to_string(),
+            CharacterStatus::Dead => "dead".to_string(),
+            CharacterStatus::Retired => "retired".to_string(),
+        }),
+        is_stale: true,
+        derived_attributes: None,
     };
 
     Json(response).into_response()
@@ -2514,6 +2668,10 @@ pub struct CharacterInfo {
     pub registered_at: Option<String>,
     /// 是否为当前活跃角色
     pub is_current: bool,
+    /// 最近一次连接的现实时间
+    pub last_connected_real_time: Option<String>,
+    /// 最近一次连接的游戏时间（格式化字符串）
+    pub last_connected_world_time: Option<String>,
 }
 
 /// 获取所有角色列表
@@ -2570,6 +2728,11 @@ pub(super) async fn list_characters_handler(
                 server_url: c.server_url.clone(),
                 registered_at: c.registered_at.map(|t| t.to_rfc3339()),
                 is_current,
+                last_connected_real_time: c.last_connected_real_time.map(|t| t.to_rfc3339()),
+                last_connected_world_time: c
+                    .last_connected_world_time
+                    .as_ref()
+                    .map(|wt| format!("{}年{}月{}日 {}时", wt.year, wt.month, wt.day, wt.hour)),
             }
         })
         .collect();
@@ -2696,6 +2859,11 @@ pub(super) async fn switch_character_handler(
             server_url: character.server_url.clone(),
             registered_at: character.registered_at.map(|t| t.to_rfc3339()),
             is_current: true,
+            last_connected_real_time: character.last_connected_real_time.map(|t| t.to_rfc3339()),
+            last_connected_world_time: character
+                .last_connected_world_time
+                .as_ref()
+                .map(|wt| format!("{}年{}月{}日 {}时", wt.year, wt.month, wt.day, wt.hour)),
         }),
     })
     .into_response()

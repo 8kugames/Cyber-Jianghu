@@ -20,7 +20,7 @@ use zeroize::Zeroize;
 // 导入 protocol 类型
 // ============================================================================
 
-pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
+pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldTime};
 
 /// 支持的 LLM Provider
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
@@ -226,6 +226,14 @@ pub struct CharacterConfig {
     /// 所属服务器的 HTTP URL（用于区分不同服务器的角色）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
+
+    /// 最近一次连接时的现实时间
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected_real_time: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// 最近一次连接时的游戏时间
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected_world_time: Option<cyber_jianghu_protocol::WorldTime>,
 
     /// 角色状态
     #[serde(default)]
@@ -756,6 +764,35 @@ impl Config {
 
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
+        // 保存 available_actions 到本地文件
+        if let Some(home) = dirs::home_dir() {
+            let config_dir = home.join(".cyber-jianghu").join("config");
+            let actions_path = config_dir.join("actions.json");
+
+            // 确保目录存在
+            if let Err(e) = fs::create_dir_all(&config_dir) {
+                tracing::warn!("创建配置目录失败: {}", e);
+            } else {
+                // 序列化并保存
+                match serde_json::to_string_pretty(&game_rules.available_actions) {
+                    Ok(json) => {
+                        if let Err(e) = fs::write(&actions_path, json) {
+                            tracing::warn!("保存 actions.json 失败: {}", e);
+                        } else {
+                            tracing::debug!(
+                                "已保存 {} 个动作到 {:?}",
+                                game_rules.available_actions.len(),
+                                actions_path
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("序列化 actions 失败: {}", e);
+                    }
+                }
+            }
+        }
+
         self.game_rules = Some(game_rules);
     }
 

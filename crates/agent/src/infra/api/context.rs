@@ -8,6 +8,7 @@
 // - 外部系统（OpenClaw）通过 /api/v1/attributes 获取"梦中一瞥"数值
 
 use crate::component::social::RelationshipStore;
+use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::soul::actor::narrative::{NarrativeConfig, NarrativeEngine};
 use cyber_jianghu_protocol::WorldState;
 use serde::Serialize;
@@ -304,12 +305,12 @@ fn generate_impl(
         }
     }
 
-    // 可用动作
-    if !state.available_actions.is_empty() {
+    // 可用动作（从本地文件加载）
+    let available_actions = load_available_actions_from_file();
+    if !available_actions.is_empty() {
         sections.push("".to_string());
         sections.push("## 可用动作".to_string());
-        let actions: Vec<String> = state
-            .available_actions
+        let actions: Vec<String> = available_actions
             .iter()
             .map(|a| format!("`{}`", a.action))
             .collect();

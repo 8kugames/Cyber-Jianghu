@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
-use crate::config::CharacterStatus;
+use crate::config::{CharacterConfig, CharacterStatus};
 use crate::infra::transport::{ConnectError, TickMismatchError};
 use crate::models::Intent;
 
@@ -157,24 +157,25 @@ impl super::Agent {
 
         // 等待注册确认（包含游戏规则）
         // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
-        let (agent_id, game_rules, registered_name) = match self.client.wait_for_registration().await {
-            Ok(Some((id, rules, name))) => (id, rules, name),
-            Ok(None) => {
-                info!(
-                    "Agent '{}' 等待角色注册（保持连接）...",
-                    self.character_name()
-                );
-                self.death_reported = true;
-                if let Some(ref api_state) = self.http_api_state {
-                    api_state
-                        .is_dead
-                        .store(true, std::sync::atomic::Ordering::Relaxed);
+        let (agent_id, game_rules, registered_name) =
+            match self.client.wait_for_registration().await {
+                Ok(Some((id, rules, name))) => (id, rules, name),
+                Ok(None) => {
+                    info!(
+                        "Agent '{}' 等待角色注册（保持连接）...",
+                        self.character_name()
+                    );
+                    self.death_reported = true;
+                    if let Some(ref api_state) = self.http_api_state {
+                        api_state
+                            .is_dead
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    self.wait_for_rebirth().await?;
+                    return Ok(());
                 }
-                self.wait_for_rebirth().await?;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        };
+                Err(e) => return Err(e),
+            };
         // 重置重试计数器
         self.reconnect_backoff = 0;
         info!("Agent '{}' registered with server", self.character_name());
@@ -212,8 +213,7 @@ impl super::Agent {
                     std::fs::create_dir_all(&char_dir)?;
                     reconstructed.save_to_file(&char_yaml)?;
                     Ok(())
-                })()
-                {
+                })() {
                     warn!("自动重建 character.yaml 失败: {}", e);
                 } else {
                     info!("已自动重建本地角色配置: {} ({})", name, agent_id);
@@ -303,6 +303,7 @@ impl super::Agent {
                     }
 
                     info!("检测到配置变更，重新加载...");
+                    let old_config_path = self.config.config_path.clone();
                     let old_config = self.config.clone();
 
                     match crate::config::Config::from_file(config_path) {
@@ -344,6 +345,8 @@ impl super::Agent {
                                     }
 
                                     self.config = new_config;
+                                    // 保留 config_path（from_file 反序列化时 #[serde(skip)] 会丢失）
+                                    self.config.config_path = old_config_path;
                                     info!("ActorSoul LLM 已重载");
                                 }
                                 Err(e) => {
@@ -355,6 +358,11 @@ impl super::Agent {
                         Err(e) => {
                             warn!("配置读取失败: {}，保持旧配置", e);
                         }
+                    }
+
+                    // 排空积压的重复通知（notify 在 macOS 上单次修改会触发多个事件）
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        while rx.try_recv().is_ok() {}
                     }
                 }
 
@@ -480,6 +488,25 @@ impl super::Agent {
 
                         // 异步更新关系叙事（不阻塞）
                         api_state.maybe_update_narratives(&world_state).await;
+                    }
+
+                    // 更新角色配置的最近连接时间并持久化
+                    if let Some(ref mut char_cfg) = self.character_config {
+                        char_cfg.last_connected_real_time = Some(chrono::Utc::now());
+                        char_cfg.last_connected_world_time = Some(world_state.world_time.clone());
+
+                        // 异步保存到磁盘（不阻塞主循环）
+                        if let Some(ref api_state) = self.http_api_state {
+                            let char_cfg_clone = char_cfg.clone();
+                            let characters_dir = api_state.character_dir.read().await.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    save_character_config_to_fs(&char_cfg_clone, &characters_dir)
+                                {
+                                    warn!("Failed to save character last_connected time: {}", e);
+                                }
+                            });
+                        }
                     }
 
                     // 1.5 检查是否死亡（只报告一次）
@@ -710,7 +737,10 @@ impl super::Agent {
                                     })() {
                                         warn!("reconnect 自动重建 character.yaml 失败: {}", e);
                                     } else {
-                                        info!("reconnect 已自动重建角色配置: {} ({})", name, agent_id);
+                                        info!(
+                                            "reconnect 已自动重建角色配置: {} ({})",
+                                            name, agent_id
+                                        );
                                         self.character_config = Some(recon);
                                     }
                                 }
@@ -898,4 +928,18 @@ impl super::Agent {
         info!("Agent '{}' stopped", self.character_name());
         Ok(())
     }
+}
+
+/// 保存角色配置到磁盘
+fn save_character_config_to_fs(
+    config: &CharacterConfig,
+    characters_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    let agent_id = config
+        .agent_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let dir = characters_dir.join(&agent_id);
+    std::fs::create_dir_all(&dir)?;
+    config.save_to_file(dir.join("character.yaml"))
 }

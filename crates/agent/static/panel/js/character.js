@@ -103,22 +103,62 @@ function renderWorldTree() {
         return;
     }
 
-    listEl.innerHTML = allCharacters.map(c => {
-        const statusClass = c.status;
-        const statusText = statusOf(c.status).treeLabel;
-        const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
-        const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
-        return `
-            <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
-                <div class="char-name">
-                    ${escapeHtml(c.name || '未知')}
-                    ${currentLabel}
+    // 按服务器分组
+    const serverGroups = {};
+    allCharacters.forEach(c => {
+        const serverKey = c.server_url || 'unknown';
+        if (!serverGroups[serverKey]) {
+            serverGroups[serverKey] = [];
+        }
+        serverGroups[serverKey].push(c);
+    });
+
+    // 生成服务器分组HTML
+    let html = '';
+    Object.entries(serverGroups).forEach(([serverKey, chars]) => {
+        const serverName = serverKey.replace(/^https?:\/\//, '').split('/')[0];
+        const firstChar = chars[0];
+        const lastRealTime = firstChar.last_connected_real_time
+            ? new Date(firstChar.last_connected_real_time).toLocaleString('zh-CN')
+            : '-';
+        const lastWorldTime = firstChar.last_connected_world_time || '-';
+
+        html += `
+            <div class="server-group">
+                <div class="server-group-header">
+                    <span class="server-name">${escapeHtml(serverName)}</span>
+                    <span class="server-meta">
+                        <span class="meta-item" title="最近连接">🕐 ${lastRealTime}</span>
+                        <span class="meta-item" title="游戏时间">⏱ ${escapeHtml(lastWorldTime)}</span>
+                    </span>
                 </div>
-                <div class="char-status ${statusClass}">${statusText}</div>
-                <div class="char-meta">${registeredAt}</div>
+                <div class="server-group-chars">
+        `;
+
+        chars.forEach(c => {
+            const statusClass = c.status;
+            const statusText = statusOf(c.status).treeLabel;
+            const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
+            const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
+            html += `
+                <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
+                    <div class="char-name">
+                        ${escapeHtml(c.name || '未知')}
+                        ${currentLabel}
+                    </div>
+                    <div class="char-status ${statusClass}">${statusText}</div>
+                    <div class="char-meta">${registeredAt}</div>
+                </div>
+            `;
+        });
+
+        html += `
+                </div>
             </div>
         `;
-    }).join('');
+    });
+
+    listEl.innerHTML = html;
 
     listEl.querySelectorAll('.world-tree-card').forEach(card => {
         card.addEventListener('click', () => {
@@ -165,21 +205,35 @@ async function loadCharacterIntoDrawer(char) {
 
     let charData = char;
 
-    // 当前角色从 /api/v1/character 取完整数据，非当前角色从 /api/v1/characters/{id}
+    // 当前角色从 /api/v1/character 取完整数据，非当前角色使用列表数据
     try {
         if (isCurrent) {
             charData = await apiGet('/api/v1/character');
-        } else {
-            charData = await apiGet(`/api/v1/characters/${char.agent_id}`);
+            console.log('[DEBUG] /api/v1/character 返回:', JSON.stringify(charData, null, 2));
+            console.log('[DEBUG] identity:', charData.identity);
+            console.log('[DEBUG] appearance:', charData.appearance);
+            console.log('[DEBUG] personality:', charData.personality);
+            console.log('[DEBUG] values:', charData.values);
+            console.log('[DEBUG] attributes:', charData.attributes);
         }
     } catch (err) {
         console.warn('获取角色详情失败，使用列表数据:', err);
+        console.log('[DEBUG] charData (fallback):', JSON.stringify(charData, null, 2));
     }
 
     const statusClass = charData.status || 'alive';
     const statusText = statusOf(charData.status).label;
     const registeredAt = charData.registered_at ? formatRealTime(charData.registered_at) : '未知';
     const serverName = charData.server_url ? charData.server_url.replace(/^https?:\/\//, '').split('/')[0] : '-';
+
+    // 在线状态
+    const isStale = charData.is_stale;
+    const onlineStatus = charData.status === 'alive'
+        ? (isStale ? '<span class="online-tag offline">离线</span>' : '<span class="online-tag online">在线</span>')
+        : '';
+
+    // 位置
+    const location = charData.location || '-';
 
     let html = `
         <div class="character-hero">
@@ -189,6 +243,7 @@ async function loadCharacterIntoDrawer(char) {
                     <div class="hero-name">${escapeHtml(charData.name || '未知')}</div>
                     <div class="hero-status">
                         <span class="status-badge ${statusClass}"><span class="status-dot"></span>${statusText}</span>
+                        ${onlineStatus}
                     </div>
                     <div class="hero-meta">
                         <span class="hero-meta-label">性别</span>
@@ -209,6 +264,10 @@ async function loadCharacterIntoDrawer(char) {
                     <span class="hero-stat-value">${escapeHtml(serverName)}</span>
                 </div>
                 <div class="hero-stat">
+                    <span class="hero-stat-label">位置</span>
+                    <span class="hero-stat-value">${escapeHtml(location)}</span>
+                </div>
+                <div class="hero-stat">
                     <span class="hero-stat-label">注册时间</span>
                     <span class="hero-stat-value">${registeredAt}</span>
                 </div>
@@ -216,7 +275,9 @@ async function loadCharacterIntoDrawer(char) {
         </div>
     `;
 
+    console.log('[DEBUG] 渲染前检查 - appearance:', charData.appearance, 'identity:', charData.identity);
     if (charData.appearance || charData.identity) {
+        console.log('[DEBUG] 进入人物画像分支');
         html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">人物画像</div>
@@ -226,7 +287,9 @@ async function loadCharacterIntoDrawer(char) {
         `;
     }
 
+    console.log('[DEBUG] personality:', charData.personality, 'values:', charData.values);
     if ((charData.personality && charData.personality.length > 0) || (charData.values && charData.values.length > 0)) {
+        console.log('[DEBUG] 进入性格与价值观分支');
         html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">性格与价值观</div>
@@ -280,22 +343,12 @@ async function loadCharacterIntoDrawer(char) {
             attrHtml += '</div></div>';
         }
 
-        // 派生属性
-        const derivedList = Object.keys(charData.attributes)
-            .filter(k => !knownKeys.has(k))
-            .filter(k => !isRedundantMax(k))
-            .filter(k => charData.attributes[k] && typeof charData.attributes[k] === 'object');
-
-        if (derivedList.length > 0) {
+        // 派生属性（从 derived_attributes 字段获取）
+        if (charData.derived_attributes) {
             attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-            derivedList.forEach(key => {
-                const attr = charData.attributes[key];
-                if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                    const displayValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : attr.current;
-                    attrHtml += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayValue}</span></div>`;
-                }
+            Object.entries(charData.derived_attributes).forEach(([key, value]) => {
+                const displayName = key.replace(/_/g, ' ');
+                attrHtml += `<div class="attr-item"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${typeof value === 'number' ? value.toFixed(2) : value}</span></div>`;
             });
             attrHtml += '</div></div>';
         }
@@ -307,6 +360,82 @@ async function loadCharacterIntoDrawer(char) {
                     ${attrHtml}
                 </section>
             `;
+        }
+    }
+
+    // 记忆关系（仅当前角色）
+    if (isCurrent) {
+        try {
+            const relData = await apiGet('/api/v1/relationship/list');
+            if (relData.relationships && relData.relationships.length > 0) {
+                const relList = relData.relationships.slice(0, 5).map(r => {
+                    const level = r.relationship_label || '陌生人';
+                    const fav = r.favorability ?? 0;
+                    return `<div class="rel-mini-item">
+                        <span class="rel-name">${escapeHtml(r.target_name || '未知')}</span>
+                        <span class="rel-level ${r.relationship_level || 'neutral'}">${escapeHtml(level)}</span>
+                        <span class="rel-fav">${fav > 0 ? '+' : ''}${fav}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">记忆关系</div>
+                        <div class="rel-mini-list">${relList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载记忆关系失败:', err);
+        }
+    }
+
+    // 经历日志（仅当前角色）
+    if (isCurrent) {
+        try {
+            const expData = await apiGet('/api/v1/character/experiences?page=1&limit=3');
+            if (expData.experiences && expData.experiences.length > 0) {
+                const expList = expData.experiences.map(e => {
+                    const tick = e.tick_id ? `T${e.tick_id}` : '';
+                    const event = e.event || e.intent_summary || '-';
+                    return `<div class="exp-mini-item">
+                        <span class="exp-tick">${tick}</span>
+                        <span class="exp-event">${escapeHtml(event.substring(0, 30))}${event.length > 30 ? '...' : ''}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">经历日志</div>
+                        <div class="exp-mini-list">${expList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载经历日志失败:', err);
+        }
+    }
+
+    // 托梦记录（仅当前角色）
+    if (isCurrent) {
+        try {
+            const dreamData = await apiGet('/api/v1/character/dream/records?page=1&limit=3');
+            if (dreamData.records && dreamData.records.length > 0) {
+                const dreamList = dreamData.records.map(d => {
+                    const tick = d.tick_id ? `T${d.tick_id}` : '';
+                    const content = d.content || '-';
+                    return `<div class="dream-mini-item">
+                        <span class="dream-tick">${tick}</span>
+                        <span class="dream-content">${escapeHtml(content.substring(0, 25))}${content.length > 25 ? '...' : ''}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">托梦记录</div>
+                        <div class="dream-mini-list">${dreamList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载托梦记录失败:', err);
         }
     }
 
@@ -328,6 +457,7 @@ async function loadCharacterIntoDrawer(char) {
     }
 
     body.innerHTML = html;
+    console.log('[DEBUG] 最终渲染的 html 长度:', html.length);
 }
 
 // 切换角色
@@ -363,6 +493,7 @@ async function loadCharacter() {
 
     try {
         const data = await apiGet('/api/v1/character');
+        console.log('[DEBUG] loadCharacter API完整返回:', JSON.stringify(data, null, 2));
 
         // 基本信息
         document.getElementById('name').textContent = data.name || '-';

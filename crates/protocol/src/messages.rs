@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{GameRules, WorldBuildingRules, WorldState};
+use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldState};
 
 /// serde default helper: 缺省 true（fail-open，旧 server 不发字段时假定存活）
 fn default_true() -> bool {
@@ -148,6 +148,23 @@ pub enum ServerMessage {
 
     /// 世界观规则更新（新增）
     WorldBuildingRulesUpdate { rules: WorldBuildingRules },
+
+    /// 动作配置增量更新
+    ///
+    /// 仅当下发变更时出现，完整动作列表由 agent 本地缓存。
+    /// action_update_type: "full" | "incremental"
+    ActionUpdate {
+        /// 更新类型
+        update_type: String,
+        /// 动作列表（全量时有效）
+        actions: Vec<AvailableAction>,
+        /// 增量更新的动作名称列表（增量时有效）
+        updated_actions: Vec<String>,
+        /// 被删除的动作名称列表（增量时有效）
+        removed_actions: Vec<String>,
+        /// 规则版本
+        version: String,
+    },
 
     /// 心跳响应
     Pong { timestamp: i64 },
@@ -354,9 +371,9 @@ mod tests {
         let agent_id = Uuid::nil();
         let game_rules = GameRules {
             tick_duration_secs: 60,
-            available_actions: vec![],
             initial_items: vec![],
             survival_actions: vec![],
+            available_actions: vec![],
             survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
@@ -416,7 +433,6 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
-            available_actions: vec![],
             deadline_ms: 0,
         };
 
@@ -463,7 +479,11 @@ mod tests {
         let json = r#"{"type":"error","message":"Something went wrong"}"#;
         let msg: ServerMessage = serde_json::from_str(json).unwrap();
         match msg {
-            ServerMessage::Error { code, message, current_tick_id: _ } => {
+            ServerMessage::Error {
+                code,
+                message,
+                current_tick_id: _,
+            } => {
                 assert!(code.is_empty());
                 assert_eq!(message, "Something went wrong");
             }
@@ -511,9 +531,9 @@ mod tests {
         let agent_id = Uuid::nil();
         let game_rules = GameRules {
             tick_duration_secs: 60,
-            available_actions: vec![],
             initial_items: vec![],
             survival_actions: vec![],
+            available_actions: vec![],
             survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),

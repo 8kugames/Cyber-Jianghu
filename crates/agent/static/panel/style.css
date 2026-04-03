@@ -1533,7 +1533,7 @@ button[type="button"]:disabled {
 
 .world-tree-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(800px, 1fr));
     gap: 18px;
 }
 
@@ -2409,6 +2409,101 @@ button[type="button"]:disabled {
     background: var(--bg-secondary);
     padding: 3px 10px;
     border-radius: 999px;
+}
+
+.server-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.server-meta {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.server-group-chars {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    padding-left: 4px;
+}
+
+/* 抽屉迷你列表样式 */
+.rel-mini-list,
+.exp-mini-list,
+.dream-mini-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rel-mini-item,
+.exp-mini-item,
+.dream-mini-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+
+.rel-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.rel-level {
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.rel-level.neutral {
+    background: rgba(150, 150, 150, 0.15);
+    color: var(--text-muted);
+}
+.rel-level.friendly {
+    background: rgba(79, 192, 141, 0.12);
+    color: var(--success);
+}
+.rel-level.hostile {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--danger);
+}
+
+.rel-fav {
+    font-weight: 600;
+    min-width: 30px;
+    text-align: right;
+}
+
+.exp-tick,
+.dream-tick {
+    font-family: monospace;
+    font-size: 10px;
+    padding: 2px 5px;
+    background: rgba(64, 120, 242, 0.08);
+    border-radius: 4px;
+    color: var(--accent);
+}
+
+.exp-event,
+.dream-content {
+    flex: 1;
+    color: var(--text-secondary);
 }
 
 .dialog-xlarge {

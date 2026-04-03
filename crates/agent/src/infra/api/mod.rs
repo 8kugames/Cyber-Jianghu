@@ -428,6 +428,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/characters/switch",
             post(handlers::switch_character_handler),
         ) // 切换当前角色
+        .route(
+            "/api/v1/characters/{agent_id}",
+            get(handlers::get_character_by_id_handler),
+        ) // 获取指定角色详情
         // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
         .route(
             "/api/v1/review/pending",

@@ -83,6 +83,8 @@ struct ConnectionState {
     world_building_rules_callback: Option<Arc<dyn Fn(WorldBuildingRules) + Send + Sync>>,
     /// Server 消息透传回调（用于 OpenClaw 集成）
     server_msg_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
+    /// 动作配置更新回调
+    action_update_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
 }
 
 impl WebSocketClient {
@@ -101,6 +103,7 @@ impl WebSocketClient {
                 dialogue_callback: None,
                 world_building_rules_callback: None,
                 server_msg_callback: None,
+                action_update_callback: None,
             })),
         }
     }
@@ -223,6 +226,17 @@ impl WebSocketClient {
         });
     }
 
+    /// 设置动作配置更新回调
+    pub fn set_action_update_callback(&self, callback: Arc<dyn Fn(ServerMessage) + Send + Sync>) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.action_update_callback = Some(callback);
+            });
+        });
+    }
+
     /// 等待注册响应
     ///
     /// 返回值：
@@ -307,12 +321,13 @@ impl WebSocketClient {
     /// 接收消息并处理
     async fn receive_and_handle_message(&self) -> Result<Option<WorldState>> {
         // 先获取回调的克隆，避免在循环中同时持有可变和不可变借用
-        let (game_rules_cb, dialogue_cb, world_building_rules_cb, server_msg_cb) = {
+        let (game_rules_cb, dialogue_cb, world_building_rules_cb, action_update_cb, server_msg_cb) = {
             let state = self.state.read().await;
             (
                 state.game_rules_callback.clone(),
                 state.dialogue_callback.clone(),
                 state.world_building_rules_callback.clone(),
+                state.action_update_callback.clone(),
                 state.server_msg_callback.clone(),
             )
         };
@@ -375,6 +390,33 @@ impl WebSocketClient {
                             }
                             // 继续等待 WorldState
                         }
+                        Ok(msg @ ServerMessage::ActionUpdate { .. }) => {
+                            if let ServerMessage::ActionUpdate {
+                                ref update_type,
+                                ref updated_actions,
+                                ref removed_actions,
+                                ref version,
+                                ..
+                            } = msg
+                            {
+                                info!(
+                                    "Received action update: type={}, version={}, updated={}, removed={}",
+                                    update_type,
+                                    version,
+                                    updated_actions.len(),
+                                    removed_actions.len()
+                                );
+                                // 使用回调处理更新
+                                if let Some(ref callback) = action_update_cb {
+                                    callback(msg.clone());
+                                }
+                            }
+                            // 透传给 OpenClaw
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
+                            }
+                            // 继续等待 WorldState
+                        }
                         Ok(msg @ ServerMessage::Dialogue { .. }) => {
                             debug!("Received dialogue message");
                             // 使用之前克隆的回调
@@ -389,7 +431,11 @@ impl WebSocketClient {
                             }
                             // 继续等待 WorldState
                         }
-                        Ok(ServerMessage::Error { code, message, current_tick_id }) => {
+                        Ok(ServerMessage::Error {
+                            code,
+                            message,
+                            current_tick_id,
+                        }) => {
                             let is_tick_mismatch =
                                 code == cyber_jianghu_protocol::ERROR_CODE_TICK_MISMATCH;
 

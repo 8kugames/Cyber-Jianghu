@@ -11,8 +11,41 @@
 use crate::component::persona::dynamic_persona::DynamicPersona;
 use crate::component::social::RelationshipStore;
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
-use cyber_jianghu_protocol::WorldState;
+use cyber_jianghu_protocol::{AvailableAction, WorldState};
 use serde::{Deserialize, Serialize};
+
+// ============================================================================
+// 公共工具函数
+// ============================================================================
+
+/// 从本地文件加载可用动作列表
+pub fn load_available_actions_from_file() -> Vec<AvailableAction> {
+    let actions_path = dirs::home_dir()
+        .map(|h| h.join(".cyber-jianghu").join("config").join("actions.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from(""));
+
+    if !actions_path.exists() {
+        tracing::debug!("本地 actions.json 不存在，跳过加载");
+        return vec![];
+    }
+
+    match std::fs::read_to_string(&actions_path) {
+        Ok(json) => match serde_json::from_str::<Vec<AvailableAction>>(&json) {
+            Ok(actions) => {
+                tracing::debug!("从 {:?} 加载了 {} 个动作", actions_path, actions.len());
+                actions
+            }
+            Err(e) => {
+                tracing::warn!("解析 actions.json 失败: {}", e);
+                vec![]
+            }
+        },
+        Err(e) => {
+            tracing::warn!("读取 actions.json 失败: {}", e);
+            vec![]
+        }
+    }
+}
 
 // ============================================================================
 // 认知上下文数据结构
@@ -185,8 +218,38 @@ impl CognitiveContextBuilder {
     }
 
     /// 从 WorldState 构建认知上下文
+    ///
+    /// available_actions 参数用于覆盖 WorldState 中的值，
+    /// 主要用于测试场景。
     pub fn build(&self, world_state: &WorldState) -> CognitiveContext {
-        self.build_with_persona(world_state, None, None)
+        self.build_with_actions(world_state, None, None, None)
+    }
+
+    /// 从 WorldState 构建认知上下文（带动作覆盖）
+    ///
+    /// # 参数
+    /// - `world_state`: 世界状态
+    /// - `available_actions_override`: 可用动作覆盖，若为 None 则使用 world_state 中的值（并回退到文件）
+    /// - `persona`: 人设信息
+    /// - `relationship_store`: 关系存储
+    pub fn build_with_actions(
+        &self,
+        world_state: &WorldState,
+        available_actions_override: Option<Vec<AvailableAction>>,
+        persona: Option<&DynamicPersona>,
+        relationship_store: Option<&RelationshipStore>,
+    ) -> CognitiveContext {
+        let perception = self.build_perception(world_state, relationship_store);
+        let motivation = self.build_motivation(world_state, persona);
+        let planning = self.build_planning_with_actions(world_state, available_actions_override);
+        let decision = self.build_decision();
+
+        CognitiveContext {
+            perception,
+            motivation,
+            planning,
+            decision,
+        }
     }
 
     /// 从 WorldState 和人设构建认知上下文
@@ -347,8 +410,17 @@ impl CognitiveContextBuilder {
         }
     }
 
-    /// 构建规划上下文
+    /// 构建规划上下文（使用 WorldState 中的值，回退到文件）
     fn build_planning(&self, world_state: &WorldState) -> PlanningContext {
+        self.build_planning_with_actions(world_state, None)
+    }
+
+    /// 构建规划上下文（带动作覆盖）
+    fn build_planning_with_actions(
+        &self,
+        world_state: &WorldState,
+        available_actions_override: Option<Vec<AvailableAction>>,
+    ) -> PlanningContext {
         let mut goals = Vec::new();
         let attrs = &world_state.self_state.attributes;
 
@@ -366,8 +438,13 @@ impl CognitiveContextBuilder {
             goals.push("继续当前活动".to_string());
         }
 
-        let available_actions: Vec<AvailableActionInfo> = world_state
-            .available_actions
+        // 优先使用传入的 available_actions_override，若为空则从本地文件加载
+        let source_actions = match available_actions_override {
+            Some(actions) => actions,
+            None => load_available_actions_from_file(),
+        };
+
+        let available_actions: Vec<AvailableActionInfo> = source_actions
             .iter()
             .map(|action| AvailableActionInfo {
                 action: action.action.clone(),
