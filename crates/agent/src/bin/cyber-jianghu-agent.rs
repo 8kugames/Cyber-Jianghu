@@ -300,9 +300,9 @@ fn select_character(server_dir: &Path) -> Option<CharacterConfig> {
 // ============================================================================
 
 /// 打印启动 Banner
-fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str) {
+fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str, mode: &str) {
     info!("╔══════════════════════════════════════════════╗");
-    info!("║       Cyber-Jianghu Agent (Claw Mode)        ║");
+    info!("║   Cyber-Jianghu Agent ({:^20})   ║", mode);
     info!("╠══════════════════════════════════════════════╣");
     info!("║ HTTP API:  http://0.0.0.0:{}                 ║", port);
     info!("║ WebSocket: {:<34} ║", server_ws_url);
@@ -653,6 +653,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             };
             let cognitive_engine =
                 Arc::new(CognitiveEngine::new(llm_arc.clone(), cognitive_config));
+            let cognitive_engine_for_builder = cognitive_engine.clone();
 
             let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
                 Arc::new(cognitive_decision_with_retry(
@@ -710,7 +711,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 ws_url,
                 &device,
                 server_dir.clone(),
-                data_dir.clone(),
                 Some(reconnect_tx),
             )?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
@@ -743,7 +743,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
-                .with_reconnect_rx(reconnect_rx);
+                .with_reconnect_rx(reconnect_rx)
+                .cognitive_engine(cognitive_engine_for_builder.clone());
 
             // Add character config if available
             if let Some(char) = character.clone() {
@@ -766,7 +767,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 ws_url,
                 &device,
                 server_dir.clone(),
-                data_dir.clone(),
             )?;
             cognitive_death_event_tx = None;
             cognitive_api_state = None;
@@ -982,8 +982,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             .await;
     }
 
-    agent.run().await?;
-    Ok(())
+    // 外层循环：run() 返回 Ok(()) 表示需要重启（等待转生后重新连接）
+    // Err 才是真正的致命错误
+    loop {
+        agent.run().await?;
+        info!("Agent run() completed, restarting...");
+    }
 }
 
 struct ServerSetup {
@@ -1008,7 +1012,6 @@ fn start_claw_server(
     ws_url: &str,
     device: &DeviceConfig,
     server_dir: PathBuf,
-    data_dir: PathBuf,
 ) -> Result<ServerSetup> {
     let actual_port = if port == 0 {
         use rand::RngExt;
@@ -1025,7 +1028,7 @@ fn start_claw_server(
     );
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, ws_url, &config_path_str);
+    print_startup_banner(actual_port, ws_url, &config_path_str, "Claw");
 
     let (reconnect_tx, reconnect_rx) =
         mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
@@ -1037,13 +1040,14 @@ fn start_claw_server(
     // Derive HTTP URL from WS URL
     let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
 
+    let character_dir = server_dir.join("characters");
     let (_http_decision_state, api_state) = create_http_state(
         device_id,
         http_url.to_string(),
         ws_url.to_string(),
         Some(device.clone()),
         server_dir,
-        data_dir.clone(),
+        character_dir,
         Some(reconnect_tx),
         config_path(),
         Some(shared_state.clone()),
@@ -1076,7 +1080,6 @@ fn start_http_api_server(
     ws_url: &str,
     device: &DeviceConfig,
     server_dir: PathBuf,
-    data_dir: PathBuf,
     reconnect_tx: Option<mpsc::Sender<cyber_jianghu_agent::infra::api::ReconnectRequest>>,
 ) -> Result<(Arc<cyber_jianghu_agent::infra::api::HttpApiState>, u16)> {
     let port_range_start = 23340u16;
@@ -1097,18 +1100,19 @@ fn start_http_api_server(
     info!("启动 HTTP API 服务器，端口: {}", actual_port);
 
     let config_path_str = config_path().display().to_string();
-    print_startup_banner(actual_port, ws_url, &config_path_str);
+    print_startup_banner(actual_port, ws_url, &config_path_str, "Cognitive");
 
     // Derive HTTP URL from WS URL
     let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
 
+    let character_dir = server_dir.join("characters");
     let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::create_http_state(
         device_id,
         http_url.to_string(),
         ws_url.to_string(),
         Some(device.clone()),
         server_dir,
-        data_dir.clone(),
+        character_dir,
         reconnect_tx,
         config_path(),
         None,

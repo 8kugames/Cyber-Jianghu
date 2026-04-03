@@ -13,75 +13,131 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tracing::{debug, error};
 
 use super::LlmClient;
 
 // ============================================================================
-// Token Usage Tracking
+// Token Usage Tracking (per provider-model)
 // ============================================================================
 
-/// LLM Token 累计使用统计
-///
-/// 使用 AtomicU64 实现无锁并发累加，通过全局单例共享。
-/// 适用于单进程 Agent 场景。
-pub struct TokenUsageTracker {
-    /// 累计 Prompt Tokens
-    pub total_prompt_tokens: AtomicU64,
-    /// 累计 Completion Tokens
-    pub total_completion_tokens: AtomicU64,
-    /// 累计 API 调用次数
-    pub total_calls: AtomicU64,
+/// Per-model token stats
+struct PerModelStats {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    calls: u64,
 }
 
-impl TokenUsageTracker {
+impl PerModelStats {
     fn new() -> Self {
-        Self {
-            total_prompt_tokens: AtomicU64::new(0),
-            total_completion_tokens: AtomicU64::new(0),
-            total_calls: AtomicU64::new(0),
-        }
+        Self { prompt_tokens: 0, completion_tokens: 0, calls: 0 }
     }
 
-    /// 记录一次 API 调用的 token 使用量
-    pub fn record(&self, prompt_tokens: u64, completion_tokens: u64) {
-        self.total_prompt_tokens
-            .fetch_add(prompt_tokens, Ordering::Relaxed);
-        self.total_completion_tokens
-            .fetch_add(completion_tokens, Ordering::Relaxed);
-        self.total_calls.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// 获取当前统计数据
-    pub fn snapshot(&self) -> TokenUsageSnapshot {
-        let prompt = self.total_prompt_tokens.load(Ordering::Relaxed);
-        let completion = self.total_completion_tokens.load(Ordering::Relaxed);
-        TokenUsageSnapshot {
-            total_prompt_tokens: prompt,
-            total_completion_tokens: completion,
-            total_tokens: prompt + completion,
-            total_calls: self.total_calls.load(Ordering::Relaxed),
-        }
+    fn record(&mut self, prompt: u64, completion: u64) {
+        self.prompt_tokens += prompt;
+        self.completion_tokens += completion;
+        self.calls += 1;
     }
 }
 
-/// Token 使用统计快照
-#[derive(Debug, Clone, Serialize)]
-pub struct TokenUsageSnapshot {
-    pub total_prompt_tokens: u64,
-    pub total_completion_tokens: u64,
+/// Token stats for a specific provider-model key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelTokenStats {
+    pub provider: String,
+    pub model: String,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
     pub total_tokens: u64,
-    pub total_calls: u64,
+    pub calls: u64,
 }
 
-static TOKEN_USAGE: OnceLock<TokenUsageTracker> = OnceLock::new();
+static TOKEN_STATS: OnceLock<Mutex<HashMap<String, PerModelStats>>> = OnceLock::new();
 
-/// 获取全局 Token 使用统计追踪器
-pub fn token_usage_tracker() -> &'static TokenUsageTracker {
-    TOKEN_USAGE.get_or_init(TokenUsageTracker::new)
+fn token_stats() -> &'static Mutex<HashMap<String, PerModelStats>> {
+    TOKEN_STATS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn model_key(provider: &LlmProvider, model: &str) -> String {
+    format!("{}/{}", provider.as_str(), model)
+}
+
+const TOKEN_LOG_DIR: &str = ".cyber-jianghu/logs";
+const TOKEN_LOG_FILE: &str = "token_cost_count.tmp";
+
+fn log_file_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(TOKEN_LOG_DIR).join(TOKEN_LOG_FILE))
+}
+
+/// Record token usage for a specific provider-model
+pub fn record_token_usage(provider: &LlmProvider, model: &str, prompt_tokens: u64, completion_tokens: u64) {
+    let key = model_key(provider, model);
+    if let Ok(mut stats) = token_stats().lock() {
+        stats.entry(key).or_insert_with(PerModelStats::new).record(prompt_tokens, completion_tokens);
+    }
+}
+
+/// Get snapshot of all model stats (does not clear)
+pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
+    let Ok(stats) = token_stats().lock() else { return vec![] };
+    stats.iter().map(|(key, s)| {
+        let parts: Vec<&str> = key.splitn(2, '/').collect();
+        let (provider, model) = if parts.len() == 2 {
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            ("unknown".to_string(), key.clone())
+        };
+        ModelTokenStats {
+            provider,
+            model,
+            prompt_tokens: s.prompt_tokens,
+            completion_tokens: s.completion_tokens,
+            total_tokens: s.prompt_tokens + s.completion_tokens,
+            calls: s.calls,
+        }
+    }).collect()
+}
+
+/// Persist all stats to file and reset counters
+pub fn persist_and_reset() {
+    let stats = snapshot_all_stats();
+    if stats.is_empty() { return; }
+    if let Some(path) = log_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        // Read existing data
+        let existing: HashMap<String, ModelTokenStats> = if path.exists() {
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+        // Merge: add to existing counts
+        let mut merged: HashMap<String, ModelTokenStats> = existing;
+        for s in &stats {
+            let key = format!("{}/{}", s.provider, s.model);
+            if let Some(existing) = merged.get_mut(&key) {
+                existing.prompt_tokens += s.prompt_tokens;
+                existing.completion_tokens += s.completion_tokens;
+                existing.total_tokens += s.total_tokens;
+                existing.calls += s.calls;
+            } else {
+                merged.insert(key, s.clone());
+            }
+        }
+        // Write back
+        if let Ok(json) = serde_json::to_string_pretty(&merged) {
+            let _ = fs::write(&path, json);
+        }
+    }
+    // Reset current tick counters
+    if let Ok(mut stats) = token_stats().lock() {
+        stats.clear();
+    }
 }
 
 /// OpenClaw 配置文件格式
@@ -443,7 +499,7 @@ impl DirectLlmClient {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
         let request = OpenAIRequest {
-            model,
+            model: model.clone(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
@@ -486,10 +542,10 @@ impl DirectLlmClient {
 
         // 记录 token 使用量
         if let Some(ref usage) = response_data.usage {
-            token_usage_tracker().record(usage.prompt_tokens, usage.completion_tokens);
+            record_token_usage(&self.config.provider, &model, usage.prompt_tokens, usage.completion_tokens);
             debug!(
-                "Token usage: prompt={}, completion={}",
-                usage.prompt_tokens, usage.completion_tokens
+                "Token usage: provider={}, model={}, prompt={}, completion={}",
+                self.config.provider.as_str(), model, usage.prompt_tokens, usage.completion_tokens
             );
         }
 
@@ -517,7 +573,7 @@ impl DirectLlmClient {
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
         let request = OpenAIRequest {
-            model,
+            model: model.clone(),
             messages: vec![
                 ChatMessage {
                     role: "system".to_string(),
@@ -564,10 +620,10 @@ impl DirectLlmClient {
             .context("Failed to parse LLM response")?;
 
         if let Some(ref usage) = response_data.usage {
-            token_usage_tracker().record(usage.prompt_tokens, usage.completion_tokens);
+            record_token_usage(&self.config.provider, &model, usage.prompt_tokens, usage.completion_tokens);
             debug!(
-                "Token usage: prompt={}, completion={}",
-                usage.prompt_tokens, usage.completion_tokens
+                "Token usage: provider={}, model={}, prompt={}, completion={}",
+                self.config.provider.as_str(), model, usage.prompt_tokens, usage.completion_tokens
             );
         }
 

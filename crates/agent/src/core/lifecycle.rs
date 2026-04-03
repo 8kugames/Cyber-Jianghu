@@ -46,12 +46,14 @@ impl super::Agent {
         if skip_connection {
             if let Some(ref character) = self.character_config {
                 warn!(
-                    "Agent '{}' status is {:?}, skipping server connection (waiting for rebirth)",
+                    "Agent '{}' status is {:?}, waiting for rebirth",
                     character.name, character.status
                 );
             } else {
-                warn!("No active character, skipping server connection");
+                warn!("No active character, waiting for character creation");
             }
+            // 保持进程存活，等待 reconnect_rx 触发重连
+            self.wait_for_rebirth().await?;
             return Ok(());
         }
 
@@ -154,53 +156,38 @@ impl super::Agent {
         }
 
         // 等待注册确认（包含游戏规则）
-        // 如果收到 "Pending registration" 错误，说明需要创建角色，无限等待
-        let (agent_id, game_rules) = loop {
-            match self.client.wait_for_registration().await {
-                Ok((id, rules)) => break (id, rules),
-                Err(e) if format!("{}", e).contains("Pending registration") => {
-                    self.reconnect_backoff += 1;
-                    let elapsed_secs = self.reconnect_backoff * 5;
-                    if should_log_retry(self.reconnect_backoff) {
-                        info!(
-                            "等待角色创建，Agent '{}' 将于 5 秒后重连... (已等待 {}秒)",
-                            self.character_name(),
-                            elapsed_secs
-                        );
-                    }
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    self.client.close().await;
-                    // 重连可能失败，使用无限重试
-                    loop {
-                        match self.client.connect().await {
-                            Ok(()) => break,
-                            Err(ConnectError::AuthFailed) => {
-                                match self.refresh_device_token().await {
-                                    Ok(()) => continue,
-                                    Err(token_err) => {
-                                        warn!(
-                                            "Token 刷新失败 (等待角色创建期间): {}, 5秒后重试",
-                                            token_err
-                                        );
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(5))
-                                            .await;
-                                    }
-                                }
-                            }
-                            Err(ConnectError::ConnectionFailed(e)) => {
-                                warn!("等待角色创建期间重连失败: {}, 5秒后重试...", e);
-                                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                            }
-                        }
-                    }
+        // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
+        let (agent_id, game_rules, registered_name) = match self.client.wait_for_registration().await {
+            Ok(Some((id, rules, name))) => (id, rules, name),
+            Ok(None) => {
+                info!(
+                    "Agent '{}' 等待角色注册（保持连接）...",
+                    self.character_name()
+                );
+                self.death_reported = true;
+                if let Some(ref api_state) = self.http_api_state {
+                    api_state
+                        .is_dead
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
-                Err(e) => return Err(e),
+                self.wait_for_rebirth().await?;
+                return Ok(());
             }
+            Err(e) => return Err(e),
         };
         // 重置重试计数器
         self.reconnect_backoff = 0;
         info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
+
+        // 使用服务器返回的角色名更新 Agent 名称追踪
+        if let Some(ref name) = registered_name {
+            self.server_assigned_name = Some(name.clone());
+            if let Some(ref engine) = self.cognitive_engine {
+                engine.update_agent_name(name);
+            }
+            info!("已更新 agent 名称为: {}", name);
+        }
 
         // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
         if agent_id == Uuid::nil() {
@@ -226,10 +213,10 @@ impl super::Agent {
                 let _ = api_state.death_event_tx.send(death_msg);
             }
 
+            // 归隐后保持进程存活，等待创建新角色
+            self.wait_for_rebirth().await?;
             return Ok(());
         }
-
-        // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
         if let Some(ref callback) = self.registration_callback {
             callback(agent_id);
         }
@@ -622,8 +609,17 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok((agent_id, game_rules)) => {
+                        Ok(Some((agent_id, game_rules, registered_name))) => {
                             info!("重连后注册确认: agent_id={}", agent_id);
+
+                            // 更新 agent 名称
+                            if let Some(ref name) = registered_name {
+                                self.server_assigned_name = Some(name.clone());
+                                if let Some(ref engine) = self.cognitive_engine {
+                                    engine.update_agent_name(name);
+                                }
+                                info!("从服务器获取角色名称: {}", name);
+                            }
 
                             // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
                             if agent_id == Uuid::nil() {
@@ -644,9 +640,8 @@ impl super::Agent {
                                     };
                                     let _ = api_state.death_event_tx.send(death_msg);
                                 }
-                                return Err(anyhow::anyhow!(
-                                    "Pending registration: character retired"
-                                ));
+                                // 归隐后不返回错误，保持进程存活等待创建新角色
+                                return Ok(());
                             }
 
                             // 重置死亡状态（转生后获得新身份）
@@ -665,13 +660,19 @@ impl super::Agent {
                             // 更新游戏规则
                             self.config.update_game_rules(game_rules);
                         }
-                        Err(e) => {
-                            let err_msg = format!("{}", e);
-                            // Pending registration = 需要注册新角色，停止重试
-                            if err_msg.contains("Pending registration") {
-                                info!("等待注册新角色，停止重连");
-                                return Err(anyhow::anyhow!("Pending registration: {}", e));
+                        Ok(None) => {
+                            // agent_id 为 nil，等待角色注册，保持连接
+                            info!("重连后收到 nil agent_id，等待角色注册...");
+                            self.death_reported = true;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state
+                                    .is_dead
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
                             }
+                            // 不返回错误，让调用方知道需要等待
+                            return Ok(());
+                        }
+                        Err(e) => {
                             // 其他错误，继续重试
                             error!("重连后注册确认失败: {}", e);
                             self.client.close().await;
@@ -774,6 +775,57 @@ impl super::Agent {
         }
 
         Ok(())
+    }
+
+    /// 等待转生（角色注册后触发重连）
+    ///
+    /// 当 agent_id 为 nil（未创建角色）或角色已归隐时，进入此等待循环。
+    /// 保持进程存活，监听 reconnect_rx（Web 面板注册新角色后通过 HTTP API 触发）。
+    async fn wait_for_rebirth(&mut self) -> Result<()> {
+        info!(
+            "Agent '{}' 进入等待转生模式，保持进程存活...",
+            self.character_name()
+        );
+
+        loop {
+            tokio::select! {
+                // 监听重连请求（Web 面板注册新角色后触发）
+                Some(req) = async {
+                    if let Some(ref mut rx) = self.reconnect_rx {
+                        rx.recv().await
+                    } else {
+                        // 无 reconnect_rx（非 Claw/Cognitive HTTP API 模式），永远等待
+                        std::future::pending().await
+                    }
+                } => {
+                    info!("[rebirth] 收到重连请求: {}", req.ws_url);
+                    let http_url = crate::config::ws_to_http_url(&req.ws_url);
+                    self.client.update_server_url(req.ws_url.clone(), http_url).await;
+
+                    match self.reconnect().await {
+                        Ok(()) => {
+                            info!("[rebirth] 重连成功，退出等待转生模式");
+                            // reconnect 成功后 death_reported 已重置
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!("[rebirth] 重连失败: {}，继续等待", e);
+                        }
+                    }
+                }
+
+                // 配置文件变更通知
+                _ = async {
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    debug!("[rebirth] 配置变更通知，忽略（等待角色注册）");
+                }
+            }
+        }
     }
 
     /// 关闭连接
