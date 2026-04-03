@@ -219,8 +219,10 @@ impl LlmValidationResponse {
                 // 空 result 或无法识别 → 宽容策略：降级为通过
                 // 避免 LLM 截断导致验证拒绝，触发无意义的重试循环
                 tracing::warn!(
-                    "Unrecognized validation result '{}', auto-approving (lenient policy)",
-                    self.result
+                    "Unrecognized validation result '{}', auto-approving (lenient policy). raw='{}', narrative='{}'",
+                    self.result,
+                    self.reason,
+                    self.narrative
                 );
                 ValidationResult::Approved {
                     reason: None,

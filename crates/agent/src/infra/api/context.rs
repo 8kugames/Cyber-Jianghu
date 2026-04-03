@@ -293,7 +293,7 @@ fn generate_impl(
     if !state.events_log.is_empty() {
         sections.push("".to_string());
         sections.push("## 最近事件".to_string());
-        for event in state.events_log.iter().rev().take(5).rev() {
+        for event in state.events_log.iter().rev().take(20).rev() {
             sections.push(format!("- {}", event.description));
         }
     }
