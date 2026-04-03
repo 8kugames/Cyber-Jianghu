@@ -360,13 +360,15 @@ impl Default for Broadcaster {
 /// 构建 Agent 连接时的初始 WorldState（简化版）
 ///
 /// 不含其他 agent entities，用于让 agent 立即获知自身存活状态
+/// `override_tick_id`: 如果提供，使用此 tick_id 而非 agent_state.tick_id（用于重连时同步到当前 tick）
 pub fn build_initial_world_state(
     agent_state: &AgentState,
     game_data_cache: &Arc<GameDataCache>,
     deadline_ms: u64,
     initial_inventory: Vec<crate::models::InventoryItem>,
+    override_tick_id: Option<i64>,
 ) -> crate::models::WorldState {
-    let tick_id = agent_state.tick_id;
+    let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
 
     // 计算游戏时间
     let total_hours = tick_id;
