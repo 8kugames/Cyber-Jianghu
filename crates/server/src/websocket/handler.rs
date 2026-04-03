@@ -29,7 +29,7 @@ use crate::dialogue::DialogueResponse;
 use crate::game_data::registry::ItemRegistry;
 use crate::inventory::InventoryManager;
 use crate::models::Intent;
-use cyber_jianghu_protocol::{ClientMessage, DialogueMessage, ServerMessage};
+use cyber_jianghu_protocol::{ClientMessage, DialogueMessage, GameError, ServerMessage};
 
 use super::connection::Connection;
 use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_building_rules};
@@ -419,10 +419,18 @@ async fn handle_websocket(
                                         agent_name_for_recv, e
                                     );
 
-                                    // 发送错误消息给 Agent
-                                    let error_msg = ServerMessage::Error {
-                                        message: format!("Failed to process message: {}", e),
-                                    };
+                                    // 发送错误消息给 Agent（尝试提取结构化错误码）
+                                    let (code, message) =
+                                        if let Some(ge) = e.downcast_ref::<GameError>() {
+                                            (ge.error_code().to_string(), ge.to_string())
+                                        } else {
+                                            (
+                                                cyber_jianghu_protocol::ERROR_CODE_ACTION_FAILED
+                                                    .to_string(),
+                                                format!("Failed to process message: {}", e),
+                                            )
+                                        };
+                                    let error_msg = ServerMessage::Error { code, message };
                                     if let Ok(json) = serde_json::to_string(&error_msg) {
                                         let _ = tx.send(Message::Text(json.into())).await;
                                     }
@@ -436,6 +444,8 @@ async fn handle_websocket(
 
                                 // 发送错误消息给 Agent
                                 let error_msg = ServerMessage::Error {
+                                    code: cyber_jianghu_protocol::ERROR_CODE_INVALID_MESSAGE
+                                        .to_string(),
                                     message: format!("Invalid message format: {}", e),
                                 };
                                 if let Ok(json) = serde_json::to_string(&error_msg) {
@@ -605,7 +615,9 @@ async fn handle_intent(
     let agent_state = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await?;
     if !agent_state.is_alive {
         warn!("Intent rejected: agent {} is dead", agent_id);
-        return Err("Agent 已死亡，无法执行此动作。请重新转生入世。".into());
+        return Err(
+            Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
+        );
     }
 
     // 纵深防御：检查 agents.status，拒绝已归隐/已死亡角色的意图
@@ -622,7 +634,9 @@ async fn handle_intent(
             "Intent rejected: agent {} status is {:?}, expected 'active'",
             agent_id, agent_status
         );
-        return Err("角色已失效，无法执行此动作。请重新转生入世。".into());
+        return Err(
+            Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
+        );
     }
 
     // tick_id 校验：从内存读取当前接受意图的 tick_id
@@ -631,7 +645,7 @@ async fn handle_intent(
         .load(std::sync::atomic::Ordering::Acquire);
 
     if current_tick == 0 {
-        return Err("服务器尚未开始接受意图".into());
+        return Err(Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>);
     }
 
     if tick_id != current_tick {
@@ -639,11 +653,10 @@ async fn handle_intent(
             "Intent tick_id mismatch: agent={}, intent_tick={}, accepting_tick={}",
             agent_id, tick_id, current_tick
         );
-        return Err(format!(
-            "Intent tick_id {} 不匹配当前 tick {}。请提交当前 tick 的意图。",
-            tick_id, current_tick
-        )
-        .into());
+        return Err(Box::new(GameError::TickMismatch {
+            intent_tick_id: tick_id,
+            current_tick_id: current_tick,
+        }) as Box<dyn std::error::Error + Send + Sync>);
     }
 
     info!(
@@ -831,6 +844,7 @@ async fn handle_dialogue_message(
             warn!("对话消息处理失败: {}", e);
             // 发送错误消息给发起者（通过 agent_to_device_map 解析 device_id）
             let error_msg = ServerMessage::Error {
+                code: cyber_jianghu_protocol::ERROR_CODE_DIALOGUE_FAILED.to_string(),
                 message: format!("Dialogue failed: {}", e),
             };
             let json = serde_json::to_string(&error_msg)?;

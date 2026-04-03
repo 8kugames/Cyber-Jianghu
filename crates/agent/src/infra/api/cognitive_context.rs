@@ -251,7 +251,10 @@ impl CognitiveContextBuilder {
         }
 
         for item in &world_state.nearby_items {
-            observations.push(format!("地上有{} [{}] x{}", item.name, item.item_id, item.quantity));
+            observations.push(format!(
+                "地上有{} [{}] x{}",
+                item.name, item.item_id, item.quantity
+            ));
         }
 
         for event in world_state.events_log.iter().rev().take(10) {

@@ -244,7 +244,7 @@ impl WebSocketClient {
                             info!("Agent registered with ID: {}", agent_id);
                             return Ok((agent_id, game_rules));
                         }
-                        Ok(ServerMessage::Error { message }) => {
+                        Ok(ServerMessage::Error { message, .. }) => {
                             return Err(anyhow::anyhow!("Server error: {}", message));
                         }
                         _ => {
@@ -374,27 +374,24 @@ impl WebSocketClient {
                             }
                             // 继续等待 WorldState
                         }
-                        Ok(msg @ ServerMessage::Error { .. }) => {
-                            let message = if let ServerMessage::Error { message } = &msg {
-                                message.clone()
-                            } else {
-                                unreachable!()
-                            };
+                        Ok(ServerMessage::Error { code, message }) => {
+                            let is_tick_mismatch =
+                                code == cyber_jianghu_protocol::ERROR_CODE_TICK_MISMATCH;
 
-                            let tick_mismatch = message.contains("tick") && message.contains("不匹配");
+                            // 透传给 OpenClaw
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(ServerMessage::Error {
+                                    code: code.clone(),
+                                    message: message.clone(),
+                                });
+                            }
 
-                            if tick_mismatch {
+                            if is_tick_mismatch {
                                 error!("Tick mismatch detected: {}", message);
-                                if let Some(ref callback) = server_msg_cb {
-                                    callback(msg);
-                                }
                                 return Err(anyhow::anyhow!("Tick mismatch: {}", message));
                             }
 
                             warn!("Server error: {}", message);
-                            if let Some(ref callback) = server_msg_cb {
-                                callback(msg);
-                            }
                         }
                         Ok(msg @ ServerMessage::AgentDied { .. }) => {
                             if let ServerMessage::AgentDied {

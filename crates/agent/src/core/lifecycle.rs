@@ -178,8 +178,12 @@ impl super::Agent {
                                 match self.refresh_device_token().await {
                                     Ok(()) => continue,
                                     Err(token_err) => {
-                                        warn!("Token 刷新失败 (等待角色创建期间): {}, 5秒后重试", token_err);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                        warn!(
+                                            "Token 刷新失败 (等待角色创建期间): {}, 5秒后重试",
+                                            token_err
+                                        );
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(5))
+                                            .await;
                                     }
                                 }
                             }
@@ -340,22 +344,29 @@ impl super::Agent {
                         Ok(state) => state,
                         Err(e) => {
                             let error_msg = format!("{}", e);
-                            // websocket.rs 已将 tick mismatch 转为 "Tick mismatch: Intent tick_id X 不匹配当前 tick Y..."
+                            // websocket.rs 已将 tick mismatch 转为 "Tick mismatch: ..."
                             if error_msg.starts_with("Tick mismatch") {
-                                // 从 "Intent tick_id X 不匹配当前 tick Y" 中提取服务端 tick
+                                // 从错误消息中提取服务端 tick（格式：任意位置包含 "current_tick_id: N" 或末尾数字）
                                 let current_server_tick: Option<i64> = error_msg
-                                    .split("当前 tick ")
-                                    .nth(1)
-                                    .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok());
-                                
+                                    .rsplit("tick ")
+                                    .next()
+                                    .and_then(|s| s.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+                                    .or_else(|| {
+                                        // 回退：取消息中最后一个连续数字段
+                                        error_msg
+                                            .split(|c: char| !c.is_ascii_digit())
+                                            .rfind(|s| !s.is_empty())
+                                            .and_then(|s| s.parse().ok())
+                                    });
+
                                 info!("Tick mismatch detected: {}. Server tick: {:?}. Reconnecting...", e, current_server_tick);
-                                
+
                                 // 重连
                                 if let Err(reconnect_err) = self.reconnect().await {
                                     error!("Reconnect failed: {}", reconnect_err);
                                     continue;
                                 }
-                                
+
                                 // 接收新的 WorldState（可能是过时的初始 WorldState）
                                 let new_world_state = match self.client.receive_world_state().await {
                                     Ok(ws) => {
@@ -367,7 +378,7 @@ impl super::Agent {
                                         continue;
                                     }
                                 };
-                                
+
                                 // 如果有 current_server_tick 且收到的 WorldState tick 太旧，
                                 // 直接用 server_tick 生成 idle intent，不要等待（会死锁）
                                 let intent_tick = if let Some(server_tick) = current_server_tick {
@@ -381,7 +392,7 @@ impl super::Agent {
                                 } else {
                                     new_world_state.tick_id
                                 };
-                                
+
                                 // 更新 HTTP API 状态
                                 if let Some(ref api_state) = self.http_api_state {
                                     let mut current = api_state.current_state.write().await;
@@ -389,7 +400,7 @@ impl super::Agent {
                                     let mut last_update = api_state.last_state_update.write().await;
                                     *last_update = Some(std::time::Instant::now());
                                 }
-                                
+
                                 // 用新 WorldState 重新生成 intent
                                 let memory_context = self.get_memory_context().await;
                                 let combined_context = match &self.last_rejection_reason {
@@ -402,7 +413,7 @@ impl super::Agent {
                                     }
                                     None => memory_context.clone(),
                                 };
-                                
+
                                 let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
                                     memory_callback(&new_world_state, &combined_context).await
                                 } else if let Some(ref reason) = self.last_rejection_reason {
@@ -414,7 +425,7 @@ impl super::Agent {
                                 } else {
                                     (self.decision_callback)(&new_world_state).await
                                 };
-                                
+
                                 // 重新验证
                                 let mut final_intent = match self.validate_with_reflector(intent, &new_world_state).await {
                                     Ok(validated) => validated,
@@ -423,13 +434,13 @@ impl super::Agent {
                                         continue;
                                     }
                                 };
-                                
+
                                 // 如果使用了 server tick（落后于 WorldState），更新 intent 的 tick_id
                                 if final_intent.tick_id != intent_tick {
                                     info!("Updating intent tick from {} to {}", final_intent.tick_id, intent_tick);
                                     final_intent.tick_id = intent_tick;
                                 }
-                                
+
                                 // 重新发送
                                 info!(
                                     "Resending intent after tick mismatch: tick={}, action={}",
@@ -443,10 +454,10 @@ impl super::Agent {
                                         final_intent.tick_id, final_intent.action_type
                                     );
                                 }
-                                
+
                                 continue;
                             }
-                            
+
                             // 其他错误，尝试重连并继续
                             error!("Failed to receive world state: {}", e);
                             self.reconnect().await?;
@@ -469,15 +480,7 @@ impl super::Agent {
                     // 1.5 检查是否死亡（只报告一次）
                     if !self.death_reported
                         && let Some(death_event) = world_state.events_log.iter().find(|e| {
-                            if let Some(cause) = e.metadata.get("cause")
-                                && let Some(cause_str) = cause.as_str() {
-                                    return cause_str.starts_with("death");
-                                }
-                            if let Some(msg_type) = e.metadata.get("type")
-                                && let Some(type_str) = msg_type.as_str() {
-                                    return type_str == "death_notification";
-                                }
-                            false
+                            e.event_type == cyber_jianghu_protocol::EVENT_TYPE_DEATH_NOTIFICATION
                         }) {
                             warn!(
                                 "Agent '{}' has died: {}",
@@ -498,8 +501,8 @@ impl super::Agent {
                         warn!("Failed to process events into memory: {}", e);
                     }
 
-                    // 3. 每 84 tick 运行遗忘机制
-                    if world_state.tick_id % 84 == 0
+                    // 3. 每 FORGETTING_INTERVAL_TICKS tick 运行遗忘机制
+                    if world_state.tick_id % super::FORGETTING_INTERVAL_TICKS == 0
                         && let Err(e) = self.run_forgetting(world_state.tick_id).await {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }

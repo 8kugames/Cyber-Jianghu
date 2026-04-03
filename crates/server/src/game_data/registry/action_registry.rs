@@ -4,6 +4,7 @@
 
 use super::global::registry;
 use crate::game_data::types::ActionConfigEntry;
+use cyber_jianghu_protocol::AvailableAction;
 
 /// Action 配置访问器
 ///
@@ -58,6 +59,26 @@ impl ActionRegistry {
                 Self::get(name)
                     .map(|config| config.tags.iter().any(|t| t == tag))
                     .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    /// 构建所有可用动作的 AvailableAction 列表（数据驱动）
+    pub fn build_available_actions() -> Vec<AvailableAction> {
+        Self::all_action_names()
+            .into_iter()
+            .filter_map(|action_name| {
+                let config = Self::get(&action_name)?;
+                Some(AvailableAction {
+                    action: action_name,
+                    description: config.description,
+                    valid_targets: None,
+                    required_fields: config
+                        .validation
+                        .as_ref()
+                        .map(|v| v.required_fields.clone())
+                        .unwrap_or_default(),
+                })
             })
             .collect()
     }

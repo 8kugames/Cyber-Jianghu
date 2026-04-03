@@ -25,7 +25,10 @@ use crate::game_data::GameDataCache;
 use crate::game_data::registry::{ActionRegistry, ItemRegistry};
 use crate::models::{AgentState, WorldEvent, WorldState};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
-use cyber_jianghu_protocol::AdjacentNode;
+use cyber_jianghu_protocol::{
+    AdjacentNode, EVENT_TYPE_DEATH_NOTIFICATION, EVENT_TYPE_SYSTEM_NOTIFICATION,
+    EVENT_TYPE_WORLD_STATE,
+};
 
 use super::event_manager::EventManager;
 
@@ -226,11 +229,11 @@ impl Broadcaster {
                     .death
                     .clone();
                 events.push(WorldEvent {
-                    event_type: "system_notification".to_string(),
+                    event_type: EVENT_TYPE_SYSTEM_NOTIFICATION.to_string(),
                     tick_id,
                     description: death_message,
                     metadata: serde_json::json!({
-                        "type": "death_notification",
+                        "type": EVENT_TYPE_DEATH_NOTIFICATION,
                         "message": "You are dead.",
                     }),
                 });
@@ -284,24 +287,14 @@ impl Broadcaster {
             .collect();
 
         // 从 ActionRegistry 获取所有可用动作（数据驱动）
-        let available_actions: Vec<crate::models::AvailableAction> =
-            ActionRegistry::all_action_names()
-                .into_iter()
-                .filter_map(|action_name| {
-                    ActionRegistry::get(&action_name).map(|config| crate::models::AvailableAction {
-                        action: action_name,
-                        description: config.description,
-                        valid_targets: None,
-                    })
-                })
-                .collect();
+        let available_actions = ActionRegistry::build_available_actions();
 
         // 获取天气描述（数据驱动，目前固定晴天）
         let weather = game_data_cache.get().display_messages.weather.sunny.clone();
 
         // 构建WorldState
         WorldState {
-            event_type: "world_state".to_string(),
+            event_type: EVENT_TYPE_WORLD_STATE.to_string(),
             tick_id,
             agent_id: Some(agent_state.agent_id),
             world_time: crate::models::WorldTime {
@@ -431,19 +424,7 @@ pub fn build_initial_world_state(
     }
 
     // 可用动作
-    let available_actions: Vec<crate::models::AvailableAction> =
-        crate::game_data::registry::ActionRegistry::all_action_names()
-            .into_iter()
-            .filter_map(|action_name| {
-                crate::game_data::registry::ActionRegistry::get(&action_name).map(|config| {
-                    crate::models::AvailableAction {
-                        action: action_name,
-                        description: config.description,
-                        valid_targets: None,
-                    }
-                })
-            })
-            .collect();
+    let available_actions = ActionRegistry::build_available_actions();
 
     let weather = game_data_cache.get().display_messages.weather.sunny.clone();
 
@@ -462,7 +443,7 @@ pub fn build_initial_world_state(
         .collect();
 
     crate::models::WorldState {
-        event_type: "world_state".to_string(),
+        event_type: EVENT_TYPE_WORLD_STATE.to_string(),
         tick_id,
         agent_id: Some(agent_state.agent_id),
         world_time: crate::models::WorldTime {

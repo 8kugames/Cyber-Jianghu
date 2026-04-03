@@ -242,7 +242,10 @@ fn generate_impl(
         sections.push("## 背包".to_string());
         for item in &state.self_state.inventory {
             let eq = if item.is_equipped { " [已装备]" } else { "" };
-            sections.push(format!("- {} [{}] x{}{}", item.name, item.item_id, item.quantity, eq));
+            sections.push(format!(
+                "- {} [{}] x{}{}",
+                item.name, item.item_id, item.quantity, eq
+            ));
         }
     }
 
@@ -283,7 +286,10 @@ fn generate_impl(
     sections.push("## 地面物品".to_string());
     if !state.nearby_items.is_empty() {
         for item in &state.nearby_items {
-            sections.push(format!("- {} [{}] x{}", item.name, item.item_id, item.quantity));
+            sections.push(format!(
+                "- {} [{}] x{}",
+                item.name, item.item_id, item.quantity
+            ));
         }
     } else {
         sections.push("无".to_string());

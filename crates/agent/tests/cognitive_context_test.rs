@@ -86,16 +86,19 @@ fn create_test_world_state() -> WorldState {
                 action: "speak".to_string(),
                 description: "与周围的人交谈".to_string(),
                 valid_targets: None,
+                required_fields: vec![],
             },
             AvailableAction {
                 action: "move".to_string(),
                 description: "移动到其他地点".to_string(),
                 valid_targets: Some(vec!["market".to_string(), "dojo".to_string()]),
+                required_fields: vec!["target_location".to_string()],
             },
             AvailableAction {
                 action: "use".to_string(),
                 description: "使用物品".to_string(),
                 valid_targets: Some(vec!["wine_bottle".to_string()]),
+                required_fields: vec!["item_id".to_string()],
             },
         ],
     }

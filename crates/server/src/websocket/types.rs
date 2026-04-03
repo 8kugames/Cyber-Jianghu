@@ -15,7 +15,7 @@ use crate::game_data::types::UnifiedWorldBuildingRulesConfig;
 use crate::game_data::{ActionRegistry, InitialInventoryRegistry};
 use crate::models::Intent;
 use chrono::Utc;
-use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldBuildingRules};
+use cyber_jianghu_protocol::{GameRules, InitialItem, WorldBuildingRules};
 
 /// WebSocket 升级请求的查询参数
 #[derive(Debug, Deserialize)]
@@ -51,21 +51,7 @@ pub fn build_game_rules_from_config(
     survival_threshold: i32,
     version: String,
 ) -> GameRules {
-    let available_actions = ActionRegistry::all_action_names()
-        .into_iter()
-        .map(|action_name| {
-            // 从配置获取描述
-            let description = ActionRegistry::get(&action_name)
-                .map(|config| config.description)
-                .unwrap_or_default();
-
-            AvailableAction {
-                action: action_name,
-                description,
-                valid_targets: None, // MVP 阶段不提供
-            }
-        })
-        .collect();
+    let available_actions = ActionRegistry::build_available_actions();
 
     let initial_items = InitialInventoryRegistry::items()
         .into_iter()
