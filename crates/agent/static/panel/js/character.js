@@ -128,8 +128,8 @@ function renderWorldTree() {
                 <div class="server-group-header">
                     <span class="server-name">${escapeHtml(serverName)}</span>
                     <span class="server-meta">
-                        <span class="meta-item" title="最近连接">🕐 ${lastRealTime}</span>
-                        <span class="meta-item" title="游戏时间">⏱ ${escapeHtml(lastWorldTime)}</span>
+                        <span class="meta-item" title="最近连接">最近连接: ${lastRealTime} ｜</span>
+                        <span class="meta-item" title="游戏时间">游戏时间: ${escapeHtml(lastWorldTime)}</span>
                     </span>
                 </div>
                 <div class="server-group-chars">
@@ -205,20 +205,15 @@ async function loadCharacterIntoDrawer(char) {
 
     let charData = char;
 
-    // 当前角色从 /api/v1/character 取完整数据，非当前角色使用列表数据
+    // 当前角色从 /api/v1/character 取完整数据，非当前角色从 /api/v1/characters/:id 取
     try {
         if (isCurrent) {
             charData = await apiGet('/api/v1/character');
-            console.log('[DEBUG] /api/v1/character 返回:', JSON.stringify(charData, null, 2));
-            console.log('[DEBUG] identity:', charData.identity);
-            console.log('[DEBUG] appearance:', charData.appearance);
-            console.log('[DEBUG] personality:', charData.personality);
-            console.log('[DEBUG] values:', charData.values);
-            console.log('[DEBUG] attributes:', charData.attributes);
+        } else if (char.agent_id) {
+            charData = await apiGet(`/api/v1/characters/${char.agent_id}`);
         }
     } catch (err) {
         console.warn('获取角色详情失败，使用列表数据:', err);
-        console.log('[DEBUG] charData (fallback):', JSON.stringify(charData, null, 2));
     }
 
     const statusClass = charData.status || 'alive';
@@ -343,12 +338,17 @@ async function loadCharacterIntoDrawer(char) {
             attrHtml += '</div></div>';
         }
 
-        // 派生属性（从 derived_attributes 字段获取）
+        // 派生属性（从 derived_attributes 字段获取，已由后端丰富为 {name, current, description}）
         if (charData.derived_attributes) {
             attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
             Object.entries(charData.derived_attributes).forEach(([key, value]) => {
-                const displayName = key.replace(/_/g, ' ');
-                attrHtml += `<div class="attr-item"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${typeof value === 'number' ? value.toFixed(2) : value}</span></div>`;
+                const isEnriched = value && typeof value === 'object' && value.current !== undefined;
+                const displayName = isEnriched ? value.name : key.replace(/_/g, ' ');
+                const displayValue = isEnriched
+                    ? (typeof value.current === 'number' ? value.current.toFixed(2) : value.current)
+                    : (typeof value === 'number' ? value.toFixed(2) : value);
+                const desc = isEnriched ? (value.description || '') : '';
+                attrHtml += `<div class="attr-item" title="${escapeHtml(desc)}"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${displayValue}</span></div>`;
             });
             attrHtml += '</div></div>';
         }

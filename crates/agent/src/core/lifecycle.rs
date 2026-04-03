@@ -522,6 +522,18 @@ impl super::Agent {
                             if let Some(ref api_state) = self.http_api_state {
                                 api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
                             }
+
+                            // 持久化死亡状态到 character.yaml（确保世界树显示正确）
+                            if let Some(ref mut char_cfg) = self.character_config {
+                                char_cfg.status = crate::config::CharacterStatus::Dead;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    let characters_dir = api_state.character_dir.read().await.clone();
+                                    if let Err(e) = crate::core::lifecycle::save_character_config_to_fs(char_cfg, &characters_dir) {
+                                        warn!("Failed to persist death status: {}", e);
+                                    }
+                                }
+                            }
+
                             // 死亡后不退出，等待转生：
                             // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
                             // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连
@@ -576,7 +588,7 @@ impl super::Agent {
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state
-                        && let Some(ref history) = api_state.intent_history {
+                        && let Some(history) = api_state.intent_history.read().await.as_ref() {
                             history
                                 .record_intent(
                                     final_intent.tick_id,
