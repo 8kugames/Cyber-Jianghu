@@ -189,6 +189,39 @@ impl super::Agent {
             info!("已更新 agent 名称为: {}", name);
         }
 
+        // 自动重建本地 character.yaml（解决 agent-server 状态不同步问题）
+        // 场景：服务器已有角色但本地文件丢失（如清除缓存、目录迁移）
+        if self.character_config.is_none() && !agent_id.is_nil() {
+            let server_dir = self.config.server_dir(&self.config.server.ws_url);
+            let characters_dir = server_dir.join("characters");
+            let char_dir = characters_dir.join(agent_id.to_string());
+            let char_yaml = char_dir.join("character.yaml");
+
+            if !char_yaml.exists() {
+                let name = registered_name.as_deref().unwrap_or("未知");
+                let reconstructed = crate::config::CharacterConfig {
+                    agent_id: Some(agent_id),
+                    name: name.to_string(),
+                    status: crate::config::CharacterStatus::Alive,
+                    server_url: Some(self.config.server.http_url.clone()),
+                    registered_at: Some(chrono::Utc::now()),
+                    ..Default::default()
+                };
+
+                if let Err(e) = (|| -> anyhow::Result<()> {
+                    std::fs::create_dir_all(&char_dir)?;
+                    reconstructed.save_to_file(&char_yaml)?;
+                    Ok(())
+                })()
+                {
+                    warn!("自动重建 character.yaml 失败: {}", e);
+                } else {
+                    info!("已自动重建本地角色配置: {} ({})", name, agent_id);
+                    self.character_config = Some(reconstructed);
+                }
+            }
+        }
+
         // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
         if agent_id == Uuid::nil() {
             warn!(
@@ -650,6 +683,37 @@ impl super::Agent {
                                 api_state
                                     .is_dead
                                     .store(false, std::sync::atomic::Ordering::Relaxed);
+                            }
+
+                            // 自动重建本地 character.yaml（reconnect 路径）
+                            if self.character_config.is_none() {
+                                let s_dir = self.config.server_dir(&self.config.server.ws_url);
+                                let chars_dir = s_dir.join("characters");
+                                let c_dir = chars_dir.join(agent_id.to_string());
+                                let c_yaml = c_dir.join("character.yaml");
+
+                                if !c_yaml.exists() {
+                                    let name = registered_name.as_deref().unwrap_or("未知");
+                                    let recon = crate::config::CharacterConfig {
+                                        agent_id: Some(agent_id),
+                                        name: name.to_string(),
+                                        status: crate::config::CharacterStatus::Alive,
+                                        server_url: Some(self.config.server.http_url.clone()),
+                                        registered_at: Some(chrono::Utc::now()),
+                                        ..Default::default()
+                                    };
+
+                                    if let Err(e) = (|| -> anyhow::Result<()> {
+                                        std::fs::create_dir_all(&c_dir)?;
+                                        recon.save_to_file(&c_yaml)?;
+                                        Ok(())
+                                    })() {
+                                        warn!("reconnect 自动重建 character.yaml 失败: {}", e);
+                                    } else {
+                                        info!("reconnect 已自动重建角色配置: {} ({})", name, agent_id);
+                                        self.character_config = Some(recon);
+                                    }
+                                }
                             }
 
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
