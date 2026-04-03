@@ -5,7 +5,7 @@
 // 本模块提供运行时配置缓存，使用 Arc<RwLock>> 实现线程安全
 // ============================================================================
 
-use super::types::GameData;
+use super::types::{GameData, UnifiedActionsConfig};
 use cyber_jianghu_protocol::{DeathInfo, LocationEdge, LocationGraph, LocationNode};
 use std::sync::Arc;
 
@@ -46,6 +46,15 @@ impl GameDataCache {
             // 这里直接 panic，因为这是严重错误
             panic!("配置缓存被污染: {}", e)
         })
+    }
+
+    /// 仅更新动作配置（用于热重载）
+    pub fn update_actions(&self, new_actions: UnifiedActionsConfig) {
+        let mut data_guard = self
+            .data
+            .write()
+            .unwrap_or_else(|e| panic!("配置缓存被污染: {}", e));
+        data_guard.actions = new_actions;
     }
 
     /// 更新游戏数据

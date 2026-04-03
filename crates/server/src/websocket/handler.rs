@@ -304,7 +304,9 @@ async fn handle_websocket(
 
                 // 构建 WorldState（简化版，不含其他 agent entities）
                 // 重连时使用当前 tick_id 而非 agent_state.tick_id，避免 TickMismatch
-                let current_tick = state.current_accepting_tick_id.load(std::sync::atomic::Ordering::Acquire);
+                let current_tick = state
+                    .current_accepting_tick_id
+                    .load(std::sync::atomic::Ordering::Acquire);
                 let world_state = crate::tick::build_initial_world_state(
                     &agent_state,
                     &state.game_data,

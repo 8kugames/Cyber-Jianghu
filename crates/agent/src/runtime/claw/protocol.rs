@@ -318,7 +318,11 @@ impl DownstreamMessage {
     /// 返回 None 表示该消息类型不需要透传（如 WorldState 已通过 Tick 处理）
     pub fn from_server_message(msg: ServerMessage, current_tick: i64) -> Option<Self> {
         match msg {
-            ServerMessage::Error { code, message, current_tick_id: server_tick_id } => {
+            ServerMessage::Error {
+                code,
+                message,
+                current_tick_id: server_tick_id,
+            } => {
                 let resolved_code = Self::resolve_error_code(&code);
                 let tick_id = server_tick_id.or_else(|| Self::parse_tick_id(&message));
                 Some(DownstreamMessage::ServerError {
@@ -909,5 +913,4 @@ mod tests {
         let result = DownstreamMessage::from_server_message(server_msg, 100);
         assert!(result.is_none());
     }
-
 }

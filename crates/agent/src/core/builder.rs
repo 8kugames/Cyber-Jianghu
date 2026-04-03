@@ -189,7 +189,10 @@ impl AgentBuilder {
     }
 
     /// 设置 Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
-    pub fn cognitive_engine(mut self, engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>) -> Self {
+    pub fn cognitive_engine(
+        mut self,
+        engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>,
+    ) -> Self {
         self.cognitive_engine = Some(engine);
         self
     }

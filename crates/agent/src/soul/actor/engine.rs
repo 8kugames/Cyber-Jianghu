@@ -25,9 +25,11 @@ use super::stages::{
 };
 use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
+use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
 use crate::models::{Intent, WorldState};
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
+use cyber_jianghu_protocol::AvailableAction;
 
 /// 认知引擎配置
 #[derive(Clone, Debug)]
@@ -70,7 +72,10 @@ pub struct CognitiveEngine {
 impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
-        Self { llm_client, config: std::sync::RwLock::new(config) }
+        Self {
+            llm_client,
+            config: std::sync::RwLock::new(config),
+        }
     }
 
     /// 使用默认配置创建
@@ -158,7 +163,6 @@ impl CognitiveEngine {
             &perception_output,
             &motivation_output,
             &persona_desc,
-            world_state,
             &agent_name,
         );
         let (pd_response, planning, decision, intent) =
@@ -464,11 +468,11 @@ impl CognitiveEngine {
         perception: &StageOutput,
         motivation: &StageOutput,
         persona_desc: &str,
-        world_state: &WorldState,
         agent_name: &str,
     ) -> String {
-        // 从 WorldState 动态构建动作表
-        let dynamic_action_table = Self::build_dynamic_action_table(world_state);
+        // 从本地文件加载动作表
+        let available_actions = load_available_actions_from_file();
+        let dynamic_action_table = Self::build_action_table(&available_actions);
 
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
@@ -525,9 +529,9 @@ target_agent_id 从 entities 列表中的 agent_id 获取。
         )
     }
 
-    /// 从 WorldState 的 available_actions 动态构建动作表
-    fn build_dynamic_action_table(world_state: &WorldState) -> String {
-        if world_state.available_actions.is_empty() {
+    /// 从动作列表构建动作表
+    fn build_action_table(actions: &[AvailableAction]) -> String {
+        if actions.is_empty() {
             return "| idle | (无) | 休息 |".to_string();
         }
 
@@ -535,7 +539,7 @@ target_agent_id 从 entities 列表中的 agent_id 获取。
             "| action | action_data 必填字段 | 说明 |\n|--------|---------------------|------|\n",
         );
 
-        for action in &world_state.available_actions {
+        for action in actions {
             let fields = if action.required_fields.is_empty() {
                 "(无)".to_string()
             } else {

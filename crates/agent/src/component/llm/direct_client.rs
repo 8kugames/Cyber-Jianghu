@@ -34,7 +34,11 @@ struct PerModelStats {
 
 impl PerModelStats {
     fn new() -> Self {
-        Self { prompt_tokens: 0, completion_tokens: 0, calls: 0 }
+        Self {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            calls: 0,
+        }
     }
 
     fn record(&mut self, prompt: u64, completion: u64) {
@@ -73,38 +77,53 @@ fn log_file_path() -> Option<PathBuf> {
 }
 
 /// Record token usage for a specific provider-model
-pub fn record_token_usage(provider: &LlmProvider, model: &str, prompt_tokens: u64, completion_tokens: u64) {
+pub fn record_token_usage(
+    provider: &LlmProvider,
+    model: &str,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+) {
     let key = model_key(provider, model);
     if let Ok(mut stats) = token_stats().lock() {
-        stats.entry(key).or_insert_with(PerModelStats::new).record(prompt_tokens, completion_tokens);
+        stats
+            .entry(key)
+            .or_insert_with(PerModelStats::new)
+            .record(prompt_tokens, completion_tokens);
     }
 }
 
 /// Get snapshot of all model stats (does not clear)
 pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
-    let Ok(stats) = token_stats().lock() else { return vec![] };
-    stats.iter().map(|(key, s)| {
-        let parts: Vec<&str> = key.splitn(2, '/').collect();
-        let (provider, model) = if parts.len() == 2 {
-            (parts[0].to_string(), parts[1].to_string())
-        } else {
-            ("unknown".to_string(), key.clone())
-        };
-        ModelTokenStats {
-            provider,
-            model,
-            prompt_tokens: s.prompt_tokens,
-            completion_tokens: s.completion_tokens,
-            total_tokens: s.prompt_tokens + s.completion_tokens,
-            calls: s.calls,
-        }
-    }).collect()
+    let Ok(stats) = token_stats().lock() else {
+        return vec![];
+    };
+    stats
+        .iter()
+        .map(|(key, s)| {
+            let parts: Vec<&str> = key.splitn(2, '/').collect();
+            let (provider, model) = if parts.len() == 2 {
+                (parts[0].to_string(), parts[1].to_string())
+            } else {
+                ("unknown".to_string(), key.clone())
+            };
+            ModelTokenStats {
+                provider,
+                model,
+                prompt_tokens: s.prompt_tokens,
+                completion_tokens: s.completion_tokens,
+                total_tokens: s.prompt_tokens + s.completion_tokens,
+                calls: s.calls,
+            }
+        })
+        .collect()
 }
 
 /// Persist all stats to file and reset counters
 pub fn persist_and_reset() {
     let stats = snapshot_all_stats();
-    if stats.is_empty() { return; }
+    if stats.is_empty() {
+        return;
+    }
     if let Some(path) = log_file_path() {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -542,10 +561,18 @@ impl DirectLlmClient {
 
         // 记录 token 使用量
         if let Some(ref usage) = response_data.usage {
-            record_token_usage(&self.config.provider, &model, usage.prompt_tokens, usage.completion_tokens);
+            record_token_usage(
+                &self.config.provider,
+                &model,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+            );
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}",
-                self.config.provider.as_str(), model, usage.prompt_tokens, usage.completion_tokens
+                self.config.provider.as_str(),
+                model,
+                usage.prompt_tokens,
+                usage.completion_tokens
             );
         }
 
@@ -620,10 +647,18 @@ impl DirectLlmClient {
             .context("Failed to parse LLM response")?;
 
         if let Some(ref usage) = response_data.usage {
-            record_token_usage(&self.config.provider, &model, usage.prompt_tokens, usage.completion_tokens);
+            record_token_usage(
+                &self.config.provider,
+                &model,
+                usage.prompt_tokens,
+                usage.completion_tokens,
+            );
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}",
-                self.config.provider.as_str(), model, usage.prompt_tokens, usage.completion_tokens
+                self.config.provider.as_str(),
+                model,
+                usage.prompt_tokens,
+                usage.completion_tokens
             );
         }
 
