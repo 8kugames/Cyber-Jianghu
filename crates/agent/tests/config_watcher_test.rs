@@ -20,8 +20,8 @@ async fn test_config_watcher_detects_changes() {
         .await
         .unwrap();
 
-    // 等待通知
-    let result = timeout(Duration::from_secs(2), rx.recv()).await;
+    // 等待通知（2s debounce + buffer）
+    let result = timeout(Duration::from_secs(5), rx.recv()).await;
     assert!(result.is_ok(), "未收到文件变更通知");
 }
 
@@ -39,9 +39,9 @@ async fn test_config_watcher_multiple_subscribers() {
         .await
         .unwrap();
 
-    // 两个订阅者都应该收到通知
-    let result1 = timeout(Duration::from_secs(2), rx1.recv()).await;
-    let result2 = timeout(Duration::from_secs(2), rx2.recv()).await;
+    // 两个订阅者都应该收到通知（2s debounce + buffer）
+    let result1 = timeout(Duration::from_secs(5), rx1.recv()).await;
+    let result2 = timeout(Duration::from_secs(5), rx2.recv()).await;
 
     assert!(result1.is_ok(), "订阅者1未收到文件变更通知");
     assert!(result2.is_ok(), "订阅者2未收到文件变更通知");
@@ -59,14 +59,17 @@ async fn test_config_watcher_multiple_changes() {
     tokio::fs::write(&config_path, b"test: value1")
         .await
         .unwrap();
-    let result1 = timeout(Duration::from_secs(2), rx.recv()).await;
+    let result1 = timeout(Duration::from_secs(5), rx.recv()).await;
     assert!(result1.is_ok(), "未收到第一次文件变更通知");
+
+    // 等待 debounce 窗口关闭（2s debounce + buffer）
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // 第二次变更
     tokio::fs::write(&config_path, b"test: value2")
         .await
         .unwrap();
-    let result2 = timeout(Duration::from_secs(2), rx.recv()).await;
+    let result2 = timeout(Duration::from_secs(5), rx.recv()).await;
     assert!(result2.is_ok(), "未收到第二次文件变更通知");
 }
 

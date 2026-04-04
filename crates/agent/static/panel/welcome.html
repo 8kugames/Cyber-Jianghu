@@ -71,6 +71,18 @@
                         cardSetup.style.display = "";
                         statusText.textContent =
                             "尚未配置服务器或 LLM，请先完成引导配置";
+                    } else if (data.is_dead) {
+                        // 角色已死亡，显示转生卡片
+                        cardSetup.style.display = "none";
+                        cardReturn.style.display = "none";
+                        cardNew.href = "create.html";
+                        cardNew.querySelector(".card-icon").textContent = "死";
+                        cardNew.querySelector("h2").textContent = "转世重生";
+                        cardNew.querySelector("p").textContent = "你的角色已死亡，点击进入轮回";
+                        statusText.textContent =
+                            "角色已死亡 | " +
+                            (data.current_character || "未知") +
+                            " | 请创建新角色";
                     } else if (data.has_character) {
                         cardSetup.style.display = "none";
                         cardNew.style.display = "none";
@@ -79,7 +91,7 @@
                             (data.current_character || "未知") +
                             " | 已配置";
                     } else {
-                        // 已配置但无角色（含转生后），直接指向创建页
+                        // 已配置但无角色，直接指向创建页
                         cardSetup.style.display = "none";
                         cardReturn.classList.add("disabled");
                         cardReturn.removeAttribute("href");

@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -77,7 +77,7 @@ pub struct Agent {
 
     /// 重连请求接收通道（可选，用于热切换触发重连）
     /// Claw 模式下由 HTTP API 触发重连，WebSocket 模式为 None
-    pub(crate) reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+    pub(crate) reconnect_rx: Option<broadcast::Receiver<ReconnectRequest>>,
 
     /// 死亡是否已报告（避免重复日志）
     pub(crate) death_reported: bool,
@@ -126,7 +126,7 @@ impl Agent {
     pub async fn new(
         config: Config,
         decision_callback: DecisionCallback,
-        reconnect_rx: Option<mpsc::Receiver<ReconnectRequest>>,
+        reconnect_rx: Option<broadcast::Receiver<ReconnectRequest>>,
         device_config: Option<DeviceConfig>,
     ) -> Self {
         let client = AgentClient::new(config.server.clone());

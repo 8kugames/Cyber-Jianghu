@@ -169,4 +169,4 @@ llm_reflector:  # 可选
   model: qwen2.5:32b
 ```
 
-配置可通过 Web 面板修改：http://localhost:23340/manage.html
+配置可通过 Web 面板修改：http://localhost:<端口>/settings.html

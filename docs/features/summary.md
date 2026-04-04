@@ -156,9 +156,9 @@ attack:
 
 ### 3. Web 管理面板
  - [x] `GET /admin/` → Admin Dashboard 入口（agent 列表、统计数据）
- - [x] `GET /` → Web 面板入口（角色创建/信息/管理导航）
- - [x] `GET /character.html` → 角色属性、背包、经历
- - [x] `GET /manage.html` → 梦境注入与转生
+ - [x] `GET /welcome.html` → Web 面板首页（根据状态显示不同卡片）
+ - [x] `GET /character.html` → 角色属性、背包、经历、梦境注入与转生
+ - [x] `GET /settings.html` → 服务器/LLM 配置
 
 ## 六、 生产部署（Phase 4）
 
