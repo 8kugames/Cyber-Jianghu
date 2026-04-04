@@ -434,6 +434,15 @@ pub async fn apply_state_change(
 
                 match craft_result {
                     Ok(()) => {
+                        // DB 事务成功（材料已扣减、成品已入库），按配方扣 stamina
+                        let stamina_cost = recipe.stamina_cost;
+                        if let Some(state) =
+                            agent_states.iter_mut().find(|s| s.agent_id == *agent_id)
+                        {
+                            let ctx = state.get_formula_context();
+                            let _ = state.status.apply_change("stamina", -stamina_cost, &ctx);
+                        }
+
                         let event = WorldEvent {
                             event_type: "action_result".to_string(),
                             tick_id,
@@ -449,6 +458,7 @@ pub async fn apply_state_change(
                     }
                     Err(e) => {
                         warn!("制造失败: {}", e);
+                        // 材料不足时 DB 事务已回滚，stamina 未扣减
                         let event = WorldEvent {
                             event_type: "action_result".to_string(),
                             tick_id,

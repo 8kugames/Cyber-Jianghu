@@ -167,17 +167,8 @@ impl Broadcaster {
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
     ) -> WorldState {
-        // 计算游戏时间（每Tick = 1游戏小时）
-        // 1 year = 12 months = 360 days = 8640 hours
-        // 1 month = 30 days = 720 hours
-        // 1 day = 24 hours
-        let total_hours = tick_id;
-        let year = 1 + (total_hours / 8640) as i32;
-        let remaining_after_year = total_hours % 8640;
-        let month = 1 + (remaining_after_year / 720) as i32;
-        let remaining_after_month = remaining_after_year % 720;
-        let day = 1 + (remaining_after_month / 24) as i32;
-        let hour = (remaining_after_month % 24) as i32;
+        // 游戏时间计算（数据驱动）
+        let (year, month, day, hour) = compute_game_time(tick_id);
 
         // 获取当前Agent的node_id
         let current_node_id = &agent_state.node_id;
@@ -347,6 +338,50 @@ impl Broadcaster {
     }
 }
 
+/// 从 tick_id（秒数）计算游戏时间
+///
+/// 数据驱动：从 TimeRegistry 和 GameRules 读取时间参数
+/// 返回 (year, month, day, hour)
+fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
+    let time_config = crate::game_data::registry::TimeRegistry::get_config();
+    if let Some(config) = time_config {
+        let registry = crate::game_data::registry_or_panic();
+        let real_seconds_per_tick = registry
+            .get()
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let ticks_per_hour = config.ticks_per_hour as i64;
+        let hours_per_day = config.hours_per_day as i64;
+        let days_per_season = config.days_per_season as i64;
+        let seasons_per_year = config.seasons.len() as i64;
+        let days_per_year = seasons_per_year * days_per_season;
+
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            tick_id / real_seconds_per_game_hour
+        } else {
+            tick_id
+        };
+
+        let hours_per_year = days_per_year * hours_per_day;
+        let hours_per_month = days_per_season * hours_per_day;
+
+        let year = 1 + (game_hours / hours_per_year) as i32;
+        let rem_after_year = game_hours % hours_per_year;
+        let month = 1 + (rem_after_year / hours_per_month) as i32;
+        let rem_after_month = rem_after_year % hours_per_month;
+        let day = 1 + (rem_after_month / hours_per_day) as i32;
+        let hour = (rem_after_month % hours_per_day) as i32;
+
+        (year, month, day, hour)
+    } else {
+        (1, 1, 1, 0)
+    }
+}
+
 impl Default for Broadcaster {
     fn default() -> Self {
         Self::new()
@@ -366,14 +401,8 @@ pub fn build_initial_world_state(
 ) -> crate::models::WorldState {
     let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
 
-    // 计算游戏时间
-    let total_hours = tick_id;
-    let year = 1 + (total_hours / 8640) as i32;
-    let remaining_after_year = total_hours % 8640;
-    let month = 1 + (remaining_after_year / 720) as i32;
-    let remaining_after_month = remaining_after_year % 720;
-    let day = 1 + (remaining_after_month / 24) as i32;
-    let hour = (remaining_after_month % 24) as i32;
+    // 游戏时间计算（与 build_world_state_for_agent 共用 compute_game_time）
+    let (year, month, day, hour) = compute_game_time(tick_id);
 
     let current_node_id = &agent_state.node_id;
 
@@ -411,11 +440,11 @@ pub fn build_initial_world_state(
             .death
             .clone();
         events.push(WorldEvent {
-            event_type: "system_notification".to_string(),
+            event_type: EVENT_TYPE_SYSTEM_NOTIFICATION.to_string(),
             tick_id,
             description: death_message,
             metadata: serde_json::json!({
-                "type": "death_notification",
+                "type": EVENT_TYPE_DEATH_NOTIFICATION,
                 "message": "You are dead.",
             }),
         });

@@ -38,6 +38,9 @@ pub enum AttributeValue {
         base: u8,    // 极限值
         current: u8, // 当前值
     },
+
+    /// 有符号增量（用于 StateChange delta 传递，支持负数）
+    Delta { value: i32 },
 }
 
 /// 属性元数据（从配置加载）
@@ -245,6 +248,7 @@ impl AttributeValue {
             AttributeValue::Static { value } => *value as i32,
             AttributeValue::DailyRandom { value, .. } => *value as i32,
             AttributeValue::Growable { current, .. } => *current as i32,
+            AttributeValue::Delta { value } => *value,
         }
     }
 
@@ -255,6 +259,9 @@ impl AttributeValue {
             AttributeValue::Static { value: v } => *v = v_u8,
             AttributeValue::DailyRandom { value: v, .. } => *v = v_u8,
             AttributeValue::Growable { current: v, .. } => *v = v_u8,
+            AttributeValue::Delta { .. } => {
+                // Delta 表示增量而非绝对值，set 操作无意义
+            }
         }
     }
 }
