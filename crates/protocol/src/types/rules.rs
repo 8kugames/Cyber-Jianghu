@@ -83,7 +83,7 @@ impl Default for WorldBuildingRules {
         Self {
             version: "0.0.1".to_string(),
             era: EraSettings {
-                name: "北宋前期（约10世纪中国）".to_string(),
+                name: "武侠架空世界".to_string(),
                 tech_level: "冷兵器时代，火药仅用于烟火".to_string(),
                 social_structure: "封建帝制，江湖与庙堂并存".to_string(),
             },

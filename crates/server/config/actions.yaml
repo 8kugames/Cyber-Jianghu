@@ -4,10 +4,38 @@
 #
 # 动作定义：原子行为单元，不可再分
 #
-# requirements 字段说明：
+# requirements 字段说明（执行前校验 + 消耗）：
 #   - cost: 执行动作扣减的属性值（正值）
-#   - recovery: 执行动作恢复的属性值（正值）
 #   - min: 执行动作前属性需达到的最小值
+#
+# effects 字段说明（执行成功后效果，走 StateChange 管线）：
+#   - effect_type: attribute_change
+#       attribute: 属性名（对应 attributes.yaml 中的 key）
+#       operation: add | sub
+#       value: 变化量（整数）
+#   - effect_type: add_item
+#       item_id: 物品 ID（对应 items.yaml 中的 key）
+#       quantity: 数量（默认 1）
+#
+# 职责划分：
+#   - requirements: 前置校验（min）+ 扣减消耗（cost），失败则整动作中止
+#   - effects: 成功后追加效果（属性变化、物品获取等），走完整 StateChange 管线
+#
+# effects 示例（见 idle 动作的实际配置）：
+#
+#   idle:
+#     effects:
+#       - effect_type: attribute_change    # 属性变化
+#         attribute: stamina
+#         operation: add
+#         value: 5
+#       - effect_type: attribute_change    # 可叠加多个效果
+#         attribute: sanity
+#         operation: add
+#         value: 1
+#       - effect_type: add_item            # 获取物品（可选）
+#         item_id: herb
+#         quantity: 2
 #
 # 动作分类：
 #   - survival: 基础生存
@@ -39,7 +67,15 @@ data:
       - requirement_type: attribute
         attribute: stamina
         min: 0
-        recovery: 5
+    effects:
+      - effect_type: attribute_change
+        attribute: stamina
+        operation: add
+        value: 5
+      - effect_type: attribute_change
+        attribute: sanity
+        operation: add
+        value: 1
 
   use:
     description: "使用物品"
@@ -406,7 +442,6 @@ data:
       - requirement_type: attribute
         attribute: stamina
         min: 10
-        cost: 10
 
   repair:
     description: "修理"

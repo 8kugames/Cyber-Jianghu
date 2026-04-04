@@ -242,12 +242,6 @@ impl ActionRequirement {
         self.get_i32("cost").filter(|&v| v > 0)
     }
 
-    /// 获取属性恢复值（recovery）
-    /// 返回正值表示恢复量
-    pub fn get_recovery(&self) -> Option<i32> {
-        self.get_i32("recovery").filter(|&v| v > 0)
-    }
-
     /// 获取属性名称
     pub fn get_attribute(&self) -> Option<&str> {
         self.get_str("attribute")

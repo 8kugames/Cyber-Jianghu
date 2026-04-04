@@ -243,7 +243,7 @@ mod tests {
                     agent_state: AgentStateRulesData {
                         tick: TickRulesData {
                             real_seconds_per_tick: 60,
-                            collection_window_secs: 5,
+                            collection_window_secs: 58,
                         },
                         survival: SurvivalRulesData {
                             critical_threshold: 30,
