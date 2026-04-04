@@ -22,6 +22,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use notify::{self, Watcher};
 use reqwest::Client;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -532,6 +533,51 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 }
 
 // ============================================================================
+// 等待角色创建
+// ============================================================================
+
+/// Waits for a valid character to appear in the characters directory.
+/// HTTP API must be started before calling this function.
+async fn await_character_loop(server_dir: &Path) -> Result<()> {
+    let characters_dir = server_dir.join("characters");
+    
+    std::fs::create_dir_all(&characters_dir)
+        .context("Failed to create characters directory")?;
+    
+    info!("Waiting for character creation...");
+    info!("Access web panel to create a character");
+    
+    // Try notify first, fallback to polling
+    let mut watcher = match notify::recommended_watcher(|_| {}) {
+        Ok(w) => Some(w),
+        Err(e) => {
+            warn!("notify unavailable, using polling fallback: {}", e);
+            None
+        }
+    };
+    
+    if let Some(ref mut w) = watcher {
+        w.watch(&characters_dir, notify::RecursiveMode::NonRecursive).ok();
+    }
+    
+    loop {
+        if let Some(c) = select_character(server_dir)
+            && c.agent_id.is_some()
+            && c.status == CharacterStatus::Alive 
+        {
+            info!("Character found: {} ({})", c.name, c.agent_id.unwrap());
+            return Ok(());
+        }
+        
+        if watcher.is_none() {
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
+}
+
+// ============================================================================
 // 运行 Agent
 // ============================================================================
 
@@ -581,35 +627,82 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Select character from filesystem
     let server_dir = config.server_dir(ws_url);
-    let character = select_character(&server_dir);
+    let initial_character = select_character(&server_dir);
 
-    if character.is_none() {
-        warn!("尚未创建角色，Agent 将在游戏中处于空闲状态");
-        warn!("请通过以下方式创建角色:");
-        warn!("  1. Web 面板: http://localhost:23340/manage.html");
-        warn!("  2. CLI: cyber-jianghu-agent create-character --name 名字");
+    // Start HTTP API FIRST (before character check) so web panel is accessible
+    let device_id = Arc::new(RwLock::new(device_id_value));
+    let (reconnect_tx, reconnect_rx) =
+        mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
+
+    // Early HTTP API startup based on mode
+    let _early_api_state: Option<Arc<cyber_jianghu_agent::infra::api::HttpApiState>>;
+    let early_actual_port: u16;
+    let _early_claw_setup: Option<EarlyClawSetup>;
+
+    match runtime_mode {
+        RuntimeMode::Cognitive => {
+            let (api_state, actual_port) = start_http_api_server(
+                port,
+                device_id.clone(),
+                &config,
+                ws_url,
+                &device,
+                server_dir.clone(),
+                Some(reconnect_tx.clone()),
+            )?;
+            info!("HTTP API 已启动: http://localhost:{}", actual_port);
+            info!("Web 面板: http://localhost:{}/", actual_port);
+            info!("角色管理: http://localhost:{}/index.html", actual_port);
+            _early_api_state = Some(api_state);
+            early_actual_port = actual_port;
+            _early_claw_setup = None;
+        }
+        RuntimeMode::Claw => {
+            let setup = start_claw_server(
+                port,
+                device_id.clone(),
+                &config,
+                ws_url,
+                &device,
+                server_dir.clone(),
+            )?;
+            _early_api_state = Some(Arc::new(setup.api_state.clone()));
+            early_actual_port = setup.actual_port;
+            _early_claw_setup = Some(EarlyClawSetup {
+                shared_state: setup.shared_state.clone(),
+                server_msg_tx: setup.server_msg_tx.clone(),
+                reconnect_rx: setup.reconnect_rx,
+            });
+            info!("Claw HTTP API 已启动: http://localhost:{}", early_actual_port);
+        }
     }
 
-    // Compute data directory
-    let data_dir = match &character {
-        Some(c) if c.agent_id.is_some() => server_dir
-            .join("characters")
-            .join(c.agent_id.unwrap().to_string())
-            .join("data"),
-        _ => server_dir.join("data"),
+    // Now check if we need to wait for character creation
+    let character = match initial_character {
+        Some(c) if c.agent_id.is_some() && c.status == CharacterStatus::Alive => c,
+        _ => {
+            info!("尚未创建角色，等待角色创建...");
+            info!("请通过 Web 面板创建角色: http://localhost:{}/index.html", early_actual_port);
+            await_character_loop(&server_dir).await?;
+            // After waiting, character MUST exist
+            select_character(&server_dir)
+                .context("Character not found after waiting")?
+        }
     };
+
+    let data_dir = server_dir
+        .join("characters")
+        .join(character.agent_id.unwrap().to_string())
+        .join("data");
 
     let device_id = Arc::new(RwLock::new(device_id_value));
 
-    let persona_info =
-        character
-            .as_ref()
-            .map(|c| cyber_jianghu_agent::soul::reflector::PersonaInfo {
-                gender: c.gender.clone(),
-                age: c.age,
-                personality: c.personality.clone(),
-                values: c.values.clone(),
-            });
+    let persona_info = Some(cyber_jianghu_agent::soul::reflector::PersonaInfo {
+        gender: character.gender.clone(),
+        age: character.age,
+        personality: character.personality.clone(),
+        values: character.values.clone(),
+    });
 
     // 根据模式创建决策回调和相关组件
     let maybe_callback_setup: Option<ClawCallbackSetup>;
@@ -630,16 +723,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
             info!("LLM Client 容器已创建（支持热重载）");
 
-            let agent_name = character
-                .as_ref()
-                .map(|c| c.name.as_str())
-                .unwrap_or("(未创建)");
+            let agent_name = character.name.as_str();
             let agent_id = device.device_id;
 
-            let persona_description = character
-                .as_ref()
-                .map(|c| c.generate_system_prompt())
-                .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
+            let persona_description = character.generate_system_prompt();
 
             let cognitive_config = CognitiveEngineConfig {
                 agent_name: agent_name.to_string(),
@@ -701,8 +788,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     })
                 });
 
-            let (reconnect_tx, reconnect_rx) =
-                mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
+    let (reconnect_tx, _reconnect_rx) =
+        mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
 
             let (api_state, actual_port) = start_http_api_server(
                 port,
@@ -746,10 +833,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_reconnect_rx(reconnect_rx)
                 .cognitive_engine(cognitive_engine_for_builder.clone());
 
-            // Add character config if available
-            if let Some(char) = character.clone() {
-                builder = builder.character_config(char);
-            }
+            builder = builder.character_config(character.clone());
 
             let agent = builder.build();
 
@@ -809,15 +893,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 }
 
                 // 创建 CognitiveEngine（与 Cognitive 模式共享架构）
-                let agent_name = character
-                    .as_ref()
-                    .map(|c| c.name.as_str())
-                    .unwrap_or("(未创建)");
+                let agent_name = character.name.as_str();
                 let agent_id = device.device_id;
-                let persona_description = character
-                    .as_ref()
-                    .map(|c| c.generate_system_prompt())
-                    .unwrap_or_else(|| "你是一名行走在江湖中的侠客。".to_string());
+                let persona_description = character.generate_system_prompt();
 
                 let cognitive_config = CognitiveEngineConfig {
                     agent_name: agent_name.to_string(),
@@ -869,10 +947,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .with_reconnect_rx(setup.reconnect_rx)
                     .with_llm_client(llm_client.clone(), None);
 
-                // Add character config if available
-                if let Some(char) = character.clone() {
-                    builder = builder.character_config(char);
-                }
+                builder = builder.character_config(character.clone());
 
                 builder.build()
             } else {
@@ -899,10 +974,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .data_dir(data_dir.clone())
                     .with_reconnect_rx(setup.reconnect_rx);
 
-                // Add character config if available
-                if let Some(char) = character.clone() {
-                    builder = builder.character_config(char);
-                }
+                builder = builder.character_config(character.clone());
 
                 builder.build()
             }
@@ -995,6 +1067,7 @@ struct ServerSetup {
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     shared_state: Arc<WsSharedState>,
     api_state: cyber_jianghu_agent::infra::api::HttpApiState,
+    actual_port: u16,
 }
 
 struct ClawCallbackSetup {
@@ -1003,6 +1076,12 @@ struct ClawCallbackSetup {
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     device_id: Arc<RwLock<Uuid>>,
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
+}
+
+struct EarlyClawSetup {
+    shared_state: Arc<WsSharedState>,
+    server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
+    reconnect_rx: mpsc::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
 }
 
 fn start_claw_server(
@@ -1069,6 +1148,7 @@ fn start_claw_server(
         server_msg_tx,
         shared_state: shared_state_for_callback,
         api_state: api_state_for_callback,
+        actual_port,
     })
 }
 
