@@ -648,7 +648,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     // Early HTTP API startup based on mode
     let _early_api_state: Option<Arc<cyber_jianghu_agent::infra::api::HttpApiState>>;
     let early_actual_port: u16;
-    let _early_claw_setup: Option<EarlyClawSetup>;
 
     match runtime_mode {
         RuntimeMode::Cognitive => {
@@ -666,7 +665,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             info!("角色管理: http://localhost:{}/index.html", actual_port);
             _early_api_state = Some(api_state);
             early_actual_port = actual_port;
-            _early_claw_setup = None;
         }
         RuntimeMode::Claw => {
             let setup = start_claw_server(
@@ -679,11 +677,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             )?;
             _early_api_state = Some(Arc::new(setup.api_state.clone()));
             early_actual_port = setup.actual_port;
-            _early_claw_setup = Some(EarlyClawSetup {
-                shared_state: setup.shared_state.clone(),
-                server_msg_tx: setup.server_msg_tx.clone(),
-                reconnect_rx: setup.reconnect_rx,
-            });
             info!(
                 "Claw HTTP API 已启动: http://localhost:{}",
                 early_actual_port
@@ -1091,14 +1084,6 @@ struct ClawCallbackSetup {
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     device_id: Arc<RwLock<Uuid>>,
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
-}
-
-#[allow(dead_code)]
-struct EarlyClawSetup {
-    shared_state: Arc<WsSharedState>,
-    server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
-    reconnect_rx:
-        tokio::sync::broadcast::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
 }
 
 fn start_claw_server(
