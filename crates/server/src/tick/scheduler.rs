@@ -326,7 +326,7 @@ impl TickScheduler {
     fn calculate_tick_id_from_time(&self, game_epoch: i64) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
 
         now - game_epoch

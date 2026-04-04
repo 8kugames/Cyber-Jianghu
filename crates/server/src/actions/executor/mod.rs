@@ -11,7 +11,10 @@ mod interaction;
 
 use sqlx::PgPool;
 
+use cyber_jianghu_protocol::AttributeValue;
+
 use super::ActionExecutionResult;
+use super::types::StateChange;
 use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
 
@@ -111,9 +114,7 @@ impl ActionExecutor {
 
     /// 处理通用需求消耗（数据驱动方式）
     ///
-    /// 处理两种属性变化：
-    /// 1. cost: 扣减属性值（正值表示扣减量）
-    /// 2. recovery: 恢复属性值（正值表示恢复量）
+    /// 仅处理 cost（扣减），recovery 已迁移至 effects 管线
     fn consume_requirements(
         &self,
         intent: &Intent,
@@ -124,15 +125,11 @@ impl ActionExecutor {
             let context = agent_state.get_formula_context();
 
             for req in &config.requirements {
-                // 使用 requirement_type 字段分发，而非枚举模式匹配
                 match req.requirement_type.as_str() {
                     ActionRequirement::REQUIREMENT_TYPE_ATTRIBUTE => {
-                        // 获取属性名称
                         let attribute = req.get_attribute().unwrap_or("unknown");
 
-                        // 处理 cost（扣减）
                         if let Some(cost) = req.get_cost() {
-                            // cost 是正值，需要取负作为 delta
                             let delta = -cost;
                             if agent_state
                                 .status
@@ -142,26 +139,11 @@ impl ActionExecutor {
                                 return Err(format!("无法扣减属性 {} 值 {}", attribute, cost));
                             }
                         }
-
-                        // 处理 recovery（恢复）
-                        if let Some(recovery) = req.get_recovery() {
-                            // recovery 是正值，直接作为 delta
-                            let delta = recovery;
-                            if agent_state
-                                .status
-                                .apply_change(attribute, delta, &context)
-                                .is_err()
-                            {
-                                return Err(format!("无法恢复属性 {} 值 {}", attribute, recovery));
-                            }
-                        }
                     }
                     ActionRequirement::REQUIREMENT_TYPE_ITEM => {
                         // MVP 阶段暂不支持通用物品消耗（需要异步 DB 操作）
                     }
-                    _ => {
-                        // 未知类型的需求，跳过（可扩展）
-                    }
+                    _ => {}
                 }
             }
         }
@@ -169,27 +151,38 @@ impl ActionExecutor {
     }
 
     /// 应用通用效果（数据驱动方式）
-    fn apply_generic_effects(&self, intent: &Intent, _result: &mut ActionExecutionResult) {
+    fn apply_generic_effects(&self, intent: &Intent, result: &mut ActionExecutionResult) {
         let action_name = intent.action_type.to_string();
         if let Some(config) = ActionRegistry::get(&action_name) {
             for effect in &config.effects {
-                // 使用 effect_type 字段分发，而非枚举模式匹配
                 match effect.effect_type.as_str() {
                     ActionEffect::EFFECT_TYPE_ATTRIBUTE_CHANGE => {
-                        // 从 params 中提取参数
-                        let _attribute = effect.get_str("attribute").unwrap_or("unknown");
-                        let _operation = effect.get_str("operation").unwrap_or("add");
-                        let _value = effect.get_i32("value"); // 或 get_f64
+                        let attribute = effect.get_str("attribute").unwrap_or("unknown");
+                        let operation = effect.get_str("operation").unwrap_or("add");
+                        let value = effect.get_i32("value").unwrap_or(0);
 
-                        // TODO: 实现通用属性效果
-                        // 当前不支持，因为需要将 value 转换为 AttributeValue
+                        let delta = match operation {
+                            "sub" => -value,
+                            _ => value,
+                        };
+
+                        result.add_change(StateChange::AttributeChanged {
+                            agent_id: intent.agent_id,
+                            attribute: attribute.to_string(),
+                            delta: AttributeValue::Delta { value: delta },
+                        });
                     }
                     ActionEffect::EFFECT_TYPE_ADD_ITEM => {
-                        // 暂不支持
+                        if let Some(item_id) = effect.get_str("item_id") {
+                            let quantity = effect.get_i32("quantity").unwrap_or(1);
+                            result.add_change(StateChange::ItemGathered {
+                                agent_id: intent.agent_id,
+                                item_id: item_id.to_string(),
+                                quantity,
+                            });
+                        }
                     }
-                    _ => {
-                        // 未知类型的效果，跳过（可扩展）
-                    }
+                    _ => {}
                 }
             }
         }

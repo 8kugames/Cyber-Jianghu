@@ -178,6 +178,15 @@ pub async fn send_agent_died_notification(
                 "AgentDied notification sent to agent {} via device {}",
                 agent_id, device_id
             );
+            // 发送 WebSocket Close frame，触发 handler 的 recv 循环退出 → 连接清理
+            // 必须在 mark_dead() 之前发送，否则 send() 会因 is_dead 检查被拒绝
+            if connection.send(Message::Close(None)).await.is_err() {
+                warn!(
+                    "Agent {} Close frame send failed (channel already closed)",
+                    agent_id
+                );
+            }
+            connection.mark_dead();
         }
     } else {
         warn!(

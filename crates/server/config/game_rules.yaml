@@ -39,7 +39,7 @@ data:
       # 收集窗口时长（秒）：每个 tick 周期开始后，等待此时间再执行 tick
       # 用于收集 Agent 意图，避免意图因时序错位而丢失
       # 设为 0 可禁用收集窗口
-      collection_window_secs: 55
+      collection_window_secs: 58
 
     # 生存底线配置
     survival:
