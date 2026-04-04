@@ -220,4 +220,8 @@ pub struct SetupStatusResponse {
     /// 当前角色名（如果有）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_character: Option<String>,
+    /// 角色是否已死亡（等待转生）
+    pub is_dead: bool,
+    /// HTTP API 服务器实际端口
+    pub actual_port: u16,
 }

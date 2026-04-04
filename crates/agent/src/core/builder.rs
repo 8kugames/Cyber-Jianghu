@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
@@ -43,8 +43,8 @@ pub struct AgentBuilder {
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
     lifespan_calculator: Option<LifespanCalculator>,
-    /// 重连请求接收通道（Claw 模式）
-    reconnect_rx: Option<mpsc::Receiver<crate::infra::api::ReconnectRequest>>,
+    /// 重连请求接收通道
+    reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
     /// 配置重载通知接收通道
     config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
@@ -158,8 +158,8 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置重连请求接收通道（Claw 模式热切换）
-    pub fn with_reconnect_rx(mut self, rx: mpsc::Receiver<ReconnectRequest>) -> Self {
+    /// 设置重连请求接收通道
+    pub fn with_reconnect_rx(mut self, rx: broadcast::Receiver<ReconnectRequest>) -> Self {
         self.reconnect_rx = Some(rx);
         self
     }

@@ -2575,3 +2575,26 @@ button[type="button"]:disabled {
     color: var(--text-primary);
     margin: 0 0 12px 0;
 }
+
+.info-banner {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.info-banner p {
+    margin: 0;
+}
+
+.info-banner a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.info-banner a:hover {
+    text-decoration: underline;
+}

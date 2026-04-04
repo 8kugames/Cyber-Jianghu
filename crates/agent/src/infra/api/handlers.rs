@@ -1572,7 +1572,7 @@ pub(super) async fn register_character_handler(
                 let reconnect_req = super::ReconnectRequest {
                     ws_url: server_ws_url,
                 };
-                if let Err(e) = tx.send(reconnect_req).await {
+                if let Err(e) = tx.send(reconnect_req) {
                     error!("[character] 注册后触发重连失败: {}", e);
                 } else {
                     info!("[character] 注册后触发 WebSocket 重连");
@@ -1739,12 +1739,10 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
             .and_then(|a| a.get("hp"))
             .and_then(|hp| hp.as_i64())
             .map(|hp| if hp > 0 { "alive" } else { "dead" }.to_string())
-            .or_else(|| {
-                match character.status {
-                    CharacterStatus::Dead => Some("dead".to_string()),
-                    CharacterStatus::Retired => Some("retired".to_string()),
-                    CharacterStatus::Alive => Some("alive".to_string()),
-                }
+            .or_else(|| match character.status {
+                CharacterStatus::Dead => Some("dead".to_string()),
+                CharacterStatus::Retired => Some("retired".to_string()),
+                CharacterStatus::Alive => Some("alive".to_string()),
             })
     };
 
@@ -1779,7 +1777,9 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
         status,
         is_stale,
         derived_attributes: enrich_derived_attributes(
-            current.as_ref().map(|ws| ws.self_state.derived_attributes.clone()),
+            current
+                .as_ref()
+                .map(|ws| ws.self_state.derived_attributes.clone()),
             &narrative_config,
         ),
     };
@@ -1880,7 +1880,9 @@ pub(super) async fn get_character_by_id_handler(
             status,
             is_stale,
             derived_attributes: enrich_derived_attributes(
-                current.as_ref().map(|ws| ws.self_state.derived_attributes.clone()),
+                current
+                    .as_ref()
+                    .map(|ws| ws.self_state.derived_attributes.clone()),
                 &narrative_config,
             ),
         })
@@ -2311,7 +2313,7 @@ pub(super) async fn rebirth_character_handler(
         let reconnect_req = super::ReconnectRequest {
             ws_url: server_ws_url,
         };
-        if let Err(e) = tx.send(reconnect_req).await {
+        if let Err(e) = tx.send(reconnect_req) {
             error!("发送重连请求失败: {}", e);
         } else {
             info!("转生后触发 WebSocket 重连");
@@ -3034,8 +3036,8 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     Json(ConfigResponse {
         server_http_url,
         server_ws_url,
-        runtime_mode: "claw".to_string(),
-        port: 23340,
+        runtime_mode: format!("{:?}", state.runtime_mode),
+        port: state.actual_port,
     })
 }
 
@@ -3050,6 +3052,8 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
                 has_llm: false,
                 has_character: false,
                 current_character: None,
+                is_dead: false,
+                actual_port: state.actual_port,
             })
             .into_response();
         }
@@ -3079,6 +3083,8 @@ pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> i
         has_llm,
         has_character,
         current_character,
+        is_dead,
+        actual_port: state.actual_port,
     })
     .into_response()
 }
@@ -3132,8 +3138,8 @@ pub(super) async fn reload_config_handler(
         let config = ConfigResponse {
             server_http_url: state.server_http_url.read().await.clone(),
             server_ws_url: state.server_ws_url.read().await.clone(),
-            runtime_mode: "claw".to_string(),
-            port: 23340,
+            runtime_mode: format!("{:?}", state.runtime_mode),
+            port: state.actual_port,
         };
 
         return Json(ConfigReloadResponse {
@@ -3166,8 +3172,8 @@ pub(super) async fn reload_config_handler(
             let response_config = ConfigResponse {
                 server_http_url: config.server.http_url,
                 server_ws_url: config.server.ws_url,
-                runtime_mode: "claw".to_string(),
-                port: 23340,
+                runtime_mode: format!("{:?}", state.runtime_mode),
+                port: state.actual_port,
             };
 
             Json(ConfigReloadResponse {
@@ -3377,7 +3383,7 @@ pub(super) async fn set_server_handler(
         let reconnect_req = super::ReconnectRequest {
             ws_url: req.ws_url.clone(),
         };
-        if let Err(e) = tx.send(reconnect_req).await {
+        if let Err(e) = tx.send(reconnect_req) {
             error!("发送重连请求失败: {}", e);
         } else {
             info!("[config] 触发 WebSocket 重连: {}", req.ws_url);

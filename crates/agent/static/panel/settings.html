@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>赛博江湖 - 初始配置</title>
+        <title>赛博江湖 - 设置</title>
         <link rel="stylesheet" href="style.css" />
     </head>
     <body class="full-width-page">
@@ -11,36 +11,19 @@
             <header>
                 <h1>赛博江湖</h1>
                 <nav class="nav-tabs">
-                    <span class="nav-tab active">初始配置</span>
+                    <a href="welcome.html" class="nav-tab">首页</a>
+                    <a href="character.html" class="nav-tab">角色</a>
+                    <a href="settings.html" class="nav-tab active">设置</a>
                 </nav>
             </header>
 
             <main>
-                <div class="info-banner">
-                    <p>首次配置向导。配置完成后可随时在 <a href="settings.html">设置页面</a> 修改。</p>
-                </div>
-                <div class="setup-progress">
-                    <div class="progress-step active" id="step-indicator-1">
-                        <span class="step-num">1</span>
-                        <span class="step-label">服务器</span>
-                    </div>
-                    <div class="progress-line"></div>
-                    <div class="progress-step" id="step-indicator-2">
-                        <span class="step-num">2</span>
-                        <span class="step-label">LLM</span>
-                    </div>
-                    <div class="progress-line"></div>
-                    <div class="progress-step" id="step-indicator-3">
-                        <span class="step-num">3</span>
-                        <span class="step-label">完成</span>
-                    </div>
-                </div>
+                <section class="form-section">
+                    <h2>服务器配置</h2>
+                    <p class="section-desc">
+                        配置游戏服务器地址。修改后 Agent 会自动重连。
+                    </p>
 
-                <section class="setup-step" id="step-1">
-                    <div class="setup-step-header">
-                        <h2>第一步：服务器配置</h2>
-                        <p>配置游戏服务器地址（默认 localhost:23333）</p>
-                    </div>
                     <form id="server-form">
                         <div class="form-group">
                             <label for="server-ws-url">WebSocket 地址</label>
@@ -48,24 +31,31 @@
                         </div>
                         <div class="form-group">
                             <label for="server-http-url">HTTP 地址</label>
-                            <input type="text" id="server-http-url" value="http://localhost:23333" />
+                            <input type="text" id="server-http-url" placeholder="http://localhost:23333" />
                         </div>
                         <div class="form-actions">
-                            <button type="submit" id="server-next-btn">下一步</button>
+                            <button type="submit" id="save-server-btn">保存并重连</button>
                         </div>
                     </form>
+
+                    <div id="server-result" class="result hidden">
+                        <p id="server-message"></p>
+                    </div>
+                    <div id="server-error" class="error hidden">
+                        <p id="server-error-msg"></p>
+                    </div>
                 </section>
 
-                <section class="setup-step hidden" id="step-2">
-                    <div class="setup-step-header">
-                        <h2>第二步：LLM 配置</h2>
-                        <p>选择 LLM Provider 并配置连接信息</p>
-                    </div>
+                <section class="form-section">
+                    <h2>LLM 配置</h2>
+                    <p class="section-desc">
+                        配置 LLM Provider 和模型参数。
+                    </p>
+
                     <form id="llm-form">
                         <div class="form-group">
                             <label for="llm-provider">Provider</label>
                             <select id="llm-provider">
-                                <!-- 动态加载 -->
                             </select>
                             <p id="llm-provider-hint" class="hint hidden"></p>
                         </div>
@@ -82,26 +72,15 @@
                             <input type="password" id="llm-api-key" placeholder="输入 API Key" />
                         </div>
                         <div class="form-actions">
-                            <button type="button" id="llm-back-btn" class="btn-secondary">上一步</button>
-                            <button type="submit" id="llm-next-btn">下一步</button>
+                            <button type="submit" id="save-llm-btn">保存配置</button>
                         </div>
                     </form>
-                </section>
 
-                <section class="setup-step hidden" id="step-3">
-                    <div class="setup-step-header">
-                        <h2>配置完成</h2>
-                        <p>服务器和 LLM 配置已保存，正在热重载...</p>
+                    <div id="llm-result" class="result hidden">
+                        <p id="llm-message"></p>
                     </div>
-                    <div id="setup-success">
-                        <div class="success-icon">&#10003;</div>
-                        <p id="setup-message">保存成功</p>
-                    </div>
-                    <div id="setup-error" class="error hidden">
-                        <p id="setup-error-msg"></p>
-                    </div>
-                    <div class="form-actions">
-                        <a href="create.html" class="nav-link" id="go-create">前往创建角色</a>
+                    <div id="llm-error" class="error hidden">
+                        <p id="llm-error-msg"></p>
                     </div>
                 </section>
             </main>
@@ -109,29 +88,10 @@
 
         <script src="js/shared.js"></script>
         <script>
-            let currentStep = 1;
-            const totalSteps = 3;
-            let providersData = []; // 缓存 Provider 数据
-
-            function showStep(n) {
-                document.querySelectorAll('.setup-step').forEach(s => s.classList.add('hidden'));
-                document.getElementById('step-' + n).classList.remove('hidden');
-
-                for (let i = 1; i <= totalSteps; i++) {
-                    const indicator = document.getElementById('step-indicator-' + i);
-                    indicator.classList.toggle('active', i === n);
-                    indicator.classList.toggle('completed', i < n);
-                }
-
-                currentStep = n;
-            }
-
-            // 动态加载 Provider 列表
             async function loadProviders() {
                 try {
                     var data = await apiGet('/api/v1/config/llm/providers');
-                    providersData = data.providers || [];
-
+                    var providersData = data.providers || [];
                     var select = document.getElementById('llm-provider');
                     select.innerHTML = '';
 
@@ -147,26 +107,17 @@
                         select.appendChild(option);
                     });
 
-                    // 触发 change 事件更新 UI
                     select.dispatchEvent(new Event('change'));
                 } catch (err) {
                     console.error('加载 Provider 列表失败:', err);
-                    // 回退到硬编码
-                    var select = document.getElementById('llm-provider');
-                    select.innerHTML = `
-                        <option value="ollama">Ollama（本地模型）</option>
-                        <option value="openai_compatible">OpenAI Compatible</option>
-                    `;
                 }
             }
 
-            document.getElementById('llm-provider').addEventListener('change', async function() {
+            document.getElementById('llm-provider').addEventListener('change', function() {
                 var selectedOption = this.options[this.selectedIndex];
                 var isDisabled = selectedOption.disabled;
-                var requiresBaseUrl = selectedOption.dataset.requiresBaseUrl === 'true';
-
-                // 显示/隐藏禁用提示
                 var hint = document.getElementById('llm-provider-hint');
+
                 if (isDisabled) {
                     hint.textContent = selectedOption.title || '此 Provider 当前不可用';
                     hint.classList.remove('hidden');
@@ -174,30 +125,13 @@
                     hint.classList.add('hidden');
                 }
 
-                // 更新表单字段显示
                 var isLocal = this.value === 'ollama';
-                // ollama 也需要显示 base_url（支持 MLX 等自定义端口）
                 document.getElementById('base-url-group').classList.toggle('hidden', false);
                 document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
 
                 if (isLocal) {
                     document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
                     document.getElementById('llm-model').placeholder = '如: qwen2.5:14b 或 llama3.2:3b';
-                } else if (this.value === 'openclaw') {
-                    // 尝试加载 OpenClaw 默认配置
-                    try {
-                        var defaults = await apiGet('/api/v1/config/llm/providers/openclaw/defaults');
-                        if (defaults.base_url) {
-                            document.getElementById('llm-base-url').value = defaults.base_url;
-                        }
-                        if (defaults.model) {
-                            document.getElementById('llm-model').value = defaults.model;
-                        }
-                        document.getElementById('llm-base-url').placeholder = '自动从 OpenClaw Gateway 读取';
-                        document.getElementById('llm-model').placeholder = '输入模型名称';
-                    } catch (err) {
-                        console.log('加载 OpenClaw 默认配置失败');
-                    }
                 } else {
                     document.getElementById('llm-base-url').placeholder = '如: https://api.openai.com/v1';
                     document.getElementById('llm-model').placeholder = '如: gpt-4o';
@@ -206,7 +140,7 @@
 
             document.getElementById('server-form').addEventListener('submit', async function(e) {
                 e.preventDefault();
-                var btn = document.getElementById('server-next-btn');
+                var btn = document.getElementById('save-server-btn');
                 btn.disabled = true;
                 btn.textContent = '保存中...';
 
@@ -214,18 +148,23 @@
                     var ws_url = document.getElementById('server-ws-url').value.trim();
                     var http_url = document.getElementById('server-http-url').value.trim();
                     await apiPost('/api/v1/config/server', { ws_url: ws_url, http_url: http_url });
-                    showStep(2);
+
+                    document.getElementById('server-result').classList.remove('hidden');
+                    document.getElementById('server-message').textContent = '服务器配置已保存';
+                    document.getElementById('server-error').classList.add('hidden');
                 } catch (err) {
-                    showError(err.message);
+                    document.getElementById('server-error').classList.remove('hidden');
+                    document.getElementById('server-error-msg').textContent = err.message;
+                    document.getElementById('server-result').classList.add('hidden');
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = '下一步';
+                    btn.textContent = '保存并重连';
                 }
             });
 
             document.getElementById('llm-form').addEventListener('submit', async function(e) {
                 e.preventDefault();
-                var btn = document.getElementById('llm-next-btn');
+                var btn = document.getElementById('save-llm-btn');
                 btn.disabled = true;
                 btn.textContent = '保存中...';
 
@@ -247,18 +186,17 @@
                         reflector_inherits_actor: true
                     });
 
-                    showStep(3);
-                    document.getElementById('setup-message').textContent = '配置已保存，Agent 正在热重载...';
+                    document.getElementById('llm-result').classList.remove('hidden');
+                    document.getElementById('llm-message').textContent = 'LLM 配置已保存';
+                    document.getElementById('llm-error').classList.add('hidden');
                 } catch (err) {
-                    showError(err.message);
+                    document.getElementById('llm-error').classList.remove('hidden');
+                    document.getElementById('llm-error-msg').textContent = err.message;
+                    document.getElementById('llm-result').classList.add('hidden');
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = '下一步';
+                    btn.textContent = '保存配置';
                 }
-            });
-
-            document.getElementById('llm-back-btn').addEventListener('click', function() {
-                showStep(1);
             });
 
             async function preloadConfig() {
@@ -272,21 +210,16 @@
                         document.getElementById('llm-provider').value = llmData.actor.provider;
                         document.getElementById('llm-model').value = llmData.actor.model || '';
                         document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
-                        // 触发 change 事件以更新 UI（显示/隐藏 base_url 和 api_key 字段）
                         document.getElementById('llm-provider').dispatchEvent(new Event('change'));
                     }
-                    return { server_ws_url: serverData.server_ws_url, llm: llmData };
                 } catch (err) {
-                    console.log('加载已有配置失败，继续使用默认值');
-                    return null;
+                    console.log('加载配置失败:', err);
                 }
             }
 
-            // 初始化
             async function init() {
                 await loadProviders();
                 await preloadConfig();
-                // 始终从步骤 1 开始，让用户确认预填充的服务器地址
             }
             init();
         </script>

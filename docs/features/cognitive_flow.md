@@ -42,7 +42,7 @@
 
 - HTTP API（辅助）：`GET /api/v1`、`GET /api/v1/state`、`GET /api/v1/context`、`POST /api/v1/character/dream`、`GET/POST /api/v1/review/*`、`POST /api/v1/validate`
 - HTTP Intent：`POST /api/v1/intent` 已禁用（强制 WebSocket）
-- Web 面板：`/index.html`（创建角色）、`/character.html`（角色信息）、`/manage.html`（托梦/转生），资源目录 `crates/agent/src/static/panel/`
+- Web 面板：`/welcome.html`（首页）、`/create.html`（创建角色）、`/character.html`（角色信息托梦/转生）、`/settings.html`（服务器/LLM 配置），资源目录 `crates/agent/src/static/panel/`
 
 ## 架构总览
 
