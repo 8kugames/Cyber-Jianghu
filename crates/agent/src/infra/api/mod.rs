@@ -174,7 +174,8 @@ pub struct HttpApiState {
     /// 托梦存储，管理持续 n 回合的念头注入
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
-    pub reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    /// 使用 broadcast 支持多消费者，Handler 和 Agent 都通过它通信
+    pub reconnect_tx: Option<broadcast::Sender<ReconnectRequest>>,
     /// 死亡事件广播通道（用于 SSE 实时推送）
     pub death_event_tx: broadcast::Sender<ServerMessage>,
     /// Tick 更新广播通道（用于 SSE 实时推送，仅发送 tick_id）
@@ -183,6 +184,8 @@ pub struct HttpApiState {
     pub narrative_config:
         std::sync::Arc<RwLock<Option<crate::soul::actor::narrative::NarrativeConfig>>>,
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// HTTP API 服务器实际端口（用于 Web 面板链接）
+    pub actual_port: u16,
 }
 
 /// HTTP 决策状态
@@ -593,10 +596,11 @@ pub fn create_http_state(
     device_config: Option<crate::config::DeviceConfig>,
     server_dir: PathBuf,
     character_dir: PathBuf,
-    reconnect_tx: Option<mpsc::Sender<ReconnectRequest>>,
+    reconnect_tx: Option<broadcast::Sender<ReconnectRequest>>,
     config_path: PathBuf,
     ws_shared_state: Option<Arc<crate::runtime::claw::WsSharedState>>,
     runtime_mode: crate::config::RuntimeMode,
+    actual_port: u16,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
@@ -715,6 +719,7 @@ pub fn create_http_state(
         runtime_mode,
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        actual_port,
     };
 
     let decision_state = Arc::new(HttpDecisionState {

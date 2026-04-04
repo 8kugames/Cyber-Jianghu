@@ -266,7 +266,7 @@ impl super::Agent {
         loop {
             tokio::select! {
                 // 检查重连请求（热切换）
-                Some(req) = async {
+                Ok(req) = async {
                     if let Some(ref mut rx) = self.reconnect_rx {
                         rx.recv().await
                     } else {
@@ -302,7 +302,7 @@ impl super::Agent {
                         continue;
                     }
 
-                    info!("检测到配置变更，重新加载...");
+                    debug!("检测到配置变更，重新加载...");
                     let old_config_path = self.config.config_path.clone();
                     let old_config = self.config.clone();
 
@@ -341,13 +341,13 @@ impl super::Agent {
                                     if let Some(ref container) = self.actor_llm_container {
                                         let mut guard = container.write().await;
                                         *guard = new_client.clone();
-                                        info!("ActorSoul LLM 容器已更新（真正热重载）");
+                                        debug!("ActorSoul LLM 容器已更新（真正热重载）");
                                     }
 
                                     self.config = new_config;
                                     // 保留 config_path（from_file 反序列化时 #[serde(skip)] 会丢失）
                                     self.config.config_path = old_config_path;
-                                    info!("ActorSoul LLM 已重载");
+                                    debug!("ActorSoul LLM 已重载");
                                 }
                                 Err(e) => {
                                     warn!("ActorSoul LLM 重载失败: {}，保持旧配置", e);
@@ -896,7 +896,7 @@ impl super::Agent {
         loop {
             tokio::select! {
                 // 监听重连请求（Web 面板注册新角色后触发）
-                Some(req) = async {
+                Ok(req) = async {
                     if let Some(ref mut rx) = self.reconnect_rx {
                         rx.recv().await
                     } else {

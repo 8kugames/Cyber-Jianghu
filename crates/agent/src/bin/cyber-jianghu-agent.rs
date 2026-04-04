@@ -16,8 +16,8 @@
 // 2. 后续运行：自动使用已保存的身份连接服务器
 // 3. Cognitive 模式（默认）：cyber-jianghu-agent run --mode cognitive
 // 4. Claw 模式：cyber-jianghu-agent run --mode claw
-// 5. Web 面板：http://localhost:23340/manage.html
-// 6. HTTP API：http://localhost:23340/api/v1/*
+// 5. Web 面板：http://localhost:<端口>/welcome.html
+// 6. HTTP API：http://localhost:<端口>/api/v1/*
 // ============================================================================
 
 use anyhow::{Context, Result};
@@ -27,7 +27,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::RwLock;
 use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
 
@@ -430,7 +430,15 @@ fn show_config() -> Result<()> {
         }
     } else {
         println!("\n当前角色: (未创建)");
-        println!("  通过 Web 面板创建: http://localhost:23340/manage.html");
+        let display_port = if config.runtime.port == 0 {
+            "<自动>".to_string()
+        } else {
+            config.runtime.port.to_string()
+        };
+        println!(
+            "  通过 Web 面板创建: http://localhost:{}/welcome.html",
+            display_port
+        );
         println!("  或通过 CLI: cyber-jianghu-agent create-character --name 名字");
     }
 
@@ -483,7 +491,10 @@ async fn create_character_cli(
         Err(e) => {
             warn!("无法连接到 Agent API: {}", e);
             warn!("请确保 Agent 已在 Claw 模式下运行（默认模式）");
-            warn!("或通过 Web 面板创建角色: http://localhost:23340/manage.html");
+            warn!(
+                "或通过 Web 面板创建角色: http://localhost:{}/welcome.html",
+                port
+            );
             return Err(e);
         }
     }
@@ -540,13 +551,12 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
 /// HTTP API must be started before calling this function.
 async fn await_character_loop(server_dir: &Path) -> Result<()> {
     let characters_dir = server_dir.join("characters");
-    
-    std::fs::create_dir_all(&characters_dir)
-        .context("Failed to create characters directory")?;
-    
+
+    std::fs::create_dir_all(&characters_dir).context("Failed to create characters directory")?;
+
     info!("Waiting for character creation...");
     info!("Access web panel to create a character");
-    
+
     // Try notify first, fallback to polling
     let mut watcher = match notify::recommended_watcher(|_| {}) {
         Ok(w) => Some(w),
@@ -555,20 +565,21 @@ async fn await_character_loop(server_dir: &Path) -> Result<()> {
             None
         }
     };
-    
+
     if let Some(ref mut w) = watcher {
-        w.watch(&characters_dir, notify::RecursiveMode::NonRecursive).ok();
+        w.watch(&characters_dir, notify::RecursiveMode::NonRecursive)
+            .ok();
     }
-    
+
     loop {
         if let Some(c) = select_character(server_dir)
             && c.agent_id.is_some()
-            && c.status == CharacterStatus::Alive 
+            && c.status == CharacterStatus::Alive
         {
             info!("Character found: {} ({})", c.name, c.agent_id.unwrap());
             return Ok(());
         }
-        
+
         if watcher.is_none() {
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         } else {
@@ -631,8 +642,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Start HTTP API FIRST (before character check) so web panel is accessible
     let device_id = Arc::new(RwLock::new(device_id_value));
-    let (reconnect_tx, reconnect_rx) =
-        mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
+    let (reconnect_tx, _reconnect_rx) =
+        tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
     // Early HTTP API startup based on mode
     let _early_api_state: Option<Arc<cyber_jianghu_agent::infra::api::HttpApiState>>;
@@ -673,7 +684,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 server_msg_tx: setup.server_msg_tx.clone(),
                 reconnect_rx: setup.reconnect_rx,
             });
-            info!("Claw HTTP API 已启动: http://localhost:{}", early_actual_port);
+            info!(
+                "Claw HTTP API 已启动: http://localhost:{}",
+                early_actual_port
+            );
         }
     }
 
@@ -682,11 +696,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         Some(c) if c.agent_id.is_some() && c.status == CharacterStatus::Alive => c,
         _ => {
             info!("尚未创建角色，等待角色创建...");
-            info!("请通过 Web 面板创建角色: http://localhost:{}/index.html", early_actual_port);
+            info!(
+                "请通过 Web 面板创建角色: http://localhost:{}/index.html",
+                early_actual_port
+            );
             await_character_loop(&server_dir).await?;
             // After waiting, character MUST exist
-            select_character(&server_dir)
-                .context("Character not found after waiting")?
+            select_character(&server_dir).context("Character not found after waiting")?
         }
     };
 
@@ -788,23 +804,21 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     })
                 });
 
-    let (reconnect_tx, _reconnect_rx) =
-        mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
+            // Reuse early's api_state (prevents duplicate HTTP server startup)
+            let early_api_state = _early_api_state
+                .as_ref()
+                .expect("early api_state must exist");
 
-            let (api_state, actual_port) = start_http_api_server(
-                port,
-                device_id.clone(),
-                &config,
-                ws_url,
-                &device,
-                server_dir.clone(),
-                Some(reconnect_tx),
-            )?;
-            info!("HTTP API 已启动: http://localhost:{}", actual_port);
-            info!("Web 面板: http://localhost:{}/", actual_port);
-            info!("角色管理: http://localhost:{}/index.html", actual_port);
+            // Reuse early's broadcast reconnect_tx by subscribing
+            // This allows multiple consumers (Late Cognitive Agent) to receive reconnect events
+            let reconnect_rx_for_builder = early_api_state
+                .reconnect_tx
+                .as_ref()
+                .map(|tx| tx.subscribe())
+                .unwrap();
 
-            let browser_url = format!("http://localhost:{}/welcome.html", actual_port);
+            let api_state = early_api_state.clone();
+            let browser_url = format!("http://localhost:{}/welcome.html", early_actual_port);
             let is_container = std::path::Path::new("/app/.dockerenv").exists();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -830,7 +844,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_llm_container(llm_container)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
-                .with_reconnect_rx(reconnect_rx)
+                .with_reconnect_rx(reconnect_rx_for_builder)
                 .cognitive_engine(cognitive_engine_for_builder.clone());
 
             builder = builder.character_config(character.clone());
@@ -1063,7 +1077,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 }
 
 struct ServerSetup {
-    reconnect_rx: mpsc::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
+    reconnect_rx:
+        tokio::sync::broadcast::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     shared_state: Arc<WsSharedState>,
     api_state: cyber_jianghu_agent::infra::api::HttpApiState,
@@ -1078,10 +1093,12 @@ struct ClawCallbackSetup {
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
 }
 
+#[allow(dead_code)]
 struct EarlyClawSetup {
     shared_state: Arc<WsSharedState>,
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
-    reconnect_rx: mpsc::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
+    reconnect_rx:
+        tokio::sync::broadcast::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
 }
 
 fn start_claw_server(
@@ -1110,7 +1127,7 @@ fn start_claw_server(
     print_startup_banner(actual_port, ws_url, &config_path_str, "Claw");
 
     let (reconnect_tx, reconnect_rx) =
-        mpsc::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(10);
+        tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
     let mut ws_state = WsDecisionState::new();
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
@@ -1131,6 +1148,7 @@ fn start_claw_server(
         config_path(),
         Some(shared_state.clone()),
         config.runtime.mode,
+        actual_port,
     );
 
     let api_state_clone = api_state.clone();
@@ -1160,7 +1178,9 @@ fn start_http_api_server(
     ws_url: &str,
     device: &DeviceConfig,
     server_dir: PathBuf,
-    reconnect_tx: Option<mpsc::Sender<cyber_jianghu_agent::infra::api::ReconnectRequest>>,
+    reconnect_tx: Option<
+        tokio::sync::broadcast::Sender<cyber_jianghu_agent::infra::api::ReconnectRequest>,
+    >,
 ) -> Result<(Arc<cyber_jianghu_agent::infra::api::HttpApiState>, u16)> {
     let port_range_start = 23340u16;
     let port_range_end = 23349u16;
@@ -1197,6 +1217,7 @@ fn start_http_api_server(
         config_path(),
         None,
         config.runtime.mode,
+        actual_port,
     );
 
     let api_state_clone = api_state.clone();

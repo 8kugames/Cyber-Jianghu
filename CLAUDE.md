@@ -434,9 +434,10 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 
 ### Agent Web Panel
 
-- `GET /` or `GET /index.html` - Character creation page
-- `GET /character.html` - Character info page (displays status, registered_at, intent_summary, observer_thought)
-- `GET /manage.html` - Management page (dream injection, rebirth)
+- `GET /welcome.html` - Home page (shows status-based cards)
+- `GET /create.html` - Character creation page
+- `GET /character.html` - Character info page (dream injection, rebirth, intent_history)
+- `GET /settings.html` - Server/LLM configuration page
 
 ## Narrative Config Delivery
 
