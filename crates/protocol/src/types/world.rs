@@ -139,24 +139,6 @@ pub struct WorldEvent {
     pub metadata: serde_json::Value,
 }
 
-impl WorldEvent {
-    /// 从旧格式（event_type 为 String）创建兼容对象
-    /// 用于反序列化旧数据时转换
-    pub fn from_legacy_string(
-        event_type_str: String,
-        tick_id: i64,
-        description: String,
-        metadata: serde_json::Value,
-    ) -> Option<Self> {
-        let event_type = WorldEventType::from_str(&event_type_str).ok()?;
-        Some(Self {
-            event_type,
-            tick_id,
-            description,
-            metadata,
-        })
-    }
-}
 
 /// 密语记录（不含内容，仅索引）
 #[derive(Debug, Clone, Serialize, Deserialize)]
