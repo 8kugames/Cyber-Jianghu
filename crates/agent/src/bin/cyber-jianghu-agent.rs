@@ -1063,9 +1063,44 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // 外层循环：run() 返回 Ok(()) 表示需要重启（等待转生后重新连接）
     // Err 才是真正的致命错误
+    // 支持 SIGTERM / Ctrl+C 优雅关闭
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+
+    let shutdown_tx_clone = shutdown_tx.clone();
+    tokio::spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("收到 Ctrl+C 信号");
+        let _ = shutdown_tx_clone.send(()).await;
+    });
+
+    #[cfg(unix)]
+    {
+        let shutdown_tx_clone = shutdown_tx.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to install SIGTERM handler");
+            sigterm.recv().await;
+            info!("收到 SIGTERM 信号");
+            let _ = shutdown_tx_clone.send(()).await;
+        });
+    }
+
     loop {
-        agent.run().await?;
-        info!("Agent run() completed, restarting...");
+        tokio::select! {
+            _ = shutdown_rx.recv() => {
+                info!("正在优雅关闭 Agent...");
+                agent.close().await.ok();
+                info!("Agent 已关闭");
+                break Ok(());
+            }
+            result = agent.run() => {
+                if let Err(e) = result {
+                    error!("Agent run() 错误: {}", e);
+                }
+                info!("Agent run() completed, restarting...");
+            }
+        }
     }
 }
 
