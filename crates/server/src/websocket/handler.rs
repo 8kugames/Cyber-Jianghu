@@ -688,19 +688,95 @@ async fn handle_intent(
     let action = crate::models::ActionType::new(&action_type);
 
     // 构造 Intent
-    let intent = Intent {
+    let mut intent = Intent {
         intent_id: req_intent_id.unwrap_or_else(uuid::Uuid::new_v4), // 如果 ClientMessage 中没有传 intent_id，这里生成一个新的
         agent_id,
         tick_id,
         thought_log,
         action_type: action,
-        action_data,
+        action_data: action_data.clone(),
         priority,
         observer_thought: None,
         narrative: None,
+        already_broadcast: false,
+        session_id: None,
     };
 
-    // 保存到 IntentManager（临时缓存）
+    // 如果是 speak 动作，立即广播给同 Location 的所有在线 Agent
+    if action_type.as_str() == "speak"
+        && let Some(content_value) = action_data.as_ref().and_then(|d| d.get("content"))
+        && let Some(content_str) = content_value.as_str()
+    {
+        let agent_state = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await?;
+        let location = agent_state.node_id.clone();
+
+        // 独立任务：广播，避免阻塞 intent 处理主流程
+        let state_clone = state.clone();
+        let content_owned = content_str.to_string();
+        let agent_id_for_log = agent_id;
+        let intent_id_for_log = intent.intent_id;
+        tokio::spawn(async move {
+            if let Err(e) = super::broadcast::broadcast_speak_to_location(
+                agent_id_for_log,
+                &location,
+                &content_owned,
+                tick_id,
+                &state_clone,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Failed to broadcast speak intent immediately: agent={}, intent={}, error={}",
+                    agent_id_for_log,
+                    intent_id_for_log,
+                    e
+                );
+            } else {
+                tracing::debug!(
+                    "Speak intent broadcast immediately to location {} for agent {}",
+                    location,
+                    agent_id_for_log
+                );
+            }
+        });
+
+        // 标记已广播
+        intent.already_broadcast = true;
+    }
+
+    // 如果是 whisper 动作，立即创建 Dialogue Session
+    if action_type.as_str() == "whisper"
+        && let Some(target_value) = action_data.as_ref().and_then(|d| d.get("target_agent_id"))
+        && let Some(target_id_str) = target_value.as_str()
+        && let Ok(target_agent_id) = uuid::Uuid::parse_str(target_id_str)
+    {
+        match state
+            .dialogue_manager
+            .create_session(agent_id, target_agent_id)
+            .await
+        {
+            Ok(response) => {
+                if let DialogueResponse::RequestForwarded { session_id, .. } = response {
+                    intent.session_id = Some(session_id.clone());
+                    tracing::debug!(
+                        "Whisper intent created Dialogue Session {} for agent {}",
+                        session_id,
+                        agent_id
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to create Dialogue Session for whisper: agent={}, target={}, error={}",
+                    agent_id,
+                    target_agent_id,
+                    e
+                );
+            }
+        }
+    }
+
+    // 保存到 IntentManager（临时缓存)
     {
         let mut intents = state.intent_manager.write().await;
         intents.insert(agent_id, intent);

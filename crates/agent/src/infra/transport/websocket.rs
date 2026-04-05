@@ -503,6 +503,13 @@ impl WebSocketClient {
                         Ok(ServerMessage::Pong { .. }) => {
                             // 心跳响应，不透传
                         }
+                        Ok(msg @ ServerMessage::ImmediateEvent { .. }) => {
+                            // 现场即时事件，走 callback
+                            debug!("Received immediate event");
+                            if let Some(ref callback) = server_msg_cb {
+                                callback(msg);
+                            }
+                        }
                         Ok(ServerMessage::Registered { .. }) => {
                             // 已经注册过了，不透传
                             debug!("Received duplicate registration message");

@@ -6,7 +6,8 @@ use cyber_jianghu_agent::infra::api::cognitive_context::{
     CognitiveContext, CognitiveContextBuilder, Drive,
 };
 use cyber_jianghu_protocol::{
-    AdjacentNode, AgentSelfState, Entity, Location, SceneItem, WorldEvent, WorldState, WorldTime,
+    AdjacentNode, AgentSelfState, Entity, Location, SceneItem, WorldEvent, WorldEventType,
+    WorldState, WorldTime,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -67,6 +68,7 @@ fn create_test_world_state() -> WorldState {
             distance: 2,
             state: "idle".to_string(),
             hostile: false,
+            recent_actions: vec![],
         }],
         nearby_items: vec![SceneItem {
             item_id: "wine_bottle".to_string(),
@@ -75,11 +77,12 @@ fn create_test_world_state() -> WorldState {
             item_type: "drink".to_string(),
         }],
         events_log: vec![WorldEvent {
-            event_type: "environmental_change".to_string(),
+            event_type: WorldEventType::EnvironmentalChange,
             tick_id: 99,
             description: "天色渐晚".to_string(),
             metadata: serde_json::Value::Null,
         }],
+        private_dialogue_log: vec![],
     }
 }
 

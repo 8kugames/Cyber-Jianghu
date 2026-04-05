@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldState};
+use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldEvent, WorldState};
 
 /// serde default helper: 缺省 true（fail-open，旧 server 不发字段时假定存活）
 fn default_true() -> bool {
@@ -207,6 +207,18 @@ pub enum ServerMessage {
         died_at: i64,
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
+    },
+
+    /// 立即事件（speak 等需要立即广播的事件）
+    ///
+    /// 与 WorldState 不同，ImmediateEvent 只包含单个事件，用于：
+    /// - speak 广播：同场景所有在线 Agent 立即收到
+    /// - 其他需要实时通知的事件
+    ImmediateEvent {
+        /// 事件内容
+        event: WorldEvent,
+        /// 当前 tick 截止时间（Unix ms）
+        deadline_ms: u64,
     },
 }
 
@@ -433,6 +445,7 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
+            private_dialogue_log: vec![],
             deadline_ms: 0,
         };
 

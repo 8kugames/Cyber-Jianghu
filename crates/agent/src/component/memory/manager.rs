@@ -133,7 +133,7 @@ impl MemoryManager {
                 event.tick_id,
                 event.description.clone(),
             )
-            .with_event_type(event.event_type.clone())
+            .with_event_type(event.event_type.to_string())
             .with_importance(importance)
             .with_metadata(event.metadata.clone());
 
@@ -323,6 +323,7 @@ pub struct MemoryManagerStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::WorldEventType;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -362,13 +363,13 @@ mod tests {
 
         let events = vec![
             WorldEvent {
-                event_type: "combat".to_string(),
+                event_type: WorldEventType::DeathNotification,
                 tick_id: 1,
                 description: "你受到了10点伤害".to_string(),
                 metadata: json!({"hp_delta": -10}),
             },
             WorldEvent {
-                event_type: "routine".to_string(),
+                event_type: WorldEventType::SystemNotification,
                 tick_id: 1,
                 description: "你休息了一会".to_string(),
                 metadata: json!({}),
@@ -394,7 +395,7 @@ mod tests {
         let mut manager = MemoryManager::new(config).unwrap();
 
         let events = vec![WorldEvent {
-            event_type: "routine".to_string(),
+            event_type: WorldEventType::SystemNotification,
             tick_id: 1,
             description: "你吃了馒头".to_string(),
             metadata: json!({}),
