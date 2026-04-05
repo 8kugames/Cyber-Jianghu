@@ -12,7 +12,9 @@ use super::{
 };
 use crate::actions::ActionExecutor;
 use crate::db::DbPool;
-use crate::models::{ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent};
+use crate::models::{
+    ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent, WorldEventType,
+};
 
 /// 状态处理器
 ///
@@ -120,6 +122,9 @@ impl StateProcessor {
                 } else {
                     ActionResult::Failed
                 },
+                thought_log: intent.thought_log.clone(),
+                observer_thought: intent.observer_thought.clone(),
+                narrative: intent.narrative.clone(),
                 created_at: chrono::Utc::now(),
             };
 
@@ -174,7 +179,7 @@ impl StateProcessor {
                     intent.agent_id, result.message
                 );
                 let event = WorldEvent {
-                    event_type: "action_result".to_string(),
+                    event_type: WorldEventType::ActionResult,
                     tick_id,
                     description: format!("动作执行失败: {}", result.message),
                     metadata: serde_json::json!({

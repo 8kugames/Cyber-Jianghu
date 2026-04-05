@@ -185,6 +185,25 @@
                                     </div>
                                 </section>
 
+                                <!-- 死亡角色常驻提示 -->
+                                <div
+                                    id="death-notice"
+                                    class="notice-bubble hidden"
+                                >
+                                    <div class="notice-bubble-icon">!</div>
+                                    <div class="notice-bubble-content">
+                                        <strong>角色已死亡</strong>
+                                        <p>
+                                            当前角色的江湖之旅已结束。请前往转生创建新角色。
+                                        </p>
+                                        <a
+                                            href="create.html"
+                                            class="btn-primary btn-small"
+                                            >前往转生</a
+                                        >
+                                    </div>
+                                </div>
+
                                 <section class="form-section">
                                     <h2>人物画像</h2>
                                     <div class="info-item full-width">
@@ -440,28 +459,24 @@
                         <p class="loading-text">加载中...</p>
                     </div>
                 </section>
-
-                <!-- 角色详情对话框 -->
-                <div
-                    id="character-detail-dialog"
-                    class="dialog-overlay"
-                    style="display: none"
-                >
-                    <div class="dialog dialog-large">
-                        <h3>角色详情</h3>
-                        <div id="character-detail-content"></div>
-                        <div class="dialog-actions">
-                            <button
-                                id="character-detail-close"
-                                class="cancel-btn"
-                            >
-                                关闭
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
         </main>
+
+        <!-- 角色详情侧边抽屉 -->
+        <div id="character-drawer-overlay" class="drawer-overlay"></div>
+        <aside id="character-drawer" class="drawer character-drawer">
+            <div class="drawer-header">
+                <div class="drawer-title" id="char-drawer-title">角色信息</div>
+                <button
+                    id="char-drawer-close"
+                    class="drawer-close"
+                    aria-label="关闭"
+                >
+                    &times;
+                </button>
+            </div>
+            <div class="drawer-body" id="char-drawer-body"></div>
+        </aside>
 
         <!-- 关系详情侧边抽屉 -->
         <div id="relationship-drawer-overlay" class="drawer-overlay"></div>

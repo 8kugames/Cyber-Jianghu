@@ -11,8 +11,9 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::ai::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
-use crate::config::CharacterStatus;
+use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use crate::config::{CharacterConfig, CharacterStatus};
+use crate::infra::transport::{ConnectError, TickMismatchError};
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -37,21 +38,22 @@ impl super::Agent {
         // 检查角色状态：若已死亡或已归隐，跳过服务器连接
         let skip_connection = self.death_reported
             || self
-                .config
-                .agent
+                .character_config
                 .as_ref()
                 .map(|c| c.status != CharacterStatus::Alive)
                 .unwrap_or(false);
 
         if skip_connection {
-            if let Some(ref agent) = self.config.agent {
+            if let Some(ref character) = self.character_config {
                 warn!(
-                    "Agent '{}' status is {:?}, skipping server connection (waiting for rebirth)",
-                    agent.name, agent.status
+                    "Agent '{}' status is {:?}, waiting for rebirth",
+                    character.name, character.status
                 );
             } else {
-                warn!("No active character, skipping server connection");
+                warn!("No active character, waiting for character creation");
             }
+            // 保持进程存活，等待 reconnect_rx 触发重连
+            self.wait_for_rebirth().await?;
             return Ok(());
         }
 
@@ -61,16 +63,36 @@ impl super::Agent {
             connect_attempt += 1;
             match self.client.connect().await {
                 Ok(()) => break,
-                Err(e) => {
+                Err(ConnectError::AuthFailed) => {
+                    warn!(
+                        "WebSocket auth failed (attempt {}), refreshing token...",
+                        connect_attempt
+                    );
+                    match self.refresh_device_token().await {
+                        Ok(()) => {
+                            info!("Token refreshed, retrying connection...");
+                            continue;
+                        }
+                        Err(e) => {
+                            if should_log_retry(connect_attempt) {
+                                warn!(
+                                    "Token refresh failed (attempt {}): {}, 5秒后重试...",
+                                    connect_attempt, e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(ConnectError::ConnectionFailed(e)) => {
                     if should_log_retry(connect_attempt) {
                         warn!(
                             "连接游戏服务器失败 (尝试 {}): {}, 5秒后重试...",
                             connect_attempt, e
                         );
                     }
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 }
             }
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
         info!("Agent '{}' connected to server", self.character_name());
 
@@ -134,9 +156,71 @@ impl super::Agent {
         }
 
         // 等待注册确认（包含游戏规则）
-        let (agent_id, game_rules) = self.client.wait_for_registration().await?;
+        // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
+        let (agent_id, game_rules, registered_name) =
+            match self.client.wait_for_registration().await {
+                Ok(Some((id, rules, name))) => (id, rules, name),
+                Ok(None) => {
+                    info!(
+                        "Agent '{}' 等待角色注册（保持连接）...",
+                        self.character_name()
+                    );
+                    self.death_reported = true;
+                    if let Some(ref api_state) = self.http_api_state {
+                        api_state
+                            .is_dead
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    self.wait_for_rebirth().await?;
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+        // 重置重试计数器
+        self.reconnect_backoff = 0;
         info!("Agent '{}' registered with server", self.character_name());
         info!("Server-assigned Agent ID: {}", agent_id);
+
+        // 使用服务器返回的角色名更新 Agent 名称追踪
+        if let Some(ref name) = registered_name {
+            self.server_assigned_name = Some(name.clone());
+            if let Some(ref engine) = self.cognitive_engine {
+                engine.update_agent_name(name);
+            }
+            info!("已更新 agent 名称为: {}", name);
+        }
+
+        // 自动重建本地 character.yaml（解决 agent-server 状态不同步问题）
+        // 场景：服务器已有角色但本地文件丢失（如清除缓存、目录迁移）
+        if self.character_config.is_none() && !agent_id.is_nil() {
+            let server_dir = self.config.server_dir(&self.config.server.ws_url);
+            let characters_dir = server_dir.join("characters");
+            let char_dir = characters_dir.join(agent_id.to_string());
+            let char_yaml = char_dir.join("character.yaml");
+
+            if !char_yaml.exists() {
+                let name = registered_name.as_deref().unwrap_or("未知");
+                let reconstructed = crate::config::CharacterConfig {
+                    agent_id: Some(agent_id),
+                    name: name.to_string(),
+                    status: crate::config::CharacterStatus::Alive,
+                    server_url: Some(self.config.server.http_url.clone()),
+                    registered_at: Some(chrono::Utc::now()),
+                    ..Default::default()
+                };
+
+                if let Err(e) = (|| -> anyhow::Result<()> {
+                    std::fs::create_dir_all(&char_dir)?;
+                    reconstructed.save_to_file(&char_yaml)?;
+                    Ok(())
+                })() {
+                    warn!("自动重建 character.yaml 失败: {}", e);
+                } else {
+                    info!("已自动重建本地角色配置: {} ({})", name, agent_id);
+                    self.character_config = Some(reconstructed);
+                }
+            }
+        }
 
         // agent_id 为零 = 角色已归隐，跳过主循环，直接触发死亡/转生流程
         if agent_id == Uuid::nil() {
@@ -162,10 +246,10 @@ impl super::Agent {
                 let _ = api_state.death_event_tx.send(death_msg);
             }
 
+            // 归隐后保持进程存活，等待创建新角色
+            self.wait_for_rebirth().await?;
             return Ok(());
         }
-
-        // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
         if let Some(ref callback) = self.registration_callback {
             callback(agent_id);
         }
@@ -182,7 +266,7 @@ impl super::Agent {
         loop {
             tokio::select! {
                 // 检查重连请求（热切换）
-                Some(req) = async {
+                Ok(req) = async {
                     if let Some(ref mut rx) = self.reconnect_rx {
                         rx.recv().await
                     } else {
@@ -192,10 +276,7 @@ impl super::Agent {
                 } => {
                     info!("[main] 收到重连请求: {}", req.ws_url);
                     // 推断 HTTP URL
-                    let http_url = req.ws_url
-                        .replace("ws://", "http://")
-                        .replace("wss://", "https://")
-                        .replace("/ws", "");
+                    let http_url = crate::config::ws_to_http_url(&req.ws_url);
                     // 更新客户端 URL
                     self.client.update_server_url(req.ws_url.clone(), http_url).await;
                     // 触发重连
@@ -211,10 +292,21 @@ impl super::Agent {
                         std::future::pending().await
                     }
                 } => {
-                    info!("检测到配置变更，重新加载...");
+                    // 防护：config_path 为空或文件不存在时跳过重载
+                    let config_path = &self.config.config_path;
+                    if config_path.as_os_str().is_empty() || !config_path.exists() {
+                        debug!("配置路径无效，跳过重载: {:?}", config_path);
+                        if let Some(ref mut rx) = self.config_reload_rx {
+                            while rx.try_recv().is_ok() {}
+                        }
+                        continue;
+                    }
+
+                    debug!("检测到配置变更，重新加载...");
+                    let old_config_path = self.config.config_path.clone();
                     let old_config = self.config.clone();
 
-                    match crate::config::Config::from_file(&self.config.config_path) {
+                    match crate::config::Config::from_file(config_path) {
                         Ok(new_config) => {
                             // 创建新的 LLM 客户端
                             let provider = LlmProvider::parse(&new_config.llm.provider);
@@ -244,19 +336,18 @@ impl super::Agent {
                                 Ok(client) => {
                                     let new_client = std::sync::Arc::new(client);
 
-                                    // 更新 actor_llm_client（向后兼容）
-                                    self.actor_llm_client = Some(new_client.clone());
-
-                                    // 更新 actor_llm_container（真正热重载）
+                                    // 更新 actor_llm_container（热重载）
                                     // 决策回调会自动使用新的 LLM Client
                                     if let Some(ref container) = self.actor_llm_container {
                                         let mut guard = container.write().await;
                                         *guard = new_client.clone();
-                                        info!("ActorSoul LLM 容器已更新（真正热重载）");
+                                        debug!("ActorSoul LLM 容器已更新（真正热重载）");
                                     }
 
                                     self.config = new_config;
-                                    info!("ActorSoul LLM 已重载");
+                                    // 保留 config_path（from_file 反序列化时 #[serde(skip)] 会丢失）
+                                    self.config.config_path = old_config_path;
+                                    debug!("ActorSoul LLM 已重载");
                                 }
                                 Err(e) => {
                                     warn!("ActorSoul LLM 重载失败: {}，保持旧配置", e);
@@ -268,6 +359,11 @@ impl super::Agent {
                             warn!("配置读取失败: {}，保持旧配置", e);
                         }
                     }
+
+                    // 排空积压的重复通知（notify 在 macOS 上单次修改会触发多个事件）
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        while rx.try_recv().is_ok() {}
+                    }
                 }
 
                 // 接收世界状态
@@ -275,8 +371,108 @@ impl super::Agent {
                     let world_state = match result {
                         Ok(state) => state,
                         Err(e) => {
+                            // 检查是否为 TickMismatchError（结构化数据）
+                            if let Some(tick_err) = e.downcast_ref::<TickMismatchError>() {
+                                let current_server_tick = tick_err.current_tick_id;
+                                info!("Tick mismatch detected: {}. Server tick: {}. Reconnecting...", tick_err.message, current_server_tick);
+
+                                // 重连
+                                if let Err(reconnect_err) = self.reconnect().await {
+                                    error!("Reconnect failed: {}", reconnect_err);
+                                    continue;
+                                }
+
+                                // 接收新的 WorldState（可能是过时的初始 WorldState）
+                                let new_world_state = match self.client.receive_world_state().await {
+                                    Ok(ws) => {
+                                        info!("Received WorldState after reconnect: tick={}", ws.tick_id);
+                                        ws
+                                    }
+                                    Err(ws_err) => {
+                                        error!("Failed to receive WorldState after reconnect: {}", ws_err);
+                                        continue;
+                                    }
+                                };
+
+                                // 如果 server tick 有效且 WorldState tick 太旧，
+                                // 直接用 server_tick 生成 idle intent，不要等待（会死锁）
+                                let intent_tick = if current_server_tick > 0
+                                    && new_world_state.tick_id < current_server_tick
+                                {
+                                    info!("WorldState tick {} < server tick {}, using server tick {} for intent",
+                                        new_world_state.tick_id, current_server_tick, current_server_tick);
+                                    current_server_tick
+                                } else {
+                                    new_world_state.tick_id
+                                };
+
+                                // 更新 HTTP API 状态
+                                if let Some(ref api_state) = self.http_api_state {
+                                    let mut current = api_state.current_state.write().await;
+                                    *current = Some(new_world_state.clone());
+                                    let mut last_update = api_state.last_state_update.write().await;
+                                    *last_update = Some(std::time::Instant::now());
+                                }
+
+                                // 用新 WorldState 重新生成 intent
+                                let memory_context = self.get_memory_context().await;
+                                let combined_context = match &self.last_rejection_reason {
+                                    Some(reason) => {
+                                        if memory_context.is_empty() {
+                                            format!("[上次意图被驳回: {}]", reason)
+                                        } else {
+                                            format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
+                                        }
+                                    }
+                                    None => memory_context.clone(),
+                                };
+
+                                let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                                    memory_callback(&new_world_state, &combined_context).await
+                                } else if let Some(ref reason) = self.last_rejection_reason {
+                                    if let Some(ref callback) = self.decision_with_feedback_callback {
+                                        callback(&new_world_state, Some(reason.as_str())).await
+                                    } else {
+                                        (self.decision_callback)(&new_world_state).await
+                                    }
+                                } else {
+                                    (self.decision_callback)(&new_world_state).await
+                                };
+
+                                // 重新验证
+                                let mut final_intent = match self.validate_with_reflector(intent, &new_world_state).await {
+                                    Ok(validated) => validated,
+                                    Err(ref validation_err) => {
+                                        error!("Re-validation failed after tick mismatch: {}", validation_err);
+                                        continue;
+                                    }
+                                };
+
+                                // 如果使用了 server tick（落后于 WorldState），更新 intent 的 tick_id
+                                if final_intent.tick_id != intent_tick {
+                                    info!("Updating intent tick from {} to {}", final_intent.tick_id, intent_tick);
+                                    final_intent.tick_id = intent_tick;
+                                }
+
+                                // 重新发送
+                                info!(
+                                    "Resending intent after tick mismatch: tick={}, action={}",
+                                    final_intent.tick_id, final_intent.action_type
+                                );
+                                if let Err(send_err) = self.client.send_intent(&final_intent).await {
+                                    error!("Resend failed: {}", send_err);
+                                } else {
+                                    info!(
+                                        "Intent resent successfully after tick mismatch: tick={}, action={}",
+                                        final_intent.tick_id, final_intent.action_type
+                                    );
+                                }
+
+                                continue;
+                            }
+
+                            // 其他错误，尝试重连并继续
                             error!("Failed to receive world state: {}", e);
-                            // 尝试重连
                             self.reconnect().await?;
                             continue;
                         }
@@ -294,18 +490,29 @@ impl super::Agent {
                         api_state.maybe_update_narratives(&world_state).await;
                     }
 
+                    // 更新角色配置的最近连接时间并持久化
+                    if let Some(ref mut char_cfg) = self.character_config {
+                        char_cfg.last_connected_real_time = Some(chrono::Utc::now());
+                        char_cfg.last_connected_world_time = Some(world_state.world_time.clone());
+
+                        // 异步保存到磁盘（不阻塞主循环）
+                        if let Some(ref api_state) = self.http_api_state {
+                            let char_cfg_clone = char_cfg.clone();
+                            let characters_dir = api_state.character_dir.read().await.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) =
+                                    save_character_config_to_fs(&char_cfg_clone, &characters_dir)
+                                {
+                                    warn!("Failed to save character last_connected time: {}", e);
+                                }
+                            });
+                        }
+                    }
+
                     // 1.5 检查是否死亡（只报告一次）
                     if !self.death_reported
                         && let Some(death_event) = world_state.events_log.iter().find(|e| {
-                            if let Some(cause) = e.metadata.get("cause")
-                                && let Some(cause_str) = cause.as_str() {
-                                    return cause_str.starts_with("death");
-                                }
-                            if let Some(msg_type) = e.metadata.get("type")
-                                && let Some(type_str) = msg_type.as_str() {
-                                    return type_str == "death_notification";
-                                }
-                            false
+                            e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification
                         }) {
                             warn!(
                                 "Agent '{}' has died: {}",
@@ -315,6 +522,18 @@ impl super::Agent {
                             if let Some(ref api_state) = self.http_api_state {
                                 api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
                             }
+
+                            // 持久化死亡状态到 character.yaml（确保世界树显示正确）
+                            if let Some(ref mut char_cfg) = self.character_config {
+                                char_cfg.status = crate::config::CharacterStatus::Dead;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    let characters_dir = api_state.character_dir.read().await.clone();
+                                    if let Err(e) = crate::core::lifecycle::save_character_config_to_fs(char_cfg, &characters_dir) {
+                                        warn!("Failed to persist death status: {}", e);
+                                    }
+                                }
+                            }
+
                             // 死亡后不退出，等待转生：
                             // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
                             // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连
@@ -326,8 +545,8 @@ impl super::Agent {
                         warn!("Failed to process events into memory: {}", e);
                     }
 
-                    // 3. 每 84 tick 运行遗忘机制
-                    if world_state.tick_id % 84 == 0
+                    // 3. 每 FORGETTING_INTERVAL_TICKS tick 运行遗忘机制
+                    if world_state.tick_id % super::FORGETTING_INTERVAL_TICKS == 0
                         && let Err(e) = self.run_forgetting(world_state.tick_id).await {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }
@@ -339,25 +558,70 @@ impl super::Agent {
                     }
 
                     // 5. 调用决策回调（带验证和记忆上下文）
-                    let intent = if self.validator.is_some() {
-                        self.decide_with_validation(&world_state).await?
-                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                        // 优先使用带记忆上下文的回调
-                        memory_callback(&world_state, &memory_context).await
-                    } else {
-                        (self.decision_callback)(&world_state).await
+                    // 用 deadline 计算剩余时间，超时自动 idle
+                    let decision_future = async {
+                        if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                            // 带记忆上下文决策（记忆系统生效）
+                            // 如果同时有 rejection feedback，也注入到 memory context 中
+                            let combined_context = match &self.last_rejection_reason {
+                                Some(reason) => {
+                                    if memory_context.is_empty() {
+                                        format!("[上次意图被驳回: {}]", reason)
+                                    } else {
+                                        format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
+                                    }
+                                }
+                                None => memory_context.clone(),
+                            };
+                            memory_callback(&world_state, &combined_context).await
+                        } else if let Some(ref reason) = self.last_rejection_reason {
+                            // 有 rejection 但无 memory callback，走 feedback 回调
+                            if let Some(ref callback) = self.decision_with_feedback_callback {
+                                callback(&world_state, Some(reason.as_str())).await
+                            } else {
+                                (self.decision_callback)(&world_state).await
+                            }
+                        } else {
+                            (self.decision_callback)(&world_state).await
+                        }
                     };
 
-                    // 5.5 审查（ReflectorSoul - 反思之魂）
-                    let final_intent = if let Some(ref store) = self.review_store {
-                        self.submit_for_review(intent, &world_state, store).await?
+                    let intent = if world_state.deadline_ms > 0 {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let remaining_ms = world_state.deadline_ms.saturating_sub(now_ms);
+                        // 留 3s 缓冲给 ReflectorSoul + 网络发送
+                        let buffer_ms: u64 = 3_000;
+                        let timeout_ms = remaining_ms.saturating_sub(buffer_ms);
+                        let decision_timeout = std::time::Duration::from_millis(timeout_ms);
+
+                        match tokio::time::timeout(decision_timeout, decision_future).await {
+                            Ok(intent) => intent,
+                            Err(_) => {
+                                warn!(
+                                    "Tick {} LLM 推理超时（剩余 {:?}，限制 {:?}），自动 idle",
+                                    world_state.tick_id,
+                                    std::time::Duration::from_millis(remaining_ms),
+                                    decision_timeout,
+                                );
+                                let agent_id = world_state.agent_id.unwrap_or_default();
+                                Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                    .with_thought("LLM 推理超时，自动 idle 以保证 tick 同步".to_string())
+                            }
+                        }
                     } else {
-                        intent
+                        // deadline_ms == 0：无时间限制，直接决策
+                        decision_future.await
                     };
+
+                    // 5.5 ReflectorSoul 同步审查（反思之魂）
+                    let final_intent = self.validate_with_reflector(intent, &world_state).await?;
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state
-                        && let Some(ref history) = api_state.intent_history {
+                        && let Some(history) = api_state.intent_history.read().await.as_ref() {
                             history
                                 .record_intent(
                                     final_intent.tick_id,
@@ -395,8 +659,11 @@ impl super::Agent {
                     // 7. 发送意图
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
-                        // 尝试重连
-                        self.reconnect().await?;
+                        // send_intent 是 fire-and-forget，tick mismatch 由 receive 路径处理
+                        // 此处只需重连
+                        if let Err(reconnect_err) = self.reconnect().await {
+                            error!("Reconnect failed: {}", reconnect_err);
+                        }
                     } else {
                         info!(
                             "Intent sent successfully: tick={}, action={}, agent={}",
@@ -447,8 +714,17 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok((agent_id, game_rules)) => {
+                        Ok(Some((agent_id, game_rules, registered_name))) => {
                             info!("重连后注册确认: agent_id={}", agent_id);
+
+                            // 更新 agent 名称
+                            if let Some(ref name) = registered_name {
+                                self.server_assigned_name = Some(name.clone());
+                                if let Some(ref engine) = self.cognitive_engine {
+                                    engine.update_agent_name(name);
+                                }
+                                info!("从服务器获取角色名称: {}", name);
+                            }
 
                             // agent_id 为零 = 角色已归隐（可能在等待期间被删除）
                             if agent_id == Uuid::nil() {
@@ -469,9 +745,8 @@ impl super::Agent {
                                     };
                                     let _ = api_state.death_event_tx.send(death_msg);
                                 }
-                                return Err(anyhow::anyhow!(
-                                    "Pending registration: character retired"
-                                ));
+                                // 归隐后不返回错误，保持进程存活等待创建新角色
+                                return Ok(());
                             }
 
                             // 重置死亡状态（转生后获得新身份）
@@ -482,6 +757,40 @@ impl super::Agent {
                                     .store(false, std::sync::atomic::Ordering::Relaxed);
                             }
 
+                            // 自动重建本地 character.yaml（reconnect 路径）
+                            if self.character_config.is_none() {
+                                let s_dir = self.config.server_dir(&self.config.server.ws_url);
+                                let chars_dir = s_dir.join("characters");
+                                let c_dir = chars_dir.join(agent_id.to_string());
+                                let c_yaml = c_dir.join("character.yaml");
+
+                                if !c_yaml.exists() {
+                                    let name = registered_name.as_deref().unwrap_or("未知");
+                                    let recon = crate::config::CharacterConfig {
+                                        agent_id: Some(agent_id),
+                                        name: name.to_string(),
+                                        status: crate::config::CharacterStatus::Alive,
+                                        server_url: Some(self.config.server.http_url.clone()),
+                                        registered_at: Some(chrono::Utc::now()),
+                                        ..Default::default()
+                                    };
+
+                                    if let Err(e) = (|| -> anyhow::Result<()> {
+                                        std::fs::create_dir_all(&c_dir)?;
+                                        recon.save_to_file(&c_yaml)?;
+                                        Ok(())
+                                    })() {
+                                        warn!("reconnect 自动重建 character.yaml 失败: {}", e);
+                                    } else {
+                                        info!(
+                                            "reconnect 已自动重建角色配置: {} ({})",
+                                            name, agent_id
+                                        );
+                                        self.character_config = Some(recon);
+                                    }
+                                }
+                            }
+
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
                             if let Some(ref callback) = self.registration_callback {
                                 callback(agent_id);
@@ -490,13 +799,19 @@ impl super::Agent {
                             // 更新游戏规则
                             self.config.update_game_rules(game_rules);
                         }
-                        Err(e) => {
-                            let err_msg = format!("{}", e);
-                            // Pending registration = 需要注册新角色，停止重试
-                            if err_msg.contains("Pending registration") {
-                                info!("等待注册新角色，停止重连");
-                                return Err(anyhow::anyhow!("Pending registration: {}", e));
+                        Ok(None) => {
+                            // agent_id 为 nil，等待角色注册，保持连接
+                            info!("重连后收到 nil agent_id，等待角色注册...");
+                            self.death_reported = true;
+                            if let Some(ref api_state) = self.http_api_state {
+                                api_state
+                                    .is_dead
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
                             }
+                            // 不返回错误，让调用方知道需要等待
+                            return Ok(());
+                        }
+                        Err(e) => {
                             // 其他错误，继续重试
                             error!("重连后注册确认失败: {}", e);
                             self.client.close().await;
@@ -510,7 +825,28 @@ impl super::Agent {
                     self.reconnect_backoff = 0;
                     return Ok(());
                 }
-                Err(e) => {
+                Err(ConnectError::AuthFailed) => {
+                    warn!(
+                        "重连 auth failed (attempt {}), refreshing token...",
+                        attempt
+                    );
+                    match self.refresh_device_token().await {
+                        Ok(()) => {
+                            info!("Token refreshed, retrying reconnection...");
+                            // 不增加退避计数器，因为 token 已刷新
+                            continue;
+                        }
+                        Err(e) => {
+                            if should_log_retry(attempt) {
+                                warn!("重连 token refresh 失败 (attempt {}): {}", attempt, e);
+                            }
+                            // 增加退避计数器（逐步降低频率）
+                            self.reconnect_backoff = self.reconnect_backoff.saturating_add(1);
+                            // 继续循环，不退出
+                        }
+                    }
+                }
+                Err(ConnectError::ConnectionFailed(e)) => {
                     if should_log_retry(attempt) {
                         warn!("重连尝试 {} 失败: {}", attempt, e);
                     }
@@ -522,10 +858,133 @@ impl super::Agent {
         }
     }
 
+    /// 刷新设备 token（WebSocket 400 认证失败时自动调用）
+    ///
+    /// 调用 `POST {server_http_url}/api/v1/agent/connect` 获取新的 auth_token，
+    /// 然后更新客户端身份和本地 device_config。
+    async fn refresh_device_token(&mut self) -> Result<()> {
+        let device_id = self
+            .device_config
+            .as_ref()
+            .map(|d| d.device_id)
+            .ok_or_else(|| anyhow::anyhow!("No device_config, cannot refresh token"))?;
+
+        let http_url = &self.config.server.http_url;
+        let url = format!("{}/api/v1/agent/connect", http_url);
+
+        debug!("Refreshing device token for {} at {}", device_id, url);
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&url)
+            .json(&serde_json::json!({ "device_id": device_id }))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("Server returned error {}: {}", status, body);
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ConnectResponse {
+            auth_token: String,
+        }
+
+        let result: ConnectResponse = response
+            .json()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?;
+
+        info!("Token refreshed successfully for device {}", device_id);
+
+        // 更新客户端身份
+        self.client
+            .set_identity(device_id, result.auth_token.clone())
+            .await;
+
+        // 更新本地 device_config 并持久化
+        if let Some(ref mut device) = self.device_config {
+            device.auth_token = result.auth_token.clone();
+            if let Err(e) = device.save_to_file(&self.config.device_yaml_path(&device.server_url)) {
+                warn!("Failed to persist refreshed token: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 等待转生（角色注册后触发重连）
+    ///
+    /// 当 agent_id 为 nil（未创建角色）或角色已归隐时，进入此等待循环。
+    /// 保持进程存活，监听 reconnect_rx（Web 面板注册新角色后通过 HTTP API 触发）。
+    async fn wait_for_rebirth(&mut self) -> Result<()> {
+        info!(
+            "Agent '{}' 进入等待转生模式，保持进程存活...",
+            self.character_name()
+        );
+
+        loop {
+            tokio::select! {
+                // 监听重连请求（Web 面板注册新角色后触发）
+                Ok(req) = async {
+                    if let Some(ref mut rx) = self.reconnect_rx {
+                        rx.recv().await
+                    } else {
+                        // 无 reconnect_rx（非 Claw/Cognitive HTTP API 模式），永远等待
+                        std::future::pending().await
+                    }
+                } => {
+                    info!("[rebirth] 收到重连请求: {}", req.ws_url);
+                    let http_url = crate::config::ws_to_http_url(&req.ws_url);
+                    self.client.update_server_url(req.ws_url.clone(), http_url).await;
+
+                    match self.reconnect().await {
+                        Ok(()) => {
+                            info!("[rebirth] 重连成功，退出等待转生模式");
+                            // reconnect 成功后 death_reported 已重置
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!("[rebirth] 重连失败: {}，继续等待", e);
+                        }
+                    }
+                }
+
+                // 配置文件变更通知
+                _ = async {
+                    if let Some(ref mut rx) = self.config_reload_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    debug!("[rebirth] 配置变更通知，忽略（等待角色注册）");
+                }
+            }
+        }
+    }
+
     /// 关闭连接
     pub async fn close(&mut self) -> Result<()> {
         self.client.close().await;
         info!("Agent '{}' stopped", self.character_name());
         Ok(())
     }
+}
+
+/// 保存角色配置到磁盘
+fn save_character_config_to_fs(
+    config: &CharacterConfig,
+    characters_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    let agent_id = config
+        .agent_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let dir = characters_dir.join(&agent_id);
+    std::fs::create_dir_all(&dir)?;
+    config.save_to_file(dir.join("character.yaml"))
 }

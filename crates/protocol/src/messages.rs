@@ -16,7 +16,12 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{GameRules, WorldBuildingRules, WorldState};
+use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldEvent, WorldState};
+
+/// serde default helper: 缺省 true（fail-open，旧 server 不发字段时假定存活）
+fn default_true() -> bool {
+    true
+}
 
 // ============================================================================
 // 对话消息类型
@@ -96,6 +101,8 @@ pub struct DialogueSession {
 ///     tick_duration_secs: 60,
 ///     available_actions: vec![],
 ///     initial_items: vec![],
+///     survival_actions: vec![],
+///     survival_threshold: 30,
 ///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
 /// };
@@ -104,6 +111,8 @@ pub struct DialogueSession {
 ///     agent_id: Uuid::new_v4(),
 ///     game_rules,
 ///     world_building_rules: None,
+///     is_alive: true,
+///     agent_name: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +126,13 @@ pub enum ServerMessage {
         /// 世界观规则（可选，保持向后兼容）
         #[serde(skip_serializing_if = "Option::is_none")]
         world_building_rules: Option<WorldBuildingRules>,
+        /// 角色是否存活（由服务器在连接时立即告知）
+        /// 缺省 true：旧 server 不发此字段时假定存活（fail-open）
+        #[serde(default = "default_true")]
+        is_alive: bool,
+        /// 角色名称（可选，首次连接时由服务器填充）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_name: Option<String>,
     },
 
     /// 世界状态下发
@@ -134,11 +150,38 @@ pub enum ServerMessage {
     /// 世界观规则更新（新增）
     WorldBuildingRulesUpdate { rules: WorldBuildingRules },
 
+    /// 动作配置增量更新
+    ///
+    /// 仅当下发变更时出现，完整动作列表由 agent 本地缓存。
+    /// action_update_type: "full" | "incremental"
+    ActionUpdate {
+        /// 更新类型
+        update_type: String,
+        /// 动作列表（全量时有效）
+        actions: Vec<AvailableAction>,
+        /// 增量更新的动作名称列表（增量时有效）
+        updated_actions: Vec<String>,
+        /// 被删除的动作名称列表（增量时有效）
+        removed_actions: Vec<String>,
+        /// 规则版本
+        version: String,
+    },
+
     /// 心跳响应
     Pong { timestamp: i64 },
 
     /// 错误消息
-    Error { message: String },
+    Error {
+        /// 机器可读错误码（如 "tick_mismatch", "agent_dead"）
+        /// 详见 `crate::ERROR_CODE_*` 常量
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        code: String,
+        /// 人类可读错误描述
+        message: String,
+        /// tick 不匹配时的当前 tick_id（仅 tick_mismatch 有值）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        current_tick_id: Option<i64>,
+    },
 
     /// 对话消息（转发）
     Dialogue {
@@ -165,6 +208,18 @@ pub enum ServerMessage {
         died_at: i64,
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
+    },
+
+    /// 立即事件（speak 等需要立即广播的事件）
+    ///
+    /// 与 WorldState 不同，ImmediateEvent 只包含单个事件，用于：
+    /// - speak 广播：同场景所有在线 Agent 立即收到
+    /// - 其他需要实时通知的事件
+    ImmediateEvent {
+        /// 事件内容
+        event: WorldEvent,
+        /// 当前 tick 截止时间（Unix ms）
+        deadline_ms: u64,
     },
 }
 
@@ -329,8 +384,10 @@ mod tests {
         let agent_id = Uuid::nil();
         let game_rules = GameRules {
             tick_duration_secs: 60,
-            available_actions: vec![],
             initial_items: vec![],
+            survival_actions: vec![],
+            available_actions: vec![],
+            survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };
@@ -338,6 +395,8 @@ mod tests {
             agent_id,
             game_rules,
             world_building_rules: None,
+            is_alive: true,
+            agent_name: None,
         };
 
         let json = msg.to_json().unwrap();
@@ -387,7 +446,8 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
-            available_actions: vec![],
+            private_dialogue_log: vec![],
+            deadline_ms: 0,
         };
 
         let msg = ServerMessage::WorldState { data: world_state };
@@ -415,13 +475,34 @@ mod tests {
     #[test]
     fn test_server_message_error() {
         let msg = ServerMessage::Error {
+            code: "unknown".to_string(),
             message: "Something went wrong".to_string(),
+            current_tick_id: None,
         };
         let json = msg.to_json().unwrap();
 
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "error");
         assert_eq!(parsed["message"], "Something went wrong");
+        assert_eq!(parsed["code"], "unknown");
+    }
+
+    #[test]
+    fn test_server_message_error_no_code() {
+        // 不带 code 字段时默认为空字符串
+        let json = r#"{"type":"error","message":"Something went wrong"}"#;
+        let msg: ServerMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ServerMessage::Error {
+                code,
+                message,
+                current_tick_id: _,
+            } => {
+                assert!(code.is_empty());
+                assert_eq!(message, "Something went wrong");
+            }
+            _ => panic!("Expected Error"),
+        }
     }
 
     #[test]
@@ -464,8 +545,10 @@ mod tests {
         let agent_id = Uuid::nil();
         let game_rules = GameRules {
             tick_duration_secs: 60,
-            available_actions: vec![],
             initial_items: vec![],
+            survival_actions: vec![],
+            available_actions: vec![],
+            survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
         };
@@ -475,6 +558,8 @@ mod tests {
             agent_id,
             game_rules,
             world_building_rules: Some(world_rules),
+            is_alive: true,
+            agent_name: None,
         };
 
         let json = msg.to_json().unwrap();

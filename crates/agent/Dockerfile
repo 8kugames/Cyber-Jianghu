@@ -115,6 +115,10 @@ RUN mkdir -p /app/data /app/config && \
 # 默认使用 23340，可在运行时通过 PORT 环境变量覆盖
 EXPOSE 23340
 
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:23340/api/v1/health || exit 1
+
 # 设置环境变量
 ENV RUST_LOG=info \
     CYBER_JIANGHU_CONFIG_DIR=/app/config \

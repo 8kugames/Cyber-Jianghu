@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -135,10 +136,13 @@ pub struct AppState {
 
     /// 配置文件目录路径
     pub config_dir: std::path::PathBuf,
+
+    /// 当前正在接受意图的 tick_id（内存原子变量）
+    /// 0 表示 scheduler 尚未启动，intent 被拒
+    pub current_accepting_tick_id: Arc<AtomicI64>,
 }
 
 impl AppState {
-    /// 创建新的应用状态
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
@@ -152,6 +156,7 @@ impl AppState {
         admin_read_token: String,
         admin_write_token: String,
         config_dir: std::path::PathBuf,
+        current_accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
         Self {
             config,
@@ -166,6 +171,7 @@ impl AppState {
             admin_write_token,
             start_time: chrono::Utc::now(),
             config_dir,
+            current_accepting_tick_id,
         }
     }
 }

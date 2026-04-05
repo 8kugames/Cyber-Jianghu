@@ -17,12 +17,14 @@
 use anyhow::{Context, Result};
 use chrono::FixedOffset;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use crate::db::DbPool;
+use crate::dialogue::DialogueManager;
 use crate::game_data::GameDataCache;
-use crate::models::TickLog;
+use crate::models::{TickLog, WorldEventType};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, IntentManager};
 
 use super::super::inventory::InventoryManager;
@@ -31,6 +33,12 @@ use super::event_manager::EventManager;
 use super::intent_collector::IntentCollector;
 use super::processor::StateProcessor;
 use super::{decay, persistence};
+
+use crate::game_data::loaders::load_actions;
+use crate::paths::get_config_dir;
+use crate::websocket::broadcast_action_update;
+use cyber_jianghu_protocol::ServerMessage;
+use std::fs;
 
 /// Tick调度器
 ///
@@ -68,6 +76,18 @@ pub struct TickScheduler {
 
     /// 状态处理器
     state_processor: StateProcessor,
+
+    /// 对话管理器
+    dialogue_manager: Arc<DialogueManager>,
+
+    /// 上一轮关闭的对话记录（用于下一轮广播）
+    closed_dialogue_records: Vec<cyber_jianghu_protocol::PrivateDialogueRecord>,
+
+    /// 当前接受意图的 tick_id（与 AppState 共享）
+    accepting_tick_id: Arc<AtomicI64>,
+
+    /// 上次加载的 actions.yaml 修改时间
+    last_actions_mtime: Option<std::time::SystemTime>,
 }
 
 impl TickScheduler {
@@ -78,6 +98,8 @@ impl TickScheduler {
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
         intent_manager: IntentManager,
+        dialogue_manager: Arc<DialogueManager>,
+        accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
         Self {
             game_data_cache,
@@ -91,12 +113,96 @@ impl TickScheduler {
             intent_collector: IntentCollector::new(),
             broadcaster: Broadcaster::new(),
             state_processor: StateProcessor::new(db_pool),
+            dialogue_manager,
+            closed_dialogue_records: vec![],
+            accepting_tick_id,
+            last_actions_mtime: None,
         }
+    }
+
+    /// 检查 actions.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_actions(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let actions_path = config_dir.join("actions.yaml");
+        let json_path = config_dir.join("actions.json");
+
+        // 确定实际使用的文件
+        let file_path = if actions_path.exists() {
+            &actions_path
+        } else if json_path.exists() {
+            &json_path
+        } else {
+            return Ok(()); // 文件不存在，跳过
+        };
+
+        let metadata = match fs::metadata(file_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        // 检查是否是新文件或已修改
+        let should_reload = match self.last_actions_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if should_reload {
+            self.last_actions_mtime = Some(modified);
+
+            // 重新加载 actions
+            match load_actions(&config_dir) {
+                Ok(new_actions) => {
+                    let version = new_actions.version.clone();
+                    let actions_count = new_actions.data.len();
+
+                    // 更新缓存
+                    self.game_data_cache.update_actions(new_actions);
+
+                    // 重新初始化注册表
+                    crate::game_data::init_registry(self.game_data_cache.clone());
+
+                    info!(
+                        "动作配置已热重载: version={}, actions={}",
+                        version, actions_count
+                    );
+
+                    // 构建 AvailableAction 列表
+                    let available_actions =
+                        crate::game_data::ActionRegistry::build_available_actions();
+
+                    // 广播给所有在线 Agent
+                    let action_update = ServerMessage::ActionUpdate {
+                        update_type: "full".to_string(),
+                        actions: available_actions,
+                        updated_actions: vec![],
+                        removed_actions: vec![],
+                        version,
+                    };
+
+                    if let Err(e) =
+                        broadcast_action_update(action_update, &self.connection_manager).await
+                    {
+                        warn!("广播动作更新失败: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("重新加载 actions.yaml 失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// 启动Tick循环
     ///
-    /// 这是一个无限循环，直到收到停止信号
+    /// 新时序：广播 → sleep(收集窗口) → 结算
+    /// Agent 收到广播后有完整窗口提交 intent
     pub async fn run(&mut self) -> Result<()> {
         // 从 game_data_cache 读取 tick 配置（克隆值以避免持有锁）
         let tick_duration_secs = {
@@ -116,13 +222,11 @@ impl TickScheduler {
         let game_epoch = self.parse_game_epoch()?;
 
         // 获取基于真实时间的当前 tick ID
-        // 使用数据库中的最大值和基于时间的计算值中的较大者
-        // 这样可以避免时间回退（如果系统时钟调整）
         let db_max_tick_id = crate::db::get_current_world_tick_id(&self.db_pool)
             .await
             .unwrap_or(0);
 
-        let time_based_tick_id = self.calculate_tick_id_from_time(game_epoch, tick_duration_secs);
+        let time_based_tick_id = self.calculate_tick_id_from_time(game_epoch);
 
         // 使用两者中的较大值，确保不会回退
         self.current_tick_id = db_max_tick_id.max(time_based_tick_id);
@@ -133,29 +237,60 @@ impl TickScheduler {
         );
 
         let mut interval = tokio::time::interval(Duration::from_secs(tick_duration_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-        // 设置错开第一次无延迟的 tick（如果有需要）
-        // interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        // 主循环
+        // 主循环：广播 → sleep → 结算
         while self.is_running {
-            interval.tick().await;
-
-            // 每次循环重新计算 tick_id，确保基于真实时间
-            // 但要保证不会回退
-            let new_tick_id = self.calculate_tick_id_from_time(game_epoch, tick_duration_secs);
-            if new_tick_id > self.current_tick_id {
-                self.current_tick_id = new_tick_id;
-            } else {
-                // 如果时间计算值没有增加（可能是系统时钟问题），则递增
-                self.current_tick_id += 1;
+            // 检查 actions.yaml 是否变更
+            if let Err(e) = self.check_and_reload_actions().await {
+                warn!("动作热重载检查失败: {}", e);
             }
 
-            // 执行一次Tick（F-06：失败时写入 tick_logs）
-            if let Err(e) = self.execute_tick().await {
-                error!("Tick {} 执行失败: {}", self.current_tick_id, e);
-                // 不要因为一次失败就停止整个引擎
-                // 继续下一个Tick
+            interval.tick().await;
+
+            let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
+            self.current_tick_id = new_tick_id;
+
+            // 1. 开单 + 广播
+            self.accepting_tick_id.store(new_tick_id, Ordering::Release);
+
+            let collection_window_secs = {
+                let gd = self.game_data_cache.get();
+                let window = gd.game_rules.data.agent_state.tick.collection_window_secs as u64;
+                let period = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
+                if window >= period {
+                    error!(
+                        "collection_window_secs({}) >= real_seconds_per_tick({}), 已禁用收集窗口",
+                        window, period
+                    );
+                    0
+                } else {
+                    window
+                }
+            };
+
+            // deadline_ms = 绝对时间戳
+            let deadline_ms = calculate_deadline_abs_ms(collection_window_secs);
+
+            // 广播新 tick（加载上一次持久化的 agent_states）
+            if let Err(e) = self.broadcast_new_tick(new_tick_id, deadline_ms).await {
+                error!("Tick {} 广播失败: {}", new_tick_id, e);
+            }
+
+            // 2. 等待 Agent 提交 intent
+            if collection_window_secs > 0 {
+                info!(
+                    "Tick {} 等待收集窗口 {}秒...",
+                    new_tick_id, collection_window_secs
+                );
+                tokio::time::sleep(Duration::from_secs(collection_window_secs)).await;
+            }
+
+            // 3. 关单 + 结算
+            // 关单：设为 0，结算期间不再接受新 intent
+            self.accepting_tick_id.store(0, Ordering::Release);
+            if let Err(e) = self.execute_tick_settlement(new_tick_id).await {
+                error!("Tick {} 结算失败: {}", new_tick_id, e);
             }
         }
 
@@ -163,17 +298,49 @@ impl TickScheduler {
         Ok(())
     }
 
-    /// 根据真实时间计算 tick ID
+    /// 广播新 tick 的 WorldState（基于上一次持久化的 agent_states）
+    async fn broadcast_new_tick(&mut self, tick_id: i64, deadline_ms: u64) -> Result<()> {
+        let agent_states = persistence::load_agent_states(&self.db_pool)
+            .await
+            .context("广播: 加载Agent状态失败")?;
+
+        self.event_manager.clear();
+
+        self.broadcaster
+            .broadcast_states(
+                tick_id,
+                &agent_states,
+                &self.db_pool,
+                &self.connection_manager,
+                &self.agent_to_device_map,
+                &self.event_manager,
+                &self.game_data_cache,
+                deadline_ms,
+                &self.closed_dialogue_records,
+            )
+            .await
+            .context("广播: 广播状态失败")?;
+
+        info!(
+            "Tick {} 广播完成: {}个Agent, deadline={}ms",
+            tick_id,
+            agent_states.len(),
+            deadline_ms
+        );
+        Ok(())
+    }
+
+    /// 根据真实时间计算 tick ID（秒级秒数）
     ///
-    /// tick_id = (当前Unix时间戳 - 游戏纪元) / tick周期
-    fn calculate_tick_id_from_time(&self, game_epoch: i64, tick_duration_secs: u64) -> i64 {
+    /// tick_id = 当前Unix时间戳 - 游戏纪元
+    /// 直接使用秒级秒数，real_seconds_per_tick 只影响执行频率，不影响 tick_id
+    fn calculate_tick_id_from_time(&self, game_epoch: i64) -> i64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64;
 
-        let tick_duration = tick_duration_secs as i64;
-        (now - game_epoch) / tick_duration
+        now - game_epoch
     }
 
     /// 解析游戏纪元（从 YAML 配置）
@@ -220,13 +387,12 @@ impl TickScheduler {
         Ok(timestamp)
     }
 
-    /// 执行一次Tick
+    /// 执行一次Tick结算（关单后调用）
     ///
-    /// 这是Tick引擎的核心方法，包含完整的Tick执行流程
-    async fn execute_tick(&mut self) -> Result<()> {
-        let tick_id = self.current_tick_id;
+    /// 包含：收集意图 → 结算 → 衰减 → 持久化（不含广播）
+    async fn execute_tick_settlement(&mut self, tick_id: i64) -> Result<()> {
         let mut tick_log = TickLog::new(tick_id);
-        info!("Tick {} 开始执行", tick_id);
+        info!("Tick {} 开始结算", tick_id);
 
         if let Err(e) = crate::db::create_tick_log(&self.db_pool, &tick_log).await {
             warn!("创建Tick日志失败: {}", e);
@@ -262,7 +428,8 @@ impl TickScheduler {
     ) -> Result<(i32, i32)> {
         let start_time = Instant::now();
 
-        self.event_manager.clear();
+        // event_manager 在 broadcast_new_tick 中已 clear，结算阶段直接添加事件
+        // 这些事件会在下一个 tick 的广播中发送给 Agent
 
         let phase1_start = Instant::now();
         let agent_states = persistence::load_agent_states(&self.db_pool)
@@ -301,7 +468,7 @@ impl TickScheduler {
                 for state in &agent_states {
                     if state.is_alive {
                         let event = crate::models::WorldEvent {
-                            event_type: "time_update".to_string(),
+                            event_type: WorldEventType::TimeUpdate,
                             tick_id,
                             description: time_desc.clone(),
                             metadata: serde_json::json!({
@@ -381,6 +548,22 @@ impl TickScheduler {
             }
         }
 
+        // 死亡 Agent 主动清理 WebSocket 连接（避免下 tick 浪费 send + mark_dead）
+        if !dead_agents.is_empty() {
+            let mut connections = self.connection_manager.write().await;
+            let mut agent_to_device = self.agent_to_device_map.write().await;
+            for agent_id in &dead_agents {
+                if let Some(device_id) = agent_to_device.remove(agent_id)
+                    && connections.remove(&device_id).is_some()
+                {
+                    info!(
+                        "已断开死亡 Agent {} 的 WebSocket 连接 (device: {})",
+                        agent_id, device_id
+                    );
+                }
+            }
+        }
+
         // 将时间事件合并到衰减事件中
         decay_events.extend(time_events);
 
@@ -439,6 +622,24 @@ impl TickScheduler {
             }
         }
 
+        // 死亡 Agent 状态更新：将 agents.status 设为 retired
+        // 确保死亡角色不再阻止同设备注册新角色
+        if !dead_agents.is_empty() {
+            for agent_id in &dead_agents {
+                if let Err(e) = sqlx::query(
+                    r#"UPDATE agents SET status = 'dead', retired_at = CURRENT_TIMESTAMP
+                       WHERE agent_id = $1 AND status = 'active'"#,
+                )
+                .bind(*agent_id)
+                .execute(&self.db_pool)
+                .await
+                {
+                    warn!("Failed to retire dead agent {}: {}", agent_id, e);
+                }
+            }
+            info!("已将 {} 个死亡 Agent 状态更新为 dead", dead_agents.len());
+        }
+
         let phase2_2_duration = phase2_2_start.elapsed();
         let _phase2_duration = phase2_1_duration + phase2_2_duration;
         info!(
@@ -450,7 +651,7 @@ impl TickScheduler {
         // Bug #5: 告警阈值 - 单 tick 自然死亡数量异常升高时触发告警
         let death_threshold = crate::game_data::registry::registry()
             .map(|r| r.get().game_rules.data.ops.death_threshold)
-            .expect("game_rules 中缺失 ops.death_threshold 配置");
+            .unwrap_or(10);
 
         if dead_agents.len() > death_threshold {
             tracing::error!(
@@ -495,25 +696,9 @@ impl TickScheduler {
         let phase4_duration = phase4_start.elapsed();
         info!("阶段4完成 - 持久化状态, 耗时: {:?}", phase4_duration);
 
-        let phase5_start = Instant::now();
-        self.broadcaster
-            .broadcast_states(
-                tick_id,
-                &updated_states,
-                &self.db_pool,
-                &self.connection_manager,
-                &self.agent_to_device_map,
-                &self.event_manager,
-                &self.game_data_cache,
-            )
-            .await
-            .context("广播状态失败")?;
-        let phase5_duration = phase5_start.elapsed();
-        info!("阶段5完成 - 广播状态, 耗时: {:?}", phase5_duration);
-
         let total_duration = start_time.elapsed();
         info!(
-            "Tick {} 完成 - 总耗时: {:?}, 处理Agent: {}, 执行动作: {}",
+            "Tick {} 结算完成 - 总耗时: {:?}, 处理Agent: {}, 执行动作: {}",
             tick_id, total_duration, agents_processed, actions_executed
         );
 
@@ -521,8 +706,19 @@ impl TickScheduler {
             warn!("Tick {} 耗时超过10秒: {:?}", tick_id, total_duration);
         }
 
+        self.closed_dialogue_records = self.dialogue_manager.close_all_sessions().await;
+
         Ok((agents_processed, actions_executed))
     }
+}
+
+/// 计算关单时刻的绝对 Unix 毫秒时间戳
+fn calculate_deadline_abs_ms(collection_window_secs: u64) -> u64 {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    now_ms + collection_window_secs * 1000
 }
 
 // ============================================================================
@@ -572,9 +768,9 @@ mod tests {
         assert_eq!(timestamp, 1772467200, "时间戳应该等于 1772467200");
     }
 
-    /// 测试 tick_id 计算
+    /// 测试 tick_id 计算（秒级秒数）
     ///
-    /// 验证基于东八区时间的 tick_id 计算正确
+    /// 验证 tick_id = now - game_epoch（秒级秒数）
     #[test]
     fn test_tick_id_calculation() {
         let start_date_str = "2026-03-03";
@@ -587,24 +783,20 @@ mod tests {
             .unwrap()
             .timestamp();
 
-        // 假设 60 秒一个 tick
-        let tick_duration_secs: u64 = 60;
-
+        // tick_id = now - game_epoch（秒级秒数）
         // 在北京时间 2026-03-03 00:00:00，tick_id 应该是 0
-        let tick_at_epoch = (game_epoch - game_epoch) / tick_duration_secs as i64;
+        let tick_at_epoch = game_epoch - game_epoch;
         assert_eq!(tick_at_epoch, 0, "纪元时刻的 tick_id 应该是 0");
 
-        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 1
-        // 1 分钟 = 60 秒 = 1 个 tick
+        // 在北京时间 2026-03-03 00:01:00（1分钟后），tick_id 应该是 60
         let one_minute_later = game_epoch + 60;
-        let tick_after_1min = (one_minute_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1min, 1, "1分钟后的 tick_id 应该是 1");
+        let tick_after_1min = one_minute_later - game_epoch;
+        assert_eq!(tick_after_1min, 60, "1分钟后的 tick_id 应该是 60");
 
-        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 60
-        // 1 小时 = 3600 秒 = 60 个 tick
+        // 在北京时间 2026-03-03 01:00:00（1小时后），tick_id 应该是 3600
         let one_hour_later = game_epoch + 3600;
-        let tick_after_1hour = (one_hour_later - game_epoch) / tick_duration_secs as i64;
-        assert_eq!(tick_after_1hour, 60, "1小时后的 tick_id 应该是 60");
+        let tick_after_1hour = one_hour_later - game_epoch;
+        assert_eq!(tick_after_1hour, 3600, "1小时后的 tick_id 应该是 3600");
     }
 
     /// 测试时间戳转换的一致性

@@ -22,10 +22,10 @@ use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
-use crate::game_data::registry::{ActionRegistry, ItemRegistry};
-use crate::models::{AgentState, WorldEvent, WorldState};
+use crate::game_data::registry::ItemRegistry;
+use crate::models::{AgentState, WorldEvent, WorldEventType, WorldState};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
-use cyber_jianghu_protocol::AdjacentNode;
+use cyber_jianghu_protocol::{AdjacentNode, EVENT_TYPE_DEATH_NOTIFICATION, EVENT_TYPE_WORLD_STATE};
 
 use super::event_manager::EventManager;
 
@@ -43,6 +43,7 @@ impl Broadcaster {
     /// 广播新状态给所有Agent
     ///
     /// 为每个Agent构建个性化WorldState并通过WebSocket发送
+    /// deadline_ms: 关单时刻的 Unix 毫秒时间戳（绝对时间）
     #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
@@ -53,6 +54,8 @@ impl Broadcaster {
         agent_to_device_map: &AgentToDeviceMap,
         event_manager: &EventManager,
         game_data_cache: &Arc<GameDataCache>,
+        deadline_ms: u64,
+        closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 
@@ -68,9 +71,10 @@ impl Broadcaster {
             .collect();
 
         // 获取当前在线的 Agent ID 集合
+        // 注意：ConnectionManager 的 key 是 device_id，但我们需要 agent_id
         let online_agent_ids: std::collections::HashSet<Uuid> = {
             let connections = connection_manager.read().await;
-            connections.keys().copied().collect()
+            connections.values().map(|c| c.agent_id).collect()
         };
 
         // 批量加载所有 Agent 的背包
@@ -116,12 +120,14 @@ impl Broadcaster {
             let world_state = self.build_world_state_for_agent(
                 agent_state,
                 tick_id,
+                deadline_ms,
                 events,
                 agent_states,
                 &agent_names,
                 inventory,
                 &online_agent_ids,
                 game_data_cache,
+                closed_dialogue_records,
             );
 
             // 向该Agent发送其专属的WorldState
@@ -152,24 +158,17 @@ impl Broadcaster {
         &self,
         agent_state: &AgentState,
         tick_id: i64,
+        deadline_ms: u64,
         mut events: Vec<WorldEvent>,
         all_agent_states: &[AgentState],
         agent_names: &HashMap<Uuid, String>,
         inventory: Vec<crate::models::InventoryItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
+        closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
     ) -> WorldState {
-        // 计算游戏时间（每Tick = 1游戏小时）
-        // 1 year = 12 months = 360 days = 8640 hours
-        // 1 month = 30 days = 720 hours
-        // 1 day = 24 hours
-        let total_hours = tick_id;
-        let year = 1 + (total_hours / 8640) as i32;
-        let remaining_after_year = total_hours % 8640;
-        let month = 1 + (remaining_after_year / 720) as i32;
-        let remaining_after_month = remaining_after_year % 720;
-        let day = 1 + (remaining_after_month / 24) as i32;
-        let hour = (remaining_after_month % 24) as i32;
+        // 游戏时间计算（数据驱动）
+        let (year, month, day, hour) = compute_game_time(tick_id);
 
         // 获取当前Agent的node_id
         let current_node_id = &agent_state.node_id;
@@ -202,6 +201,17 @@ impl Broadcaster {
             })
             .collect();
 
+        // 过滤events_log：只保留与当前Agent同节点的事件
+        // 全局事件（如系统通知）没有location字段，会被保留
+        events.retain(|e| {
+            if let Some(loc) = e.metadata.get("location")
+                && let Some(loc_str) = loc.as_str()
+            {
+                return loc_str == current_node_id;
+            }
+            true
+        });
+
         // 如果 Agent 已经死亡，添加一个特殊的系统事件
         if !agent_state.is_alive {
             let has_death_event = events.iter().any(|e| {
@@ -221,11 +231,11 @@ impl Broadcaster {
                     .death
                     .clone();
                 events.push(WorldEvent {
-                    event_type: "system_notification".to_string(),
+                    event_type: WorldEventType::SystemNotification,
                     tick_id,
                     description: death_message,
                     metadata: serde_json::json!({
-                        "type": "death_notification",
+                        "type": EVENT_TYPE_DEATH_NOTIFICATION,
                         "message": "You are dead.",
                     }),
                 });
@@ -274,29 +284,35 @@ impl Broadcaster {
                         entity_state_alive.clone()
                     },
                     hostile: false, // MVP阶段：无敌对关系
+                    recent_actions: events
+                        .iter()
+                        .filter(|e| {
+                            e.metadata
+                                .get("from_agent_id")
+                                .and_then(|v| v.as_str())
+                                .map(|id| id == other.agent_id.to_string())
+                                .unwrap_or(false)
+                        })
+                        .map(|e| crate::models::RecentAction {
+                            tick_id: e.tick_id,
+                            action_type: e.event_type.as_str().to_string(),
+                            content: e
+                                .metadata
+                                .get("content")
+                                .and_then(|v| v.as_str().map(String::from)),
+                            result: e.description.clone(),
+                        })
+                        .collect(),
                 }
             })
             .collect();
-
-        // 从 ActionRegistry 获取所有可用动作（数据驱动）
-        let available_actions: Vec<crate::models::AvailableAction> =
-            ActionRegistry::all_action_names()
-                .into_iter()
-                .filter_map(|action_name| {
-                    ActionRegistry::get(&action_name).map(|config| crate::models::AvailableAction {
-                        action: action_name,
-                        description: config.description,
-                        valid_targets: None,
-                    })
-                })
-                .collect();
 
         // 获取天气描述（数据驱动，目前固定晴天）
         let weather = game_data_cache.get().display_messages.weather.sunny.clone();
 
         // 构建WorldState
         WorldState {
-            event_type: "world_state".to_string(),
+            event_type: EVENT_TYPE_WORLD_STATE.to_string(),
             tick_id,
             agent_id: Some(agent_state.agent_id),
             world_time: crate::models::WorldTime {
@@ -347,13 +363,170 @@ impl Broadcaster {
             // 注意：nearby_items 暂未实现，场景物品功能未开发
             nearby_items: vec![],
             events_log: events, // 传递本 Tick 发生的事件
-            available_actions,
+            private_dialogue_log: closed_dialogue_records.to_vec(), // 上一轮关闭的密语会话记录
+            deadline_ms,
         }
+    }
+}
+
+/// 从 tick_id（秒数）计算游戏时间
+///
+/// 数据驱动：从 TimeRegistry 和 GameRules 读取时间参数
+/// 返回 (year, month, day, hour)
+fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
+    let time_config = crate::game_data::registry::TimeRegistry::get_config();
+    if let Some(config) = time_config {
+        let registry = crate::game_data::registry_or_panic();
+        let real_seconds_per_tick = registry
+            .get()
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let ticks_per_hour = config.ticks_per_hour as i64;
+        let hours_per_day = config.hours_per_day as i64;
+        let days_per_season = config.days_per_season as i64;
+        let seasons_per_year = config.seasons.len() as i64;
+        let days_per_year = seasons_per_year * days_per_season;
+
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            tick_id / real_seconds_per_game_hour
+        } else {
+            tick_id
+        };
+
+        let hours_per_year = days_per_year * hours_per_day;
+        let hours_per_month = days_per_season * hours_per_day;
+
+        let year = 1 + (game_hours / hours_per_year) as i32;
+        let rem_after_year = game_hours % hours_per_year;
+        let month = 1 + (rem_after_year / hours_per_month) as i32;
+        let rem_after_month = rem_after_year % hours_per_month;
+        let day = 1 + (rem_after_month / hours_per_day) as i32;
+        let hour = (rem_after_month % hours_per_day) as i32;
+
+        (year, month, day, hour)
+    } else {
+        (1, 1, 1, 0)
     }
 }
 
 impl Default for Broadcaster {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// 构建 Agent 连接时的初始 WorldState（简化版）
+///
+/// 不含其他 agent entities，用于让 agent 立即获知自身存活状态
+/// `override_tick_id`: 如果提供，使用此 tick_id 而非 agent_state.tick_id（用于重连时同步到当前 tick）
+pub fn build_initial_world_state(
+    agent_state: &AgentState,
+    game_data_cache: &Arc<GameDataCache>,
+    deadline_ms: u64,
+    initial_inventory: Vec<crate::models::InventoryItem>,
+    override_tick_id: Option<i64>,
+) -> crate::models::WorldState {
+    let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
+
+    // 游戏时间计算（与 build_world_state_for_agent 共用 compute_game_time）
+    let (year, month, day, hour) = compute_game_time(tick_id);
+
+    let current_node_id = &agent_state.node_id;
+
+    // 位置信息
+    let location_registry = game_data_cache.location_registry.read().unwrap();
+    let location_node = location_registry.get_node(current_node_id);
+    let location_name = location_node
+        .map(|n| n.name.clone())
+        .unwrap_or_else(|| current_node_id.clone());
+    let location_type = location_node
+        .map(|n| format!("{:?}", n.node_type))
+        .unwrap_or_else(|| "未知".to_string());
+    let adjacent_nodes: Vec<AdjacentNode> = location_registry
+        .get_neighbors(current_node_id)
+        .iter()
+        .filter_map(|edge| {
+            location_registry
+                .get_node(&edge.to_node_id)
+                .map(|node| AdjacentNode {
+                    node_id: edge.to_node_id.clone(),
+                    name: node.name.clone(),
+                    travel_cost: edge.travel_cost,
+                })
+        })
+        .collect();
+    drop(location_registry);
+
+    // 死亡状态事件
+    let mut events = Vec::new();
+    if !agent_state.is_alive {
+        let death_message = game_data_cache
+            .get()
+            .display_messages
+            .notifications
+            .death
+            .clone();
+        events.push(WorldEvent {
+            event_type: WorldEventType::SystemNotification,
+            tick_id,
+            description: death_message,
+            metadata: serde_json::json!({
+                "type": EVENT_TYPE_DEATH_NOTIFICATION,
+                "message": "You are dead.",
+            }),
+        });
+    }
+
+    let weather = game_data_cache.get().display_messages.weather.sunny.clone();
+
+    // 属性
+    let attributes = agent_state.get_attributes_for_protocol();
+    let derived_attributes = agent_state.get_derived_attributes_for_protocol();
+    let game_data = game_data_cache.get();
+    let attribute_descriptions: HashMap<String, String> = attributes
+        .iter()
+        .filter_map(|(name, &value)| {
+            game_data
+                .narrative
+                .get_description(name, value)
+                .map(|desc| (name.clone(), desc.to_string()))
+        })
+        .collect();
+
+    crate::models::WorldState {
+        event_type: EVENT_TYPE_WORLD_STATE.to_string(),
+        tick_id,
+        agent_id: Some(agent_state.agent_id),
+        world_time: crate::models::WorldTime {
+            year,
+            month,
+            day,
+            hour,
+            minute: 0,
+            second: 0,
+            weather,
+        },
+        location: crate::models::Location {
+            node_id: current_node_id.clone(),
+            name: location_name,
+            node_type: location_type,
+            adjacent_nodes,
+        },
+        self_state: crate::models::AgentSelfState {
+            attributes,
+            derived_attributes,
+            attribute_descriptions,
+            status_effects: vec![],
+            inventory: initial_inventory,
+        },
+        entities: vec![], // 连接时不含其他 agent
+        nearby_items: vec![],
+        events_log: events,
+        private_dialogue_log: vec![],
+        deadline_ms,
     }
 }

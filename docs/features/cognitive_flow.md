@@ -42,7 +42,7 @@
 
 - HTTP API（辅助）：`GET /api/v1`、`GET /api/v1/state`、`GET /api/v1/context`、`POST /api/v1/character/dream`、`GET/POST /api/v1/review/*`、`POST /api/v1/validate`
 - HTTP Intent：`POST /api/v1/intent` 已禁用（强制 WebSocket）
-- Web 面板：`/index.html`（创建角色）、`/character.html`（角色信息）、`/manage.html`（托梦/转生），资源目录 `crates/agent/src/static/panel/`
+- Web 面板：`/welcome.html`（首页）、`/create.html`（创建角色）、`/character.html`（角色信息托梦/转生）、`/settings.html`（服务器/LLM 配置），资源目录 `crates/agent/src/static/panel/`
 
 ## 架构总览
 
@@ -64,7 +64,7 @@
 │                                          ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                           TRANSPORT LAYER (传输层)                               │   │
-│  │  transport/websocket.rs - WebSocketClient                                       │   │
+│  │  infra/transport/websocket.rs - WebSocketClient                                       │   │
 │  │  ┌──────────────────────────────────────────────────────────────────────────┐   │   │
 │  │  │  WebSocket ──────────────────────────────────────────────────────────▶   │   │   │
 │  │  │  ┌────────────────┐                      ┌────────────────┐              │   │   │
@@ -106,7 +106,7 @@
 │                                          ▼                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         COGNITIVE ENGINE (认知引擎)                              │   │
-│  │  core/cognitive/                                                                 │   │
+│  │  soul/actor/                                                                 │   │
 │  │  ├── engine.rs      - MultiStageCognitiveEngine (主引擎)                        │   │
 │  │  ├── chain.rs       - CognitiveChain (认知链)                                   │   │
 │  │  ├── stages.rs      - StageOutput, 各阶段响应类型                               │   │
@@ -142,7 +142,7 @@
 │                                                                                         │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐  │
 │  │    LlmClient     │  │  DynamicPersona  │  │  MemoryManager   │  │ NarrativeEngine│  │
-│  │  (ai/llm/)       │  │  (ai/persona/)   │  │  (ai/memory/)    │  │ (ai/cognitive/)│  │
+│  │  (component/llm/)       │  │  (component/persona/)   │  │  (component/memory/)    │  │ (soul/actor/)│  │
 │  │                  │  │                  │  │                  │  │                │  │
 │  │ • DirectLlmClient│  │ • traits         │  │ • WorkingMemory  │  │ • Perception   │  │
 │  │ • LlmProvider    │  │ • current_state  │  │ • EpisodicMemory │  │   Narrative    │  │
@@ -187,7 +187,7 @@
 │                                                                                         │
 │  ws://localhost:23333/ws (开发默认)                                                     │
 │                                                                                         │
-│  Tick Loop (60s): 意图收集 → 验证 → 冲突解析 → 执行 → 状态更新 → 广播                   │
+│  Tick Loop: 广播(开单) → 收集窗口 → 关单 → 结算(收集→验证→冲突→执行→衰减) → 持久化     │
 │                                                                                         │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -200,11 +200,11 @@
 
 | 来源                   | 数据结构                 | 处理模块                     | 用途     |
 | -------------------- | -------------------- | ------------------------ | ------ |
-| **Server WebSocket** | `WorldState`         | `transport/websocket.rs` | 世界快照   |
-| **Server WebSocket** | `GameRules`          | `transport/websocket.rs` | 游戏规则更新 |
-| **Server WebSocket** | `DialogueMessage`    | `ai/dialogue/`           | 对话消息   |
-| **Server WebSocket** | `WorldBuildingRules` | `ai/validator/`          | 世界观约束  |
-| **本地事件**             | `WorldEvent[]`       | `ai/memory/manager.rs`   | 记忆系统输入 |
+| **Server WebSocket** | `WorldState`         | `infra/transport/websocket.rs` | 世界快照   |
+| **Server WebSocket** | `GameRules`          | `infra/transport/websocket.rs` | 游戏规则更新 |
+| **Server WebSocket** | `DialogueMessage`    | `component/social/dialogue.rs`           | 对话消息   |
+| **Server WebSocket** | `WorldBuildingRules` | `soul/reflector/`          | 世界观约束  |
+| **本地事件**             | `WorldEvent[]`       | `component/memory/manager.rs`   | 记忆系统输入 |
 
 ### 2. 认知处理流 (Cognitive Pipeline)
 
@@ -243,10 +243,10 @@ WorldState ──┬──▶ NarrativeEngine.from_attributes() ──▶ 叙事
 
 | 目标                   | 数据结构                   | 来源模块                             | 用途   |
 | -------------------- | ---------------------- | -------------------------------- | ---- |
-| **Server WebSocket** | `Intent`               | `transport/websocket.rs`         | 提交决策 |
-| **Episodic Memory**  | `MemoryEntry`          | `ai/memory/backends/episodic.rs` | 事件记忆 |
-| **Semantic Memory**  | `MemoryEntry + Vector` | `ai/memory/backends/semantic/`   | 语义索引 |
-| **Archive Memory**   | `MemoryEntry`          | `ai/memory/backends/archive.rs`  | 遗忘归档 |
+| **Server WebSocket** | `Intent`               | `infra/transport/websocket.rs`         | 提交决策 |
+| **Episodic Memory**  | `MemoryEntry`          | `component/memory/backends/episodic.rs` | 事件记忆 |
+| **Semantic Memory**  | `MemoryEntry + Vector` | `component/memory/backends/semantic/`   | 语义索引 |
+| **Archive Memory**   | `MemoryEntry`          | `component/memory/backends/archive.rs`  | 遗忘归档 |
 
 ***
 
@@ -355,13 +355,13 @@ fn should_log_retry(attempt: u32) -> bool {
 
 ### Validator 组件
 
-**位置**: `ai/validator/`
+**位置**: `soul/reflector/`
 
 | 组件                   | 说明                                     |
 | -------------------- | -------------------------------------- |
 | `Validator` Trait    | 验证器接口                                  |
-| `CognitiveValidator` | 基于 LLM 的认知验证器                          |
-| `RuleEngine`         | 规则引擎验证                                 |
+| `CognitiveValidator` | 认知链质量验证器（5 条确定性规则：完整性、长度、状态引用、重复检测、连贯性，**非 LLM**） |
+| `RuleEngine`         | 规则引擎验证（含默认冷却规则：speak/move）            |
 | `ValidationRequest`  | 验证请求 (intent, persona, world\_context) |
 | `ValidationResult`   | 验证结果 (Approved/Rejected)               |
 
@@ -472,9 +472,9 @@ review:
 | `ReviewConfig`    | `review`              | 审查配置   | `enabled: true`           |
 | `RuntimeConfig`   | `runtime`             | 运行时模式  | `mode: cognitive`         |
 
-### 2. 传输层 (`transport/websocket.rs`)
+### 2. 传输层 (`infra/transport/websocket.rs`)
 
-**路径**: `crates/agent/src/transport/websocket.rs`
+**路径**: `crates/agent/src/infra/transport/websocket.rs`
 
 | 组件                | 说明                        |
 | ----------------- | ------------------------- |
@@ -504,9 +504,9 @@ review:
 | `decide_with_validation()` | 带验证器的决策流程             |
 | `submit_for_review()`      | 提交 ReflectorSoul 审查   |
 
-### 4. 认知引擎 (`core/cognitive/`)
+### 4. 认知引擎 (`soul/actor/`)
 
-**路径**: `crates/agent/src/core/cognitive/`
+**路径**: `crates/agent/src/soul/actor/`
 
 | 文件            | 组件                          | 说明          |
 | ------------- | --------------------------- | ----------- |
@@ -528,9 +528,9 @@ review:
 - `think_with_memory(&WorldState, &str) -> CognitiveChain`: 带记忆上下文
 - `create_decision_callback()`: 创建决策回调 (兼容 Agent 接口)
 
-### 5. 记忆系统 (`ai/memory/manager.rs`)
+### 5. 记忆系统 (`component/memory/manager.rs`)
 
-**路径**: `crates/agent/src/ai/memory/manager.rs`
+**路径**: `crates/agent/src/component/memory/manager.rs`
 
 | 后端                      | 存储            | 用途   | 容量   | 配置项                   |
 | ----------------------- | ------------- | ---- | ---- | --------------------- |
@@ -546,9 +546,9 @@ review:
 - `build_llm_context()`: 构建 LLM 上下文字符串
 - `recall_archived(query, limit)`: 搜索归档记忆 ("努力回忆")
 
-### 6. 人设系统 (`ai/persona/dynamic_persona.rs`)
+### 6. 人设系统 (`component/persona/dynamic_persona.rs`)
 
-**路径**: `crates/agent/src/ai/persona/dynamic_persona.rs`
+**路径**: `crates/agent/src/component/persona/dynamic_persona.rs`
 
 | 组件                  | 说明              |
 | ------------------- | --------------- |
@@ -565,9 +565,9 @@ review:
 - `set_goal(goal)`: 设置当前目标
 - `apply_all_decay()`: 应用所有特质衰减
 
-### 7. 叙事引擎 (`ai/cognitive/narrative.rs`)
+### 7. 叙事引擎 (`soul/actor/narrative.rs`)
 
-**路径**: `crates/agent/src/ai/cognitive/narrative.rs`
+**路径**: `crates/agent/src/soul/actor/narrative.rs`
 
 | 组件                     | 说明           |
 | ---------------------- | ------------ |

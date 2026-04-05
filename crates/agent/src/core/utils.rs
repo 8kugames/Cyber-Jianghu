@@ -1,4 +1,4 @@
-use crate::ai::lifespan::LifespanCalculator;
+use crate::component::persona::LifespanCalculator;
 use crate::models::WorldState;
 
 /// 构建世界上下文
