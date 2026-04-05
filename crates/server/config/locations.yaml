@@ -59,7 +59,8 @@ data:
       name: "厨房"
       type: "sub_scene"
       parent_id: "longmen_inn"
-      gatherable_items: []
+      gatherable_items:
+        - "water" # 缸中清水
       description: "客栈的厨房，飘着饭香"
 
     # --------------------------------------------------------------------------
@@ -110,6 +111,31 @@ data:
     - from_node_id: "desert"
       to_node_id: "longmen_inn"
       travel_cost: 3 # 回程更累
+
+    # 龙门客栈 <-> 子场景连接（从客栈大地图进入/离开子场景）
+    - from_node_id: "longmen_inn"
+      to_node_id: "longmen_lobby"
+      travel_cost: 1
+
+    - from_node_id: "longmen_lobby"
+      to_node_id: "longmen_inn"
+      travel_cost: 1
+
+    - from_node_id: "longmen_inn"
+      to_node_id: "longmen_backyard"
+      travel_cost: 1
+
+    - from_node_id: "longmen_backyard"
+      to_node_id: "longmen_inn"
+      travel_cost: 1
+
+    - from_node_id: "longmen_inn"
+      to_node_id: "longmen_kitchen"
+      travel_cost: 1
+
+    - from_node_id: "longmen_kitchen"
+      to_node_id: "longmen_inn"
+      travel_cost: 1
 
     # 龙门客栈内部移动
     - from_node_id: "longmen_lobby"

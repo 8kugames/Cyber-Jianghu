@@ -11,19 +11,29 @@
 
 mod agent;
 mod builder;
-pub mod cognitive;
 mod lifecycle;
 pub mod tools;
 pub mod utils;
 
+// ============================================================================
+// 运行时常量
+// ============================================================================
+
+/// 遗忘机制运行间隔（tick 数）
+///
+/// 基于艾宾浩斯遗忘曲线，每隔一定 tick 运行遗忘检查。
+pub const FORGETTING_INTERVAL_TICKS: i64 = 84;
+
 // 重新导出核心类型
-pub use agent::{Agent, PersonaValidationResult, ValidatorConfig};
+pub use agent::{Agent, PersonaValidationResult};
 pub use builder::AgentBuilder;
-pub use cognitive::{
-    CognitiveChain, CognitiveEngineConfig, CognitiveStage, MultiStageCognitiveEngine, StageOutput,
+
+// 从 soul::actor 重导出认知引擎类型
+pub use crate::soul::actor::{
+    CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
 
-// 从 runtime::decision 模块重导出决策类型
-pub use crate::runtime::decision::{
+// 从 runtime 模块重导出决策类型
+pub use crate::runtime::{
     DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback,
 };

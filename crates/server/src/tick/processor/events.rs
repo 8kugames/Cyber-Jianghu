@@ -2,7 +2,7 @@
 //!
 //! 负责生成和管理 WorldEvent。
 
-use crate::models::WorldEvent;
+use crate::models::{WorldEvent, WorldEventType};
 
 /// 事件生成器
 pub struct EventBuilder;
@@ -23,7 +23,7 @@ impl EventBuilder {
         success: bool,
     ) -> WorldEvent {
         WorldEvent {
-            event_type: "action_result".to_string(),
+            event_type: WorldEventType::ActionResult,
             tick_id,
             description: if success {
                 format!("执行 {} 成功", action)
@@ -47,7 +47,7 @@ impl EventBuilder {
         details: serde_json::Value,
     ) -> WorldEvent {
         WorldEvent {
-            event_type: "state_change".to_string(),
+            event_type: WorldEventType::StateChange,
             tick_id,
             description: format!("状态变更: {}", change_type),
             metadata: details,
@@ -73,7 +73,7 @@ mod tests {
 
         let event = builder.build_action_event(agent_id, 1, "speak", true);
 
-        assert_eq!(event.event_type, "action_result");
+        assert_eq!(event.event_type, WorldEventType::ActionResult);
         assert!(event.description.contains("成功"));
     }
 
@@ -89,6 +89,6 @@ mod tests {
             serde_json::json!({"old": 100, "new": 90}),
         );
 
-        assert_eq!(event.event_type, "state_change");
+        assert_eq!(event.event_type, WorldEventType::StateChange);
     }
 }

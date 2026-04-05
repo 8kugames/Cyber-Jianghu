@@ -24,18 +24,56 @@ use cyber_jianghu_server::*;
 use anyhow::Result;
 use axum::{
     Router,
+    body::Body,
     routing::{get, post},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use tokio::task::JoinHandle;
-use tower_http::services::ServeDir;
 use tracing::{Level, error, info};
 use tracing_subscriber::FmtSubscriber;
 
 // ============================================================================
 // Tick引擎启动
 // ============================================================================
+
+fn serve_admin_file(path: &str) -> Result<axum::response::Response<Body>, StatusCode> {
+    let static_dir = crate::paths::get_static_dir().join("admin");
+
+    let file_path = if path.is_empty() || path == "index.html" {
+        static_dir.join("index.html")
+    } else {
+        static_dir.join(path)
+    };
+
+    if !file_path.exists() || !file_path.is_file() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let mime = mime_guess::from_path(&file_path).first_or_octet_stream();
+    let body =
+        Body::from(std::fs::read(&file_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+    Ok(axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header(axum::http::header::CONTENT_TYPE, mime.as_ref())
+        .body(body)
+        .unwrap_or_else(|_| axum::response::Response::new(Body::empty())))
+}
+
+/// /admin/ → serve index.html (no path parameter to extract)
+async fn serve_admin_index() -> Result<axum::response::Response<Body>, StatusCode> {
+    serve_admin_file("index.html")
+}
+
+/// /admin/{*path} → serve the specific file
+async fn serve_admin(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> Result<axum::response::Response<Body>, StatusCode> {
+    serve_admin_file(&path)
+}
+
+use axum::http::StatusCode;
 
 /// 启动Tick引擎（后台任务）
 ///
@@ -46,6 +84,8 @@ fn start_tick_engine(
     connection_manager: websocket::ConnectionManager,
     agent_to_device_map: websocket::AgentToDeviceMap,
     intent_manager: websocket::IntentManager,
+    dialogue_manager: Arc<dialogue::DialogueManager>,
+    accepting_tick_id: Arc<AtomicI64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -54,6 +94,8 @@ fn start_tick_engine(
             connection_manager,
             agent_to_device_map,
             intent_manager,
+            dialogue_manager,
+            accepting_tick_id,
         );
 
         info!("启动Tick引擎（后台任务）");
@@ -157,6 +199,7 @@ async fn main() -> Result<()> {
         .admin_write_token
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     let read_token_source = if config.server.admin_read_token.is_some() {
         "配置/环境变量"
     } else {
@@ -170,22 +213,13 @@ async fn main() -> Result<()> {
 
     use std::fs::File;
     use std::io::Write;
-    use std::path::PathBuf;
 
-    let tokens_file = "cyber_jianghu_admin.tmp";
-    let mut token_paths = vec![PathBuf::from(tokens_file)];
-    let logs_token_path = crate::paths::get_logs_dir().join(tokens_file);
-    if logs_token_path.as_os_str() != tokens_file {
-        token_paths.push(logs_token_path);
+    let token_path = crate::paths::get_logs_dir().join("cyber_jianghu_admin.tmp");
+    if let Some(parent) = token_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    for token_path in token_paths {
-        if let Some(parent) = token_path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-
+    {
         let mut file = File::create(&token_path).map_err(|e| {
             anyhow::anyhow!("无法创建admin token文件 {}: {}", token_path.display(), e)
         })?;
@@ -198,15 +232,16 @@ async fn main() -> Result<()> {
         writeln!(file, "Write Token (读写): [{}]", write_token_source)?;
         writeln!(file, "  {}", admin_write_token)?;
         writeln!(file)?;
-        // writeln!(file, "可直接写入 .env:")?;
-        // writeln!(file, "ADMIN_READ_TOKEN={} ADMIN_WRITE_TOKEN={}", admin_read_token, admin_write_token)?;
         writeln!(file, "========================================")?;
-
-        info!("管理员访问凭证已保存到: {}", token_path.display());
-        info!("查看凭证: cat {}", token_path.display());
     }
 
-    // 9. 创建应用状态
+    info!("管理员访问凭证已保存到: {}", token_path.display());
+    info!("查看凭证: cat {}", token_path.display());
+
+    // 9. 创建共享 tick_id（scheduler 和 AppState 共用）
+    let accepting_tick_id = Arc::new(AtomicI64::new(0));
+
+    // 9.1 创建应用状态
     let state = Arc::new(AppState::new(
         config.clone(),
         db_pool.clone(),
@@ -219,6 +254,7 @@ async fn main() -> Result<()> {
         admin_read_token,
         admin_write_token,
         crate::paths::get_config_dir(),
+        accepting_tick_id.clone(),
     ));
 
     // 10. 启动Tick引擎（后台任务）
@@ -228,6 +264,8 @@ async fn main() -> Result<()> {
         connection_manager.clone(),
         agent_to_device_map.clone(),
         intent_manager.clone(),
+        dialogue_manager.clone(),
+        accepting_tick_id,
     );
 
     // 10.1 启动速率限制器清理任务
@@ -272,15 +310,6 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
-            "/api/dashboard/agents",
-            get(handlers::dashboard::get_online_agents).layer(
-                axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_read_token,
-                ),
-            ),
-        )
-        .route(
             "/api/dashboard/agents/offline",
             get(handlers::dashboard::get_offline_agents).layer(
                 axum::middleware::from_fn_with_state(
@@ -299,6 +328,31 @@ async fn main() -> Result<()> {
         .route(
             "/api/dashboard/agent/{id}",
             get(handlers::dashboard::get_agent_details).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agent/{id}/experiences",
+            get(handlers::dashboard::get_agent_experiences).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
+            "/api/dashboard/agents",
+            get(handlers::dashboard::get_all_agents).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/status-configs",
+            get(handlers::dashboard::get_status_configs).layer(
                 axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
@@ -345,8 +399,23 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
-        // Static files (Admin panel)
-        .nest_service("/admin", ServeDir::new(crate::paths::get_static_dir()))
+        // Admin Auth API (Cookie Session)
+        .route("/api/admin/login", post(handlers::admin_auth::login))
+        .route("/api/admin/logout", post(handlers::admin_auth::logout))
+        .route(
+            "/api/admin/session",
+            get(handlers::admin_auth::check_session),
+        )
+        // Admin Static Files (no auth - login page must be accessible without token)
+        // Auth is enforced client-side: frontend stores token in localStorage,
+        // sends it via Bearer header on API calls. API routes have their own middleware.
+        .route("/admin/", get(serve_admin_index))
+        .route("/admin/{*path}", get(serve_admin))
+        // Redirect /admin to /admin/
+        .route(
+            "/admin",
+            get(|| async { axum::response::Redirect::temporary("/admin/") }),
+        )
         .with_state(state);
 
     // 12. 启动Web服务器

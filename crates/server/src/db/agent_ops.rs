@@ -546,11 +546,10 @@ pub async fn rebirth_agent(
 
     let agent_info: Option<(Uuid, String)> = sqlx::query_as(
         r#"
-        SELECT a.agent_id, a.name 
+        SELECT a.agent_id, a.name
         FROM agents a
-        INNER JOIN agent_states s ON a.agent_id = s.agent_id
-        WHERE a.device_id = $1 AND a.status = 'active' AND s.is_alive = true
-        ORDER BY s.tick_id DESC
+        WHERE a.device_id = $1 AND a.status = 'active'
+        ORDER BY a.created_at DESC
         LIMIT 1
         "#,
     )
@@ -583,6 +582,31 @@ pub async fn rebirth_agent(
     if updated.rows_affected() == 0 {
         anyhow::bail!("归隐失败：角色状态已变更");
     }
+
+    // 4. 插入 is_alive=false 的状态快照，防止归隐角色继续参与 Tick 处理
+    // load_agent_states 先 DISTINCT ON 取最新记录再过滤 is_alive，确保最新记录为 false 即可排除
+    let latest_tick: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(tick_id) FROM agent_states WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_optional(pool)
+            .await
+            .context("查询 Agent 最新 tick_id 失败")?
+            .flatten();
+
+    // 使用下一个 tick_id 避免违反 UNIQUE(agent_id, tick_id) 约束
+    let retired_tick_id = latest_tick.map(|t| t + 1).unwrap_or(0);
+
+    sqlx::query(
+        r#"
+        INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive)
+        VALUES ($1, $2, '{}'::jsonb, 'void', false)
+        "#,
+    )
+    .bind(agent_id)
+    .bind(retired_tick_id)
+    .execute(pool)
+    .await
+    .context("插入归隐状态快照失败")?;
 
     tracing::info!(
         "Agent 归隐成功: {} ({}) 已归隐，可创建新角色",

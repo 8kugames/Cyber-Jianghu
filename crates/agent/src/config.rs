@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use url::Url;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -19,39 +20,63 @@ use zeroize::Zeroize;
 // 导入 protocol 类型
 // ============================================================================
 
-pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem};
+pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldTime};
 
 /// 支持的 LLM Provider
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
 
 // ============================================================================
-// Agent 身份配置（持久化）
+// 每服务器设备身份配置（device.yaml）
 // ============================================================================
 
-/// 设备身份配置
-///
-/// 首次启动时生成，之后持久化保存。
-/// 不随角色变化，角色死亡转世时 identity 保持不变。
+/// 每服务器设备身份（device.yaml）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IdentityConfig {
-    /// 设备唯一标识（客户端生成 UUID v4）
+pub struct DeviceConfig {
     pub device_id: Uuid,
-
-    /// Server 返回的认证令牌
     pub auth_token: String,
-
-    /// 注册时的服务器 HTTP URL（用于检测服务器切换）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_url: Option<String>,
+    pub server_url: String,
 }
 
-impl IdentityConfig {
-    /// 检查身份是否匹配当前服务器
-    ///
-    /// 如果身份中没有记录 server_url（旧版本配置），则认为不匹配
-    pub fn matches_server(&self, server_url: &str) -> bool {
-        self.server_url.as_deref() == Some(server_url)
+impl DeviceConfig {
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let yaml = serde_yaml::to_string(self).context("Failed to serialize DeviceConfig")?;
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &yaml)?;
+        fs::rename(&tmp_path, path)?;
+        Ok(())
     }
+
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let yaml = fs::read_to_string(path).context("Failed to read device.yaml")?;
+        serde_yaml::from_str(&yaml).context("Failed to parse device.yaml")
+    }
+
+    pub fn ws_url_with_token(&self, ws_url: &str) -> String {
+        format!(
+            "{}?device_id={}&token={}",
+            ws_url, self.device_id, self.auth_token
+        )
+    }
+}
+
+/// 计算服务器目录 key（从 WebSocket URL 派生）
+pub fn server_key(ws_url: &str) -> String {
+    let url =
+        Url::parse(ws_url).unwrap_or_else(|_| Url::parse(&format!("ws://{}", ws_url)).unwrap());
+    let host = url.host_str().unwrap_or("localhost");
+    let port = url.port().map(|p| format!("-{}", p)).unwrap_or_default();
+    format!("{}{}", host.replace(['.', ':', '[', ']'], "-"), port)
+}
+
+/// Convert WebSocket URL to HTTP URL.
+/// e.g. `ws://localhost:23333/ws` -> `http://localhost:23333`
+pub fn ws_to_http_url(ws_url: &str) -> String {
+    ws_url
+        .replace("ws://", "http://")
+        .replace("wss://", "https://")
+        .rsplit_once('/')
+        .map(|(base, _)| base.to_string())
+        .unwrap_or_else(|| ws_url.to_string())
 }
 
 // ============================================================================
@@ -202,6 +227,14 @@ pub struct CharacterConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
 
+    /// 最近一次连接时的现实时间
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected_real_time: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// 最近一次连接时的游戏时间
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connected_world_time: Option<cyber_jianghu_protocol::WorldTime>,
+
     /// 角色状态
     #[serde(default)]
     pub status: CharacterStatus,
@@ -278,6 +311,27 @@ impl CharacterConfig {
     pub fn is_registered(&self) -> bool {
         self.agent_id.is_some()
     }
+
+    /// 从文件加载角色配置
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read character config from {:?}", path.as_ref()))?;
+        serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse character config from {:?}", path.as_ref()))
+    }
+
+    /// 保存角色配置到文件（原子写入：先写临时文件再 rename）
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let content =
+            serde_yaml::to_string(self).context("Failed to serialize character config")?;
+        let path = path.as_ref();
+        let tmp_path = path.with_extension("tmp");
+        std::fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write character config to {:?}", tmp_path))?;
+        std::fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename character config at {:?}", path))?;
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -335,7 +389,7 @@ impl Default for RuntimeConfig {
 /// Claw 模式专用配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClawConfig {
-    /// 是否使用统一认知架构（OpenClawBridge + MultiStageCognitiveEngine）
+    /// 是否使用统一认知架构（OpenClawBridge + CognitiveEngine）
     /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
     /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
     #[serde(default = "default_use_unified_cognitive")]
@@ -464,10 +518,6 @@ pub struct MemoryConfig {
     /// 情景记忆保存阈值（重要性 >= 此值的事件会被保存）
     #[serde(default = "default_episodic_threshold")]
     pub episodic_threshold: f32,
-
-    /// 数据库存储路径（默认 ~/.cyber-jianghu/data/）
-    #[serde(default)]
-    pub db_path: Option<String>,
 }
 
 fn default_memory_enabled() -> bool {
@@ -488,7 +538,6 @@ impl Default for MemoryConfig {
             enabled: true,
             working_memory_size: 20,
             episodic_threshold: 0.5,
-            db_path: None,
         }
     }
 }
@@ -578,22 +627,9 @@ impl Default for ObserverConfig {
 /// 完整配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
-    /// Agent 身份（首次启动自动生成）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub identity: Option<IdentityConfig>,
-
     /// 服务器配置
     #[serde(default)]
     pub server: ServerConfig,
-
-    /// 当前角色配置（通过 Web/API 创建）
-    /// 使用 `agent` 字段名以保持与现有代码的兼容性
-    #[serde(skip_serializing_if = "Option::is_none", alias = "character")]
-    pub agent: Option<CharacterConfig>,
-
-    /// 所有角色历史（包括已故、归隐的角色）
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub characters: Vec<CharacterConfig>,
 
     /// 运行时配置
     #[serde(default)]
@@ -634,6 +670,11 @@ pub struct Config {
     /// 配置文件路径（运行时设置，不序列化）
     #[serde(skip)]
     pub config_path: PathBuf,
+
+    /// 服务器数据目录
+    /// 默认 ~/.cyber-jianghu/servers/
+    #[serde(default)]
+    pub servers_dir: PathBuf,
 }
 
 impl Config {
@@ -703,10 +744,7 @@ impl Config {
         };
 
         Ok(Config {
-            identity: None,
             server,
-            agent: None,
-            characters: vec![],
             runtime,
             claw: ClawConfig::default(),
             llm: LlmConfig::from_env(),
@@ -717,135 +755,60 @@ impl Config {
             observer: None,
             game_rules: None,
             config_path: PathBuf::new(),
-        })
-    }
-
-    /// 检查 Agent 是否已注册身份
-    pub fn has_identity(&self) -> bool {
-        self.identity.is_some()
-    }
-
-    /// 检查身份是否匹配当前服务器
-    ///
-    /// 返回 (has_identity, needs_reset):
-    /// - has_identity: 是否有身份
-    /// - needs_reset: 是否需要重置（服务器地址变化）
-    pub fn check_identity_server_match(&self) -> (bool, bool) {
-        match &self.identity {
-            None => (false, false),
-            Some(identity) => {
-                let matches = identity.matches_server(&self.server.http_url);
-                (true, !matches)
-            }
-        }
-    }
-
-    /// 清除身份（用于服务器切换时重新注册）
-    pub fn clear_identity(&mut self) {
-        self.identity = None;
-    }
-
-    /// 检查是否已创建角色
-    pub fn has_character(&self) -> bool {
-        self.agent
-            .as_ref()
-            .map(|c| c.is_registered())
-            .unwrap_or(false)
-    }
-
-    /// 生成 WebSocket URL（带认证）
-    pub fn ws_url_with_token(&self) -> Option<String> {
-        self.identity.as_ref().map(|id| {
-            format!(
-                "{}?device_id={}&token={}",
-                self.server.ws_url, id.device_id, id.auth_token
-            )
+            servers_dir: dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cyber-jianghu")
+                .join("servers"),
         })
     }
 
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
-        self.game_rules = Some(game_rules);
-    }
+        // 保存 available_actions 到本地文件
+        if let Some(home) = dirs::home_dir() {
+            let config_dir = home.join(".cyber-jianghu").join("config");
+            let actions_path = config_dir.join("actions.json");
 
-    /// 获取指定服务器的所有角色
-    pub fn get_characters_by_server(&self, server_url: &str) -> Vec<&CharacterConfig> {
-        self.characters
-            .iter()
-            .filter(|c| c.server_url.as_deref() == Some(server_url))
-            .collect()
-    }
-
-    /// 获取指定服务器的存活角色
-    pub fn get_alive_character_by_server(&self, server_url: &str) -> Option<&CharacterConfig> {
-        self.characters.iter().find(|c| {
-            c.server_url.as_deref() == Some(server_url)
-                && c.status == CharacterStatus::Alive
-                && c.agent_id.is_some()
-        })
-    }
-
-    /// 添加或更新角色到历史记录
-    pub fn upsert_character(&mut self, character: CharacterConfig) {
-        if let Some(agent_id) = character.agent_id {
-            // 查找是否已存在
-            if let Some(existing) = self
-                .characters
-                .iter_mut()
-                .find(|c| c.agent_id == Some(agent_id))
-            {
-                *existing = character.clone();
+            // 确保目录存在
+            if let Err(e) = fs::create_dir_all(&config_dir) {
+                tracing::warn!("创建配置目录失败: {}", e);
             } else {
-                self.characters.push(character.clone());
+                // 序列化并保存
+                match serde_json::to_string_pretty(&game_rules.available_actions) {
+                    Ok(json) => {
+                        if let Err(e) = fs::write(&actions_path, json) {
+                            tracing::warn!("保存 actions.json 失败: {}", e);
+                        } else {
+                            tracing::debug!(
+                                "已保存 {} 个动作到 {:?}",
+                                game_rules.available_actions.len(),
+                                actions_path
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("序列化 actions 失败: {}", e);
+                    }
+                }
             }
         }
-        // 更新当前活跃角色
-        if character.status == CharacterStatus::Alive {
-            self.agent = Some(character);
-        }
-    }
 
-    /// 切换到指定角色
-    pub fn switch_to_character(&mut self, agent_id: Uuid) -> bool {
-        if let Some(character) = self
-            .characters
-            .iter()
-            .find(|c| c.agent_id == Some(agent_id))
-        {
-            self.agent = Some(character.clone());
-            return true;
-        }
-        false
-    }
-
-    /// 标记当前角色为归隐状态
-    pub fn retire_current_character(&mut self) {
-        if let Some(ref mut character) = self.agent {
-            character.status = CharacterStatus::Retired;
-            // 更新 characters 列表中的记录
-            if let Some(agent_id) = character.agent_id
-                && let Some(existing) = self
-                    .characters
-                    .iter_mut()
-                    .find(|c| c.agent_id == Some(agent_id))
-            {
-                existing.status = CharacterStatus::Retired;
-            }
-        }
-    }
-
-    /// 检查指定服务器是否有存活角色
-    pub fn has_alive_character_for_server(&self, server_url: &str) -> bool {
-        self.characters.iter().any(|c| {
-            c.server_url.as_deref() == Some(server_url)
-                && c.status == CharacterStatus::Alive
-                && c.agent_id.is_some()
-        })
+        self.game_rules = Some(game_rules);
     }
 
     /// 获取 ReflectorSoul LLM 配置（带回退逻辑）
     pub fn get_reflector_llm_config(&self) -> &LlmConfig {
         self.llm_reflector.as_ref().unwrap_or(&self.llm)
+    }
+
+    /// 获取指定服务器的数据目录
+    pub fn server_dir(&self, ws_url: &str) -> PathBuf {
+        self.servers_dir.join(server_key(ws_url))
+    }
+
+    /// 获取指定服务器的 device.yaml 路径
+    pub fn device_yaml_path(&self, ws_url: &str) -> PathBuf {
+        self.server_dir(ws_url).join("device.yaml")
     }
 }
 
@@ -888,8 +851,6 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert!(config.identity.is_none());
-        assert!(config.agent.is_none());
         assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
     }
 

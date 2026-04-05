@@ -97,6 +97,24 @@ pub struct Entity {
     /// 是否敌对
     #[serde(default)]
     pub hostile: bool,
+
+    /// 该角色最近的动作（供其他 Agent 观察上下文）
+    #[serde(default)]
+    pub recent_actions: Vec<RecentAction>,
+}
+
+/// 最近动作记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentAction {
+    /// Tick 编号
+    pub tick_id: i64,
+    /// 动作类型
+    pub action_type: String,
+    /// 对话内容（如果有）
+    #[serde(default)]
+    pub content: Option<String>,
+    /// 结果描述
+    pub result: String,
 }
 
 /// 场景物品（可拾取）
@@ -129,6 +147,10 @@ pub struct AvailableAction {
     /// 有效目标（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub valid_targets: Option<Vec<String>>,
+
+    /// 必需的 action_data 字段名列表（如 ["content"]、["target_agent_id", "item_id"]）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_fields: Vec<String>,
 }
 
 /// 初始物品配置

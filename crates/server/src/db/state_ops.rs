@@ -33,13 +33,17 @@ use crate::models::{AgentAction, AgentState, TickLog};
 pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<AgentState>> {
     debug!("查询所有存活Agent的最新状态");
 
-    // 使用DISTINCT ON获取每个Agent的最新状态
+    // 先取每个 agent 的最新记录，再过滤 is_alive
+    // 不能在 DISTINCT ON 之前加 WHERE is_alive = true，
+    // 否则会忽略最新的死亡记录、找到旧的存活记录，导致已死亡 agent 被加载
     let states = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT DISTINCT ON (agent_id) *
-        FROM agent_states
+        SELECT * FROM (
+            SELECT DISTINCT ON (agent_id) *
+            FROM agent_states
+            ORDER BY agent_id, tick_id DESC
+        ) latest
         WHERE is_alive = true
-        ORDER BY agent_id, tick_id DESC
         "#,
     )
     .fetch_all(pool)
@@ -297,7 +301,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_data, result) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_data, result, thought_log, observer_thought, narrative) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
@@ -305,7 +309,10 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
             .push_bind(action.agent_id)
             .push_bind(action.action_type.to_string())
             .push_bind(&action.action_data)
-            .push_bind(action.result.to_string());
+            .push_bind(action.result.to_string())
+            .push_bind(&action.thought_log)
+            .push_bind(&action.observer_thought)
+            .push_bind(&action.narrative);
     });
 
     query_builder

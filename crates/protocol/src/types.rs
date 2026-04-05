@@ -147,7 +147,8 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
-            available_actions: vec![],
+            private_dialogue_log: vec![],
+            deadline_ms: 0,
         };
 
         let json = serde_json::to_string(&world_state).unwrap();

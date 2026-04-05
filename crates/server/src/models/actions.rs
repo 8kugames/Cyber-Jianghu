@@ -36,6 +36,15 @@ pub struct AgentAction {
     /// 执行结果
     pub result: ActionResult,
 
+    /// ActorSoul 思考日志
+    pub thought_log: Option<String>,
+
+    /// ReflectorSoul 审查理由
+    pub observer_thought: Option<String>,
+
+    /// 叙事化经历描述
+    pub narrative: Option<String>,
+
     /// 记录时间
     pub created_at: DateTime<Utc>,
 }
