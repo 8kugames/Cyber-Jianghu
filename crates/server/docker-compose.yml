@@ -25,12 +25,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # 挂载迁移文件（按文件名排序执行）
-      - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql:ro
-      - ./migrations/002_jsonb_attributes.sql:/docker-entrypoint-initdb.d/002_jsonb_attributes.sql:ro
-      - ./migrations/003_ground_items.sql:/docker-entrypoint-initdb.d/003_ground_items.sql:ro
-      - ./migrations/004_drop_legacy_columns.sql:/docker-entrypoint-initdb.d/004_drop_legacy_columns.sql:ro
-      - ./migrations/005_devices.sql:/docker-entrypoint-initdb.d/005_devices.sql:ro
-      - ./migrations/006_agents_device_link.sql:/docker-entrypoint-initdb.d/006_agents_device_link.sql:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -76,7 +70,8 @@ services:
     ports:
       - "${SERVER_PORT:-23333}:23333"
     volumes:
-      # 配置文件挂载（数据驱动架构 - 支持热插拔）
+      # 配置文件挂载（数据驱动架构）
+      # 如果 ./config 目录为空，entrypoint 会自动填充默认配置
       - ./config:/app/config
       # 日志持久化
       - ./logs:/app/logs

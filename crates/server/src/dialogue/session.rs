@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+/// 系统级 Agent ID（用于标识系统操作的结束方）
+const SYSTEM_AGENT_ID: Uuid = Uuid::from_u128(0);
+
 /// 对话会话状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionStatus {
@@ -29,10 +32,16 @@ pub struct DialogueSession {
     pub session_id: String,
     /// 发起方 Agent ID
     pub agent_a: Uuid,
+    /// 发起方 Agent 名称
+    pub agent_a_name: String,
     /// 接收方 Agent ID
     pub agent_b: Uuid,
+    /// 接收方 Agent 名称
+    pub agent_b_name: String,
     /// 消息计数
     pub message_count: u32,
+    /// 最后一条消息发送者（agent_a 或 agent_b）
+    pub last_message_from: Option<Uuid>,
     /// 会话状态
     pub status: SessionStatus,
     /// 创建时间（预留：会话时长统计）
@@ -40,20 +49,27 @@ pub struct DialogueSession {
     pub created_at: Instant,
     /// 最后活动时间
     pub last_activity_at: Instant,
+    /// 结束方 Agent ID（关单时由系统设置）
+    #[allow(dead_code)]
+    pub ended_by: Option<Uuid>,
 }
 
 impl DialogueSession {
     /// 创建新的对话会话
-    pub fn new(agent_a: Uuid, agent_b: Uuid) -> Self {
+    pub fn new(agent_a: Uuid, agent_a_name: String, agent_b: Uuid, agent_b_name: String) -> Self {
         let now = Instant::now();
         Self {
             session_id: Uuid::new_v4().to_string(),
             agent_a,
+            agent_a_name,
             agent_b,
+            agent_b_name,
             message_count: 0,
+            last_message_from: None,
             status: SessionStatus::Pending,
             created_at: now,
             last_activity_at: now,
+            ended_by: None,
         }
     }
 
@@ -75,10 +91,11 @@ impl DialogueSession {
         }
     }
 
-    /// 增加消息计数并更新活动时间
-    pub fn increment_message_count(&mut self) {
+    /// 增加消息计数并更新活动时间和
+    pub fn increment_message_count(&mut self, from_agent_id: Uuid) {
         self.message_count += 1;
         self.last_activity_at = Instant::now();
+        self.last_message_from = Some(from_agent_id);
     }
 
     /// 检查是否达到消息限制
@@ -122,7 +139,12 @@ impl SessionRegistry {
     ///
     /// 返回新创建的会话
     pub fn create_session(&mut self, agent_a: Uuid, agent_b: Uuid) -> DialogueSession {
-        let session = DialogueSession::new(agent_a, agent_b);
+        let session = DialogueSession::new(
+            agent_a,
+            agent_a.to_string(),
+            agent_b,
+            agent_b.to_string(),
+        );
         let session_id = session.session_id.clone();
 
         info!(
@@ -221,6 +243,42 @@ impl SessionRegistry {
 
         removed_count
     }
+
+    /// 关闭所有活动会话（Tick 结束时调用）
+    ///
+    /// 返回所有被关闭的会话信息
+    pub fn close_all_sessions(&mut self) -> Vec<cyber_jianghu_protocol::PrivateDialogueRecord> {
+        let session_ids: Vec<String> = self.sessions.keys().cloned().collect();
+        let mut records = Vec::new();
+
+        for session_id in session_ids {
+            if let Some(mut session) = self.sessions.remove(&session_id) {
+                session.ended_by = Some(SYSTEM_AGENT_ID);
+                self.agent_index.remove(&session.agent_a);
+                self.agent_index.remove(&session.agent_b);
+
+                let last_message_from = session
+                    .last_message_from
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                records.push(cyber_jianghu_protocol::PrivateDialogueRecord {
+                    session_id,
+                    agent_a_id: session.agent_a,
+                    agent_a_name: session.agent_a_name,
+                    agent_b_id: session.agent_b,
+                    agent_b_name: session.agent_b_name,
+                    message_count: session.message_count,
+                    last_message_from,
+                });
+            }
+        }
+
+        if !records.is_empty() {
+            info!("Tick 结束，关闭了 {} 个对话会话", records.len());
+        }
+
+        records
+    }
 }
 
 impl Default for SessionRegistry {
@@ -241,7 +299,12 @@ mod tests {
     fn test_dialogue_session_creation() {
         let agent_a = Uuid::new_v4();
         let agent_b = Uuid::new_v4();
-        let session = DialogueSession::new(agent_a, agent_b);
+        let session = DialogueSession::new(
+            agent_a,
+            "Agent_A".to_string(),
+            agent_b,
+            "Agent_B".to_string(),
+        );
 
         assert_eq!(session.agent_a, agent_a);
         assert_eq!(session.agent_b, agent_b);
@@ -255,7 +318,12 @@ mod tests {
         let agent_a = Uuid::new_v4();
         let agent_b = Uuid::new_v4();
         let agent_c = Uuid::new_v4();
-        let session = DialogueSession::new(agent_a, agent_b);
+        let session = DialogueSession::new(
+            agent_a,
+            "Agent_A".to_string(),
+            agent_b,
+            "Agent_B".to_string(),
+        );
 
         assert!(session.involves(agent_a));
         assert!(session.involves(agent_b));
@@ -266,7 +334,12 @@ mod tests {
     fn test_get_partner() {
         let agent_a = Uuid::new_v4();
         let agent_b = Uuid::new_v4();
-        let session = DialogueSession::new(agent_a, agent_b);
+        let session = DialogueSession::new(
+            agent_a,
+            "Agent_A".to_string(),
+            agent_b,
+            "Agent_B".to_string(),
+        );
 
         assert_eq!(session.get_partner(agent_a), Some(agent_b));
         assert_eq!(session.get_partner(agent_b), Some(agent_a));
@@ -276,12 +349,17 @@ mod tests {
     fn test_increment_message_count() {
         let agent_a = Uuid::new_v4();
         let agent_b = Uuid::new_v4();
-        let mut session = DialogueSession::new(agent_a, agent_b);
+        let mut session = DialogueSession::new(
+            agent_a,
+            "Agent_A".to_string(),
+            agent_b,
+            "Agent_B".to_string(),
+        );
 
         assert_eq!(session.message_count, 0);
-        session.increment_message_count();
+        session.increment_message_count(agent_a);
         assert_eq!(session.message_count, 1);
-        session.increment_message_count();
+        session.increment_message_count(agent_b);
         assert_eq!(session.message_count, 2);
     }
 
@@ -289,19 +367,25 @@ mod tests {
     fn test_message_limit() {
         let agent_a = Uuid::new_v4();
         let agent_b = Uuid::new_v4();
-        let mut session = DialogueSession::new(agent_a, agent_b);
+        let mut session = DialogueSession::new(
+            agent_a,
+            "Agent_A".to_string(),
+            agent_b,
+            "Agent_B".to_string(),
+        );
 
         // max_messages=10 means total limit is 20
         assert!(!session.is_message_limit_reached(10));
 
         // Add 19 messages - should not reach limit yet
-        for _ in 0..19 {
-            session.increment_message_count();
+        for i in 0..19 {
+            let sender = if i % 2 == 0 { agent_a } else { agent_b };
+            session.increment_message_count(sender);
         }
         assert!(!session.is_message_limit_reached(10));
 
         // Add 1 more - total 20, should reach limit
-        session.increment_message_count();
+        session.increment_message_count(agent_a);
         assert!(session.is_message_limit_reached(10));
     }
 

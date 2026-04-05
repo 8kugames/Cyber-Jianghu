@@ -1,10 +1,12 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
+    http::StatusCode,
 };
 use chrono::Utc;
 use serde::Serialize;
 use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -67,7 +69,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
     // 2. Current active agents (alive and in latest tick and online)
     let connected_agents: std::collections::HashSet<Uuid> = {
         let connections = state.connection_manager.read().await;
-        connections.keys().copied().collect()
+        connections.values().map(|c| c.agent_id).collect()
     };
     let latest_state_tick_id = crate::db::get_latest_state_tick_id(&state.db_pool)
         .await
@@ -310,7 +312,7 @@ pub struct OnlineAgent {
 pub async fn get_online_agents(State(state): State<Arc<AppState>>) -> Json<Vec<OnlineAgent>> {
     let connected_agents: std::collections::HashSet<Uuid> = {
         let connections = state.connection_manager.read().await;
-        connections.keys().copied().collect()
+        connections.values().map(|c| c.agent_id).collect()
     };
 
     if connected_agents.is_empty() {
@@ -374,7 +376,7 @@ pub struct OfflineAgent {
 pub async fn get_offline_agents(State(state): State<Arc<AppState>>) -> Json<Vec<OfflineAgent>> {
     let connected_agents: std::collections::HashSet<Uuid> = {
         let connections = state.connection_manager.read().await;
-        connections.keys().copied().collect()
+        connections.values().map(|c| c.agent_id).collect()
     };
 
     // 查询最新状态中存活但不在线的 agent
@@ -478,6 +480,165 @@ pub async fn get_dead_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Dea
     Json(agents)
 }
 
+// ============================================================================
+// 统一 Agent 列表（数据驱动状态）
+// ============================================================================
+
+/// Agent 列表条目（统一格式）
+#[derive(Serialize)]
+pub struct AgentListEntry {
+    pub id: Uuid,
+    pub name: String,
+    pub device_id: Uuid,
+    pub status: String,
+    pub location: String,
+    pub last_active: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_tick_id: Option<i64>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub hp: i32,
+    pub max_hp: i32,
+    pub attributes: std::collections::HashMap<String, i32>,
+    pub birth_attributes: std::collections::HashMap<String, i32>,
+}
+
+/// 获取所有 agents（统一列表，数据驱动）
+pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<AgentListEntry>> {
+    let connected_agents: std::collections::HashSet<Uuid> = {
+        let connections = state.connection_manager.read().await;
+        connections.values().map(|c| c.agent_id).collect()
+    };
+
+    // 从配置获取主属性名集合（数据驱动）
+    let primary_attr_keys: std::collections::HashSet<String> = {
+        let gd = state.game_data.get();
+        gd.attributes
+            .data
+            .primary
+            .attributes
+            .keys()
+            .cloned()
+            .collect()
+    };
+
+    // 查询所有 agents 的最新状态
+    let query = "
+        WITH LatestStates AS (
+            SELECT DISTINCT ON (agent_id) agent_id, node_id, attributes, is_alive, tick_id
+            FROM agent_states
+            ORDER BY agent_id, tick_id DESC
+        )
+        SELECT
+            a.agent_id,
+            a.name,
+            a.device_id,
+            a.status as db_status,
+            a.created_at,
+            a.last_tick_online,
+            COALESCE(s.node_id, 'unknown') as location,
+            COALESCE((s.attributes->>'hp')::int, 0) as hp,
+            COALESCE((s.attributes->>'hp_max')::int, 100) as max_hp,
+            s.is_alive,
+            s.tick_id as last_tick_id,
+            s.attributes as all_attrs
+        FROM agents a
+        LEFT JOIN LatestStates s ON a.agent_id = s.agent_id
+        ORDER BY a.created_at DESC
+        LIMIT 1000;
+    ";
+
+    let rows = sqlx::query(query)
+        .fetch_all(&state.db_pool)
+        .await
+        .unwrap_or_default();
+
+    let mut agents = Vec::new();
+
+    for row in rows {
+        let agent_id: Uuid = row.get("agent_id");
+        let db_status: String = row.get("db_status");
+        let is_alive: Option<bool> = row.get("is_alive");
+        let _is_alive = is_alive.unwrap_or(false);
+
+        // 确定状态（数据驱动）
+        // 数据库状态优先：retired 和 dead 直接使用
+        let status = if db_status == "retired" || db_status == "dead" {
+            db_status
+        } else if connected_agents.contains(&agent_id) {
+            "online".to_string()
+        } else {
+            "offline".to_string()
+        };
+
+        // 从 JSONB all_attrs 拆分先天属性和状态属性（数据驱动）
+        // 规则：key 或 key.trim_end_matches("_max") 在 primary_attr_keys 中 → birth_attributes
+        let all_attrs: Option<serde_json::Value> = row.get("all_attrs");
+        let mut attributes = std::collections::HashMap::new();
+        let mut birth_attributes = std::collections::HashMap::new();
+
+        if let Some(attrs) = all_attrs.and_then(|v| v.as_object().cloned()) {
+            for (k, v) in &attrs {
+                if let Some(val) = v.as_i64() {
+                    let base_key = k.strip_suffix("_max").unwrap_or(k);
+                    if primary_attr_keys.contains(base_key) {
+                        birth_attributes.insert(k.clone(), val as i32);
+                    } else {
+                        attributes.insert(k.clone(), val as i32);
+                    }
+                }
+            }
+        }
+
+        agents.push(AgentListEntry {
+            id: agent_id,
+            name: row.get("name"),
+            device_id: row.get("device_id"),
+            status,
+            location: row.get("location"),
+            last_active: row.get("last_tick_online"),
+            last_tick_id: row.get("last_tick_id"),
+            created_at: row.get("created_at"),
+            hp: row.get("hp"),
+            max_hp: row.get("max_hp"),
+            attributes,
+            birth_attributes,
+        });
+    }
+
+    tracing::debug!("返回所有 agents 数量: {}", agents.len());
+    Json(agents)
+}
+
+// ============================================================================
+// 状态配置 API（数据驱动）
+// ============================================================================
+
+/// 状态配置项
+#[derive(Serialize)]
+pub struct StatusConfig {
+    pub key: String,
+    pub display_name: String,
+    pub description: String,
+    pub color: String,
+    pub sort_order: i32,
+}
+/// 获取状态配置列表
+pub async fn get_status_configs(State(state): State<Arc<AppState>>) -> Json<Vec<StatusConfig>> {
+    let gd = state.game_data.get();
+    let configs: Vec<StatusConfig> = gd
+        .game_rules
+        .data
+        .agent_statuses
+        .iter()
+        .map(|(key, cfg)| StatusConfig {
+            key: key.clone(),
+            display_name: cfg.display_name.clone(),
+            description: cfg.description.clone(),
+            color: cfg.color.clone(),
+            sort_order: cfg.sort_order,
+        })
+        .collect();
+    Json(configs)
+}
 #[derive(Serialize)]
 pub struct AgentDetail {
     pub id: Uuid,
@@ -710,5 +871,95 @@ pub async fn cleanup_offline_agents(
 
     Ok(Json(CleanupResult {
         deleted_count: result.rows_affected(),
+    }))
+}
+
+// ============================================================================
+// Agent Experiences API
+// ============================================================================
+
+/// 经历日志条目
+#[derive(Debug, serde::Serialize)]
+pub struct ExperienceEntry {
+    pub tick_id: i64,
+    pub action_type: String,
+    pub action_data: serde_json::Value,
+    pub result: Option<String>,
+    pub thought_log: Option<String>,
+    pub observer_thought: Option<String>,
+    pub narrative: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 经历日志响应
+#[derive(Debug, serde::Serialize)]
+pub struct ExperiencesResponse {
+    pub experiences: Vec<ExperienceEntry>,
+    pub total: i64,
+    pub page: i32,
+    pub limit: i32,
+}
+
+/// 获取 Agent 经历日志
+/// GET /api/dashboard/agent/{id}/experiences?page=1&limit=20
+pub async fn get_agent_experiences(
+    State(state): State<Arc<AppState>>,
+    Path(agent_id): Path<Uuid>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<ExperiencesResponse>, StatusCode> {
+    let page: i32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let limit: i32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+    let offset = (page - 1) * limit;
+
+    // 获取总数
+    let total: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM agent_action_logs WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_one(&state.db_pool)
+            .await
+            .unwrap_or(0);
+
+    // 获取经历日志
+    let rows = sqlx::query(
+        "SELECT tick_id, action_type, action_data, result, thought_log, observer_thought, narrative, created_at
+         FROM agent_action_logs
+         WHERE agent_id = $1
+         ORDER BY tick_id DESC
+         LIMIT $2 OFFSET $3",
+    )
+    .bind(agent_id)
+    .bind(limit as i64)
+    .bind(offset as i64)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch experiences: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let experiences: Vec<ExperienceEntry> = rows
+        .into_iter()
+        .map(|row| ExperienceEntry {
+            tick_id: row.get("tick_id"),
+            action_type: row.get("action_type"),
+            action_data: row
+                .get::<Option<serde_json::Value>, _>("action_data")
+                .unwrap_or(serde_json::Value::Null),
+            result: row.get("result"),
+            thought_log: row.get("thought_log"),
+            observer_thought: row.get("observer_thought"),
+            narrative: row.get("narrative"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(ExperiencesResponse {
+        experiences,
+        total,
+        page,
+        limit,
     }))
 }

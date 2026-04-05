@@ -125,6 +125,19 @@ pub enum GameError {
     ClientConnectionClosed,
 
     // ========== 通用错误 ==========
+    /// 服务器尚未开始接受意图
+    #[error("服务器尚未开始接受意图")]
+    NotAccepting,
+
+    /// Tick ID 不匹配
+    #[error(
+        "Intent tick_id {intent_tick_id} 不匹配当前 tick {current_tick_id}。请提交当前 tick 的意图。"
+    )]
+    TickMismatch {
+        intent_tick_id: i64,
+        current_tick_id: i64,
+    },
+
     /// 验证失败
     #[error("Validation failed: {0}")]
     Validation(String),
@@ -152,6 +165,40 @@ impl From<String> for GameError {
 impl From<&str> for GameError {
     fn from(msg: &str) -> Self {
         GameError::Unknown(msg.to_string())
+    }
+}
+
+impl GameError {
+    /// 提取关联的 tick_id（仅 TickMismatch 有值）
+    pub fn current_tick_id(&self) -> Option<i64> {
+        match self {
+            GameError::TickMismatch {
+                current_tick_id, ..
+            } => Some(*current_tick_id),
+            _ => None,
+        }
+    }
+}
+
+impl GameError {
+    /// 返回机器可读的错误码字符串
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            GameError::AgentDead { .. } => crate::ERROR_CODE_AGENT_DEAD,
+            GameError::NotAccepting => crate::ERROR_CODE_NOT_ACCEPTING,
+            GameError::TickMismatch { .. } => crate::ERROR_CODE_TICK_MISMATCH,
+            GameError::AlreadyInDialogue { .. }
+            | GameError::TargetBusy { .. }
+            | GameError::SessionNotFound { .. }
+            | GameError::NotParticipant { .. }
+            | GameError::SessionNotActive { .. }
+            | GameError::MessageLimitReached { .. }
+            | GameError::Dialogue(_) => crate::ERROR_CODE_DIALOGUE_FAILED,
+            GameError::InvalidActionData { .. } | GameError::Action(_) => {
+                crate::ERROR_CODE_ACTION_FAILED
+            }
+            _ => "unknown",
+        }
     }
 }
 

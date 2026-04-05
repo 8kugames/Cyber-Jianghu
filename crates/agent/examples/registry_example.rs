@@ -5,7 +5,7 @@
 // 演示如何使用 GlobalMemoryRegistry 获取所有 Agent 的历史记忆
 // ============================================================================
 
-use cyber_jianghu_agent::ai::memory::GlobalMemoryRegistry;
+use cyber_jianghu_agent::component::memory::GlobalMemoryRegistry;
 
 fn main() {
     println!("全局记忆注册表演示");

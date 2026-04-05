@@ -4,23 +4,22 @@
 //
 // 用于连接 Cyber-Jianghu MMO-MAS 服务端的 Agent SDK
 //
-// ## COI 架构（组合优于继承）
+// ## 目录结构
 // ```
 // crates/agent/src/
-// ├── transport/    # 与 server 通信的 SDK（纯 I/O）
-// ├── core/         # 本地核心逻辑（Agent 组装、生命周期）
-// ├── runtime/      # 运行模式（各种决策函数）
-// ├── ai/           # 智能增强模块
-// │   ├── llm/       # LLM 客户端
-// │   ├── cognitive/ # 认知引擎 + 叙事化
-// │   ├── memory/    # 记忆系统
-// │   ├── persona/   # 人设系统
-// │   ├── skill/     # 技能系统
-//   ├── validator/ # 意图验证
-//   ├── dialogue/   # 对话系统
-//   ├── lifespan/   # 寿命计算
-//   ├── relationship/ # 关系管理
-//   └── prompts.rs   # Prompt 模板
+// ├── core/         # Agent 结构 + 生命周期（编排者）
+// ├── soul/         # 双魂系统（ActorSoul + ReflectorSoul）
+// │   ├── actor/    #   认知引擎 + 叙事化
+// │   └── reflector/#   意图验证 + 审查存储
+// ├── component/    # 共享能力组件
+// │   ├── memory/   #   三级记忆系统
+// │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化 + 预设）
+// │   ├── social/   #   社交系统（关系 + 对话）
+// │   └── llm/      #   LLM 客户端抽象层
+// ├── infra/        # 基础设施
+// │   ├── api/      #   HTTP API 服务器
+// │   └── transport/#   游戏服务器 WebSocket 客户端
+// ├── runtime/      # 模式入口（cognitive / claw）
 // ├── config.rs     # 配置（数据）
 // ├── models.rs     # 数据模型
 // └── bin/          # CLI 入口（组装）
@@ -31,29 +30,39 @@
 // Server ─[WebSocket]→ Transport ─[WorldState]→ Runtime ─[Intent]→ Transport ─[WebSocket]→ Server
 // ```
 //
-// ## 运行模式（runtime 模块提供）
-// - `simple`: 简单规则决策（基于生理需求）
-// - `idle`: 只空闲
-// - `stdio`: 标准输入输出（外部程序决策）
-// - `tcp`: TCP 服务器（外部程序决策）
-// - `http`: HTTP API 服务器（外部程序决策）
-// - `cognitive`: 多阶段认知引擎（内置 LLM 决策）
+// ## 双魂架构（同步审查）
+// ```
+// ActorSoul（行动之魂/本我）     ReflectorSoul（反思之魂/超我）
+//        │                              │
+//        │  generate_intent()           │
+//        │  ─────────────────────────> │  validate_with_reflector()
+//        │                              │  LLM 同步审查（单次调用）
+//        │  approved → send_intent()    │
+//        │  rejected → idle + 反馈      │
+//        ▼                              │
+//    send_intent()                     │
+// ```
+// 驳回原因通过 last_rejection_reason 跨 tick 反馈给 ActorSoul，
+// 使下一 tick 的决策能参考上一次的驳回理由。
 
 // ============================================================================
 // 模块声明
 // ============================================================================
 
-// 与 server 通信的 SDK（纯 I/O）
-pub mod transport;
-
 // 本地核心逻辑（Agent 组装、生命周期）
 pub mod core;
 
+// 双魂系统
+pub mod soul;
+
+// 共享能力组件
+pub mod component;
+
+// 基础设施
+pub mod infra;
+
 // 运行模式（决策函数）
 pub mod runtime;
-
-// 智能增强模块
-pub mod ai;
 
 // 配置和数据模型
 pub mod config;
@@ -64,10 +73,27 @@ pub mod models;
 // ============================================================================
 
 // 通信层
-pub use transport::{AgentClient, ServerConfig as TransportServerConfig, WebSocketClient};
+pub use infra::transport::{
+    AgentClient, ConnectError, ServerConfig as TransportServerConfig, WebSocketClient,
+};
 
 // 核心
 pub use core::{Agent, AgentBuilder};
+
+// 双魂系统
+pub use soul::actor::{
+    CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
+};
+pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
+pub use soul::reflector::rule_engine::{
+    Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,
+    RuleValidationResult,
+};
+pub use soul::reflector::{
+    ObserverPrompt, PendingReview, PendingReviewEntry, PersonaInfo, ReflectorSoul, RejectionType,
+    ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest, ValidationResult, Validator,
+    sanitize_for_prompt,
+};
 
 // 运行模式
 pub use runtime::{
@@ -77,31 +103,24 @@ pub use runtime::{
     run_http_server,
 };
 
-// AI 模块
-pub use ai::lifespan::{
-    AgingEffectValues, AgingEffects, AgingStage, LifespanCalculator, LifespanConfig, LifespanStatus,
-};
-pub use ai::llm::LlmClient;
-pub use ai::memory::{
+// 组件
+pub use component::llm::LlmClient;
+pub use component::memory::{
     ArchiveMemoryBackend, ClientMemory, EbbinghausConfig, EmbedderService, EpisodicMemoryBackend,
     ForgettingReport, ForgettingScheduler, ImportanceScorer, LocalEmbedder, MemoryEntry,
     MemoryManager, MemoryManagerConfig, MemoryManagerStats, MemoryToolDefinition,
     RecallArchivedParams, SearchMemoryParams, WorkingMemoryBackend,
 };
-pub use ai::persona::{
-    dynamic_persona::{DynamicPersona, PersonaState, ThreadSafePersona},
-    event_mapper::{EventTraitMapper, TraitMappingRule},
-    trait_types::{Trait, TraitChange, TraitType},
+pub use component::persona::{
+    AgentPrompt, AgingEffectValues, AgingEffects, AgingStage, DynamicPersona, EventTraitMapper,
+    LifespanCalculator, LifespanConfig, LifespanStatus, PersonaState, ThreadSafePersona, Trait,
+    TraitChange, TraitMappingRule, TraitType, get_agent_prompt, get_all_agent_prompts,
 };
-pub use ai::prompts::{AgentPrompt, get_agent_prompt, get_all_agent_prompts};
-pub use ai::relationship::{KeyEvent, RelationshipMemory, RelationshipStore};
-pub use ai::validator::{
-    IntentValidator, PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
-};
+pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
 
 // 配置
 pub use config::{
-    AgentRole, CharacterConfig, Config, GoalsConfig, IdentityConfig, LanguageStyleConfig,
+    AgentRole, CharacterConfig, Config, DeviceConfig, GoalsConfig, LanguageStyleConfig,
     MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig,
 };
 pub use models::{ActionType, Intent, WorldEvent, WorldState};

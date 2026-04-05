@@ -61,6 +61,30 @@ impl CombatActionExecutor {
             );
         }
 
+        // eat/drink 语义过滤：检查物品效果是否匹配动作类型
+        let action_str = intent.action_type.as_str();
+        if action_str == "eat" || action_str == "drink" {
+            let target_attr = if action_str == "eat" {
+                "hunger"
+            } else {
+                "thirst"
+            };
+            let has_matching_effect = item
+                .effects
+                .iter()
+                .any(|e| e.attribute == target_attr && e.operation == "add");
+            if !has_matching_effect {
+                return ActionExecutionResult::failure(
+                    format!(
+                        "{} 不能用于{}（无 {} 恢复效果）",
+                        item.name, action_str, target_attr
+                    ),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        }
+
         // 收集物品效果（在 apply_state_change 中扣除物品成功后应用）
         let effects: Vec<super::super::ItemEffect> = item
             .effects

@@ -4,6 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
+fn default_survival_threshold() -> i32 {
+    30
+}
+
 use super::entities::{AvailableAction, InitialItem};
 
 /// 游戏规则
@@ -19,6 +23,14 @@ pub struct GameRules {
 
     /// 初始物品（注册时发放）
     pub initial_items: Vec<InitialItem>,
+
+    /// 生存相关动作列表（hunger/thirst 低于阈值时绕过 ReflectorSoul 审查）
+    #[serde(default)]
+    pub survival_actions: Vec<String>,
+
+    /// 生存底线阈值（hunger/thirst 低于此值时触发 survival 动作绕过审查）
+    #[serde(default = "default_survival_threshold")]
+    pub survival_threshold: i32,
 
     /// 规则版本（用于检测变更）
     pub version: String,
@@ -71,7 +83,7 @@ impl Default for WorldBuildingRules {
         Self {
             version: "0.0.1".to_string(),
             era: EraSettings {
-                name: "北宋前期（约10世纪中国）".to_string(),
+                name: "武侠架空世界".to_string(),
                 tech_level: "冷兵器时代，火药仅用于烟火".to_string(),
                 social_structure: "封建帝制，江湖与庙堂并存".to_string(),
             },

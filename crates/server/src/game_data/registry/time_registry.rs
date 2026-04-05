@@ -26,16 +26,24 @@ impl TimeRegistry {
     /// 根据 tick 获取当前季节
     pub fn get_current_season(current_tick: i64) -> Option<SeasonData> {
         let config = Self::get_config()?;
+        let registry = registry_or_panic();
+        let tick_config = &registry.get().game_rules.data.agent_state.tick;
 
         let ticks_per_hour = config.ticks_per_hour as i64;
         let hours_per_day = config.hours_per_day as i64;
         let days_per_season = config.days_per_season as i64;
+        let real_seconds_per_tick = tick_config.real_seconds_per_tick as i64;
 
-        let ticks_per_day = ticks_per_hour * hours_per_day;
-        let ticks_per_season = ticks_per_day * days_per_season;
-
-        // 计算过了多少个完整的季节
-        let total_seasons_passed = current_tick / ticks_per_season;
+        // tick_id 是秒级秒数，转换为游戏小时
+        // game_hours = tick_id / (real_seconds_per_tick * ticks_per_hour)
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            current_tick / real_seconds_per_game_hour
+        } else {
+            current_tick / ticks_per_hour
+        };
+        let game_days = game_hours / hours_per_day;
+        let game_seasons = game_days / days_per_season;
 
         // 季节循环索引
         let season_count = config.seasons.len() as i64;
@@ -43,7 +51,7 @@ impl TimeRegistry {
             return None;
         }
 
-        let season_index = (total_seasons_passed % season_count) as usize;
+        let season_index = (game_seasons % season_count) as usize;
 
         config.seasons.get(season_index).cloned()
     }
@@ -51,13 +59,23 @@ impl TimeRegistry {
     /// 获取格式化的时间显示，用于广播
     pub fn get_time_display(current_tick: i64) -> Option<TimeDisplay> {
         let config = Self::get_config()?;
+        let registry = registry_or_panic();
+        let tick_config = &registry.get().game_rules.data.agent_state.tick;
 
         let ticks_per_hour = config.ticks_per_hour as i64;
         let hours_per_day = config.hours_per_day as i64;
+        let real_seconds_per_tick = tick_config.real_seconds_per_tick as i64;
 
-        let hour_of_day = (current_tick / ticks_per_hour) % hours_per_day;
-        let day_of_season =
-            (current_tick / (ticks_per_hour * hours_per_day)) % config.days_per_season as i64;
+        // tick_id 是秒级秒数，转换为游戏小时
+        // game_hours = tick_id / (real_seconds_per_tick * ticks_per_hour)
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            current_tick / real_seconds_per_game_hour
+        } else {
+            current_tick / ticks_per_hour
+        };
+        let hour_of_day = game_hours % hours_per_day;
+        let day_of_season = (game_hours / hours_per_day) % config.days_per_season as i64;
 
         // 假设 6:00 到 18:00 为白天
         let is_daytime = (6..18).contains(&hour_of_day);

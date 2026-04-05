@@ -1,132 +1,112 @@
 # ============================================================================
-# OpenClaw Cyber-Jianghu 动作系统配置
+# Cyber-Jianghu 动作系统配置
 # ============================================================================
 #
-# 动作定义：包含验证规则和属性要求
+# 动作定义：原子行为单元，不可再分
 #
-# requirements 字段说明：
+# requirements 字段说明（执行前校验 + 消耗）：
 #   - cost: 执行动作扣减的属性值（正值）
-#   - recovery: 执行动作恢复的属性值（正值）
 #   - min: 执行动作前属性需达到的最小值
+#
+# effects 字段说明（执行成功后效果，走 StateChange 管线）：
+#   - effect_type: attribute_change
+#       attribute: 属性名（对应 attributes.yaml 中的 key）
+#       operation: add | sub
+#       value: 变化量（整数）
+#   - effect_type: add_item
+#       item_id: 物品 ID（对应 items.yaml 中的 key）
+#       quantity: 数量（默认 1）
+#
+# 职责划分：
+#   - requirements: 前置校验（min）+ 扣减消耗（cost），失败则整动作中止
+#   - effects: 成功后追加效果（属性变化、物品获取等），走完整 StateChange 管线
+#
+# effects 示例（见 idle 动作的实际配置）：
+#
+#   idle:
+#     effects:
+#       - effect_type: attribute_change    # 属性变化
+#         attribute: stamina
+#         operation: add
+#         value: 5
+#       - effect_type: attribute_change    # 可叠加多个效果
+#         attribute: sanity
+#         operation: add
+#         value: 1
+#       - effect_type: add_item            # 获取物品（可选）
+#         item_id: herb
+#         quantity: 2
+#
+# 动作分类：
+#   - survival: 基础生存
+#   - combat: 战斗
+#   - martial: 江湖技能
+#   - social: 社交
+#   - economic: 经济
 # ============================================================================
 
-version: "0.0.1"
-description: "动作系统配置文件（统一数据格式）"
+version: "0.1.0"
+description: "动作系统配置文件"
 
 meta:
   created_at: "2026-03-16"
   updated_at: "2026-03-18"
-  author: "Cyber-Jianghu Community"
   tags:
     - actions
-    - commands
     - config
-  notes:
-    - "requirements 中的 cost 表示执行动作扣减的属性值（正值）"
-    - "requirements 中的 recovery 表示执行动作恢复的属性值（正值）"
-    - "min 表示执行动作前属性需达到的最小值"
 
 data:
+  # ==========================================================================
+  # 基础生存
+  # ==========================================================================
   idle:
     description: "休息，不做任何操作"
+    category: survival
     validation: {}
     requirements:
       - requirement_type: attribute
         attribute: stamina
         min: 0
-        recovery: 5
-
-  attack:
-    description: "攻击目标，造成伤害"
-    base_damage: 10
-    damage_formula: "10 + strength * 0.5 + weapon_bonus * weapon_multiplier"
-    weapon_bonus: 5
-    weapon_bonus_multiplier: 1.0
-    validation:
-      requires_target: true
-      requires_target_alive: true
-      required_fields:
-        - target_agent_id
-    requirements:
-      - requirement_type: attribute
+    effects:
+      - effect_type: attribute_change
         attribute: stamina
-        min: 5
-        cost: 5
-
-  steal:
-    description: "从目标身上偷取物品，有一定成功率"
-    success_rate: 0.5
-    validation:
-      requires_target: true
-      requires_target_alive: true
-      required_fields:
-        - target_agent_id
-        - item_id
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 5
-        cost: 5
-
-  speak:
-    description: "公开说话，所有人可见"
-    max_content_length: 500
-    validation:
-      required_fields:
-        - content
-      field_validations:
-        - field: content
-          validation_type: not_empty
-        - field: content
-          validation_type: max_length
-          max_length: 500
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 0
-        cost: 1
-
-  move:
-    description: "移动到指定位置（多场景版本）"
-    validation:
-      required_fields:
-        - target_location
-      field_validations:
-        - field: target_location
-          validation_type: not_empty
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 10
-        cost: 10
-
-  give:
-    description: "将物品给予目标"
-    validation:
-      requires_target: true
-      requires_target_alive: true
-      required_fields:
-        - target_agent_id
-        - item_id
-        - quantity
-      field_validations:
-        - field: quantity
-          validation_type: min_value
-          min_value: 1
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 2
-        cost: 2
+        operation: add
+        value: 5
+      - effect_type: attribute_change
+        attribute: sanity
+        operation: add
+        value: 1
 
   use:
-    description: "使用物品（如食物、水等）"
+    description: "使用物品"
+    category: survival
     validation:
       required_fields:
         - item_id
-      field_validations:
-        - field: item_id
-          validation_type: not_empty
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  eat:
+    description: "进食"
+    category: survival
+    validation:
+      required_fields:
+        - item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 1
+        cost: 1
+
+  drink:
+    description: "饮水"
+    category: survival
+    validation:
+      required_fields:
+        - item_id
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -134,13 +114,11 @@ data:
         cost: 1
 
   pickup:
-    description: "从地面拾取物品"
+    description: "拾取物品"
+    category: survival
     validation:
       required_fields:
         - item_id
-      field_validations:
-        - field: item_id
-          validation_type: not_empty
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -148,14 +126,13 @@ data:
         cost: 2
 
   drop:
-    description: "将物品丢弃到地面"
+    description: "丢弃物品"
+    category: survival
     validation:
       required_fields:
         - item_id
         - quantity
       field_validations:
-        - field: item_id
-          validation_type: not_empty
         - field: quantity
           validation_type: min_value
           min_value: 1
@@ -165,36 +142,265 @@ data:
         min: 1
         cost: 1
 
-  gather:
-    description: "从场景中采集自然资源"
+  move:
+    description: "移动到指定位置"
+    category: survival
     validation:
       required_fields:
-        - target_id
-      field_validations:
-        - field: target_id
-          validation_type: not_empty
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 5
-        cost: 5
-
-  craft:
-    description: "制造/合成物品"
-    validation:
-      required_fields:
-        - recipe_id
-      field_validations:
-        - field: recipe_id
-          validation_type: not_empty
+        - target_location
     requirements:
       - requirement_type: attribute
         attribute: stamina
         min: 10
         cost: 10
 
+  # ==========================================================================
+  # 战斗
+  # ==========================================================================
+  attack:
+    description: "攻击目标"
+    category: combat
+    base_damage: 10
+    damage_formula: "10 + strength * 0.5 + weapon_bonus"
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 5
+
+  defend:
+    description: "防御姿态"
+    category: combat
+    damage_reduction: 0.5
+    duration_ticks: 1
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 10
+        cost: 8
+
+  dodge:
+    description: "闪避"
+    category: combat
+    dodge_chance_formula: "agility * 0.01 + luck * 0.005"
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 8
+        cost: 6
+
+  parry:
+    description: "招架"
+    category: combat
+    parry_chance_formula: "strength * 0.02"
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 12
+        cost: 10
+
+  heavy_strike:
+    description: "重击"
+    category: combat
+    base_damage: 25
+    damage_formula: "25 + strength * 0.8"
+    stamina_cost_multiplier: 2.0
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 20
+        cost: 20
+
+  flee:
+    description: "逃跑"
+    category: combat
+    flee_success_formula: "agility * 0.03"
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 15
+        cost: 10
+
+  # ==========================================================================
+  # 江湖技能
+  # ==========================================================================
+  steal:
+    description: "偷窃"
+    category: martial
+    success_rate_formula: "agility * 0.02 + luck * 0.01"
+    detection_threshold: 0.3
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+        - item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 5
+
+  stealth:
+    description: "潜行"
+    category: martial
+    stealth_level_formula: "agility * 0.5 + luck * 0.3"
+    duration_ticks: 5
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 10
+        cost: 8
+
+  poison:
+    description: "下毒"
+    category: martial
+    poison_damage: 5
+    poison_duration_ticks: 3
+    success_rate: 0.6
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+        - poison_item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 10
+        cost: 8
+
+  meditate:
+    description: "打坐"
+    category: martial
+    inner_power_recovery: 15
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 0
+
+  practice:
+    description: "修炼武功"
+    category: martial
+    skill_progress: 5
+    validation:
+      required_fields:
+        - skill_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 15
+        cost: 10
+
+  # ==========================================================================
+  # 社交
+  # ==========================================================================
+  speak:
+    description: "公开说话"
+    category: social
+    max_content_length: 500
+    validation:
+      required_fields:
+        - content
+      field_validations:
+        - field: content
+          validation_type: not_empty
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 0
+        cost: 1
+
+  whisper:
+    description: "私语"
+    category: social
+    max_content_length: 200
+    validation:
+      requires_target: true
+      required_fields:
+        - target_agent_id
+        - content
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 0
+        cost: 1
+
+  shout:
+    description: "大喊"
+    category: social
+    max_content_length: 300
+    broadcast_radius: 3
+    validation:
+      required_fields:
+        - content
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 3
+
+  follow:
+    description: "跟随"
+    category: social
+    follow_distance: 3
+    validation:
+      requires_target: true
+      required_fields:
+        - target_agent_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 0
+        cost: 1
+
+  # ==========================================================================
+  # 经济
+  # ==========================================================================
+  give:
+    description: "给予物品"
+    category: economic
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+        - item_id
+        - quantity
+      field_validations:
+        - field: quantity
+          validation_type: min_value
+          min_value: 1
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 2
+        cost: 2
+
   trade:
-    description: "与目标进行交易，以指定价格买卖物品"
+    description: "交易"
+    category: economic
     validation:
       requires_target: true
       requires_target_alive: true
@@ -211,3 +417,41 @@ data:
         attribute: stamina
         min: 3
         cost: 3
+
+  gather:
+    description: "采集"
+    category: economic
+    resource_yield: "1 + luck * 0.1"
+    validation:
+      required_fields:
+        - target_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 5
+
+  craft:
+    description: "制造"
+    category: economic
+    quality_formula: "craft_skill * 0.5 + luck * 0.1"
+    validation:
+      required_fields:
+        - recipe_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 10
+
+  repair:
+    description: "修理"
+    category: economic
+    durability_restore: 50
+    validation:
+      required_fields:
+        - item_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 8
+        cost: 6

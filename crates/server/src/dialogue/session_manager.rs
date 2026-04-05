@@ -106,6 +106,14 @@ impl DialogueManager {
         let mut registry = self.sessions.write().await;
         registry.cleanup_timeout_sessions(timeout)
     }
+
+    /// 关闭所有活动会话（Tick 结束时调用）
+    ///
+    /// 返回所有被关闭的会话信息
+    pub async fn close_all_sessions(&self) -> Vec<cyber_jianghu_protocol::PrivateDialogueRecord> {
+        let mut registry = self.sessions.write().await;
+        registry.close_all_sessions()
+    }
 }
 
 // ============================================================================

@@ -1,6 +1,6 @@
-use crate::ai::memory::MemoryManager;
-use crate::ai::memory::backend::SearchableBackend;
-use crate::ai::memory::tools::{
+use crate::component::memory::MemoryManager;
+use crate::component::memory::backend::SearchableBackend;
+use crate::component::memory::tools::{
     MemorySearchResult, MemoryToolDefinition, MemoryToolResult, RECALL_ARCHIVED_TOOL,
     RecallArchivedParams, SEARCH_MEMORY_TOOL, SearchMemoryParams,
 };

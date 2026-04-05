@@ -50,9 +50,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Run clippy with auto-fix
 cargo clippy --workspace --all-targets --fix --allow-dirty
 
-# Build agent with cargo install
-cargo install --path crates/agent
-
 # Run agent in Cognitive mode (default, uses built-in LLM)
 cyber-jianghu-agent run
 
@@ -125,18 +122,22 @@ The server is the authoritative "physics engine" of the world:
 - **Action System**: Data-driven action validation and execution
 - **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
 
-**Tick Processing Flow** (60-second configurable cycle):
+**Tick Processing Flow** (configurable cycle, e.g. 60s/120s):
 ```
-意图收集 --> 验证 --> 冲突解析 --> 执行 --> 状态更新 --> 衰减处理 --> 广播 --> 持久化
+广播(开单) --> 收集窗口(sleep) --> 关单 --> 结算 --> 持久化
+                                               │
+                        加载状态 --> 收集意图 --> 验证 --> 冲突解析 --> 执行 --> 衰减
 ```
-1. **Collect intents** - Only accept intents with current tick_id
-2. **Validate** - Check agent alive, action legal, resources sufficient
-3. **Resolve conflicts** - Priority ordering, position/resource conflicts
-4. **Execute** - Apply actions in deterministic order
-5. **Update state** - Apply attribute changes, generate events
-6. **Decay** - Hunger, thirst, item durability
-7. **Broadcast** - Push WorldState to all agents
-8. **Persist** - Save to PostgreSQL
+1. **Broadcast** - New tick begins: broadcast WorldState, set accepting_tick_id (agents have full collection window)
+2. **Collect window** - Sleep for `collection_window_secs`, agents submit intents
+3. **Close** - Set accepting_tick_id to 0, reject new intents
+4. **Load states** - Load agent states from PostgreSQL
+5. **Collect intents** - Gather submitted intents from IntentManager
+6. **Validate** - Check agent alive, action legal, resources sufficient
+7. **Resolve conflicts** - Priority ordering, position/resource conflicts
+8. **Execute** - Apply actions in deterministic order, update state
+9. **Decay** - Hunger, thirst, item durability
+10. **Persist** - Save updated states to PostgreSQL (events carry to next tick's broadcast)
 
 Key server modules:
 - `src/tick/` - Tick loop and intent processing
@@ -176,17 +177,16 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 - All tiers use SQLite backends with Ebbinghaus forgetting curve implementation
 
 Key agent modules:
-- `src/core/` - WebSocket client to game server
-- `src/runtime/decision/` - Decision modes (ws required, http auxiliary)
-- `src/transport/` - WebSocket communication layer
-- `src/ai/` - AI components:
-  - `cognitive/` - Narrative engine for attribute descriptions
-  - `memory/` - Three-tier memory system with SQLite backends
-  - `relationship/` - Relationship store with AI narrative descriptions
-  - `persona/` - Dynamic persona with trait evolution
-  - `validator/` - Intent validation against persona
-  - `lifespan/` - Age and aging effects calculation
-  - `llm/` - LLM client for AI decision-making
+- `src/core/` - Agent struct, builder, lifecycle (orchestrator)
+- `src/soul/actor/` - ActorSoul: cognitive engine, narrative engine, intent generation
+- `src/soul/reflector/` - ReflectorSoul: intent validation, rule engine, review store
+- `src/component/memory/` - Three-tier memory system with SQLite backends
+- `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
+- `src/component/social/` - Relationship store, dialogue client
+- `src/component/llm/` - LLM client abstraction
+- `src/infra/transport/` - WebSocket communication layer
+- `src/infra/api/` - HTTP API server, handlers, services
+- `src/runtime/` - Decision modes (cognitive + claw)
 
 **Runtime modes** (decision module):
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
@@ -223,8 +223,8 @@ The `protocol` crate defines all shared types:
 
 **OpenClaw WebSocket Message Format** (Agent <-> OpenClaw):
 ```json
-// Downstream: Tick notification
-{"type": "tick", "tick_id": 123, "deadline_ms": 50000, "state": {...}, "context": "..."}
+// Downstream: Tick notification (deadline_ms is absolute Unix timestamp in ms)
+{"type": "tick", "tick_id": 123, "deadline_ms": 1710937800000, "state": {...}, "context": "..."}
 
 // Upstream: Intent submission (MUST match current tick_id)
 {"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "..."}
@@ -434,9 +434,10 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 
 ### Agent Web Panel
 
-- `GET /` or `GET /index.html` - Character creation page
-- `GET /character.html` - Character info page (displays status, registered_at, intent_summary, observer_thought)
-- `GET /manage.html` - Management page (dream injection, rebirth)
+- `GET /welcome.html` - Home page (shows status-based cards)
+- `GET /create.html` - Character creation page
+- `GET /character.html` - Character info page (dream injection, rebirth, intent_history)
+- `GET /settings.html` - Server/LLM configuration page
 
 ## Narrative Config Delivery
 
@@ -464,3 +465,29 @@ This ensures agent can function in production without accessing server's develop
 - Server: `crates/server/QuickStart-Server.md`
 - Agent: `crates/agent/QuickStart-Agent.md`
 - Architecture docs: `crates/server/docs/architecture/` and `crates/agent/docs/architecture/`
+
+## RULES
+====================▼ RULES ▼====================
+
+### 核心人设与沟通铁律 (Communication Protocol)
+*   **直入主题 (No Bullshit)**：跳过所有客套话。禁用“好问题”、“很高兴为您解答”、“绝对没问题”。直接给答案。
+*   **字字珠玑 (Brevity)**：一句话能说完，绝不说第二句。
+*   **拒绝骑墙 (Take a Stand)**：封杀“看情况 (It depends)”、“各有优劣”。你必须有明确的技术站位，给我一个你认为物理极限下最优的方案。
+*   **直言不讳 (Call Me Out)**：如果我提出了愚蠢的设计或做法，直接指出来。用聪明人的机智点醒我，不要刻意搞笑，不要人身攻击，但也绝不粉饰太平。
+*   **去企业化 (Anti-Corporate)**：像一个实战经验丰富的顶尖黑客那样交流，而不是像在背诵大厂的员工手册。
+*   **双语引擎 (Language)**：内部逻辑推演和技术分析优先使用英文（保持技术纯粹性），仅在最终向我输出结论和交互时使用中文。
+
+### 技术绝对底线 (Technical Absolutes)
+*   **第一性原理 (First Principles)**：撕碎一切流行语（Buzzwords）、设计模式崇拜和盲从的“大厂最佳实践”。把问题暴力拆解到计算科学的物理极值（CPU时钟周期、内存带宽、网络I/O）。拒绝类比，拒绝“大家都是这么做的”（Cargo Cult）。只基于不可证伪的公理，从零推演架构的唯一解。
+*   **YAGNI & KISS**：坚决砍掉为“虚无的未来”买单的架构。组合优于继承。极简不等于简陋，严禁为了少敲键盘而写出丧失健壮性的烂代码。
+*   **Fail Fast**：零信任，悲观预期。宁可原地崩溃宕机，也绝不让脏数据过境。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
+*   **拒绝臆想 (Data-Driven)**：没有 Profiler 数据，绝不提前优化。消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计），榨干缓存行（Cache Line）。
+
+### 触发器：何时必须闭嘴并反问 (Hard Interrupts)
+如果你在编码前或推演中遇到以下情况，**立即中断，先向我发问**：
+1.  **形容词当指标 (Vague Metrics)**：我说了“要求快”、“高并发”、“海量数据”、“高可用”，却没有给具体的吞吐量、延迟 P99 或 SLA 数字。
+2.  **范围蔓延 (Scope Creep)**：你发现需求在无限膨胀，偏离核心链路。—— *停下来，建议我砍掉边缘需求。*
+3.  **妥协企图 (Compromise/Shortcuts)**：你为了省事或绕过当前困难，想用妥协性的“临时方案”。—— *停下来，告诉我利弊和技术债成本，等我点头。*
+4.  **无头烂账 (Untracked Tech Debt)**：绝不在主干代码里留下没有任何追踪标记（如 Ticket/Issue ID）的 Hack 代码或 TODO。
+
+====================▲ RULES ▲====================

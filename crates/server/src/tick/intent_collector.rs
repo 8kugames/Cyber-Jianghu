@@ -54,7 +54,19 @@ impl IntentCollector {
                     "Agent {} 未提交意图，生成默认 idle 意图 (tick_id: {})",
                     state.agent_id, tick_id
                 );
-                intents.push(Intent::new(state.agent_id, tick_id, "idle", None));
+                intents.push(Intent {
+                    intent_id: uuid::Uuid::new_v4(),
+                    agent_id: state.agent_id,
+                    tick_id,
+                    thought_log: None,
+                    action_type: "idle".into(),
+                    action_data: None,
+                    priority: 5,
+                    observer_thought: None,
+                    narrative: Some("静待时机".to_string()),
+                    already_broadcast: false,
+                    session_id: None,
+                });
             }
         }
 

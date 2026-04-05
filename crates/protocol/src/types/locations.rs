@@ -111,7 +111,12 @@ impl LocationGraph {
     }
 
     /// 检查两个节点是否直接相连
+    ///
+    /// 自环（from == to）视为有效：原地不动是合法的"移动"。
     pub fn is_connected(&self, from: &str, to: &str) -> bool {
+        if from == to {
+            return true;
+        }
         self.get_neighbors(from).iter().any(|e| e.to_node_id == to)
     }
 }

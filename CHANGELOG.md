@@ -9,6 +9,90 @@
 
 ### ⚠️ Breaking Changes
 
+- **Protocol**: `ServerMessage::Error` 新增 `code: String` 字段
+  - 旧格式: `{"type":"error","message":"..."}`
+  - 新格式: `{"type":"error","code":"tick_mismatch","message":"..."}`
+  - `code` 字段使用 `#[serde(default)]` 反序列化兼容，但**旧版 Agent 无法利用结构化错误码**
+  - 错误码常量定义在 `cyber_jianghu_protocol::ERROR_CODE_*`（见下方 Added）
+  - 影响：所有依赖 `ServerMessage::Error` 的下游代码需适配 `code` 字段
+
+- **Protocol**: `AvailableAction` 新增 `required_fields: Vec<String>` 字段
+  - 字段使用 `#[serde(default)]` 反序列化兼容，旧数据自动填充空数组
+  - 影响：所有构造 `AvailableAction` 的代码需提供 `required_fields`
+
+- **Agent**: 删除 `claw/protocol.rs` 中 `infer_error_code()` 文本推断回退
+  - 旧版 Agent 在 server 不发 `code` 时通过中文/英文关键词推断错误类型
+  - 现在要求 server 必须发送 `code` 字段，否则统一回退 `ServerErrorCode::Unknown`
+
+### Added
+
+- **Protocol**: 结构化错误码常量 (`crates/protocol/src/lib.rs`)
+  - `ERROR_CODE_TICK_MISMATCH` = `"tick_mismatch"`
+  - `ERROR_CODE_NOT_ACCEPTING` = `"not_accepting"`
+  - `ERROR_CODE_AGENT_DEAD` = `"agent_dead"`
+  - `ERROR_CODE_RATE_LIMITED` = `"rate_limited"`
+  - `ERROR_CODE_INVALID_MESSAGE` = `"invalid_message"`
+  - `ERROR_CODE_DIALOGUE_FAILED` = `"dialogue_failed"`
+  - `ERROR_CODE_ACTION_FAILED` = `"action_failed"`
+
+- **Protocol**: 事件类型常量 (`crates/protocol/src/lib.rs`)
+  - `EVENT_TYPE_WORLD_STATE` = `"world_state"`
+  - `EVENT_TYPE_ACTION_RESULT` = `"action_result"`
+  - `EVENT_TYPE_PUBLIC_MESSAGE` = `"public_message"`
+  - `EVENT_TYPE_DEATH_NOTIFICATION` = `"death_notification"`
+  - `EVENT_TYPE_SYSTEM_NOTIFICATION` = `"system_notification"`
+  - `EVENT_TYPE_DIALOGUE_START` = `"dialogue_start"`
+  - `EVENT_TYPE_DIALOGUE_MESSAGE` = `"dialogue_message"`
+
+- **Protocol**: `GameError` 新增变体和方法
+  - `GameError::NotAccepting` — 服务端未开始接受意图
+  - `GameError::TickMismatch { intent_tick_id, current_tick_id }` — 携带结构化 tick 数据
+  - `GameError::error_code()` — 从枚举映射到协议常量
+  - `GameError::current_tick_id()` — 提取 tick_id（仅 TickMismatch 有值）
+
+- **Agent**: `TickMismatchError` 结构化错误 (`crates/agent/src/infra/transport/websocket.rs`)
+  - 携带 `current_tick_id` 和 `message`，通过 `anyhow::Error` downcast 传递
+  - 替代 lifecycle.rs 中 `rsplit("tick ")` 文本解析
+
+- **Server**: `ActionRegistry::build_available_actions()` 去重方法
+  - 统一 3 处 `AvailableAction` 内联构造（broadcaster.rs、types.rs、handlers/agent.rs）
+  - 自动填充 `required_fields`（从 `actions.yaml` 的 `validation.required_fields` 读取）
+
+- **Agent**: 动态动作表生成 (`engine.rs:build_dynamic_action_table()`)
+  - 从 `world_state.available_actions` 动态生成 LLM prompt 动作表
+  - 包含 `required_fields` 提示，替代硬编码动作列表
+
+- **Agent**: `FORGETTING_INTERVAL_TICKS` 命名常量 (`crates/agent/src/core/mod.rs`)
+  - 替代 magic number `84`（7 天 * 12 小时/天）
+
+### Changed
+
+- **Server**: 错误响应使用结构化 `GameError` 而非裸字符串
+  - `handler.rs`: agent 死亡返回 `GameError::AgentDead`，tick 校验返回 `GameError::TickMismatch/NotAccepting`
+  - 错误 handler 通过 `downcast_ref::<GameError>()` 提取 `error_code()` 发送结构化 `code`
+
+- **Server**: broadcaster.rs / types.rs 事件类型使用协议常量
+  - `"world_state"` → `EVENT_TYPE_WORLD_STATE`
+  - `"system_notification"` → `EVENT_TYPE_SYSTEM_NOTIFICATION`
+  - `"death_notification"` → `EVENT_TYPE_DEATH_NOTIFICATION`
+
+- **Agent**: event_mapper.rs 事件类型使用协议常量
+- **Agent**: engine.rs 事件分类使用协议常量（`EVENT_TYPE_PUBLIC_MESSAGE`、`EVENT_TYPE_ACTION_RESULT`）
+- **Agent**: claw/protocol.rs `resolve_error_code()` 使用协议常量映射
+
+### Removed
+
+- **Agent**: `infer_error_code()` 函数及其 4 个测试
+  - 通过中文/英文关键词推断错误类型的向后兼容代码，server 已全面支持 `code` 字段
+
+- **Agent**: lifecycle.rs 中 tick mismatch 文本解析
+  - 删除 `rsplit("tick ")` + `rfind()` 数字提取逻辑
+  - 替代为 `TickMismatchError` 结构化 downcast
+
+---
+
+## [0.0.33] - 2026-03-23
+
 - **Agent**: CLI 移除 `--role` 和 `--target-endpoint` 参数
   - 移除远程 Observer 模式（HTTP 轮询其他 Agent）
   - ReflectorSoul 现在作为进程内双 Soul 架构默认启用
@@ -256,7 +340,3 @@ Game Server → WebSocket Client → server_msg_callback → broadcast::Sender
 
 - **Server**: 版本号从 0.0.7 升级到 0.0.9
 - **Config**: `config.rs` 中 Token 读取逻辑增加空字符串过滤
-
----
-
-## [Unreleased]

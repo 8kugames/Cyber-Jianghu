@@ -8,7 +8,7 @@
 //! ```
 
 use cyber_jianghu_agent::{
-    IntentValidator, LifespanCalculator, LifespanConfig, LlmClient, PersonaInfo, Validator,
+    LifespanCalculator, LifespanConfig, LlmClient, PersonaInfo, ReflectorSoul, Validator,
 };
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::sync::Arc;
@@ -33,6 +33,10 @@ impl LlmClient for ExampleLlmClient {
         }"#
         .to_string())
     }
+
+    async fn complete_with_system(&self, _system: &str, _prompt: &str) -> anyhow::Result<String> {
+        self.complete(_prompt).await
+    }
 }
 
 // ============================================================================
@@ -44,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     // 初始化日志
     tracing_subscriber::fmt::init();
 
-    println!("=== IntentValidator 示例 ===\n");
+    println!("=== ReflectorSoul 示例 ===\n");
 
     // 1. 创建 WorldBuildingRules
     let world_rules = WorldBuildingRules::default();
@@ -57,11 +61,10 @@ async fn main() -> anyhow::Result<()> {
     // 2. 创建 LLM 客户端（实际使用时由 OpenClaw 提供）
     let llm_client = Arc::new(ExampleLlmClient);
 
-    // 3. 创建 IntentValidator
-    // 注意：IntentValidator 是泛型的，需要指定 LLM 客户端类型
+    // 3. 创建 ReflectorSoul（意图审查引擎）
     let validator: Arc<dyn Validator> =
-        Arc::new(IntentValidator::new(world_rules.clone(), llm_client));
-    println!("IntentValidator 已创建\n");
+        Arc::new(ReflectorSoul::new(world_rules.clone(), llm_client));
+    println!("ReflectorSoul 已创建\n");
 
     // 4. 创建 LifespanCalculator
     let lifespan_config = LifespanConfig {
@@ -136,7 +139,7 @@ async fn main() -> anyhow::Result<()> {
     println!("2. 从服务端获取 WorldBuildingRules");
     println!("3. 将验证器注入到 Agent 中：");
     println!(
-        "   let validator: Arc<dyn Validator> = Arc::new(IntentValidator::new(rules, llm_client));"
+        "   let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(rules, llm_client));"
     );
     println!("   agent.set_validator(validator);");
 

@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-server"
-version = "0.0.62"
+version = "0.0.105"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ description = "MVP server for Cyber-Jianghu MMO-MAS"
 
 [dependencies]
 # 内部 crates
-cyber-jianghu-protocol = { version = "0.0.16", path = "../protocol", features = ["sqlx-support"] }
+cyber-jianghu-protocol = { version = "0.0.34", path = "../protocol", features = ["sqlx-support"] }
 
 # Web 框架
 axum = { version = "0.8.8", features = ["ws"] }
@@ -41,6 +41,7 @@ config = "0.15.21"
 dotenv = "0.15"
 rand = { workspace = true }
 evalexpr = "13.1.0"
+mime_guess = "2.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"

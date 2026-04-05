@@ -19,6 +19,10 @@ pub struct ActionConfigEntry {
     #[serde(default)]
     pub description: String,
 
+    /// 动作标签（用于分类和逻辑判断，如 [survival]）
+    #[serde(default)]
+    pub tags: Vec<String>,
+
     /// 基础伤害（attack）
     pub base_damage: Option<i32>,
 
@@ -236,12 +240,6 @@ impl ActionRequirement {
     /// 返回正值表示扣减量
     pub fn get_cost(&self) -> Option<i32> {
         self.get_i32("cost").filter(|&v| v > 0)
-    }
-
-    /// 获取属性恢复值（recovery）
-    /// 返回正值表示恢复量
-    pub fn get_recovery(&self) -> Option<i32> {
-        self.get_i32("recovery").filter(|&v| v > 0)
     }
 
     /// 获取属性名称

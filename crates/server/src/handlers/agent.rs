@@ -7,8 +7,7 @@ use crate::db::{self, DeviceConnectResult, verify_device_token};
 use crate::game_data;
 use crate::models::{
     AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,
-    AvailableAction, GameRules, InitialItem, get_max_agent_name_length,
-    get_max_system_prompt_length,
+    GameRules, InitialItem, get_max_agent_name_length, get_max_system_prompt_length,
 };
 use crate::state::AppState;
 
@@ -181,21 +180,13 @@ pub async fn agent_register(
         let gd = state.game_data.get();
         gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64
     };
+    let survival_threshold = {
+        let gd = state.game_data.get();
+        gd.game_rules.data.agent_state.survival.critical_threshold
+    };
     let game_rules = GameRules {
         tick_duration_secs,
-        available_actions: game_data::ActionRegistry::all_action_names()
-            .into_iter()
-            .map(|action_name| {
-                let description = game_data::ActionRegistry::get(&action_name)
-                    .map(|config| config.description)
-                    .unwrap_or_default();
-                AvailableAction {
-                    action: action_name,
-                    description,
-                    valid_targets: None,
-                }
-            })
-            .collect(),
+        available_actions: game_data::ActionRegistry::build_available_actions(),
         initial_items: initial_items
             .into_iter()
             .map(|item| InitialItem {
@@ -205,6 +196,8 @@ pub async fn agent_register(
                 description: item.description,
             })
             .collect(),
+        survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
+        survival_threshold,
         version: state.game_data.get().game_rules.version.clone(),
         last_updated: chrono::Utc::now().to_rfc3339(),
     };

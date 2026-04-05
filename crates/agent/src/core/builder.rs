@@ -5,28 +5,26 @@
 // 提供流式接口构建 Agent
 // ============================================================================
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::ai::dialogue::DialogueClient;
-use crate::ai::lifespan::LifespanCalculator;
-use crate::ai::llm::LlmClient;
-use crate::ai::memory::{MemoryManager, MemoryManagerConfig};
-use crate::ai::relationship::RelationshipStore;
-use crate::ai::validator::{IntentValidator, Validator};
-use crate::config::{Config, ReviewConfig};
+use crate::component::llm::LlmClient;
+use crate::component::memory::{MemoryManager, MemoryManagerConfig};
+use crate::component::persona::LifespanCalculator;
+use crate::component::social::DialogueClient;
+use crate::component::social::RelationshipStore;
+use crate::config::{CharacterConfig, Config, DeviceConfig};
+use crate::infra::api::{HttpApiState, ReconnectRequest};
+use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
-use crate::runtime::decision::http::{HttpApiState, ReconnectRequest, review::ReviewStore};
-use crate::transport::websocket::AgentClient;
+use crate::soul::reflector::{ReflectorSoul, Validator};
 use cyber_jianghu_protocol::WorldBuildingRules;
 
-use super::{
-    Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback,
-    ValidatorConfig,
-};
+use super::{Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
 
 /// Agent 构建器
 pub struct AgentBuilder {
@@ -45,23 +43,25 @@ pub struct AgentBuilder {
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
     lifespan_calculator: Option<LifespanCalculator>,
-    validator_config: ValidatorConfig,
-    /// 审查存储（ReflectorSoul 共享）
-    review_store: Option<Arc<ReviewStore>>,
-    /// 审查配置
-    review_config: ReviewConfig,
-    /// 重连请求接收通道（Claw 模式）
-    reconnect_rx: Option<mpsc::Receiver<crate::runtime::decision::http::ReconnectRequest>>,
+    /// 重连请求接收通道
+    reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
     /// 配置重载通知接收通道
     config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
+    /// 设备身份配置（可选，从 device.yaml 加载）
+    device_config: Option<DeviceConfig>,
+    /// 角色配置（可选，当前活跃角色）
+    character_config: Option<CharacterConfig>,
+    /// Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
+    /// 数据目录
+    data_dir: PathBuf,
 }
 
 impl AgentBuilder {
     /// 创建新的构建器
     pub fn new(config: Config, decision_callback: DecisionCallback) -> Self {
-        let review_config = config.review.clone().unwrap_or_default();
         Self {
             config,
             decision_callback,
@@ -75,12 +75,13 @@ impl AgentBuilder {
             relationship_store: None,
             validator: None,
             lifespan_calculator: None,
-            validator_config: ValidatorConfig::default(),
-            review_store: None,
-            review_config,
             reconnect_rx: None,
             config_reload_rx: None,
             http_api_state: None,
+            device_config: None,
+            character_config: None,
+            cognitive_engine: None,
+            data_dir: PathBuf::from("."),
         }
     }
 
@@ -128,14 +129,14 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 LLM 客户端（自动创建 IntentValidator）
+    /// 设置 LLM 客户端（自动创建 ReflectorSoul）
     pub fn with_llm_client(
         mut self,
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
         let rules = rules.unwrap_or_default();
-        let validator = Arc::new(IntentValidator::new(rules, llm_client.clone()));
+        let validator = Arc::new(ReflectorSoul::new(rules, llm_client.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
         self
@@ -157,20 +158,8 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置验证器配置
-    pub fn with_validator_config(mut self, config: ValidatorConfig) -> Self {
-        self.validator_config = config;
-        self
-    }
-
-    /// 设置审查存储（ActorSoul + ReflectorSoul）
-    pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
-        self.review_store = Some(store);
-        self
-    }
-
-    /// 设置重连请求接收通道（Claw 模式热切换）
-    pub fn with_reconnect_rx(mut self, rx: mpsc::Receiver<ReconnectRequest>) -> Self {
+    /// 设置重连请求接收通道
+    pub fn with_reconnect_rx(mut self, rx: broadcast::Receiver<ReconnectRequest>) -> Self {
         self.reconnect_rx = Some(rx);
         self
     }
@@ -187,14 +176,44 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置设备身份配置
+    pub fn device_config(mut self, config: DeviceConfig) -> Self {
+        self.device_config = Some(config);
+        self
+    }
+
+    /// 设置角色配置
+    pub fn character_config(mut self, config: CharacterConfig) -> Self {
+        self.character_config = Some(config);
+        self
+    }
+
+    /// 设置 Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    pub fn cognitive_engine(
+        mut self,
+        engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>,
+    ) -> Self {
+        self.cognitive_engine = Some(engine);
+        self
+    }
+
+    /// 设置数据目录
+    pub fn data_dir(mut self, path: PathBuf) -> Self {
+        self.data_dir = path;
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
 
-        // 设置设备身份（如果已存在）
-        if let Some(ref identity) = self.config.identity {
-            let device_id = identity.device_id;
-            let auth_token = identity.auth_token.clone();
+        // 设置设备身份
+        let device_ref = self
+            .device_config
+            .as_ref()
+            .map(|dc| (dc.device_id, dc.auth_token.clone()));
+
+        if let Some((device_id, auth_token)) = device_ref {
             tokio::task::block_in_place(|| {
                 Handle::current().block_on(async {
                     client.set_identity(device_id, auth_token).await;
@@ -204,9 +223,14 @@ impl AgentBuilder {
 
         // 初始化记忆系统
         let memory_manager = if self.enable_memory {
-            let agent_id = Uuid::new_v4();
+            let agent_id = self
+                .character_config
+                .as_ref()
+                .and_then(|c| c.agent_id)
+                .unwrap_or_else(Uuid::new_v4);
             let config = self.memory_config.unwrap_or_else(|| MemoryManagerConfig {
                 agent_id,
+                db_dir: self.data_dir.clone(),
                 ..Default::default()
             });
 
@@ -216,8 +240,7 @@ impl AgentBuilder {
             match result {
                 Ok(manager) => {
                     let agent_name = self
-                        .config
-                        .agent
+                        .character_config
                         .as_ref()
                         .map(|c| c.name.as_str())
                         .unwrap_or("(未创建)");
@@ -247,17 +270,18 @@ impl AgentBuilder {
             relationship_store: self.relationship_store,
             validator: self.validator,
             lifespan_calculator: self.lifespan_calculator,
-            validator_config: self.validator_config,
+            last_rejection_reason: None,
             registration_callback: None,
             reconnect_backoff: 0,
             reconnect_rx: self.reconnect_rx,
             death_reported: false,
-            review_store: self.review_store,
-            review_config: self.review_config,
-            actor_llm_client: self.llm_client,
             actor_llm_container: self.llm_container,
             config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
+            device_config: self.device_config,
+            character_config: self.character_config,
+            cognitive_engine: self.cognitive_engine,
+            server_assigned_name: None,
         }
     }
 }

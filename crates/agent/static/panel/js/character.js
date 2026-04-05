@@ -10,6 +10,48 @@ let hasMoreDreamRecords = false;
 let allCharacters = [];
 let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
 
+const STATUS_MAP = {
+    alive:   { label: '存活', treeLabel: '存活', tag: '' },
+    dead:    { label: '死亡', treeLabel: '已故', tag: ' [已故]' },
+    retired: { label: '归隐', treeLabel: '归隐', tag: ' [归隐]' },
+};
+function statusOf(s) { return STATUS_MAP[s] || { label: s, treeLabel: s, tag: '' }; }
+
+function formatWorldTime(worldTime) {
+    if (!worldTime) return '-';
+    if (typeof worldTime === 'string' || typeof worldTime === 'number') {
+        return String(worldTime);
+    }
+    if (typeof worldTime === 'object') {
+        if (worldTime.display) return String(worldTime.display);
+        if (worldTime.text) return String(worldTime.text);
+        if (worldTime.label) return String(worldTime.label);
+        const year = worldTime.year ?? worldTime.y;
+        const month = worldTime.month ?? worldTime.m;
+        const day = worldTime.day ?? worldTime.d;
+        const hour = worldTime.hour ?? worldTime.h;
+        const minute = worldTime.minute ?? worldTime.min;
+        if (year || month || day || hour || minute) {
+            const datePart = [year, month, day].filter(v => v !== undefined).join('-');
+            const timePart = [hour, minute].filter(v => v !== undefined).join(':');
+            return [datePart, timePart].filter(Boolean).join(' ');
+        }
+        try {
+            return JSON.stringify(worldTime);
+        } catch {
+            return '-';
+        }
+    }
+    return '-';
+}
+
+function formatRealTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return String(ts);
+    return d.toLocaleString('zh-CN');
+}
+
 // 加载属性元数据（分类信息，从 narrative_config 解析）
 async function loadAttributeMeta() {
     try {
@@ -35,8 +77,7 @@ async function loadCharacterList() {
             selectorSection.classList.add('hidden');
         } else {
             selectEl.innerHTML = allCharacters.map(c => {
-                const statusText = c.status === 'alive' ? '' :
-                                  c.status === 'dead' ? ' [已故]' : ' [归隐]';
+                const statusText = statusOf(c.status).tag;
                 const serverInfo = c.server_url
                     ? ` (${c.server_url.replace(/^https?:\/\//, '').split('/')[0]})`
                     : '';
@@ -62,83 +103,361 @@ function renderWorldTree() {
         return;
     }
 
-    listEl.innerHTML = allCharacters.map(c => {
-        const statusClass = c.status === 'alive' ? 'alive' : c.status === 'dead' ? 'dead' : 'retired';
-        const statusText = c.status === 'alive' ? '存活' : c.status === 'dead' ? '已故' : '归隐';
-        const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
-        const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
-        return `
-            <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
-                <div class="char-name">
-                    ${escapeHtml(c.name || '未知')}
-                    ${currentLabel}
+    // 按服务器分组
+    const serverGroups = {};
+    allCharacters.forEach(c => {
+        const serverKey = c.server_url || 'unknown';
+        if (!serverGroups[serverKey]) {
+            serverGroups[serverKey] = [];
+        }
+        serverGroups[serverKey].push(c);
+    });
+
+    // 生成服务器分组HTML
+    let html = '';
+    Object.entries(serverGroups).forEach(([serverKey, chars]) => {
+        const serverName = serverKey.replace(/^https?:\/\//, '').split('/')[0];
+        const firstChar = chars[0];
+        const lastRealTime = firstChar.last_connected_real_time
+            ? new Date(firstChar.last_connected_real_time).toLocaleString('zh-CN')
+            : '-';
+        const lastWorldTime = firstChar.last_connected_world_time || '-';
+
+        html += `
+            <div class="server-group">
+                <div class="server-group-header">
+                    <span class="server-name">${escapeHtml(serverName)}</span>
+                    <span class="server-meta">
+                        <span class="meta-item" title="最近连接">最近连接: ${lastRealTime} ｜</span>
+                        <span class="meta-item" title="游戏时间">游戏时间: ${escapeHtml(lastWorldTime)}</span>
+                    </span>
                 </div>
-                <div class="char-status ${statusClass}">${statusText}</div>
-                <div class="char-meta">${registeredAt}</div>
+                <div class="server-group-chars">
+        `;
+
+        chars.forEach(c => {
+            const statusClass = c.status;
+            const statusText = statusOf(c.status).treeLabel;
+            const currentLabel = c.is_current ? '<span class="current-label">当前</span>' : '';
+            const registeredAt = c.registered_at ? new Date(c.registered_at).toLocaleDateString('zh-CN') : '';
+            html += `
+                <div class="world-tree-card ${c.is_current ? 'current' : ''}" data-agent-id="${c.agent_id || ''}">
+                    <div class="char-name">
+                        ${escapeHtml(c.name || '未知')}
+                        ${currentLabel}
+                    </div>
+                    <div class="char-status ${statusClass}">${statusText}</div>
+                    <div class="char-meta">${registeredAt}</div>
+                </div>
+            `;
+        });
+
+        html += `
+                </div>
             </div>
         `;
-    }).join('');
+    });
+
+    listEl.innerHTML = html;
 
     listEl.querySelectorAll('.world-tree-card').forEach(card => {
         card.addEventListener('click', () => {
             const agentId = card.dataset.agentId;
             const char = allCharacters.find(c => c.agent_id === agentId);
             if (!char) return;
-            if (char.is_current) {
-                document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
-                document.querySelector('[data-tab="current"]').classList.add('active');
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                document.getElementById('tab-current').classList.add('active');
-            } else {
-                showCharacterDetail(char);
-            }
+            openCharacterDrawer(char);
         });
     });
 }
 
-// 显示角色详情对话框
-function showCharacterDetail(char) {
-    const dialog = document.getElementById('character-detail-dialog');
-    const content = document.getElementById('character-detail-content');
-    const statusClass = char.status === 'alive' ? 'alive' : char.status === 'dead' ? 'dead' : 'retired';
-    const statusText = char.status === 'alive' ? '存活' : char.status === 'dead' ? '已故' : '归隐';
-    const registeredAt = char.registered_at ? new Date(char.registered_at).toLocaleString('zh-CN') : '未知';
+// 打开角色抽屉
+async function openCharacterDrawer(char) {
+    const drawer = document.getElementById('character-drawer');
+    const overlay = document.getElementById('character-drawer-overlay');
+    const body = document.getElementById('char-drawer-body');
+    const title = document.getElementById('char-drawer-title');
 
-    content.innerHTML = `
-        <div class="info-grid">
-            <div class="info-item">
-                <span class="label">姓名</span>
-                <span class="value">${escapeHtml(char.name || '未知')}</span>
+    body.innerHTML = '<p class="loading-text">加载中...</p>';
+    title.textContent = '角色信息';
+
+    drawer.classList.add('open');
+    overlay.classList.add('open');
+
+    try {
+        await loadCharacterIntoDrawer(char);
+    } catch (err) {
+        body.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
+    }
+}
+
+// 关闭角色抽屉
+function closeCharacterDrawer() {
+    const drawer = document.getElementById('character-drawer');
+    const overlay = document.getElementById('character-drawer-overlay');
+    drawer.classList.remove('open');
+    overlay.classList.remove('open');
+}
+
+// 加载角色数据到抽屉
+async function loadCharacterIntoDrawer(char) {
+    const body = document.getElementById('char-drawer-body');
+    const isCurrent = char.is_current;
+
+    let charData = char;
+
+    // 当前角色从 /api/v1/character 取完整数据，非当前角色从 /api/v1/characters/:id 取
+    try {
+        if (isCurrent) {
+            charData = await apiGet('/api/v1/character');
+        } else if (char.agent_id) {
+            charData = await apiGet(`/api/v1/characters/${char.agent_id}`);
+        }
+    } catch (err) {
+        console.warn('获取角色详情失败，使用列表数据:', err);
+    }
+
+    const statusClass = charData.status || 'alive';
+    const statusText = statusOf(charData.status).label;
+    const registeredAt = charData.registered_at ? formatRealTime(charData.registered_at) : '未知';
+    const serverName = charData.server_url ? charData.server_url.replace(/^https?:\/\//, '').split('/')[0] : '-';
+
+    // 在线状态
+    const isStale = charData.is_stale;
+    const onlineStatus = charData.status === 'alive'
+        ? (isStale ? '<span class="online-tag offline">离线</span>' : '<span class="online-tag online">在线</span>')
+        : '';
+
+    // 位置
+    const location = charData.location || '-';
+
+    let html = `
+        <div class="character-hero">
+            <div class="hero-main">
+                <div class="hero-avatar" aria-hidden="true">魂</div>
+                <div class="hero-text">
+                    <div class="hero-name">${escapeHtml(charData.name || '未知')}</div>
+                    <div class="hero-status">
+                        <span class="status-badge ${statusClass}"><span class="status-dot"></span>${statusText}</span>
+                        ${onlineStatus}
+                    </div>
+                    <div class="hero-meta">
+                        <span class="hero-meta-label">性别</span>
+                        <span class="hero-meta-value">${escapeHtml(charData.gender || '-')}</span>
+                        <span class="hero-meta-sep">·</span>
+                        <span class="hero-meta-label">年龄</span>
+                        <span class="hero-meta-value">${charData.age || '-'}</span>
+                    </div>
+                </div>
             </div>
-            <div class="info-item">
-                <span class="label">状态</span>
-                <span class="value status-${statusClass}">${statusText}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">年龄</span>
-                <span class="value">${char.age || '-'}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">性别</span>
-                <span class="value">${escapeHtml(char.gender || '-')}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">身份</span>
-                <span class="value">${escapeHtml(char.identity || '-')}</span>
-            </div>
-            <div class="info-item">
-                <span class="label">注册时间</span>
-                <span class="value">${registeredAt}</span>
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <span class="hero-stat-label">Agent ID</span>
+                    <span class="hero-stat-value" style="font-family: monospace; font-size: 0.9em;">${escapeHtml(charData.agent_id || '-')}</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="hero-stat-label">服务器</span>
+                    <span class="hero-stat-value">${escapeHtml(serverName)}</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="hero-stat-label">位置</span>
+                    <span class="hero-stat-value">${escapeHtml(location)}</span>
+                </div>
+                <div class="hero-stat">
+                    <span class="hero-stat-label">注册时间</span>
+                    <span class="hero-stat-value">${registeredAt}</span>
+                </div>
             </div>
         </div>
     `;
-    dialog.style.display = 'flex';
-    document.getElementById('character-detail-close').onclick = () => {
-        dialog.style.display = 'none';
-    };
-    dialog.onclick = (e) => {
-        if (e.target === dialog) dialog.style.display = 'none';
-    };
+
+    console.log('[DEBUG] 渲染前检查 - appearance:', charData.appearance, 'identity:', charData.identity);
+    if (charData.appearance || charData.identity) {
+        console.log('[DEBUG] 进入人物画像分支');
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">人物画像</div>
+                ${charData.appearance ? `<div class="info-item full-width"><span class="label">外貌</span><span class="value">${escapeHtml(charData.appearance)}</span></div>` : ''}
+                ${charData.identity ? `<div class="info-item full-width"><span class="label">身份背景</span><span class="value">${escapeHtml(charData.identity)}</span></div>` : ''}
+            </section>
+        `;
+    }
+
+    console.log('[DEBUG] personality:', charData.personality, 'values:', charData.values);
+    if ((charData.personality && charData.personality.length > 0) || (charData.values && charData.values.length > 0)) {
+        console.log('[DEBUG] 进入性格与价值观分支');
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">性格与价值观</div>
+                ${charData.personality && charData.personality.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.personality.map(p => `<span class="info-tag">${escapeHtml(p)}</span>`).join('')}</div>` : ''}
+                ${charData.values && charData.values.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.values.map(v => `<span class="info-tag">${escapeHtml(v)}</span>`).join('')}</div>` : ''}
+            </section>
+        `;
+    }
+
+    // 属性（使用 renderAttributes 的分组逻辑）
+    if (charData.attributes) {
+        const categories = attributeMeta ? attributeMeta.categories : null;
+        const statusKeys = new Set(categories?.status || []);
+        const primaryKeys = new Set(categories?.primary || []);
+        const knownKeys = new Set([...statusKeys, ...primaryKeys]);
+
+        const isRedundantMax = (key) => {
+            if (typeof key !== 'string' || !key.endsWith('_max')) return false;
+            const base = key.slice(0, -4);
+            return knownKeys.has(base);
+        };
+
+        let attrHtml = '';
+
+        // 先天属性
+        const primaryList = categories?.primary || [];
+        if (primaryList.length > 0) {
+            attrHtml += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+            primaryList.forEach(key => {
+                const attr = charData.attributes[key];
+                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                    attrHtml += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
+                }
+            });
+            attrHtml += '</div></div>';
+        }
+
+        // 状态属性
+        const statusList = categories?.status || [];
+        if (statusList.length > 0) {
+            attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+            statusList.forEach(key => {
+                const attr = charData.attributes[key];
+                if (attr && typeof attr === 'object' && attr.current !== undefined) {
+                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+                    const displayValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : attr.current;
+                    attrHtml += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayValue}</span></div>`;
+                }
+            });
+            attrHtml += '</div></div>';
+        }
+
+        // 派生属性（从 derived_attributes 字段获取，已由后端丰富为 {name, current, description}）
+        if (charData.derived_attributes) {
+            attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+            Object.entries(charData.derived_attributes).forEach(([key, value]) => {
+                const isEnriched = value && typeof value === 'object' && value.current !== undefined;
+                const displayName = isEnriched ? value.name : key.replace(/_/g, ' ');
+                const displayValue = isEnriched
+                    ? (typeof value.current === 'number' ? value.current.toFixed(2) : value.current)
+                    : (typeof value === 'number' ? value.toFixed(2) : value);
+                const desc = isEnriched ? (value.description || '') : '';
+                attrHtml += `<div class="attr-item" title="${escapeHtml(desc)}"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${displayValue}</span></div>`;
+            });
+            attrHtml += '</div></div>';
+        }
+
+        if (attrHtml) {
+            html += `
+                <section class="drawer-section">
+                    <div class="drawer-section-title">属性</div>
+                    ${attrHtml}
+                </section>
+            `;
+        }
+    }
+
+    // 记忆关系（仅当前角色）
+    if (isCurrent) {
+        try {
+            const relData = await apiGet('/api/v1/relationship/list');
+            if (relData.relationships && relData.relationships.length > 0) {
+                const relList = relData.relationships.slice(0, 5).map(r => {
+                    const level = r.relationship_label || '陌生人';
+                    const fav = r.favorability ?? 0;
+                    return `<div class="rel-mini-item">
+                        <span class="rel-name">${escapeHtml(r.target_name || '未知')}</span>
+                        <span class="rel-level ${r.relationship_level || 'neutral'}">${escapeHtml(level)}</span>
+                        <span class="rel-fav">${fav > 0 ? '+' : ''}${fav}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">记忆关系</div>
+                        <div class="rel-mini-list">${relList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载记忆关系失败:', err);
+        }
+    }
+
+    // 经历日志（仅当前角色）
+    if (isCurrent) {
+        try {
+            const expData = await apiGet('/api/v1/character/experiences?page=1&limit=3');
+            if (expData.experiences && expData.experiences.length > 0) {
+                const expList = expData.experiences.map(e => {
+                    const tick = e.tick_id ? `T${e.tick_id}` : '';
+                    const event = e.event || e.intent_summary || '-';
+                    return `<div class="exp-mini-item">
+                        <span class="exp-tick">${tick}</span>
+                        <span class="exp-event">${escapeHtml(event.substring(0, 30))}${event.length > 30 ? '...' : ''}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">经历日志</div>
+                        <div class="exp-mini-list">${expList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载经历日志失败:', err);
+        }
+    }
+
+    // 托梦记录（仅当前角色）
+    if (isCurrent) {
+        try {
+            const dreamData = await apiGet('/api/v1/character/dream/records?page=1&limit=3');
+            if (dreamData.records && dreamData.records.length > 0) {
+                const dreamList = dreamData.records.map(d => {
+                    const tick = d.tick_id ? `T${d.tick_id}` : '';
+                    const content = d.content || '-';
+                    return `<div class="dream-mini-item">
+                        <span class="dream-tick">${tick}</span>
+                        <span class="dream-content">${escapeHtml(content.substring(0, 25))}${content.length > 25 ? '...' : ''}</span>
+                    </div>`;
+                }).join('');
+                html += `
+                    <section class="drawer-section">
+                        <div class="drawer-section-title">托梦记录</div>
+                        <div class="dream-mini-list">${dreamList}</div>
+                    </section>
+                `;
+            }
+        } catch (err) {
+            console.warn('加载托梦记录失败:', err);
+        }
+    }
+
+    // 持有物品
+    if (charData.inventory && charData.inventory.length > 0) {
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">持有物品</div>
+                <div class="inventory-list">
+                    ${charData.inventory.map(item => `
+                        <div class="inv-item">
+                            <span class="inv-name">${escapeHtml(item.name || item.item_id || '未知物品')}</span>
+                            <span class="inv-qty">x${item.quantity || 1}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </section>
+        `;
+    }
+
+    body.innerHTML = html;
+    console.log('[DEBUG] 最终渲染的 html 长度:', html.length);
 }
 
 // 切换角色
@@ -174,6 +493,7 @@ async function loadCharacter() {
 
     try {
         const data = await apiGet('/api/v1/character');
+        console.log('[DEBUG] loadCharacter API完整返回:', JSON.stringify(data, null, 2));
 
         // 基本信息
         document.getElementById('name').textContent = data.name || '-';
@@ -186,8 +506,23 @@ async function loadCharacter() {
 
         if (data.status) {
             const statusEl = document.getElementById('status');
-            const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
-            statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>';
+            const text = statusOf(data.status).label;
+            const onlineTag = data.status === 'alive'
+                ? (data.is_stale
+                    ? '<span class="online-tag offline">离线</span>'
+                    : '<span class="online-tag online">在线</span>')
+                : '';
+            statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>' + onlineTag;
+
+            // 死亡角色显示常驻提示气泡
+            const deathNotice = document.getElementById('death-notice');
+            if (deathNotice) {
+                if (data.status === 'dead') {
+                    deathNotice.classList.remove('hidden');
+                } else {
+                    deathNotice.classList.add('hidden');
+                }
+            }
         }
 
         // 注册时间
@@ -213,7 +548,7 @@ async function loadCharacter() {
             : '-';
 
         // 属性
-        renderAttributes(data.attributes);
+        renderAttributes(data.attributes, data.derived_attributes);
 
         // 物品（修复 XSS）
         renderInventory(data.inventory);
@@ -250,7 +585,7 @@ async function loadCharacter() {
 }
 
 // 渲染属性
-function renderAttributes(attributes) {
+function renderAttributes(attributes, derivedAttributes) {
     const attrsEl = document.getElementById('attributes');
     if (!attributes) {
         attrsEl.innerHTML = '<p class="no-data">暂无属性数据</p>';
@@ -268,10 +603,7 @@ function renderAttributes(attributes) {
         primaryList.forEach(key => {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
-                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                    <span class="attr-value">${attr.current}</span>
-                </div>`;
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
             }
         });
         html += '</div></div>';
@@ -285,36 +617,27 @@ function renderAttributes(attributes) {
             const attr = attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
                 if (attr.max !== undefined && attr.max !== null) {
-                    // 有上限的状态属性，显示进度条
                     const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
                     const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                    html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}">
-                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                        <span class="attr-value">${attr.current}/${attr.max}</span>
-                    </div>`;
+                    html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}/${attr.max}</span></div>`;
                 } else {
-                    // 无上限的状态属性（如声望）
-                    html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
-                        <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                        <span class="attr-value">${attr.current}</span>
-                    </div>`;
+                    html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
                 }
             }
         });
         html += '</div></div>';
     }
 
-    // 派生属性（从配置分类中获取）
+    // 派生属性：优先从 derivedAttributes 中取，兜底从 attributes 中取
     const derivedList = categories?.derived || [];
+    const derivedSource = derivedAttributes || {};
     if (derivedList.length > 0) {
         html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
         derivedList.forEach(key => {
-            const attr = attributes[key];
+            // 先看 derived_attributes，再看 attributes
+            const attr = derivedSource[key] || attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}">
-                    <span class="attr-name">${escapeHtml(attr.name || key)}</span>
-                    <span class="attr-value">${attr.current}</span>
-                </div>`;
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
             }
         });
         html += '</div></div>';
@@ -369,23 +692,34 @@ async function loadExperiences(page = 1) {
                 const div = document.createElement('div');
                 div.className = 'exp-item';
 
-                let html = `
-                    <div class="exp-header">
-                        <span class="exp-tick">Tick ${exp.tick_id}</span>
-                    </div>
-                    <div class="exp-content">${escapeHtml(exp.event)}</div>
-                `;
-                if (exp.intent_summary) {
-                    html += `<div class="exp-thought">
-                        <span class="thought-label">意图:</span>
-                        <span class="thought-content">${escapeHtml(exp.intent_summary)}</span>
-                    </div>`;
-                }
+                const worldTimeText = formatWorldTime(exp.world_time);
+                const realTimeText = formatRealTime(exp.created_at);
+                const eventText = (exp.event !== undefined && exp.event !== null) ? exp.event : '-';
+                const actionType = exp.action_type || '';
+
+                // 解析 observer_thought JSON
+                let observerData = null;
                 if (exp.observer_thought) {
-                    html += `<div class="exp-observer">
-                        <span class="observer-label">审查:</span>
-                        <span class="observer-content">${escapeHtml(exp.observer_thought)}</span>
-                    </div>`;
+                    try {
+                        observerData = JSON.parse(exp.observer_thought);
+                    } catch (e) {
+                        // ignore parse error
+                    }
+                }
+
+                let html = `<div class="exp-header"><span class="exp-tick-badge">T${exp.tick_id || '-'}</span><span class="exp-time-info"><span class="exp-world-time">${escapeHtml(worldTimeText)}</span><span class="exp-real-time">${escapeHtml(realTimeText)}</span></span></div>`;
+                if (actionType) {
+                    html += `<div class="exp-action-tag">${escapeHtml(actionType)}</div>`;
+                }
+                html += `<div class="exp-body"><div class="exp-content">${escapeHtml(eventText)}</div></div>`;
+                if (observerData && observerData.narrative) {
+                    html += `<div class="exp-review-narrative">${escapeHtml(observerData.narrative)}</div>`;
+                }
+                if (exp.intent_summary) {
+                    html += `<div class="exp-thought">意图: ${escapeHtml(exp.intent_summary)}</div>`;
+                }
+                if (observerData) {
+                    html += `<div class="exp-observer">审查: ${escapeHtml(observerData.result || '-')} - ${escapeHtml(observerData.reason || '-')}</div>`;
                 }
                 div.innerHTML = html;
                 expEl.appendChild(div);
@@ -631,7 +965,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadAttributeMeta().then(async () => {
         await loadCharacterList();
         const currentChar = allCharacters.find(c => c.is_current);
-        
+
         // 当前角色非存活时，切换到世界树分页（不建立 SSE 连接）
         if (!currentChar || currentChar.status !== 'alive') {
             hide('#loading');
@@ -642,10 +976,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('tab-worldtree').classList.add('active');
             return;
         }
-        
+
         // 仅对存活角色建立 SSE 连接
         connectDeathEvents();
-        
+
         // 角色数据通过 HTTP API 获取，立即可用
         loadCharacter();
         loadRelationships();
@@ -665,8 +999,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // 关系抽屉关闭事件
     document.getElementById('drawer-close').addEventListener('click', closeRelationshipDrawer);
     document.getElementById('relationship-drawer-overlay').addEventListener('click', closeRelationshipDrawer);
+
+    // 角色抽屉关闭事件
+    document.getElementById('char-drawer-close').addEventListener('click', closeCharacterDrawer);
+    document.getElementById('character-drawer-overlay').addEventListener('click', closeCharacterDrawer);
+
+    // ESC 关闭所有抽屉
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeRelationshipDrawer();
+        if (e.key === 'Escape') {
+            closeRelationshipDrawer();
+            closeCharacterDrawer();
+        }
     });
 
     // 横向标签页切换
@@ -836,16 +1179,17 @@ document.addEventListener('DOMContentLoaded', () => {
     async function incrementalRefresh() {
         try {
             const data = await apiGet('/api/v1/character');
-            
+
             // 记录当前数据用于下次比较
             const newDataHash = JSON.stringify({
                 tick_id: data.tick_id,
                 location: data.location,
                 world_time: data.world_time,
                 attributes: data.attributes,
+                derived_attributes: data.derived_attributes,
                 inventory: data.inventory
             });
-            
+
             // 数据没变化，跳过
             if (newDataHash === lastRefreshData) return;
             lastRefreshData = newDataHash;
@@ -857,13 +1201,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 更新状态
             if (data.status) {
-                const text = data.status === 'alive' ? '存活' : data.status === 'dead' ? '死亡' : data.status;
+                const text = statusOf(data.status).label;
                 const statusEl = document.getElementById('status');
-                statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>';
+                const onlineTag = data.status === 'alive'
+                    ? (data.is_stale
+                        ? '<span class="online-tag offline">离线</span>'
+                        : '<span class="online-tag online">在线</span>')
+                    : '';
+                statusEl.innerHTML = '<span class="status-badge ' + data.status + '"><span class="status-dot"></span>' + text + '</span>' + onlineTag;
+
+                // 同步世界树中当前角色的状态（局部更新，避免全量重渲染）
+                const worldTreeChar = allCharacters.find(c => c.is_current);
+                if (worldTreeChar && worldTreeChar.status !== data.status) {
+                    worldTreeChar.status = data.status;
+                    const card = document.querySelector(`.world-tree-card[data-agent-id="${worldTreeChar.agent_id || ''}"]`);
+                    if (card) {
+                        const statusEl = card.querySelector('.char-status');
+                        if (statusEl) {
+                            const info = statusOf(data.status);
+                            statusEl.className = 'char-status ' + data.status;
+                            statusEl.textContent = info.treeLabel;
+                        }
+                    }
+                }
             }
 
-            // 更新属性（使用 data 属性存储旧值，只更新变化的）
-            updateAttributesIncremental(data.attributes);
+            // 更新属性（全量重渲染，包含 derived_attributes）
+            renderAttributes(data.attributes, data.derived_attributes);
 
             // 更新物品
             updateInventoryIncremental(data.inventory);
@@ -965,45 +1329,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 增量更新属性（只更新变化的值）
-    function updateAttributesIncremental(attributes) {
-        if (!attributes) return;
-        const attrsEl = document.getElementById('attributes');
-        const existingItems = attrsEl.querySelectorAll('.attr-item');
-        
-        existingItems.forEach(item => {
-            const nameEl = item.querySelector('.attr-name');
-            const valueEl = item.querySelector('.attr-value');
-            if (!nameEl || !valueEl) return;
-            
-            const attrName = nameEl.textContent;
-            // 找到对应属性
-            const attrKey = Object.keys(attributes).find(k => attributes[k].name === attrName);
-            if (!attrKey) return;
-            
-            const attr = attributes[attrKey];
-            const newValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : String(attr.current);
-            
-            if (valueEl.textContent !== newValue) {
-                valueEl.textContent = newValue;
-                item.classList.add('value-changed');
-                setTimeout(() => item.classList.remove('value-changed'), 300);
-                
-                // 更新颜色类
-                if (attr.max > 0) {
-                    const pct = Math.round((attr.current / attr.max) * 100);
-                    item.classList.remove('attr-high', 'attr-medium', 'attr-low');
-                    item.classList.add(pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low');
-                }
-            }
-        });
-    }
-
     // 增量更新物品（只更新变化的）
     function updateInventoryIncremental(inventory) {
         if (!inventory && inventory !== 0) return;
         const invEl = document.getElementById('inventory');
-        
+
         if (!inventory || inventory.length === 0) {
             if (!invEl.querySelector('.no-data')) {
                 invEl.innerHTML = '<p class="no-data">暂无物品</p>';
@@ -1011,9 +1341,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const currentItems = Array.from(invEl.querySelectorAll('.inventory-item')).map(item => ({
-            name: item.querySelector('.item-name')?.textContent,
-            quantity: item.querySelector('.item-quantity')?.textContent
+        const currentItems = Array.from(invEl.querySelectorAll('.inv-item')).map(item => ({
+            name: item.querySelector('.inv-name')?.textContent,
+            quantity: item.querySelector('.inv-qty')?.textContent
         }));
 
         const newItems = inventory.map(item => ({
@@ -1029,15 +1359,17 @@ document.addEventListener('DOMContentLoaded', () => {
             invEl.innerHTML = '';
             inventory.forEach(item => {
                 const div = document.createElement('div');
-                div.className = 'inventory-item';
-                div.innerHTML = `
-                    <span class="item-name">${escapeHtml(item.name || '未知物品')}</span>
-                    <span class="item-quantity">x${item.quantity || 1}</span>
-                `;
+                div.className = 'inv-item';
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'inv-name';
+                nameSpan.textContent = item.name || item.item_id || '未知物品';
+                const qtySpan = document.createElement('span');
+                qtySpan.className = 'inv-qty';
+                qtySpan.textContent = `x${item.quantity || 1}`;
+                div.appendChild(nameSpan);
+                div.appendChild(qtySpan);
                 invEl.appendChild(div);
             });
-            invEl.classList.add('value-changed');
-            setTimeout(() => invEl.classList.remove('value-changed'), 300);
         }
     }
 });

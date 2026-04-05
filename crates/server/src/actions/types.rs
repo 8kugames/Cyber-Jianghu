@@ -183,6 +183,7 @@ pub enum StateChange {
         agent_id: Uuid,
         /// 对话内容
         content: String,
+        already_broadcast: bool,
     },
 
     /// Agent 死亡

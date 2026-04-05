@@ -11,7 +11,7 @@
 
 use axum::extract::ws::Message;
 use cyber_jianghu_protocol::{DialogueMessage, ServerMessage};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::connection::{AgentToDeviceMap, ConnectionManager};
 
@@ -19,20 +19,13 @@ use super::connection::{AgentToDeviceMap, ConnectionManager};
 // 消息广播函数
 // ============================================================================
 
-/// 向指定 Agent 发送 WorldState
-///
-/// 通过 agent_id 查找对应的 device_id，再找到 WebSocket 连接并发送
 pub async fn send_world_state(
     agent_id: uuid::Uuid,
     world_state: crate::models::WorldState,
     connection_manager: &ConnectionManager,
     agent_to_device_map: &AgentToDeviceMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = connection_manager.read().await;
-
-    let device_id = if let Some(conn) = connections.get(&agent_id) {
-        conn.device_id
-    } else {
+    let device_id = {
         let agent_to_device = agent_to_device_map.read().await;
         match agent_to_device.get(&agent_id) {
             Some(&device_id) => device_id,
@@ -46,13 +39,22 @@ pub async fn send_world_state(
         }
     };
 
-    if let Some(connection) = connections.get(&device_id) {
-        let protocol_world_state = world_state;
-        let msg = ServerMessage::WorldState {
-            data: protocol_world_state,
-        };
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, skipping WorldState send",
+                agent_id
+            );
+            return Ok(());
+        }
+        let msg = ServerMessage::WorldState { data: world_state };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!("Agent {} send failed, marking connection as dead", agent_id);
+            return Ok(());
+        }
         debug!(
             "WorldState sent to agent {} via device {}",
             agent_id, device_id
@@ -67,23 +69,48 @@ pub async fn send_world_state(
     Ok(())
 }
 
-/// 转发对话消息给指定 Agent
-///
-/// 通过 WebSocket 连接发送对话消息
 pub async fn forward_dialogue_message(
     to_agent_id: uuid::Uuid,
     message: DialogueMessage,
     connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = connection_manager.read().await;
+    let device_id = {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&to_agent_id) {
+            Some(&device_id) => device_id,
+            None => {
+                warn!(
+                    "Agent {} has no device mapping, cannot send dialogue",
+                    to_agent_id
+                );
+                return Err("Agent not online".into());
+            }
+        }
+    };
 
-    if let Some(connection) = connections.get(&to_agent_id) {
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, cannot send dialogue",
+                to_agent_id
+            );
+            return Err("Connection dead".into());
+        }
         let msg = ServerMessage::Dialogue { message };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!("Agent {} dialogue send failed, marking dead", to_agent_id);
+            return Err("Send failed".into());
+        }
         debug!("对话消息已发送给 agent {}", to_agent_id);
     } else {
-        warn!("Agent {} 不在线，无法发送对话消息", to_agent_id);
+        warn!(
+            "Agent {} is not online (device {} not connected)",
+            to_agent_id, device_id
+        );
         return Err("Agent not online".into());
     }
 
@@ -106,8 +133,6 @@ pub async fn send_agent_died_notification(
     died_at: i64,
     ctx: &DeathNotificationContext<'_>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let connections = ctx.connection_manager.read().await;
-
     let device_id = {
         let agent_to_device = ctx.agent_to_device_map.read().await;
         match agent_to_device.get(&agent_id) {
@@ -122,7 +147,16 @@ pub async fn send_agent_died_notification(
         }
     };
 
-    if let Some(connection) = connections.get(&device_id) {
+    let mut connections = ctx.connection_manager.write().await;
+
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, cannot send AgentDied notification",
+                agent_id
+            );
+            return Ok(());
+        }
         let msg = ServerMessage::AgentDied {
             agent_id,
             cause,
@@ -133,11 +167,27 @@ pub async fn send_agent_died_notification(
             rebirth_delay_ticks: 0,
         };
         let json = serde_json::to_string(&msg)?;
-        connection.send(Message::Text(json.into())).await?;
-        debug!(
-            "AgentDied notification sent to agent {} via device {}",
-            agent_id, device_id
-        );
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!(
+                "Agent {} AgentDied send failed, marking connection dead",
+                agent_id
+            );
+        } else {
+            debug!(
+                "AgentDied notification sent to agent {} via device {}",
+                agent_id, device_id
+            );
+            // 发送 WebSocket Close frame，触发 handler 的 recv 循环退出 → 连接清理
+            // 必须在 mark_dead() 之前发送，否则 send() 会因 is_dead 检查被拒绝
+            if connection.send(Message::Close(None)).await.is_err() {
+                warn!(
+                    "Agent {} Close frame send failed (channel already closed)",
+                    agent_id
+                );
+            }
+            connection.mark_dead();
+        }
     } else {
         warn!(
             "Agent {} is not online (device {} not connected), cannot send AgentDied notification",
@@ -145,5 +195,133 @@ pub async fn send_agent_died_notification(
         );
     }
 
+    Ok(())
+}
+
+/// 广播动作配置更新到所有在线 Agent
+pub async fn broadcast_action_update(
+    action_update: ServerMessage,
+    connection_manager: &ConnectionManager,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let connections = connection_manager.read().await;
+    let mut success_count = 0;
+    let mut fail_count = 0;
+
+    for (device_id, connection) in connections.iter() {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, skipping ActionUpdate",
+                connection.agent_id
+            );
+            fail_count += 1;
+            continue;
+        }
+
+        let msg = action_update.clone();
+
+        let json = serde_json::to_string(&msg)?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            warn!(
+                "Agent {} ActionUpdate send failed, skipped (dead connection)",
+                connection.agent_id
+            );
+            fail_count += 1;
+        } else {
+            debug!(
+                "ActionUpdate sent to agent {} via device {}",
+                connection.agent_id, device_id
+            );
+            success_count += 1;
+        }
+    }
+
+    info!(
+        "ActionUpdate broadcast complete: {} success, {} failed",
+        success_count, fail_count
+    );
+    Ok(())
+}
+
+/// 向同 Location 的所有在线 Agent 广播 speak 消息（立即推送）
+pub async fn broadcast_speak_to_location(
+    from_agent_id: uuid::Uuid,
+    location: &str,
+    content: &str,
+    tick_id: i64,
+    state: &crate::state::AppState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::models::{WorldEvent, WorldEventType};
+
+    // 阶段 1：读锁内只收集候选 agent_id 列表，然后立即释放锁
+    let candidates: Vec<uuid::Uuid> = {
+        let connections = state.connection_manager.read().await;
+        connections
+            .iter()
+            .filter(|(_, c)| !c.is_dead() && c.agent_id != from_agent_id)
+            .map(|(_, c)| c.agent_id)
+            .collect()
+    };
+
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    // 阶段 2：批量查询 location（一次 SQL 拿到所有候选 agent 的位置）
+    let candidate_set: Vec<uuid::Uuid> = candidates;
+    let rows: Vec<(uuid::Uuid, String)> = sqlx::query_as(
+        "SELECT DISTINCT ON (agent_id) agent_id, node_id FROM agent_states WHERE agent_id = ANY($1) ORDER BY agent_id, tick_id DESC",
+    )
+    .bind(&candidate_set)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| format!("Failed to query agent locations: {}", e))?;
+
+    // 阶段 3：只给同 location 的 agent 发送
+    let connections = state.connection_manager.read().await;
+    let mut sent_count = 0;
+
+    for (agent_id, node_id) in rows {
+        if node_id != location {
+            continue;
+        }
+        let Some(connection) = connections.values().find(|c| c.agent_id == agent_id) else {
+            continue;
+        };
+
+        let event = WorldEvent {
+            event_type: WorldEventType::PublicMessage,
+            tick_id,
+            description: format!("有人说: {}", content),
+            metadata: serde_json::json!({
+                "from_agent_id": from_agent_id,
+                "content": content,
+                "channel": "speak",
+                "location": location,
+            }),
+        };
+
+        let msg = ServerMessage::ImmediateEvent {
+            event,
+            deadline_ms: u64::MAX,
+        };
+        let json = serde_json::to_string(&msg)?;
+
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            warn!("Agent {} speak broadcast failed", agent_id);
+        } else {
+            debug!(
+                "Speak message broadcast to agent {} at location {}",
+                agent_id, location
+            );
+            sent_count += 1;
+        }
+    }
+
+    if sent_count > 0 {
+        debug!(
+            "Speak message broadcast to {} agents at location {}",
+            sent_count, location
+        );
+    }
     Ok(())
 }
