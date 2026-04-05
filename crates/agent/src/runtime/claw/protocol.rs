@@ -182,6 +182,18 @@ pub enum DownstreamMessage {
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
     },
+
+    /// Server 即时事件（speak 广播等实时推送）
+    ServerImmediateEvent {
+        /// 事件类型
+        event_type: String,
+        /// Tick ID
+        tick_id: i64,
+        /// 事件描述
+        description: String,
+        /// 事件元数据
+        metadata: Value,
+    },
 }
 
 /// 玩家意图（用于审核请求）
@@ -422,6 +434,14 @@ impl DownstreamMessage {
                 died_at,
                 rebirth_delay_ticks,
             }),
+            ServerMessage::ImmediateEvent { event, deadline_ms: _ } => {
+                Some(DownstreamMessage::ServerImmediateEvent {
+                    event_type: event.event_type.to_string(),
+                    tick_id: event.tick_id,
+                    description: event.description,
+                    metadata: event.metadata,
+                })
+            }
             // 其他消息类型不透传
             _ => None,
         }

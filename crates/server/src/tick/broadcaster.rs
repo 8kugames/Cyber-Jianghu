@@ -295,7 +295,7 @@ impl Broadcaster {
                         })
                         .map(|e| crate::models::RecentAction {
                             tick_id: e.tick_id,
-                            action_type: format!("{:?}", e.event_type),
+                            action_type: e.event_type.as_str().to_string(),
                             content: e
                                 .metadata
                                 .get("content")
