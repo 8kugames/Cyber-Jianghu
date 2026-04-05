@@ -2,7 +2,7 @@
 //!
 //! 处理 mutator 未覆盖的状态变更类型，提供回退执行逻辑。
 
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::actions::StateChange;
 use crate::db::DbPool;
@@ -606,7 +606,22 @@ pub async fn apply_state_change(
                 )
                 .await
                 {
-                    warn!("掉落物品添加到地面失败: {}", e);
+                    warn!("掉落物品添加到地面失败，回滚背包: {}", e);
+                    // 回滚：把物品放回背包，避免物品凭空消失
+                    if let Err(re) = crate::inventory::InventoryManager::add_item(
+                        db_pool,
+                        *from_agent,
+                        item_id,
+                        *quantity,
+                    )
+                    .await
+                    {
+                        error!(
+                            "掉落回滚失败！物品丢失: agent={}, item={}, qty={}, err={}",
+                            from_agent, item_id, quantity, re
+                        );
+                    }
+                    return false;
                 }
 
                 let event = WorldEvent {
