@@ -548,6 +548,22 @@ impl TickScheduler {
             }
         }
 
+        // 死亡 Agent 主动清理 WebSocket 连接（避免下 tick 浪费 send + mark_dead）
+        if !dead_agents.is_empty() {
+            let mut connections = self.connection_manager.write().await;
+            let mut agent_to_device = self.agent_to_device_map.write().await;
+            for agent_id in &dead_agents {
+                if let Some(device_id) = agent_to_device.remove(agent_id) {
+                    if connections.remove(&device_id).is_some() {
+                        info!(
+                            "已断开死亡 Agent {} 的 WebSocket 连接 (device: {})",
+                            agent_id, device_id
+                        );
+                    }
+                }
+            }
+        }
+
         // 将时间事件合并到衰减事件中
         decay_events.extend(time_events);
 
