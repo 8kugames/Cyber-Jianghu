@@ -112,6 +112,7 @@ pub struct DialogueSession {
 ///     game_rules,
 ///     world_building_rules: None,
 ///     is_alive: true,
+///     agent_name: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]

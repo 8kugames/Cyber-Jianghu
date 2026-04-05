@@ -222,7 +222,7 @@ pub async fn broadcast_action_update(
         let json = serde_json::to_string(&msg)?;
         if connection.send(Message::Text(json.into())).await.is_err() {
             warn!(
-                "Agent {} ActionUpdate send failed, marking connection dead",
+                "Agent {} ActionUpdate send failed, skipped (dead connection)",
                 connection.agent_id
             );
             fail_count += 1;
@@ -269,7 +269,7 @@ pub async fn broadcast_speak_to_location(
     // 阶段 2：批量查询 location（一次 SQL 拿到所有候选 agent 的位置）
     let candidate_set: Vec<uuid::Uuid> = candidates;
     let rows: Vec<(uuid::Uuid, String)> = sqlx::query_as(
-        "SELECT agent_id, node_id FROM agent_states WHERE agent_id = ANY($1) ORDER BY tick_id DESC",
+        "SELECT DISTINCT ON (agent_id) agent_id, node_id FROM agent_states WHERE agent_id = ANY($1) ORDER BY agent_id, tick_id DESC",
     )
     .bind(&candidate_set)
     .fetch_all(&state.db_pool)
