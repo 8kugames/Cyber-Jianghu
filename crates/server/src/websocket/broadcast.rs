@@ -241,3 +241,87 @@ pub async fn broadcast_action_update(
     );
     Ok(())
 }
+
+/// 向同 Location 的所有在线 Agent 广播 speak 消息（立即推送）
+pub async fn broadcast_speak_to_location(
+    from_agent_id: uuid::Uuid,
+    location: &str,
+    content: &str,
+    tick_id: i64,
+    state: &crate::state::AppState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::models::{WorldEvent, WorldEventType};
+
+    // 阶段 1：读锁内只收集候选 agent_id 列表，然后立即释放锁
+    let candidates: Vec<uuid::Uuid> = {
+        let connections = state.connection_manager.read().await;
+        connections
+            .iter()
+            .filter(|(_, c)| !c.is_dead() && c.agent_id != from_agent_id)
+            .map(|(_, c)| c.agent_id)
+            .collect()
+    };
+
+    if candidates.is_empty() {
+        return Ok(());
+    }
+
+    // 阶段 2：批量查询 location（一次 SQL 拿到所有候选 agent 的位置）
+    let candidate_set: Vec<uuid::Uuid> = candidates;
+    let rows: Vec<(uuid::Uuid, String)> = sqlx::query_as(
+        "SELECT agent_id, node_id FROM agent_states WHERE agent_id = ANY($1) ORDER BY tick_id DESC",
+    )
+    .bind(&candidate_set)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| format!("Failed to query agent locations: {}", e))?;
+
+    // 阶段 3：只给同 location 的 agent 发送
+    let connections = state.connection_manager.read().await;
+    let mut sent_count = 0;
+
+    for (agent_id, node_id) in rows {
+        if node_id != location {
+            continue;
+        }
+        let Some(connection) = connections.values().find(|c| c.agent_id == agent_id) else {
+            continue;
+        };
+
+        let event = WorldEvent {
+            event_type: WorldEventType::PublicMessage,
+            tick_id,
+            description: format!("有人说: {}", content),
+            metadata: serde_json::json!({
+                "from_agent_id": from_agent_id,
+                "content": content,
+                "channel": "speak",
+                "location": location,
+            }),
+        };
+
+        let msg = ServerMessage::ImmediateEvent {
+            event,
+            deadline_ms: u64::MAX,
+        };
+        let json = serde_json::to_string(&msg)?;
+
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            warn!("Agent {} speak broadcast failed", agent_id);
+        } else {
+            debug!(
+                "Speak message broadcast to agent {} at location {}",
+                agent_id, location
+            );
+            sent_count += 1;
+        }
+    }
+
+    if sent_count > 0 {
+        debug!(
+            "Speak message broadcast to {} agents at location {}",
+            sent_count, location
+        );
+    }
+    Ok(())
+}

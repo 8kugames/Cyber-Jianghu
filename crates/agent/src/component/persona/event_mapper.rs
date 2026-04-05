@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::WorldEvent;
+use crate::models::{WorldEvent, WorldEventType};
 
 use super::dynamic_persona::DynamicPersona;
 use super::trait_types::TraitChange;
@@ -124,8 +124,8 @@ impl EventContext {
 
     /// 分类事件类型（静态辅助方法）
     pub fn classify_event(event: &WorldEvent) -> EventType {
-        match event.event_type.as_str() {
-            cyber_jianghu_protocol::EVENT_TYPE_ACTION_RESULT => {
+        match event.event_type {
+            WorldEventType::ActionResult => {
                 let desc = event.description.to_lowercase();
 
                 // 优先检查被动语态（被...攻击）
@@ -155,7 +155,7 @@ impl EventContext {
                 }
                 EventType::Other
             }
-            cyber_jianghu_protocol::EVENT_TYPE_ENVIRONMENTAL_CHANGE => {
+            WorldEventType::EnvironmentalChange => {
                 let desc = event.description.to_lowercase();
                 if desc.contains("饥饿") {
                     return EventType::Hungry;
@@ -165,7 +165,7 @@ impl EventContext {
                 }
                 EventType::Other
             }
-            cyber_jianghu_protocol::EVENT_TYPE_SOCIAL_INTERACTION => EventType::SocialInteraction,
+            WorldEventType::SocialInteraction => EventType::SocialInteraction,
             _ => EventType::Other,
         }
     }
@@ -309,7 +309,7 @@ mod tests {
         metadata.insert("targets".to_string(), serde_json::json!(["测试者"]));
 
         let event = WorldEvent {
-            event_type: "action_result".to_string(),
+            event_type: WorldEventType::ActionResult,
             tick_id: 1,
             description: "被测试者攻击".to_string(),
             metadata: serde_json::Value::Object(metadata),
@@ -347,7 +347,7 @@ mod tests {
         metadata.insert("targets".to_string(), serde_json::json!(["攻击者"]));
 
         let event = WorldEvent {
-            event_type: "action_result".to_string(),
+            event_type: WorldEventType::ActionResult,
             tick_id: 1,
             description: "被攻击者攻击".to_string(),
             metadata: serde_json::Value::Object(metadata),

@@ -14,7 +14,7 @@
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::models::AgentState;
+use crate::models::{AgentState, WorldEventType};
 
 use crate::game_data::registry_or_panic;
 use cyber_jianghu_protocol::DeathInfo;
@@ -121,7 +121,7 @@ pub fn apply_decay_and_environmental_damage(
 
                 // 创建死亡事件
                 let death_event = crate::models::WorldEvent {
-                    event_type: "action_result".to_string(),
+                    event_type: WorldEventType::DeathNotification,
                     tick_id,
                     description: description.clone(),
                     metadata: serde_json::json!({
@@ -158,7 +158,7 @@ pub fn apply_decay_and_environmental_damage(
 
                 // 记录环境伤害事件
                 let event = crate::models::WorldEvent {
-                    event_type: "environmental_damage".to_string(),
+                    event_type: WorldEventType::EnvironmentalChange,
                     tick_id,
                     description: format!("你在 {} 受到环境伤害，HP 减少 {}", state.node_id, damage),
                     metadata: serde_json::json!({
@@ -189,7 +189,7 @@ pub fn apply_decay_and_environmental_damage(
 
                     // 创建死亡事件
                     let death_event = crate::models::WorldEvent {
-                        event_type: "action_result".to_string(),
+                        event_type: WorldEventType::DeathNotification,
                         tick_id,
                         description: description.clone(),
                         metadata: serde_json::json!({
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         let (event_agent_id, event) = &events[0];
         assert_eq!(*event_agent_id, updated_agents[0].agent_id);
-        assert_eq!(event.event_type, "action_result");
+        assert_eq!(event.event_type, WorldEventType::DeathNotification);
     }
 
     /// 测试口渴死亡时创建死亡通知

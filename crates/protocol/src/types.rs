@@ -147,6 +147,7 @@ mod tests {
             entities: vec![],
             nearby_items: vec![],
             events_log: vec![],
+            private_dialogue_log: vec![],
             deadline_ms: 0,
         };
 

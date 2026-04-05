@@ -512,7 +512,7 @@ impl super::Agent {
                     // 1.5 检查是否死亡（只报告一次）
                     if !self.death_reported
                         && let Some(death_event) = world_state.events_log.iter().find(|e| {
-                            e.event_type == cyber_jianghu_protocol::EVENT_TYPE_DEATH_NOTIFICATION
+                            e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification
                         }) {
                             warn!(
                                 "Agent '{}' has died: {}",
@@ -558,29 +558,62 @@ impl super::Agent {
                     }
 
                     // 5. 调用决策回调（带验证和记忆上下文）
-                    let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                        // 带记忆上下文决策（记忆系统生效）
-                        // 如果同时有 rejection feedback，也注入到 memory context 中
-                        let combined_context = match &self.last_rejection_reason {
-                            Some(reason) => {
-                                if memory_context.is_empty() {
-                                    format!("[上次意图被驳回: {}]", reason)
-                                } else {
-                                    format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
+                    // 用 deadline 计算剩余时间，超时自动 idle
+                    let decision_future = async {
+                        if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                            // 带记忆上下文决策（记忆系统生效）
+                            // 如果同时有 rejection feedback，也注入到 memory context 中
+                            let combined_context = match &self.last_rejection_reason {
+                                Some(reason) => {
+                                    if memory_context.is_empty() {
+                                        format!("[上次意图被驳回: {}]", reason)
+                                    } else {
+                                        format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
+                                    }
                                 }
+                                None => memory_context.clone(),
+                            };
+                            memory_callback(&world_state, &combined_context).await
+                        } else if let Some(ref reason) = self.last_rejection_reason {
+                            // 有 rejection 但无 memory callback，走 feedback 回调
+                            if let Some(ref callback) = self.decision_with_feedback_callback {
+                                callback(&world_state, Some(reason.as_str())).await
+                            } else {
+                                (self.decision_callback)(&world_state).await
                             }
-                            None => memory_context.clone(),
-                        };
-                        memory_callback(&world_state, &combined_context).await
-                    } else if let Some(ref reason) = self.last_rejection_reason {
-                        // 有 rejection 但无 memory callback，走 feedback 回调
-                        if let Some(ref callback) = self.decision_with_feedback_callback {
-                            callback(&world_state, Some(reason.as_str())).await
                         } else {
                             (self.decision_callback)(&world_state).await
                         }
+                    };
+
+                    let intent = if world_state.deadline_ms > 0 {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let remaining_ms = world_state.deadline_ms.saturating_sub(now_ms);
+                        // 留 3s 缓冲给 ReflectorSoul + 网络发送
+                        let buffer_ms: u64 = 3_000;
+                        let timeout_ms = remaining_ms.saturating_sub(buffer_ms);
+                        let decision_timeout = std::time::Duration::from_millis(timeout_ms);
+
+                        match tokio::time::timeout(decision_timeout, decision_future).await {
+                            Ok(intent) => intent,
+                            Err(_) => {
+                                warn!(
+                                    "Tick {} LLM 推理超时（剩余 {:?}，限制 {:?}），自动 idle",
+                                    world_state.tick_id,
+                                    std::time::Duration::from_millis(remaining_ms),
+                                    decision_timeout,
+                                );
+                                let agent_id = world_state.agent_id.unwrap_or_default();
+                                Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                    .with_thought("LLM 推理超时，自动 idle 以保证 tick 同步".to_string())
+                            }
+                        }
                     } else {
-                        (self.decision_callback)(&world_state).await
+                        // deadline_ms == 0：无时间限制，直接决策
+                        decision_future.await
                     };
 
                     // 5.5 ReflectorSoul 同步审查（反思之魂）
