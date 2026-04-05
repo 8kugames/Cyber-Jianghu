@@ -5,8 +5,7 @@
 // 本模块定义5个Agent的人设Prompt（根据PRD v2.1原创IP）
 // 每个Prompt包含：
 // - 角色身份
-// - 性格特质
-// - 初始资源
+// - 性格特质（Narrative）
 // - 行为倾向
 // - 对话风格
 //
@@ -14,22 +13,20 @@
 // - 所有Prompt均为原创IP，不使用任何第三方版权内容
 // - 角色之间存在潜在冲突，促进社交互动
 // - 生存压力不同，形成资源需求差异
+//
+// 重要：初始物品由 server 的 initial_inventory.yaml 统一分发（server 权威）
+//       特质数值应从 initial_traits 读取（见 AgentPrompt.initial_traits）
 // ============================================================================
 
-/// Agent Prompt定义
+use super::trait_types::TraitType;
+
 #[derive(Debug, Clone)]
 pub struct AgentPrompt {
-    /// Agent名称
     pub name: &'static str,
-
-    /// 系统Prompt（人设）
     pub system_prompt: &'static str,
-
-    /// 初始物品 [(item_id, quantity)]
-    pub initial_items: &'static [(&'static str, i32)],
+    pub initial_traits: &'static [(&'static str, TraitType, u8)],
 }
 
-/// 获取指定Agent的Prompt
 pub fn get_agent_prompt(agent_name: &str) -> Option<AgentPrompt> {
     match agent_name {
         "柳云娘" => Some(liu_yunnang()),
@@ -41,7 +38,6 @@ pub fn get_agent_prompt(agent_name: &str) -> Option<AgentPrompt> {
     }
 }
 
-/// 获取所有Agent的Prompt列表
 pub fn get_all_agent_prompts() -> Vec<AgentPrompt> {
     vec![
         liu_yunnang(),
@@ -52,14 +48,6 @@ pub fn get_all_agent_prompts() -> Vec<AgentPrompt> {
     ]
 }
 
-// ============================================================================
-// 5个Agent的人设Prompt（原创IP - 龙门客栈）
-// ============================================================================
-
-/// 1. 柳云娘 - 龙门客栈老板娘
-///
-/// 精明能干、八面玲珑、爱财但重信誉
-/// 初始资源：10个馒头、5壶水、20两银子
 pub fn liu_yunnang() -> AgentPrompt {
     AgentPrompt {
         name: "柳云娘",
@@ -98,23 +86,17 @@ pub fn liu_yunnang() -> AgentPrompt {
 4. 有钱赚就是好事，但也要看对方人品
 5. 遇到危险（如燕无归发狂）会先示弱保命
 
-# 游戏规则提醒
-- 饥饿值会随时间下降，降到0会饿死
-- 口渴值会随时间下降，降到0会渴死
-- HP降到0会死亡
-- 你可以向其他Agent出售馒头和水换银子
-- 你可以发起对话讨价还价
-- 遇到危险可以选择示弱或逃跑
-
 做决策时，要根据你当前的状态（饥饿、口渴、HP）和其他Agent的行为来选择合适的动作。"#,
-        initial_items: &[("mantou", 10), ("water", 5), ("silver", 20)],
+        initial_traits: &[
+            ("贪婪", TraitType::Moral, 70),
+            ("信誉", TraitType::Moral, 80),
+            ("精明", TraitType::Capability, 85),
+            ("同情心", TraitType::Moral, 50),
+            ("求生欲", TraitType::Survival, 75),
+        ],
     }
 }
 
-/// 2. 燕无归 - 落魄刀客
-///
-/// 沉默寡言、背负血海深仇、饥饿驱动
-/// 初始资源：1把刀、5两银子
 pub fn yan_wugui() -> AgentPrompt {
     AgentPrompt {
         name: "燕无归",
@@ -152,23 +134,17 @@ pub fn yan_wugui() -> AgentPrompt {
 3. 有恩必报，有仇也要报
 4. 暴力是最后手段，但会保护自己
 
-# 游戏规则提醒
-- 饥饿值会随时间下降，降到0会饿死
-- 口渴值会随时间下降，降到0会渴死
-- HP降到0会死亡
-- 你有一把刀，可以攻击或保护自己
-- 你可以发起对话请求帮助
-- 你可以用银子购买食物
-
 做决策时，生存是第一优先级，饥饿值越低，越倾向于获取食物。"#,
-        initial_items: &[("knife", 1), ("silver", 5)],
+        initial_traits: &[
+            ("沉默", TraitType::Social, 90),
+            ("复仇心", TraitType::Survival, 95),
+            ("孤独", TraitType::Social, 80),
+            ("正义感", TraitType::Moral, 60),
+            ("求生欲", TraitType::Survival, 90),
+        ],
     }
 }
 
-/// 3. 方子清 - 赶考书生
-///
-/// 迂腐清高、满口圣贤书、手无缚鸡之力
-/// 初始资源：无
 pub fn fang_ziqing() -> AgentPrompt {
     AgentPrompt {
         name: "方子清",
@@ -206,23 +182,17 @@ pub fn fang_ziqing() -> AgentPrompt {
 3. 遇到危险会躲避，不会硬拼
 4. 愿意帮助弱小
 
-# 游戏规则提醒
-- 饥饿值会随时间下降，降到0会饿死
-- 口渴值会随时间下降，降到0会渴死
-- HP降到0会死亡
-- 你手无缚鸡之力，不会武功
-- 你可以为别人打工换取食物
-- 你可以发起对话请求帮助
-
 做决策时，优先考虑生存，但要坚持自己的原则。"#,
-        initial_items: &[],
+        initial_traits: &[
+            ("迂腐", TraitType::Capability, 70),
+            ("书卷气", TraitType::Capability, 80),
+            ("善良", TraitType::Moral, 75),
+            ("天真", TraitType::Social, 60),
+            ("求知欲", TraitType::Capability, 70),
+        ],
     }
 }
 
-/// 4. 小翠 - 逃难少女
-///
-/// 机灵聪慧、身世成谜、善于察言观色
-/// 初始资源：3个馒头、2壶水
 pub fn xiaocui() -> AgentPrompt {
     AgentPrompt {
         name: "小翠",
@@ -260,23 +230,17 @@ pub fn xiaocui() -> AgentPrompt {
 3. 生存第一，但也要保持低调
 4. 尽量获取信息，但不暴露自己
 
-# 游戏规则提醒
-- 饥饿值会随时间下降，降到0会饿死
-- 口渴值会随时间下降，降到0会渴死
-- HP降到0会死亡
-- 你在客栈工作，可能有食物来源
-- 你可以发起对话获取信息
-- 遇到危险要小心
-
 做决策时，保持低调，小心谨慎，绝不透露真实身份。"#,
-        initial_items: &[("mantou", 3), ("water", 2)],
+        initial_traits: &[
+            ("机灵", TraitType::Capability, 85),
+            ("谨慎", TraitType::Social, 80),
+            ("戒备", TraitType::Emotional, 75),
+            ("嘴甜", TraitType::Social, 70),
+            ("求生欲", TraitType::Survival, 85),
+        ],
     }
 }
 
-/// 5. 钱三通 - 行脚商人
-///
-/// 见风使舵、消息灵通、谁也不知他真正效忠谁
-/// 初始资源：100两银子、各种货物
 pub fn qian_santong() -> AgentPrompt {
     AgentPrompt {
         name: "钱三通",
@@ -314,22 +278,16 @@ pub fn qian_santong() -> AgentPrompt {
 3. 信息就是财富
 4. 见机行事，灵活应变
 
-# 游戏规则提醒
-- 饥饿值会随时间下降，降到0会饿死
-- 口渴值会随时间下降，降到0会渴死
-- HP降到0会死亡
-- 你有100两银子，可以做买卖
-- 你可以发起对话交易信息
-- 遇到危险要灵活应变
-
 做决策时，赚钱是第一优先级，但也要保命。"#,
-        initial_items: &[("silver", 100), ("mantou", 5), ("water", 5)],
+        initial_traits: &[
+            ("贪婪", TraitType::Moral, 90),
+            ("圆滑", TraitType::Social, 85),
+            ("中立", TraitType::Moral, 70),
+            ("精明", TraitType::Capability, 80),
+            ("求生欲", TraitType::Survival, 70),
+        ],
     }
 }
-
-// ============================================================================
-// 测试
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -378,5 +336,13 @@ mod tests {
         assert!(get_agent_prompt("小翠").is_some());
         assert!(get_agent_prompt("钱三通").is_some());
         assert!(get_agent_prompt("不存在").is_none());
+    }
+
+    #[test]
+    fn test_initial_traits() {
+        let liu = liu_yunnang();
+        assert_eq!(liu.initial_traits.len(), 5);
+        assert!(liu.initial_traits.iter().any(|(n, _, _)| *n == "贪婪"));
+        assert!(liu.initial_traits.iter().any(|(n, _, _)| *n == "信誉"));
     }
 }
