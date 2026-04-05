@@ -274,7 +274,7 @@ async fn handle_websocket(
                     drop(gd);
                     let now_ms = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_millis() as u64;
                     now_ms + tick_secs * 1000
                 };
