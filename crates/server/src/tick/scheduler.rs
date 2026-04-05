@@ -651,7 +651,7 @@ impl TickScheduler {
         // Bug #5: 告警阈值 - 单 tick 自然死亡数量异常升高时触发告警
         let death_threshold = crate::game_data::registry::registry()
             .map(|r| r.get().game_rules.data.ops.death_threshold)
-            .expect("game_rules 中缺失 ops.death_threshold 配置");
+            .unwrap_or(10);
 
         if dead_agents.len() > death_threshold {
             tracing::error!(
