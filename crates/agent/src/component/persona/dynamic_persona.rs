@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use super::trait_types::{Trait, TraitChange, TraitType};
+use super::trait_types::{Trait, TraitChange, TraitType, default_traits, parse_traits};
 
 /// 人设状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ pub struct DynamicPersona {
 impl DynamicPersona {
     /// 从预设的 AgentPrompt 创建动态人设
     pub fn from_preset(agent_id: Uuid, preset: &AgentPrompt) -> Self {
-        let traits = Trait::parse_from_prompt(preset.system_prompt, preset.name);
+        let traits = parse_traits(preset);
 
         Self {
             agent_id: agent_id.to_string(),
@@ -80,9 +80,10 @@ impl DynamicPersona {
         }
     }
 
-    /// 使用默认配置创建
     pub fn new(agent_id: Uuid, name: &str, description: &str) -> Self {
-        let traits = Trait::parse_from_prompt(description, name);
+        let traits = super::prompts::get_agent_prompt(name)
+            .map(|p| parse_traits(&p))
+            .unwrap_or_else(default_traits);
 
         Self {
             agent_id: agent_id.to_string(),
