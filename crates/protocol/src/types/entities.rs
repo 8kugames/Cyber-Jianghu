@@ -97,6 +97,24 @@ pub struct Entity {
     /// 是否敌对
     #[serde(default)]
     pub hostile: bool,
+
+    /// 该角色最近的动作（供其他 Agent 观察上下文）
+    #[serde(default)]
+    pub recent_actions: Vec<RecentAction>,
+}
+
+/// 最近动作记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentAction {
+    /// Tick 编号
+    pub tick_id: i64,
+    /// 动作类型
+    pub action_type: String,
+    /// 对话内容（如果有）
+    #[serde(default)]
+    pub content: Option<String>,
+    /// 结果描述
+    pub result: String,
 }
 
 /// 场景物品（可拾取）

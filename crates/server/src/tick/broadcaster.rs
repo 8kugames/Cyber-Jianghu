@@ -23,12 +23,9 @@ use uuid::Uuid;
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
 use crate::game_data::registry::ItemRegistry;
-use crate::models::{AgentState, WorldEvent, WorldState};
+use crate::models::{AgentState, WorldEvent, WorldEventType, WorldState};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
-use cyber_jianghu_protocol::{
-    AdjacentNode, EVENT_TYPE_DEATH_NOTIFICATION, EVENT_TYPE_SYSTEM_NOTIFICATION,
-    EVENT_TYPE_WORLD_STATE,
-};
+use cyber_jianghu_protocol::{AdjacentNode, EVENT_TYPE_DEATH_NOTIFICATION, EVENT_TYPE_WORLD_STATE};
 
 use super::event_manager::EventManager;
 
@@ -58,6 +55,7 @@ impl Broadcaster {
         event_manager: &EventManager,
         game_data_cache: &Arc<GameDataCache>,
         deadline_ms: u64,
+        closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 
@@ -129,6 +127,7 @@ impl Broadcaster {
                 inventory,
                 &online_agent_ids,
                 game_data_cache,
+                closed_dialogue_records,
             );
 
             // 向该Agent发送其专属的WorldState
@@ -166,6 +165,7 @@ impl Broadcaster {
         inventory: Vec<crate::models::InventoryItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
+        closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
     ) -> WorldState {
         // 游戏时间计算（数据驱动）
         let (year, month, day, hour) = compute_game_time(tick_id);
@@ -201,6 +201,17 @@ impl Broadcaster {
             })
             .collect();
 
+        // 过滤events_log：只保留与当前Agent同节点的事件
+        // 全局事件（如系统通知）没有location字段，会被保留
+        events.retain(|e| {
+            if let Some(loc) = e.metadata.get("location")
+                && let Some(loc_str) = loc.as_str()
+            {
+                return loc_str == current_node_id;
+            }
+            true
+        });
+
         // 如果 Agent 已经死亡，添加一个特殊的系统事件
         if !agent_state.is_alive {
             let has_death_event = events.iter().any(|e| {
@@ -220,7 +231,7 @@ impl Broadcaster {
                     .death
                     .clone();
                 events.push(WorldEvent {
-                    event_type: EVENT_TYPE_SYSTEM_NOTIFICATION.to_string(),
+                    event_type: WorldEventType::SystemNotification,
                     tick_id,
                     description: death_message,
                     metadata: serde_json::json!({
@@ -273,6 +284,25 @@ impl Broadcaster {
                         entity_state_alive.clone()
                     },
                     hostile: false, // MVP阶段：无敌对关系
+                    recent_actions: events
+                        .iter()
+                        .filter(|e| {
+                            e.metadata
+                                .get("from_agent_id")
+                                .and_then(|v| v.as_str())
+                                .map(|id| id == other.agent_id.to_string())
+                                .unwrap_or(false)
+                        })
+                        .map(|e| crate::models::RecentAction {
+                            tick_id: e.tick_id,
+                            action_type: format!("{:?}", e.event_type),
+                            content: e
+                                .metadata
+                                .get("content")
+                                .and_then(|v| v.as_str().map(String::from)),
+                            result: e.description.clone(),
+                        })
+                        .collect(),
                 }
             })
             .collect();
@@ -333,6 +363,7 @@ impl Broadcaster {
             // 注意：nearby_items 暂未实现，场景物品功能未开发
             nearby_items: vec![],
             events_log: events, // 传递本 Tick 发生的事件
+            private_dialogue_log: closed_dialogue_records.to_vec(), // 上一轮关闭的密语会话记录
             deadline_ms,
         }
     }
@@ -440,7 +471,7 @@ pub fn build_initial_world_state(
             .death
             .clone();
         events.push(WorldEvent {
-            event_type: EVENT_TYPE_SYSTEM_NOTIFICATION.to_string(),
+            event_type: WorldEventType::SystemNotification,
             tick_id,
             description: death_message,
             metadata: serde_json::json!({
@@ -495,6 +526,7 @@ pub fn build_initial_world_state(
         entities: vec![], // 连接时不含其他 agent
         nearby_items: vec![],
         events_log: events,
+        private_dialogue_log: vec![],
         deadline_ms,
     }
 }

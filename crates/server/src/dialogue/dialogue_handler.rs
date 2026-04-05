@@ -211,7 +211,7 @@ impl DialogueManager {
 
         // 更新消息计数
         let mut updated = session.clone();
-        updated.increment_message_count();
+        updated.increment_message_count(from_agent_id);
         registry.update_session(&session_id, updated);
 
         debug!("消息已转发: {} -> {}", from_agent_id, to_agent_id);

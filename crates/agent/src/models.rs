@@ -22,6 +22,7 @@ pub use cyber_jianghu_protocol::{
     // 消息类型
     ServerMessage,
     WorldEvent,
+    WorldEventType,
     // 数据类型
     WorldState,
     WorldTime,

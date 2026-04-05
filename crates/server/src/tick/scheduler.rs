@@ -22,8 +22,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use crate::db::DbPool;
+use crate::dialogue::DialogueManager;
 use crate::game_data::GameDataCache;
-use crate::models::TickLog;
+use crate::models::{TickLog, WorldEventType};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, IntentManager};
 
 use super::super::inventory::InventoryManager;
@@ -76,6 +77,12 @@ pub struct TickScheduler {
     /// 状态处理器
     state_processor: StateProcessor,
 
+    /// 对话管理器
+    dialogue_manager: Arc<DialogueManager>,
+
+    /// 上一轮关闭的对话记录（用于下一轮广播）
+    closed_dialogue_records: Vec<cyber_jianghu_protocol::PrivateDialogueRecord>,
+
     /// 当前接受意图的 tick_id（与 AppState 共享）
     accepting_tick_id: Arc<AtomicI64>,
 
@@ -91,6 +98,7 @@ impl TickScheduler {
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
         intent_manager: IntentManager,
+        dialogue_manager: Arc<DialogueManager>,
         accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
         Self {
@@ -105,6 +113,8 @@ impl TickScheduler {
             intent_collector: IntentCollector::new(),
             broadcaster: Broadcaster::new(),
             state_processor: StateProcessor::new(db_pool),
+            dialogue_manager,
+            closed_dialogue_records: vec![],
             accepting_tick_id,
             last_actions_mtime: None,
         }
@@ -306,6 +316,7 @@ impl TickScheduler {
                 &self.event_manager,
                 &self.game_data_cache,
                 deadline_ms,
+                &self.closed_dialogue_records,
             )
             .await
             .context("广播: 广播状态失败")?;
@@ -457,7 +468,7 @@ impl TickScheduler {
                 for state in &agent_states {
                     if state.is_alive {
                         let event = crate::models::WorldEvent {
-                            event_type: "time_update".to_string(),
+                            event_type: WorldEventType::TimeUpdate,
                             tick_id,
                             description: time_desc.clone(),
                             metadata: serde_json::json!({
@@ -678,6 +689,8 @@ impl TickScheduler {
         if total_duration.as_secs() > 10 {
             warn!("Tick {} 耗时超过10秒: {:?}", tick_id, total_duration);
         }
+
+        self.closed_dialogue_records = self.dialogue_manager.close_all_sessions().await;
 
         Ok((agents_processed, actions_executed))
     }

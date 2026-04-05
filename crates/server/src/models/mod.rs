@@ -59,7 +59,10 @@ pub use protocol::InitialItem;
 pub use protocol::Intent;
 pub use protocol::InventoryItem;
 pub use protocol::Location;
+pub use protocol::PrivateDialogueRecord;
+pub use protocol::RecentAction;
 pub use protocol::WorldEvent;
+pub use protocol::WorldEventType;
 pub use protocol::WorldState;
 pub use protocol::WorldTime;
 

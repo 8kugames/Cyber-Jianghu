@@ -140,6 +140,20 @@ pub struct Intent {
     /// 叙事化描述（ReflectorSoul 生成的经历描述）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narrative: Option<String>,
+
+    /// 是否已经广播（用于 speak 动作的幂等性）
+    ///
+    /// speak 动作在 handle_intent 时立即广播给同 Location 的 Agent，
+    /// 结算时通过此字段跳过重复广播
+    #[serde(default)]
+    pub already_broadcast: bool,
+
+    /// 关联的 Dialogue Session ID（用于 whisper 动作）
+    ///
+    /// whisper 动作在 handle_intent 时立即建立 Dialogue Session，
+    /// 用于关单时强制结束 Session
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 fn default_priority() -> i32 {
@@ -164,6 +178,8 @@ impl Intent {
             priority: 5,
             observer_thought: None,
             narrative: None,
+            already_broadcast: false,
+            session_id: None,
         }
     }
 
@@ -185,6 +201,8 @@ impl Intent {
             priority: 5,
             observer_thought: None,
             narrative: None,
+            already_broadcast: false,
+            session_id: None,
         }
     }
 

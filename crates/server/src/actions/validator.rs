@@ -399,6 +399,8 @@ mod tests {
             priority: 5,
             observer_thought: None,
             narrative: None,
+            already_broadcast: false,
+            session_id: None,
         }
     }
 

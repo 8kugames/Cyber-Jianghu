@@ -27,7 +27,7 @@ use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
-use crate::models::{Intent, WorldState};
+use crate::models::{Intent, WorldEventType, WorldState};
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
 use cyber_jianghu_protocol::AvailableAction;
 
@@ -359,13 +359,13 @@ impl CognitiveEngine {
             .iter()
             .rev()
             .filter_map(|e| {
-                match e.event_type.as_str() {
-                    cyber_jianghu_protocol::EVENT_TYPE_PUBLIC_MESSAGE => e
+                match e.event_type {
+                    WorldEventType::PublicMessage => e
                         .metadata
                         .get("content")
                         .and_then(|c| c.as_str())
                         .map(|s| s.to_string()),
-                    cyber_jianghu_protocol::EVENT_TYPE_ACTION_RESULT => {
+                    WorldEventType::ActionResult => {
                         // 数据驱动：直接使用 server 提供的 description，不硬编码 action 类型
                         if e.description.is_empty() {
                             None
@@ -415,9 +415,28 @@ impl CognitiveEngine {
                 .join(", ")
         };
 
+        let location_constraint = if world_state.location.adjacent_nodes.is_empty() {
+            "\n【重要】当前位置无法移动到任何地方，你必须留在当前位置。"
+        } else {
+            "\n【重要】只能移动到上述明确列出的位置，禁止编造或推断其他位置名称。"
+        };
+
+        let time_info = {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let remaining = world_state.deadline_ms.saturating_sub(now_ms) / 1000;
+            if remaining > 0 && world_state.deadline_ms > 0 {
+                format!("\n[时间提醒] 当前 Tick 剩余时间约 {} 秒，请在此时间内完成决策。", remaining)
+            } else {
+                String::new()
+            }
+        };
+
         format!(
             r#"# 感知与动机阶段 (Perception + Motivation)
-{feedback_section}
+{feedback_section}{time_info}
 你是 {agent_name}。
 {persona}
 
@@ -429,7 +448,7 @@ impl CognitiveEngine {
 
 ### 位置
 - 地点: {location}
-- 可达位置: {adjacent_locations}
+- 可达位置: {adjacent_locations}{location_constraint}
 
 ### 环境
 - 附近的人: {entities}
@@ -455,6 +474,8 @@ impl CognitiveEngine {
             inventory = inventory_str,
             location = world_state.location.name,
             adjacent_locations = adjacent_locations,
+            location_constraint = location_constraint,
+            time_info = time_info,
             entities = entities_str,
             items = items_str,
             memory_section = memory_section,

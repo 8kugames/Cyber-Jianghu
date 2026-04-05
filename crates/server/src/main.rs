@@ -84,6 +84,7 @@ fn start_tick_engine(
     connection_manager: websocket::ConnectionManager,
     agent_to_device_map: websocket::AgentToDeviceMap,
     intent_manager: websocket::IntentManager,
+    dialogue_manager: Arc<dialogue::DialogueManager>,
     accepting_tick_id: Arc<AtomicI64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -93,6 +94,7 @@ fn start_tick_engine(
             connection_manager,
             agent_to_device_map,
             intent_manager,
+            dialogue_manager,
             accepting_tick_id,
         );
 
@@ -262,6 +264,7 @@ async fn main() -> Result<()> {
         connection_manager.clone(),
         agent_to_device_map.clone(),
         intent_manager.clone(),
+        dialogue_manager.clone(),
         accepting_tick_id,
     );
 

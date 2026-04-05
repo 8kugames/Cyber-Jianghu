@@ -64,6 +64,8 @@ impl IntentCollector {
                     priority: 5,
                     observer_thought: None,
                     narrative: Some("静待时机".to_string()),
+                    already_broadcast: false,
+                    session_id: None,
                 });
             }
         }

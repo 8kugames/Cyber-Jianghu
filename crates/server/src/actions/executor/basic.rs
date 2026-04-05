@@ -118,6 +118,7 @@ impl BasicActionExecutor {
         result.add_change(StateChange::MessageSpoken {
             agent_id: intent.agent_id,
             content: data.content,
+            already_broadcast: intent.already_broadcast,
         });
 
         result
