@@ -134,8 +134,12 @@ impl RuleValidationContext {
             .world_state
             .as_ref()
             .map(|ws| {
-                let items: Vec<String> =
-                    ws.self_state.inventory.iter().map(|i| i.item_id.clone()).collect();
+                let items: Vec<String> = ws
+                    .self_state
+                    .inventory
+                    .iter()
+                    .map(|i| i.item_id.clone())
+                    .collect();
                 let nodes: Vec<String> = ws
                     .location
                     .adjacent_nodes

@@ -244,7 +244,25 @@ impl CognitiveEngine {
         prompt: &str,
         world_state: &WorldState,
     ) -> Result<(String, StageOutput, StageOutput, Intent)> {
-        let mut response: PlanDecisionResponse = self.llm_client.complete_json(prompt).await?;
+        let mut response: PlanDecisionResponse = if self.llm_client.supports_tool_calling() {
+            use crate::soul::actor::tools::{ActorToolExecutor, create_actor_tools};
+
+            let tools = create_actor_tools();
+            let executor = ActorToolExecutor::new(world_state.clone());
+            match self
+                .llm_client
+                .complete_json_with_tools("", prompt, &tools, &executor, 1)
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!("Tool calling failed, fallback to direct: {}", e);
+                    self.llm_client.complete_json(prompt).await?
+                }
+            }
+        } else {
+            self.llm_client.complete_json(prompt).await?
+        };
 
         let response_json = serde_json::to_string(&response)?;
 
@@ -428,7 +446,10 @@ impl CognitiveEngine {
                 .as_millis() as u64;
             let remaining = world_state.deadline_ms.saturating_sub(now_ms) / 1000;
             if remaining > 0 && world_state.deadline_ms > 0 {
-                format!("\n[时间提醒] 当前 Tick 剩余时间约 {} 秒，请在此时间内完成决策。", remaining)
+                format!(
+                    "\n[时间提醒] 当前 Tick 剩余时间约 {} 秒，请在此时间内完成决策。",
+                    remaining
+                )
             } else {
                 String::new()
             }
@@ -511,6 +532,10 @@ impl CognitiveEngine {
 基于你的感知和动机，制定行动计划并做出最终决策。
 1. 先规划：你打算怎么做？分成几个步骤？
 2. 再决策：基于规划，选择一个具体的行动。
+
+## 工具使用
+你可以调用工具查询精确的游戏数据。当你决定涉及物品或地点的行动时，请先调用工具确认正确的 ID。
+工具返回的数据是绝对权威的，你必须使用工具返回的精确 ID，不要自行翻译或猜测。
 
 ## 重要约束
 1. **必须引用前面的思考**：在 thought_process 中说明你的决策如何基于感知和动机。

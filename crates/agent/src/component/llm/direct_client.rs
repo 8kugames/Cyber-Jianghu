@@ -20,6 +20,8 @@ use std::sync::{Mutex, OnceLock};
 use tracing::{debug, error};
 
 use super::LlmClient;
+use super::openai_types::{ChatMessage, OpenAIRequest, OpenAIResponse};
+use super::tool_types::{ToolDefinition, ToolExecutor};
 
 // ============================================================================
 // Token Usage Tracking (per provider-model)
@@ -508,31 +510,17 @@ impl DirectLlmClient {
             .context("Failed to build HTTP client")
     }
 
-    /// 调用 OpenAI 兼容 API
-    ///
-    /// OpenClaw Gateway、OpenAI Compatible、Ollama 都使用 OpenAI 兼容接口
-    async fn call_openai_compatible_api(&self, prompt: &str) -> Result<String> {
+    /// 发送 OpenAI 兼容 API 请求（公共 HTTP 逻辑）
+    async fn send_request(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
         let client = self.build_http_client()?;
         let base_url = self.config.get_base_url()?;
-        let model = self.config.get_model_with_default();
         let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
-        let request = OpenAIRequest {
-            model: model.clone(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
-            temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
-        };
 
         debug!("Calling OpenAI-compatible API: {}", url);
         debug!("Request model: {}", request.model);
 
         let mut request_builder = client.post(&url).header("Content-Type", "application/json");
 
-        // 添加 Authorization 头（如果有 API Key）
         if let Some(ref api_key) = self.config.api_key {
             request_builder =
                 request_builder.header("Authorization", format!("Bearer {}", api_key));
@@ -559,7 +547,7 @@ impl DirectLlmClient {
             .await
             .context("Failed to parse LLM response")?;
 
-        // 记录 token 使用量
+        let model = self.config.get_model_with_default();
         if let Some(ref usage) = response_data.usage {
             record_token_usage(
                 &self.config.provider,
@@ -576,8 +564,33 @@ impl DirectLlmClient {
             );
         }
 
+        Ok(response_data)
+    }
+
+    /// 调用 OpenAI 兼容 API
+    ///
+    /// OpenClaw Gateway、OpenAI Compatible、Ollama 都使用 OpenAI 兼容接口
+    async fn call_openai_compatible_api(&self, prompt: &str) -> Result<String> {
+        let model = self.config.get_model_with_default();
+        let request = OpenAIRequest {
+            model,
+            messages: vec![ChatMessage::user(prompt)],
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
+        };
+
+        let response_data = self.send_request(&request).await?;
+
         if let Some(choice) = response_data.choices.first() {
-            let content = choice.message.content.trim().to_string();
+            let content = choice
+                .message
+                .content
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             debug!("LLM response length: {} chars", content.len());
             Ok(content)
         } else {
@@ -594,81 +607,107 @@ impl DirectLlmClient {
         system: &str,
         prompt: &str,
     ) -> Result<String> {
-        let client = self.build_http_client()?;
-        let base_url = self.config.get_base_url()?;
         let model = self.config.get_model_with_default();
-        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-
         let request = OpenAIRequest {
-            model: model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: prompt.to_string(),
-                },
-            ],
+            model,
+            messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
             temperature: Some(self.config.temperature),
             max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
         };
 
-        debug!("Calling OpenAI-compatible API (system+user): {}", url);
-        debug!("Request model: {}", request.model);
+        debug!("Calling OpenAI-compatible API (system+user)");
 
-        let mut request_builder = client.post(&url).header("Content-Type", "application/json");
-
-        if let Some(ref api_key) = self.config.api_key {
-            request_builder =
-                request_builder.header("Authorization", format!("Bearer {}", api_key));
-        }
-
-        let response = request_builder
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send request to LLM API")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unable to read error body".to_string());
-            error!("LLM API error {}: {}", status, error_body);
-            anyhow::bail!("LLM API error {}: {}", status, error_body);
-        }
-
-        let response_data: OpenAIResponse = response
-            .json()
-            .await
-            .context("Failed to parse LLM response")?;
-
-        if let Some(ref usage) = response_data.usage {
-            record_token_usage(
-                &self.config.provider,
-                &model,
-                usage.prompt_tokens,
-                usage.completion_tokens,
-            );
-            debug!(
-                "Token usage: provider={}, model={}, prompt={}, completion={}",
-                self.config.provider.as_str(),
-                model,
-                usage.prompt_tokens,
-                usage.completion_tokens
-            );
-        }
+        let response_data = self.send_request(&request).await?;
 
         if let Some(choice) = response_data.choices.first() {
-            let content = choice.message.content.trim().to_string();
+            let content = choice
+                .message
+                .content
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             debug!("LLM response length: {} chars", content.len());
             Ok(content)
         } else {
             anyhow::bail!("LLM returned empty response")
         }
+    }
+
+    /// 使用 tool calling 的多轮对话
+    async fn call_openai_compatible_api_with_tools(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[ToolDefinition],
+        executor: &dyn ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let model = self.config.get_model_with_default();
+        let mut messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
+
+        for round in 0..max_rounds {
+            debug!("Tool calling round {}/{}", round + 1, max_rounds);
+
+            let request = OpenAIRequest {
+                model: model.clone(),
+                messages: messages.clone(),
+                temperature: Some(self.config.temperature),
+                max_tokens: Some(self.config.max_tokens),
+                tools: Some(tools.to_vec()),
+                tool_choice: Some(serde_json::json!("auto")),
+            };
+
+            let response_data = self.send_request(&request).await?;
+
+            let choice = response_data
+                .choices
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("LLM returned empty response"))?;
+            let msg = &choice.message;
+
+            let has_tool_calls = msg
+                .tool_calls
+                .as_ref()
+                .map(|tc| !tc.is_empty())
+                .unwrap_or(false);
+
+            if !has_tool_calls {
+                let content = msg.content.clone().unwrap_or_default();
+                debug!(
+                    "Tool calling completed after {} rounds, response length: {} chars",
+                    round + 1,
+                    content.len()
+                );
+                return Ok(content);
+            }
+
+            let tool_calls = msg.tool_calls.as_ref().unwrap();
+            debug!("LLM requested {} tool calls", tool_calls.len());
+
+            messages.push(msg.clone());
+
+            for tc in tool_calls {
+                let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
+                let result = executor
+                    .execute(&tc.function.name, &args)
+                    .await
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
+
+                debug!("Tool {} result: {}", tc.function.name, result);
+
+                messages.push(ChatMessage::tool_result(
+                    &tc.id,
+                    &tc.function.name,
+                    &result.to_string(),
+                ));
+            }
+        }
+
+        debug!("Tool calling reached max rounds ({})", max_rounds);
+        anyhow::bail!("Tool calling exceeded max rounds ({})", max_rounds)
     }
 }
 
@@ -683,46 +722,22 @@ impl LlmClient for DirectLlmClient {
         self.call_openai_compatible_api_with_system(system, prompt)
             .await
     }
-}
 
-// ============================================================================
-// OpenAI 兼容 API 类型
-// ============================================================================
+    fn supports_tool_calling(&self) -> bool {
+        true
+    }
 
-#[derive(Debug, Serialize)]
-struct OpenAIRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIResponse {
-    choices: Vec<OpenAIChoice>,
-    #[serde(default)]
-    usage: Option<OpenAIUsage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIUsage {
-    #[serde(default)]
-    prompt_tokens: u64,
-    #[serde(default)]
-    completion_tokens: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIChoice {
-    message: ChatMessage,
+    async fn complete_with_tools(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[ToolDefinition],
+        executor: &dyn ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        self.call_openai_compatible_api_with_tools(system, prompt, tools, executor, max_rounds)
+            .await
+    }
 }
 
 // ============================================================================

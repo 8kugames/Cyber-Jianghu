@@ -480,7 +480,10 @@ mod tests {
     async fn test_evaluate_in_node_ids() {
         let evaluator = DefaultEvaluator;
         let mut context = create_test_context();
-        context.reachable_node_ids = vec!["longmen_kitchen".to_string(), "longmen_backyard".to_string()];
+        context.reachable_node_ids = vec![
+            "longmen_kitchen".to_string(),
+            "longmen_backyard".to_string(),
+        ];
 
         let condition = RuleCondition::In(
             "intent.action_data.target_location".to_string(),
