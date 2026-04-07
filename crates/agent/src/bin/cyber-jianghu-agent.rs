@@ -828,17 +828,39 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let config_watcher = Arc::new(ConfigWatcher::new(config_path.clone())?);
             info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
 
+            // 初始化关系存储
+            let agent_id_for_rel = character.agent_id.unwrap_or_else(Uuid::new_v4);
+            let relationship_db_path = data_dir.join("relationships.db");
+            let relationship_store = match cyber_jianghu_agent::component::social::RelationshipStore::open(
+                agent_id_for_rel,
+                &relationship_db_path,
+            ) {
+                Ok(store) => {
+                    info!("RelationshipStore 已初始化");
+                    Some(store)
+                }
+                Err(e) => {
+                    tracing::warn!("RelationshipStore 初始化失败: {}，继续无关系存储", e);
+                    None
+                }
+            };
+
             let mut builder = AgentBuilder::new(config_for_builder, decision)
                 .device_config(device.clone())
                 .data_dir(data_dir.clone())
                 .with_decision_feedback(cognitive_decision_with_feedback)
                 .with_decision_memory(decision_with_memory)
-                .with_llm_client(llm_arc.clone(), None)
                 .with_llm_container(llm_container)
+                .with_llm_client(llm_arc.clone(), None)
                 .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
-                .with_reconnect_rx(reconnect_rx_for_builder)
-                .cognitive_engine(cognitive_engine_for_builder.clone());
+                .with_reconnect_rx(reconnect_rx_for_builder);
+
+            if let Some(store) = relationship_store {
+                builder = builder.with_relationship_store(store);
+            }
+
+            builder = builder.cognitive_engine(cognitive_engine_for_builder.clone());
 
             builder = builder.character_config(character.clone());
 

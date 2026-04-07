@@ -19,7 +19,7 @@ pub struct StatusComponent {
     pub collection: AttributeCollection,
 }
 
-use evalexpr::ContextWithMutableVariables;
+
 
 impl StatusComponent {
     /// 从配置创建状态值组件（数据驱动）
@@ -180,21 +180,12 @@ impl StatusComponent {
         default_max: f32,
         context: &std::collections::HashMap<String, i32>,
     ) -> f32 {
-        if let Some(f) = formula {
-            let mut eval_context = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
-            for (k, v) in context {
-                let _ = eval_context.set_value(k.clone(), evalexpr::Value::Int(*v as i64));
-            }
-            let res = evalexpr::eval_with_context(f, &eval_context);
-            if let Ok(evalexpr::Value::Int(result)) = res {
-                return result as f32;
-            } else if let Ok(evalexpr::Value::Float(result)) = res {
-                return result as f32;
-            } else if let Ok(parsed) = f.parse::<f32>() {
-                return parsed;
-            }
-        }
-        default_max
+        let i64_context: std::collections::HashMap<String, i64> = context
+            .iter()
+            .map(|(k, v)| (k.clone(), *v as i64))
+            .collect();
+        let engine = crate::game_data::formula_engine::FormulaEngine::new();
+        engine.evaluate_max(formula, default_max, &i64_context)
     }
 
     /// 应用属性值变化（带范围限制）

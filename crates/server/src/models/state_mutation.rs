@@ -2,7 +2,7 @@
 // AgentState 状态变更方法
 // ============================================================================
 
-use evalexpr::ContextWithMutableVariables;
+
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -104,23 +104,16 @@ impl AgentState {
         let recovering_attributes = self.status.get_recovering_attributes();
 
         for (attr_name, formula) in recovering_attributes {
-            // 使用 evalexpr 计算恢复值
-            let mut eval_context = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
-            for (k, v) in &context {
-                let _ = eval_context.set_value(k.clone(), evalexpr::Value::Int(*v as i64));
-            }
+            // 使用 FormulaEngine 计算恢复值
+            let i64_context: std::collections::HashMap<String, i64> = context
+                .iter()
+                .map(|(k, v)| (k.clone(), *v as i64))
+                .collect();
+            let engine = crate::game_data::formula_engine::FormulaEngine::new();
 
-            // 计算基础恢复值
-            let base_recovery = if let Ok(evalexpr::Value::Float(recovery)) =
-                evalexpr::eval_with_context(&formula, &eval_context)
-            {
-                recovery.floor() as i32
-            } else if let Ok(evalexpr::Value::Int(recovery)) =
-                evalexpr::eval_with_context(&formula, &eval_context)
-            {
-                recovery as i32
-            } else {
-                continue;
+            let base_recovery = match engine.evaluate_int(&formula, &i64_context) {
+                Ok(v) => v,
+                Err(_) => continue,
             };
 
             if base_recovery > 0 {

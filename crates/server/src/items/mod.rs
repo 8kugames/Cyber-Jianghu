@@ -27,5 +27,3 @@ pub(crate) mod types;
 mod tests;
 
 pub use registry::{get_item_definition, init_item_cache_from_config};
-#[allow(unused_imports)]
-pub use system::apply_item_effect;

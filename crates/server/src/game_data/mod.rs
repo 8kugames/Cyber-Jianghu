@@ -17,8 +17,7 @@
 // ============================================================================
 
 mod cache;
-#[allow(unused)]
-mod formula_engine;
+pub mod formula_engine;
 mod loader;
 pub mod loaders;
 pub mod registry;

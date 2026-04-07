@@ -12,7 +12,6 @@
 mod agent;
 mod builder;
 mod lifecycle;
-pub mod tools;
 pub mod utils;
 
 // ============================================================================
