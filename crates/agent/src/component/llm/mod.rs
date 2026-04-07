@@ -4,6 +4,8 @@
 
 mod client;
 pub mod direct_client;
+mod openai_types;
+pub mod tool_types;
 
 pub use client::mock;
 pub use client::mock::MockLlmClient;
@@ -12,3 +14,4 @@ pub use direct_client::{
     DirectLlmClient, DirectLlmClientConfig, LlmProvider, ModelTokenStats, OpenClawConfig,
     persist_and_reset, record_token_usage, snapshot_all_stats,
 };
+pub use tool_types::{ToolCall, ToolDefinition, ToolExecutor};

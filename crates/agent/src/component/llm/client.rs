@@ -26,6 +26,27 @@ pub trait LlmClient: Send + Sync {
     /// 使用 system role 发送系统指令，user role 发送用户 prompt，
     /// 利用 LLM 的 system message 优先级机制确保角色指令不被截断。
     async fn complete_with_system(&self, system: &str, prompt: &str) -> Result<String>;
+
+    /// 是否支持 tool calling
+    fn supports_tool_calling(&self) -> bool {
+        false
+    }
+
+    /// 使用 tool calling 的多轮对话
+    ///
+    /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
+    /// 直到 LLM 返回最终文本响应或超过 max_rounds。
+    async fn complete_with_tools(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let _ = (system, prompt, tools, executor, max_rounds);
+        anyhow::bail!("Tool calling not supported by this LLM client")
+    }
 }
 
 /// LlmClient 扩展 Trait
@@ -41,6 +62,16 @@ pub trait LlmClientExt {
         &self,
         system: &str,
         prompt: &str,
+    ) -> Result<T>;
+
+    /// 使用 tool calling 的多轮对话，返回结构化 JSON
+    async fn complete_json_with_tools<T: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
     ) -> Result<T>;
 }
 
@@ -137,6 +168,20 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     ) -> Result<D> {
         let response = self.complete_with_system(system, prompt).await?;
         parse_json_response::<D>(&response)
+    }
+
+    async fn complete_json_with_tools<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<D> {
+        let text = self
+            .complete_with_tools(system, prompt, tools, executor, max_rounds)
+            .await?;
+        parse_json_response::<D>(&text)
     }
 }
 

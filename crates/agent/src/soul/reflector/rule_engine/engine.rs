@@ -38,12 +38,28 @@ impl Validator for RuleEngine {
             // 如需启用规则验证，需从 WorldState/AgentState 获取这些数据并传入
             history_intents: vec![],
             attributes: HashMap::new(),
-            available_item_ids: request.world_state.as_ref().map(|ws| {
-                ws.self_state.inventory.iter().map(|i| i.item_id.clone()).collect()
-            }).unwrap_or_default(),
-            reachable_node_ids: request.world_state.as_ref().map(|ws| {
-                ws.location.adjacent_nodes.iter().map(|n| n.node_id.clone()).collect()
-            }).unwrap_or_default(),
+            available_item_ids: request
+                .world_state
+                .as_ref()
+                .map(|ws| {
+                    ws.self_state
+                        .inventory
+                        .iter()
+                        .map(|i| i.item_id.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            reachable_node_ids: request
+                .world_state
+                .as_ref()
+                .map(|ws| {
+                    ws.location
+                        .adjacent_nodes
+                        .iter()
+                        .map(|n| n.node_id.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
 
         // 调用内部验证逻辑
