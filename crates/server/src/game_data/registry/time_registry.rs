@@ -1,4 +1,4 @@
-use crate::game_data::registry_or_panic;
+use crate::game_data::registry_or_error;
 use crate::game_data::types::unified_config::{SeasonData, TimeData};
 use serde::{Deserialize, Serialize};
 
@@ -19,14 +19,14 @@ pub struct TimeRegistry;
 impl TimeRegistry {
     /// 获取完整时间配置
     pub fn get_config() -> Option<TimeData> {
-        let registry = registry_or_panic();
+        let registry = registry_or_error().ok()?;
         Some(registry.get().time.data.clone())
     }
 
     /// 根据 tick 获取当前季节
     pub fn get_current_season(current_tick: i64) -> Option<SeasonData> {
         let config = Self::get_config()?;
-        let registry = registry_or_panic();
+        let registry = registry_or_error().ok()?;
         let tick_config = &registry.get().game_rules.data.agent_state.tick;
 
         let ticks_per_hour = config.ticks_per_hour as i64;
@@ -59,7 +59,7 @@ impl TimeRegistry {
     /// 获取格式化的时间显示，用于广播
     pub fn get_time_display(current_tick: i64) -> Option<TimeDisplay> {
         let config = Self::get_config()?;
-        let registry = registry_or_panic();
+        let registry = registry_or_error().ok()?;
         let tick_config = &registry.get().game_rules.data.agent_state.tick;
 
         let ticks_per_hour = config.ticks_per_hour as i64;

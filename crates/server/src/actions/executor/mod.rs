@@ -9,6 +9,8 @@ mod basic;
 mod combat;
 mod interaction;
 
+use std::collections::HashSet;
+
 use sqlx::PgPool;
 
 use cyber_jianghu_protocol::AttributeValue;
@@ -44,14 +46,17 @@ impl ActionExecutor {
             );
         }
 
-        // 1. 处理通用消耗
-        if let Err(e) = self.consume_requirements(intent, agent_state) {
-            return ActionExecutionResult::failure(
-                e,
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
+        // 1. 处理通用消耗（返回已扣减的属性集合，防止下游 effects 双重扣减）
+        let consumed_attrs = match self.consume_requirements(intent, agent_state) {
+            Ok(attrs) => attrs,
+            Err(e) => {
+                return ActionExecutionResult::failure(
+                    e,
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
 
         // 2. 执行特定逻辑（数据驱动：字符串匹配）
         let mut result = match intent.action_type.as_str() {
@@ -104,9 +109,9 @@ impl ActionExecutor {
             }
         };
 
-        // 3. 应用通用效果
+        // 3. 应用通用效果（跳过 consume_requirements 已处理的属性，防止双重扣减）
         if result.success {
-            self.apply_generic_effects(intent, &mut result);
+            self.apply_generic_effects(intent, &mut result, &consumed_attrs);
         }
 
         result
@@ -114,12 +119,14 @@ impl ActionExecutor {
 
     /// 处理通用需求消耗（数据驱动方式）
     ///
-    /// 仅处理 cost（扣减），recovery 已迁移至 effects 管线
+    /// 仅处理 cost（扣减），recovery 已迁移至 effects 管线。
+    /// 返回已扣减的属性名集合，供 apply_generic_effects 跳过。
     fn consume_requirements(
         &self,
         intent: &Intent,
         agent_state: &mut AgentState,
-    ) -> Result<(), String> {
+    ) -> Result<HashSet<String>, String> {
+        let mut consumed: HashSet<String> = HashSet::new();
         let action_name = intent.action_type.to_string();
         if let Some(config) = ActionRegistry::get(&action_name) {
             let context = agent_state.get_formula_context();
@@ -138,6 +145,7 @@ impl ActionExecutor {
                             {
                                 return Err(format!("无法扣减属性 {} 值 {}", attribute, cost));
                             }
+                            consumed.insert(attribute.to_string());
                         }
                     }
                     ActionRequirement::REQUIREMENT_TYPE_ITEM => {
@@ -147,17 +155,30 @@ impl ActionExecutor {
                 }
             }
         }
-        Ok(())
+        Ok(consumed)
     }
 
     /// 应用通用效果（数据驱动方式）
-    fn apply_generic_effects(&self, intent: &Intent, result: &mut ActionExecutionResult) {
+    ///
+    /// `skip_attrs`: 已被 consume_requirements 扣减的属性集合，跳过以防止双重扣减
+    fn apply_generic_effects(
+        &self,
+        intent: &Intent,
+        result: &mut ActionExecutionResult,
+        skip_attrs: &HashSet<String>,
+    ) {
         let action_name = intent.action_type.to_string();
         if let Some(config) = ActionRegistry::get(&action_name) {
             for effect in &config.effects {
                 match effect.effect_type.as_str() {
                     ActionEffect::EFFECT_TYPE_ATTRIBUTE_CHANGE => {
                         let attribute = effect.get_str("attribute").unwrap_or("unknown");
+
+                        // 跳过已被 consume_requirements 扣减的属性
+                        if skip_attrs.contains(attribute) {
+                            continue;
+                        }
+
                         let operation = effect.get_str("operation").unwrap_or("add");
                         let value = effect.get_i32("value").unwrap_or(0);
 

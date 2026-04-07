@@ -25,7 +25,7 @@ mod state_registry;
 pub mod time_registry;
 
 pub use action_registry::{ActionField, ActionRegistry};
-pub use global::{init_registry, registry, registry_or_panic};
+pub use global::{init_registry, registry, registry_or_error};
 pub use inventory_registry::{InitialInventoryRegistry, InventoryRegistry};
 pub use item_registry::ItemRegistry;
 pub use network_registry::NetworkRegistry;

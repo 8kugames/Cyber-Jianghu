@@ -3,6 +3,7 @@
 // ============================================================================
 
 use sqlx::PgPool;
+use std::collections::HashMap;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -188,6 +189,29 @@ impl InventoryManager {
         .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
 
         Ok(items)
+    }
+
+    /// 批量获取多个 Agent 的背包物品（单次 DB 查询，解决 N+1 问题）
+    pub async fn get_all_items_batch(
+        pool: &PgPool,
+        agent_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Vec<InventoryItem>>, InventoryError> {
+        if agent_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let items = sqlx::query_as::<_, InventoryItem>(
+            "SELECT id, agent_id, item_id, quantity, is_equipped FROM agent_inventory WHERE agent_id = ANY($1)"
+        )
+        .bind(agent_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
+
+        let mut map: HashMap<Uuid, Vec<InventoryItem>> = HashMap::new();
+        for item in items {
+            map.entry(item.agent_id).or_default().push(item);
+        }
+        Ok(map)
     }
 
     /// 转移物品（give 动作的核心）

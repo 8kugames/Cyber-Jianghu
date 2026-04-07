@@ -249,10 +249,11 @@ impl TickScheduler {
             interval.tick().await;
 
             let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
-            self.current_tick_id = new_tick_id;
+            // 防御时钟回拨：tick_id 只增不减
+            self.current_tick_id = self.current_tick_id.max(new_tick_id);
 
-            // 1. 开单 + 广播
-            self.accepting_tick_id.store(new_tick_id, Ordering::Release);
+            // 1. 开单 + 广播（使用 max 守卫后的值，保证 Agent 看到的 tick_id 单调递增）
+            self.accepting_tick_id.store(self.current_tick_id, Ordering::Release);
 
             let collection_window_secs = {
                 let gd = self.game_data_cache.get();
