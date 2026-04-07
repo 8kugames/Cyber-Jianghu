@@ -4,7 +4,7 @@
 
 use crate::models::Intent;
 use crate::soul::reflector::types::{PersonaInfo, ValidationRequest};
-use cyber_jianghu_protocol::ActionType;
+use cyber_jianghu_protocol::{ActionType, WorldState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -133,21 +133,7 @@ impl RuleValidationContext {
         let (available_item_ids, reachable_node_ids) = request
             .world_state
             .as_ref()
-            .map(|ws| {
-                let items: Vec<String> = ws
-                    .self_state
-                    .inventory
-                    .iter()
-                    .map(|i| i.item_id.clone())
-                    .collect();
-                let nodes: Vec<String> = ws
-                    .location
-                    .adjacent_nodes
-                    .iter()
-                    .map(|n| n.node_id.clone())
-                    .collect();
-                (items, nodes)
-            })
+            .map(extract_ids_from_world_state)
             .unwrap_or_default();
         Self {
             intent: request.intent,
@@ -232,6 +218,23 @@ impl Default for RuleEngineConfig {
             enable_deep_verify_on_repeated_fail: true,
         }
     }
+}
+
+/// Extract valid item IDs and reachable node IDs from WorldState
+pub fn extract_ids_from_world_state(ws: &WorldState) -> (Vec<String>, Vec<String>) {
+    let items: Vec<String> = ws
+        .self_state
+        .inventory
+        .iter()
+        .map(|i| i.item_id.clone())
+        .collect();
+    let nodes: Vec<String> = ws
+        .location
+        .adjacent_nodes
+        .iter()
+        .map(|n| n.node_id.clone())
+        .collect();
+    (items, nodes)
 }
 
 #[cfg(test)]

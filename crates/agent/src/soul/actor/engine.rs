@@ -29,6 +29,7 @@ use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
 use crate::models::{Intent, WorldEventType, WorldState};
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
+use crate::soul::actor::tools::{ActorToolExecutor, create_actor_tools};
 use cyber_jianghu_protocol::AvailableAction;
 
 /// 认知引擎配置
@@ -245,8 +246,6 @@ impl CognitiveEngine {
         world_state: &WorldState,
     ) -> Result<(String, StageOutput, StageOutput, Intent)> {
         let mut response: PlanDecisionResponse = if self.llm_client.supports_tool_calling() {
-            use crate::soul::actor::tools::{ActorToolExecutor, create_actor_tools};
-
             let tools = create_actor_tools();
             let executor = ActorToolExecutor::new(world_state.clone());
             match self
