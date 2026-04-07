@@ -8,8 +8,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use crate::component::llm::{LlmClient, LlmClientExt};
+use crate::component::llm::LlmClientExt;
 use crate::infra::api::thinking_log;
+use crate::runtime::claw::LlmClientContainer;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::prompt::ObserverPrompt;
@@ -57,18 +58,18 @@ impl Validator for ReflectorSoul {
 pub struct ReflectorSoul {
     /// 世界观规则
     rules: Arc<RwLock<WorldBuildingRules>>,
-    /// LLM 客户端（注入的外部实现）
-    llm_client: Arc<dyn LlmClient>,
+    /// LLM 客户端容器（支持热重载）
+    llm_container: LlmClientContainer,
     /// 观察者 prompt 模板
     observer_prompt: ObserverPrompt,
 }
 
 impl ReflectorSoul {
     /// 创建新的 ReflectorSoul
-    pub fn new(rules: WorldBuildingRules, llm_client: Arc<dyn LlmClient>) -> Self {
+    pub fn new(rules: WorldBuildingRules, llm_container: LlmClientContainer) -> Self {
         Self {
             rules: Arc::new(RwLock::new(rules)),
-            llm_client,
+            llm_container,
             observer_prompt: ObserverPrompt::default(),
         }
     }
@@ -89,9 +90,9 @@ impl ReflectorSoul {
 
         debug!("Validation prompt:\n{}", prompt);
 
-        // 调用 LLM（system + user 分离，利用 system message 优先级）
-        let response: LlmValidationResponse = self
-            .llm_client
+        // 调用 LLM（从 container 读取当前客户端，支持热重载）
+        let llm_client = self.llm_container.read().await.clone();
+        let response: LlmValidationResponse = llm_client
             .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
             .await?;
 
@@ -186,8 +187,8 @@ impl ReflectorSoul {
             persona.values.join("、"),
         );
 
-        let response: LlmValidationResponse = self
-            .llm_client
+        let llm_client = self.llm_container.read().await.clone();
+        let response: LlmValidationResponse = llm_client
             .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
             .await?;
 
@@ -237,6 +238,12 @@ impl LlmValidationResponse {
 mod tests {
     use super::*;
     use crate::component::llm::MockLlmClient;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn mock_container(client: MockLlmClient) -> LlmClientContainer {
+        Arc::new(RwLock::new(Arc::new(client)))
+    }
 
     #[tokio::test]
     async fn test_validate_approved() {
@@ -248,7 +255,7 @@ mod tests {
         }"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -278,7 +285,7 @@ mod tests {
         }"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -310,7 +317,7 @@ mod tests {
             r#"{"result": "approved", "reason": "", "narrative": ""}"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), Arc::new(mock_client));
+        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         // Test that update_rules doesn't panic
         let new_rules = WorldBuildingRules::default();
