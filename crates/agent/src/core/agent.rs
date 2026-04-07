@@ -502,6 +502,7 @@ impl Agent {
             intent: intent.clone(),
             persona: self.extract_persona(),
             world_context: self.build_world_context(world_state),
+            world_state: Some(world_state.clone()),
         };
 
         // 验证意图（验证失败时降级为通过，不中断 agent）

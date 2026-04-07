@@ -157,6 +157,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                         ),
                         persona: persona_info.clone(),
                         world_context: format!("tick: {}", req.intent.tick_id),
+                        world_state: None,
                     };
 
                     // 5. 带超时的验证（10 秒）
