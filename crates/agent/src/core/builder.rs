@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
@@ -129,14 +130,18 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 LLM 客户端（自动创建 ReflectorSoul）
+    /// 设置 LLM 客户端（自动创建 ReflectorSoul，共享 LlmClientContainer 支持热重载）
     pub fn with_llm_client(
         mut self,
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
         let rules = rules.unwrap_or_default();
-        let validator = Arc::new(ReflectorSoul::new(rules, llm_client.clone()));
+        // 复用已有 container 或创建新的，确保 ActorSoul 和 ReflectorSoul 共享
+        let container = self.llm_container.clone().unwrap_or_else(|| {
+            Arc::new(RwLock::new(llm_client.clone()))
+        });
+        let validator = Arc::new(ReflectorSoul::new(rules, container));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
         self
