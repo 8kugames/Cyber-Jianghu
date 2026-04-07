@@ -985,6 +985,7 @@ pub(super) async fn validate_intent_handler(
         intent,
         persona: persona_info,
         world_context,
+        world_state: None,
     };
 
     match validator.validate(validation_req).await {
