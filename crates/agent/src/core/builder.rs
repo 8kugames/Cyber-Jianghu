@@ -141,9 +141,10 @@ impl AgentBuilder {
         let container = self.llm_container.clone().unwrap_or_else(|| {
             Arc::new(RwLock::new(llm_client.clone()))
         });
-        let validator = Arc::new(ReflectorSoul::new(rules, container));
+        let validator = Arc::new(ReflectorSoul::new(rules, container.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
+        self.llm_container = Some(container);
         self
     }
 

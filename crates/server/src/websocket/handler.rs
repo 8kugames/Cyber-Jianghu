@@ -302,6 +302,31 @@ async fn handle_websocket(
                         }
                     };
 
+                // 加载当前节点地面物品
+                let nearby_items =
+                    match crate::db::get_ground_items_by_node(&state.db_pool, &agent_state.node_id)
+                        .await
+                    {
+                        Ok(items) => items
+                            .into_iter()
+                            .map(|gi| {
+                                let name = ItemRegistry::get(&gi.item_id)
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| gi.item_id.clone());
+                                cyber_jianghu_protocol::SceneItem {
+                                    item_id: gi.item_id,
+                                    name,
+                                    quantity: gi.quantity,
+                                    item_type: String::new(),
+                                }
+                            })
+                            .collect(),
+                        Err(e) => {
+                            warn!("加载 Agent {} 地面物品失败: {}", agent_id, e);
+                            vec![]
+                        }
+                    };
+
                 // 构建 WorldState（简化版，不含其他 agent entities）
                 // 重连时使用当前 tick_id 而非 agent_state.tick_id，避免 TickMismatch
                 let current_tick = state
@@ -312,6 +337,7 @@ async fn handle_websocket(
                     &state.game_data,
                     deadline_ms,
                     initial_inventory,
+                    nearby_items,
                     Some(current_tick),
                 );
                 let ws_msg =
