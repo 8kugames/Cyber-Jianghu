@@ -43,6 +43,9 @@ impl ConditionEvaluator for DefaultEvaluator {
             RuleCondition::And(conditions) => self.evaluate_and(conditions, context).await,
             RuleCondition::Or(conditions) => self.evaluate_or(conditions, context).await,
             RuleCondition::Not(condition) => self.evaluate_not(condition, context).await,
+            RuleCondition::In(field, collection) => {
+                self.evaluate_in(field, collection, context).await
+            }
         }
     }
 }
@@ -268,6 +271,32 @@ impl DefaultEvaluator {
     ) -> bool {
         !self.evaluate(condition, context).await
     }
+
+    /// 评估 In 条件：字段值必须在指定集合中
+    async fn evaluate_in(
+        &self,
+        field_path: &str,
+        collection_field: &str,
+        context: &RuleValidationContext,
+    ) -> bool {
+        let field_value = match self.get_field_value(field_path, context) {
+            Some(v) => v,
+            None => return false,
+        };
+
+        let field_str = match field_value {
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        };
+
+        let collection: &[String] = match collection_field {
+            "available_item_ids" => &context.available_item_ids,
+            "reachable_node_ids" => &context.reachable_node_ids,
+            _ => return false,
+        };
+
+        collection.contains(&field_str)
+    }
 }
 
 #[cfg(test)]
@@ -299,6 +328,8 @@ mod tests {
             tick_id: 10,
             history_intents: vec![],
             attributes,
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         }
     }
 
@@ -414,5 +445,86 @@ mod tests {
             serde_json::json!("move"),
         )));
         assert!(evaluator.evaluate(&condition, &context).await);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_in_item_ids() {
+        let evaluator = DefaultEvaluator;
+        let mut context = create_test_context();
+        context.available_item_ids = vec!["mantou".to_string(), "water".to_string()];
+
+        // item_id 在列表中
+        let condition = RuleCondition::In(
+            "intent.action_data.item_id".to_string(),
+            "available_item_ids".to_string(),
+        );
+        context.intent = Intent::new(
+            Uuid::new_v4(),
+            10,
+            ActionType::SPEAK,
+            Some(serde_json::json!({"item_id": "mantou"})),
+        );
+        assert!(evaluator.evaluate(&condition, &context).await);
+
+        // item_id 不在列表中
+        context.intent = Intent::new(
+            Uuid::new_v4(),
+            10,
+            ActionType::SPEAK,
+            Some(serde_json::json!({"item_id": "steamed_bun"})),
+        );
+        assert!(!evaluator.evaluate(&condition, &context).await);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_in_node_ids() {
+        let evaluator = DefaultEvaluator;
+        let mut context = create_test_context();
+        context.reachable_node_ids = vec!["longmen_kitchen".to_string(), "longmen_backyard".to_string()];
+
+        let condition = RuleCondition::In(
+            "intent.action_data.target_location".to_string(),
+            "reachable_node_ids".to_string(),
+        );
+
+        context.intent = Intent::new(
+            Uuid::new_v4(),
+            10,
+            ActionType::SPEAK,
+            Some(serde_json::json!({"target_location": "longmen_kitchen"})),
+        );
+        assert!(evaluator.evaluate(&condition, &context).await);
+
+        context.intent = Intent::new(
+            Uuid::new_v4(),
+            10,
+            ActionType::SPEAK,
+            Some(serde_json::json!({"target_location": "kitchen"})),
+        );
+        assert!(!evaluator.evaluate(&condition, &context).await);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_in_empty_collection() {
+        let evaluator = DefaultEvaluator;
+        let context = create_test_context(); // empty available_item_ids
+
+        let condition = RuleCondition::In(
+            "intent.action_data.item_id".to_string(),
+            "available_item_ids".to_string(),
+        );
+        assert!(!evaluator.evaluate(&condition, &context).await);
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_in_unknown_collection() {
+        let evaluator = DefaultEvaluator;
+        let context = create_test_context();
+
+        let condition = RuleCondition::In(
+            "intent.action_data.item_id".to_string(),
+            "unknown_collection".to_string(),
+        );
+        assert!(!evaluator.evaluate(&condition, &context).await);
     }
 }

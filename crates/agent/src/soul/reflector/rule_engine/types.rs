@@ -46,6 +46,9 @@ pub enum RuleCondition {
     Or(Vec<RuleCondition>),
     /// 非（NOT）
     Not(Box<RuleCondition>),
+    /// 字段值必须在指定集合字段中
+    /// In("intent.action_data.item_id", "available_item_ids")
+    In(String, String),
 }
 
 /// 规则
@@ -113,6 +116,10 @@ pub struct RuleValidationContext {
     pub history_intents: Vec<Intent>,
     /// 额外的属性数据（用于规则检查）
     pub attributes: HashMap<String, serde_json::Value>,
+    /// 可用物品 ID 列表（从 WorldState.inventory 提取）
+    pub available_item_ids: Vec<String>,
+    /// 可达地点 ID 列表（从 WorldState.location.adjacent_nodes 提取）
+    pub reachable_node_ids: Vec<String>,
 }
 
 impl RuleValidationContext {
@@ -123,6 +130,21 @@ impl RuleValidationContext {
         attributes: HashMap<String, serde_json::Value>,
     ) -> Self {
         let tick_id = request.intent.tick_id;
+        let (available_item_ids, reachable_node_ids) = request
+            .world_state
+            .as_ref()
+            .map(|ws| {
+                let items: Vec<String> =
+                    ws.self_state.inventory.iter().map(|i| i.item_id.clone()).collect();
+                let nodes: Vec<String> = ws
+                    .location
+                    .adjacent_nodes
+                    .iter()
+                    .map(|n| n.node_id.clone())
+                    .collect();
+                (items, nodes)
+            })
+            .unwrap_or_default();
         Self {
             intent: request.intent,
             persona_info: request.persona,
@@ -130,6 +152,8 @@ impl RuleValidationContext {
             tick_id,
             history_intents,
             attributes,
+            available_item_ids,
+            reachable_node_ids,
         }
     }
 
@@ -317,6 +341,8 @@ mod tests {
             tick_id: 1,
             history_intents: vec![],
             attributes: HashMap::new(),
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         };
 
         assert_eq!(context.action_type().as_str(), "move");
@@ -341,6 +367,8 @@ mod tests {
             tick_id: 1,
             history_intents: vec![],
             attributes,
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         };
 
         assert_eq!(
@@ -363,6 +391,7 @@ mod tests {
             intent,
             persona: PersonaInfo::default(),
             world_context: "test world".to_string(),
+            world_state: None,
         };
 
         let history_intents = vec![];

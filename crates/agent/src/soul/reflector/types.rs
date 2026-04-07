@@ -120,6 +120,8 @@ pub struct ValidationRequest {
     pub persona: PersonaInfo,
     /// 当前世界状态（自然语言描述）
     pub world_context: String,
+    /// 当前 WorldState，用于提取合法 ID 列表
+    pub world_state: Option<cyber_jianghu_protocol::WorldState>,
 }
 
 /// Deserializer that treats `null` as empty string

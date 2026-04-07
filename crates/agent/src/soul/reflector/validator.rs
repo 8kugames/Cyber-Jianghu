@@ -254,6 +254,7 @@ mod tests {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
+            world_state: None,
         };
 
         let result = validator.validate(request).await.unwrap();
@@ -283,6 +284,7 @@ mod tests {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
+            world_state: None,
         };
 
         let result = validator.validate(request).await.unwrap();

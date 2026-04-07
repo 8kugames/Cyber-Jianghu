@@ -38,6 +38,12 @@ impl Validator for RuleEngine {
             // 如需启用规则验证，需从 WorldState/AgentState 获取这些数据并传入
             history_intents: vec![],
             attributes: HashMap::new(),
+            available_item_ids: request.world_state.as_ref().map(|ws| {
+                ws.self_state.inventory.iter().map(|i| i.item_id.clone()).collect()
+            }).unwrap_or_default(),
+            reachable_node_ids: request.world_state.as_ref().map(|ws| {
+                ws.location.adjacent_nodes.iter().map(|n| n.node_id.clone()).collect()
+            }).unwrap_or_default(),
         };
 
         // 调用内部验证逻辑
@@ -106,6 +112,60 @@ impl RuleEngine {
                 super::types::RuleCondition::GreaterThan("cooldown_move".to_string(), 0.0),
             ]),
             "刚移动过，休息一下再走".to_string(),
+        ));
+
+        // eat 的 item_id 必须在背包中
+        rule_set.add_rule(Rule::new(
+            "valid_item_id_eat".to_string(),
+            "eat 的 item_id 必须在背包中".to_string(),
+            super::types::RuleType::ResourceConstraint,
+            super::types::RuleCondition::And(vec![
+                super::types::RuleCondition::Equals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("eat"),
+                ),
+                super::types::RuleCondition::In(
+                    "intent.action_data.item_id".to_string(),
+                    "available_item_ids".to_string(),
+                ),
+            ]),
+            "吃东西失败：物品ID无效，请使用背包中物品的精确ID".to_string(),
+        ));
+
+        // drink 的 item_id 必须在背包中
+        rule_set.add_rule(Rule::new(
+            "valid_item_id_drink".to_string(),
+            "drink 的 item_id 必须在背包中".to_string(),
+            super::types::RuleType::ResourceConstraint,
+            super::types::RuleCondition::And(vec![
+                super::types::RuleCondition::Equals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("drink"),
+                ),
+                super::types::RuleCondition::In(
+                    "intent.action_data.item_id".to_string(),
+                    "available_item_ids".to_string(),
+                ),
+            ]),
+            "喝水失败：物品ID无效，请使用背包中物品的精确ID".to_string(),
+        ));
+
+        // move 的 target_location 必须可达
+        rule_set.add_rule(Rule::new(
+            "valid_target_node_move".to_string(),
+            "move 的 target_location 必须可达".to_string(),
+            super::types::RuleType::StateRestriction,
+            super::types::RuleCondition::And(vec![
+                super::types::RuleCondition::Equals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("move"),
+                ),
+                super::types::RuleCondition::In(
+                    "intent.action_data.target_location".to_string(),
+                    "reachable_node_ids".to_string(),
+                ),
+            ]),
+            "移动失败：目标地点ID无效，请使用可达地点的精确ID".to_string(),
         ));
 
         Self {
@@ -244,6 +304,8 @@ mod tests {
             tick_id: 10,
             history_intents: vec![],
             attributes,
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         }
     }
 
