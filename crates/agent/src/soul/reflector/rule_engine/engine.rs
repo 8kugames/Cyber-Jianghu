@@ -4,7 +4,7 @@
 
 use super::evaluator::{ConditionEvaluator, DefaultEvaluator};
 use super::registry::{RuleRegistry, RuleSet};
-use super::types::{Rule, RuleValidationContext};
+use super::types::{Rule, RuleValidationContext, extract_ids_from_world_state};
 use crate::soul::reflector::{
     PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
 };
@@ -28,38 +28,21 @@ impl Validator for RuleEngine {
     async fn validate(&self, request: ValidationRequest) -> anyhow::Result<ValidationResult> {
         // 构建验证上下文
         let tick_id = request.intent.tick_id;
+        let (available_item_ids, reachable_node_ids) = request
+            .world_state
+            .as_ref()
+            .map(extract_ids_from_world_state)
+            .unwrap_or_default();
+
         let context = RuleValidationContext {
             intent: request.intent,
             persona_info: request.persona,
             world_context: request.world_context,
             tick_id,
-            // 注意：RuleValidationContext 的 history_intents 和 attributes 字段暂未填充
-            // 当前规则引擎在空数据上下文中进行验证，结果可能不准确
-            // 如需启用规则验证，需从 WorldState/AgentState 获取这些数据并传入
             history_intents: vec![],
             attributes: HashMap::new(),
-            available_item_ids: request
-                .world_state
-                .as_ref()
-                .map(|ws| {
-                    ws.self_state
-                        .inventory
-                        .iter()
-                        .map(|i| i.item_id.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
-            reachable_node_ids: request
-                .world_state
-                .as_ref()
-                .map(|ws| {
-                    ws.location
-                        .adjacent_nodes
-                        .iter()
-                        .map(|n| n.node_id.clone())
-                        .collect()
-                })
-                .unwrap_or_default(),
+            available_item_ids,
+            reachable_node_ids,
         };
 
         // 调用内部验证逻辑
