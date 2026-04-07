@@ -146,6 +146,9 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 
     info!("批量插入 {} 个Agent状态", states.len());
 
+    // 显式事务：保证原子性，防御未来扩展为多语句操作
+    let mut tx = pool.begin().await.context("开启事务失败")?;
+
     // F-05: 预先序列化所有属性，失败时立即返回错误（禁止静默吞掉）
     let serialized: Vec<(uuid::Uuid, i64, serde_json::Value, String, bool)> = states
         .iter()
@@ -183,7 +186,7 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 
     query_builder
         .build()
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             error!("批量插入Agent状态失败: {}", e);
@@ -191,6 +194,8 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
             e
         })
         .context("批量插入 Agent 状态失败")?;
+
+    tx.commit().await.context("提交事务失败")?;
 
     info!("批量插入完成");
     Ok(())

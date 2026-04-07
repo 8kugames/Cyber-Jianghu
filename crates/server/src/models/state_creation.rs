@@ -13,7 +13,9 @@ impl AgentState {
     /// 从统一配置读取所有属性的初始值，使用组件化架构
     pub fn new(agent_id: Uuid, tick_id: i64) -> Self {
         // 获取全局配置注册表
-        let registry = crate::game_data::registry_or_panic();
+        let registry = crate::game_data::registry_or_error().unwrap_or_else(|e| {
+            panic!("AgentState::new() 需要初始化注册表: {}", e);
+        });
         let data = registry.get();
 
         // 从统一配置创建 StatusComponent（状态值）

@@ -31,7 +31,7 @@ pub use cache::GameDataCache;
 pub use loader::load_from_dir;
 pub use registry::{
     ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, NetworkRegistry,
-    StateRegistry, init_registry, registry, registry_or_panic,
+    StateRegistry, init_registry, registry, registry_or_error,
 };
 pub use types::{ActionEffect, ActionRequirement, GameData, ItemConfigEntry, ItemEffect};
 

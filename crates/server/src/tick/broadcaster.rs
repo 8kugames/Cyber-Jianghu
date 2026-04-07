@@ -77,21 +77,22 @@ impl Broadcaster {
             connections.values().map(|c| c.agent_id).collect()
         };
 
-        // 批量加载所有 Agent 的背包
-        let mut agent_inventories = HashMap::new();
-        for agent_state in agent_states {
-            match crate::inventory::InventoryManager::get_all_items(db_pool, agent_state.agent_id)
-                .await
-            {
-                Ok(items) => {
-                    // 转换为 protocol::InventoryItem
+        // 批量加载所有 Agent 的背包（单次 DB 查询，解决 N+1 问题）
+        let agent_ids: Vec<Uuid> = agent_states.iter().map(|s| s.agent_id).collect();
+        let agent_inventories = match crate::inventory::InventoryManager::get_all_items_batch(
+            db_pool, &agent_ids,
+        )
+        .await
+        {
+            Ok(batch) => {
+                let mut map: HashMap<Uuid, Vec<crate::models::InventoryItem>> = HashMap::new();
+                for (agent_id, items) in batch {
                     let proto_items: Vec<crate::models::InventoryItem> = items
                         .into_iter()
                         .map(|item| {
                             let name = ItemRegistry::get(&item.item_id)
                                 .map(|config| config.name)
                                 .unwrap_or_else(|| item.item_id.clone());
-
                             crate::models::InventoryItem {
                                 item_id: item.item_id.clone(),
                                 name,
@@ -100,13 +101,15 @@ impl Broadcaster {
                             }
                         })
                         .collect();
-                    agent_inventories.insert(agent_state.agent_id, proto_items);
+                    map.insert(agent_id, proto_items);
                 }
-                Err(e) => {
-                    warn!("加载 Agent {} 背包失败: {}", agent_state.agent_id, e);
-                }
+                map
             }
-        }
+            Err(e) => {
+                warn!("批量加载背包失败: {}", e);
+                HashMap::new()
+            }
+        };
 
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
@@ -376,7 +379,13 @@ impl Broadcaster {
 fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
     let time_config = crate::game_data::registry::TimeRegistry::get_config();
     if let Some(config) = time_config {
-        let registry = crate::game_data::registry_or_panic();
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("注册表未初始化，使用默认时间: {}", e);
+                return (1, 1, 1, 0);
+            }
+        };
         let real_seconds_per_tick = registry
             .get()
             .game_rules
