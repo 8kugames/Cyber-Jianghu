@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
-use crate::component::memory::tools::{MemoryToolDefinition, MemoryToolResult};
+
 use crate::component::memory::types::MemoryEntry;
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
@@ -357,23 +357,6 @@ impl Agent {
     /// 获取角色配置的引用
     pub fn character_config(&self) -> Option<&CharacterConfig> {
         self.character_config.as_ref()
-    }
-
-    /// 获取所有记忆工具定义（供 LLM function calling）
-    pub fn get_memory_tools() -> Vec<MemoryToolDefinition> {
-        super::tools::get_memory_tools()
-    }
-
-    /// 执行工具调用
-    #[allow(dead_code)]
-    async fn execute_tool_call(
-        &mut self,
-        world_state: &crate::models::WorldState,
-        tool_name: &str,
-        arguments: &str,
-    ) -> MemoryToolResult {
-        super::tools::execute_tool_call(&mut self.memory_manager, world_state, tool_name, arguments)
-            .await
     }
 
     /// 处理世界事件并更新记忆

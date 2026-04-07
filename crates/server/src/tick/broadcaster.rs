@@ -474,6 +474,7 @@ pub fn build_initial_world_state(
     game_data_cache: &Arc<GameDataCache>,
     deadline_ms: u64,
     initial_inventory: Vec<crate::models::InventoryItem>,
+    nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
     override_tick_id: Option<i64>,
 ) -> crate::models::WorldState {
     let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
@@ -570,7 +571,7 @@ pub fn build_initial_world_state(
             inventory: initial_inventory,
         },
         entities: vec![], // 连接时不含其他 agent
-        nearby_items: vec![],
+        nearby_items,
         events_log: events,
         private_dialogue_log: vec![],
         deadline_ms,
