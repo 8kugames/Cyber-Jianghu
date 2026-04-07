@@ -111,6 +111,22 @@ impl Broadcaster {
             }
         };
 
+        // 批量加载所有节点的地面物品（单次 DB 查询）
+        let node_ids: Vec<String> = agent_states
+            .iter()
+            .map(|s| s.node_id.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let ground_items_map = match crate::db::get_ground_items_by_nodes(db_pool, &node_ids).await
+        {
+            Ok(map) => map,
+            Err(e) => {
+                warn!("批量加载地面物品失败: {}", e);
+                HashMap::new()
+            }
+        };
+
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
         for agent_state in agent_states {
@@ -118,6 +134,26 @@ impl Broadcaster {
             let inventory = agent_inventories
                 .get(&agent_state.agent_id)
                 .cloned()
+                .unwrap_or_default();
+
+            let nearby_items = ground_items_map
+                .get(&agent_state.node_id)
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|gi| {
+                            let name = ItemRegistry::get(&gi.item_id)
+                                .map(|c| c.name.clone())
+                                .unwrap_or_else(|| gi.item_id.clone());
+                            cyber_jianghu_protocol::SceneItem {
+                                item_id: gi.item_id.clone(),
+                                name,
+                                quantity: gi.quantity,
+                                item_type: String::new(),
+                            }
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
 
             let world_state = self.build_world_state_for_agent(
@@ -128,6 +164,7 @@ impl Broadcaster {
                 agent_states,
                 &agent_names,
                 inventory,
+                nearby_items,
                 &online_agent_ids,
                 game_data_cache,
                 closed_dialogue_records,
@@ -166,6 +203,7 @@ impl Broadcaster {
         all_agent_states: &[AgentState],
         agent_names: &HashMap<Uuid, String>,
         inventory: Vec<crate::models::InventoryItem>,
+        nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
         closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
@@ -363,8 +401,7 @@ impl Broadcaster {
                 }
             },
             entities, // 包含同节点的其他Agent
-            // 注意：nearby_items 暂未实现，场景物品功能未开发
-            nearby_items: vec![],
+            nearby_items,
             events_log: events, // 传递本 Tick 发生的事件
             private_dialogue_log: closed_dialogue_records.to_vec(), // 上一轮关闭的密语会话记录
             deadline_ms,
