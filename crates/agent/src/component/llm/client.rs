@@ -228,16 +228,13 @@ impl FallbackLlmClient {
     /// - HTTP 429 (Rate limit)
     fn should_fallback(error: &anyhow::Error) -> bool {
         let msg = format!("{:#}", error);
-        // HTTP 状态码匹配
+        // HTTP 状态码匹配（直接来自 API 响应）
         msg.contains("LLM API error 403")
             || msg.contains("LLM API error 429")
             // Dashscope 额度耗尽关键词
             || msg.contains("AllocationQuota")
-            // 连接/请求失败（context 包装后前缀为 "Failed to send request to LLM API"）
+            // 连接/请求失败（.context() 包装后的前缀）
             || msg.contains("Failed to send request to LLM API")
-            // 超时（reqwest 超时 / tokio 超时）
-            || msg.contains("operation timed out")
-            || msg.contains("timed out")
     }
 
     /// 执行带 fallback 的调用

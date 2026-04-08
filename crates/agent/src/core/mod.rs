@@ -12,6 +12,7 @@
 mod agent;
 mod builder;
 mod lifecycle;
+mod reconnect;
 pub mod utils;
 
 // ============================================================================
