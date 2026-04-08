@@ -62,7 +62,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-server; \
+        cargo build --release -p cyber-jianghu-server; \
     else \
         cargo build --release -p cyber-jianghu-server; \
     fi
@@ -77,7 +77,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     touch crates/protocol/src/lib.rs && \
     if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-server; \
+        cargo build --release -p cyber-jianghu-server; \
     else \
         cargo build --release -p cyber-jianghu-server; \
     fi && \
