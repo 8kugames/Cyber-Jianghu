@@ -636,7 +636,7 @@ impl CognitiveEngine {
                             "idle",
                             None,
                         )
-                        .with_thought(format!("认知受阻: {}", e))
+                        .with_thought("忽然心神不宁，难以决断，只得暂且静候".to_string())
                     }
                 }
             })

@@ -648,7 +648,7 @@ impl super::Agent {
                                 );
                                 let agent_id = world_state.agent_id.unwrap_or_default();
                                 Intent::new(agent_id, world_state.tick_id, "idle", None)
-                                    .with_thought("LLM 推理超时，自动 idle 以保证 tick 同步".to_string())
+                                    .with_thought("忽然心神恍惚，思绪难聚，只得静坐调息片刻".to_string())
                             }
                         }
                     } else {
