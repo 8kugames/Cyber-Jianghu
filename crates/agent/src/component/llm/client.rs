@@ -1,8 +1,15 @@
 // ============================================================================
-// LLM 客户端接口
+// LLM 客户端接口与 Fallback 降级
 // ============================================================================
 //
-// 定义 LLM 客户端 Trait，仅由 OpenClaw 实现
+// 定义 LLM 客户端 Trait (LlmClient) 及其两种实现：
+// - DirectLlmClient: 直接调用 LLM API（single model）
+// - FallbackLlmClient: 多模型包装器，主模型 403/超时时自动降级
+//
+// FallbackLlmClient 策略：
+// - 按序尝试所有模型（主模型 → fallback_models）
+// - 成功后 sticky 到该模型（避免反复切换）
+// - 仅对可恢复错误（403/429/超时）触发 fallback
 // ============================================================================
 
 use anyhow::Result;
@@ -231,7 +238,7 @@ impl FallbackLlmClient {
         // HTTP 状态码匹配（直接来自 API 响应）
         msg.contains("LLM API error 403")
             || msg.contains("LLM API error 429")
-            // Dashscope 额度耗尽关键词
+            // 额度耗尽关键词
             || msg.contains("AllocationQuota")
             // 连接/请求失败（.context() 包装后的前缀）
             || msg.contains("Failed to send request to LLM API")

@@ -183,7 +183,7 @@ Key agent modules:
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
 - `src/component/social/` - Relationship store, dialogue client
-- `src/component/llm/` - LLM client abstraction
+- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` auto-downgrade)
 - `src/infra/transport/` - WebSocket communication layer
 - `src/infra/api/` - HTTP API server, handlers, services
 - `src/runtime/` - Decision modes (cognitive + claw)
@@ -211,6 +211,13 @@ ActorSoul (行动之魂/本我)     ReflectorSoul (反思之魂/超我)
 - **ReflectorSoul**: Reviews intents against moral values, approves/rejects (superego/超我)
 - **ReviewStore**: In-memory shared state for pending reviews and results
 - **Timeout**: Default 30s, auto-approves on timeout to prevent tick expiry
+
+**LLM Fallback** (Cognitive mode):
+- `FallbackLlmClient` wraps multiple LLM models sharing the same provider/api_key
+- Auto-downgrade on 403 (quota), 429 (rate limit), connection failure
+- Sticky fallback: stays on working model until it also fails
+- Config: `fallback_models: ["model-b", "model-c"]` in `agent.yaml`
+- Final fallback: idle intent with wuxia-style thought_log
 
 ### Protocol Layer
 
