@@ -164,9 +164,18 @@ Agent 支持配置不同的 LLM 模型给 ActorSoul 和 ReflectorSoul：
 llm:
   provider: ollama
   model: qwen2.5:14b
+  # 备用模型（可选）：主模型 403/429/超时时自动降级，共享同一 provider/api_key
+  fallback_models:
+    - qwen2.5:7b
+    - qwen2.5:3b
 
 llm_reflector:  # 可选
   model: qwen2.5:32b
 ```
+
+**Fallback 降级机制**：
+- 触发条件：主模型返回 403（额度耗尽）、429（限速）、或连接超时
+- 策略：按 `fallback_models` 顺序依次尝试，成功后 sticky 到该模型
+- 未配置 `fallback_models` 时，主模型失败直接降级为 idle intent
 
 配置可通过 Web 面板修改：http://localhost:<端口>/settings.html
