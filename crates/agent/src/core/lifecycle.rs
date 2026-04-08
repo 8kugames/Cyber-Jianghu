@@ -11,9 +11,9 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, LlmProvider};
+use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, FallbackLlmClient, LlmProvider};
 use crate::config::{CharacterConfig, CharacterStatus};
-use crate::infra::transport::{ConnectError, TickMismatchError};
+use crate::infra::transport::ConnectError;
 use crate::models::Intent;
 
 /// 检查是否应该记录重试日志（日志采样策略）
@@ -373,15 +373,41 @@ impl super::Agent {
                             };
 
                             match llm_client_result {
-                                Ok(client) => {
-                                    let new_client = std::sync::Arc::new(client);
+                                Ok(primary_client) => {
+                                    // 构建 LLM 客户端（主模型 + fallback）
+                                    let mut clients: Vec<std::sync::Arc<dyn crate::component::llm::LlmClient>> =
+                                        vec![std::sync::Arc::new(primary_client)];
+                                    for fallback_model in &new_config.llm.fallback_models {
+                                        let fb_provider = LlmProvider::parse(&new_config.llm.provider)
+                                            .unwrap_or(LlmProvider::Ollama);
+                                        let mut fb_config = DirectLlmClientConfig::new(
+                                            fb_provider,
+                                            new_config.llm.api_key.clone(),
+                                        );
+                                        if let Some(ref url) = new_config.llm.base_url {
+                                            fb_config = fb_config.with_base_url(url);
+                                        }
+                                        fb_config = fb_config
+                                            .with_model(fallback_model)
+                                            .with_temperature(new_config.llm.temperature)
+                                            .with_max_tokens(new_config.llm.max_tokens);
+                                        if let Ok(fb_client) = DirectLlmClient::new(fb_config) {
+                                            clients.push(std::sync::Arc::new(fb_client));
+                                        }
+                                    }
 
-                                    // 更新 actor_llm_container（热重载）
-                                    // 决策回调会自动使用新的 LLM Client
+                                    let new_client: std::sync::Arc<dyn crate::component::llm::LlmClient> =
+                                        if clients.len() > 1 {
+                                            std::sync::Arc::new(FallbackLlmClient::new(clients))
+                                        } else {
+                                            clients.into_iter().next().unwrap()
+                                        };
+
+                                    // 更新 actor_llm_container（热重载 + fallback）
                                     if let Some(ref container) = self.actor_llm_container {
                                         let mut guard = container.write().await;
                                         *guard = new_client.clone();
-                                        debug!("ActorSoul LLM 容器已更新（真正热重载）");
+                                        debug!("ActorSoul LLM 容器已更新（热重载 + fallback）");
                                     }
 
                                     self.config = new_config;
@@ -411,107 +437,8 @@ impl super::Agent {
                     let world_state = match result {
                         Ok(state) => state,
                         Err(e) => {
-                            // 检查是否为 TickMismatchError（结构化数据）
-                            if let Some(tick_err) = e.downcast_ref::<TickMismatchError>() {
-                                let current_server_tick = tick_err.current_tick_id;
-                                info!("Tick mismatch detected: {}. Server tick: {}. Reconnecting...", tick_err.message, current_server_tick);
-
-                                // 重连
-                                if let Err(reconnect_err) = self.reconnect().await {
-                                    error!("Reconnect failed: {}", reconnect_err);
-                                    continue;
-                                }
-
-                                // 接收新的 WorldState（可能是过时的初始 WorldState）
-                                let new_world_state = match self.client.receive_world_state().await {
-                                    Ok(ws) => {
-                                        info!("Received WorldState after reconnect: tick={}", ws.tick_id);
-                                        ws
-                                    }
-                                    Err(ws_err) => {
-                                        error!("Failed to receive WorldState after reconnect: {}", ws_err);
-                                        continue;
-                                    }
-                                };
-
-                                // 如果 server tick 有效且 WorldState tick 太旧，
-                                // 直接用 server_tick 生成 idle intent，不要等待（会死锁）
-                                let intent_tick = if current_server_tick > 0
-                                    && new_world_state.tick_id < current_server_tick
-                                {
-                                    info!("WorldState tick {} < server tick {}, using server tick {} for intent",
-                                        new_world_state.tick_id, current_server_tick, current_server_tick);
-                                    current_server_tick
-                                } else {
-                                    new_world_state.tick_id
-                                };
-
-                                // 更新 HTTP API 状态
-                                if let Some(ref api_state) = self.http_api_state {
-                                    let mut current = api_state.current_state.write().await;
-                                    *current = Some(new_world_state.clone());
-                                    let mut last_update = api_state.last_state_update.write().await;
-                                    *last_update = Some(std::time::Instant::now());
-                                }
-
-                                // 用新 WorldState 重新生成 intent
-                                let memory_context = self.get_memory_context().await;
-                                let combined_context = match &self.last_rejection_reason {
-                                    Some(reason) => {
-                                        if memory_context.is_empty() {
-                                            format!("[上次意图被驳回: {}]", reason)
-                                        } else {
-                                            format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
-                                        }
-                                    }
-                                    None => memory_context.clone(),
-                                };
-
-                                let intent = if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                                    memory_callback(&new_world_state, &combined_context).await
-                                } else if let Some(ref reason) = self.last_rejection_reason {
-                                    if let Some(ref callback) = self.decision_with_feedback_callback {
-                                        callback(&new_world_state, Some(reason.as_str())).await
-                                    } else {
-                                        (self.decision_callback)(&new_world_state).await
-                                    }
-                                } else {
-                                    (self.decision_callback)(&new_world_state).await
-                                };
-
-                                // 重新验证
-                                let mut final_intent = match self.validate_with_reflector(intent, &new_world_state).await {
-                                    Ok(validated) => validated,
-                                    Err(ref validation_err) => {
-                                        error!("Re-validation failed after tick mismatch: {}", validation_err);
-                                        continue;
-                                    }
-                                };
-
-                                // 如果使用了 server tick（落后于 WorldState），更新 intent 的 tick_id
-                                if final_intent.tick_id != intent_tick {
-                                    info!("Updating intent tick from {} to {}", final_intent.tick_id, intent_tick);
-                                    final_intent.tick_id = intent_tick;
-                                }
-
-                                // 重新发送
-                                info!(
-                                    "Resending intent after tick mismatch: tick={}, action={}",
-                                    final_intent.tick_id, final_intent.action_type
-                                );
-                                if let Err(send_err) = self.client.send_intent(&final_intent).await {
-                                    error!("Resend failed: {}", send_err);
-                                } else {
-                                    info!(
-                                        "Intent resent successfully after tick mismatch: tick={}, action={}",
-                                        final_intent.tick_id, final_intent.action_type
-                                    );
-                                }
-
-                                continue;
-                            }
-
-                            // 其他错误，尝试重连并继续
+                            // 连接断开或 channel 错误，重连
+                            // tick mismatch 不走此路径（自恢复：下一个 tick 的 WorldState 自然到来）
                             error!("Failed to receive world state: {}", e);
                             self.reconnect().await?;
                             continue;

@@ -233,9 +233,11 @@ impl FallbackLlmClient {
             || msg.contains("LLM API error 429")
             // Dashscope 额度耗尽关键词
             || msg.contains("AllocationQuota")
-            // 连接超时/请求超时
-            || msg.contains("error sending request")
+            // 连接/请求失败（context 包装后前缀为 "Failed to send request to LLM API"）
+            || msg.contains("Failed to send request to LLM API")
+            // 超时（reqwest 超时 / tokio 超时）
             || msg.contains("operation timed out")
+            || msg.contains("timed out")
     }
 
     /// 执行带 fallback 的调用
