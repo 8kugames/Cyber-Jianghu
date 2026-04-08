@@ -157,9 +157,9 @@ impl super::Agent {
 
         // 等待注册确认（包含游戏规则）
         // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
-        let (agent_id, game_rules, registered_name) =
+        let (agent_id, game_rules, registered_name, is_alive) =
             match self.client.wait_for_registration().await {
-                Ok(Some((id, rules, name))) => (id, rules, name),
+                Ok(Some((id, rules, name, alive))) => (id, rules, name, alive),
                 Ok(None) => {
                     info!(
                         "Agent '{}' 等待角色注册（保持连接）...",
@@ -250,6 +250,46 @@ impl super::Agent {
             self.wait_for_rebirth().await?;
             return Ok(());
         }
+
+        // 服务器返回 agent_id 但 is_alive=false：断连期间角色死亡
+        // 此时 agent_id 有效但角色已不在，需要 rebirth
+        if !is_alive {
+            warn!(
+                "Agent '{}' ({}) died during disconnect (is_alive=false)",
+                self.character_name(), agent_id
+            );
+            self.death_reported = true;
+            if let Some(ref api_state) = self.http_api_state {
+                api_state
+                    .is_dead
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                let death_msg = ServerMessage::AgentDied {
+                    agent_id,
+                    cause: "disconnect_death".to_string(),
+                    description: "角色在断连期间死亡，请通过 rebirth 创建新角色".to_string(),
+                    location: String::new(),
+                    tick_id: 0,
+                    died_at: chrono::Utc::now().timestamp_millis(),
+                    rebirth_delay_ticks: 0,
+                };
+                let _ = api_state.death_event_tx.send(death_msg);
+            }
+
+            // 持久化死亡状态
+            if let Some(ref mut char_cfg) = self.character_config {
+                char_cfg.status = crate::config::CharacterStatus::Dead;
+                if let Some(ref api_state) = self.http_api_state {
+                    let characters_dir = api_state.character_dir.read().await.clone();
+                    if let Err(e) = crate::core::lifecycle::save_character_config_to_fs(char_cfg, &characters_dir) {
+                        warn!("Failed to persist disconnect-death status: {}", e);
+                    }
+                }
+            }
+
+            self.wait_for_rebirth().await?;
+            return Ok(());
+        }
+
         if let Some(ref callback) = self.registration_callback {
             callback(agent_id);
         }
@@ -714,8 +754,8 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok(Some((agent_id, game_rules, registered_name))) => {
-                            info!("重连后注册确认: agent_id={}", agent_id);
+                        Ok(Some((agent_id, game_rules, registered_name, is_alive))) => {
+                            info!("重连后注册确认: agent_id={}, alive={}", agent_id, is_alive);
 
                             // 更新 agent 名称
                             if let Some(ref name) = registered_name {
@@ -746,6 +786,44 @@ impl super::Agent {
                                     let _ = api_state.death_event_tx.send(death_msg);
                                 }
                                 // 归隐后不返回错误，保持进程存活等待创建新角色
+                                return Ok(());
+                            }
+
+                            // 服务器返回真实 agent_id 但 is_alive=false：断连期间角色死亡
+                            if !is_alive {
+                                warn!(
+                                    "重连后发现角色 {} 已死亡 (is_alive=false)",
+                                    agent_id
+                                );
+                                self.death_reported = true;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    api_state
+                                        .is_dead
+                                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let death_msg = ServerMessage::AgentDied {
+                                        agent_id,
+                                        cause: "disconnect_death".to_string(),
+                                        description: "角色在断连期间死亡，请通过 rebirth 创建新角色".to_string(),
+                                        location: String::new(),
+                                        tick_id: 0,
+                                        died_at: chrono::Utc::now().timestamp_millis(),
+                                        rebirth_delay_ticks: 0,
+                                    };
+                                    let _ = api_state.death_event_tx.send(death_msg);
+                                }
+
+                                // 持久化死亡状态
+                                if let Some(ref mut char_cfg) = self.character_config {
+                                    char_cfg.status = crate::config::CharacterStatus::Dead;
+                                    if let Some(ref api_state) = self.http_api_state {
+                                        let characters_dir = api_state.character_dir.read().await.clone();
+                                        if let Err(e) = crate::core::lifecycle::save_character_config_to_fs(char_cfg, &characters_dir) {
+                                            warn!("Failed to persist reconnect-death status: {}", e);
+                                        }
+                                    }
+                                }
+
+                                // 保持进程存活等待 rebirth
                                 return Ok(());
                             }
 
