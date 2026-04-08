@@ -43,16 +43,6 @@ pub enum ConnectError {
     ConnectionFailed(#[from] anyhow::Error),
 }
 
-/// Tick 不匹配错误（携带结构化数据）
-#[derive(Debug, thiserror::Error)]
-#[error("Tick mismatch: {message}")]
-pub struct TickMismatchError {
-    /// 服务端当前 tick
-    pub current_tick_id: i64,
-    /// 原始错误消息
-    pub message: String,
-}
-
 // ============================================================================
 // WebSocket 客户端
 // ============================================================================
@@ -566,25 +556,7 @@ async fn websocket_background_task(
 
                                 if is_tick_mismatch {
                                     error!("Background: Tick mismatch: {}", message);
-                                    let tick_id = current_tick_id.unwrap_or_else(|| {
-                                        message
-                                            .rsplit("当前 tick ")
-                                            .next()
-                                            .and_then(|s| {
-                                                s.chars()
-                                                    .take_while(|c| c.is_ascii_digit())
-                                                    .collect::<String>()
-                                                    .parse::<i64>()
-                                                    .ok()
-                                            })
-                                            .unwrap_or(0)
-                                    });
-                                    // 通过 watch channel 发送 Error（用特殊 WorldState 表示）
-                                    // 但 watch channel 只能发 WorldState...
-                                    // Tick mismatch 通过 server_msg_cb 回调处理，主循环会通过
-                                    // receive_world_state 的错误路径发现连接问题
-                                    // TODO: 需要更好的错误传递机制
-                                    let _ = tick_id; // 暂时不通过 channel 传递
+                                    // tick mismatch 自恢复：下一个 tick 的 WorldState 会自然到来
                                 } else {
                                     warn!("Background: Server error: {}", message);
                                 }
