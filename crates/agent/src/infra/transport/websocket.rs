@@ -71,6 +71,7 @@ struct RegistrationData {
     game_rules: GameRules,
     world_building_rules: Option<WorldBuildingRules>,
     agent_name: Option<String>,
+    is_alive: bool,
 }
 
 /// 连接状态
@@ -282,10 +283,10 @@ impl WebSocketClient {
     /// 等待注册响应
     ///
     /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, agent_name)))` - 正常注册
-    /// - `Ok(None)` - 已连接但等待角色注册（agent_id 为 nil，保持连接）
+    /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
+    /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
-    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>)>> {
+    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
         let mut rx = {
             let state = self.state.read().await;
             state.registered_tx.as_ref()
@@ -302,7 +303,7 @@ impl WebSocketClient {
                     return Ok(None);
                 }
                 Some(data) => {
-                    info!("Agent registered with ID: {}", data.agent_id);
+                    info!("Agent registered with ID: {}, alive={}", data.agent_id, data.is_alive);
                     // 更新 state 中的字段
                     let mut state = self.state.write().await;
                     state.agent_id = Some(data.agent_id);
@@ -310,7 +311,7 @@ impl WebSocketClient {
                     if let Some(ref rules) = data.world_building_rules {
                         state.world_building_rules = Some(rules.clone());
                     }
-                    return Ok(Some((data.agent_id, data.game_rules.clone(), data.agent_name.clone())));
+                    return Ok(Some((data.agent_id, data.game_rules.clone(), data.agent_name.clone(), data.is_alive)));
                 }
                 None => {} // 尚未收到注册消息
             }
@@ -592,10 +593,10 @@ async fn websocket_background_task(
                                 agent_id,
                                 game_rules,
                                 world_building_rules,
-                                is_alive: _,
+                                is_alive,
                                 agent_name,
                             }) => {
-                                info!("Background: Registered agent_id={}", agent_id);
+                                info!("Background: Registered agent_id={}, alive={}", agent_id, is_alive);
                                 // 保存注册数据到 watch channel
                                 if let Some(ref tx) = reg_tx {
                                     let _ = tx.send(Some(RegistrationData {
@@ -603,6 +604,7 @@ async fn websocket_background_task(
                                         game_rules,
                                         world_building_rules,
                                         agent_name,
+                                        is_alive,
                                     }));
                                 }
                             }
@@ -804,10 +806,10 @@ impl AgentClient {
     /// 等待注册响应
     ///
     /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, agent_name)))` - 正常注册
-    /// - `Ok(None)` - 已连接但等待角色注册（agent_id 为 nil）
+    /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
+    /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
-    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>)>> {
+    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }
