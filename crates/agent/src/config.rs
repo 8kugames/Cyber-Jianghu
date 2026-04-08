@@ -430,6 +430,9 @@ pub struct LlmConfig {
     pub temperature: f32,
     #[serde(default = "default_llm_max_tokens")]
     pub max_tokens: u32,
+    /// 备用模型列表（同 provider/api_key，主模型 403/超时时自动降级）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
 }
 
 fn default_llm_provider() -> String {
@@ -453,6 +456,7 @@ impl Default for LlmConfig {
             model: None,
             temperature: DEFAULT_LLM_TEMPERATURE,
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
+            fallback_models: Vec::new(),
         }
     }
 }
@@ -473,6 +477,7 @@ impl LlmConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
+            fallback_models: Vec::new(),
         }
     }
 

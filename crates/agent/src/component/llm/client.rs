@@ -8,6 +8,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
+use std::sync::Arc;
 
 /// LLM 客户端 Trait（仅由 OpenClaw 实现）
 ///
@@ -182,6 +183,157 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             .complete_with_tools(system, prompt, tools, executor, max_rounds)
             .await?;
         parse_json_response::<D>(&text)
+    }
+}
+
+// ============================================================================
+// Fallback LLM 客户端（403/超时自动降级）
+// ============================================================================
+
+/// Fallback LLM 客户端
+///
+/// 主模型 403（额度耗尽）或超时时，自动切换到备用模型。
+/// 所有模型共享同一 provider/api_key，仅 model name 不同。
+///
+/// 一旦某个 fallback 成功，后续调用优先使用该模型（sticky fallback）。
+pub struct FallbackLlmClient {
+    /// LLM 客户端列表（index 0 = 主模型，1.. = fallback）
+    clients: Vec<Arc<dyn LlmClient>>,
+    /// 当前活跃客户端索引
+    active: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl FallbackLlmClient {
+    /// 创建 Fallback 客户端
+    ///
+    /// `clients` 不应为空，index 0 是主模型。
+    pub fn new(clients: Vec<Arc<dyn LlmClient>>) -> Self {
+        assert!(!clients.is_empty(), "FallbackLlmClient needs at least one client");
+        Self {
+            clients,
+            active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    /// 获取当前活跃客户端
+    fn active_client(&self) -> Arc<dyn LlmClient> {
+        let idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        self.clients[idx.min(self.clients.len() - 1)].clone()
+    }
+
+    /// 判断错误是否应触发 fallback
+    ///
+    /// 匹配条件：
+    /// - HTTP 403 (AllocationQuota / 额度耗尽)
+    /// - HTTP 429 (Rate limit)
+    fn should_fallback(error: &anyhow::Error) -> bool {
+        let msg = format!("{:#}", error);
+        // HTTP 状态码匹配
+        msg.contains("LLM API error 403")
+            || msg.contains("LLM API error 429")
+            // Dashscope 额度耗尽关键词
+            || msg.contains("AllocationQuota")
+            // 连接超时/请求超时
+            || msg.contains("error sending request")
+            || msg.contains("operation timed out")
+    }
+
+    /// 执行带 fallback 的调用
+    ///
+    /// 策略：从 active index 开始，失败时尝试后续所有客户端。
+    /// 一旦成功，sticky 到该客户端。
+    async fn call_with_fallback<F, Fut>(&self, f: F) -> Result<String>
+    where
+        F: Fn(Arc<dyn LlmClient>) -> Fut,
+        Fut: std::future::Future<Output = Result<String>>,
+    {
+        let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let mut last_err = None;
+
+        for offset in 0..self.clients.len() {
+            let idx = (start + offset) % self.clients.len();
+            let client = self.clients[idx].clone();
+
+            match f(client).await {
+                Ok(response) => {
+                    if offset > 0 {
+                        tracing::warn!(
+                            "LLM fallback 成功：切换到客户端 #{} (主用 #{}）",
+                            idx, start
+                        );
+                        // sticky：后续调用使用此客户端
+                        self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    return Ok(response);
+                }
+                Err(e) => {
+                    let should = Self::should_fallback(&e);
+                    tracing::warn!(
+                        "LLM 客户端 #{} 调用失败 (fallback={}: {}",
+                        idx, should, e
+                    );
+                    if !should {
+                        // 非 fallback 类错误（如 JSON 解析失败），直接返回
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        // 所有客户端都失败
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有 LLM 客户端均失败")))
+    }
+}
+
+#[async_trait]
+impl LlmClient for FallbackLlmClient {
+    async fn complete(&self, prompt: &str) -> Result<String> {
+        let prompt = prompt.to_string();
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let prompt = prompt.clone();
+            async move { client.complete(&prompt).await }
+        })
+        .await
+    }
+
+    async fn complete_with_system(&self, system: &str, prompt: &str) -> Result<String> {
+        let system = system.to_string();
+        let prompt = prompt.to_string();
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let system = system.clone();
+            let prompt = prompt.clone();
+            async move { client.complete_with_system(&system, &prompt).await }
+        })
+        .await
+    }
+
+    fn supports_tool_calling(&self) -> bool {
+        self.active_client().supports_tool_calling()
+    }
+
+    async fn complete_with_tools(
+        &self,
+        system: &str,
+        prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let system = system.to_string();
+        let prompt = prompt.to_string();
+        let tools = tools.to_vec();
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let system = system.clone();
+            let prompt = prompt.clone();
+            let tools = tools.clone();
+            async move {
+                client
+                    .complete_with_tools(&system, &prompt, &tools, executor, max_rounds)
+                    .await
+            }
+        })
+        .await
     }
 }
 

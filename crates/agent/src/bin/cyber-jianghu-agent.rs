@@ -32,7 +32,7 @@ use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
 
 use cyber_jianghu_agent::component::llm::{
-    DirectLlmClient, DirectLlmClientConfig, LlmClient, LlmProvider,
+    DirectLlmClient, DirectLlmClientConfig, FallbackLlmClient, LlmClient, LlmProvider,
 };
 use cyber_jianghu_agent::config::{
     CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
@@ -543,6 +543,24 @@ fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
     DirectLlmClient::new(client_config)
 }
 
+/// 创建指定 model name 的 LLM 客户端（用于 fallback）
+fn create_llm_client_with_model(llm_config: &LlmConfig, model: &str) -> Result<DirectLlmClient> {
+    let provider = LlmProvider::parse(&llm_config.provider)
+        .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
+
+    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
+
+    if let Some(url) = &llm_config.base_url {
+        client_config = client_config.with_base_url(url);
+    }
+    client_config = client_config
+        .with_model(model)
+        .with_temperature(llm_config.temperature)
+        .with_max_tokens(llm_config.max_tokens);
+
+    DirectLlmClient::new(client_config)
+}
+
 // ============================================================================
 // 等待角色创建
 // ============================================================================
@@ -728,9 +746,25 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 config.llm.model.as_deref().unwrap_or("default")
             );
 
-            let llm_arc: Arc<dyn LlmClient> = Arc::new(llm_client);
+            // 构建 LLM 客户端列表（主模型 + fallback）
+            let mut llm_clients: Vec<Arc<dyn LlmClient>> = vec![Arc::new(llm_client)];
+            for (i, fallback_model) in config.llm.fallback_models.iter().enumerate() {
+                match create_llm_client_with_model(&config.llm, fallback_model) {
+                    Ok(client) => {
+                        info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
+                        llm_clients.push(Arc::new(client));
+                    }
+                    Err(e) => warn!("Fallback 模型 #{} ({}) 创建失败: {}", i + 1, fallback_model, e),
+                }
+            }
+
+            let llm_arc: Arc<dyn LlmClient> = if llm_clients.len() > 1 {
+                Arc::new(FallbackLlmClient::new(llm_clients))
+            } else {
+                llm_clients.into_iter().next().unwrap()
+            };
             let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
-            info!("LLM Client 容器已创建（支持热重载）");
+            info!("LLM Client 容器已创建（支持热重载 + fallback）");
 
             let agent_name = character.name.as_str();
             let agent_id = device.device_id;
