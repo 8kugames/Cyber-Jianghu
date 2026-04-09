@@ -193,24 +193,40 @@ Key agent modules:
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
 
 **Dual Soul Architecture** (Cognitive mode):
-The agent uses a dual-soul design for intent generation and moral review:
+The agent uses an Actor-Reflector loop with three-layer validation:
 
 ```
-ActorSoul (行动之魂/本我)     ReflectorSoul (反思之魂/超我)
-       │                              │
-       │  submit_for_review()        │  poll ReviewStore
-       │  ─────────────────────────> │
-       │                              │  LLM review
-       │  <─────────────────────────  │  submit_review()
-       │  await approval              │
-       ▼
-   send_intent()
+loop {
+    ActorSoul (行动之魂/本我)  ──generate intent──>  ReflectorSoul (反思之魂/超我)
+           │                                              │
+           │              Layer 1: action_type 合法性     │
+           │              Layer 2: RuleEngine 规则校验    │
+           │              Layer 3: LLM 人设/世界观审查     │
+           │                                              │
+           │<───── Approved: send intent ──────────────── │
+           │<───── Rejected: retry with reason ────────── │
+           │                                              │
+           │  (max 3 retries, deadline timeout → idle)   │
+}
 ```
 
-- **ActorSoul**: Generates intents, pursues immediate goals (id/本我)
-- **ReflectorSoul**: Reviews intents against moral values, approves/rejects (superego/超我)
-- **ReviewStore**: In-memory shared state for pending reviews and results
-- **Timeout**: Default 30s, auto-approves on timeout to prevent tick expiry
+- **ActorSoul**: 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision)
+- **ReflectorSoul**: Three-layer validation (action_type → RuleEngine → LLM)
+- **Retry loop**: Rejected intents trigger ActorSoul re-inference with rejection reason within same tick
+- **Deadline timeout**: Tick关单打断循环，超时提交 idle
+- **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
+
+**Immediate Event System**:
+- Server broadcasts `ImmediateEvent` (speak) to co-located agents mid-tick
+- Agent's `ImmediateEventHandler` decides: RespondNow / DeferToMainTick / Ignore
+- RespondNow sends speak intent via dedicated `immediate_msg_tx` channel (不占 intent 配额)
+- Deferred events injected into next tick's LLM context as "待回应的对话"
+- All ImmediateEvents immediately stored in working memory (即时感知)
+
+**Server Error Feedback**:
+- Server sends `ServerMessage::Error` with `ERROR_CODE_ACTION_FAILED` on validation failure
+- Agent consumes via `server_error_feedback` channel → `last_rejection_reason`
+- Injected into next tick's ActorSoul context as `[意图被驳回: {reason}]`
 
 **LLM Fallback** (Cognitive mode):
 - `FallbackLlmClient` wraps multiple LLM models sharing the same provider/api_key
