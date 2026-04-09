@@ -414,7 +414,8 @@ impl Default for ClawConfig {
 
 const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
-const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
+const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -433,6 +434,13 @@ pub struct LlmConfig {
     /// 备用模型列表（同 provider/api_key，主模型 403/超时时自动降级）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fallback_models: Vec<String>,
+    /// 连续 idle tick 数达到此阈值后主动切换到下一个模型
+    #[serde(default = "default_idle_rotate_threshold")]
+    pub idle_rotate_threshold: u32,
+}
+
+fn default_idle_rotate_threshold() -> u32 {
+    DEFAULT_IDLE_ROTATE_THRESHOLD
 }
 
 fn default_llm_provider() -> String {
@@ -457,6 +465,7 @@ impl Default for LlmConfig {
             temperature: DEFAULT_LLM_TEMPERATURE,
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             fallback_models: Vec::new(),
+            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
         }
     }
 }
@@ -478,6 +487,7 @@ impl LlmConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
             fallback_models: Vec::new(),
+            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
         }
     }
 

@@ -25,7 +25,7 @@ pub mod utils;
 pub const FORGETTING_INTERVAL_TICKS: i64 = 84;
 
 // 重新导出核心类型
-pub use agent::{Agent, PersonaValidationResult};
+pub use agent::{Agent, PersonaValidationResult, ReflectorResult};
 pub use builder::AgentBuilder;
 
 // 从 soul::actor 重导出认知引擎类型

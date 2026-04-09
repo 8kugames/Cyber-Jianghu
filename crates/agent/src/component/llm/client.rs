@@ -40,6 +40,14 @@ pub trait LlmClient: Send + Sync {
         false
     }
 
+    /// 强制切换到下一个模型（用于连续 idle 时主动换模型）
+    ///
+    /// 返回 `true` 表示成功切换，`false` 表示只有单模型无法切换。
+    /// 默认实现返回 `false`（单模型客户端无需切换）。
+    fn force_rotate_model(&self) -> bool {
+        false
+    }
+
     /// 使用 tool calling 的多轮对话
     ///
     /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
@@ -222,6 +230,21 @@ impl FallbackLlmClient {
         }
     }
 
+    /// 强制切换到下一个模型
+    ///
+    /// 将 active 索引前进一位（环绕）。返回 true 表示切换成功，
+    /// false 表示只有一个模型无法切换。
+    pub fn force_rotate(&self) -> bool {
+        if self.clients.len() <= 1 {
+            return false;
+        }
+        let old = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let new = (old + 1) % self.clients.len();
+        self.active.store(new, std::sync::atomic::Ordering::Relaxed);
+        tracing::warn!("强制切换 LLM 模型: #{} → #{}", old, new);
+        true
+    }
+
     /// 获取当前活跃客户端
     fn active_client(&self) -> Arc<dyn LlmClient> {
         let idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
@@ -294,6 +317,10 @@ impl FallbackLlmClient {
 
 #[async_trait]
 impl LlmClient for FallbackLlmClient {
+    fn force_rotate_model(&self) -> bool {
+        self.force_rotate()
+    }
+
     async fn complete(&self, prompt: &str) -> Result<String> {
         let prompt = prompt.to_string();
         self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
