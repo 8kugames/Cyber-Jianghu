@@ -216,6 +216,8 @@ pub enum ServerMessage {
     /// - speak 广播：同场景所有在线 Agent 立即收到
     /// - 其他需要实时通知的事件
     ImmediateEvent {
+        /// 事件唯一 ID（用于即时意图追踪）
+        event_id: Uuid,
         /// 事件内容
         event: WorldEvent,
         /// 当前 tick 截止时间（Unix ms）
