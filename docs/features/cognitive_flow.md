@@ -97,7 +97,7 @@
 │  │  │  │                                            │ decision_callback │   │    │   │
 │  │  │  │                                            │ (Cognitive)       │   │    │   │
 │  │  │  │                                            └───────────────────┘   │    │   │
-│  │  │  5.5 [审查] submit_for_review() ──▶ ReviewStore (ReflectorSoul)        │    │   │
+│  │  │  5b. validate_with_reflector() ──▶ ReviewStore (ReflectorSoul)      │    │   │
 │  │  │  6.  send_intent() ───────────────────────────────────────────▶ Intent │    │   │
 │  │  │  6.5 [寿命] LifespanCalculator.process_tick() 检查寿命状态              │    │   │
 │  │  └─────────────────────────────────────────────────────────────────────────┘    │   │
@@ -107,10 +107,10 @@
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         COGNITIVE ENGINE (认知引擎)                              │   │
 │  │  soul/actor/                                                                 │   │
-│  │  ├── engine.rs      - MultiStageCognitiveEngine (主引擎)                        │   │
+│  │  ├── engine.rs      - CognitiveEngine (主引擎)                           │   │
 │  │  ├── chain.rs       - CognitiveChain (认知链)                                   │   │
 │  │  ├── stages.rs      - StageOutput, 各阶段响应类型                               │   │
-│  │  └── pipeline.rs    - CognitivePipeline (流程编排)                              │   │
+│  │  └── narrative.rs   - NarrativeEngine (叙事化)                            │   │
 │  │                                                                                  │   │
 │  │  ┌─────────────────────────────────────────────────────────────────────────┐    │   │
 │  │  │                    think(WorldState) -> CognitiveChain                   │    │   │
@@ -275,16 +275,20 @@ loop {
             1.  接收 WorldState
             1.5 [死亡检查] 检测 events_log 中的死亡事件
                 - 若死亡且未报告: 记录日志, 设置 death_reported = true
+            1.6 [验证错误] 消费 server_error_feedback，写入 last_rejection_reason
+            1.7 [即时事件] 消费 immediate_event_buffer，写入工作记忆
             2.  处理事件: process_events(&world_state.events_log)
             3.  每 84 tick 运行遗忘机制: run_forgetting(tick_id)
-            4.  构建记忆上下文: get_memory_context()
-            5.  决策 (带验证器):
-                - 若有 validator: decide_with_validation()
-                - 若有 memory_callback: decision_with_memory_callback()
-                - 否则: decision_callback()
-            5.5 [审查] 若有 review_store: submit_for_review()
-                - 等待 ReflectorSoul 审查结果
-                - 超时则使用原始 Intent
+            4.  构建记忆上下文: get_memory_context() + 注入 deferred 对话
+            5.  Actor-Reflector 循环 (最多 3 次重试):
+                5a. ActorSoul 决策 (注入 last_rejection_reason)
+                    - 若有 memory_callback: decision_with_memory_callback()
+                    - 否则: decision_callback() / decision_with_feedback_callback()
+                5b. ReflectorSoul 审查: validate_with_reflector()
+                    - Approved: 跳出循环
+                    - Rejected: 设置 last_rejection_reason，循环继续
+                    - deadline 超时: 退出循环（不发送 intent）
+            5.5 [超时 idle] 达到最大重试次数，提交 idle intent
             6.  发送 Intent: send_intent()
             6.5 [寿命] LifespanCalculator.process_tick()
                 - 若已故: 发送最后的 idle Intent 并退出
@@ -295,18 +299,20 @@ loop {
 
 ### 步骤说明
 
-| 步骤  | 说明                        | 状态          |
-| --- | ------------------------- | ----------- |
-| 1   | 接收世界状态                    | 已实现         |
-| 1.5 | 死亡检查 (death\_reported 标志) | 已实现         |
-| 2   | 事件处理并更新记忆                 | 已实现         |
-| 3   | 遗忘机制 (每 84 tick)          | 已实现         |
-| 4   | 构建记忆上下文                   | 已实现         |
-| 5   | 认知决策 (带验证器)               | 已实现         |
-| 5.5 | ReflectorSoul 审查          | 已实现         |
-| 6   | 发送 Intent                 | 已实现         |
-| 6.5 | 寿命处理                      | 已实现         |
-| -   | 配置热重载                     | **已实现** 使用 `RwLock` 容器包装 LLM Client，决策回调每次从容器读取最新 Client |
+| 步骤   | 说明                        | 状态          |
+| ----- | ------------------------- | ----------- |
+| 1     | 接收世界状态                    | 已实现         |
+| 1.5   | 死亡检查 (death\_reported 标志) | 已实现         |
+| 1.6   | 验证错误反馈 (server_error_feedback) | 已实现         |
+| 1.7   | 即时事件缓冲消费               | 已实现         |
+| 2     | 事件处理并更新记忆                 | 已实现         |
+| 3     | 遗忘机制 (每 84 tick)          | 已实现         |
+| 4     | 构建记忆上下文 (+ deferred 对话)  | 已实现         |
+| 5     | Actor-Reflector 循环 (重试)     | 已实现         |
+| 5.5   | 超时 idle                    | 已实现         |
+| 6     | 发送 Intent                 | 已实现         |
+| 6.5   | 寿命处理                      | 已实现         |
+| -     | 配置热重载                     | **已实现** 使用 `RwLock` 容器包装 LLM Client，决策回调每次从容器读取最新 Client |
 
 ***
 
@@ -351,7 +357,50 @@ fn should_log_retry(attempt: u32) -> bool {
 
 ***
 
-## Intent 验证流程
+## Intent 验证与审查流程
+
+### Actor-Reflector 循环
+
+**位置**: `core/lifecycle.rs` 主循环
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ActorSoul (决策)                                   │
+│                                                                      │
+│  1. 读取 memory_context + last_rejection_reason                      │
+│  2. 调用 decision_with_memory_callback() / decision_callback()        │
+│  3. 生成 Intent                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ReflectorSoul (审查)                               │
+│                                                                      │
+│  1. validate_with_reflector()                                       │
+│     ├── RuleEngine 规则检查 (冷却、合法性)                            │
+│     ├── CognitiveValidator 质量检查                                   │
+│     └── LLM Validator (可选)                                        │
+│  2. 返回: Approved / Rejected(reason)                               │
+└─────────────────────────────────────────────────────────────────────┘
+                              │
+            ┌─────────────────┴─────────────────┐
+            ▼                                     ▼
+    Approved                                  Rejected
+            │                                     │
+            │                              设置 last_rejection_reason
+            │                                     │
+            │                                     ▼
+            │                              循环回 ActorSoul 重试
+            │                                     │
+            │                              (最多 max_retries 次)
+            ▼                                     │
+    发送 Intent                                      │
+            │                                     │
+            │        deadline 超时 ────────────────┘
+            │                                     │
+            ▼                                     ▼
+    send_intent()                            idle intent
+```
 
 ### Validator 组件
 
@@ -364,93 +413,16 @@ fn should_log_retry(attempt: u32) -> bool {
 | `RuleEngine`         | 规则引擎验证（含默认冷却规则：speak/move）            |
 | `ValidationRequest`  | 验证请求 (intent, persona, world\_context) |
 | `ValidationResult`   | 验证结果 (Approved/Rejected)               |
-
-### 验证配置
-
-```yaml
-# agent.yaml
-validator:
-  max_retry_attempts: 5           # 最大重试次数
-  min_retry_time_secs: 10         # 最小重试时间
-  consecutive_rejection_threshold: 3  # 连续驳回阈值
-```
-
-### 验证流程
-
-```
-Intent 生成
-    │
-    ▼
-┌─────────────────┐
-│   Validator     │
-│   .validate()   │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-Approved   Rejected
-    │         │
-    │         ▼
-    │    记录驳回原因
-    │         │
-    │         ▼
-    │    decision_with_feedback_callback()
-    │         │
-    │         ▼
-    │    重新生成 Intent (最多 max_retry_attempts 次)
-    │         │
-    │    ┌────┴────┐
-    │    ▼         ▼
-    │ Approved   连续驳回 >= threshold
-    │    │         │
-    │    │         ▼
-    │    │    强制 idle
-    │    │         │
-    └────┴─────────┘
-              │
-              ▼
-         最终 Intent
-```
-
-***
-
-## ReflectorSoul 审查系统
-
-### 架构
-
-```
-┌─────────────────┐                    ┌─────────────────┐
-│   ActorSoul     │                    │  ReflectorSoul  │
-│   (玩家 Agent)   │                    │  (观察者 Agent)  │
-├─────────────────┤                    ├─────────────────┤
-│                 │                    │                 │
-│ 1. 生成 Intent  │                    │ 1. 轮询待审查队列│
-│                 │                    │                 │
-│ 2. 提交审查     │──▶ ReviewStore ──▶│ 2. LLM 审查     │
-│    add_pending()│                    │    (世界观一致性)│
-│                 │                    │                 │
-│ 3. 等待结果     │◀── ReviewStore ◀──│ 3. 提交结果     │
-│    (带超时)     │                    │    (Approved/   │
-│                 │                    │     Rejected)   │
-└─────────────────┘                    └─────────────────┘
-```
-
-### 审查配置
-
-```yaml
-# agent.yaml
-review:
-  enabled: true
-  timeout_seconds: 30      # 审查超时
-  auth_token: "xxx"        # 审查认证 Token
-```
+| `ReviewStore`       | 审查存储（支持 Observer Agent 外部审查）        |
 
 ### 审查结果处理
 
 | 结果                | 处理                    |
 | ----------------- | --------------------- |
-| `Approved`        | 使用原始 Intent           |
-| `Rejected`        | 返回 idle Intent + 驳回原因 |
+| `Approved`        | 发送原始 Intent           |
+| `Rejected`        | 设置 rejection_reason，循环重试 |
+| deadline 超时     | 不发送 intent，等待下个 tick  |
+| 达到最大重试      | 提交 idle intent           |
 | `TimeoutApproved` | 超时后自动通过               |
 | `Pending`         | 继续等待 (每 100ms 检查一次)   |
 
@@ -501,8 +473,8 @@ review:
 | `Agent`                    | 运行时主结构，持有所有组件引用       |
 | `run()`                    | 主循环：接收 → 处理 → 决策 → 发送 |
 | `reconnect()`              | 重连机制，指数退避策略           |
-| `decide_with_validation()` | 带验证器的决策流程             |
-| `submit_for_review()`      | 提交 ReflectorSoul 审查   |
+| `validate_with_reflector()` | ReflectorSoul 审查流程    |
+| `last_rejection_reason`    | 跨 tick 的驳回原因传递        |
 
 ### 4. 认知引擎 (`soul/actor/`)
 
@@ -510,10 +482,11 @@ review:
 
 | 文件            | 组件                          | 说明          |
 | ------------- | --------------------------- | ----------- |
-| `engine.rs`   | `MultiStageCognitiveEngine` | 四阶段认知流程引擎   |
+| `engine.rs`   | `CognitiveEngine`           | 四阶段认知流程引擎   |
 | `chain.rs`    | `CognitiveChain`            | 存储各阶段输出的认知链 |
-| `stages.rs`   | `StageOutput`, `*Response`  | 各阶段响应类型定义   |
-| `pipeline.rs` | `CognitivePipeline`         | 认知流程编排器     |
+| `stages.rs`   | `StageOutput`, `*Response` | 各阶段响应类型定义   |
+| `narrative.rs`| `NarrativeEngine`           | 叙事化引擎         |
+| `tools.rs`    | `ActorToolExecutor`         | 工具执行器         |
 
 **四阶段流程**:
 
