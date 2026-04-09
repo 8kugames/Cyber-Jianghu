@@ -61,10 +61,11 @@ pub fn cognitive_decision_with_retry(
     agent_id: Uuid,
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
-) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
-    move |world_state: &WorldState, feedback: Option<&str>| {
+) -> impl Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
+    move |world_state: &WorldState, memory_context: &str, feedback: Option<&str>| {
         let engine = engine.clone();
         let world_state = world_state.clone();
+        let memory_context = memory_context.to_string();
         let feedback = feedback.map(|s| s.to_string());
 
         Box::pin(async move {
@@ -72,7 +73,7 @@ pub fn cognitive_decision_with_retry(
 
             for attempt in 0..=max_retries {
                 match engine
-                    .think_with_memory_and_feedback(&world_state, "", feedback.as_deref())
+                    .think_with_memory_and_feedback(&world_state, &memory_context, feedback.as_deref())
                     .await
                 {
                     Ok(chain) => {
