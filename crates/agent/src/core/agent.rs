@@ -543,7 +543,19 @@ impl Agent {
 
         match self.rule_engine.validate_context(&context).await {
             Ok(crate::soul::reflector::ValidationResult::Approved { .. }) => Ok(()),
-            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => Err(reason),
+            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => {
+                // 增强 eat/drink 驳回消息，附加可用 item_id 列表
+                let enhanced = if reason.contains("吃东西失败") || reason.contains("喝水失败") {
+                    let ids = context.available_item_ids.join(", ");
+                    format!("{}。可用物品ID: [{}]", reason, ids)
+                } else if reason.contains("移动失败") {
+                    let nodes = context.reachable_node_ids.join(", ");
+                    format!("{}。可达地点ID: [{}]", reason, nodes)
+                } else {
+                    reason
+                };
+                Err(enhanced)
+            }
             Err(e) => {
                 // 规则引擎出错时放行（fail-open）
                 tracing::warn!("RuleEngine error, bypassing: {}", e);
