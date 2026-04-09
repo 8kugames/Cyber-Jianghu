@@ -41,11 +41,11 @@ use std::sync::Arc;
 /// 无状态，可组合
 pub type DecisionCallback = Arc<dyn Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync>;
 
-/// 带反馈的决策回调类型
+/// 带反馈和记忆上下文的决策回调类型
 ///
-/// 接收世界状态和验证反馈（驳回原因），返回异步 Future
+/// 接收世界状态、记忆上下文和验证反馈（驳回原因），返回异步 Future
 pub type DecisionWithFeedbackCallback =
-    Arc<dyn Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
+    Arc<dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带记忆上下文的决策回调类型
 ///

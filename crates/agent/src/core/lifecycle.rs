@@ -561,26 +561,25 @@ impl super::Agent {
 
                         // 5a. ActorSoul 决策（带 rejection reason 注入）
                         let intent = {
-                            let combined_context = match &self.last_rejection_reason {
-                                Some(reason) => {
-                                    let prefix = if attempt > 0 { "[意图被驳回" } else { "[上次意图被驳回" };
-                                    if memory_context.is_empty() {
-                                        format!("{}，请重新决策]", prefix)
-                                    } else {
-                                        format!("{}\n{}: {}，请重新决策]", memory_context, prefix, reason)
-                                    }
-                                }
-                                None => memory_context.clone(),
-                            };
                             let decision_future = async {
-                                if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                                    memory_callback(&world_state, &combined_context).await
-                                } else if let Some(ref reason) = self.last_rejection_reason {
+                                // 有 rejection reason 时优先走 feedback callback（使用 [验证反馈] section）
+                                // feedback callback 内部有 CognitiveValidator 重试
+                                if let Some(ref reason) = self.last_rejection_reason {
                                     if let Some(ref callback) = self.decision_with_feedback_callback {
-                                        callback(&world_state, Some(reason.as_str())).await
+                                        callback(&world_state, &memory_context, Some(reason.as_str())).await
+                                    } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                                        // fallback: 将 rejection 混入 memory context
+                                        let combined = if memory_context.is_empty() {
+                                            format!("[意图被驳回: {}，请重新决策]", reason)
+                                        } else {
+                                            format!("{}\n[意图被驳回: {}，请重新决策]", memory_context, reason)
+                                        };
+                                        memory_callback(&world_state, &combined).await
                                     } else {
                                         (self.decision_callback)(&world_state).await
                                     }
+                                } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                                    memory_callback(&world_state, &memory_context).await
                                 } else {
                                     (self.decision_callback)(&world_state).await
                                 }
