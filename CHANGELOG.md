@@ -140,7 +140,7 @@
 - **Agent**: ActorSoul + ReflectorSoul 双 Soul 架构
   - 新增 `ReviewStore` 共享内存用于进程内审查通信
   - ActorSoul (行动之魂)：生成意图，执行行动
-  - ReflectorSoul (反思之魂)：审查意图，道德判断（默认启用）
+  - ReflectorSoul (反思之魂)：审查意图，世界观一致性审查（默认启用）
   - AgentBuilder 新增 `with_review_store()` 和 `with_reconnect_rx()` 方法
 
 - **Agent**: 审查系统默认启用

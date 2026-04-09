@@ -45,8 +45,7 @@ fn make_mock_client() -> MockLlmClient {
         thought_process:
             "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作"
                 .to_string(),
-        action: "use".to_string(),
-        action_data: serde_json::json!({"item_id": "包子"}),
+        narrative_action: "去包子摊买包子充饥".to_string(),
     })
     .unwrap();
 

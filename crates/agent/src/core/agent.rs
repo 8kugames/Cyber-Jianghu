@@ -26,6 +26,7 @@ use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{PersonaInfo, Validator};
+use crate::soul::translator::IntentTranslator;
 
 use super::builder::AgentBuilder;
 use super::{DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
@@ -120,6 +121,10 @@ pub struct Agent {
 
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
+
+    /// 天魂 — 意图翻译器（Cognitive 模式，将叙事意图翻译为格式化 Intent）
+    /// Claw 模式下为 None（外部系统直接提供格式化 Intent）
+    pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl Agent {
@@ -179,6 +184,7 @@ impl Agent {
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
+            intent_translator: None,
         }
     }
 
@@ -439,6 +445,68 @@ impl Agent {
         }
     }
 
+    /// 天魂翻译：将人魂的叙事意图翻译为服务端格式化 Intent
+    ///
+    /// 如果 intent 的 action_type 为 "narrative"（人魂标记），调用天魂翻译。
+    /// 否则直接返回原 intent（Claw 模式或已经是格式化 Intent）。
+    ///
+    /// 翻译失败时返回 idle intent 作为降级。
+    pub(crate) async fn translate_intent(
+        &self,
+        intent: Intent,
+        world_state: &WorldState,
+    ) -> Intent {
+        // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
+        if intent.action_type.as_str() != "narrative" {
+            return intent;
+        }
+
+        let translator = match &self.intent_translator {
+            Some(t) => t,
+            None => {
+                warn!("人魂输出了 narrative intent 但未配置天魂翻译器，降级为 idle");
+                return Intent::new(
+                    intent.agent_id,
+                    intent.tick_id,
+                    "idle",
+                    None,
+                ).with_thought(intent.thought_log.unwrap_or_default());
+            }
+        };
+
+        // 从 action_data 提取叙事文本
+        let narrative = intent.action_data
+            .as_ref()
+            .and_then(|d| d.get("narrative"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("");
+
+        let thought_log = intent.thought_log.as_deref().unwrap_or("");
+
+        if narrative.is_empty() {
+            warn!("人魂 narrative intent 缺少叙事文本，降级为 idle");
+            return Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                .with_thought(thought_log.to_string());
+        }
+
+        info!("[天魂] 翻译叙事意图: {}", narrative);
+
+        match translator.translate(narrative, thought_log, world_state).await {
+            Ok(translated) => {
+                info!(
+                    "[天魂] 翻译完成: action_type={}, action_data={:?}",
+                    translated.action_type, translated.action_data
+                );
+                translated
+            }
+            Err(e) => {
+                warn!("[天魂] 翻译失败: {}, 降级为 idle", e);
+                Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                    .with_thought(format!("意图翻译失败: {}", e))
+            }
+        }
+    }
+
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
         match &self.character_config {
@@ -467,6 +535,24 @@ impl Agent {
     /// 构建世界上下文
     pub(crate) fn build_world_context(&self, world_state: &crate::models::WorldState) -> String {
         super::utils::build_world_context(world_state, self.lifespan_calculator.as_ref())
+    }
+
+    /// 将地魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈
+    ///
+    /// 人魂不应看到 "item_id 无效" 这样的 meta 信息，
+    /// 只需要知道"想做的事没做成"以及"为什么"的叙事化描述。
+    pub(crate) fn narrativize_rejection(reason: &str) -> String {
+        // RuleEngine 技术性驳回 → 叙事化
+        if reason.contains("吃东西失败") || reason.contains("喝水失败") {
+            "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。".to_string()
+        } else if reason.contains("移动失败") {
+            "你想要移动到别处，但发现那条路走不通。也许该重新考虑目的地。".to_string()
+        } else if reason.contains("action") && reason.contains("不在合法列表") {
+            "你想做一件事，但似乎无法如愿。也许该换个行动方式。".to_string()
+        } else {
+            // LLM 驳回（人设/世界观）已经是自然语言，直接使用
+            reason.to_string()
+        }
     }
 
     /// 保存观察者叙事到情景记忆
@@ -544,17 +630,9 @@ impl Agent {
         match self.rule_engine.validate_context(&context).await {
             Ok(crate::soul::reflector::ValidationResult::Approved { .. }) => Ok(()),
             Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => {
-                // 增强 eat/drink 驳回消息，附加可用 item_id 列表
-                let enhanced = if reason.contains("吃东西失败") || reason.contains("喝水失败") {
-                    let ids = context.available_item_ids.join(", ");
-                    format!("{}。可用物品ID: [{}]", reason, ids)
-                } else if reason.contains("移动失败") {
-                    let nodes = context.reachable_node_ids.join(", ");
-                    format!("{}。可达地点ID: [{}]", reason, nodes)
-                } else {
-                    reason
-                };
-                Err(enhanced)
+                // 三魂架构中，驳回信息会在 lifecycle 中被 narrativize_rejection 叙事化
+                // 不在此处增强 ID 信息——人魂不应看到任何技术性 meta 数据
+                Err(reason)
             }
             Err(e) => {
                 // 规则引擎出错时放行（fail-open）
@@ -621,14 +699,12 @@ impl Agent {
         // 第一层：action_type 确定性校验（不经过 LLM）
         if let Err(e) = self.validate_action_type(&intent) {
             warn!("Action type validation failed: {}", e);
-            self.last_rejection_reason = Some(e.clone());
             return Ok(ReflectorResult::Rejected(e));
         }
 
         // 第二层：RuleEngine 规则校验（确定性，不经过 LLM）
         if let Err(e) = self.validate_with_rule_engine(&intent, world_state).await {
             warn!("Rule engine validation failed: {}", e);
-            self.last_rejection_reason = Some(e.clone());
             return Ok(ReflectorResult::Rejected(e));
         }
 
@@ -666,7 +742,7 @@ impl Agent {
                 rejection_type,
             } => {
                 warn!("ReflectorSoul rejected: {} [{:?}]", reason, rejection_type);
-                self.last_rejection_reason = Some(reason.clone());
+                // last_rejection_reason 由 lifecycle 统一叙事化后设置
                 Ok(ReflectorResult::Rejected(reason))
             }
         }

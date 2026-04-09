@@ -476,7 +476,7 @@ impl super::Agent {
                         let mut guard = self.server_error_feedback.lock().await;
                         if let Some(reason) = guard.take() {
                             warn!("Server 验证错误反馈: {}", reason);
-                            self.last_rejection_reason = Some(reason);
+                            self.last_rejection_reason = Some(super::Agent::narrativize_rejection(&reason));
                         }
                     }
 
@@ -532,7 +532,7 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
-                    // 5. Actor-Reflector 循环：ActorSoul 决策 → ReflectorSoul 审查 → 驳回则重试
+                    // 5. 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试
                     // 循环直到审查通过或 deadline 到期
                     let max_retries = 3; // 防止无限循环
                     let agent_id = world_state.agent_id.unwrap_or_default();
@@ -554,13 +554,13 @@ impl super::Agent {
                         // 检查 deadline（Tick 关单）
                         if let Some(dl) = deadline_at
                             && std::time::Instant::now() >= dl {
-                                warn!("Tick {} Actor-Reflector 循环被 Tick 关单打断，第 {} 次尝试", world_state.tick_id, attempt);
+                                warn!("Tick {} 三魂循环被 Tick 关单打断，第 {} 次尝试", world_state.tick_id, attempt);
                                 // 不发送 intent（server 已关单），保留 rejection reason 供下个 tick
                                 break;
                             }
 
-                        // 5a. ActorSoul 决策（带 rejection reason 注入）
-                        let intent = {
+                        // 5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
+                        let raw_intent = {
                             let decision_future = async {
                                 // 有 rejection reason 时优先走 feedback callback（使用 [验证反馈] section）
                                 // feedback callback 内部有 CognitiveValidator 重试
@@ -590,7 +590,7 @@ impl super::Agent {
                                 match tokio::time::timeout(remaining, decision_future).await {
                                     Ok(intent) => intent,
                                     Err(_) => {
-                                        warn!("Tick {} 第 {} 次 ActorSoul 推理超时，放弃本轮", world_state.tick_id, attempt);
+                                        warn!("Tick {} 第 {} 次人魂推理超时，放弃本轮", world_state.tick_id, attempt);
                                         // 不发送 intent（server 可能已关单）
                                         break;
                                     }
@@ -603,22 +603,28 @@ impl super::Agent {
                         // 如果 final_intent 已被设为超时 idle，退出
                         if final_intent.is_some() { break; }
 
-                        // 5b. ReflectorSoul 审查
+                        // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化
+                        let intent = self.translate_intent(raw_intent, &world_state).await;
+
+                        // 5c. 地魂 (ReflectorSoul) 审查 — 三层验证
                         match self.validate_with_reflector(intent, &world_state).await? {
                             super::agent::ReflectorResult::Approved(approved_intent) => {
                                 final_intent = Some(approved_intent);
                                 break;
                             }
                             super::agent::ReflectorResult::Rejected(reason) => {
-                                warn!("Tick {} 第 {} 次审查驳回: {}", world_state.tick_id, attempt, reason);
+                                warn!("Tick {} 第 {} 次地魂审查驳回: {}", world_state.tick_id, attempt, reason);
+                                // 叙事化驳回原因：人魂不应看到技术性 meta 信息（item_id 等）
+                                self.last_rejection_reason =
+                                    Some(super::Agent::narrativize_rejection(&reason));
                                 if attempt >= max_retries {
                                     warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
                                     final_intent = Some(Intent::new(agent_id, world_state.tick_id, "idle", None)
                                         .with_thought(format!("意图多次被驳回: {}", reason)));
                                     break;
                                 }
-                                // last_rejection_reason 已在 validate_with_reflector 中设置
-                                // 下一轮 ActorSoul 会看到 rejection reason
+                                // last_rejection_reason 已在此处叙事化设置
+                                // 下一轮人魂会看到叙事化的 rejection reason（不含 meta 信息）
                             }
                         }
                     }

@@ -178,8 +178,9 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - ActorSoul: cognitive engine, narrative engine, intent generation
-- `src/soul/reflector/` - ReflectorSoul: intent validation, rule engine, review store
+- `src/soul/actor/` - 人魂 ActorSoul: cognitive engine, narrative engine, narrative intent generation
+- `src/soul/translator/` - 天魂 IntentTranslator: LLM-based narrative→structured intent translation
+- `src/soul/reflector/` - 地魂 ReflectorSoul: intent validation, rule engine, review store
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
 - `src/component/social/` - Relationship store, dialogue client
@@ -192,27 +193,30 @@ Key agent modules:
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
 
-**Dual Soul Architecture** (Cognitive mode):
-The agent uses an Actor-Reflector loop with three-layer validation:
+**Three-Soul Architecture** (三魂, Cognitive mode):
+The agent uses a three-stage pipeline: 人魂 (narrative) → 天魂 (translation) → 地魂 (validation)
 
 ```
 loop {
-    ActorSoul (行动之魂/本我)  ──generate intent──>  ReflectorSoul (反思之魂/超我)
-           │                                              │
-           │              Layer 1: action_type 合法性     │
-           │              Layer 2: RuleEngine 规则校验    │
-           │              Layer 3: LLM 人设/世界观审查     │
-           │                                              │
-           │<───── Approved: send intent ──────────────── │
-           │<───── Rejected: retry with reason ────────── │
-           │                                              │
-           │  (max 3 retries, deadline timeout → idle)   │
+    人魂 ActorSoul (行动之魂)     天魂 IntentTranslator          地魂 ReflectorSoul (反思之魂)
+      叙事意图                      格式化翻译                      三层审查
+           │                              │                              │
+           │  "吃馒头充饥"               │  action_type=eat             │  Layer 1: action_type 合法性
+           │  ──────────────────────>     │  action_data={item_id:       │  Layer 2: RuleEngine 规则校验
+           │                              │    "mantou"}                 │  Layer 3: LLM 人设/世界观审查
+           │                              │  ──────────────────────>     │
+           │                              │                              │
+           │<─────── Approved: send intent ───────────────────────────── │
+           │<─────── Rejected: retry with reason ────────────────────── │
+           │                                                              │
+           │  (max 3 retries, deadline timeout → idle)                   │
 }
 ```
 
-- **ActorSoul**: 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision)
-- **ReflectorSoul**: Three-layer validation (action_type → RuleEngine → LLM)
-- **Retry loop**: Rejected intents trigger ActorSoul re-inference with rejection reason within same tick
+- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent
+- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON with correct action_type, item_id, target_location etc.
+- **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM)
+- **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
 - **Deadline timeout**: Tick关单打断循环，超时提交 idle
 - **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
 
@@ -497,14 +501,12 @@ This ensures agent can function in production without accessing server's develop
 *   **字字珠玑 (Brevity)**：一句话能说完，绝不说第二句。
 *   **拒绝骑墙 (Take a Stand)**：封杀“看情况 (It depends)”、“各有优劣”。你必须有明确的技术站位，给我一个你认为物理极限下最优的方案。
 *   **直言不讳 (Call Me Out)**：如果我提出了愚蠢的设计或做法，直接指出来。用聪明人的机智点醒我，不要刻意搞笑，不要人身攻击，但也绝不粉饰太平。
-*   **去企业化 (Anti-Corporate)**：像一个实战经验丰富的顶尖黑客那样交流，而不是像在背诵大厂的员工手册。
-*   **双语引擎 (Language)**：内部逻辑推演和技术分析优先使用英文（保持技术纯粹性），仅在最终向我输出结论和交互时使用中文。
 
 ### 技术绝对底线 (Technical Absolutes)
 *   **第一性原理 (First Principles)**：撕碎一切流行语（Buzzwords）、设计模式崇拜和盲从的“大厂最佳实践”。把问题暴力拆解到计算科学的物理极值（CPU时钟周期、内存带宽、网络I/O）。拒绝类比，拒绝“大家都是这么做的”（Cargo Cult）。只基于不可证伪的公理，从零推演架构的唯一解。
 *   **YAGNI & KISS**：坚决砍掉为“虚无的未来”买单的架构。组合优于继承。极简不等于简陋，严禁为了少敲键盘而写出丧失健壮性的烂代码。
-*   **Fail Fast**：零信任，悲观预期。宁可原地崩溃宕机，也绝不让脏数据过境。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
-*   **拒绝臆想 (Data-Driven)**：没有 Profiler 数据，绝不提前优化。消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计），榨干缓存行（Cache Line）。
+*   **Fail Fast**：零信任，悲观预期。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
+*   **数据驱动 (Data-Driven)**：消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计）。
 
 ### 触发器：何时必须闭嘴并反问 (Hard Interrupts)
 如果你在编码前或推演中遇到以下情况，**立即中断，先向我发问**：

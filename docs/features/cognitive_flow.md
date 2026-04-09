@@ -280,11 +280,13 @@ loop {
             2.  处理事件: process_events(&world_state.events_log)
             3.  每 84 tick 运行遗忘机制: run_forgetting(tick_id)
             4.  构建记忆上下文: get_memory_context() + 注入 deferred 对话
-            5.  Actor-Reflector 循环 (最多 3 次重试):
-                5a. ActorSoul 决策 (注入 last_rejection_reason)
+            5.  三魂循环 (最多 3 次重试):
+                5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
                     - 若有 memory_callback: decision_with_memory_callback()
                     - 否则: decision_callback() / decision_with_feedback_callback()
-                5b. ReflectorSoul 审查: validate_with_reflector()
+                5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化 Intent
+                    - narrative action_type="narrative" → 精确 action_type + action_data
+                5c. 地魂 (ReflectorSoul) 审查: validate_with_reflector()
                     - Approved: 跳出循环
                     - Rejected: 设置 last_rejection_reason，循环继续
                     - deadline 超时: 退出循环（不发送 intent）
@@ -308,7 +310,7 @@ loop {
 | 2     | 事件处理并更新记忆                 | 已实现         |
 | 3     | 遗忘机制 (每 84 tick)          | 已实现         |
 | 4     | 构建记忆上下文 (+ deferred 对话)  | 已实现         |
-| 5     | Actor-Reflector 循环 (重试)     | 已实现         |
+| 5     | 三魂循环 (人魂→天魂→地魂)         | 已实现         |
 | 5.5   | 超时 idle                    | 已实现         |
 | 6     | 发送 Intent                 | 已实现         |
 | 6.5   | 寿命处理                      | 已实现         |
@@ -359,7 +361,7 @@ fn should_log_retry(attempt: u32) -> bool {
 
 ## Intent 验证与审查流程
 
-### Actor-Reflector 循环
+### 三魂循环
 
 **位置**: `core/lifecycle.rs` 主循环
 
