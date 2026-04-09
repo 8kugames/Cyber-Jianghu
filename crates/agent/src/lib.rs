@@ -8,9 +8,10 @@
 // ```
 // crates/agent/src/
 // ├── core/         # Agent 结构 + 生命周期（编排者）
-// ├── soul/         # 双魂系统（ActorSoul + ReflectorSoul）
-// │   ├── actor/    #   认知引擎 + 叙事化
-// │   └── reflector/#   意图验证 + 审查存储
+// ├── soul/         # 三魂系统（天魂 + 地魂 + 人魂）
+// │   ├── actor/    #   人魂：认知引擎 + 叙事意图生成
+// │   ├── translator/#  天魂：叙事意图→格式化 Intent 翻译
+// │   └── reflector/#   地魂：意图验证 + 审查存储
 // ├── component/    # 共享能力组件
 // │   ├── memory/   #   三级记忆系统
 // │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化 + 预设）
@@ -30,20 +31,17 @@
 // Server ─[WebSocket]→ Transport ─[WorldState]→ Runtime ─[Intent]→ Transport ─[WebSocket]→ Server
 // ```
 //
-// ## 双魂架构（同步审查）
+// ## 三魂架构（人魂→天魂→地魂）
 // ```
-// ActorSoul（行动之魂/本我）     ReflectorSoul（反思之魂/超我）
-//        │                              │
-//        │  generate_intent()           │
-//        │  ─────────────────────────> │  validate_with_reflector()
-//        │                              │  LLM 同步审查（单次调用）
-//        │  approved → send_intent()    │
-//        │  rejected → idle + 反馈      │
-//        ▼                              │
-//    send_intent()                     │
+// 人魂 (ActorSoul)           天魂 (IntentTranslator)      地魂 (ReflectorSoul)
+//   叙事意图                    格式化翻译                    三层审查
+//   "吃馒头充饥"    ──→     action_type=eat             ──→  action_type 合法性
+//                           action_data={item_id:            RuleEngine 规则校验
+//                             "mantou"}                       LLM 人设/世界观审查
 // ```
-// 驳回原因通过 last_rejection_reason 跨 tick 反馈给 ActorSoul，
-// 使下一 tick 的决策能参考上一次的驳回理由。
+// 人魂输出自然语言意图，天魂用 LLM 翻译为含精确 ID 的结构化数据，
+// 地魂对格式化 Intent 进行三层审查。驳回原因通过 last_rejection_reason
+// 跨 tick 反馈给人魂，使下一 tick 的决策能参考上一次的驳回理由。
 
 // ============================================================================
 // 模块声明
@@ -52,7 +50,7 @@
 // 本地核心逻辑（Agent 组装、生命周期）
 pub mod core;
 
-// 双魂系统
+// 三魂系统
 pub mod soul;
 
 // 共享能力组件
@@ -80,10 +78,11 @@ pub use infra::transport::{
 // 核心
 pub use core::{Agent, AgentBuilder};
 
-// 双魂系统
+// 三魂系统
 pub use soul::actor::{
     CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
+pub use soul::translator::IntentTranslator;
 pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{
     Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,

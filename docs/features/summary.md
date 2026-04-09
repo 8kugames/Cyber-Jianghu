@@ -108,9 +108,10 @@ attack:
 
  **动态人设**: `Persona` 根据外界反馈（被攻击/被治愈）动态偏移；支持好感度/信任度关系图谱。
 
- **双 Soul 架构**:
- - ActorSoul (行动之魂/本我): 生成意图，执行行动
- - ReflectorSoul (反思之魂/超我): 审查意图，道德判断（默认启用）
+ **三魂架构**:
+ - ActorSoul (人魂/行动之魂): 生成叙事意图，纯推理不涉及 ID
+ - IntentTranslator (天魂): LLM 翻译叙事→格式化 Intent（精确 ID 映射）
+ - ReflectorSoul (地魂/反思之魂): 审查格式化 Intent，世界观一致性审查（默认启用）
  - `ReviewStore` 共享内存用于进程内审查通信
 
 ### 3. 意图控制（三层架构）
@@ -124,17 +125,14 @@ attack:
  - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
  - [x] 默认冷却规则: speak/move 动作冷却（`with_default_config()` 预注册）
  - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
- - [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
- - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: 新增 `llm_reflector` 字段
- - [x] **LLM 配置热重载**: 文件监听自动热重载 + API Key 验证 + zeroize 内存安全
+ - [x] Cognitive 路径: 人魂决策 → 天魂翻译 → 地魂验证 → 驳回 → `think_with_feedback(feedback)` 重试（天魂/地魂与人魂共用 `llm_arc`）
 
-**第二层: 超我审查**（ActorSoul + ReflectorSoul，进程内双 Soul 架构）:
- - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，intent 经审查后再发送
+**第二层: 地魂审查**（天魂 + 地魂，三魂架构）:
+ - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，翻译后的 intent 经审查后再发送
  - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
- - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: `llm_reflector` 字段支持独立配置审查 LLM
  - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
  - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
- - [x] Actor-Reflector 循环：决策 → 审查 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
+ - [x] 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
 
 ## 三、 通信协议 (Protocol)
 
