@@ -9,7 +9,7 @@
 //   4. 决策 (Decision)     ─┘ LLM Call 2（合并）
 //   5. 验证 (Validation)
 //      5a. CognitiveValidator 认知链质量审查（本文件，重试循环内）
-//      5b. ReflectorSoul 规则/道德审查（lifecycle.rs，外部）
+//      5b. ReflectorSoul 规则/世界观审查（lifecycle.rs，外部）
 
 use crate::soul::actor::CognitiveEngine;
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;

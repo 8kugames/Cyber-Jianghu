@@ -24,6 +24,7 @@ use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{ReflectorSoul, Validator};
+use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::{Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
@@ -59,6 +60,8 @@ pub struct AgentBuilder {
     data_dir: PathBuf,
     /// 即时事件处理器
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
+    /// 天魂 — 意图翻译器（Cognitive 模式）
+    intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl AgentBuilder {
@@ -84,6 +87,7 @@ impl AgentBuilder {
             cognitive_engine: None,
             data_dir: PathBuf::from("."),
             immediate_handler: None,
+            intent_translator: None,
         }
     }
 
@@ -229,6 +233,15 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置天魂（IntentTranslator）— Cognitive 模式专用
+    ///
+    /// 天魂将人魂的叙事意图翻译为服务端格式化 Intent。
+    /// Claw 模式不需要（外部系统直接提供格式化数据）。
+    pub fn with_intent_translator(mut self, translator: Arc<IntentTranslator>) -> Self {
+        self.intent_translator = Some(translator);
+        self
+    }
+
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -312,6 +325,7 @@ impl AgentBuilder {
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
+            intent_translator: self.intent_translator,
         }
     }
 }

@@ -89,9 +89,15 @@ impl CognitiveChain {
             ));
         }
 
+        let narrative = self.final_intent.action_data
+            .as_ref()
+            .and_then(|d| d.get("narrative"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("(未生成叙事意图)");
+
         summary.push_str(&format!(
-            "\n## 最终决策\n动作: {:?}\n思考: {}\n",
-            self.final_intent.action_type,
+            "\n## 叙事意图\n{}\n思考: {}\n",
+            narrative,
             self.final_intent.thought_log.as_deref().unwrap_or("(无)")
         ));
 
@@ -157,6 +163,6 @@ mod tests {
         let summary = chain.summarize();
         assert!(summary.contains("测试侠客"));
         assert!(summary.contains("感知内容"));
-        assert!(summary.contains("最终决策"));
+        assert!(summary.contains("叙事意图"));
     }
 }

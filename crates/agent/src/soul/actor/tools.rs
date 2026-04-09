@@ -1,9 +1,12 @@
 // ============================================================================
-// ActorSoul 工具定义 + ToolExecutor
+// ActorSoul 工具定义 + ToolExecutor（遗留，供参考）
 // ============================================================================
 //
-// 提供 get_inventory 和 get_adjacent_locations 两个工具，
-// 让 LLM 在决策阶段查询精确的游戏数据 ID。
+// 三魂架构下，人魂（ActorSoul）不再使用 tool calling 查询精确 ID。
+// 精确 ID 查询由天魂（IntentTranslator）在翻译阶段通过 prompt 内嵌的
+// inventory/locations 信息完成。
+//
+// 保留此模块仅供参考和未来可能的工具扩展场景。
 
 use anyhow::Result;
 use async_trait::async_trait;

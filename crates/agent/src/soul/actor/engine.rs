@@ -1,18 +1,21 @@
 // ============================================================================
-// 认知引擎核心（5 阶段，非线性管道）
+// 认知引擎核心（5 阶段，非线性管道）— 人魂 (ActorSoul)
 // ============================================================================
 //
-// 5 个认知阶段通过 2 次合并 LLM 调用执行，降低 token 消耗和延迟：
-//   1. 感知 + 2. 动机 → LLM Call 1（Perception+Motivation 合并）
-//   3. 规划 + 4. 决策 → LLM Call 2（Planning+Decision 合并）
-//   5a. CognitiveValidator → 认知链质量审查（本文件/decision.rs 重试循环内，5 条规则）
-//   5b. ReflectorSoul → 规则/道德审查（engine 外部，lifecycle.rs）
+// 三魂架构中的人魂（行动之魂），负责叙事意图生成：
+//   人魂 (ActorSoul)        → 叙事意图（"吃馒头充饥"）
+//   天魂 (IntentTranslator)  → 格式化翻译（action_type + action_data with IDs）
+//   地魂 (ReflectorSoul)     → 规则/人设审查
 //
-// Prompt 注入上下文：
-//   - 背包/地面物品: "name [item_id] xN" 格式，确保 LLM 使用系统 ID
-//   - 可达位置: "name [node_id]" 格式，同上
-//   - 最近发言: 从 events_log 提取最近 5 条 public_message，用于去重
-//   - 动作表: 含 dialogue 私聊动作，item_id/target_location 强制使用英文 ID
+// 5 个认知阶段通过 2 次合并 LLM 调用执行：
+//   1. 感知 + 2. 动机 → LLM Call 1（Perception+Motivation 合并）
+//   3. 规划 + 4. 决策 → LLM Call 2（Planning+Decision 合并，输出叙事意图）
+//   5a. CognitiveValidator → 认知链质量审查（decision.rs 重试循环内）
+//   5b. 天魂 (IntentTranslator) → 叙事→格式化翻译（lifecycle.rs）
+//   5c. 地魂 (ReflectorSoul) → 规则/世界观审查（lifecycle.rs）
+//
+// 人魂不输出结构化 action_data，只输出 narrative_action（自然语言）。
+// ID 映射和格式化由天魂负责。
 // ============================================================================
 
 use anyhow::Result;
@@ -29,7 +32,7 @@ use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
 use crate::models::{Intent, WorldEventType, WorldState};
 use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
-use crate::soul::actor::tools::{ActorToolExecutor, create_actor_tools};
+
 use cyber_jianghu_protocol::AvailableAction;
 
 /// 认知引擎配置
@@ -240,28 +243,17 @@ impl CognitiveEngine {
     }
 
     /// Stage 2: 规划+决策（合并为单次 LLM 调用）
+    ///
+    /// 人魂只输出叙事意图（narrative_action），不输出结构化 action_data。
+    /// 结构化翻译由天魂（IntentTranslator）在 lifecycle.rs 中执行。
     async fn plan_and_decide(
         &self,
         prompt: &str,
         world_state: &WorldState,
     ) -> Result<(String, StageOutput, StageOutput, Intent)> {
-        let mut response: PlanDecisionResponse = if self.llm_client.supports_tool_calling() {
-            let tools = create_actor_tools();
-            let executor = ActorToolExecutor::new(world_state.clone());
-            match self
-                .llm_client
-                .complete_json_with_tools("", prompt, &tools, &executor, 1)
-                .await
-            {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!("Tool calling failed, fallback to direct: {}", e);
-                    self.llm_client.complete_json(prompt).await?
-                }
-            }
-        } else {
-            self.llm_client.complete_json(prompt).await?
-        };
+        // 人魂只输出叙事意图，不需要 tool calling 查询精确 ID
+        // 精确 ID 翻译由天魂（IntentTranslator）负责
+        let response: PlanDecisionResponse = self.llm_client.complete_json(prompt).await?;
 
         let response_json = serde_json::to_string(&response)?;
 
@@ -282,23 +274,18 @@ impl CognitiveEngine {
             }),
         );
 
-        // Decision stage output
+        // Decision stage output: 用 "narrative" 哨兵 action_type 传递叙事意图
+        // 天魂（IntentTranslator）在 lifecycle 中检测并翻译
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
-        let action_type = response.action.to_lowercase();
 
-        let action_data = if response.action_data.is_null() {
-            None
-        } else {
-            Some(std::mem::take(&mut response.action_data))
-        };
-
-        let intent = Intent::new(agent_id, tick_id, action_type.as_str(), action_data)
+        let intent = Intent::new(agent_id, tick_id, "narrative",
+            Some(serde_json::json!({"narrative": response.narrative_action})))
             .with_thought(response.thought_process.clone());
 
         let decision_content = format!(
-            "思考: {}\n行动: {}",
-            response.thought_process, intent.action_type
+            "思考: {}\n意图: {}",
+            response.thought_process, response.narrative_action
         );
         let decision = StageOutput::with_metadata(
             CognitiveStage::Decision,
@@ -522,9 +509,9 @@ impl CognitiveEngine {
         persona_desc: &str,
         agent_name: &str,
     ) -> String {
-        // 从本地文件加载动作表
+        // 加载动作表（仅作为参考，人魂不需要输出结构化 action_data）
         let available_actions = load_available_actions_from_file();
-        let dynamic_action_table = Self::build_action_table(&available_actions);
+        let action_list = Self::build_action_list(&available_actions);
 
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
@@ -539,28 +526,18 @@ impl CognitiveEngine {
 {motivation}
 
 ## 任务
-基于你的感知和动机，制定行动计划并做出最终决策。
+基于你的感知和动机，制定行动计划并用自然语言描述你想要做的事。
 1. 先规划：你打算怎么做？分成几个步骤？
-2. 再决策：基于规划，选择一个具体的行动。
-
-## 工具使用
-你可以调用工具查询精确的游戏数据。当你决定涉及物品或地点的行动时，请先调用工具确认正确的 ID。
-工具返回的数据是绝对权威的，你必须使用工具返回的精确 ID，不要自行翻译或猜测。
+2. 再决策：用一句话描述你最终想做什么（叙事，不需要指定 ID 或格式）。
 
 ## 重要约束
 1. **必须引用前面的思考**：在 thought_process 中说明你的决策如何基于感知和动机。
 2. **不能跳过思考**：必须体现完整的认知链条。
 3. **必须以 JSON 格式输出**：不要包含其他文本。
+4. **narrative_action 是自然语言**：用你自己的话说想做什么（如"吃一个馒头充饥"、"走到后院看看"、"跟旁边的人打个招呼"）。不要填 ID 或英文字段名。
 
-!!! 生死攸关的 ID 规则（违反必死）!!!
-
-物品、位置、采集目标必须使用英文字母的 ID，绝不能用括号内的中文名称：
-- 背包格式: "mantou (馒头): 3 个" — 用 "mantou"，不要用 "馒头"
-- 使用物品: item_id 填 "water" 而非 "水" → {{"item_id": "water"}}
-- 移动: target_location 填 "longmen_backyard" 而非 "后院" → {{"target_location": "longmen_backyard"}}
-- 采集: target_id 填 "water" 而非 "老井" → {{"target_id": "water"}}
-
-记住：英文字母开头的才是 ID。用中文名称 = 动作失败 = 资源耗尽 = 死亡。
+## 可做之事（参考）
+{action_list}
 
 ## 输出格式
 {{
@@ -568,57 +545,35 @@ impl CognitiveEngine {
   "priority": 5,
   "expected_outcome": "预期结果 (30字以内)",
   "thought_process": "你的完整思考过程，必须引用感知和动机 (300字以内)",
-  "action": "动作名称",
-  "action_data": {{}}
+  "narrative_action": "用自然语言描述你想做的事 (如'吃馒头充饥')"
 }}
-
-## 可用动作及 action_data 字段（字段名必须严格匹配，否则服务端会拒绝）
-
-{dynamic_action_table}
-
-target_agent_id 从 entities 列表中的 agent_id 获取。
 "#,
             agent_name = agent_name,
             persona = persona_desc,
             perception = perception.content,
             motivation = motivation.content,
-            dynamic_action_table = dynamic_action_table,
+            action_list = action_list,
         )
     }
 
-    /// 从动作列表构建动作表
-    fn build_action_table(actions: &[AvailableAction]) -> String {
+    /// 从动作列表构建简要动作说明（人魂参考用，不含字段细节）
+    fn build_action_list(actions: &[AvailableAction]) -> String {
         if actions.is_empty() {
-            return "| idle | (无) | 休息 |".to_string();
+            return "- idle: 休息".to_string();
         }
 
-        let mut table = String::from(
-            "| action | action_data 必填字段 | 说明 |\n|--------|---------------------|------|\n",
-        );
-
-        for action in actions {
-            let fields = if action.required_fields.is_empty() {
-                "(无)".to_string()
-            } else {
-                action
-                    .required_fields
-                    .iter()
-                    .map(|f| format!("\"{}\"", f))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            let desc = if action.description.is_empty() {
-                &action.action
-            } else {
-                &action.description
-            };
-            table.push_str(&format!(
-                "| {} | {{{}}} | {} |\n",
-                action.action, fields, desc
-            ));
-        }
-
-        table
+        actions
+            .iter()
+            .map(|a| {
+                let desc = if a.description.is_empty() {
+                    &a.action
+                } else {
+                    &a.description
+                };
+                format!("- {}: {}", a.action, desc)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     // ========================================================================

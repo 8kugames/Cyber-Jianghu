@@ -48,6 +48,7 @@ use cyber_jianghu_agent::{
         cognitive_decision_with_retry,
     },
     soul::actor::{CognitiveEngine, CognitiveEngineConfig},
+    soul::translator::IntentTranslator,
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
@@ -887,6 +888,11 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
 
+            // 天魂 (IntentTranslator): Cognitive 模式专用，将人魂叙事翻译为格式化 Intent
+            let intent_translator = Arc::new(IntentTranslator::new(llm_arc.clone()));
+            builder = builder.with_intent_translator(intent_translator);
+            info!("天魂 (IntentTranslator) 已创建");
+
             if let Some(store) = relationship_store {
                 builder = builder.with_relationship_store(store);
             }
@@ -1002,6 +1008,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .with_decision_feedback(cognitive_decision_with_feedback)
                     .with_reconnect_rx(setup.reconnect_rx)
                     .with_llm_client(llm_client.clone(), None);
+
+                // 天魂: Claw unified cognitive 模式也使用三魂架构
+                let intent_translator = Arc::new(IntentTranslator::new(llm_client.clone()));
+                builder = builder.with_intent_translator(intent_translator);
 
                 builder = builder.character_config(character.clone());
 
