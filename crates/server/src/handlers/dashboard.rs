@@ -882,11 +882,20 @@ pub async fn cleanup_offline_agents(
 #[derive(Debug, serde::Serialize)]
 pub struct ExperienceEntry {
     pub tick_id: i64,
+    /// 动作原始类型（如 idle, speak）
     pub action_type: String,
+    /// 动作中文描述（如 "休息，不做任何操作"）
+    pub action_type_display: Option<String>,
     pub action_data: serde_json::Value,
+    /// 执行结果（success/failed）
     pub result: Option<String>,
+    /// 执行结果详细描述
+    pub result_message: Option<String>,
+    /// ActorSoul 思考日志
     pub thought_log: Option<String>,
+    /// ReflectorSoul 审查理由
     pub observer_thought: Option<String>,
+    /// 叙事化经历描述
     pub narrative: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -924,7 +933,7 @@ pub async fn get_agent_experiences(
 
     // 获取经历日志
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_data, result, thought_log, observer_thought, narrative, created_at
+        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, created_at
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -945,10 +954,12 @@ pub async fn get_agent_experiences(
         .map(|row| ExperienceEntry {
             tick_id: row.get("tick_id"),
             action_type: row.get("action_type"),
+            action_type_display: row.get("action_type_display"),
             action_data: row
                 .get::<Option<serde_json::Value>, _>("action_data")
                 .unwrap_or(serde_json::Value::Null),
             result: row.get("result"),
+            result_message: row.get("result_message"),
             thought_log: row.get("thought_log"),
             observer_thought: row.get("observer_thought"),
             narrative: row.get("narrative"),
