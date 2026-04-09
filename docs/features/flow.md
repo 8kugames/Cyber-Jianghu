@@ -1,7 +1,7 @@
 # Cyber-Jianghu 架构图谱与数据流
 
-**日期**: 2026-04-07
-**版本**: v0.2
+**日期**: 2026-04-09
+**版本**: v0.3
 
 ---
 
@@ -54,7 +54,8 @@
 │  │       ▼                                        ▼                      │  │
 │  │  [Registered, WorldState, ActionUpdate,        [Intent, Dialogue]      │  │
 │  │   Dialogue, Error, DeathNotification,           [Pong]                 │  │
-│  │   ActionResult, PrivateDialogueRecord]                                 │  │
+│  │   ActionResult, PrivateDialogueRecord,         ]                      │  │
+│  │   ImmediateEvent, AgentDied]                    ]                      │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -91,6 +92,7 @@
 │  │          │              │      Decay & Death             │          │  │
 │  │          │              │  - apply_decay()                │          │  │
 │  │          │              │  - 环境伤害                      │          │  │
+│  │          │              │  - 立即推送 DeathNotification   │          │  │
 │  │          │              └─────────────────────────────────┘          │  │
 │  │          │                      │                                  │  │
 │  │          │                      ▼                                  │  │
@@ -109,6 +111,12 @@
 │  │   │ handle_ws()  │  │ handle_intent │  │   Heartbeat  │             │  │
 │  │   │ (连接管理)    │  │ (意图接收)    │  │   (Ping/Pong)│            │  │
 │  │   └──────────────┘  └──────────────┘  └──────────────┘             │  │
+│  │                                                                       │  │
+│  │   ┌──────────────────────────────────────────────────────────────┐  │  │
+│  │   │            Immediate Actions (即时动作)                       │  │  │
+│  │   │   speak → 立即广播给同场景 Agent                              │  │  │
+│  │   │   whisper → 立即创建 Dialogue Session                         │  │  │
+│  │   └──────────────────────────────────────────────────────────────┘  │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
@@ -230,9 +238,9 @@
 │  (AppState)     │ │  ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐        │
 └────────┬────────┘ │  │ agent │ │ auth  │ │dashboard│ │system │        │
          │          │  └───────┘ └───────┘ └───────┘ └───────┘        │
-         │          │  ┌───────┐ ┌───────┐ ┌───────┐                   │
-         │          │  │context│ │validation│ │config_*│                   │
-         │          │  └───────┘ └───────┘ └───────┘                   │
+         │          │  ┌───────┐ ┌───────┐                               │
+         │          │  │context│ │validation│                              │
+         │          │  └───────┘ └───────┘                               │
          │          └─────────────────────────────────────────────────────┘
          │
          ▼
@@ -350,9 +358,15 @@
     │                                                                       │
     │  scheduler.run()                                                     │
     │       │                                                              │
+    │       ├──► check_and_reload_actions()  [热重载检查]                    │
+    │       │                                                              │
+    │       ├──► interval.tick()  [等待周期时间]                            │
+    │       │                                                              │
+    │       ├──► calculate_tick_id_from_time()  [Unix时间戳 - 游戏纪元]     │
+    │       │                                                              │
     │       ├──► atomic_store(accepting_tick_id, N)  ◄── 开单              │
     │       │                                                              │
-    │       ├──► 计算 deadline_ms (绝对时间戳)                               │
+    │       ├──► calculate_deadline_abs_ms()  [绝对时间戳]                   │
     │       │                                                              │
     │       ├──► persistence::load_agent_states()                           │
     │       │         │                                                    │
@@ -465,7 +479,7 @@
     │       │         │                                                    │
     │       │         ▼                                                    │
     │       │    ┌─────────────────────────────────────────┐               │
-    │       │    │ 4.2 意图结算 (Phase 2.1)                │               │
+    │       │    │ 4.2.1 意图结算 (Phase 2.1)              │               │
     │       │    │                                         │               │
     │       │    │  intent_collector.collect_intents()     │               │
     │       │    │         │                               │               │
@@ -506,11 +520,13 @@
     │       │    │                    │    (物品转移)            │               │
     │       │    │                    └──► LocationMutator                 │
     │       │    │                         (位置移动)            │               │
+    │       │    │                                                       │               │
+    │       │    │  验证失败 → validation_errors 通知 ServerMessage::Error │
     │       │    └─────────────────────────────────────────┘               │
     │       │         │                                                    │
     │       │         ▼                                                    │
     │       │    ┌─────────────────────────────────────────┐               │
-    │       │    │ 4.3 衰减与环境伤害 (Phase 2.2)          │               │
+    │       │    │ 4.2.2 衰减与环境伤害 (Phase 2.2)          │               │
     │       │    │                                         │               │
     │       │    │  decay::apply_decay_and_env_damage()    │               │
     │       │    │         │                               │               │
@@ -529,27 +545,34 @@
     │       │    │         │    .environmental_damage > 0?                  │
     │       │    │         │                               │               │
     │       │    │         └──► 死亡处理                   │               │
+    │       │    │              │                               │               │
     │       │    │              ├──► 立即推送 DeathNotification              │
+    │       │    │              │    send_agent_died_notification()         │
+    │       │    │              │                               │               │
     │       │    │              ├──► 断开 WebSocket 连接                   │
+    │       │    │              │    connection_manager.remove()            │
+    │       │    │              │                               │               │
     │       │    │              ├──► 清空背包 (InventoryManager)            │
+    │       │    │              │    + 死亡掉落物品到地面                   │
+    │       │    │              │                               │               │
     │       │    │              └──► UPDATE agents SET status='dead'        │
     │       │    └─────────────────────────────────────────┘               │
     │       │         │                                                    │
     │       │         ▼                                                    │
     │       │    ┌─────────────────────────────────────────┐               │
-    │       │    │ 4.4 统计与记录 (Phase 3)                 │               │
+    │       │    │ 4.3 统计与记录 (Phase 3)                 │               │
     │       │    │                                         │               │
     │       │    │  db::get_intent_timeout_stats()          │               │
+    │       │    │  (每10 tick记录一次)                      │               │
     │       │    └─────────────────────────────────────────┘               │
     │       │         │                                                    │
     │       │         ▼                                                    │
     │       │    ┌─────────────────────────────────────────┐               │
-    │       │    │ 4.5 持久化 (Phase 4)                   │               │
+    │       │    │ 4.4 持久化 (Phase 4)                   │               │
     │       │    │                                         │               │
     │       │    │  persistence::persist_states()           │               │
     │       │    │         │                               │               │
     │       │    │         ├──► INSERT INTO agent_states   │               │
-    │       │    │         │    (每条记录一次 DB 往返)       │               │
     │       │    │         │                               │               │
     │       │    │         ├──► db::batch_insert_action_logs()             │
     │       │    │         │                               │               │
@@ -557,7 +580,9 @@
     │       │    │              (文件)                       │               │
     │       │    └─────────────────────────────────────────┘               │
     │       │                                                              │
-    │       └──► tick_log.complete()                                      │
+    │       ├──► tick_log.complete()                                      │
+    │       │                                                              │
+    │       └──► dialogue_manager.close_all_sessions()                     │
     │                                                                     │
     └─────────────────────────────────────────────────────────────────────┘
             │
@@ -567,69 +592,161 @@
     └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 设备连接与角色注册流程
+### 4.2 WebSocket 连接与消息处理流程
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       设备连接与角色注册流程                                   │
+│                       WebSocket 连接与消息处理                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 
     Agent                                      Server
       │                                           │
-      │  1. POST /api/v1/agent/connect            │
-      │  { device_id: UUID }                      │
+      │  1. WebSocket 升级请求                      │
+      │  GET /ws?device_id=xxx&token=yyy          │
       │ ─────────────────────────────────────────►
       │                                           │
-      │                                           ├──► db::connect_device()
+      │                                           ├──► verify_device_token()
       │                                           │         │
       │                                           │         ▼
-      │                                           │    ┌─────────────┐
-      │                                           │    │ PostgreSQL  │
-      │                                           │    │  devices    │
-      │                                           │    │   table     │
-      │                                           │    └──────┬──────┘
-      │                                           │           │
-      │  2. Response { auth_token, ... }         │
-      │ ◄─────────────────────────────────────────
+      │                                           │    PostgreSQL: devices 表
       │                                           │
-      │  [Agent 保存 device_id + auth_token]       │
-      │                                           │
-      │  3. WebSocket 连接                         │
-      │  GET /ws?device_id=...&token=...          │
-      │ ─────────────────────────────────────────►
-      │                                           │
-      │                                           ├──► verify_device_token()
       │                                           ├──► get_agent_by_device_id()
-      │                                           ├──► 更新 agent_to_device_map
+      │                                           │         │
+      │                                           │         ▼
+      │                                           │    PostgreSQL: agents 表
       │                                           │
-      │  4. ServerMessage::Registered { ... }     │
+      │                                           ├──► 添加到 ConnectionManager
+      │                                           │
+      │  2. ServerMessage::Registered { ... }     │
       │ ◄─────────────────────────────────────────
       │                                           │
-      │  5. ServerMessage::WorldState { ... }     │
+      │  3. ServerMessage::WorldState (初始状态)   │
       │ ◄─────────────────────────────────────────
       │                                           │
-      │  [若无角色，进入注册流程]                   │
+      │  [心跳任务启动: 每30秒 Ping]                │
       │                                           │
-      │  6. POST /api/v1/agent/register           │
-      │  { name, system_prompt, device_id,        │
-      │    auth_token }                           │
+      │  4. ClientMessage::Intent                 │
+      │  ─────────────────────────────────────────►
+      │                                           │
+      │                                           ├──► handle_intent()
+      │                                           │         │
+      │                                           │         ├──► rate_limit 检查
+      │                                           │         ├──► is_alive 检查
+      │                                           │         ├──► tick_id 校验
+      │                                           │         │
+      │                                           │         ├──► 即时动作判断
+      │                                           │         │    (speak/whisper/emote)
+      │                                           │         │
+      │                                           │         ├──► speak → 立即广播
+      │                                           │         │    broadcast_speak_to_location()
+      │                                           │         │
+      │                                           │         ├──► whisper → 立即创建 Session
+      │                                           │         │    dialogue_manager.create_session()
+      │                                           │         │
+      │                                           │         └──► 保存到 IntentManager
+      │                                           │
+      │  5. ServerMessage::ImmediateEvent (speak) │
+      │ ◄─────────────────────────────────────────
+      │  (同场景所有在线 Agent 立即收到)           │
+      │                                           │
+      │  6. ClientMessage::Intent (whisper)       │
+      │  ─────────────────────────────────────────►
+      │                                           │
+      │  7. DialogueMessage::Accept { session }   │
+      │ ◄─────────────────────────────────────────
+      │
+      │  [心跳响应: Ping/Pong]                     │
+      │                                           │
+      │  8. 连接断开                               │
       │ ─────────────────────────────────────────►
       │                                           │
-      │                                           ├──► verify_device_token()
-      │                                           ├──► db::register_agent_transactional()
-      │                                           │         │
-      │                                           │         ├──► INSERT agents
-      │                                           │         ├──► INSERT agent_states
-      │                                           │         └──► INSERT agent_inventory
-      │                                           │
-      │  7. Response { agent_id, game_rules, ... } │
-      │ ◄─────────────────────────────────────────
-      │                                           │
-      │  [角色创建完成，等待下一 Tick 广播]         │
-      │                                           │
+      │                                           ├──► ConnectionManager.remove()
+      │                                           └──► agent_to_device_map.remove()
 ```
 
-### 4.3 对话 (Dialogue) 流程
+### 4.3 即时事件系统 (Immediate Event System)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         即时事件系统 (Speak 广播)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    Agent A                                     Server                          Agent B (同场景)
+      │                                           │                                │
+      │  speak intent (ClientMessage)              │                                │
+      │  action_type: "speak"                      │                                │
+      │  action_data: { content: "你好" }          │                                │
+      │ ─────────────────────────────────────────►                                │
+      │                                           │                                │
+      │                                           ├──► handle_intent()             │
+      │                                           │         │                      │
+      │                                           │         ├──► 检测到即时动作     │
+      │                                           │         │                      │
+      │                                           │         └──► tokio::spawn()     │
+      │                                           │              (独立任务)        │
+      │                                           │                   │             │
+      │                                           │                   ▼             │
+      │                                           │    broadcast_speak_to_location()
+      │                                           │              │                 │
+      │                                           │              ▼                 │
+      │  ServerMessage::ImmediateEvent {         │    ┌─────────────────┐        │
+      │    event: { speak, content: "你好" }     │    │ 同一 Location    │        │
+      │  }                                        │    │ 的在线 Agent     │        │
+      │ ◄─────────────────────────────────────────    └────────┬────────┘        │
+      │                                                       │                  │
+      │                                                       ▼                  │
+      │                                                       Agent B 收到       │
+      │                                                                       │
+      │  [speak intent 标记为 already_broadcast=true]                         │
+      │  [在 tick 结算时不再重复处理]                                          │
+```
+
+### 4.4 死亡通知系统 (Death Notification)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         死亡通知系统                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    Server Tick Engine                              Agent
+      │                                               │
+      │  decay::apply_decay_and_env_damage()          │
+      │         │                                      │
+      │         ├──► HP <= 0 检测                      │
+      │         │                                      │
+      │         ▼                                      │
+      │  ┌─────────────────────────────────────────┐  │
+      │  │         死亡处理流程                     │  │
+      │  │                                        │  │
+      │  │  1. 构建 DeathNotification             │  │
+      │  │     ├── cause: "hunger" | "thirst"    │  │
+      │  │     ├── description: 叙事化文本         │  │
+      │  │     ├── location: node_id             │  │
+      │  │     ├── died_at: Unix ms              │  │
+      │  │     └── rebirth_delay_ticks          │  │
+      │  │                                        │  │
+      │  │  2. send_agent_died_notification()    │  │
+      │  │     └── WebSocket 推送                 │  │
+      │  │                                        │  │
+      │  │  3. 断开 WebSocket 连接                │  │
+      │  │     └── ConnectionManager.remove()     │  │
+      │  │                                        │  │
+      │  │  4. 清空背包 + 死亡掉落                │  │
+      │  │     └── InventoryManager.clear()      │  │
+      │  │         + add_ground_item()           │  │
+      │  │                                        │  │
+      │  │  5. UPDATE agents.status = 'dead'    │  │
+      │  │                                        │  │
+      │  └─────────────────────────────────────────┘  │
+      │         │                                      │
+      │         ▼                                      │
+      │  ServerMessage::AgentDied { ... }             │
+      │ ◄──────────────────────────────────────────────
+      │                                               │
+      │  [Agent 透传给 OpenClaw，触发重生流程]         │
+```
+
+### 4.5 对话 (Dialogue) 流程
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -638,25 +755,11 @@
 
     Agent A                                     Server                          Agent B
       │                                           │                                │
-      │  speak action (公开对话)                   │                                │
+      │  whisper intent                           │                                │
+      │  action_data: { target_agent_id, content }│                                │
       │  ─────────────────────────────────────────►                                │
       │                                           │                                │
-      │                                           ├──► websocket::broadcast_speak_to_location()
-      │                                           │         │                      │
-      │                                           │         ▼                      │
-      │                                           │   ┌─────────────────┐         │
-      │                                           │   │ 同一 Location    │         │
-      │                                           │   │ 的在线 Agent     │         │
-      │                                           │   └────────┬────────┘         │
-      │                                           │            │                  │
-      │  ServerMessage (同节点消息)               │            ▼                  │
-      │ ◄─────────────────────────────────────────            │                  │
-      │                                           │    Agent B 收到消息             │
-      │                                           │                                │
-      │  whisper action (私密对话)                 │                                │
-      │  ─────────────────────────────────────────►                                │
-      │                                           │                                │
-      │                                           ├──► DialogueManager::create_session()
+      │                                           ├──► dialogue_manager.create_session()
       │                                           │         │                      │
       │                                           │         ├──► 验证双方状态      │
       │                                           │         └──► 创建 Session       │
@@ -668,16 +771,17 @@
       │                                           │    └────────┬────────┘        │
       │                                           │              │                 │
       │                                           │              ▼                 │
-      │                                           │    forward_dialogue_message() │
-      │                                           │              │                 │
-      │                                           │              ▼                 │
-      │                                           │    ┌─────────────────┐        │
-      │  DialogueMessage::Accept { session_id }    │    │ Agent B 在线?   │        │
-      │ ◄─────────────────────────────────────────    │ WebSocket send   │        │
+      │  DialogueMessage::Accept { session_id }   │    forward_dialogue_message() │
+      │ ◄─────────────────────────────────────────    │    (WebSocket send)          │
       │                                           │    └────────┬────────┘        │
       │                                           │              │                 │
-      │  dialogue message (内容)                   │              ▼                 │
+      │  DialogueMessage::Content { content }     │              ▼                 │
       │  ─────────────────────────────────────────►    Agent B 收到消息           │
+      │                                           │                                │
+      │                                           ├──► dialogue_manager.handle_message()
+      │                                           │                                │
+      │  DialogueMessage::Content { reply }       │                                │
+      │ ◄─────────────────────────────────────────                                │
       │                                           │                                │
       │                                           ├──► close_all_sessions()       │
       │                                           │    (Tick 结算时)              │
@@ -760,8 +864,6 @@
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 3. Nearby Items (场景物品) 管道                                              │
 │                                                                              │
-│   WorldState.nearby_items                                                    │
-│                                                                              │
 │   完整管道已接通:                                                             │
 │   - drop/death → add_ground_item → ground_items 表                          │
 │   - pick_up/gather → remove_ground_item → InventoryManager                  │
@@ -782,6 +884,19 @@
 │   ActorSoul 和 ReflectorSoul 共享同一容器                                    │
 │   config_reload_rx → lifecycle.rs select! → 读新配置 → swap 容器             │
 │   Builder 正确传递容器: with_llm_container → with_llm_client 复用            │
+│                                                                              │
+│   状态: ✅ 已集成                                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. 验证错误通知管道 (v0.3 新增)                                               │
+│                                                                              │
+│   StateProcessor 返回 validation_errors → Scheduler 发送 ServerMessage::Error│
+│                                                                              │
+│   流程:                                                                      │
+│   - process_intents() 返回 validation_errors                                 │
+│   - scheduler 遍历 validation_errors                                         │
+│   - broadcaster::send_to_agent() → ServerMessage::Error                     │
 │                                                                              │
 │   状态: ✅ 已集成                                                            │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -963,6 +1078,8 @@ scheduler.run()
      │         ├──► init_registry(cache)  [重新初始化注册表]
      │         │
      │         └──► broadcast_action_update()  [广播给所有 Agent]
+     │                   │
+     │                   └──► ServerMessage::ActionUpdate
      │
      └──► /api/admin/reload-config  [手动触发]
                │
@@ -996,6 +1113,7 @@ WebSocket Handler
      │         ├──► rate_limit 触发 → "rate_limited"
      │         ├──► Agent 已死亡 → "agent_dead"
      │         ├──► tick_id 不匹配 → "tick_mismatch"
+     │         ├──► 纵深防御: agents.status != 'active' → "agent_dead"
      │         └──► 执行失败 → "action_failed"
      │
      └──► 对话处理错误
@@ -1017,6 +1135,26 @@ scheduler.run()
      │         └──► save_tick_log() 失败 → 记录日志
      │
      └──► 单 Tick 耗时 > 10s → warn 日志
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        验证错误通知 (v0.3 新增)                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+StateProcessor.process_intents()
+     │
+     ├──► IntentResolver::validate() 失败
+     │         │
+     │         └──► validation_errors.push((agent_id, reason))
+     │
+     └──► 返回 validation_errors
+
+scheduler.execute_tick_inner()
+     │
+     └──► 遍历 validation_errors
+               │
+               └──► broadcaster::send_to_agent()
+                        │
+                        └──► ServerMessage::Error
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           Agent 端错误                                      │
@@ -1075,6 +1213,9 @@ AgentClient
 │       ├──► entities: Vec<Entity>                                             │
 │       │         (同节点在线 Agent)                                            │
 │       │                                                                      │
+│       ├──► nearby_items: Vec<SceneItem>                                      │
+│       │         (地面物品)                                                   │
+│       │                                                                      │
 │       └──► events_log: Vec<WorldEvent>                                      │
 │                 (本 Tick 事件)                                                │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -1116,6 +1257,22 @@ AgentClient
 │                           ├──► state_changes: Vec<StateChange>              │
 │                           └──► success: bool                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. Tick ID 计算 (v0.3 改进)                                                  │
+│                                                                              │
+│  tick_id = current_unix_timestamp - game_epoch                              │
+│                                                                              │
+│  game_epoch 解析:                                                            │
+│  - 从 game_rules.yaml 读取 start_date 和 timezone_offset                     │
+│  - 例如: start_date: "2026-03-03", timezone_offset: 8 (UTC+8)                 │
+│  - 结果: 2026-03-03 00:00:00 UTC+8 = 2026-03-02 16:00:00 UTC                 │
+│         = Unix timestamp 1772467200                                         │
+│                                                                              │
+│  时钟回拨防御:                                                               │
+│  - tick_id 只增不减 (使用 max() 比较)                                        │
+│  - 数据库最大 tick_id 与时间计算 tick_id 取较大值                            │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1126,7 +1283,8 @@ AgentClient
 
 | 模块 | 文件数 | 描述 | 状态 |
 |------|--------|------|------|
-| tick | 10 | Tick 引擎核心 | ✅ 完整 |
+| tick | 12 | Tick 引擎核心 | ✅ 完整 |
+| tick/processor | 6 | 状态处理子模块 | ✅ 完整 |
 | websocket | 5 | WebSocket 通信 | ✅ 完整 |
 | handlers | 9 | HTTP API 处理器 | ✅ 完整 |
 | game_data | 25+ | 数据驱动配置 | ✅ 完整 |
@@ -1166,4 +1324,4 @@ AgentClient
 
 ---
 
-*文档生成时间: 2026-04-07*
+*文档生成时间: 2026-04-09*

@@ -57,7 +57,15 @@ attack:
 
 `ActionType` 为字符串包装（任何字符串均有效），扩展动作只需编辑 YAML。
 
-**已实现动作**: `idle`, `move`, `attack`, `gather`, `speak`, `whisper`, `steal`, `give`, `discard`, `use_item`, `equip`, `unequip`, `dialogue_request`, `dialogue_accept`, `dialogue_reject`, `dialogue_end`
+**已实现动作** (基于 `actions.yaml`):
+- 基础生存: `idle`, `use`, `eat`, `drink`
+- 移动: `move`, `follow`, `flee`
+- 战斗: `attack`, `defend`, `dodge`, `parry`, `heavy_strike`, `stealth`
+- 采集: `gather`
+- 社交: `speak`, `whisper`, `shout`, `steal`
+- 经济: `give`, `drop`, `pickup`, `trade`, `craft`, `repair`
+- 技能: `poison`, `practice`, `meditate`
+- 对话动作通过 `ClientMessage::Dialogue` 而非独立 ActionType
 
 **物品与背包**: 地上物品拾取、背包容量校验、物品消耗（武器/消耗品/任务道具）
 
@@ -121,11 +129,12 @@ attack:
  - [x] **LLM 配置热重载**: 文件监听自动热重载 + API Key 验证 + zeroize 内存安全
 
 **第二层: 超我审查**（ActorSoul + ReflectorSoul，进程内双 Soul 架构）:
- - [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送
- - [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore`，超时 30 秒自动通过
+ - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，intent 经审查后再发送
+ - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
  - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: `llm_reflector` 字段支持独立配置审查 LLM
  - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
  - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
+ - [x] Actor-Reflector 循环：决策 → 审查 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
 
 ## 三、 通信协议 (Protocol)
 
@@ -179,7 +188,7 @@ attack:
 
 ### Agent SDK
 
-- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/backend.rs`
+- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/`
   - 基础设施已就绪（HNSW 向量索引 + FTS fallback + LocalEmbedder）
   - 需要实现：`SemanticMemoryBackend::add()` 空操作 → 改为真正写入向量存储
   - 需要实现：`ensure_embeddings_for_priority()` stub → 实现优先级记忆的向量生成
