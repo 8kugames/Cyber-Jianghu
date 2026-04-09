@@ -91,6 +91,8 @@ struct ConnectionState {
     shutdown_tx: Option<tokio::sync::broadcast::Sender<()>>,
     /// Intent 发送通道（主循环 → 后台任务）
     intent_tx: Option<tokio::sync::mpsc::Sender<Intent>>,
+    /// 即时消息发送通道（立即响应 → 后台任务）
+    immediate_msg_tx: Option<tokio::sync::mpsc::Sender<ClientMessage>>,
     /// WorldState 通道（后台任务 → 主循环，watch 保留最新值）
     worldstate_tx: Option<tokio::sync::watch::Sender<Option<WorldState>>>,
     /// 注册通知通道（后台任务 → 主循环）
@@ -116,6 +118,7 @@ impl WebSocketClient {
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
+                immediate_msg_tx: None,
                 worldstate_tx: None,
                 registered_tx: None,
             })),
@@ -153,6 +156,7 @@ impl WebSocketClient {
 
                 // 创建通道
                 let (intent_tx, intent_rx) = tokio::sync::mpsc::channel(32);
+                let (immediate_msg_tx, immediate_msg_rx) = tokio::sync::mpsc::channel(32);
                 let (worldstate_tx, _) = tokio::sync::watch::channel(None);
                 let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
                 let (registered_tx, _) = tokio::sync::watch::channel(None);
@@ -160,7 +164,7 @@ impl WebSocketClient {
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
                 let handle = tokio::spawn(async move {
-                    websocket_background_task(ws, state_arc, intent_rx, shutdown_rx).await;
+                    websocket_background_task(ws, state_arc, intent_rx, immediate_msg_rx, shutdown_rx).await;
                 });
 
                 // 更新状态
@@ -171,6 +175,7 @@ impl WebSocketClient {
                 state.reader_task = Some(handle);
                 state.shutdown_tx = Some(shutdown_tx);
                 state.intent_tx = Some(intent_tx);
+                state.immediate_msg_tx = Some(immediate_msg_tx);
                 state.worldstate_tx = Some(worldstate_tx);
                 state.registered_tx = Some(registered_tx);
 
@@ -259,6 +264,17 @@ impl WebSocketClient {
         });
     }
 
+    /// 获取当前 server_msg_callback（用于 callback chaining）
+    pub fn get_server_msg_callback(&self) -> Option<Arc<dyn Fn(ServerMessage) + Send + Sync>> {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let state = self.state.read().await;
+                state.server_msg_callback.clone()
+            })
+        })
+    }
+
     /// 设置动作配置更新回调
     pub fn set_action_update_callback(&self, callback: Arc<dyn Fn(ServerMessage) + Send + Sync>) {
         tokio::task::block_in_place(|| {
@@ -316,7 +332,7 @@ impl WebSocketClient {
         }
     }
 
-    /// 接收 WorldState（阻塞直到收到）
+    /// 接收 WorldState（阻塞直到收到新值）
     pub async fn receive_world_state(&self) -> Result<WorldState> {
         let mut rx = {
             let state = self.state.read().await;
@@ -325,16 +341,12 @@ impl WebSocketClient {
                 .subscribe()
         };
 
-        // 等待 WorldState 到达（watch channel 会在值变化时通知）
-        // 初始值为 None（连接建立但未收到 WorldState）
-        loop {
-            // 先检查当前值
-            if let Some(ws) = rx.borrow().as_ref() {
-                return Ok(ws.clone());
-            }
-            // 等待变化
-            rx.changed().await?;
-        }
+        // 阻塞等待 sender 发送新值（每个 tick 广播一次）
+        rx.changed().await
+            .context("WorldState channel closed")?;
+
+        rx.borrow().as_ref().cloned()
+            .context("WorldState channel produced None")
     }
 
     /// 发送 Intent（通过 mpsc channel → 后台任务）
@@ -351,6 +363,28 @@ impl WebSocketClient {
 
         debug!("Sent Intent to background: {:?}", intent.action_type);
         Ok(())
+    }
+
+    /// 发送即时消息（speak/whisper 等，通过独立 channel，不阻塞主 intent）
+    pub async fn send_immediate_message(&self, msg: ClientMessage) -> Result<()> {
+        let tx = {
+            let state = self.state.read().await;
+            state.immediate_msg_tx.as_ref()
+                .context("Not connected to server")?
+                .clone()
+        };
+
+        tx.send(msg).await
+            .context("Failed to send immediate message to background task")?;
+
+        debug!("Sent immediate message to background task");
+        Ok(())
+    }
+
+    /// 获取即时消息发送端的 clone（用于绑定到 ImmediateEventHandler）
+    pub async fn immediate_msg_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
+        let state = self.state.read().await;
+        state.immediate_msg_tx.clone()
     }
 
     /// 获取游戏规则
@@ -381,6 +415,7 @@ impl WebSocketClient {
             let handle = state.reader_task.take();
             state.connected = false;
             state.intent_tx = None;
+            state.immediate_msg_tx = None;
             state.worldstate_tx = None;
             state.registered_tx = None;
 
@@ -421,6 +456,7 @@ async fn websocket_background_task(
     mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     state: Arc<RwLock<ConnectionState>>,
     mut intent_rx: tokio::sync::mpsc::Receiver<Intent>,
+    mut immediate_msg_rx: tokio::sync::mpsc::Receiver<ClientMessage>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     info!("WebSocket background task started");
@@ -665,6 +701,23 @@ async fn websocket_background_task(
                 }
                 debug!("Background: Sent intent action={}", intent.action_type);
             }
+
+            // 发送即时消息（ImmediateIntent，通过单独的 channel）
+            Some(immediate_msg) = immediate_msg_rx.recv() => {
+                let json = match serde_json::to_string(&immediate_msg) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!("Background: Failed to serialize immediate message: {}", e);
+                        continue;
+                    }
+                };
+
+                if let Err(e) = ws.send(Message::Text(json.into())).await {
+                    error!("Background: Failed to send immediate message: {}", e);
+                    break;
+                }
+                debug!("Background: Sent immediate message");
+            }
         }
     }
 
@@ -722,6 +775,18 @@ impl AgentClient {
         client.send_intent(intent).await
     }
 
+    /// 发送即时消息（speak/whisper 等）
+    pub async fn send_immediate_message(&self, msg: ClientMessage) -> Result<()> {
+        let client = self.client.read().await;
+        client.send_immediate_message(msg).await
+    }
+
+    /// 获取即时消息发送端
+    pub async fn immediate_msg_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
+        let client = self.client.read().await;
+        client.immediate_msg_sender().await
+    }
+
     pub async fn is_connected(&self) -> bool {
         let client = self.client.read().await;
         client.is_connected().await
@@ -773,6 +838,12 @@ impl AgentClient {
     ) {
         let client = self.client.read().await;
         client.set_server_msg_callback(callback);
+    }
+
+    /// 获取当前 server_msg_callback（用于 callback chaining）
+    pub async fn get_server_msg_callback(&self) -> Option<Arc<dyn Fn(ServerMessage) + Send + Sync>> {
+        let client = self.client.read().await;
+        client.get_server_msg_callback()
     }
 
     /// 等待注册响应

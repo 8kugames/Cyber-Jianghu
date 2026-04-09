@@ -435,6 +435,7 @@ impl DownstreamMessage {
                 rebirth_delay_ticks,
             }),
             ServerMessage::ImmediateEvent {
+                event_id: _,
                 event,
                 deadline_ms: _,
             } => Some(DownstreamMessage::ServerImmediateEvent {

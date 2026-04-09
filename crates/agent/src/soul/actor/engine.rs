@@ -414,6 +414,16 @@ impl CognitiveEngine {
             None => String::new(),
         };
 
+        // private_dialogue_log: 近期密语索引
+        let private_dialogue_section = if world_state.private_dialogue_log.is_empty() {
+            String::new()
+        } else {
+            let entries: Vec<String> = world_state.private_dialogue_log.iter()
+                .map(|d| format!("- {} ↔ {} ({}条消息)", d.agent_a_name, d.agent_b_name, d.message_count))
+                .collect();
+            format!("\n### 近期密语\n{}\n", entries.join("\n"))
+        };
+
         let adjacent_locations = if world_state.location.adjacent_nodes.is_empty() {
             "无（当前位置无法移动）".to_string()
         } else {
@@ -473,7 +483,7 @@ impl CognitiveEngine {
 ### 环境
 - 附近的人: {entities}
 - 地上的物品: {items}
-{memory_section}{recent_speeches_section}
+{memory_section}{recent_speeches_section}{private_dialogue_section}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -500,6 +510,7 @@ impl CognitiveEngine {
             items = items_str,
             memory_section = memory_section,
             recent_speeches_section = recent_speeches_section,
+            private_dialogue_section = private_dialogue_section,
             feedback_section = feedback_section,
         )
     }
