@@ -6,11 +6,13 @@
 // ============================================================================
 
 use anyhow::Result;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
 
@@ -88,9 +90,6 @@ pub struct Agent {
     /// 允许热重载时更新 LLM Client，决策回调会自动使用新配置
     pub(crate) actor_llm_container: Option<LlmClientContainer>,
 
-    /// 配置重载通知接收通道
-    pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
-
     /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 
@@ -106,6 +105,21 @@ pub struct Agent {
     /// 服务器分配的角色名称（注册时由 ServerMessage::Registered.agent_name 填充）
     /// 优先于 character_config.name，解决本地无 character.yaml 时显示"(未创建)"的问题
     pub(crate) server_assigned_name: Option<String>,
+
+    /// 即时事件处理器（处理 ImmediateEvent）
+    pub(crate) immediate_handler: Option<Arc<ImmediateEventHandler>>,
+
+    /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
+    pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,
+
+    /// 即时事件缓冲区（Fn callback 写入，主循环消费写入工作记忆）
+    pub(crate) immediate_event_buffer: Arc<Mutex<Vec<cyber_jianghu_protocol::WorldEvent>>>,
+
+    /// RuleEngine 缓存（避免每 tick 重建）
+    pub(crate) rule_engine: crate::soul::reflector::rule_engine::RuleEngine,
+
+    /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
+    pub(crate) consecutive_idle_count: u32,
 }
 
 impl Agent {
@@ -155,12 +169,16 @@ impl Agent {
             reconnect_rx,
             death_reported: false,
             actor_llm_container: None,
-            config_reload_rx: None,
             http_api_state: None,
             device_config,
             character_config: None,
             cognitive_engine: None,
             server_assigned_name: None,
+            immediate_handler: None,
+            server_error_feedback: Arc::new(Mutex::new(None)),
+            immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
+            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
+            consecutive_idle_count: 0,
         }
     }
 
@@ -280,6 +298,15 @@ impl Agent {
         self.validator.is_some()
     }
 
+    /// 设置即时事件处理器
+    pub fn set_immediate_handler(&mut self, handler: Arc<ImmediateEventHandler>) {
+        self.immediate_handler = Some(handler);
+        info!(
+            "Immediate event handler set for agent '{}'",
+            self.character_name()
+        );
+    }
+
     /// 获取记忆上下文字符串（用于 LLM）
     pub async fn get_memory_context(&self) -> String {
         if let Some(ref manager) = self.memory_manager {
@@ -392,6 +419,26 @@ impl Agent {
             .unwrap_or(Duration::from_secs(60))
     }
 
+    /// 检查连续 idle 计数是否达到阈值，触发模型切换
+    pub(crate) async fn maybe_rotate_model(&mut self) {
+        let threshold = self.config.llm.idle_rotate_threshold;
+        if threshold == 0 || self.consecutive_idle_count < threshold {
+            return;
+        }
+        let count = self.consecutive_idle_count;
+        if let Some(ref container) = self.actor_llm_container {
+            let llm = container.read().await;
+            if llm.force_rotate_model() {
+                warn!(
+                    "连续 {} tick idle，已切换到下一个 LLM 模型",
+                    count
+                );
+                // 切换后重置计数器，给新模型机会
+                self.consecutive_idle_count = 0;
+            }
+        }
+    }
+
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
         match &self.character_config {
@@ -466,19 +513,117 @@ impl Agent {
         }
     }
 
+    /// RuleEngine 规则校验（确定性，不经过 LLM）
+    ///
+    /// 使用默认规则集（eat/drink item_id 有效性、move 目标可达性等）。
+    /// 从 WorldState 提取背包物品 ID 和可达地点 ID 供规则匹配。
+    async fn validate_with_rule_engine(
+        &self,
+        intent: &Intent,
+        world_state: &WorldState,
+    ) -> Result<(), String> {
+        use crate::soul::reflector::rule_engine::{
+            RuleValidationContext,
+            types::extract_ids_from_world_state,
+        };
+
+        let (available_item_ids, reachable_node_ids) =
+            extract_ids_from_world_state(world_state);
+
+        let context = RuleValidationContext {
+            intent: intent.clone(),
+            persona_info: self.extract_persona(),
+            world_context: String::new(),
+            tick_id: world_state.tick_id,
+            history_intents: vec![],
+            attributes: std::collections::HashMap::new(),
+            available_item_ids,
+            reachable_node_ids,
+        };
+
+        match self.rule_engine.validate_context(&context).await {
+            Ok(crate::soul::reflector::ValidationResult::Approved { .. }) => Ok(()),
+            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => Err(reason),
+            Err(e) => {
+                // 规则引擎出错时放行（fail-open）
+                tracing::warn!("RuleEngine error, bypassing: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    /// 确定性 action_type 校验（不经过 LLM）
+    ///
+    /// 从本地 actions.json 加载合法 action 列表，检查 intent 的 action_type 是否在列。
+    /// idle 动作始终放行。
+    /// actions.json 不存在时放行（无数据不做拦截）。
+    fn validate_action_type(&self, intent: &Intent) -> Result<(), String> {
+        // idle 始终合法
+        if intent.action_type.as_str() == "idle" {
+            return Ok(());
+        }
+
+        let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
+        if actions.is_empty() {
+            // 无数据不做拦截
+            return Ok(());
+        }
+
+        let valid_names: Vec<&str> = actions.iter().map(|a| a.action.as_str()).collect();
+        if valid_names.contains(&intent.action_type.as_str()) {
+            return Ok(());
+        }
+
+        // 找最接近的合法 action（简单前缀匹配 + 包含匹配）
+        let action_lower = intent.action_type.as_str().to_lowercase();
+        let suggestion = valid_names
+            .iter()
+            .find(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower.contains(&action_lower) || action_lower.contains(&name_lower)
+            })
+            .unwrap_or(&"idle");
+
+        Err(format!(
+            "action '{}' 不在合法列表中，合法值: [{}]，最接近: '{}'",
+            intent.action_type,
+            valid_names.join(", "),
+            suggestion,
+        ))
+    }
+
     /// ReflectorSoul 同步审查 Intent
     ///
-    /// 单次 LLM 调用，无 retry 循环。
-    /// 审查通过返回原始 Intent，审查拒绝返回 idle Intent。
-    /// LLM 错误时 fail-open（自动通过）。
+    /// 三层审查，规则型在 LLM 之前：
+    /// 1. action_type 确定性校验：是否在合法动作列表中
+    /// 2. RuleEngine 规则校验：eat/drink item_id 有效性、move 目标可达性等
+    /// 3. LLM 审查：人设/世界观合规
+    ///
+    /// 审查通过返回 Approved，审查拒绝返回 Rejected(reason)。
+    /// 调用方根据返回值决定是否重试 ActorSoul。
     pub async fn validate_with_reflector(
         &mut self,
         intent: Intent,
         world_state: &WorldState,
-    ) -> Result<Intent> {
+    ) -> Result<ReflectorResult> {
+        // 第一层：action_type 确定性校验（不经过 LLM）
+        if let Err(e) = self.validate_action_type(&intent) {
+            warn!("Action type validation failed: {}", e);
+            self.last_rejection_reason = Some(e.clone());
+            return Ok(ReflectorResult::Rejected(e));
+        }
+
+        // 第二层：RuleEngine 规则校验（确定性，不经过 LLM）
+        if let Err(e) = self.validate_with_rule_engine(&intent, world_state).await {
+            warn!("Rule engine validation failed: {}", e);
+            self.last_rejection_reason = Some(e.clone());
+            return Ok(ReflectorResult::Rejected(e));
+        }
+
+        // 第三层：LLM 审查（人设/世界观）
         let validator = match &self.validator {
             Some(v) => v,
-            None => return Ok(intent),
+            None => return Ok(ReflectorResult::Approved(intent)),
         };
 
         let request = crate::soul::reflector::ValidationRequest {
@@ -488,13 +633,12 @@ impl Agent {
             world_state: Some(world_state.clone()),
         };
 
-        // 验证意图（验证失败时降级为通过，不中断 agent）
+        // LLM 错误时 fail-open（自动通过）
         let validation_result = match validator.validate(request).await {
             Ok(result) => result,
             Err(e) => {
                 warn!("ReflectorSoul validation error, auto-approving: {}", e);
-                self.last_rejection_reason = None;
-                return Ok(intent);
+                return Ok(ReflectorResult::Approved(intent));
             }
         };
 
@@ -503,8 +647,7 @@ impl Agent {
                 info!("ReflectorSoul approved: {:?}", reason);
                 self.save_observer_narrative(world_state.tick_id, &narrative)
                     .await?;
-                self.last_rejection_reason = None;
-                Ok(intent)
+                Ok(ReflectorResult::Approved(intent))
             }
             crate::soul::reflector::ValidationResult::Rejected {
                 reason,
@@ -512,12 +655,18 @@ impl Agent {
             } => {
                 warn!("ReflectorSoul rejected: {} [{:?}]", reason, rejection_type);
                 self.last_rejection_reason = Some(reason.clone());
-                let agent_id = self.client.agent_id().await.unwrap_or_default();
-                Ok(Intent::new(agent_id, world_state.tick_id, "idle", None)
-                    .with_thought(format!("被反思之魂驳回: {}", reason)))
+                Ok(ReflectorResult::Rejected(reason))
             }
         }
     }
+}
+
+/// ReflectorSoul 审查结果
+pub enum ReflectorResult {
+    /// 审查通过，携带修正后的 Intent
+    Approved(Intent),
+    /// 审查拒绝，携带原因（调用方可据此重试 ActorSoul）
+    Rejected(String),
 }
 
 /// 人设验证结果

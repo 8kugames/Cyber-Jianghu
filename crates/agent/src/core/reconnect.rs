@@ -342,17 +342,6 @@ impl super::Agent {
                         }
                     }
                 }
-
-                // 配置文件变更通知
-                _ = async {
-                    if let Some(ref mut rx) = self.config_reload_rx {
-                        rx.recv().await
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    debug!("[rebirth] 配置变更通知，忽略（等待角色注册）");
-                }
             }
         }
     }

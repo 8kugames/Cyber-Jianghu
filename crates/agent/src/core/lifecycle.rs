@@ -12,7 +12,6 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::component::llm::{DirectLlmClient, DirectLlmClientConfig, FallbackLlmClient, LlmProvider};
 use crate::config::CharacterStatus;
 use crate::infra::transport::ConnectError;
 use crate::models::Intent;
@@ -291,6 +290,83 @@ impl super::Agent {
         // 更新游戏规则
         self.config.update_game_rules(game_rules.clone());
 
+        // 绑定即时意图通道到 WebSocket 的 immediate_msg_tx
+        if let Some(ref handler) = self.immediate_handler {
+            if let Some(tx) = self.client.immediate_msg_sender().await {
+                handler.replace_intent_channel(tx).await;
+            } else {
+                warn!("WebSocket immediate_msg_tx 不可用，即时回应将使用临时 channel");
+            }
+        }
+
+        // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
+        // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
+        let prev_callback = self.client.get_server_msg_callback().await;
+        let immediate_handler = self.immediate_handler.clone();
+        let error_feedback = self.server_error_feedback.clone();
+        let event_buffer = self.immediate_event_buffer.clone();
+        let callback: Arc<dyn Fn(ServerMessage) + Send + Sync> = Arc::new(move |msg: ServerMessage| {
+            // 1. 验证错误反馈
+            if let ServerMessage::Error { code, message, .. } = &msg
+                && code == cyber_jianghu_protocol::ERROR_CODE_ACTION_FAILED {
+                    let reason = message.clone();
+                    let feedback = error_feedback.clone();
+                    tokio::spawn(async move {
+                        let mut guard = feedback.lock().await;
+                        *guard = Some(reason);
+                    });
+                }
+            // 2. ImmediateEvent: 即时决策 + 写入工作记忆
+            if let ServerMessage::ImmediateEvent { event, .. } = &msg {
+                // 2a. 写入即时事件缓冲区（主循环消费后写入工作记忆）
+                let evt = event.clone();
+                let buf = event_buffer.clone();
+                tokio::spawn(async move {
+                    let mut guard = buf.lock().await;
+                    guard.push(evt);
+                });
+                // 2b. 转给即时事件处理器（RespondNow/Defer/Ignore）
+                if let Some(ref handler) = immediate_handler {
+                    let h = handler.clone();
+                    let msg = msg.clone();
+                    tokio::spawn(async move {
+                        h.handle_server_message(msg).await;
+                    });
+                }
+            }
+            // 2c. Dialogue（whisper 密语）：写入工作记忆
+            if let ServerMessage::Dialogue { message, .. } = &msg {
+                use cyber_jianghu_protocol::DialogueMessage;
+                let desc = match message {
+                    DialogueMessage::Request { opening_remark, .. } =>
+                        format!("收到密语请求: {}", opening_remark),
+                    DialogueMessage::Content { content, .. } =>
+                        format!("密语内容: {}", content),
+                    DialogueMessage::Accept { .. } => "密语对话已接受".to_string(),
+                    DialogueMessage::Reject { reason, .. } =>
+                        format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")),
+                    DialogueMessage::End { .. } => "密语对话已结束".to_string(),
+                };
+                let buf = event_buffer.clone();
+                tokio::spawn(async move {
+                    let world_event = cyber_jianghu_protocol::WorldEvent {
+                        event_type: cyber_jianghu_protocol::WorldEventType::PrivateDialogue,
+                        tick_id: 0,
+                        description: desc,
+                        metadata: serde_json::json!({}),
+                    };
+                    let mut guard = buf.lock().await;
+                    guard.push(world_event);
+                });
+            }
+            // 3. 透传给 binary 回调（AgentDied 处理、Claw 模式 OpenClaw 转发等）
+            if let Some(ref prev) = prev_callback {
+                prev(msg);
+            }
+        });
+        self.client.set_server_msg_callback(callback).await;
+        info!("Server 消息回调已注册（即时事件 + 验证错误 + 链式透传）");
+
         loop {
             tokio::select! {
                 // 检查重连请求（热切换）
@@ -312,120 +388,6 @@ impl super::Agent {
                     continue;
                 }
 
-                // 配置文件变更通知
-                _ = async {
-                    if let Some(ref mut rx) = self.config_reload_rx {
-                        rx.recv().await
-                    } else {
-                        std::future::pending().await
-                    }
-                } => {
-                    // 防护：config_path 为空或文件不存在时跳过重载
-                    let config_path = &self.config.config_path;
-                    if config_path.as_os_str().is_empty() || !config_path.exists() {
-                        debug!("配置路径无效，跳过重载: {:?}", config_path);
-                        if let Some(ref mut rx) = self.config_reload_rx {
-                            while rx.try_recv().is_ok() {}
-                        }
-                        continue;
-                    }
-
-                    debug!("检测到配置变更，重新加载...");
-                    let old_config_path = self.config.config_path.clone();
-                    let old_config = self.config.clone();
-
-                    match crate::config::Config::from_file(config_path) {
-                        Ok(new_config) => {
-                            // 创建新的 LLM 客户端
-                            let provider = LlmProvider::parse(&new_config.llm.provider);
-                            let llm_client_result = match provider {
-                                Some(provider) => {
-                                    let mut client_config = DirectLlmClientConfig::new(
-                                        provider,
-                                        new_config.llm.api_key.clone(),
-                                    );
-                                    if let Some(ref url) = new_config.llm.base_url {
-                                        client_config = client_config.with_base_url(url);
-                                    }
-                                    if let Some(ref model) = new_config.llm.model {
-                                        client_config = client_config.with_model(model);
-                                    }
-                                    client_config = client_config
-                                        .with_temperature(new_config.llm.temperature)
-                                        .with_max_tokens(new_config.llm.max_tokens);
-                                    DirectLlmClient::new(client_config)
-                                }
-                                None => {
-                                    Err(anyhow::anyhow!("Unknown LLM provider: {}", new_config.llm.provider))
-                                }
-                            };
-
-                            match llm_client_result {
-                                Ok(primary_client) => {
-                                    // 构建 LLM 客户端（主模型 + fallback）
-                                    let mut clients: Vec<std::sync::Arc<dyn crate::component::llm::LlmClient>> =
-                                        vec![std::sync::Arc::new(primary_client)];
-                                    // provider 已在上方解析并验证，复用而非重解析
-                                    if let Some(resolved_provider) = provider {
-                                        for fallback_model in &new_config.llm.fallback_models {
-                                            let mut fb_config = DirectLlmClientConfig::new(
-                                                resolved_provider,
-                                                new_config.llm.api_key.clone(),
-                                            );
-                                            if let Some(ref url) = new_config.llm.base_url {
-                                                fb_config = fb_config.with_base_url(url);
-                                            }
-                                            fb_config = fb_config
-                                                .with_model(fallback_model)
-                                                .with_temperature(new_config.llm.temperature)
-                                                .with_max_tokens(new_config.llm.max_tokens);
-                                            match DirectLlmClient::new(fb_config) {
-                                                Ok(fb_client) => {
-                                                    info!("热重载 fallback 模型: {}", fallback_model);
-                                                    clients.push(std::sync::Arc::new(fb_client));
-                                                }
-                                                Err(e) => warn!("热重载 fallback 模型 {} 创建失败: {}", fallback_model, e),
-                                            }
-                                        }
-                                    }
-
-                                    let new_client: std::sync::Arc<dyn crate::component::llm::LlmClient> =
-                                        if clients.len() > 1 {
-                                            std::sync::Arc::new(FallbackLlmClient::new(clients))
-                                        } else {
-                                            clients.into_iter().next().unwrap()
-                                        };
-
-                                    // 先更新 config（保证一致性），再更新 container
-                                    self.config = new_config;
-                                    // 保留 config_path（from_file 反序列化时 #[serde(skip)] 会丢失）
-                                    self.config.config_path = old_config_path;
-
-                                    if let Some(ref container) = self.actor_llm_container {
-                                        let mut guard = container.write().await;
-                                        *guard = new_client;
-                                        debug!("ActorSoul LLM 容器已更新（热重载 + fallback）");
-                                    }
-
-                                    debug!("ActorSoul LLM 已重载");
-                                }
-                                Err(e) => {
-                                    warn!("ActorSoul LLM 重载失败: {}，保持旧配置", e);
-                                    self.config = old_config;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("配置读取失败: {}，保持旧配置", e);
-                        }
-                    }
-
-                    // 排空积压的重复通知（notify 在 macOS 上单次修改会触发多个事件）
-                    if let Some(ref mut rx) = self.config_reload_rx {
-                        while rx.try_recv().is_ok() {}
-                    }
-                }
-
                 // 接收世界状态
                 result = self.client.receive_world_state() => {
                     let world_state = match result {
@@ -438,6 +400,11 @@ impl super::Agent {
                             continue;
                         }
                     };
+
+                    // 更新即时事件处理器 tick_id
+                    if let Some(ref handler) = self.immediate_handler {
+                        handler.set_tick_id(world_state.tick_id).await;
+                    }
 
                     // 更新 HTTP API 状态（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state {
@@ -501,6 +468,30 @@ impl super::Agent {
                             continue;
                         }
 
+                    // 1.5 清除上一 tick 的 rejection reason（在消费新反馈之前）
+                    self.last_rejection_reason = None;
+
+                    // 1.6 消费 Server 验证错误反馈（由 Fn callback 异步写入）
+                    {
+                        let mut guard = self.server_error_feedback.lock().await;
+                        if let Some(reason) = guard.take() {
+                            warn!("Server 验证错误反馈: {}", reason);
+                            self.last_rejection_reason = Some(reason);
+                        }
+                    }
+
+                    // 1.7 消费即时事件缓冲区（ImmediateEvent 即时写入工作记忆）
+                    let immediate_events = {
+                        let mut guard = self.immediate_event_buffer.lock().await;
+                        if guard.is_empty() { Vec::new() } else { guard.drain(..).collect() }
+                    };
+                    if !immediate_events.is_empty() {
+                        debug!("消费 {} 个即时事件到工作记忆", immediate_events.len());
+                        if let Err(e) = self.process_events(&immediate_events).await {
+                            warn!("即时事件写入记忆失败: {}", e);
+                        }
+                    }
+
                     // 2. 处理事件并更新记忆
                     if let Err(e) = self.process_events(&world_state.events_log).await {
                         warn!("Failed to process events into memory: {}", e);
@@ -512,73 +503,141 @@ impl super::Agent {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }
 
-                    // 4. 构建增强的世界状态（包含记忆上下文）
-                    let memory_context = self.get_memory_context().await;
+                    // 4. 构建增强的世界状态（包含记忆上下文 + deferred 对话）
+                    let mut memory_context = self.get_memory_context().await;
+                    // 注入延迟处理的即时对话（DeferToMainTick 事件）
+                    if let Some(ref handler) = self.immediate_handler {
+                        let deferred = handler.get_deferred_events().await;
+                        if !deferred.is_empty() {
+                            let deferred_ctx: Vec<String> = deferred.iter()
+                                .filter_map(|e| {
+                                    let content = e.metadata.get("content")
+                                        .and_then(|v| v.as_str()).unwrap_or("");
+                                    if content.is_empty() { None }
+                                    else { Some(format!("[有人对你说: {}]", content)) }
+                                })
+                                .collect();
+                            if !deferred_ctx.is_empty() {
+                                let deferred_section = format!(
+                                    "\n### 待回应的对话\n{}\n",
+                                    deferred_ctx.join("\n")
+                                );
+                                memory_context.push_str(&deferred_section);
+                            }
+                            // 标记已消费
+                            handler.cleanup_processed().await;
+                        }
+                    }
                     if !memory_context.is_empty() {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
-                    // 5. 调用决策回调（带验证和记忆上下文）
-                    // 用 deadline 计算剩余时间，超时自动 idle
-                    let decision_future = async {
-                        if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                            // 带记忆上下文决策（记忆系统生效）
-                            // 如果同时有 rejection feedback，也注入到 memory context 中
-                            let combined_context = match &self.last_rejection_reason {
-                                Some(reason) => {
-                                    if memory_context.is_empty() {
-                                        format!("[上次意图被驳回: {}]", reason)
-                                    } else {
-                                        format!("{}\n[上次意图被驳回: {}]", memory_context, reason)
-                                    }
-                                }
-                                None => memory_context.clone(),
-                            };
-                            memory_callback(&world_state, &combined_context).await
-                        } else if let Some(ref reason) = self.last_rejection_reason {
-                            // 有 rejection 但无 memory callback，走 feedback 回调
-                            if let Some(ref callback) = self.decision_with_feedback_callback {
-                                callback(&world_state, Some(reason.as_str())).await
-                            } else {
-                                (self.decision_callback)(&world_state).await
-                            }
-                        } else {
-                            (self.decision_callback)(&world_state).await
-                        }
-                    };
+                    // 5. Actor-Reflector 循环：ActorSoul 决策 → ReflectorSoul 审查 → 驳回则重试
+                    // 循环直到审查通过或 deadline 到期
+                    let max_retries = 3; // 防止无限循环
+                    let agent_id = world_state.agent_id.unwrap_or_default();
+                    let mut final_intent = None;
 
-                    let intent = if world_state.deadline_ms > 0 {
+                    // 计算总 deadline（留 3s 缓冲给网络发送）
+                    let deadline_at = if world_state.deadline_ms > 0 {
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as u64;
-                        let remaining_ms = world_state.deadline_ms.saturating_sub(now_ms);
-                        // 留 3s 缓冲给 ReflectorSoul + 网络发送
-                        let buffer_ms: u64 = 3_000;
-                        let timeout_ms = remaining_ms.saturating_sub(buffer_ms);
-                        let decision_timeout = std::time::Duration::from_millis(timeout_ms);
-
-                        match tokio::time::timeout(decision_timeout, decision_future).await {
-                            Ok(intent) => intent,
-                            Err(_) => {
-                                warn!(
-                                    "Tick {} LLM 推理超时（剩余 {:?}，限制 {:?}），自动 idle",
-                                    world_state.tick_id,
-                                    std::time::Duration::from_millis(remaining_ms),
-                                    decision_timeout,
-                                );
-                                let agent_id = world_state.agent_id.unwrap_or_default();
-                                Intent::new(agent_id, world_state.tick_id, "idle", None)
-                                    .with_thought("忽然心神恍惚，思绪难聚，只得静坐调息片刻".to_string())
-                            }
-                        }
+                        let remaining = world_state.deadline_ms.saturating_sub(now_ms);
+                        Some(std::time::Instant::now() + std::time::Duration::from_millis(remaining.saturating_sub(3_000)))
                     } else {
-                        // deadline_ms == 0：无时间限制，直接决策
-                        decision_future.await
+                        None
                     };
 
-                    // 5.5 ReflectorSoul 同步审查（反思之魂）
-                    let final_intent = self.validate_with_reflector(intent, &world_state).await?;
+                    for attempt in 0..=max_retries {
+                        // 检查 deadline（Tick 关单）
+                        if let Some(dl) = deadline_at
+                            && std::time::Instant::now() >= dl {
+                                warn!("Tick {} Actor-Reflector 循环被 Tick 关单打断，第 {} 次尝试", world_state.tick_id, attempt);
+                                // 不发送 intent（server 已关单），保留 rejection reason 供下个 tick
+                                break;
+                            }
+
+                        // 5a. ActorSoul 决策（带 rejection reason 注入）
+                        let intent = {
+                            let combined_context = match &self.last_rejection_reason {
+                                Some(reason) => {
+                                    let prefix = if attempt > 0 { "[意图被驳回" } else { "[上次意图被驳回" };
+                                    if memory_context.is_empty() {
+                                        format!("{}，请重新决策]", prefix)
+                                    } else {
+                                        format!("{}\n{}: {}，请重新决策]", memory_context, prefix, reason)
+                                    }
+                                }
+                                None => memory_context.clone(),
+                            };
+                            let decision_future = async {
+                                if let Some(ref memory_callback) = self.decision_with_memory_callback {
+                                    memory_callback(&world_state, &combined_context).await
+                                } else if let Some(ref reason) = self.last_rejection_reason {
+                                    if let Some(ref callback) = self.decision_with_feedback_callback {
+                                        callback(&world_state, Some(reason.as_str())).await
+                                    } else {
+                                        (self.decision_callback)(&world_state).await
+                                    }
+                                } else {
+                                    (self.decision_callback)(&world_state).await
+                                }
+                            };
+
+                            if let Some(dl) = deadline_at {
+                                let remaining = dl.saturating_duration_since(std::time::Instant::now());
+                                match tokio::time::timeout(remaining, decision_future).await {
+                                    Ok(intent) => intent,
+                                    Err(_) => {
+                                        warn!("Tick {} 第 {} 次 ActorSoul 推理超时，放弃本轮", world_state.tick_id, attempt);
+                                        // 不发送 intent（server 可能已关单）
+                                        break;
+                                    }
+                                }
+                            } else {
+                                decision_future.await
+                            }
+                        };
+
+                        // 如果 final_intent 已被设为超时 idle，退出
+                        if final_intent.is_some() { break; }
+
+                        // 5b. ReflectorSoul 审查
+                        match self.validate_with_reflector(intent, &world_state).await? {
+                            super::agent::ReflectorResult::Approved(approved_intent) => {
+                                final_intent = Some(approved_intent);
+                                break;
+                            }
+                            super::agent::ReflectorResult::Rejected(reason) => {
+                                warn!("Tick {} 第 {} 次审查驳回: {}", world_state.tick_id, attempt, reason);
+                                if attempt >= max_retries {
+                                    warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
+                                    final_intent = Some(Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                        .with_thought(format!("意图多次被驳回: {}", reason)));
+                                    break;
+                                }
+                                // last_rejection_reason 已在 validate_with_reflector 中设置
+                                // 下一轮 ActorSoul 会看到 rejection reason
+                            }
+                        }
+                    }
+
+                    let final_intent = match final_intent {
+                        Some(intent) => intent,
+                        None => {
+                            warn!("Tick {} 无有效 intent（超时或被驳回耗尽），等待下个 tick", world_state.tick_id);
+                            self.consecutive_idle_count += 1;
+                            self.maybe_rotate_model().await;
+                            continue;
+                        }
+                    };
+
+                    // idle intent 也计入连续 idle
+                    if final_intent.action_type.as_str() == "idle" {
+                        self.consecutive_idle_count += 1;
+                    }
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state
@@ -618,8 +677,17 @@ impl super::Agent {
                     }
 
                     // 7. 发送意图
+                    // 设置当前意图类型，让即时事件处理器进行冲突检测
+                    if let Some(ref handler) = self.immediate_handler {
+                        handler.set_current_intent(Some(final_intent.action_type.to_string())).await;
+                    }
+
                     if let Err(e) = self.client.send_intent(&final_intent).await {
                         error!("Failed to send intent: {}", e);
+                        // 清除当前意图类型
+                        if let Some(ref handler) = self.immediate_handler {
+                            handler.set_current_intent(None).await;
+                        }
                         // send_intent 是 fire-and-forget，tick mismatch 由 receive 路径处理
                         // 此处只需重连
                         if let Err(reconnect_err) = self.reconnect().await {
@@ -630,6 +698,18 @@ impl super::Agent {
                             "Intent sent successfully: tick={}, action={}, agent={}",
                             final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                         );
+                        // 非 idle 成功发送，重置连续 idle 计数
+                        if final_intent.action_type.as_str() != "idle" {
+                            self.consecutive_idle_count = 0;
+                        }
+                        // idle 发送成功后检查是否需要 rotate
+                        if final_intent.action_type.as_str() == "idle" {
+                            self.maybe_rotate_model().await;
+                        }
+                        // 清除当前意图类型
+                        if let Some(ref handler) = self.immediate_handler {
+                            handler.set_current_intent(None).await;
+                        }
                     }
                 }
             }

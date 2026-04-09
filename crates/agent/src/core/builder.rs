@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::component::immediate::{ImmediateEventHandler, RuleBasedImmediateDecisionMaker};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::LifespanCalculator;
@@ -46,8 +47,6 @@ pub struct AgentBuilder {
     lifespan_calculator: Option<LifespanCalculator>,
     /// 重连请求接收通道
     reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
-    /// 配置重载通知接收通道
-    config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
     /// 设备身份配置（可选，从 device.yaml 加载）
@@ -58,6 +57,8 @@ pub struct AgentBuilder {
     cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
     /// 数据目录
     data_dir: PathBuf,
+    /// 即时事件处理器
+    immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
 }
 
 impl AgentBuilder {
@@ -77,12 +78,12 @@ impl AgentBuilder {
             validator: None,
             lifespan_calculator: None,
             reconnect_rx: None,
-            config_reload_rx: None,
             http_api_state: None,
             device_config: None,
             character_config: None,
             cognitive_engine: None,
             data_dir: PathBuf::from("."),
+            immediate_handler: None,
         }
     }
 
@@ -170,11 +171,6 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置配置重载通知接收通道
-    pub fn with_config_reload_rx(mut self, rx: broadcast::Receiver<()>) -> Self {
-        self.config_reload_rx = Some(rx);
-        self
-    }
 
     /// 设置 HTTP API 状态（用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     pub fn with_http_api_state(mut self, state: Arc<HttpApiState>) -> Self {
@@ -200,6 +196,30 @@ impl AgentBuilder {
         engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>,
     ) -> Self {
         self.cognitive_engine = Some(engine);
+        self
+    }
+
+    /// 启用即时事件处理
+    ///
+    /// 创建即时事件处理器，用于处理 Server 下发的 ImmediateEvent（speak/whisper 等）
+    pub fn with_immediate_handler(mut self) -> Self {
+        use crate::component::immediate::ImmediateDecisionMaker;
+        use tokio::sync::mpsc;
+
+        // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 immediate_msg_tx）
+        let (tx, _rx) = mpsc::channel(32);
+
+        // 创建基于规则的决策器
+        let decision_maker: Arc<dyn ImmediateDecisionMaker> =
+            Arc::new(RuleBasedImmediateDecisionMaker::new());
+
+        // 创建处理器
+        let handler = Arc::new(ImmediateEventHandler::new(
+            decision_maker,
+            tx,
+        ));
+
+        self.immediate_handler = Some(handler);
         self
     }
 
@@ -282,12 +302,16 @@ impl AgentBuilder {
             reconnect_rx: self.reconnect_rx,
             death_reported: false,
             actor_llm_container: self.llm_container,
-            config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
             device_config: self.device_config,
             character_config: self.character_config,
             cognitive_engine: self.cognitive_engine,
             server_assigned_name: None,
+            immediate_handler: self.immediate_handler,
+            server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
+            immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
+            consecutive_idle_count: 0,
         }
     }
 }

@@ -38,8 +38,8 @@ use cyber_jianghu_agent::config::{
     CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
 };
 use cyber_jianghu_agent::{
+    infra::api::thinking_log,
     AgentBuilder,
-    infra::api::{ConfigWatcher, thinking_log},
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::claw::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::create_http_state,
@@ -859,8 +859,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 }
             });
 
-            let config_watcher = Arc::new(ConfigWatcher::new(config_path.clone())?);
-            info!("ConfigWatcher 已创建，支持 LLM 配置热重载");
 
             // 初始化关系存储
             let agent_id_for_rel = character.agent_id.unwrap_or_else(Uuid::new_v4);
@@ -886,7 +884,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_decision_memory(decision_with_memory)
                 .with_llm_container(llm_container)
                 .with_llm_client(llm_arc.clone(), None)
-                .with_config_reload_rx(config_watcher.subscribe())
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
 
@@ -998,10 +995,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     })
                 });
 
-                // 启动 ReflectorSoul 任务（Claw 模式无配置热重载）
-                let (_reflector_config_reload_tx, _reflector_config_reload_rx) =
-                    tokio::sync::broadcast::channel::<()>(1);
-
                 // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
@@ -1028,9 +1021,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                             .with_thought("等待 OpenClaw 提交 Intent".to_string())
                     })
                 });
-
-                let (_reflector_config_reload_tx, _reflector_config_reload_rx) =
-                    tokio::sync::broadcast::channel::<()>(1);
 
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
