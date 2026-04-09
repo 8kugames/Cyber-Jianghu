@@ -30,5 +30,5 @@ mod scheduler;
 mod state_processor;
 
 // 导出公共API
-pub use broadcaster::build_initial_world_state;
+pub use broadcaster::{build_initial_world_state, send_to_agent};
 pub use scheduler::TickScheduler;
