@@ -694,7 +694,14 @@ async fn handle_intent(
         return Err(Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>);
     }
 
-    if tick_id != current_tick {
+    // 即时动作（speak、whisper、emote 等）允许在当前 tick 重复提交
+    // 这些动作不检查 IntentManager 中是否已有该 agent 的 intent
+    let is_immediate_action = matches!(
+        action_type.as_str(),
+        "speak" | "whisper" | "emote" | "laugh" | "nod" | "wave" | "bow"
+    );
+
+    if tick_id != current_tick && !is_immediate_action {
         warn!(
             "Intent tick_id mismatch: agent={}, intent_tick={}, accepting_tick={}",
             agent_id, tick_id, current_tick
@@ -703,6 +710,22 @@ async fn handle_intent(
             intent_tick_id: tick_id,
             current_tick_id: current_tick,
         }) as Box<dyn std::error::Error + Send + Sync>);
+    }
+
+    // 即时动作：允许重复提交（覆盖之前的 intent）
+    // 普通动作：检查是否已有 intent
+    if !is_immediate_action {
+        let intents = state.intent_manager.read().await;
+        if intents.contains_key(&agent_id) {
+            warn!(
+                "Intent duplicate: agent {} already has intent for tick {}",
+                agent_id, tick_id
+            );
+            return Err(Box::new(GameError::TickMismatch {
+                    intent_tick_id: tick_id,
+                    current_tick_id: current_tick,
+                }) as Box<dyn std::error::Error + Send + Sync>);
+        }
     }
 
     info!(
@@ -818,7 +841,6 @@ async fn handle_intent(
 
 /// 处理对话消息
 ///
-/// 将对话消息转发给对话管理器，并根据响应路由到相应的 Agent
 async fn handle_dialogue_message(
     agent_id: uuid::Uuid,
     message: DialogueMessage,
