@@ -493,11 +493,30 @@ impl TickScheduler {
             .collect_intents(&self.intent_manager, tick_id, &agent_states)
             .await
             .context("收集意图失败")?;
-        let (intent_processed_states, executed_actions, processor_events, action_logs) = self
+        let (intent_processed_states, executed_actions, processor_events, action_logs, validation_errors) = self
             .state_processor
             .process_intents(tick_id, agent_states, &intents)
             .await
             .context("结算意图失败")?;
+
+        // 发送验证错误通知给 agent
+        if !validation_errors.is_empty() {
+            for (agent_id, reason) in &validation_errors {
+                let msg = cyber_jianghu_protocol::ServerMessage::Error {
+                    code: cyber_jianghu_protocol::ERROR_CODE_ACTION_FAILED.to_string(),
+                    message: reason.clone(),
+                    current_tick_id: Some(tick_id),
+                };
+                if let Err(e) = super::broadcaster::send_to_agent(
+                    *agent_id,
+                    &msg,
+                    &self.connection_manager,
+                    &self.agent_to_device_map,
+                ).await {
+                    debug!("验证错误通知发送失败: agent={}, error={}", agent_id, e);
+                }
+            }
+        }
 
         for (agent_id, event) in processor_events {
             self.event_manager.add_event_for_agent(agent_id, event);

@@ -459,6 +459,35 @@ fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
     }
 }
 
+/// 向指定 agent 发送任意 ServerMessage
+///
+/// 通用单播函数，通过 agent_id → device_id → WebSocket 连接 发送消息。
+/// 用于 tick processor 的验证错误通知等场景。
+pub async fn send_to_agent(
+    agent_id: Uuid,
+    msg: &cyber_jianghu_protocol::ServerMessage,
+    connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let device_id = {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&agent_id) {
+            Some(&device_id) => device_id,
+            None => return Ok(()), // agent 不在线，静默跳过
+        }
+    };
+
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            return Ok(());
+        }
+        let json = serde_json::to_string(msg)?;
+        let _ = connection.send(axum::extract::ws::Message::Text(json.into())).await;
+    }
+    Ok(())
+}
+
 impl Default for Broadcaster {
     fn default() -> Self {
         Self::new()
