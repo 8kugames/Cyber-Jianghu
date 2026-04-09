@@ -51,7 +51,9 @@ impl StateProcessor {
 
     /// 处理意图列表
     ///
-    /// 这是主入口函数，协调整个处理流程
+    /// 这是主入口函数，协调整个处理流程。
+    /// 返回值中的 `validation_errors` 包含验证失败的 (agent_id, reason) 对，
+    /// 由调用方（scheduler）负责发送错误通知给 agent。
     pub async fn process_intents(
         &self,
         tick_id: i64,
@@ -62,11 +64,13 @@ impl StateProcessor {
         usize,
         Vec<(uuid::Uuid, WorldEvent)>,
         Vec<AgentAction>,
+        Vec<(uuid::Uuid, String)>,
     )> {
         let mut actions_executed = 0;
         let executor = ActionExecutor::new(self.db_pool.clone());
         let mut events = Vec::new();
         let mut action_logs = Vec::new();
+        let mut validation_errors: Vec<(uuid::Uuid, String)> = Vec::new();
 
         // 遍历所有意图
         for intent in intents {
@@ -102,7 +106,8 @@ impl StateProcessor {
                 .validate_intent(intent, &agent_states[agent_idx], &agent_states)
                 .await
             {
-                debug!("动作验证失败: agent={}, error={}", intent.agent_id, e);
+                warn!("动作验证失败: agent={}, error={}", intent.agent_id, e);
+                validation_errors.push((intent.agent_id, format!("{}", e)));
                 continue;
             }
 
@@ -202,7 +207,7 @@ impl StateProcessor {
             action_logs.push(action_log);
         }
 
-        Ok((agent_states, actions_executed, events, action_logs))
+        Ok((agent_states, actions_executed, events, action_logs, validation_errors))
     }
 }
 
