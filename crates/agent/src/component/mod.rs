@@ -2,6 +2,7 @@
 // 共享能力组件
 // ============================================================================
 
+pub mod immediate;
 pub mod llm;
 pub mod memory;
 pub mod persona;
