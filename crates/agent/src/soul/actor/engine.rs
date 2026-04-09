@@ -12,7 +12,7 @@
 //   - 背包/地面物品: "name [item_id] xN" 格式，确保 LLM 使用系统 ID
 //   - 可达位置: "name [node_id]" 格式，同上
 //   - 最近发言: 从 events_log 提取最近 5 条 public_message，用于去重
-//   - 动作表: 含 dialogue 私聊动作，item_id/target_location 强制使用方括号 ID
+//   - 动作表: 含 dialogue 私聊动作，item_id/target_location 强制使用英文 ID
 // ============================================================================
 
 use anyhow::Result;
@@ -337,7 +337,7 @@ impl CognitiveEngine {
             self_state
                 .inventory
                 .iter()
-                .map(|i| format!("{} [{}] x{}", i.name, i.item_id, i.quantity))
+                .map(|i| format!("{} ({}): {} 个", i.item_id, i.name, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -359,7 +359,7 @@ impl CognitiveEngine {
             world_state
                 .nearby_items
                 .iter()
-                .map(|i| format!("{} [{}] x{}", i.name, i.item_id, i.quantity))
+                .map(|i| format!("{} ({}): {} 个", i.item_id, i.name, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -554,12 +554,13 @@ impl CognitiveEngine {
 
 !!! 生死攸关的 ID 规则（违反必死）!!!
 
-物品、位置、采集目标必须使用方括号内的英文 ID，绝不能用中文名称：
+物品、位置、采集目标必须使用英文字母的 ID，绝不能用括号内的中文名称：
+- 背包格式: "mantou (馒头): 3 个" — 用 "mantou"，不要用 "馒头"
 - 使用物品: item_id 填 "water" 而非 "水" → {{"item_id": "water"}}
 - 移动: target_location 填 "longmen_backyard" 而非 "后院" → {{"target_location": "longmen_backyard"}}
 - 采集: target_id 填 "water" 而非 "老井" → {{"target_id": "water"}}
 
-记住：方括号 [xxx] 里面的才是 ID。用中文名称 = 动作失败 = 资源耗尽 = 死亡。
+记住：英文字母开头的才是 ID。用中文名称 = 动作失败 = 资源耗尽 = 死亡。
 
 ## 输出格式
 {{
