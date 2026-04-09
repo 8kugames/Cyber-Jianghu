@@ -288,6 +288,7 @@ pub async fn broadcast_speak_to_location(
             continue;
         };
 
+        let event_id = uuid::Uuid::new_v4();
         let event = WorldEvent {
             event_type: WorldEventType::PublicMessage,
             tick_id,
@@ -301,6 +302,7 @@ pub async fn broadcast_speak_to_location(
         };
 
         let msg = ServerMessage::ImmediateEvent {
+            event_id,
             event,
             deadline_ms: u64::MAX,
         };
