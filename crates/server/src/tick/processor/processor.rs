@@ -111,17 +111,24 @@ impl StateProcessor {
 
             // 记录日志
             let action_type = ActionType::new(&result.action_type);
+
+            // 从配置获取动作中文描述
+            let action_type_display = crate::game_data::registry::ActionRegistry::get(&result.action_type)
+                .map(|config| config.description.clone());
+
             let mut action_log = AgentAction {
                 id: 0,
                 tick_id,
                 agent_id: intent.agent_id,
                 action_type,
+                action_type_display,
                 action_data: intent.action_data.clone(),
                 result: if result.success {
                     ActionResult::Success
                 } else {
                     ActionResult::Failed
                 },
+                result_message: Some(result.message.clone()),
                 thought_log: intent.thought_log.clone(),
                 observer_thought: intent.observer_thought.clone(),
                 narrative: intent.narrative.clone(),
