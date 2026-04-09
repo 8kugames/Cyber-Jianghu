@@ -306,15 +306,17 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_data, result, thought_log, observer_thought, narrative) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
         b.push_bind(action.tick_id)
             .push_bind(action.agent_id)
             .push_bind(action.action_type.to_string())
+            .push_bind(&action.action_type_display)
             .push_bind(&action.action_data)
             .push_bind(action.result.to_string())
+            .push_bind(&action.result_message)
             .push_bind(&action.thought_log)
             .push_bind(&action.observer_thought)
             .push_bind(&action.narrative);
