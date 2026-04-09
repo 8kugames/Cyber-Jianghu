@@ -72,46 +72,14 @@ impl RuleEngine {
         }
     }
 
-    /// 创建带有默认配置的规则引擎（兼容性方法）
+    /// 创建带有默认配置的规则引擎
     ///
     /// 预加载默认的验证规则（硬编码，未来从 YAML 配置加载）：
-    /// - cooldown_speak: speak 冷却检查（需 history_intents 数据）
-    /// - cooldown_move: move 冷却检查（需 history_intents 数据）
-    ///
-    /// 注意：当前 history_intents 为空，冷却规则暂不触发。
-    /// 当 decision pipeline 接入历史意图数据后自动生效。
+    /// - valid_item_id_eat: eat 的 item_id 必须在背包中
+    /// - valid_item_id_drink: drink 的 item_id 必须在背包中
+    /// - valid_target_node_move: move 的 target_location 必须可达
     pub fn with_default_config() -> Self {
         let mut rule_set = RuleSet::new();
-
-        // speak 冷却规则
-        rule_set.add_rule(Rule::new(
-            "cooldown_speak".to_string(),
-            "说话冷却: 连续说话需间隔".to_string(),
-            super::types::RuleType::ActionCooldown,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
-                    "intent.action_type".to_string(),
-                    serde_json::json!("speak"),
-                ),
-                super::types::RuleCondition::GreaterThan("cooldown_speak".to_string(), 0.0),
-            ]),
-            "刚说过话，等一会儿再说".to_string(),
-        ));
-
-        // move 冷却规则
-        rule_set.add_rule(Rule::new(
-            "cooldown_move".to_string(),
-            "移动冷却: 连续移动需间隔".to_string(),
-            super::types::RuleType::ActionCooldown,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
-                    "intent.action_type".to_string(),
-                    serde_json::json!("move"),
-                ),
-                super::types::RuleCondition::GreaterThan("cooldown_move".to_string(), 0.0),
-            ]),
-            "刚移动过，休息一下再走".to_string(),
-        ));
 
         // eat 的 item_id 必须在背包中
         rule_set.add_rule(Rule::new(

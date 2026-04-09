@@ -112,7 +112,7 @@ pub struct RuleValidationContext {
     pub world_context: String,
     /// 当前 Tick ID
     pub tick_id: i64,
-    /// 历史意图（用于冷却检查）
+    /// 历史意图（保留字段，未来可用于上下文感知验证）
     pub history_intents: Vec<Intent>,
     /// 额外的属性数据（用于规则检查）
     pub attributes: HashMap<String, serde_json::Value>,
@@ -194,10 +194,6 @@ impl RuleValidationResult {
 pub struct RuleEngineConfig {
     /// 是否启用特质一致性检查
     pub enable_trait_consistency: bool,
-    /// 是否启用动作冷却检查
-    pub enable_action_cooldown: bool,
-    /// 默认冷却 Tick 数
-    pub default_cooldown_ticks: i64,
     /// 是否启用资源约束检查
     pub enable_resource_constraints: bool,
     /// 连续失败触发深度验证的阈值
@@ -211,8 +207,6 @@ impl Default for RuleEngineConfig {
     fn default() -> Self {
         Self {
             enable_trait_consistency: true,
-            enable_action_cooldown: true,
-            default_cooldown_ticks: 5,
             enable_resource_constraints: true,
             consecutive_failures_for_deep_verify: 3,
             enable_deep_verify_on_repeated_fail: true,
@@ -301,9 +295,7 @@ mod tests {
     fn test_rule_engine_config_default() {
         let config = RuleEngineConfig::default();
         assert!(config.enable_trait_consistency);
-        assert!(config.enable_action_cooldown);
         assert!(config.enable_resource_constraints);
-        assert_eq!(config.default_cooldown_ticks, 5);
         assert_eq!(config.consecutive_failures_for_deep_verify, 3);
         assert!(config.enable_deep_verify_on_repeated_fail);
     }
