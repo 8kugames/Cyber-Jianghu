@@ -465,6 +465,9 @@ impl DirectLlmClient {
                 .unwrap_or_default()
                 .trim()
                 .to_string();
+            if content.is_empty() {
+                anyhow::bail!("LLM API error: response content is empty (model may have returned null/whitespace)");
+            }
             debug!("LLM response length: {} chars", content.len());
             Ok(content)
         } else {
@@ -504,6 +507,9 @@ impl DirectLlmClient {
                 .unwrap_or_default()
                 .trim()
                 .to_string();
+            if content.is_empty() {
+                anyhow::bail!("LLM API error: response content is empty (model may have returned null/whitespace)");
+            }
             debug!("LLM response length: {} chars", content.len());
             Ok(content)
         } else {

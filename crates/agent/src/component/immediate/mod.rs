@@ -184,10 +184,10 @@ impl ImmediateEventHandler {
                 "Queued ImmediateEvent: id={}, type={}",
                 event_id, event.event_type
             );
+        } // 释放 pending_events 写锁后再决策，避免 RwLock 死锁
 
-            // 触发即时决策
-            self.process_immediate_decision().await;
-        }
+        // 触发即时决策（锁已释放，process_immediate_decision 会重新获取）
+        self.process_immediate_decision().await;
     }
 
     /// 处理即时决策
@@ -412,7 +412,7 @@ mod tests {
     use super::*;
     use cyber_jianghu_protocol::WorldEvent;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_immediate_response_sends_intent() {
         let (intent_tx, mut intent_rx) = mpsc::channel(32);
         let maker = Arc::new(RuleBasedImmediateDecisionMaker::new());
@@ -437,8 +437,17 @@ mod tests {
 
         handler.handle_server_message(event).await;
 
-        // 验证发送了 Intent
-        let intent = intent_rx.recv().await.unwrap();
+        // yield 让 spawn 的任务有机会执行
+        tokio::task::yield_now().await;
+
+        // 验证发送了 Intent（加超时防止永久阻塞）
+        let intent = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            intent_rx.recv(),
+        )
+        .await
+        .expect("timeout waiting for immediate intent")
+        .unwrap();
         match intent {
             ClientMessage::Intent {
                 tick_id,
