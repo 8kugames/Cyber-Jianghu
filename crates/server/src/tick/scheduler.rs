@@ -737,6 +737,35 @@ impl TickScheduler {
 
         self.closed_dialogue_records = self.dialogue_manager.close_all_sessions().await;
 
+        // 群像传记生成：每 168 tick (7 游戏日) 生成一次
+        let period_ticks = crate::chronicle::ChronicleConfig::default().period_ticks;
+        if tick_id > 0 && tick_id % period_ticks == 0 {
+            let period_start = tick_id - period_ticks + 1;
+            info!(
+                "7 日周期完成 (tick {} - {}), 开始生成群像传记...",
+                period_start, tick_id
+            );
+
+            // 异步生成，不阻塞 tick 结算
+            let db_pool = self.db_pool.clone();
+            tokio::spawn(async move {
+                match crate::chronicle::generate_and_store(period_start, tick_id, &db_pool).await {
+                    Ok(chronicle) => {
+                        info!(
+                            "群像传记生成完成: {} (第{}-{}日, {}季)",
+                            chronicle.chronicle_id,
+                            chronicle.game_day_start,
+                            chronicle.game_day_end,
+                            chronicle.season
+                        );
+                    }
+                    Err(e) => {
+                        error!("群像传记生成失败: {}", e);
+                    }
+                }
+            });
+        }
+
         Ok((agents_processed, actions_executed))
     }
 }

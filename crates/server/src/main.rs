@@ -368,6 +368,30 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // Chronicle API (群像传记)
+        .route(
+            "/api/dashboard/chronicles",
+            get(handlers::chronicle::list_chronicles).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/chronicles/{id}",
+            get(handlers::chronicle::get_chronicle).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/chronicles/generate",
+            post(handlers::chronicle::generate_chronicle).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
+        )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
         .route(
             "/api/config",
@@ -410,6 +434,10 @@ async fn main() -> Result<()> {
         // Auth is enforced client-side: frontend stores token in localStorage,
         // sends it via Bearer header on API calls. API routes have their own middleware.
         .route("/admin/", get(serve_admin_index))
+        .route(
+            "/admin/chronicles",
+            get(|| async { serve_admin_file("chronicles.html") }),
+        )
         .route("/admin/{*path}", get(serve_admin))
         // Redirect /admin to /admin/
         .route(

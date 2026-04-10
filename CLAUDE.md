@@ -143,6 +143,7 @@ Key server modules:
 - `src/websocket/` - WebSocket connection management
 - `src/handlers/` - HTTP API endpoints
 - `src/state.rs` - Shared AppState and rate limiting
+- `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
 
 ### Agent Architecture
 
@@ -410,6 +411,24 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 | OpenClaw integration | [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw) |
 
+## Chronicle (群像传记)
+
+Every 7 game days, the server auto-generates a **Chronicle** summarizing world events:
+
+- **Auto-generation**: Triggers every 7 game days (period calculated from `time.yaml` config)
+- **Template mode**: Pure rule-based generation (no external dependency)
+- **LLM mode**: Optional AI-enhanced narrative via `config/llm.yaml`
+
+### Deployment
+
+```bash
+# Run database migration
+docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_chronicles.sql
+
+# (Optional) Configure LLM in config/llm.yaml
+# Restart server to apply changes
+```
+
 ## API Endpoints
 
 ### Server (port 23333)
@@ -419,6 +438,9 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
 - `POST /api/v1/agent/rebirth` - Delete agent (CASCADE delete states/inventory)
 - `GET /api/dashboard/stats` - Dashboard statistics (requires admin token)
+- `GET /api/dashboard/chronicles` - List chronicles (paginated, requires admin token)
+- `GET /api/dashboard/chronicles/{id}` - Get chronicle detail (requires admin token)
+- `POST /api/dashboard/chronicles/generate` - Manually generate a chronicle (requires admin token)
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
 
@@ -463,8 +485,10 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 - `POST /api/v1/config/reload` - Hot reload configuration from file
 - `POST /api/v1/config/server` - Set server address (triggers WebSocket reconnection)
 
-### Agent Web Panel
+### Admin Web Panel (Server Dashboard)
 
+- `GET /admin/` - Main dashboard
+- `GET /admin/chronicles` - Chronicles page (群像传记)
 - `GET /welcome.html` - Home page (shows status-based cards)
 - `GET /create.html` - Character creation page
 - `GET /character.html` - Character info page (dream injection, rebirth, intent_history)
