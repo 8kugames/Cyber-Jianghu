@@ -407,5 +407,4 @@ mod tests {
         assert!(context.contains("你吃了馒头"));
         assert!(context.contains("最近事件"));
     }
-
 }

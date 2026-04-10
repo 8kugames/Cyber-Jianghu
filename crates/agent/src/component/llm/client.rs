@@ -97,14 +97,17 @@ pub trait LlmClientExt {
 /// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
 fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
     // 常见 thinking 标签模式
-    let patterns = ["<think_tag>", "<think/>", "<think/>>", "<reasoning>", "<thought>"];
+    let patterns = [
+        "<think_tag>",
+        "<think/>",
+        "<think/>>",
+        "<reasoning>",
+        "<thought>",
+    ];
     let lower = response.to_ascii_lowercase();
 
     // 查找第一个 thinking 标签
-    let first_tag_pos = patterns
-        .iter()
-        .filter_map(|tag| lower.find(tag))
-        .min();
+    let first_tag_pos = patterns.iter().filter_map(|tag| lower.find(tag)).min();
 
     let Some(tag_start) = first_tag_pos else {
         return std::borrow::Cow::Borrowed(response);
@@ -144,7 +147,11 @@ fn extract_json_str(response: &str) -> std::borrow::Cow<'_, str> {
     if let Some(start) = response.find("```json") {
         let after_marker = start + 7;
         if let Some(end) = response[after_marker..].find("```") {
-            std::borrow::Cow::Owned(response[after_marker..after_marker + end].trim().to_string())
+            std::borrow::Cow::Owned(
+                response[after_marker..after_marker + end]
+                    .trim()
+                    .to_string(),
+            )
         } else {
             std::borrow::Cow::Owned(response[after_marker..].trim().to_string())
         }
@@ -305,7 +312,10 @@ impl FallbackLlmClient {
     ///
     /// `clients` 不应为空，index 0 是主模型。
     pub fn new(clients: Vec<Arc<dyn LlmClient>>) -> Self {
-        assert!(!clients.is_empty(), "FallbackLlmClient needs at least one client");
+        assert!(
+            !clients.is_empty(),
+            "FallbackLlmClient needs at least one client"
+        );
         Self {
             clients,
             active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -370,7 +380,8 @@ impl FallbackLlmClient {
                     if offset > 0 {
                         tracing::warn!(
                             "LLM fallback 成功：切换到客户端 #{} (主用 #{}）",
-                            idx, start
+                            idx,
+                            start
                         );
                         // sticky：后续调用使用此客户端
                         self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
@@ -379,10 +390,7 @@ impl FallbackLlmClient {
                 }
                 Err(e) => {
                     let should = Self::should_fallback(&e);
-                    tracing::warn!(
-                        "LLM 客户端 #{} 调用失败 (fallback={}: {}",
-                        idx, should, e
-                    );
+                    tracing::warn!("LLM 客户端 #{} 调用失败 (fallback={}: {}", idx, should, e);
                     if !should {
                         // 非 fallback 类错误（如 JSON 解析失败），直接返回
                         return Err(e);

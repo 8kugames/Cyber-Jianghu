@@ -82,7 +82,6 @@ pub use core::{Agent, AgentBuilder};
 pub use soul::actor::{
     CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
-pub use soul::translator::IntentTranslator;
 pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{
     Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,
@@ -93,6 +92,7 @@ pub use soul::reflector::{
     ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest, ValidationResult, Validator,
     sanitize_for_prompt,
 };
+pub use soul::translator::IntentTranslator;
 
 // 运行模式
 pub use runtime::{

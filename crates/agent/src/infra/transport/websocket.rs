@@ -164,7 +164,14 @@ impl WebSocketClient {
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
                 let handle = tokio::spawn(async move {
-                    websocket_background_task(ws, state_arc, intent_rx, immediate_msg_rx, shutdown_rx).await;
+                    websocket_background_task(
+                        ws,
+                        state_arc,
+                        intent_rx,
+                        immediate_msg_rx,
+                        shutdown_rx,
+                    )
+                    .await;
                 });
 
                 // 更新状态
@@ -292,10 +299,14 @@ impl WebSocketClient {
     /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
     /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
-    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
+    pub async fn wait_for_registration(
+        &self,
+    ) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
         let mut rx = {
             let state = self.state.read().await;
-            state.registered_tx.as_ref()
+            state
+                .registered_tx
+                .as_ref()
                 .context("Not connected to server")?
                 .subscribe()
         };
@@ -309,7 +320,10 @@ impl WebSocketClient {
                     return Ok(None);
                 }
                 Some(data) => {
-                    info!("Agent registered with ID: {}, alive={}", data.agent_id, data.is_alive);
+                    info!(
+                        "Agent registered with ID: {}, alive={}",
+                        data.agent_id, data.is_alive
+                    );
                     // 更新 state 中的字段
                     let mut state = self.state.write().await;
                     state.agent_id = Some(data.agent_id);
@@ -317,7 +331,12 @@ impl WebSocketClient {
                     if let Some(ref rules) = data.world_building_rules {
                         state.world_building_rules = Some(rules.clone());
                     }
-                    return Ok(Some((data.agent_id, data.game_rules.clone(), data.agent_name.clone(), data.is_alive)));
+                    return Ok(Some((
+                        data.agent_id,
+                        data.game_rules.clone(),
+                        data.agent_name.clone(),
+                        data.is_alive,
+                    )));
                 }
                 None => {} // 尚未收到注册消息
             }
@@ -336,16 +355,19 @@ impl WebSocketClient {
     pub async fn receive_world_state(&self) -> Result<WorldState> {
         let mut rx = {
             let state = self.state.read().await;
-            state.worldstate_tx.as_ref()
+            state
+                .worldstate_tx
+                .as_ref()
                 .context("Not connected to server")?
                 .subscribe()
         };
 
         // 阻塞等待 sender 发送新值（每个 tick 广播一次）
-        rx.changed().await
-            .context("WorldState channel closed")?;
+        rx.changed().await.context("WorldState channel closed")?;
 
-        rx.borrow().as_ref().cloned()
+        rx.borrow()
+            .as_ref()
+            .cloned()
             .context("WorldState channel produced None")
     }
 
@@ -353,12 +375,15 @@ impl WebSocketClient {
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
         let tx = {
             let state = self.state.read().await;
-            state.intent_tx.as_ref()
+            state
+                .intent_tx
+                .as_ref()
                 .context("Not connected to server")?
                 .clone()
         };
 
-        tx.send(intent.clone()).await
+        tx.send(intent.clone())
+            .await
             .context("Failed to send intent to background task")?;
 
         debug!("Sent Intent to background: {:?}", intent.action_type);
@@ -369,16 +394,37 @@ impl WebSocketClient {
     pub async fn send_immediate_message(&self, msg: ClientMessage) -> Result<()> {
         let tx = {
             let state = self.state.read().await;
-            state.immediate_msg_tx.as_ref()
+            state
+                .immediate_msg_tx
+                .as_ref()
                 .context("Not connected to server")?
                 .clone()
         };
 
-        tx.send(msg).await
+        tx.send(msg)
+            .await
             .context("Failed to send immediate message to background task")?;
 
         debug!("Sent immediate message to background task");
         Ok(())
+    }
+
+    /// 发送三魂循环元数据到服务器
+    ///
+    /// 在 intent 发送后调用，使 server-web 能看到与 agent-web 相同的三魂详情。
+    /// 使用即时消息通道（fire-and-forget，不阻塞主循环）。
+    pub async fn send_soul_cycle_report(
+        &self,
+        tick_id: i64,
+        metadata: cyber_jianghu_protocol::SoulCycleMetadata,
+    ) -> Result<()> {
+        let agent_id = self.agent_id();
+        let msg = ClientMessage::SoulCycleReport {
+            tick_id,
+            agent_id,
+            metadata,
+        };
+        self.send_immediate_message(msg).await
     }
 
     /// 获取即时消息发送端的 clone（用于绑定到 ImmediateEventHandler）
@@ -424,10 +470,7 @@ impl WebSocketClient {
 
         // 等待后台任务结束（带超时）
         if let Some(handle) = handle {
-            match tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                handle,
-            ).await {
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await {
                 Ok(Ok(())) => debug!("Background task shutdown cleanly"),
                 Ok(Err(e)) => warn!("Background task error on shutdown: {}", e),
                 Err(_) => {
@@ -781,6 +824,16 @@ impl AgentClient {
         client.send_immediate_message(msg).await
     }
 
+    /// 发送三魂循环元数据到服务器
+    pub async fn send_soul_cycle_report(
+        &self,
+        tick_id: i64,
+        metadata: cyber_jianghu_protocol::SoulCycleMetadata,
+    ) -> Result<()> {
+        let client = self.client.read().await;
+        client.send_soul_cycle_report(tick_id, metadata).await
+    }
+
     /// 获取即时消息发送端
     pub async fn immediate_msg_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
         let client = self.client.read().await;
@@ -841,7 +894,9 @@ impl AgentClient {
     }
 
     /// 获取当前 server_msg_callback（用于 callback chaining）
-    pub async fn get_server_msg_callback(&self) -> Option<Arc<dyn Fn(ServerMessage) + Send + Sync>> {
+    pub async fn get_server_msg_callback(
+        &self,
+    ) -> Option<Arc<dyn Fn(ServerMessage) + Send + Sync>> {
         let client = self.client.read().await;
         client.get_server_msg_callback()
     }
@@ -852,7 +907,9 @@ impl AgentClient {
     /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
     /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
-    pub async fn wait_for_registration(&self) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
+    pub async fn wait_for_registration(
+        &self,
+    ) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }

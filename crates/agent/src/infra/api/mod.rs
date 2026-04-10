@@ -35,6 +35,7 @@ mod dto;
 mod handlers;
 pub mod intent_history;
 pub mod service;
+pub mod soul_cycle_recorder;
 pub mod thinking_log;
 
 use axum::{
@@ -167,6 +168,8 @@ pub struct HttpApiState {
     pub review_store: Option<Arc<ReviewStore>>,
     /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
     pub intent_history: Arc<RwLock<Option<Arc<intent_history::IntentHistoryStore>>>>,
+    /// 三魂循环记录器，记录人魂→天魂→地魂完整链路
+    pub soul_cycle_recorder: Arc<RwLock<Option<Arc<soul_cycle_recorder::SoulCycleRecorder>>>>,
     /// 托梦存储，管理持续 n 回合的念头注入
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
@@ -408,6 +411,10 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/character/experiences",
             get(handlers::get_experiences_handler),
         ) // 获取经历日志（分页）
+        .route(
+            "/api/v1/character/soul-cycles",
+            get(handlers::get_soul_cycles_handler),
+        ) // 获取三魂循环完整记录
         .route(
             "/api/v1/character/rebirth",
             post(handlers::rebirth_character_handler),
@@ -705,6 +712,14 @@ pub fn create_http_state(
             intent_history::IntentHistoryStore::open(
                 current_agent_id,
                 &data_dir.join(format!("intent_history_{}.db", current_agent_id)),
+            )
+            .ok()
+            .map(Arc::new),
+        )),
+        soul_cycle_recorder: Arc::new(RwLock::new(
+            soul_cycle_recorder::SoulCycleRecorder::open(
+                current_agent_id,
+                &data_dir.join(format!("soul_cycle_{}.db", current_agent_id)),
             )
             .ok()
             .map(Arc::new),

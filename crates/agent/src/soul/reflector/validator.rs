@@ -255,7 +255,8 @@ mod tests {
         }"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+        let validator =
+            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -285,7 +286,8 @@ mod tests {
         }"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+        let validator =
+            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
@@ -317,7 +319,8 @@ mod tests {
             r#"{"result": "approved", "reason": "", "narrative": ""}"#,
         );
 
-        let validator = ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+        let validator =
+            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         // Test that update_rules doesn't panic
         let new_rules = WorldBuildingRules::default();

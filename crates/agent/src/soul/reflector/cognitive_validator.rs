@@ -482,5 +482,4 @@ mod tests {
         assert!(!result.is_valid, "Chain with short content should fail");
         assert!(result.reason.unwrap().contains("过短"));
     }
-
 }

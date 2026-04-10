@@ -53,6 +53,11 @@ pub struct AgentAction {
     /// 叙事化经历描述
     pub narrative: Option<String>,
 
+    /// 三魂循环元数据（JSONB）
+    /// 由 agent 通过 WebSocket SoulCycleReport 消息上报
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soul_cycle_metadata: Option<serde_json::Value>,
+
     /// 记录时间
     pub created_at: DateTime<Utc>,
 }

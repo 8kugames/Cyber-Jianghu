@@ -483,7 +483,9 @@ pub async fn send_to_agent(
             return Ok(());
         }
         let json = serde_json::to_string(msg)?;
-        let _ = connection.send(axum::extract::ws::Message::Text(json.into())).await;
+        let _ = connection
+            .send(axum::extract::ws::Message::Text(json.into()))
+            .await;
     }
     Ok(())
 }

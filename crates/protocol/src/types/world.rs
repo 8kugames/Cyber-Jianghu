@@ -139,7 +139,6 @@ pub struct WorldEvent {
     pub metadata: serde_json::Value,
 }
 
-
 /// 密语记录（不含内容，仅索引）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivateDialogueRecord {

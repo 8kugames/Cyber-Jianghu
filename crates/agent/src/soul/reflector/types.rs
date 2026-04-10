@@ -149,5 +149,4 @@ mod tests {
         );
         assert_eq!(RejectionType::parse("unknown"), RejectionType::Other);
     }
-
 }

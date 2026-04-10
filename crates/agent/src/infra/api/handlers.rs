@@ -955,7 +955,9 @@ pub(super) async fn validate_intent_handler(
     if req.action_type.trim() == "narrative" {
         return Json(ValidateResponse {
             valid: false,
-            reason: Some("action_type 'narrative' is an internal sentinel, not a valid action".to_string()),
+            reason: Some(
+                "action_type 'narrative' is an internal sentinel, not a valid action".to_string(),
+            ),
             rejection_type: None,
             narrative: None,
         })
@@ -2174,6 +2176,281 @@ pub(super) async fn get_experiences_handler(
         has_more,
         experiences,
     })
+}
+
+// ============================================================================
+// 三魂循环记录 API
+// ============================================================================
+
+/// Layer 结果条目
+#[derive(Debug, Serialize)]
+struct LayerResultEntry {
+    layer: String,
+    passed: bool,
+    detail: Option<String>,
+}
+
+/// 人魂记录
+#[derive(Debug, Serialize)]
+struct RenhunEntry {
+    narrative: Option<String>,
+    thought_log: Option<String>,
+}
+
+/// 天魂记录
+#[derive(Debug, Serialize)]
+struct TianhunEntry {
+    action_type: Option<String>,
+    action_data: Option<serde_json::Value>,
+    speech_content: Option<String>,
+    success: bool,
+    error: Option<String>,
+}
+
+/// 地魂记录
+#[derive(Debug, Serialize)]
+struct DihunEntry {
+    result: Option<String>,
+    layers: Vec<LayerResultEntry>,
+    reason: Option<String>,
+    narrative: Option<String>,
+}
+
+/// 最终 Intent 记录
+#[derive(Debug, Serialize)]
+struct FinalIntentEntry {
+    intent_id: Option<String>,
+    action_type: Option<String>,
+    action_data: Option<serde_json::Value>,
+}
+
+/// 单条三魂尝试记录
+#[derive(Debug, Serialize)]
+struct SoulCycleAttemptEntry {
+    attempt: i32,
+    renhun: RenhunEntry,
+    tianhun: TianhunEntry,
+    dihun: DihunEntry,
+    final_intent: Option<FinalIntentEntry>,
+}
+
+/// 即时意图记录
+#[derive(Debug, Serialize)]
+struct ImmediateIntentEntry {
+    intent_id: String,
+    route_type: String,
+    action_type: String,
+    action_data: Option<serde_json::Value>,
+    speech_content: Option<String>,
+    send_status: String,
+    send_error: Option<String>,
+}
+
+/// 三魂循环完整记录响应
+#[derive(Debug, Serialize)]
+struct SoulCyclesResponse {
+    tick_id: i64,
+    attempts: Vec<SoulCycleAttemptEntry>,
+    immediate_intents: Vec<ImmediateIntentEntry>,
+}
+
+/// 三魂循环分页响应
+#[derive(Debug, Serialize)]
+struct SoulCyclesPageResponse {
+    page: u32,
+    limit: u32,
+    total: u32,
+    has_more: bool,
+    records: Vec<SoulCycleAttemptEntry>,
+}
+
+/// 获取指定 tick 的三魂完整记录
+///
+/// GET /api/v1/character/soul-cycles?tick_id=123
+/// GET /api/v1/character/soul-cycles?page=1&limit=20
+pub(super) async fn get_soul_cycles_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let tick_id: Option<i64> = params.get("tick_id").and_then(|s| s.parse().ok());
+    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
+    let limit: u32 = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+
+    let recorder_guard = state.soul_cycle_recorder.read().await;
+    let Some(recorder) = recorder_guard.as_ref() else {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "SoulCycleRecorder not available"})),
+        )
+            .into_response();
+    };
+
+    if let Some(tid) = tick_id {
+        // 按 tick_id 查询
+        let records = recorder.get_by_tick(tid).await;
+        let immediate = recorder.get_immediate_by_tick(tid).await;
+
+        let attempts: Vec<SoulCycleAttemptEntry> = records
+            .into_iter()
+            .map(|r| {
+                let action_data: Option<serde_json::Value> = r
+                    .tianhun_action_data
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let final_action_data: Option<serde_json::Value> = r
+                    .final_action_data
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let layers = [
+                    (r.dihun_layer1_result.as_deref(), "layer1"),
+                    (r.dihun_layer2_result.as_deref(), "layer2"),
+                    (r.dihun_layer3_result.as_deref(), "layer3"),
+                ]
+                .iter()
+                .map(|(detail, layer)| {
+                    // "通过" 或空字符串表示通过，否则表示驳回
+                    let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
+                    LayerResultEntry {
+                        layer: layer.to_string(),
+                        passed,
+                        detail: if passed {
+                            None
+                        } else {
+                            Some(detail.unwrap_or("驳回").to_string())
+                        },
+                    }
+                })
+                .collect();
+
+                SoulCycleAttemptEntry {
+                    attempt: r.attempt,
+                    renhun: RenhunEntry {
+                        narrative: r.renhun_narrative,
+                        thought_log: r.renhun_thought_log,
+                    },
+                    tianhun: TianhunEntry {
+                        action_type: r.tianhun_action_type,
+                        action_data,
+                        speech_content: r.tianhun_speech_content,
+                        success: r.tianhun_success,
+                        error: r.tianhun_error,
+                    },
+                    dihun: DihunEntry {
+                        result: r.dihun_result,
+                        layers,
+                        reason: r.dihun_reason,
+                        narrative: r.dihun_narrative,
+                    },
+                    final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
+                        intent_id: Some(id),
+                        action_type: r.final_action_type,
+                        action_data: final_action_data,
+                    }),
+                }
+            })
+            .collect();
+
+        let immediate_intents: Vec<ImmediateIntentEntry> = immediate
+            .into_iter()
+            .map(|r| {
+                let action_data: Option<serde_json::Value> = r
+                    .action_data
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                ImmediateIntentEntry {
+                    intent_id: r.intent_id,
+                    route_type: r.route_type,
+                    action_type: r.action_type,
+                    action_data,
+                    speech_content: r.speech_content,
+                    send_status: r.send_status,
+                    send_error: r.send_error,
+                }
+            })
+            .collect();
+
+        Json(SoulCyclesResponse {
+            tick_id: tid,
+            attempts,
+            immediate_intents,
+        })
+        .into_response()
+    } else {
+        // 分页查询
+        let (records, total) = recorder.get_page(page, limit).await;
+
+        let attempts: Vec<SoulCycleAttemptEntry> = records
+            .into_iter()
+            .map(|r| {
+                let action_data: Option<serde_json::Value> = r
+                    .tianhun_action_data
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let final_action_data: Option<serde_json::Value> = r
+                    .final_action_data
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok());
+                let layers = [
+                    (r.dihun_layer1_result.as_deref(), "layer1"),
+                    (r.dihun_layer2_result.as_deref(), "layer2"),
+                    (r.dihun_layer3_result.as_deref(), "layer3"),
+                ]
+                .iter()
+                .map(|(detail, layer)| {
+                    let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
+                    LayerResultEntry {
+                        layer: layer.to_string(),
+                        passed,
+                        detail: if passed {
+                            None
+                        } else {
+                            Some(detail.unwrap_or("驳回").to_string())
+                        },
+                    }
+                })
+                .collect();
+
+                SoulCycleAttemptEntry {
+                    attempt: r.attempt,
+                    renhun: RenhunEntry {
+                        narrative: r.renhun_narrative,
+                        thought_log: r.renhun_thought_log,
+                    },
+                    tianhun: TianhunEntry {
+                        action_type: r.tianhun_action_type,
+                        action_data,
+                        speech_content: r.tianhun_speech_content,
+                        success: r.tianhun_success,
+                        error: r.tianhun_error,
+                    },
+                    dihun: DihunEntry {
+                        result: r.dihun_result,
+                        layers,
+                        reason: r.dihun_reason,
+                        narrative: r.dihun_narrative,
+                    },
+                    final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
+                        intent_id: Some(id),
+                        action_type: r.final_action_type,
+                        action_data: final_action_data,
+                    }),
+                }
+            })
+            .collect();
+
+        let has_more = (page * limit) < total;
+        Json(SoulCyclesPageResponse {
+            page,
+            limit,
+            total,
+            has_more,
+            records: attempts,
+        })
+        .into_response()
+    }
 }
 
 /// 转生请求

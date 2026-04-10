@@ -29,7 +29,9 @@ use crate::dialogue::DialogueResponse;
 use crate::game_data::registry::ItemRegistry;
 use crate::inventory::InventoryManager;
 use crate::models::Intent;
-use cyber_jianghu_protocol::{ClientMessage, DialogueMessage, GameError, ServerMessage};
+use cyber_jianghu_protocol::{
+    ClientMessage, DialogueMessage, GameError, ServerMessage, SoulCycleMetadata,
+};
 
 use super::connection::Connection;
 use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_building_rules};
@@ -598,6 +600,11 @@ async fn handle_client_message(
         ClientMessage::Dialogue { message } => {
             handle_dialogue_message(*agent_id, message, state).await
         }
+        ClientMessage::SoulCycleReport {
+            tick_id,
+            agent_id: msg_agent_id,
+            metadata,
+        } => handle_soul_cycle_report(*agent_id, msg_agent_id, tick_id, &metadata, state).await,
     }
 }
 
@@ -722,9 +729,9 @@ async fn handle_intent(
                 agent_id, tick_id
             );
             return Err(Box::new(GameError::TickMismatch {
-                    intent_tick_id: tick_id,
-                    current_tick_id: current_tick,
-                }) as Box<dyn std::error::Error + Send + Sync>);
+                intent_tick_id: tick_id,
+                current_tick_id: current_tick,
+            }) as Box<dyn std::error::Error + Send + Sync>);
         }
     }
 
@@ -1005,6 +1012,57 @@ async fn handle_dialogue_message(
             }
         }
     }
+
+    Ok(())
+}
+
+/// 处理三魂循环元数据上报
+///
+/// Agent 在 intent 发送后通过 WebSocket SoulCycleReport 消息上报三魂循环详情。
+/// Server 将元数据关联到同一 tick 的 agent_action_logs 记录。
+async fn handle_soul_cycle_report(
+    connection_agent_id: uuid::Uuid,
+    msg_agent_id: Option<uuid::Uuid>,
+    tick_id: i64,
+    metadata: &SoulCycleMetadata,
+    state: &Arc<crate::state::AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 确定最终的 agent_id（与 handle_intent 相同逻辑）
+    let agent_id = match msg_agent_id {
+        Some(id) => {
+            let owner_device_id: Option<uuid::Uuid> =
+                sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
+                    .bind(id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .context("查询 Agent 归属失败")?;
+
+            match owner_device_id {
+                Some(owner) if owner == connection_agent_id => id,
+                Some(_) => {
+                    warn!("SoulCycleReport: Agent ownership mismatch: agent={}", id);
+                    return Err("无权操作此角色".into());
+                }
+                None => return Err("Agent 不存在".into()),
+            }
+        }
+        None => connection_agent_id,
+    };
+
+    debug!(
+        "收到三魂循环元数据：agent={}, tick={}, attempts={}",
+        agent_id,
+        tick_id,
+        metadata.cycles.len()
+    );
+
+    // 将 metadata 序列化为 JSON
+    let metadata_json = serde_json::to_value(metadata).context("序列化三魂循环元数据失败")?;
+
+    // 更新 agent_action_logs 表
+    crate::db::update_soul_cycle_metadata(&state.db_pool, agent_id, tick_id, &metadata_json)
+        .await
+        .ok(); // 非关键操作，失败仅 warn
 
     Ok(())
 }

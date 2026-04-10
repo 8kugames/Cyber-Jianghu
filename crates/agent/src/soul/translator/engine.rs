@@ -41,6 +41,14 @@ pub struct TranslationResult {
     /// - shout: 不拆分，留在主 intent
     /// - 无说话: None
     pub speech_intent: Option<Intent>,
+    /// 原始叙事文本（用于记录）
+    pub original_narrative: String,
+    /// 原始思考日志（用于记录）
+    pub original_thought_log: String,
+    /// 翻译是否成功
+    pub success: bool,
+    /// 翻译错误信息（失败时）
+    pub error: Option<String>,
 }
 
 /// 天魂 — 意图翻译器
@@ -75,13 +83,12 @@ impl IntentTranslator {
         debug!("[天魂] 翻译叙事意图: {}", narrative);
 
         // 30 秒超时保护，外层 lifecycle deadline 也会截断
-        let translate_future = self.llm_client.complete_json::<TranslationResponse>(&prompt);
-        let response = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            translate_future,
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("[天魂] 翻译超时（30秒），降级为 idle"))??;
+        let translate_future = self
+            .llm_client
+            .complete_json::<TranslationResponse>(&prompt);
+        let response = tokio::time::timeout(std::time::Duration::from_secs(30), translate_future)
+            .await
+            .map_err(|_| anyhow::anyhow!("[天魂] 翻译超时（30秒），降级为 idle"))??;
 
         debug!(
             "[天魂] 翻译结果: action_type={}, action_data={:?}, speech_content={:?}",
@@ -95,20 +102,35 @@ impl IntentTranslator {
             Some(response.action_data)
         };
 
-        let intent = Intent::new(agent_id, world_state.tick_id, response.action_type.as_str(), action_data)
-            .with_thought(thought_log.to_string());
+        let intent = Intent::new(
+            agent_id,
+            world_state.tick_id,
+            response.action_type.as_str(),
+            action_data,
+        )
+        .with_thought(thought_log.to_string());
 
         // 决定即时 intent 和主 intent 的分配
-        let (main_intent, speech_intent) = self.route_intents(intent, response.speech_content.as_deref(), narrative);
+        let (main_intent, speech_intent) =
+            self.route_intents(intent, response.speech_content.as_deref(), narrative);
 
         debug!(
             "[天魂] 路由结果: main={}/{:?}, speech={:?}",
             main_intent.action_type,
             main_intent.action_data,
-            speech_intent.as_ref().map(|i| format!("{}:{:?}", i.action_type, i.action_data))
+            speech_intent
+                .as_ref()
+                .map(|i| format!("{}:{:?}", i.action_type, i.action_data))
         );
 
-        Ok(TranslationResult { intent: main_intent, speech_intent })
+        Ok(TranslationResult {
+            intent: main_intent,
+            speech_intent,
+            original_narrative: narrative.to_string(),
+            original_thought_log: thought_log.to_string(),
+            success: true,
+            error: None,
+        })
     }
 
     /// 路由：决定哪个 intent 走即时通道，哪个走主配额
@@ -159,11 +181,7 @@ impl IntentTranslator {
     /// 策略：
     /// 1. 优先使用 LLM 返回的 speech_content
     /// 2. Fallback: 正则从 narrative 中提取引号内容
-    fn extract_speech(
-        &self,
-        llm_speech: Option<&str>,
-        narrative: &str,
-    ) -> Option<String> {
+    fn extract_speech(&self, llm_speech: Option<&str>, narrative: &str) -> Option<String> {
         // 优先使用 LLM 提取的结果
         if let Some(speech) = llm_speech {
             let trimmed = speech.trim();
@@ -188,12 +206,7 @@ impl IntentTranslator {
         None
     }
 
-    fn build_prompt(
-        &self,
-        narrative: &str,
-        thought_log: &str,
-        world_state: &WorldState,
-    ) -> String {
+    fn build_prompt(&self, narrative: &str, thought_log: &str, world_state: &WorldState) -> String {
         let inventory = if world_state.self_state.inventory.is_empty() {
             "空".to_string()
         } else {
@@ -368,7 +381,10 @@ mod tests {
     #[test]
     fn test_route_pure_whisper_to_immediate() {
         let translator = make_translator();
-        let intent = make_intent("whisper", Some(serde_json::json!({"content": "秘密", "target_agent_id": "abc"})));
+        let intent = make_intent(
+            "whisper",
+            Some(serde_json::json!({"content": "秘密", "target_agent_id": "abc"})),
+        );
         let (main, speech) = translator.route_intents(intent, None, "悄悄说秘密");
 
         assert_eq!(main.action_type.as_str(), "idle");
