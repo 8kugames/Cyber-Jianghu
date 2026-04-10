@@ -324,7 +324,8 @@ impl CognitiveEngine {
             self_state
                 .inventory
                 .iter()
-                .map(|i| format!("{} ({}): {} 个", i.item_id, i.name, i.quantity))
+                // 人魂只看到物品名称和数量，不暴露 item_id（精确 ID 由天魂处理）
+                .map(|i| format!("{} x{}", i.name, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -346,7 +347,8 @@ impl CognitiveEngine {
             world_state
                 .nearby_items
                 .iter()
-                .map(|i| format!("{} ({}): {} 个", i.item_id, i.name, i.quantity))
+                // 人魂只看到物品名称和数量，不暴露 item_id
+                .map(|i| format!("{} x{}", i.name, i.quantity))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
@@ -418,11 +420,12 @@ impl CognitiveEngine {
                 .location
                 .adjacent_nodes
                 .iter()
+                // 人魂只看到地点中文名，不暴露 node_id
                 .map(|n| {
                     if n.travel_cost > 1 {
-                        format!("{} [{}] (耗时{}tick)", n.name, n.node_id, n.travel_cost)
+                        format!("{} (耗时{}tick)", n.name, n.travel_cost)
                     } else {
-                        format!("{} [{}]", n.name, n.node_id)
+                        n.name.clone()
                     }
                 })
                 .collect::<Vec<_>>()
@@ -432,7 +435,7 @@ impl CognitiveEngine {
         let location_constraint = if world_state.location.adjacent_nodes.is_empty() {
             "\n【重要】当前位置无法移动到任何地方，你必须留在当前位置。"
         } else {
-            "\n【重要】只能移动到上述明确列出的位置，禁止编造或推断其他位置名称。"
+            "\n【重要】只能移动到上述列出的位置，禁止编造或推断其他位置。"
         };
 
         let time_info = {
