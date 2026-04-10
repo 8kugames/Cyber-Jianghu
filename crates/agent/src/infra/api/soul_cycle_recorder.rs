@@ -433,8 +433,8 @@ impl SoulCycleRecorder {
             .unwrap_or_default()
     }
 
-    /// 分页获取所有记录
-    pub async fn get_page(&self, page: u32, limit: u32) -> (Vec<SoulCycleRecord>, u32) {
+    /// 按 tick 分组的分页查询（返回去重 tick_id 列表）
+    pub async fn get_tick_ids_page(&self, page: u32, limit: u32) -> (Vec<i64>, u32) {
         let page = page.max(1);
         let conn = match self.conn.lock() {
             Ok(c) => c,
@@ -442,31 +442,68 @@ impl SoulCycleRecorder {
         };
 
         let total: u32 = conn
-            .query_row("SELECT COUNT(*) FROM soul_cycle_record", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(DISTINCT tick_id) FROM soul_cycle_record",
+                [],
+                |row| row.get(0),
+            )
             .unwrap_or(0);
 
         let offset = ((page - 1) * limit) as i64;
         let mut stmt = match conn.prepare(
-            "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
-                    tianhun_action_type, tianhun_action_data, tianhun_speech_content,
-                    tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
-                    dihun_layer2_result, dihun_layer3_result, dihun_reason, dihun_narrative,
-                    final_intent_id, final_action_type, final_action_data, route_type,
-                    world_time, created_at
-             FROM soul_cycle_record ORDER BY tick_id DESC, attempt ASC LIMIT ?1 OFFSET ?2",
+            "SELECT DISTINCT tick_id FROM soul_cycle_record ORDER BY tick_id DESC LIMIT ?1 OFFSET ?2",
         ) {
             Ok(s) => s,
             Err(_) => return (vec![], total),
         };
 
-        let records = stmt
-            .query_map(params![limit, offset], |row| Ok(Self::row_to_record(row)))
+        let tick_ids: Vec<i64> = stmt
+            .query_map(params![limit, offset], |row| row.get(0))
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
             .unwrap_or_default();
 
-        (records, total)
+        (tick_ids, total)
+    }
+
+    /// 批量获取多个 tick 的即时意图记录
+    pub async fn get_immediate_by_ticks(&self, tick_ids: &[i64]) -> Vec<ImmediateIntentRecord> {
+        if tick_ids.is_empty() {
+            return vec![];
+        }
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+
+        // 构建 IN 子句
+        let placeholders: String = tick_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, tick_id, intent_id, source_narrative, route_type,
+                    action_type, action_data, speech_content, send_status, send_error, created_at
+             FROM immediate_intent_record WHERE tick_id IN ({}) ORDER BY id ASC",
+            placeholders
+        );
+
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        // 绑定参数
+        let params: Vec<&dyn rusqlite::ToSql> = tick_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        stmt.query_map(params.as_slice(), |row| {
+            Ok(Self::row_to_immediate_record(row))
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
     }
 
     /// 获取即时意图记录
@@ -727,23 +764,6 @@ mod tests {
         let records = recorder.get_immediate_by_tick(1).await;
         assert_eq!(records[0].send_status, "failed");
         assert_eq!(records[0].send_error.as_deref(), Some("WebSocket 断开"));
-    }
-
-    #[tokio::test]
-    async fn test_get_page() {
-        let (_dir, recorder) = make_recorder();
-        for i in 1..=25 {
-            recorder
-                .record_renhun(i, 0, &format!("narrative {}", i), "...")
-                .await;
-        }
-        let (page1, total) = recorder.get_page(1, 10).await;
-        let (page2, _) = recorder.get_page(2, 10).await;
-        assert_eq!(total, 25);
-        assert_eq!(page1.len(), 10);
-        assert_eq!(page2.len(), 10);
-        assert_eq!(page1[0].tick_id, 25); // 降序
-        assert_eq!(page2[0].tick_id, 15);
     }
 
     #[tokio::test]
