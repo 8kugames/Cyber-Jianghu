@@ -514,4 +514,83 @@ mod tests {
         let result: TestResponse = client.complete_json("test prompt").await.unwrap();
         assert_eq!(result.message, "test");
     }
+
+    // ========================================================================
+    // find_first_json_end tests
+    // ========================================================================
+
+    #[test]
+    fn test_find_json_simple() {
+        let s = r#"{"a":1}"#;
+        assert_eq!(find_first_json_end(s), Some(6));
+    }
+
+    #[test]
+    fn test_find_json_with_trailing() {
+        let s = r#"{"a":1}{"b":2}"#;
+        assert_eq!(find_first_json_end(s), Some(6));
+    }
+
+    #[test]
+    fn test_find_json_nested() {
+        let s = r#"{"a":{"b":2}}"#;
+        assert_eq!(find_first_json_end(s), Some(12));
+    }
+
+    #[test]
+    fn test_find_json_string_with_braces() {
+        let s = r#"{"a":"{b}"}"#;
+        assert_eq!(find_first_json_end(s), Some(10));
+    }
+
+    #[test]
+    fn test_find_json_escaped_quotes() {
+        let s = r#"{"a":"he said \"hello\""}"#;
+        assert_eq!(find_first_json_end(s), Some(24));
+    }
+
+    #[test]
+    fn test_find_json_no_object() {
+        let s = "no json here";
+        assert_eq!(find_first_json_end(s), None);
+    }
+
+    #[test]
+    fn test_find_json_with_prefix() {
+        let s = r#"some text {"a":1}"#;
+        assert_eq!(find_first_json_end(s), Some(16));
+    }
+
+    // ========================================================================
+    // strip_thinking_tags tests
+    // ========================================================================
+
+    #[test]
+    fn test_strip_think_tag() {
+        let input = "<think_tag>reasoning</think_tag>{\"a\":1}";
+        let result = strip_thinking_tags(input);
+        assert_eq!(result.as_ref(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_strip_reasoning_tag() {
+        let input = "<reasoning>let me think...</reasoning>{\"result\":42}";
+        let result = strip_thinking_tags(input);
+        assert_eq!(result.as_ref(), "{\"result\":42}");
+    }
+
+    #[test]
+    fn test_strip_no_tags() {
+        let input = "{\"a\":1}";
+        let result = strip_thinking_tags(input);
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(result.as_ref(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_strip_empty_response() {
+        let input = "";
+        let result = strip_thinking_tags(input);
+        assert!(result.is_empty());
+    }
 }
