@@ -210,6 +210,15 @@ impl InteractionActionExecutor {
             );
         }
 
+        // 验证数量有效
+        if data.quantity <= 0 {
+            return ActionExecutionResult::failure(
+                "交易数量必须大于 0".to_string(),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
         // 验证价格有效
         if data.price < 0 {
             return ActionExecutionResult::failure(
@@ -220,7 +229,7 @@ impl InteractionActionExecutor {
         }
 
         let mut result = ActionExecutionResult::success(
-            format!("准备交易：{} 以 {} 两银子", data.item_id, data.price),
+            format!("准备交易：{} x{} 以 {} 两银子", data.item_id, data.quantity, data.price),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
@@ -230,7 +239,7 @@ impl InteractionActionExecutor {
             initiator: intent.agent_id,
             target: target_id,
             item_id: data.item_id.clone(),
-            item_quantity: 1, // 假设交易数量为 1
+            item_quantity: data.quantity,
             price: data.price,
         });
 

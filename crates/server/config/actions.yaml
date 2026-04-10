@@ -407,8 +407,12 @@ data:
       required_fields:
         - target_agent_id
         - item_id
+        - quantity
         - price
       field_validations:
+        - field: quantity
+          validation_type: min_value
+          min_value: 1
         - field: price
           validation_type: min_value
           min_value: 0
@@ -443,15 +447,25 @@ data:
         attribute: stamina
         min: 10
 
-  repair:
-    description: "修理"
-    category: economic
-    durability_restore: 50
-    validation:
-      required_fields:
-        - item_id
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 8
-        cost: 6
+  # repair:
+  #   description: "修理"
+  #   category: economic
+  #   durability_restore: 50
+  #   validation:
+  #     required_fields:
+  #       - item_id
+  #     optional_fields:
+  #       - target_agent_id  # 可选：不填则修理自己，背包中他人物品则修理他人
+  #   requirements:
+  #     - requirement_type: attribute
+  #       attribute: stamina
+  #       min: 8
+      #       cost: 6
+  #
+  # NOTE: 修理动作暂未实现，依赖以下前置工作：
+  #   1. 数据库: agent_inventory 添加 durability / max_durability 列
+  #   2. 配置: items.yaml 添加 durability 属性定义
+  #   3. 模型: 添加 RepairData 结构体
+  #   4. StateChange: 添加 ItemRepaired 变体
+  #   5. 执行器: InteractionActionExecutor::execute_repair
+  #   6. 动作分发: executor/mod.rs 添加 repair case
