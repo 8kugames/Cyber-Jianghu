@@ -143,9 +143,10 @@ impl AgentBuilder {
     ) -> Self {
         let rules = rules.unwrap_or_default();
         // 复用已有 container 或创建新的，确保 ActorSoul 和 ReflectorSoul 共享
-        let container = self.llm_container.clone().unwrap_or_else(|| {
-            Arc::new(RwLock::new(llm_client.clone()))
-        });
+        let container = self
+            .llm_container
+            .clone()
+            .unwrap_or_else(|| Arc::new(RwLock::new(llm_client.clone())));
         let validator = Arc::new(ReflectorSoul::new(rules, container.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
@@ -174,7 +175,6 @@ impl AgentBuilder {
         self.reconnect_rx = Some(rx);
         self
     }
-
 
     /// 设置 HTTP API 状态（用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     pub fn with_http_api_state(mut self, state: Arc<HttpApiState>) -> Self {
@@ -218,10 +218,7 @@ impl AgentBuilder {
             Arc::new(RuleBasedImmediateDecisionMaker::new());
 
         // 创建处理器
-        let handler = Arc::new(ImmediateEventHandler::new(
-            decision_maker,
-            tx,
-        ));
+        let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx));
 
         self.immediate_handler = Some(handler);
         self

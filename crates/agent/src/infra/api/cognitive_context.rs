@@ -503,5 +503,4 @@ mod tests {
         assert_eq!(drives[1].drive, "mid");
         assert_eq!(drives[2].drive, "low");
     }
-
 }

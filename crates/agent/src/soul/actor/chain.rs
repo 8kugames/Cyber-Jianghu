@@ -89,7 +89,9 @@ impl CognitiveChain {
             ));
         }
 
-        let narrative = self.final_intent.action_data
+        let narrative = self
+            .final_intent
+            .action_data
             .as_ref()
             .and_then(|d| d.get("narrative"))
             .and_then(|n| n.as_str())

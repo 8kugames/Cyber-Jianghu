@@ -52,10 +52,12 @@ pub use state_ops::{
 pub use state_ops::{create_tick_log, update_tick_log};
 
 // 导出公共API - Agent动作日志操作
-pub use state_ops::batch_insert_action_logs;
+pub use state_ops::{batch_insert_action_logs, update_soul_cycle_metadata};
 
 // 导出公共API - 地面物品操作
-pub use ground_item_ops::{add_ground_item, get_ground_items_by_node, get_ground_items_by_nodes, remove_ground_item};
+pub use ground_item_ops::{
+    add_ground_item, get_ground_items_by_node, get_ground_items_by_nodes, remove_ground_item,
+};
 
 // 导出公共API - 物品操作
 pub use item_ops::sync_items_from_config;

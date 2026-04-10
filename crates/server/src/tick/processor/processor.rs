@@ -118,8 +118,9 @@ impl StateProcessor {
             let action_type = ActionType::new(&result.action_type);
 
             // 从配置获取动作中文描述
-            let action_type_display = crate::game_data::registry::ActionRegistry::get(&result.action_type)
-                .map(|config| config.description.clone());
+            let action_type_display =
+                crate::game_data::registry::ActionRegistry::get(&result.action_type)
+                    .map(|config| config.description.clone());
 
             let mut action_log = AgentAction {
                 id: 0,
@@ -137,6 +138,7 @@ impl StateProcessor {
                 thought_log: intent.thought_log.clone(),
                 observer_thought: intent.observer_thought.clone(),
                 narrative: intent.narrative.clone(),
+                soul_cycle_metadata: None, // 由 agent 通过 SoulCycleReport 消息上报后更新
                 created_at: chrono::Utc::now(),
             };
 
@@ -207,7 +209,13 @@ impl StateProcessor {
             action_logs.push(action_log);
         }
 
-        Ok((agent_states, actions_executed, events, action_logs, validation_errors))
+        Ok((
+            agent_states,
+            actions_executed,
+            events,
+            action_logs,
+            validation_errors,
+        ))
     }
 }
 

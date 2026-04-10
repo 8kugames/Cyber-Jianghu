@@ -103,10 +103,7 @@ impl super::Agent {
 
                             // 服务器返回真实 agent_id 但 is_alive=false：断连期间角色死亡
                             if !is_alive {
-                                warn!(
-                                    "重连后发现角色 {} 已死亡 (is_alive=false)",
-                                    agent_id
-                                );
+                                warn!("重连后发现角色 {} 已死亡 (is_alive=false)", agent_id);
                                 self.death_reported = true;
                                 if let Some(ref api_state) = self.http_api_state {
                                     api_state
@@ -115,7 +112,9 @@ impl super::Agent {
                                     let death_msg = ServerMessage::AgentDied {
                                         agent_id,
                                         cause: "disconnect_death".to_string(),
-                                        description: "角色在断连期间死亡，请通过 rebirth 创建新角色".to_string(),
+                                        description:
+                                            "角色在断连期间死亡，请通过 rebirth 创建新角色"
+                                                .to_string(),
                                         location: String::new(),
                                         tick_id: 0,
                                         died_at: chrono::Utc::now().timestamp_millis(),
@@ -128,9 +127,15 @@ impl super::Agent {
                                 if let Some(ref mut char_cfg) = self.character_config {
                                     char_cfg.status = CharacterStatus::Dead;
                                     if let Some(ref api_state) = self.http_api_state {
-                                        let characters_dir = api_state.character_dir.read().await.clone();
-                                        if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
-                                            warn!("Failed to persist reconnect-death status: {}", e);
+                                        let characters_dir =
+                                            api_state.character_dir.read().await.clone();
+                                        if let Err(e) =
+                                            save_character_config_to_fs(char_cfg, &characters_dir)
+                                        {
+                                            warn!(
+                                                "Failed to persist reconnect-death status: {}",
+                                                e
+                                            );
                                         }
                                     }
                                 }

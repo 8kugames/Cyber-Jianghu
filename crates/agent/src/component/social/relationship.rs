@@ -563,5 +563,4 @@ mod tests {
         let retrieved = store.get_relationship(target_id).unwrap();
         assert!(retrieved.is_none());
     }
-
 }

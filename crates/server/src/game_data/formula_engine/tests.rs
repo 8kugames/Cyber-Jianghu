@@ -35,7 +35,10 @@ mod tests {
         ctx.insert("strength".to_string(), 30);
         ctx.insert("constitution".to_string(), 25);
 
-        assert_eq!(engine.evaluate_int("100 + constitution * 2", &ctx).unwrap(), 150);
+        assert_eq!(
+            engine.evaluate_int("100 + constitution * 2", &ctx).unwrap(),
+            150
+        );
         assert_eq!(engine.evaluate_int("50 + strength * 2", &ctx).unwrap(), 110);
     }
 
@@ -105,15 +108,21 @@ mod tests {
         let engine = FormulaEngine::new();
 
         let known_attrs = vec!["strength", "constitution"];
-        assert!(engine
-            .validate_formula("100 + constitution * 2", Some(&known_attrs))
-            .is_ok());
-        assert!(engine
-            .validate_formula("max(10, 20)", Some(&known_attrs))
-            .is_ok());
-        assert!(engine
-            .validate_formula("100 +", Some(&known_attrs))
-            .is_err());
+        assert!(
+            engine
+                .validate_formula("100 + constitution * 2", Some(&known_attrs))
+                .is_ok()
+        );
+        assert!(
+            engine
+                .validate_formula("max(10, 20)", Some(&known_attrs))
+                .is_ok()
+        );
+        assert!(
+            engine
+                .validate_formula("100 +", Some(&known_attrs))
+                .is_err()
+        );
     }
 
     #[test]

@@ -436,10 +436,7 @@ impl Agent {
         if let Some(ref container) = self.actor_llm_container {
             let llm = container.read().await;
             if llm.force_rotate_model() {
-                warn!(
-                    "连续 {} tick idle，已切换到下一个 LLM 模型",
-                    count
-                );
+                warn!("连续 {} tick idle，已切换到下一个 LLM 模型", count);
                 // 切换后重置计数器，给新模型机会
                 self.consecutive_idle_count = 0;
             }
@@ -459,30 +456,24 @@ impl Agent {
     ) -> TranslationResult {
         // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
         if intent.action_type.as_str() != "narrative" {
+            let thought = intent
+                .thought_log
+                .as_ref()
+                .map(|s| s.clone())
+                .unwrap_or_default();
             return TranslationResult {
                 intent,
                 speech_intent: None,
+                original_narrative: String::new(),
+                original_thought_log: thought,
+                success: true,
+                error: None,
             };
         }
 
-        let translator = match &self.intent_translator {
-            Some(t) => t,
-            None => {
-                tracing::error!("人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle");
-                return TranslationResult {
-                    intent: Intent::new(
-                        intent.agent_id,
-                        intent.tick_id,
-                        "idle",
-                        None,
-                    ).with_thought(intent.thought_log.unwrap_or_default()),
-                    speech_intent: None,
-                };
-            }
-        };
-
-        // 从 action_data 提取叙事文本
-        let narrative = intent.action_data
+        // 从 action_data 提取叙事文本（提前提取，避免变量作用域问题）
+        let narrative = intent
+            .action_data
             .as_ref()
             .and_then(|d| d.get("narrative"))
             .and_then(|n| n.as_str())
@@ -490,24 +481,52 @@ impl Agent {
 
         let thought_log = intent.thought_log.as_deref().unwrap_or("");
 
+        let translator = match &self.intent_translator {
+            Some(t) => t,
+            None => {
+                tracing::error!(
+                    "人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle"
+                );
+                return TranslationResult {
+                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(intent.thought_log.clone().unwrap_or_default()),
+                    speech_intent: None,
+                    original_narrative: narrative.to_string(),
+                    original_thought_log: thought_log.to_string(),
+                    success: false,
+                    error: Some("IntentTranslator not configured".to_string()),
+                };
+            }
+        };
+
         if narrative.is_empty() {
             warn!("人魂 narrative intent 缺少叙事文本，降级为 idle");
             return TranslationResult {
                 intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
                     .with_thought(thought_log.to_string()),
                 speech_intent: None,
+                original_narrative: String::new(),
+                original_thought_log: thought_log.to_string(),
+                success: false,
+                error: Some("Empty narrative".to_string()),
             };
         }
 
         info!("[天魂] 翻译叙事意图: {}", narrative);
 
-        match translator.translate(narrative, thought_log, world_state).await {
+        match translator
+            .translate(narrative, thought_log, world_state)
+            .await
+        {
             Ok(result) => {
                 info!(
                     "[天魂] 翻译完成: action_type={}, action_data={:?}, speech={:?}",
                     result.intent.action_type,
                     result.intent.action_data,
-                    result.speech_intent.as_ref().map(|i| i.action_type.to_string())
+                    result
+                        .speech_intent
+                        .as_ref()
+                        .map(|i| i.action_type.to_string())
                 );
                 result
             }
@@ -517,6 +536,10 @@ impl Agent {
                     intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
                         .with_thought(format!("意图翻译失败: {}", e)),
                     speech_intent: None,
+                    original_narrative: narrative.to_string(),
+                    original_thought_log: thought_log.to_string(),
+                    success: false,
+                    error: Some(e.to_string()),
                 }
             }
         }
@@ -560,12 +583,13 @@ impl Agent {
     /// 使用 RuleEngine 常量前缀匹配，避免 string.contains 紧耦合。
     pub(crate) fn narrativize_rejection(reason: &str) -> String {
         use crate::soul::reflector::rule_engine::engine::{
-            ERR_EAT_INVALID_ITEM, ERR_DRINK_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
+            ERR_DRINK_INVALID_ITEM, ERR_EAT_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
         };
 
         // RuleEngine 技术性驳回 → 叙事化（用常量前缀匹配）
         if reason.starts_with(ERR_EAT_INVALID_ITEM) || reason.starts_with(ERR_DRINK_INVALID_ITEM) {
-            "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。".to_string()
+            "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。"
+                .to_string()
         } else if reason.starts_with(ERR_MOVE_INVALID_TARGET) {
             "你想要移动到别处，但发现那条路走不通。也许该重新考虑目的地。".to_string()
         } else if reason.contains("不在合法列表") {
@@ -630,12 +654,10 @@ impl Agent {
         world_state: &WorldState,
     ) -> Result<(), String> {
         use crate::soul::reflector::rule_engine::{
-            RuleValidationContext,
-            types::extract_ids_from_world_state,
+            RuleValidationContext, types::extract_ids_from_world_state,
         };
 
-        let (available_item_ids, reachable_node_ids) =
-            extract_ids_from_world_state(world_state);
+        let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
 
         let context = RuleValidationContext {
             intent: intent.clone(),
@@ -677,7 +699,9 @@ impl Agent {
         // Fail-safe: "narrative" sentinel 绝不应到达此处（天魂应已翻译）
         // 如果到达，说明 translate_intent 路径有 bug
         if intent.action_type.as_str() == "narrative" {
-            tracing::error!("narrative sentinel 泄漏到 validate_action_type（天魂翻译未执行？），强制拒绝");
+            tracing::error!(
+                "narrative sentinel 泄漏到 validate_action_type（天魂翻译未执行？），强制拒绝"
+            );
             return Err("意图格式异常：narrative 未被翻译".to_string());
         }
 
@@ -717,29 +741,65 @@ impl Agent {
     /// 2. RuleEngine 规则校验：eat/drink item_id 有效性、move 目标可达性等
     /// 3. LLM 审查：人设/世界观合规
     ///
-    /// 审查通过返回 Approved，审查拒绝返回 Rejected(reason)。
-    /// 调用方根据返回值决定是否重试 ActorSoul。
+    /// 每层结果作为 LayerResult 返回，调用方聚合为 Vec<LayerResult> 传入 ReflectorResult。
     pub async fn validate_with_reflector(
         &mut self,
         intent: Intent,
         world_state: &WorldState,
     ) -> Result<ReflectorResult> {
+        let mut layers = Vec::with_capacity(3);
+
         // 第一层：action_type 确定性校验（不经过 LLM）
-        if let Err(e) = self.validate_action_type(&intent) {
-            warn!("Action type validation failed: {}", e);
-            return Ok(ReflectorResult::Rejected(e));
+        match self.validate_action_type(&intent) {
+            Ok(()) => {
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: true,
+                    detail: None,
+                });
+            }
+            Err(e) => {
+                warn!("Action type validation failed: {}", e);
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
         }
 
         // 第二层：RuleEngine 规则校验（确定性，不经过 LLM）
-        if let Err(e) = self.validate_with_rule_engine(&intent, world_state).await {
-            warn!("Rule engine validation failed: {}", e);
-            return Ok(ReflectorResult::Rejected(e));
+        match self.validate_with_rule_engine(&intent, world_state).await {
+            Ok(()) => {
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: true,
+                    detail: None,
+                });
+            }
+            Err(e) => {
+                warn!("Rule engine validation failed: {}", e);
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
         }
 
         // 第三层：LLM 审查（人设/世界观）
         let validator = match &self.validator {
             Some(v) => v,
-            None => return Ok(ReflectorResult::Approved(intent)),
+            None => {
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: None,
+                });
+                return Ok(ReflectorResult::Approved(intent, layers));
+            }
         };
 
         let request = crate::soul::reflector::ValidationRequest {
@@ -754,35 +814,77 @@ impl Agent {
             Ok(result) => result,
             Err(e) => {
                 warn!("ReflectorSoul validation error, auto-approving: {}", e);
-                return Ok(ReflectorResult::Approved(intent));
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: Some(format!("LLM error, bypassed: {}", e)),
+                });
+                return Ok(ReflectorResult::Approved(intent, layers));
             }
         };
 
         match validation_result {
-            crate::soul::reflector::ValidationResult::Approved { reason, narrative } => {
-                info!("ReflectorSoul approved: {:?}", reason);
-                self.save_observer_narrative(world_state.tick_id, &narrative)
-                    .await?;
-                Ok(ReflectorResult::Approved(intent))
+            crate::soul::reflector::ValidationResult::Approved {
+                reason: _,
+                narrative,
+            } => {
+                info!("ReflectorSoul approved");
+                if !narrative.is_empty() {
+                    self.save_observer_narrative(world_state.tick_id, &narrative)
+                        .await?;
+                }
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: None,
+                });
+                Ok(ReflectorResult::Approved(intent, layers))
             }
             crate::soul::reflector::ValidationResult::Rejected {
                 reason,
-                rejection_type,
+                rejection_type: _,
             } => {
-                warn!("ReflectorSoul rejected: {} [{:?}]", reason, rejection_type);
-                // last_rejection_reason 由 lifecycle 统一叙事化后设置
-                Ok(ReflectorResult::Rejected(reason))
+                warn!("ReflectorSoul rejected: {}", reason);
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                Ok(ReflectorResult::Rejected { reason, layers })
             }
         }
     }
+
+    /// 获取三魂循环记录器（如果可用）
+    pub(crate) fn soul_recorder(
+        &self,
+    ) -> Option<Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
+        let guard = self.http_api_state.as_ref()?;
+        let guard = guard.soul_cycle_recorder.try_read().ok()?;
+        guard.as_ref().cloned()
+    }
+}
+
+/// 地魂单层审查结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LayerResult {
+    /// 层标识
+    pub layer: &'static str,
+    /// 是否通过
+    pub passed: bool,
+    /// 详情，通过时为 None，驳回时包含原因
+    pub detail: Option<String>,
 }
 
 /// ReflectorSoul 审查结果
 pub enum ReflectorResult {
-    /// 审查通过，携带修正后的 Intent
-    Approved(Intent),
-    /// 审查拒绝，携带原因（调用方可据此重试 ActorSoul）
-    Rejected(String),
+    /// 审查通过，携带修正后的 Intent 和三层中间结果
+    Approved(Intent, Vec<LayerResult>),
+    /// 审查拒绝，携带叙事化原因和三层中间结果
+    Rejected {
+        reason: String,
+        layers: Vec<LayerResult>,
+    },
 }
 
 /// 人设验证结果

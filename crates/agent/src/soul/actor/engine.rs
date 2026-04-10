@@ -279,9 +279,13 @@ impl CognitiveEngine {
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
 
-        let intent = Intent::new(agent_id, tick_id, "narrative",
-            Some(serde_json::json!({"narrative": response.narrative_action})))
-            .with_thought(response.thought_process.clone());
+        let intent = Intent::new(
+            agent_id,
+            tick_id,
+            "narrative",
+            Some(serde_json::json!({"narrative": response.narrative_action})),
+        )
+        .with_thought(response.thought_process.clone());
 
         let decision_content = format!(
             "思考: {}\n意图: {}",
@@ -407,8 +411,15 @@ impl CognitiveEngine {
         let private_dialogue_section = if world_state.private_dialogue_log.is_empty() {
             String::new()
         } else {
-            let entries: Vec<String> = world_state.private_dialogue_log.iter()
-                .map(|d| format!("- {} ↔ {} ({}条消息)", d.agent_a_name, d.agent_b_name, d.message_count))
+            let entries: Vec<String> = world_state
+                .private_dialogue_log
+                .iter()
+                .map(|d| {
+                    format!(
+                        "- {} ↔ {} ({}条消息)",
+                        d.agent_a_name, d.agent_b_name, d.message_count
+                    )
+                })
                 .collect();
             format!("\n### 近期密语\n{}\n", entries.join("\n"))
         };
