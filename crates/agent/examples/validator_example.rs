@@ -63,8 +63,10 @@ async fn main() -> anyhow::Result<()> {
     let llm_client = Arc::new(ExampleLlmClient);
 
     // 3. 创建 ReflectorSoul（意图审查引擎）
-    let validator: Arc<dyn Validator> =
-        Arc::new(ReflectorSoul::new(world_rules.clone(), Arc::new(RwLock::new(llm_client))));
+    let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(
+        world_rules.clone(),
+        Arc::new(RwLock::new(llm_client)),
+    ));
     println!("ReflectorSoul 已创建\n");
 
     // 4. 创建 LifespanCalculator

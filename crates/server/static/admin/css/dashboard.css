@@ -827,3 +827,244 @@ input:checked + .slider:before {
     font-size: 11px;
     color: #666;
 }
+
+.exp-note {
+    margin-left: auto;
+    font-size: 10px;
+    color: #95a5a6;
+    font-style: italic;
+}
+
+/* ============================================================================
+   三魂详情弹窗（server-web 与 agent-web 共享样式）
+   ============================================================================ */
+
+.exp-detail-btn {
+    margin-left: auto;
+    padding: 2px 10px;
+    font-size: 11px;
+    background: #f5f6fa;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    cursor: pointer;
+    color: #666;
+    transition: all 0.15s;
+}
+
+.exp-detail-btn:hover {
+    background: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.dialog-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.dialog-overlay.show {
+    display: flex;
+}
+
+.dialog {
+    display: none;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    width: min(700px, 90vw);
+    max-height: 80vh;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.dialog.show {
+    display: flex;
+}
+
+.dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.dialog-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.dialog-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #999;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.dialog-close:hover {
+    color: #333;
+}
+
+.dialog-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.soul-cycle-attempt {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    border: 1px solid #eee;
+}
+
+.soul-cycle-attempt-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #999;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+}
+
+.soul-sub-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: #999;
+    text-transform: uppercase;
+    margin-top: 8px;
+    margin-bottom: 2px;
+}
+
+.soul-sub-title:first-child {
+    margin-top: 0;
+}
+
+.soul-text {
+    font-size: 13px;
+    color: #333;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.soul-thought {
+    font-size: 11px;
+    color: #777;
+    font-style: italic;
+}
+
+.soul-error {
+    font-size: 12px;
+    color: #e74c3c;
+    padding: 4px 8px;
+    background: rgba(231, 76, 60, 0.1);
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
+
+.soul-layer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+}
+
+.soul-layer-name {
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+}
+
+.soul-layer.passed .soul-layer-name {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.soul-layer.failed .soul-layer-name {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.soul-layer-status {
+    font-weight: 600;
+}
+
+.soul-layer.passed .soul-layer-status {
+    color: #27ae60;
+}
+
+.soul-layer.failed .soul-layer-status {
+    color: #e74c3c;
+}
+
+.soul-layer-detail {
+    font-size: 11px;
+    color: #999;
+}
+
+.soul-final-intent {
+    margin-top: 8px;
+    padding: 8px;
+    background: rgba(39, 174, 96, 0.05);
+    border: 1px solid rgba(39, 174, 96, 0.2);
+    border-radius: 4px;
+}
+
+.soul-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #999;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+}
+
+.soul-immediate-section {
+    margin-top: 16px;
+}
+
+.soul-immediate-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #f9f9f9;
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
+
+.soul-action-type {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2980b9;
+}
+
+.soul-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.soul-status.sent {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.soul-status.failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}

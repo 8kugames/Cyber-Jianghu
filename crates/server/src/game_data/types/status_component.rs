@@ -19,8 +19,6 @@ pub struct StatusComponent {
     pub collection: AttributeCollection,
 }
 
-
-
 impl StatusComponent {
     /// 从配置创建状态值组件（数据驱动）
     #[allow(dead_code)]

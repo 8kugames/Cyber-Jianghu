@@ -897,6 +897,9 @@ pub struct ExperienceEntry {
     pub observer_thought: Option<String>,
     /// 叙事化经历描述
     pub narrative: Option<String>,
+    /// 三魂循环元数据
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soul_cycle_metadata: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -933,7 +936,7 @@ pub async fn get_agent_experiences(
 
     // 获取经历日志
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, created_at
+        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, created_at
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -963,6 +966,7 @@ pub async fn get_agent_experiences(
             thought_log: row.get("thought_log"),
             observer_thought: row.get("observer_thought"),
             narrative: row.get("narrative"),
+            soul_cycle_metadata: row.get("soul_cycle_metadata"),
             created_at: row.get("created_at"),
         })
         .collect();

@@ -253,7 +253,8 @@ impl TickScheduler {
             self.current_tick_id = self.current_tick_id.max(new_tick_id);
 
             // 1. 开单 + 广播（使用 max 守卫后的值，保证 Agent 看到的 tick_id 单调递增）
-            self.accepting_tick_id.store(self.current_tick_id, Ordering::Release);
+            self.accepting_tick_id
+                .store(self.current_tick_id, Ordering::Release);
 
             let collection_window_secs = {
                 let gd = self.game_data_cache.get();
@@ -493,7 +494,13 @@ impl TickScheduler {
             .collect_intents(&self.intent_manager, tick_id, &agent_states)
             .await
             .context("收集意图失败")?;
-        let (intent_processed_states, executed_actions, processor_events, action_logs, validation_errors) = self
+        let (
+            intent_processed_states,
+            executed_actions,
+            processor_events,
+            action_logs,
+            validation_errors,
+        ) = self
             .state_processor
             .process_intents(tick_id, agent_states, &intents)
             .await
@@ -512,7 +519,9 @@ impl TickScheduler {
                     &msg,
                     &self.connection_manager,
                     &self.agent_to_device_map,
-                ).await {
+                )
+                .await
+                {
                     debug!("验证错误通知发送失败: agent={}, error={}", agent_id, e);
                 }
             }

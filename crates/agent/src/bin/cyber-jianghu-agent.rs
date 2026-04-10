@@ -38,8 +38,8 @@ use cyber_jianghu_agent::config::{
     CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
 };
 use cyber_jianghu_agent::{
-    infra::api::thinking_log,
     AgentBuilder,
+    infra::api::thinking_log,
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::claw::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::create_http_state,
@@ -755,7 +755,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                         info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
                         llm_clients.push(Arc::new(client));
                     }
-                    Err(e) => warn!("Fallback 模型 #{} ({}) 创建失败: {}", i + 1, fallback_model, e),
+                    Err(e) => warn!(
+                        "Fallback 模型 #{} ({}) 创建失败: {}",
+                        i + 1,
+                        fallback_model,
+                        e
+                    ),
                 }
             }
 
@@ -860,23 +865,23 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 }
             });
 
-
             // 初始化关系存储
             let agent_id_for_rel = character.agent_id.unwrap_or_else(Uuid::new_v4);
             let relationship_db_path = data_dir.join("relationships.db");
-            let relationship_store = match cyber_jianghu_agent::component::social::RelationshipStore::open(
-                agent_id_for_rel,
-                &relationship_db_path,
-            ) {
-                Ok(store) => {
-                    info!("RelationshipStore 已初始化");
-                    Some(store)
-                }
-                Err(e) => {
-                    tracing::warn!("RelationshipStore 初始化失败: {}，继续无关系存储", e);
-                    None
-                }
-            };
+            let relationship_store =
+                match cyber_jianghu_agent::component::social::RelationshipStore::open(
+                    agent_id_for_rel,
+                    &relationship_db_path,
+                ) {
+                    Ok(store) => {
+                        info!("RelationshipStore 已初始化");
+                        Some(store)
+                    }
+                    Err(e) => {
+                        tracing::warn!("RelationshipStore 初始化失败: {}，继续无关系存储", e);
+                        None
+                    }
+                };
 
             let mut builder = AgentBuilder::new(config_for_builder, decision)
                 .device_config(device.clone())

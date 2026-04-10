@@ -19,13 +19,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use cyber_jianghu_protocol::{
-    AvailableAction, ClientMessage, ServerMessage, WorldEventType,
-};
+use cyber_jianghu_protocol::{AvailableAction, ClientMessage, ServerMessage, WorldEventType};
 
 // ============================================================================
 // 常量
@@ -36,8 +34,6 @@ const IMMEDIATE_DECISION_TIMEOUT_MS: u64 = 5000;
 
 /// 最大待处理即时事件队列
 const MAX_PENDING_EVENTS: usize = 32;
-
-
 
 // ============================================================================
 // 即时事件
@@ -68,18 +64,11 @@ pub struct PendingImmediateEvent {
 #[derive(Debug, Clone)]
 pub enum ResponseDecision {
     /// 立即回应（发送普通 Intent）
-    RespondNow {
-        content: String,
-        thought: String,
-    },
+    RespondNow { content: String, thought: String },
     /// 延迟到主 tick 回应
-    DeferToMainTick {
-        reason: String,
-    },
+    DeferToMainTick { reason: String },
     /// 不理会
-    Ignore {
-        reason: String,
-    },
+    Ignore { reason: String },
 }
 
 // ============================================================================
@@ -210,8 +199,10 @@ impl ImmediateEventHandler {
             let unresponded: Vec<_> = queue
                 .iter_mut()
                 .filter(|e| !e.responded)
-                .filter(|e| now.duration_since(e.received_at).as_millis() as u64
-                    <= IMMEDIATE_DECISION_TIMEOUT_MS)
+                .filter(|e| {
+                    now.duration_since(e.received_at).as_millis() as u64
+                        <= IMMEDIATE_DECISION_TIMEOUT_MS
+                })
                 .map(|e| e.clone())
                 .collect();
             unresponded
@@ -224,7 +215,9 @@ impl ImmediateEventHandler {
             };
 
             // 决策（使用空列表，由 LLM 或上层提供可用动作）
-            let decision = self.decision_maker.decide_response(&event, current_intent.as_deref(), &[]);
+            let decision =
+                self.decision_maker
+                    .decide_response(&event, current_intent.as_deref(), &[]);
 
             match decision {
                 Some(ResponseDecision::RespondNow { content, thought }) => {
@@ -260,10 +253,7 @@ impl ImmediateEventHandler {
                     event.response_decision = Some(ResponseDecision::DeferToMainTick { reason });
                 }
                 Some(ResponseDecision::Ignore { reason }) => {
-                    debug!(
-                        "Ignored ImmediateEvent {}: {}",
-                        event.event_id, reason
-                    );
+                    debug!("Ignored ImmediateEvent {}: {}", event.event_id, reason);
                     event.responded = true;
                     event.response_decision = Some(ResponseDecision::Ignore { reason });
                 }
@@ -461,7 +451,12 @@ mod tests {
                 assert_eq!(action_type, "speak");
                 assert_eq!(priority, 10);
                 assert_eq!(
-                    action_data.unwrap().get("content").unwrap().as_str().unwrap(),
+                    action_data
+                        .unwrap()
+                        .get("content")
+                        .unwrap()
+                        .as_str()
+                        .unwrap(),
                     "何事？"
                 );
             }
@@ -480,11 +475,9 @@ mod tests {
 
         let event = create_test_event("喂！");
 
-        let decision = handler.decision_maker.decide_response(
-            &event,
-            Some("move"),
-            &[],
-        );
+        let decision = handler
+            .decision_maker
+            .decide_response(&event, Some("move"), &[]);
 
         match decision {
             Some(ResponseDecision::DeferToMainTick { .. }) => {}

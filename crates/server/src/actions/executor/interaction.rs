@@ -229,7 +229,10 @@ impl InteractionActionExecutor {
         }
 
         let mut result = ActionExecutionResult::success(
-            format!("准备交易：{} x{} 以 {} 两银子", data.item_id, data.quantity, data.price),
+            format!(
+                "准备交易：{} x{} 以 {} 两银子",
+                data.item_id, data.quantity, data.price
+            ),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
