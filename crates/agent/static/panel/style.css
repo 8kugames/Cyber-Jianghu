@@ -1230,21 +1230,176 @@ button[type="button"]:disabled {
     transition: all 0.2s;
 }
 
-/* 时间线圆点（仅经历日志） */
-#experiences.experience-list > .exp-item {
-    margin-left: 12px;
+/* Tick 卡片样式 */
+.tick-card {
+    position: relative;
+    padding: 16px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-sm);
 }
 
-#experiences.experience-list > .exp-item::before {
-    content: "";
-    position: absolute;
-    left: -19px;
-    top: 18px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+.tick-card:last-child {
+    margin-bottom: 0;
+}
+
+.tick-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+    flex-wrap: wrap;
+}
+
+.tick-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 22px;
+    padding: 0 8px;
     background: var(--accent);
-    border: 2px solid var(--bg-secondary);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 11px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.tick-world-time {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.tick-real-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.tick-section {
+    margin-bottom: 8px;
+}
+
+.tick-section-immediate {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-light);
+}
+
+.tick-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.tick-attempt-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin: 6px 0 2px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.tick-card .exp-renhun,
+.tick-card .exp-tianhun,
+.tick-card .exp-dihun {
+    margin-top: 6px;
+    padding: 6px 10px;
+}
+
+.imm-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.imm-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.imm-status.sent {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.imm-status.failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.imm-error {
+    font-size: 11px;
+    color: #e74c3c;
+}
+
+.soul-params {
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.soul-speech {
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: rgba(9, 132, 227, 0.08);
+    border-radius: 4px;
+    font-style: italic;
+    font-size: 12px;
+}
+
+.soul-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px 0;
+}
+
+.soul-layer-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.soul-layer-tag.passed {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.soul-layer-tag.failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.exp-dihun-result.approved {
+    color: #27ae60;
+}
+
+.exp-dihun-result.rejected {
+    color: #e74c3c;
 }
 
 .exp-item:last-child {
@@ -1297,29 +1452,6 @@ button[type="button"]:disabled {
 .exp-real-time {
     font-size: 11px;
     color: var(--text-muted);
-}
-
-.exp-body {
-    margin-bottom: 4px;
-}
-
-.exp-content {
-    font-size: 13px;
-    color: var(--text-primary);
-    line-height: 1.7;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.exp-action-tag {
-    display: inline-block;
-    margin-top: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    color: var(--info);
-    background: var(--info-light);
-    border-radius: 4px;
-    font-weight: 500;
 }
 
 /* 三魂架构样式 */
@@ -2649,121 +2781,12 @@ button[type="button"]:disabled {
 }
 
 /* ============================================================================
-   三魂详情弹窗
+   三魂公用样式（tick-card 内使用）
    ============================================================================ */
-
-.exp-detail-btn {
-    margin-left: auto;
-    padding: 2px 10px;
-    font-size: 11px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.15s;
-}
-
-.exp-detail-btn:hover {
-    background: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
-}
-
-.dialog-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-}
-
-.dialog-header h3 {
-    margin: 0;
-    font-size: 16px;
-}
-
-.dialog-close {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: var(--text-secondary);
-    padding: 0 4px;
-    line-height: 1;
-}
-
-.dialog-close:hover {
-    color: var(--text-color);
-}
-
-.dialog-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
-}
-
-.dialog-overlay.show {
-    display: flex;
-}
-
-#soul-cycle-modal.dialog {
-    display: none;
-    background: var(--bg-card);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    width: min(700px, 90vw);
-    max-height: 80vh;
-    overflow: hidden;
-    flex-direction: column;
-}
-
-#soul-cycle-modal.dialog.show {
-    display: flex;
-}
-
-#soul-cycle-body {
-    padding: 16px 20px;
-    overflow-y: auto;
-    flex: 1;
-}
-
-.soul-cycle-attempt {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-}
-
-.soul-cycle-attempt-header {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-    text-transform: uppercase;
-}
-
-.soul-sub-title {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    margin-top: 8px;
-    margin-bottom: 2px;
-}
-
-.soul-sub-title:first-child {
-    margin-top: 0;
-}
 
 .soul-text {
     font-size: 13px;
-    color: var(--text-color);
+    color: var(--text-primary);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
@@ -2782,102 +2805,4 @@ button[type="button"]:disabled {
     background: rgba(231, 76, 60, 0.1);
     border-radius: 4px;
     margin-bottom: 4px;
-}
-
-.soul-layer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-    font-size: 12px;
-}
-
-.soul-layer-name {
-    font-family: monospace;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 4px;
-}
-
-.soul-layer.passed .soul-layer-name {
-    background: rgba(39, 174, 96, 0.15);
-    color: #27ae60;
-}
-
-.soul-layer.failed .soul-layer-name {
-    background: rgba(231, 76, 60, 0.15);
-    color: #e74c3c;
-}
-
-.soul-layer-status {
-    font-weight: 600;
-}
-
-.soul-layer.passed .soul-layer-status {
-    color: #27ae60;
-}
-
-.soul-layer.failed .soul-layer-status {
-    color: #e74c3c;
-}
-
-.soul-layer-detail {
-    font-size: 11px;
-    color: var(--text-secondary);
-}
-
-.soul-final-intent {
-    margin-top: 8px;
-    padding: 8px;
-    background: rgba(39, 174, 96, 0.05);
-    border: 1px solid rgba(39, 174, 96, 0.2);
-    border-radius: var(--radius-sm);
-}
-
-.soul-section-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-}
-
-.soul-immediate-section {
-    margin-top: 16px;
-}
-
-.soul-immediate-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-sm);
-    margin-bottom: 4px;
-}
-
-.soul-action-type {
-    font-size: 12px;
-    font-weight: 600;
-    color: #0984e3;
-}
-
-.soul-status {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 10px;
-}
-
-.soul-status.sent {
-    background: rgba(39, 174, 96, 0.15);
-    color: #27ae60;
-}
-
-.soul-status.failed {
-    background: rgba(231, 76, 60, 0.15);
-    color: #e74c3c;
 }

@@ -697,59 +697,7 @@ input:checked + .slider:before {
     overflow-y: auto;
 }
 
-/* 三魂架构样式 - 与 agent-web 保持一致 */
-.exp-item {
-    position: relative;
-    padding: 14px 16px;
-    background: #fff;
-    border-radius: 4px;
-    margin-bottom: 10px;
-    border: 1px solid var(--border-color);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.exp-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-}
-
-.exp-tick-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 32px;
-    height: 20px;
-    padding: 0 6px;
-    background: var(--primary-color);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    border-radius: 10px;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
-
-.exp-time-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.exp-world-time {
-    font-size: 12px;
-    color: var(--text-color);
-    font-weight: 500;
-}
-
-.exp-real-time {
-    font-size: 11px;
-    color: #95a5a6;
-}
-
+/* 三魂架构样式 - tick-card 内使用 */
 .exp-renhun,
 .exp-tianhun,
 .exp-dihun {
@@ -828,124 +776,179 @@ input:checked + .slider:before {
     color: #666;
 }
 
-.exp-note {
-    margin-left: auto;
-    font-size: 10px;
-    color: #95a5a6;
-    font-style: italic;
-}
-
 /* ============================================================================
-   三魂详情弹窗（server-web 与 agent-web 共享样式）
+   Tick 卡片样式（server-web）
    ============================================================================ */
 
-.exp-detail-btn {
-    margin-left: auto;
-    padding: 2px 10px;
-    font-size: 11px;
-    background: #f5f6fa;
-    border: 1px solid #ddd;
-    border-radius: 10px;
-    cursor: pointer;
-    color: #666;
-    transition: all 0.15s;
+.tick-card {
+    position: relative;
+    padding: 16px;
+    background: #fff;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.exp-detail-btn:hover {
-    background: #3498db;
-    color: white;
-    border-color: #3498db;
+.tick-card:last-child {
+    margin-bottom: 0;
 }
 
-.dialog-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+.tick-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+    flex-wrap: wrap;
+}
+
+.tick-badge {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-width: 36px;
+    height: 22px;
+    padding: 0 8px;
+    background: var(--primary-color);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 11px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
 }
 
-.dialog-overlay.show {
-    display: flex;
+.tick-world-time {
+    font-size: 13px;
+    color: var(--text-color);
+    font-weight: 500;
 }
 
-.dialog {
-    display: none;
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-    width: min(700px, 90vw);
-    max-height: 80vh;
-    overflow: hidden;
-    flex-direction: column;
+.tick-real-time {
+    font-size: 11px;
+    color: #95a5a6;
+    margin-left: auto;
 }
 
-.dialog.show {
-    display: flex;
-}
-
-.dialog-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.dialog-header h3 {
-    margin: 0;
-    font-size: 16px;
-}
-
-.dialog-close {
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: #999;
-    padding: 0 4px;
-    line-height: 1;
-}
-
-.dialog-close:hover {
-    color: #333;
-}
-
-.dialog-body {
-    padding: 16px 20px;
-    overflow-y: auto;
-    flex: 1;
-}
-
-.soul-cycle-attempt {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: #f9f9f9;
-    border-radius: 6px;
-    border: 1px solid #eee;
-}
-
-.soul-cycle-attempt-header {
-    font-size: 12px;
-    font-weight: 600;
-    color: #999;
+.tick-section {
     margin-bottom: 8px;
-    text-transform: uppercase;
 }
 
-.soul-sub-title {
+.tick-section-immediate {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #eee;
+}
+
+.tick-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.tick-attempt-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #95a5a6;
+    margin: 6px 0 2px;
+    padding: 2px 6px;
+    background: #f5f6fa;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.tick-card .exp-renhun,
+.tick-card .exp-tianhun,
+.tick-card .exp-dihun {
+    margin-top: 6px;
+    padding: 6px 10px;
+}
+
+.imm-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #f5f6fa;
+    border-radius: 4px;
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.imm-status {
     font-size: 10px;
     font-weight: 600;
-    color: #999;
-    text-transform: uppercase;
-    margin-top: 8px;
-    margin-bottom: 2px;
+    padding: 1px 6px;
+    border-radius: 10px;
 }
 
-.soul-sub-title:first-child {
-    margin-top: 0;
+.imm-status.sent {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.imm-status.failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.imm-error {
+    font-size: 11px;
+    color: #e74c3c;
+}
+
+.soul-params {
+    font-family: monospace;
+    font-size: 11px;
+    color: #95a5a6;
+}
+
+.soul-speech {
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: rgba(9, 132, 227, 0.08);
+    border-radius: 4px;
+    font-style: italic;
+    font-size: 12px;
+}
+
+.soul-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px 0;
+}
+
+.soul-layer-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+.soul-layer-tag.passed {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.soul-layer-tag.failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.exp-dihun-result.approved {
+    color: #27ae60;
+}
+
+.exp-dihun-result.rejected {
+    color: #e74c3c;
 }
 
 .soul-text {
@@ -969,102 +972,4 @@ input:checked + .slider:before {
     background: rgba(231, 76, 60, 0.1);
     border-radius: 4px;
     margin-bottom: 4px;
-}
-
-.soul-layer {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-    font-size: 12px;
-}
-
-.soul-layer-name {
-    font-family: monospace;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 4px;
-}
-
-.soul-layer.passed .soul-layer-name {
-    background: rgba(39, 174, 96, 0.15);
-    color: #27ae60;
-}
-
-.soul-layer.failed .soul-layer-name {
-    background: rgba(231, 76, 60, 0.15);
-    color: #e74c3c;
-}
-
-.soul-layer-status {
-    font-weight: 600;
-}
-
-.soul-layer.passed .soul-layer-status {
-    color: #27ae60;
-}
-
-.soul-layer.failed .soul-layer-status {
-    color: #e74c3c;
-}
-
-.soul-layer-detail {
-    font-size: 11px;
-    color: #999;
-}
-
-.soul-final-intent {
-    margin-top: 8px;
-    padding: 8px;
-    background: rgba(39, 174, 96, 0.05);
-    border: 1px solid rgba(39, 174, 96, 0.2);
-    border-radius: 4px;
-}
-
-.soul-section-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: #999;
-    margin-bottom: 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid #eee;
-}
-
-.soul-immediate-section {
-    margin-top: 16px;
-}
-
-.soul-immediate-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: #f9f9f9;
-    border-radius: 4px;
-    margin-bottom: 4px;
-}
-
-.soul-action-type {
-    font-size: 12px;
-    font-weight: 600;
-    color: #2980b9;
-}
-
-.soul-status {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 10px;
-}
-
-.soul-status.sent {
-    background: rgba(39, 174, 96, 0.15);
-    color: #27ae60;
-}
-
-.soul-status.failed {
-    background: rgba(231, 76, 60, 0.15);
-    color: #e74c3c;
 }

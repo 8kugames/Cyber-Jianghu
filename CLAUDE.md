@@ -467,7 +467,9 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_c
 #### Character Management (Web Panel)
 
 - `GET /api/v1/character` - Get character info (name, age, gender, status, registered_at, birth_attributes, attributes, inventory)
-- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated, includes action_type_display, result_message, thought_log, observer_thought, narrative)
+- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (legacy, paginated, includes action_type_display, result_message, thought_log, observer_thought, narrative)
+- `GET /api/v1/character/soul-cycles?page=1&limit=20` - Get soul cycle records grouped by tick (paginated, full three-soul data with immediate intents)
+- `GET /api/v1/character/soul-cycles?tick_id=123` - Get soul cycle records for a specific tick
 - `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
 - `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
 - `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)

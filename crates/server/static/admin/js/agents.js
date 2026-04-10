@@ -276,253 +276,132 @@ function renderExperiences(data) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
         var metadata = exp.soul_cycle_metadata;
 
-        // 优先使用 soul_cycle_metadata（agent 上报的三魂完整链路）
         if (metadata && metadata.cycles && metadata.cycles.length > 0) {
-            return renderSoulCycleExperience(exp, metadata, time);
+            return renderTickCard(exp, metadata, time);
         }
 
-        // 兜底：使用旧数据（intent_history 无三魂链路时）
-        return renderLegacyExperience(exp, time);
+        return renderLegacyTickCard(exp, time);
     }).join("");
 
     return '<div class="experience-list">' + expHtml + '</div>';
 }
 
-// 渲染三魂完整链路（优先使用）
-function renderSoulCycleExperience(exp, metadata, time) {
-    var attempts = metadata.cycles;
+// 渲染 Tick 卡片（三魂完整链路）
+function renderTickCard(exp, metadata, time) {
+    var attempts = metadata.cycles || [];
     var immediate = metadata.immediate_intents || [];
-    var hasMultiple = attempts.length > 1;
 
-    var html = '<div class="exp-item">' +
-        '<div class="exp-header">' +
-        '<span class="exp-tick-badge">T' + (exp.tick_id || '-') + '</span>' +
-        '<span class="exp-time-info">' +
-        '<span class="exp-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
-        '<span class="exp-real-time">' + time + '</span></span>' +
-        '<button class="exp-detail-btn" onclick="showSoulCycleDetailServer(this, ' + (exp.tick_id || 0) + ')">查看详情</button>' +
+    var html = '<div class="tick-card">' +
+        '<div class="tick-card-header">' +
+        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+        '<span class="tick-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
+        '<span class="tick-real-time">' + time + '</span>' +
         '</div>';
 
-    // 只显示第一个 attempt 的摘要（避免太长）
-    var first = attempts[0];
-    if (first.renhun && first.renhun.narrative) {
-        html += '<div class="exp-renhun">' +
-            '<span class="exp-soul-label">人魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(first.renhun.narrative) + '</span></div>';
-    }
-    if (first.tianhun && first.tianhun.action_type) {
-        html += '<div class="exp-tianhun">' +
-            '<span class="exp-soul-label">天魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(first.tianhun.action_type) + '</span></div>';
-    }
-    if (first.dihun) {
-        html += '<div class="exp-dihun">' +
-            '<span class="exp-soul-label">地魂</span>' +
-            '<div class="exp-dihun-content">' +
-            '<div class="exp-dihun-result">' + escapeHtml(first.dihun.result || '-') + '</div>';
-        if (first.dihun.reason) {
-            html += '<div class="exp-dihun-reason">' + escapeHtml(first.dihun.reason) + '</div>';
+    // 行动分区
+    html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+    attempts.forEach(function(attempt, idx) {
+        if (attempts.length > 1) {
+            html += '<div class="tick-attempt-label">第 ' + (idx + 1) + ' 次尝试</div>';
         }
-        html += '</div></div>';
-    }
-
+        html += renderServerSoulInline('人魂', attempt.renhun, 'renhun');
+        html += renderServerSoulInline('天魂', attempt.tianhun, 'tianhun');
+        html += renderServerSoulInline('地魂', attempt.dihun, 'dihun');
+    });
     html += '</div>';
 
-    // 将完整 metadata 存入元素 dataset
-    html = html.replace('showSoulCycleDetailServer(this,', 'showSoulCycleDetailServer(this,') +
-        '<script>window._soulMeta = window._soulMeta || {}; window._soulMeta[' + (exp.tick_id || 0) + '] = ' + JSON.stringify(metadata) + ';</script>';
-
-    return html;
-}
-
-// 渲染旧数据（兜底）
-function renderLegacyExperience(exp, time) {
-    var actionData = exp.action_data || {};
-
-    var renhunContent = '';
-    var tianhunContent = '';
-    var dihunContent = '';
-
-    if (exp.thought_log) {
-        renhunContent = '<div class="exp-renhun">' +
-            '<span class="exp-soul-label">人魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(exp.thought_log) + '</span></div>';
-    }
-
-    if (exp.action_type || (actionData && Object.keys(actionData).length > 0)) {
-        tianhunContent = '<div class="exp-tianhun">' +
-            '<span class="exp-soul-label">天魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(exp.action_type || '-') + (actionData && Object.keys(actionData).length > 0 ? ' ' + escapeHtml(JSON.stringify(actionData)) : '') + '</span></div>';
-    }
-
-    if (exp.observer_thought) {
-        var observerData = null;
-        try {
-            observerData = JSON.parse(exp.observer_thought);
-        } catch (e) {
-            observerData = null;
-        }
-
-        if (observerData) {
-            dihunContent = '<div class="exp-dihun">' +
-                '<span class="exp-soul-label">地魂</span>' +
-                '<div class="exp-dihun-content">' +
-                '<div class="exp-dihun-result">' + escapeHtml(observerData.result || '-') + '</div>' +
-                (observerData.reason ? '<div class="exp-dihun-reason">' + escapeHtml(observerData.reason) + '</div>' : '') +
-                (observerData.narrative ? '<div class="exp-dihun-narrative">' + escapeHtml(observerData.narrative) + '</div>' : '') +
-                '</div></div>';
-        } else {
-            dihunContent = '<div class="exp-dihun">' +
-                '<span class="exp-soul-label">地魂</span>' +
-                '<span class="exp-soul-content">' + escapeHtml(exp.observer_thought) + '</span></div>';
-        }
-    }
-
-    return '<div class="exp-item">' +
-        '<div class="exp-header">' +
-        '<span class="exp-tick-badge">T' + (exp.tick_id || '-') + '</span>' +
-        '<span class="exp-time-info">' +
-        '<span class="exp-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
-        '<span class="exp-real-time">' + time + '</span></span>' +
-        '</div>' +
-        renhunContent + tianhunContent + dihunContent +
-        '</div>';
-}
-
-// server-web 三魂详情弹窗（复用 agent-web 相同样式）
-function showSoulCycleDetailServer(btn, tickId) {
-    var modal = document.getElementById('soul-cycle-modal');
-    var overlay = document.getElementById('soul-cycle-overlay');
-    var body = document.getElementById('soul-cycle-body');
-
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'soul-cycle-modal';
-        modal.className = 'dialog';
-        overlay = document.createElement('div');
-        overlay.id = 'soul-cycle-overlay';
-        overlay.className = 'dialog-overlay';
-        overlay.onclick = function() { closeSoulCycleModalServer(); };
-        document.body.appendChild(overlay);
-        document.body.appendChild(modal);
-    }
-
-    modal.innerHTML = `
-        <div class="dialog-header">
-            <h3>三魂详情 - T${tickId}</h3>
-            <button class="dialog-close" onclick="closeSoulCycleModalServer()">&times;</button>
-        </div>
-        <div class="dialog-body" id="soul-cycle-body"><p class="loading-text">加载中...</p></div>
-    `;
-    modal.classList.add('show');
-    overlay.classList.add('show');
-
-    var metadata = (window._soulMeta || {})[tickId];
-    body = document.getElementById('soul-cycle-body');
-
-    if (!metadata || !metadata.cycles || metadata.cycles.length === 0) {
-        body.innerHTML = '<p class="no-data">暂无三魂记录</p>';
-        return;
-    }
-
-    var html = '';
-    metadata.cycles.forEach(function(attempt, idx) {
-        var attemptLabel = metadata.cycles.length > 1 ? ('<div class="soul-cycle-attempt-header">第 ' + (idx + 1) + ' 次尝试</div>') : '';
-        html += '<div class="soul-cycle-attempt">' + attemptLabel;
-
-        // 人魂
-        html += '<div class="exp-renhun"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">';
-        if (attempt.renhun && attempt.renhun.narrative) {
-            html += '<div class="soul-sub-title">叙事意图</div><div class="soul-text">' + escapeHtml(attempt.renhun.narrative) + '</div>';
-        }
-        if (attempt.renhun && attempt.renhun.thought_log) {
-            html += '<div class="soul-sub-title">思考日志</div><div class="soul-text soul-thought">' + escapeHtml(attempt.renhun.thought_log) + '</div>';
-        }
-        html += '</div></div>';
-
-        // 天魂
-        html += '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">';
-        if (attempt.tianhun) {
-            if (!attempt.tianhun.success) {
-                html += '<div class="soul-error">翻译失败: ' + escapeHtml(attempt.tianhun.error || '未知错误') + '</div>';
-            }
-            if (attempt.tianhun.action_type) {
-                html += '<div class="soul-sub-title">动作类型</div><div class="soul-text">' + escapeHtml(attempt.tianhun.action_type) + '</div>';
-            }
-            if (attempt.tianhun.action_data && Object.keys(attempt.tianhun.action_data).length > 0) {
-                html += '<div class="soul-sub-title">动作参数</div><div class="soul-text">' + escapeHtml(JSON.stringify(attempt.tianhun.action_data)) + '</div>';
-            }
-            if (attempt.tianhun.speech_content) {
-                html += '<div class="soul-sub-title">提取对话</div><div class="soul-text">' + escapeHtml(attempt.tianhun.speech_content) + '</div>';
-            }
-        }
-        html += '</div></div>';
-
-        // 地魂
-        html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-dihun-content">';
-        html += '<div class="exp-dihun-result">' + escapeHtml(attempt.dihun && attempt.dihun.result ? attempt.dihun.result : '-') + '</div>';
-        if (attempt.dihun && attempt.dihun.layers && attempt.dihun.layers.length > 0) {
-            html += '<div class="soul-sub-title">三层审查</div>';
-            attempt.dihun.layers.forEach(function(layer) {
-                var status = layer.passed ? 'passed' : 'failed';
-                var label = layer.passed ? '通过' : '驳回';
-                html += '<div class="soul-layer ' + status + '">' +
-                    '<span class="soul-layer-name">' + escapeHtml(layer.layer) + '</span>' +
-                    '<span class="soul-layer-status">' + label + '</span>' +
-                    (layer.detail ? '<span class="soul-layer-detail">' + escapeHtml(layer.detail) + '</span>' : '') +
-                    '</div>';
-            });
-        }
-        if (attempt.dihun && attempt.dihun.reason) {
-            html += '<div class="exp-dihun-reason">驳回原因: ' + escapeHtml(attempt.dihun.reason) + '</div>';
-        }
-        if (attempt.dihun && attempt.dihun.narrative) {
-            html += '<div class="exp-dihun-narrative">叙事化: ' + escapeHtml(attempt.dihun.narrative) + '</div>';
-        }
-        html += '</div></div>';
-
-        // 最终 Intent
-        if (attempt.final_intent) {
-            html += '<div class="soul-final-intent">' +
-                '<div class="soul-sub-title">最终 Intent</div>' +
-                '<div class="soul-text">' + escapeHtml(attempt.final_intent.action_type || '-') + '</div>';
-            if (attempt.final_intent.action_data) {
-                html += '<div class="soul-text">' + escapeHtml(JSON.stringify(attempt.final_intent.action_data)) + '</div>';
-            }
-            html += '</div>';
-        }
-
-        html += '</div>';
-    });
-
-    // 即时意图
-    if (metadata.immediate_intents && metadata.immediate_intents.length > 0) {
-        html += '<div class="soul-immediate-section">' +
-            '<div class="soul-section-title">即时通道（不占 Intent 配额）</div>';
-        metadata.immediate_intents.forEach(function(imm) {
-            html += '<div class="soul-immediate-item">' +
-                '<span class="soul-action-type">' + escapeHtml(imm.action_type) + '</span>' +
-                '<span class="soul-status ' + (imm.send_status === 'sent' ? 'sent' : 'failed') + '">' +
-                (imm.send_status === 'sent' ? '已发送' : '失败') + '</span>';
-            if (imm.speech_content) {
-                html += '<div class="soul-text">' + escapeHtml(imm.speech_content) + '</div>';
-            }
-            if (imm.send_error) {
-                html += '<div class="soul-error">错误: ' + escapeHtml(imm.send_error) + '</div>';
-            }
-            html += '</div>';
+    // 即时分区
+    if (immediate.length > 0) {
+        html += '<div class="tick-section tick-section-immediate"><div class="tick-section-title">即时</div>';
+        immediate.forEach(function(imm) {
+            html += '<div class="imm-item">' +
+                '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(imm.action_type) +
+                (imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : '') +
+                '</span></div>' +
+                '<span class="imm-status ' + (imm.send_status === 'sent' ? 'sent' : 'failed') + '">' +
+                (imm.send_status === 'sent' ? '已发送' : '失败') + '</span>' +
+                (imm.send_error ? '<span class="imm-error">' + escapeHtml(imm.send_error) + '</span>' : '') +
+                '</div>';
         });
         html += '</div>';
     }
 
-    body.innerHTML = html;
+    html += '</div>';
+    return html;
 }
 
-function closeSoulCycleModalServer() {
-    var modal = document.getElementById('soul-cycle-modal');
-    var overlay = document.getElementById('soul-cycle-overlay');
-    if (modal) modal.classList.remove('show');
-    if (overlay) overlay.classList.remove('show');
+// 渲染单魂内联区块（server 版本）
+function renderServerSoulInline(label, data, type) {
+    if (!data) return '';
+    var html = '<div class="exp-' + type + '"><span class="exp-soul-label">' + label + '</span><div class="exp-soul-content">';
+
+    if (type === 'renhun') {
+        if (data.narrative) html += '<div class="soul-text">' + escapeHtml(data.narrative) + '</div>';
+        if (data.thought_log) html += '<div class="soul-thought">' + escapeHtml(data.thought_log) + '</div>';
+    } else if (type === 'tianhun') {
+        if (!data.success) html += '<div class="soul-error">翻译失败: ' + escapeHtml(data.error || '未知错误') + '</div>';
+        if (data.action_type) {
+            html += '<div class="soul-text">' + escapeHtml(data.action_type);
+            if (data.action_data && Object.keys(data.action_data).length > 0) {
+                html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(data.action_data)) + '</span>';
+            }
+            html += '</div>';
+        }
+        if (data.speech_content) html += '<div class="soul-speech">' + escapeHtml(data.speech_content) + '</div>';
+    } else if (type === 'dihun') {
+        html += '<div class="exp-dihun-result ' + (data.result || '') + '">' + escapeHtml(data.result || '-') + '</div>';
+        if (data.layers && data.layers.length > 0) {
+            html += '<div class="soul-layers">';
+            data.layers.forEach(function(l) {
+                var cls = l.passed ? 'passed' : 'failed';
+                html += '<span class="soul-layer-tag ' + cls + '">' + l.layer +
+                    (l.passed ? '' : ': ' + escapeHtml(l.detail || '')) + '</span>';
+            });
+            html += '</div>';
+        }
+        if (data.reason) html += '<div class="exp-dihun-reason">' + escapeHtml(data.reason) + '</div>';
+        if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
+}
+
+// 渲染旧数据（兜底）
+function renderLegacyTickCard(exp, time) {
+    var html = '<div class="tick-card">' +
+        '<div class="tick-card-header">' +
+        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+        '<span class="tick-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
+        '<span class="tick-real-time">' + time + '</span>' +
+        '</div>' +
+        '<div class="tick-section">';
+
+    if (exp.thought_log) {
+        html += '<div class="exp-renhun"><span class="exp-soul-label">人魂</span>' +
+            '<span class="exp-soul-content">' + escapeHtml(exp.thought_log) + '</span></div>';
+    }
+    if (exp.action_type) {
+        html += '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>' +
+            '<span class="exp-soul-content">' + escapeHtml(exp.action_type) + '</span></div>';
+    }
+    if (exp.observer_thought) {
+        try {
+            var od = JSON.parse(exp.observer_thought);
+            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-dihun-content">' +
+                '<div class="exp-dihun-result">' + escapeHtml(od.result || '-') + '</div>' +
+                (od.reason ? '<div class="exp-dihun-reason">' + escapeHtml(od.reason) + '</div>' : '') +
+                (od.narrative ? '<div class="exp-dihun-narrative">' + escapeHtml(od.narrative) + '</div>' : '') +
+                '</div></div>';
+        } catch (e) {
+            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(exp.observer_thought) + '</span></div>';
+        }
+    }
+
+    html += '</div></div>';
+    return html;
 }
 
 function escapeHtml(text) {
@@ -530,34 +409,6 @@ function escapeHtml(text) {
     var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function formatActionSummary(actionType, actionData) {
-    actionData = actionData || {};
-    switch (actionType) {
-        case "move":
-            return "<strong>移动至:</strong> " + escapeHtml(getLocationName(actionData.target_location || actionData.target || "未知"));
-        case "rest":
-            return "<strong>休息恢复</strong>";
-        case "eat":
-            return "<strong>进食:</strong> " + escapeHtml(actionData.item_name || actionData.food || "食物");
-        case "drink":
-            return "<strong>饮水:</strong> " + escapeHtml(actionData.item_name || actionData.drink || "水");
-        case "speak":
-            var content = actionData.content || "...";
-            var preview = content.length > 50 ? content.substring(0, 50) + "..." : content;
-            return '<strong>对话:</strong> "' + escapeHtml(preview) + '"';
-        case "idle":
-            return "<strong>静待时机</strong>";
-        case "craft":
-            return "<strong>制作:</strong> " + escapeHtml(actionData.recipe_id || actionData.recipe || "物品");
-        case "pickup":
-            return "<strong>拾取:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
-        case "drop":
-            return "<strong>丢弃:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
-        default:
-            return "<strong>" + escapeHtml(actionType) + "</strong>";
-    }
 }
 
 async function cleanupOfflineAgents() {

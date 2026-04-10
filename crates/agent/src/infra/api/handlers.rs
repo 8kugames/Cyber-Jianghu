@@ -2227,6 +2227,9 @@ struct FinalIntentEntry {
 /// 单条三魂尝试记录
 #[derive(Debug, Serialize)]
 struct SoulCycleAttemptEntry {
+    tick_id: i64,
+    world_time: Option<serde_json::Value>,
+    created_at: String,
     attempt: i32,
     renhun: RenhunEntry,
     tianhun: TianhunEntry,
@@ -2254,7 +2257,7 @@ struct SoulCyclesResponse {
     immediate_intents: Vec<ImmediateIntentEntry>,
 }
 
-/// 三魂循环分页响应
+/// 三魂循环分页响应（按 tick 分组）
 #[derive(Debug, Serialize)]
 struct SoulCyclesPageResponse {
     page: u32,
@@ -2262,6 +2265,90 @@ struct SoulCyclesPageResponse {
     total: u32,
     has_more: bool,
     records: Vec<SoulCycleAttemptEntry>,
+    immediate_intents: std::collections::HashMap<String, Vec<ImmediateIntentEntry>>,
+}
+
+/// SoulCycleRecord → SoulCycleAttemptEntry 转换（消除重复代码）
+fn record_to_attempt_entry(r: super::soul_cycle_recorder::SoulCycleRecord) -> SoulCycleAttemptEntry {
+    let action_data: Option<serde_json::Value> = r
+        .tianhun_action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let final_action_data: Option<serde_json::Value> = r
+        .final_action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let layers = [
+        (r.dihun_layer1_result.as_deref(), "layer1"),
+        (r.dihun_layer2_result.as_deref(), "layer2"),
+        (r.dihun_layer3_result.as_deref(), "layer3"),
+    ]
+    .iter()
+    .map(|(detail, layer)| {
+        let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
+        LayerResultEntry {
+            layer: layer.to_string(),
+            passed,
+            detail: if passed {
+                None
+            } else {
+                Some(detail.unwrap_or("驳回").to_string())
+            },
+        }
+    })
+    .collect();
+    let world_time: Option<serde_json::Value> = r
+        .world_time
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+
+    SoulCycleAttemptEntry {
+        tick_id: r.tick_id,
+        world_time,
+        created_at: r.created_at.to_rfc3339(),
+        attempt: r.attempt,
+        renhun: RenhunEntry {
+            narrative: r.renhun_narrative,
+            thought_log: r.renhun_thought_log,
+        },
+        tianhun: TianhunEntry {
+            action_type: r.tianhun_action_type,
+            action_data,
+            speech_content: r.tianhun_speech_content,
+            success: r.tianhun_success,
+            error: r.tianhun_error,
+        },
+        dihun: DihunEntry {
+            result: r.dihun_result,
+            layers,
+            reason: r.dihun_reason,
+            narrative: r.dihun_narrative,
+        },
+        final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
+            intent_id: Some(id),
+            action_type: r.final_action_type,
+            action_data: final_action_data,
+        }),
+    }
+}
+
+/// ImmediateIntentRecord → ImmediateIntentEntry 转换
+fn immediate_record_to_entry(
+    r: super::soul_cycle_recorder::ImmediateIntentRecord,
+) -> ImmediateIntentEntry {
+    let action_data: Option<serde_json::Value> = r
+        .action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    ImmediateIntentEntry {
+        intent_id: r.intent_id,
+        route_type: r.route_type,
+        action_type: r.action_type,
+        action_data,
+        speech_content: r.speech_content,
+        send_status: r.send_status,
+        send_error: r.send_error,
+    }
 }
 
 /// 获取指定 tick 的三魂完整记录
@@ -2293,83 +2380,12 @@ pub(super) async fn get_soul_cycles_handler(
         let records = recorder.get_by_tick(tid).await;
         let immediate = recorder.get_immediate_by_tick(tid).await;
 
-        let attempts: Vec<SoulCycleAttemptEntry> = records
-            .into_iter()
-            .map(|r| {
-                let action_data: Option<serde_json::Value> = r
-                    .tianhun_action_data
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-                let final_action_data: Option<serde_json::Value> = r
-                    .final_action_data
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-                let layers = [
-                    (r.dihun_layer1_result.as_deref(), "layer1"),
-                    (r.dihun_layer2_result.as_deref(), "layer2"),
-                    (r.dihun_layer3_result.as_deref(), "layer3"),
-                ]
-                .iter()
-                .map(|(detail, layer)| {
-                    // "通过" 或空字符串表示通过，否则表示驳回
-                    let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
-                    LayerResultEntry {
-                        layer: layer.to_string(),
-                        passed,
-                        detail: if passed {
-                            None
-                        } else {
-                            Some(detail.unwrap_or("驳回").to_string())
-                        },
-                    }
-                })
-                .collect();
-
-                SoulCycleAttemptEntry {
-                    attempt: r.attempt,
-                    renhun: RenhunEntry {
-                        narrative: r.renhun_narrative,
-                        thought_log: r.renhun_thought_log,
-                    },
-                    tianhun: TianhunEntry {
-                        action_type: r.tianhun_action_type,
-                        action_data,
-                        speech_content: r.tianhun_speech_content,
-                        success: r.tianhun_success,
-                        error: r.tianhun_error,
-                    },
-                    dihun: DihunEntry {
-                        result: r.dihun_result,
-                        layers,
-                        reason: r.dihun_reason,
-                        narrative: r.dihun_narrative,
-                    },
-                    final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
-                        intent_id: Some(id),
-                        action_type: r.final_action_type,
-                        action_data: final_action_data,
-                    }),
-                }
-            })
-            .collect();
+        let attempts: Vec<SoulCycleAttemptEntry> =
+            records.into_iter().map(record_to_attempt_entry).collect();
 
         let immediate_intents: Vec<ImmediateIntentEntry> = immediate
             .into_iter()
-            .map(|r| {
-                let action_data: Option<serde_json::Value> = r
-                    .action_data
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-                ImmediateIntentEntry {
-                    intent_id: r.intent_id,
-                    route_type: r.route_type,
-                    action_type: r.action_type,
-                    action_data,
-                    speech_content: r.speech_content,
-                    send_status: r.send_status,
-                    send_error: r.send_error,
-                }
-            })
+            .map(immediate_record_to_entry)
             .collect();
 
         Json(SoulCyclesResponse {
@@ -2379,67 +2395,31 @@ pub(super) async fn get_soul_cycles_handler(
         })
         .into_response()
     } else {
-        // 分页查询
-        let (records, total) = recorder.get_page(page, limit).await;
+        // 分页查询：按 tick_id 分组
+        let (tick_ids, total) = recorder.get_tick_ids_page(page, limit).await;
 
-        let attempts: Vec<SoulCycleAttemptEntry> = records
-            .into_iter()
-            .map(|r| {
-                let action_data: Option<serde_json::Value> = r
-                    .tianhun_action_data
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-                let final_action_data: Option<serde_json::Value> = r
-                    .final_action_data
-                    .as_ref()
-                    .and_then(|s| serde_json::from_str(s).ok());
-                let layers = [
-                    (r.dihun_layer1_result.as_deref(), "layer1"),
-                    (r.dihun_layer2_result.as_deref(), "layer2"),
-                    (r.dihun_layer3_result.as_deref(), "layer3"),
-                ]
-                .iter()
-                .map(|(detail, layer)| {
-                    let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
-                    LayerResultEntry {
-                        layer: layer.to_string(),
-                        passed,
-                        detail: if passed {
-                            None
-                        } else {
-                            Some(detail.unwrap_or("驳回").to_string())
-                        },
-                    }
-                })
-                .collect();
+        // 批量获取所有 tick 的记录和即时意图
+        let mut all_records = Vec::new();
+        for tid in &tick_ids {
+            let records = recorder.get_by_tick(*tid).await;
+            all_records.extend(records);
+        }
+        let all_immediate = recorder.get_immediate_by_ticks(&tick_ids).await;
 
-                SoulCycleAttemptEntry {
-                    attempt: r.attempt,
-                    renhun: RenhunEntry {
-                        narrative: r.renhun_narrative,
-                        thought_log: r.renhun_thought_log,
-                    },
-                    tianhun: TianhunEntry {
-                        action_type: r.tianhun_action_type,
-                        action_data,
-                        speech_content: r.tianhun_speech_content,
-                        success: r.tianhun_success,
-                        error: r.tianhun_error,
-                    },
-                    dihun: DihunEntry {
-                        result: r.dihun_result,
-                        layers,
-                        reason: r.dihun_reason,
-                        narrative: r.dihun_narrative,
-                    },
-                    final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
-                        intent_id: Some(id),
-                        action_type: r.final_action_type,
-                        action_data: final_action_data,
-                    }),
-                }
-            })
-            .collect();
+        let attempts: Vec<SoulCycleAttemptEntry> =
+            all_records.into_iter().map(record_to_attempt_entry).collect();
+
+        // 按 tick_id 分组即时意图
+        let mut immediate_map: std::collections::HashMap<String, Vec<ImmediateIntentEntry>> =
+            std::collections::HashMap::new();
+        for imm in all_immediate {
+            let tick_key = imm.tick_id.to_string();
+            let entry = immediate_record_to_entry(imm);
+            immediate_map
+                .entry(tick_key)
+                .or_default()
+                .push(entry);
+        }
 
         let has_more = (page * limit) < total;
         Json(SoulCyclesPageResponse {
@@ -2448,6 +2428,7 @@ pub(super) async fn get_soul_cycles_handler(
             total,
             has_more,
             records: attempts,
+            immediate_intents: immediate_map,
         })
         .into_response()
     }
