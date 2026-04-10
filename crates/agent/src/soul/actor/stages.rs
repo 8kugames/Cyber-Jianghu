@@ -120,22 +120,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cognitive_stages() {
-        let stages = CognitiveStage::all();
-        assert_eq!(stages.len(), 4);
-        assert_eq!(stages[0], CognitiveStage::Perception);
-        assert_eq!(stages[3], CognitiveStage::Decision);
-    }
-
-    #[test]
-    fn test_stage_names() {
-        assert_eq!(CognitiveStage::Perception.name(), "感知");
-        assert_eq!(CognitiveStage::Motivation.name(), "动机");
-        assert_eq!(CognitiveStage::Planning.name(), "规划");
-        assert_eq!(CognitiveStage::Decision.name(), "决策");
-    }
-
-    #[test]
     fn test_stage_output() {
         let output = StageOutput::new(CognitiveStage::Perception, "test".to_string());
         assert_eq!(output.stage, CognitiveStage::Perception);

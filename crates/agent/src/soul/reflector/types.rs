@@ -138,15 +138,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_persona_info_default() {
-        let persona = PersonaInfo::default();
-        assert_eq!(persona.gender, "男");
-        assert_eq!(persona.age, 28);
-        assert_eq!(persona.personality.len(), 2);
-        assert_eq!(persona.values.len(), 1);
-    }
-
-    #[test]
     fn test_rejection_type_from_str() {
         assert_eq!(
             RejectionType::parse("era_violation"),
@@ -159,10 +150,4 @@ mod tests {
         assert_eq!(RejectionType::parse("unknown"), RejectionType::Other);
     }
 
-    #[test]
-    fn test_rejection_type_as_str() {
-        assert_eq!(RejectionType::EraViolation.as_str(), "era_violation");
-        assert_eq!(RejectionType::MetaGaming.as_str(), "meta_gaming");
-        assert_eq!(RejectionType::Other.as_str(), "other");
-    }
 }

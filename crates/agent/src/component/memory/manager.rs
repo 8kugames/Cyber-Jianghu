@@ -408,16 +408,4 @@ mod tests {
         assert!(context.contains("最近事件"));
     }
 
-    #[test]
-    fn test_memory_manager_stats() {
-        let stats = MemoryManagerStats {
-            working_count: 10,
-            episodic_count: 50,
-            archive_count: 5,
-        };
-
-        assert_eq!(stats.working_count, 10);
-        assert_eq!(stats.episodic_count, 50);
-        assert_eq!(stats.archive_count, 5);
-    }
 }

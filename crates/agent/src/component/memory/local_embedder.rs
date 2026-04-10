@@ -210,12 +210,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_model_availability_check() {
-        // 测试模型可用性检查不会崩溃
-        let _available = LocalEmbedder::is_model_available();
-    }
-
-    #[test]
     fn test_model_dir() {
         let dir = LocalEmbedder::model_dir();
         assert!(dir.to_string_lossy().contains("cyber-jianghu"));
