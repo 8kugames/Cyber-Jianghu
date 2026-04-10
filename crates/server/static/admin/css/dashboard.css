@@ -696,3 +696,134 @@ input:checked + .slider:before {
     max-height: 500px;
     overflow-y: auto;
 }
+
+/* 三魂架构样式 - 与 agent-web 保持一致 */
+.exp-item {
+    position: relative;
+    padding: 14px 16px;
+    background: #fff;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.exp-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.exp-tick-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 20px;
+    padding: 0 6px;
+    background: var(--primary-color);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.exp-time-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.exp-world-time {
+    font-size: 12px;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.exp-real-time {
+    font-size: 11px;
+    color: #95a5a6;
+}
+
+.exp-renhun,
+.exp-tianhun,
+.exp-dihun {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: #f5f6fa;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.exp-soul-label {
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    min-width: 32px;
+    text-align: center;
+}
+
+.exp-soul-content {
+    flex: 1;
+}
+
+/* 人魂 - 紫色 */
+.exp-renhun {
+    border-left: 3px solid #6c5ce7;
+}
+.exp-renhun .exp-soul-label {
+    background: rgba(108, 92, 231, 0.15);
+    color: #6c5ce7;
+}
+
+/* 天魂 - 蓝色 */
+.exp-tianhun {
+    border-left: 3px solid #0984e3;
+}
+.exp-tianhun .exp-soul-label {
+    background: rgba(9, 132, 227, 0.15);
+    color: #0984e3;
+}
+
+/* 地魂 - 橙色 */
+.exp-dihun {
+    border-left: 3px solid #e17055;
+    flex-direction: column;
+    gap: 6px;
+}
+.exp-dihun .exp-soul-label {
+    background: rgba(225, 112, 85, 0.15);
+    color: #e17055;
+    align-self: flex-start;
+}
+
+.exp-dihun-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+}
+
+.exp-dihun-result {
+    font-weight: 600;
+}
+
+.exp-dihun-reason,
+.exp-dihun-narrative {
+    font-size: 11px;
+    color: #666;
+}

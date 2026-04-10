@@ -448,6 +448,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
+        .route("/api/v1/actions", get(handlers::get_actions_handler)) // 获取动作类型映射
         .route(
             "/api/v1/config/reload",
             post(handlers::reload_config_handler),

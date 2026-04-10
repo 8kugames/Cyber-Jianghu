@@ -17,6 +17,21 @@ const STATUS_MAP = {
 };
 function statusOf(s) { return STATUS_MAP[s] || { label: s, treeLabel: s, tag: '' }; }
 
+let actionTypeMap = {};
+async function loadActionTypeMap() {
+    try {
+        const data = await apiGet('/api/v1/actions');
+        if (data && typeof data === 'object') {
+            actionTypeMap = data;
+        }
+    } catch (e) {
+        console.warn('[actions] Failed to load action type map:', e);
+    }
+}
+function getActionTypeDisplay(actionType) {
+    return actionTypeMap[actionType] || actionType;
+}
+
 function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
     if (typeof worldTime === 'string' || typeof worldTime === 'number') {
@@ -694,33 +709,68 @@ async function loadExperiences(page = 1) {
 
                 const worldTimeText = formatWorldTime(exp.world_time);
                 const realTimeText = formatRealTime(exp.created_at);
-                const eventText = (exp.event !== undefined && exp.event !== null) ? exp.event : '-';
                 const actionType = exp.action_type || '';
 
-                // 解析 observer_thought JSON
-                let observerData = null;
+                // 解析各魂数据
+                let renhunNarrative = exp.intent_summary || null;  // 人魂输出
+                let tianhunActionType = exp.action_type || null;    // 天魂翻译结果
+                let tianhunActionData = exp.action_data || null;    // 天魂翻译的详细参数
+                let dihunData = null;                               // 地魂审查结果
+
+                // 解析 observer_thought JSON（地魂输出）
                 if (exp.observer_thought) {
                     try {
-                        observerData = JSON.parse(exp.observer_thought);
+                        dihunData = JSON.parse(exp.observer_thought);
                     } catch (e) {
                         // ignore parse error
                     }
                 }
 
+                // 构建 HTML
                 let html = `<div class="exp-header"><span class="exp-tick-badge">T${exp.tick_id || '-'}</span><span class="exp-time-info"><span class="exp-world-time">${escapeHtml(worldTimeText)}</span><span class="exp-real-time">${escapeHtml(realTimeText)}</span></span></div>`;
                 if (actionType) {
-                    html += `<div class="exp-action-tag">${escapeHtml(actionType)}</div>`;
+                    html += `<div class="exp-action-tag">${escapeHtml(getActionTypeDisplay(actionType))}</div>`;
                 }
-                html += `<div class="exp-body"><div class="exp-content">${escapeHtml(eventText)}</div></div>`;
-                if (observerData && observerData.narrative) {
-                    html += `<div class="exp-review-narrative">${escapeHtml(observerData.narrative)}</div>`;
+
+                // 人魂 - 叙事意图
+                if (renhunNarrative) {
+                    html += `<div class="exp-renhun">
+                        <span class="exp-soul-label">人魂</span>
+                        <span class="exp-soul-content">${escapeHtml(renhunNarrative)}</span>
+                    </div>`;
                 }
-                if (exp.intent_summary) {
-                    html += `<div class="exp-thought">意图: ${escapeHtml(exp.intent_summary)}</div>`;
+
+                // 天魂 - 结构化翻译
+                if (tianhunActionType) {
+                    let actionDataStr = '';
+                    if (tianhunActionData && Object.keys(tianhunActionData).length > 0) {
+                        try {
+                            actionDataStr = ' ' + JSON.stringify(tianhunActionData);
+                        } catch (e) {
+                            actionDataStr = '';
+                        }
+                    }
+                    html += `<div class="exp-tianhun">
+                        <span class="exp-soul-label">天魂</span>
+                        <span class="exp-soul-content">${escapeHtml(tianhunActionType)}${escapeHtml(actionDataStr)}</span>
+                    </div>`;
                 }
-                if (observerData) {
-                    html += `<div class="exp-observer">审查: ${escapeHtml(observerData.result || '-')} - ${escapeHtml(observerData.reason || '-')}</div>`;
+
+                // 地魂 - 三层审查
+                if (dihunData) {
+                    const result = dihunData.result || '-';
+                    const reason = dihunData.reason || '';
+                    const narrative = dihunData.narrative || '';
+                    html += `<div class="exp-dihun">
+                        <span class="exp-soul-label">地魂</span>
+                        <div class="exp-dihun-content">
+                            <div class="exp-dihun-result">${escapeHtml(result)}</div>
+                            ${reason ? `<div class="exp-dihun-reason">${escapeHtml(reason)}</div>` : ''}
+                            ${narrative ? `<div class="exp-dihun-narrative">${escapeHtml(narrative)}</div>` : ''}
+                        </div>
+                    </div>`;
                 }
+
                 div.innerHTML = html;
                 expEl.appendChild(div);
             });
@@ -963,6 +1013,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     loadAttributeMeta().then(async () => {
+        await loadActionTypeMap();
         await loadCharacterList();
         const currentChar = allCharacters.find(c => c.is_current);
 
