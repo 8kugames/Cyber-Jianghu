@@ -16,4 +16,4 @@ pub use chain::CognitiveChain;
 pub use engine::{CognitiveEngine, CognitiveEngineConfig};
 pub use narrative::{NarrativeEngine, PerceptionNarrative};
 pub use stages::{CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput};
-pub use tools::{ActorToolExecutor, create_actor_tools};
+// tools: ActorToolExecutor/create_actor_tools 保留供测试和未来扩展，不公开导出

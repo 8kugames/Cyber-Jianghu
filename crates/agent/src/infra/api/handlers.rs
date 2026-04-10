@@ -594,6 +594,17 @@ pub(super) async fn submit_intent_handler(
 
     let action_type: ActionType = req.action_type.into();
     let action_type_str = action_type.to_string();
+
+    // "narrative" 是三魂架构的内部 sentinel，不应通过 HTTP API 提交
+    if action_type_str == "narrative" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "action_type 'narrative' is an internal sentinel, use a valid action type"
+            })),
+        )
+            .into_response();
+    }
     let intent = if let Some(id_str) = &req.intent_id {
         if let Ok(id) = Uuid::parse_str(id_str) {
             Intent::new_with_id(id, agent_id, tick_id, action_type, req.action_data)
@@ -934,6 +945,17 @@ pub(super) async fn validate_intent_handler(
         return Json(ValidateResponse {
             valid: false,
             reason: Some("action_type cannot be empty".to_string()),
+            rejection_type: None,
+            narrative: None,
+        })
+        .into_response();
+    }
+
+    // "narrative" 是三魂架构的内部 sentinel，不应通过 HTTP API 提交
+    if req.action_type.trim() == "narrative" {
+        return Json(ValidateResponse {
+            valid: false,
+            reason: Some("action_type 'narrative' is an internal sentinel, not a valid action".to_string()),
             rejection_type: None,
             narrative: None,
         })

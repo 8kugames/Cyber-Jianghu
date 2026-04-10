@@ -464,7 +464,7 @@ impl Agent {
         let translator = match &self.intent_translator {
             Some(t) => t,
             None => {
-                warn!("人魂输出了 narrative intent 但未配置天魂翻译器，降级为 idle");
+                tracing::error!("人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle");
                 return Intent::new(
                     intent.agent_id,
                     intent.tick_id,
@@ -541,13 +541,19 @@ impl Agent {
     ///
     /// 人魂不应看到 "item_id 无效" 这样的 meta 信息，
     /// 只需要知道"想做的事没做成"以及"为什么"的叙事化描述。
+    ///
+    /// 使用 RuleEngine 常量前缀匹配，避免 string.contains 紧耦合。
     pub(crate) fn narrativize_rejection(reason: &str) -> String {
-        // RuleEngine 技术性驳回 → 叙事化
-        if reason.contains("吃东西失败") || reason.contains("喝水失败") {
+        use crate::soul::reflector::rule_engine::engine::{
+            ERR_EAT_INVALID_ITEM, ERR_DRINK_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
+        };
+
+        // RuleEngine 技术性驳回 → 叙事化（用常量前缀匹配）
+        if reason.starts_with(ERR_EAT_INVALID_ITEM) || reason.starts_with(ERR_DRINK_INVALID_ITEM) {
             "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。".to_string()
-        } else if reason.contains("移动失败") {
+        } else if reason.starts_with(ERR_MOVE_INVALID_TARGET) {
             "你想要移动到别处，但发现那条路走不通。也许该重新考虑目的地。".to_string()
-        } else if reason.contains("action") && reason.contains("不在合法列表") {
+        } else if reason.contains("不在合法列表") {
             "你想做一件事，但似乎无法如愿。也许该换个行动方式。".to_string()
         } else {
             // LLM 驳回（人设/世界观）已经是自然语言，直接使用
@@ -651,6 +657,13 @@ impl Agent {
         // idle 始终合法
         if intent.action_type.as_str() == "idle" {
             return Ok(());
+        }
+
+        // Fail-safe: "narrative" sentinel 绝不应到达此处（天魂应已翻译）
+        // 如果到达，说明 translate_intent 路径有 bug
+        if intent.action_type.as_str() == "narrative" {
+            tracing::error!("narrative sentinel 泄漏到 validate_action_type（天魂翻译未执行？），强制拒绝");
+            return Err("意图格式异常：narrative 未被翻译".to_string());
         }
 
         let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
