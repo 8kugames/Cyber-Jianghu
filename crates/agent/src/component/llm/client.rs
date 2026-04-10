@@ -348,6 +348,7 @@ impl FallbackLlmClient {
     /// 匹配条件：
     /// - HTTP 403 (AllocationQuota / 额度耗尽)
     /// - HTTP 429 (Rate limit)
+    /// - 空响应（模型返回 null/空内容）
     fn should_fallback(error: &anyhow::Error) -> bool {
         let msg = format!("{:#}", error);
         // HTTP 状态码匹配（直接来自 API 响应）
@@ -357,6 +358,8 @@ impl FallbackLlmClient {
             || msg.contains("AllocationQuota")
             // 连接/请求失败（.context() 包装后的前缀）
             || msg.contains("Failed to send request to LLM API")
+            // 空响应（MiniMax 等模型偶尔返回 content=null）
+            || msg.contains("response content is empty")
     }
 
     /// 执行带 fallback 的调用
