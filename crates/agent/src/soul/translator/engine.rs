@@ -46,6 +46,8 @@ impl IntentTranslator {
     /// * `narrative` - ActorSoul 的自然语言意图（如 "吃一个馒头来充饥"）
     /// * `thought_log` - ActorSoul 的思考过程
     /// * `world_state` - 当前世界状态（含背包物品 ID、可达位置 ID）
+    ///
+    /// 内置 30 秒超时保护，避免单次 LLM 调用吃掉整个 tick deadline。
     pub async fn translate(
         &self,
         narrative: &str,
@@ -56,7 +58,14 @@ impl IntentTranslator {
 
         debug!("[天魂] 翻译叙事意图: {}", narrative);
 
-        let response: TranslationResponse = self.llm_client.complete_json(&prompt).await?;
+        // 30 秒超时保护，外层 lifecycle deadline 也会截断
+        let translate_future = self.llm_client.complete_json::<TranslationResponse>(&prompt);
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            translate_future,
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("[天魂] 翻译超时（30秒），降级为 idle"))??;
 
         debug!(
             "[天魂] 翻译结果: action_type={}, action_data={:?}",

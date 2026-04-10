@@ -13,6 +13,18 @@ use cyber_jianghu_protocol::WorldBuildingRules;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// ============================================================================
+// RuleEngine 错误消息常量
+// ============================================================================
+// 集中定义，供 narrativize_rejection() 引用，避免 string.contains 紧耦合
+
+/// eat item_id 无效
+pub const ERR_EAT_INVALID_ITEM: &str = "吃东西失败：物品ID无效";
+/// drink item_id 无效
+pub const ERR_DRINK_INVALID_ITEM: &str = "喝水失败：物品ID无效";
+/// move target_location 无效
+pub const ERR_MOVE_INVALID_TARGET: &str = "移动失败：目标地点ID无效";
+
 /// 规则引擎
 ///
 /// 协调规则注册表和条件评估器，提供统一的验证入口
@@ -96,7 +108,7 @@ impl RuleEngine {
                     "available_item_ids".to_string(),
                 ),
             ]),
-            "吃东西失败：物品ID无效，请使用背包中物品的精确ID".to_string(),
+            format!("{}，请使用背包中物品的精确ID", ERR_EAT_INVALID_ITEM),
         ));
 
         // drink 的 item_id 必须在背包中
@@ -114,7 +126,7 @@ impl RuleEngine {
                     "available_item_ids".to_string(),
                 ),
             ]),
-            "喝水失败：物品ID无效，请使用背包中物品的精确ID".to_string(),
+            format!("{}，请使用背包中物品的精确ID", ERR_DRINK_INVALID_ITEM),
         ));
 
         // move 的 target_location 必须可达
@@ -132,7 +144,7 @@ impl RuleEngine {
                     "reachable_node_ids".to_string(),
                 ),
             ]),
-            "移动失败：目标地点ID无效，请使用可达地点的精确ID".to_string(),
+            format!("{}，请使用可达地点的精确ID", ERR_MOVE_INVALID_TARGET),
         ));
 
         Self {

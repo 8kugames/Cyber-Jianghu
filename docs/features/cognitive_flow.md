@@ -9,8 +9,8 @@
 
 ### 核心结论
 
-- **双 Soul 架构已落地**：ActorSoul（生成/发送 Intent）+ ReflectorSoul（审查 Intent），单进程内通过 `ReviewStore` 共享内存通信。
-- **远程 Observer 模式已移除**：只保留进程内双 Soul，减少部署复杂度与一致性风险。
+- **三魂架构已落地**：ActorSoul（人魂，生成叙事意图）+ IntentTranslator（天魂，翻译为格式化 Intent）+ ReflectorSoul（地魂，三层审查），单进程内同步串联。
+- **远程 Observer 模式已移除**：只保留进程内三魂，减少部署复杂度与一致性风险。
 - **主通道明确**：Intent 提交 **只能** 走 WebSocket；HTTP API 仅做辅助查询/管理/审查/面板。
 - **硬约束**：`POST /api/v1/intent` **已禁用**（强制 WebSocket，避免 tick 同步问题）。
 
@@ -30,7 +30,7 @@
 | 验证项    | 命令                                                      | 结果          |
 | ------ | ------------------------------------------------------- | ----------- |
 | Build  | `cargo build -p cyber-jianghu-agent`                    | ✅           |
-| Tests  | `cargo test --workspace`                                | ✅           |
+| Tests  | `cargo nextest run --workspace`                         | ✅           |
 | Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | ✅（二进制无新增问题） |
 
 ### Web 控制语义（强约束）
@@ -91,13 +91,14 @@
 │  │  │  2.  process_events() ───────▶ MemoryManager.process_events()           │    │   │
 │  │  │  3.  run_forgetting() ───────▶ MemoryManager.run_forgetting() [每84tick]│    │   │
 │  │  │  4.  get_memory_context() ───▶ MemoryManager.build_llm_context()        │    │   │
-│  │  │  5.  decide_with_validation() ───────────────────────────────┐          │    │   │
+│  │  │  5.  三魂循环 (人魂→天魂→地魂) ──────────────────────────────┐          │    │   │
 │  │  │  │                                                           ▼          │    │   │
 │  │  │  │                                            ┌───────────────────┐   │    │   │
 │  │  │  │                                            │ decision_callback │   │    │   │
-│  │  │  │                                            │ (Cognitive)       │   │    │   │
+│  │  │  │                                            │ (人魂 ActorSoul)   │   │    │   │
 │  │  │  │                                            └───────────────────┘   │    │   │
-│  │  │  5b. validate_with_reflector() ──▶ ReviewStore (ReflectorSoul)      │    │   │
+│  │  │  5b. translate_intent() ──▶ IntentTranslator (天魂)                 │    │   │
+│  │  │  5c. validate_with_reflector() ──▶ ReflectorSoul (地魂)             │    │   │
 │  │  │  6.  send_intent() ───────────────────────────────────────────▶ Intent │    │   │
 │  │  │  6.5 [寿命] LifespanCalculator.process_tick() 检查寿命状态              │    │   │
 │  │  └─────────────────────────────────────────────────────────────────────────┘    │   │
@@ -415,18 +416,16 @@ fn should_log_retry(attempt: u32) -> bool {
 | `RuleEngine`         | 规则引擎验证（含默认冷却规则：speak/move）            |
 | `ValidationRequest`  | 验证请求 (intent, persona, world\_context) |
 | `ValidationResult`   | 验证结果 (Approved/Rejected)               |
-| `ReviewStore`       | 审查存储（支持 Observer Agent 外部审查）        |
+| `ReviewStore`       | 审查存储（供 HTTP API 监控端点查询，远程 Observer 模式已移除）        |
 
 ### 审查结果处理
 
 | 结果                | 处理                    |
 | ----------------- | --------------------- |
-| `Approved`        | 发送原始 Intent           |
-| `Rejected`        | 设置 rejection_reason，循环重试 |
+| `Approved`        | 发送翻译后的 Intent          |
+| `Rejected`        | 叙事化驳回原因，循环重试（最多 3 次） |
 | deadline 超时     | 不发送 intent，等待下个 tick  |
 | 达到最大重试      | 提交 idle intent           |
-| `TimeoutApproved` | 超时后自动通过               |
-| `Pending`         | 继续等待 (每 100ms 检查一次)   |
 
 ***
 

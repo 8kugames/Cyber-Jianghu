@@ -32,9 +32,6 @@ cargo build -p cyber-jianghu-server --release
 # Build agent
 cargo build -p cyber-jianghu-agent
 
-# Run tests (CI uses nextest)
-cargo test --workspace
-
 # Run tests with nextest (faster, used in CI)
 cargo nextest run --workspace
 
