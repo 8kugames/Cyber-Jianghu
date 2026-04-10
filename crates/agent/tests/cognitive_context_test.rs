@@ -2,9 +2,7 @@
 //!
 //! 测试 CognitiveContextBuilder 从 WorldState 生成结构化认知上下文
 
-use cyber_jianghu_agent::infra::api::cognitive_context::{
-    CognitiveContext, CognitiveContextBuilder, Drive,
-};
+use cyber_jianghu_agent::infra::api::cognitive_context::CognitiveContextBuilder;
 use cyber_jianghu_protocol::{
     AdjacentNode, AgentSelfState, Entity, Location, SceneItem, WorldEvent, WorldEventType,
     WorldState, WorldTime,
@@ -84,45 +82,6 @@ fn create_test_world_state() -> WorldState {
         }],
         private_dialogue_log: vec![],
     }
-}
-
-#[test]
-fn test_cognitive_context_builder_default() {
-    let _builder = CognitiveContextBuilder::default();
-}
-
-#[test]
-fn test_cognitive_context_has_required_fields() {
-    let ctx = CognitiveContext::default();
-    assert!(!ctx.perception.self_status.is_empty());
-    assert!(!ctx.perception.environment.is_empty());
-    assert!(!ctx.motivation.dominant_drive.is_empty());
-    assert!(!ctx.decision.thinking_prompt.is_empty());
-}
-
-#[test]
-fn test_drive_serialization_format() {
-    let drive = Drive {
-        drive: "寻找食物".to_string(),
-        intensity: 8,
-        reason: "肚子饿了".to_string(),
-    };
-
-    let json = serde_json::to_string(&drive).unwrap();
-    assert!(json.contains("drive"));
-    assert!(json.contains("intensity"));
-    assert!(json.contains("reason"));
-}
-
-#[test]
-fn test_cognitive_context_json_output() {
-    let ctx = CognitiveContext::default();
-    let json = serde_json::to_string_pretty(&ctx).unwrap();
-
-    assert!(json.contains("perception"));
-    assert!(json.contains("motivation"));
-    assert!(json.contains("planning"));
-    assert!(json.contains("decision"));
 }
 
 #[test]

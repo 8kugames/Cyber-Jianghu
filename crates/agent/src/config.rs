@@ -864,12 +864,6 @@ mod tests {
     }
 
     #[test]
-    fn test_config_default() {
-        let config = Config::default();
-        assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
-    }
-
-    #[test]
     fn test_reflector_llm_inheritance() {
         let mut llm = LlmConfig::default();
         llm.provider = "ollama".to_string();

@@ -17,7 +17,7 @@ use crate::models::Intent;
 use crate::models::WorldState;
 use cyber_jianghu_protocol::AvailableAction;
 
-/// 翻译结果
+/// LLM 翻译响应（JSON 解析用）
 #[derive(Debug, Clone, Deserialize)]
 pub struct TranslationResponse {
     /// 服务端动作类型（eat, move, idle, speak...）
@@ -25,6 +25,22 @@ pub struct TranslationResponse {
     /// 动作参数（含精确 ID）
     #[serde(default)]
     pub action_data: serde_json::Value,
+    /// 提取的说话内容（如果有）
+    #[serde(default)]
+    pub speech_content: Option<String>,
+}
+
+/// 天魂翻译结果
+#[derive(Debug)]
+pub struct TranslationResult {
+    /// 主行动 Intent（走正常 intent 配额）
+    pub intent: Intent,
+    /// 说话 Intent（speak/whisper，与主行动分离，由 lifecycle 决定发送方式）
+    /// - 纯 speak/whisper: 整个 intent 搬到此处，主 intent 变 idle
+    /// - 混合说话+行动: 提取的说话内容包装为 speak intent
+    /// - shout: 不拆分，留在主 intent
+    /// - 无说话: None
+    pub speech_intent: Option<Intent>,
 }
 
 /// 天魂 — 意图翻译器
@@ -40,10 +56,10 @@ impl IntentTranslator {
         Self { llm_client }
     }
 
-    /// 翻译叙事意图为结构化 Intent
+    /// 翻译叙事意图为结构化 Intent + 即时说话
     ///
     /// # Arguments
-    /// * `narrative` - ActorSoul 的自然语言意图（如 "吃一个馒头来充饥"）
+    /// * `narrative` - ActorSoul 的自然语言意图（如 "一边说'你好'，一边吃馒头"）
     /// * `thought_log` - ActorSoul 的思考过程
     /// * `world_state` - 当前世界状态（含背包物品 ID、可达位置 ID）
     ///
@@ -53,7 +69,7 @@ impl IntentTranslator {
         narrative: &str,
         thought_log: &str,
         world_state: &WorldState,
-    ) -> Result<Intent> {
+    ) -> Result<TranslationResult> {
         let prompt = self.build_prompt(narrative, thought_log, world_state);
 
         debug!("[天魂] 翻译叙事意图: {}", narrative);
@@ -68,8 +84,8 @@ impl IntentTranslator {
         .map_err(|_| anyhow::anyhow!("[天魂] 翻译超时（30秒），降级为 idle"))??;
 
         debug!(
-            "[天魂] 翻译结果: action_type={}, action_data={:?}",
-            response.action_type, response.action_data
+            "[天魂] 翻译结果: action_type={}, action_data={:?}, speech_content={:?}",
+            response.action_type, response.action_data, response.speech_content
         );
 
         let agent_id = world_state.agent_id.unwrap_or_default();
@@ -79,8 +95,97 @@ impl IntentTranslator {
             Some(response.action_data)
         };
 
-        Ok(Intent::new(agent_id, world_state.tick_id, response.action_type.as_str(), action_data)
-            .with_thought(thought_log.to_string()))
+        let intent = Intent::new(agent_id, world_state.tick_id, response.action_type.as_str(), action_data)
+            .with_thought(thought_log.to_string());
+
+        // 决定即时 intent 和主 intent 的分配
+        let (main_intent, speech_intent) = self.route_intents(intent, response.speech_content.as_deref(), narrative);
+
+        debug!(
+            "[天魂] 路由结果: main={}/{:?}, speech={:?}",
+            main_intent.action_type,
+            main_intent.action_data,
+            speech_intent.as_ref().map(|i| format!("{}:{:?}", i.action_type, i.action_data))
+        );
+
+        Ok(TranslationResult { intent: main_intent, speech_intent })
+    }
+
+    /// 路由：决定哪个 intent 走即时通道，哪个走主配额
+    ///
+    /// 规则：
+    /// - 纯 speak/whisper: 整个 intent → 即时，主 intent 变 idle
+    /// - shout: 留在主 intent（大喊占配额）
+    /// - 混合（说话+行动）: 提取说话 → 即时 speak intent，行动留在主 intent
+    /// - 无说话: immediate = None
+    fn route_intents(
+        &self,
+        intent: Intent,
+        llm_speech: Option<&str>,
+        narrative: &str,
+    ) -> (Intent, Option<Intent>) {
+        let action_type = intent.action_type.as_str();
+
+        // 纯 speak/whisper → 整个走即时通道
+        if matches!(action_type, "speak" | "whisper") {
+            debug!("[天魂] 纯 {} → 即时通道", action_type);
+            let idle_intent = Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                .with_thought(intent.thought_log.clone().unwrap_or_default());
+            return (idle_intent, Some(intent));
+        }
+
+        // shout 保留在主 intent（大喊占配额）
+        if action_type == "shout" {
+            return (intent, None);
+        }
+
+        // 混合场景：提取说话内容
+        let speech = self.extract_speech(llm_speech, narrative);
+        if let Some(content) = speech {
+            let speak_intent = Intent::new(
+                intent.agent_id,
+                intent.tick_id,
+                "speak",
+                Some(serde_json::json!({"content": content})),
+            );
+            return (intent, Some(speak_intent));
+        }
+
+        (intent, None)
+    }
+
+    /// 从叙事中提取说话内容
+    ///
+    /// 策略：
+    /// 1. 优先使用 LLM 返回的 speech_content
+    /// 2. Fallback: 正则从 narrative 中提取引号内容
+    fn extract_speech(
+        &self,
+        llm_speech: Option<&str>,
+        narrative: &str,
+    ) -> Option<String> {
+        // 优先使用 LLM 提取的结果
+        if let Some(speech) = llm_speech {
+            let trimmed = speech.trim();
+            if !trimmed.is_empty() {
+                debug!("[天魂] LLM 提取说话内容: {}", trimmed);
+                return Some(trimmed.to_string());
+            }
+        }
+
+        // Fallback: 正则从叙事中提取（一边说'xxx' / 说着'xxx'）
+        if let Ok(re) = regex::Regex::new(r#"说[着了]?['"「]([^'"」]+)['"」]"#)
+            && let Some(caps) = re.captures(narrative)
+            && let Some(m) = caps.get(1)
+        {
+            let speech = m.as_str().to_string();
+            if !speech.is_empty() {
+                debug!("[天魂] 正则 fallback 提取说话内容: {}", speech);
+                return Some(speech);
+            }
+        }
+
+        None
     }
 
     fn build_prompt(
@@ -168,9 +273,20 @@ impl IntentTranslator {
 4. target_agent_id 必须使用附近的人中的 agent_id
 5. 没有对应动作时输出 idle
 6. action_data 中的 key 必须与动作表的"必填字段"严格匹配
+7. 如果叙事中包含说话内容（如"一边说'xxx'，一边做Y"），将说话内容提取到 speech_content 字段，action_type 设为说话时的物理动作
+8. 如果叙事纯说话无动作，action_type 设为 "speak"，content 放入 action_data.content，speech_content 留空
+
+## 关键区分：eat/drink vs pickup
+- **eat**（吃）：消耗背包中的食物（如馒头、肉干）→ item_id 必须在背包物品中
+- **drink**（喝）：消耗背包中的饮品（如水壶、茶）→ item_id 必须在背包物品中
+- **pickup**（捡）：从地面拾取物品到背包 → item_id 必须在地面物品中
+- 角色"想吃东西/喝水/充饥/解渴" → 优先 eat/drink（物品在背包时）
+- 角色"想捡起地上的东西" → pickup
+- 背包有水却说"喝水"→ drink（不是 pickup！）
+- 背包有馒头却说"吃馒头"→ eat（不是 pickup！）
 
 ## 输出格式
-{{"action_type": "动作名", "action_data": {{}}}}"#,
+{{"action_type": "动作名", "action_data": {{}}, "speech_content": "说话内容或空字符串"}}"#,
             narrative = narrative,
             thought_log = thought_log,
             inventory = inventory,

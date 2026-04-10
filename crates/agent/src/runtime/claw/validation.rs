@@ -254,17 +254,6 @@ async fn send_server_error(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_ws_validation_request_struct() {
-        // 验证结构体字段存在
-        // 实际功能测试需要 WebSocket mock，在集成测试中覆盖
-    }
-
-    #[test]
-    fn test_validation_task_params_struct() {
-        // 验证参数结构体字段存在
-    }
-
     // ========================================================================
     // CAS 去重逻辑测试
     // ========================================================================
