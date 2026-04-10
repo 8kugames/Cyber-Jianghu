@@ -3064,6 +3064,18 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
+/// 获取动作类型到中文描述的映射
+///
+/// GET /api/v1/actions - 返回 action_type -> description 映射
+pub(super) async fn get_actions_handler() -> impl IntoResponse {
+    let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
+    let map: std::collections::HashMap<String, String> = actions
+        .into_iter()
+        .map(|a| (a.action, a.description))
+        .collect();
+    Json(map)
+}
+
 /// GET /api/v1/setup/status - 返回引导状态
 pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let config = match crate::config::Config::from_file(&state.config_path) {

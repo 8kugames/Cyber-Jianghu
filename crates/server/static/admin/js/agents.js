@@ -275,39 +275,63 @@ function renderExperiences(data) {
     var expHtml = data.experiences.map(function (exp) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
         var actionData = exp.action_data || {};
-        var actionSummary = formatActionSummary(exp.action_type, actionData);
 
-        var narrativeBlocks = '';
+        var renhunContent = '';
+        var tianhunContent = '';
+        var dihunContent = '';
 
+        // 人魂 - 叙事意图
         if (exp.thought_log) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #6c5ce7; background: #f8f4ff; padding: 8px; border-radius: 4px; border-left: 2px solid #6c5ce7;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F916; ActorSoul 思考:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.thought_log) + '</div></div>';
+            renhunContent = '<div class="exp-renhun">' +
+                '<span class="exp-soul-label">人魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(exp.thought_log) + '</span></div>';
         }
 
+        // 天魂 - 结构化翻译
+        if (exp.action_type || (actionData && Object.keys(actionData).length > 0)) {
+            tianhunContent = '<div class="exp-tianhun">' +
+                '<span class="exp-soul-label">天魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(exp.action_type || '-') + (actionData && Object.keys(actionData).length > 0 ? ' ' + escapeHtml(JSON.stringify(actionData)) : '') + '</span></div>';
+        }
+
+        // 地魂 - 三层审查
         if (exp.observer_thought) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #e17055; background: #fff4f0; padding: 8px; border-radius: 4px; border-left: 2px solid #e17055;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F9D9; ReflectorSoul 审查:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.observer_thought) + '</div></div>';
+            var observerData = null;
+            try {
+                observerData = JSON.parse(exp.observer_thought);
+            } catch (e) {
+                observerData = null;
+            }
+
+            if (observerData) {
+                var result = observerData.result || '-';
+                var reason = observerData.reason || '';
+                var narrative = observerData.narrative || '';
+                dihunContent = '<div class="exp-dihun">' +
+                    '<span class="exp-soul-label">地魂</span>' +
+                    '<div class="exp-dihun-content">' +
+                    '<div class="exp-dihun-result">' + escapeHtml(result) + '</div>' +
+                    (reason ? '<div class="exp-dihun-reason">' + escapeHtml(reason) + '</div>' : '') +
+                    (narrative ? '<div class="exp-dihun-narrative">' + escapeHtml(narrative) + '</div>' : '') +
+                    '</div></div>';
+            } else {
+                dihunContent = '<div class="exp-dihun">' +
+                    '<span class="exp-soul-label">地魂</span>' +
+                    '<span class="exp-soul-content">' + escapeHtml(exp.observer_thought) + '</span></div>';
+            }
         }
 
-        if (exp.narrative) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #00b894; background: #f0fff4; padding: 8px; border-radius: 4px; border-left: 2px solid #00b894;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F4DD; 叙事:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.narrative) + '</div></div>';
-        }
-
-        return '<div style="border-left: 3px solid var(--accent-color); padding: 12px; margin-bottom: 12px; background: #f8f9fa; border-radius: 0 8px 8px 0;">' +
-            '<div style="display: flex; justify-content: space-between; margin-bottom: 8px;">' +
-            '<span style="font-weight: 600; color: var(--primary-color);">' + escapeHtml(exp.action_type) + '</span>' +
-            '<span style="font-size: 12px; color: #999;">' + time + '</span></div>' +
-            '<div style="font-size: 14px; margin-bottom: 6px;">' + actionSummary + '</div>' +
-            narrativeBlocks +
-            (exp.result ? '<div style="font-size: 13px; color: #27ae60; font-style: italic; background: white; padding: 8px; border-radius: 4px; margin-top: 8px;"><strong>结果:</strong> ' + escapeHtml(exp.result) + '</div>' : '') +
+        return '<div class="exp-item">' +
+            '<div class="exp-header">' +
+            '<span class="exp-tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+            '<span class="exp-time-info">' +
+            '<span class="exp-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
+            '<span class="exp-real-time">' + time + '</span></span></div>' +
+            renhunContent + tianhunContent + dihunContent +
             '</div>';
     }).join("");
 
-    return '<div class="experiences-list">' + expHtml + '</div>';
+    return '<div class="experience-list">' + expHtml + '</div>';
 }
 
 function escapeHtml(text) {
