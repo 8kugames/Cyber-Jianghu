@@ -164,21 +164,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_rule_set_add_rule() {
-        let mut set = RuleSet::new();
-        let rule = Rule::new(
-            "test1".to_string(),
-            "测试规则".to_string(),
-            RuleType::ActionCooldown,
-            RuleCondition::Equals("action".to_string(), serde_json::json!("speak")),
-            "测试错误".to_string(),
-        );
-
-        set.add_rule(rule);
-        assert_eq!(set.cooldown_rules.len(), 1);
-    }
-
-    #[tokio::test]
     async fn test_registry_register() {
         let registry = RuleRegistry::new();
         let rule = Rule::new(

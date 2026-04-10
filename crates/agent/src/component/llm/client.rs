@@ -91,24 +91,106 @@ pub trait LlmClientExt {
     ) -> Result<T>;
 }
 
+/// 剥离 LLM 响应中的 thinking/reasoning 标签
+///
+/// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
+/// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
+fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
+    // 常见 thinking 标签模式
+    let patterns = ["<think_tag>", "<think/>", "<think/>>", "<reasoning>", "<thought>"];
+    let lower = response.to_ascii_lowercase();
+
+    // 查找第一个 thinking 标签
+    let first_tag_pos = patterns
+        .iter()
+        .filter_map(|tag| lower.find(tag))
+        .min();
+
+    let Some(tag_start) = first_tag_pos else {
+        return std::borrow::Cow::Borrowed(response);
+    };
+
+    // 找到 thinking 内容的结束位置
+    let close_patterns = ["</think_tag>", "</think/>", "</reasoning>", "</thought>"];
+    let content_start = lower[tag_start..]
+        .find('>')
+        .map(|p| tag_start + p + 1)
+        .unwrap_or(tag_start);
+
+    let after_thinking = close_patterns
+        .iter()
+        .filter_map(|tag| lower.find(tag))
+        .map(|pos| {
+            // 跳过 close tag 到其末尾
+            pos + lower[pos..].find('>').map(|p| p + 1).unwrap_or(pos)
+        })
+        .filter(|&pos| pos > content_start)
+        .min()
+        .unwrap_or(content_start);
+
+    std::borrow::Cow::Owned(response[after_thinking..].to_string())
+}
+
 /// 从 LLM 响应中提取 JSON 字符串
-fn extract_json_str(response: &str) -> &str {
+///
+/// 使用大括号计数找第一个完整 JSON 对象，避免 LLM 在 JSON 后输出额外内容
+/// 导致 "trailing characters" 解析错误（如 MiniMax 输出多行 JSON）。
+fn extract_json_str(response: &str) -> std::borrow::Cow<'_, str> {
+    // 先剥离 thinking tags
+    let cleaned = strip_thinking_tags(response);
+
+    let response = cleaned.as_ref();
+
     if let Some(start) = response.find("```json") {
         let after_marker = start + 7;
         if let Some(end) = response[after_marker..].find("```") {
-            response[after_marker..after_marker + end].trim()
+            std::borrow::Cow::Owned(response[after_marker..after_marker + end].trim().to_string())
         } else {
-            response[after_marker..].trim()
+            std::borrow::Cow::Owned(response[after_marker..].trim().to_string())
         }
-    } else if let Some(start) = response.find('{') {
-        if let Some(end) = response.rfind('}') {
-            &response[start..=end]
-        } else {
-            response.trim()
-        }
+    } else if let Some(end) = find_first_json_end(response) {
+        std::borrow::Cow::Owned(response[..=end].to_string())
     } else {
-        response.trim()
+        std::borrow::Cow::Owned(response.trim().to_string())
     }
+}
+
+/// 用大括号计数找第一个完整 JSON 对象的结束位置
+///
+/// 从第一个 `{` 开始，逐字符追踪大括号深度（跳过字符串内的大括号），
+/// 当深度归零时即为第一个完整 JSON 对象的末尾。
+fn find_first_json_end(s: &str) -> Option<usize> {
+    let start = s.find('{')?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (i, &c) in s.as_bytes().iter().enumerate().skip(start) {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if c == b'\\' && in_string {
+            escape = true;
+            continue;
+        }
+        if c == b'"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        if c == b'{' {
+            depth += 1;
+        } else if c == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 /// 尝试修复截断的 JSON 字符串
@@ -147,10 +229,10 @@ fn try_fix_truncated_json(json_str: &str) -> String {
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
     let json_str = extract_json_str(response);
 
-    match serde_json::from_str::<D>(json_str) {
+    match serde_json::from_str::<D>(&json_str) {
         Ok(parsed) => Ok(parsed),
         Err(first_err) => {
-            let fixed = try_fix_truncated_json(json_str);
+            let fixed = try_fix_truncated_json(&json_str);
 
             match serde_json::from_str::<D>(&fixed) {
                 Ok(parsed) => {

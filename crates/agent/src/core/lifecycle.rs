@@ -604,7 +604,14 @@ impl super::Agent {
                         if final_intent.is_some() { break; }
 
                         // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化
-                        let intent = self.translate_intent(raw_intent, &world_state).await;
+                        let translation = self.translate_intent(raw_intent, &world_state).await;
+
+                        // 5b'. 如果天魂拆分出说话 intent，走即时通道
+                        if let Some(speech) = &translation.speech_intent {
+                            self.send_immediate_intent(speech).await;
+                        }
+
+                        let intent = translation.intent;
 
                         // 5c. 地魂 (ReflectorSoul) 审查 — 三层验证
                         match self.validate_with_reflector(intent, &world_state).await? {
@@ -718,6 +725,36 @@ impl super::Agent {
                     }
                 }
             }
+        }
+    }
+
+    /// 发送即时 Intent（通过 immediate_msg_tx，不走 intent 配额）
+    ///
+    /// 天魂路由出的 speak/whisper 或混合说话走此通道，
+    /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
+    async fn send_immediate_intent(&self, intent: &Intent) {
+        use cyber_jianghu_protocol::ClientMessage;
+
+        let msg = ClientMessage::Intent {
+            intent_id: Some(intent.intent_id),
+            tick_id: intent.tick_id,
+            agent_id: Some(intent.agent_id),
+            thought_log: intent.thought_log.clone(),
+            action_type: intent.action_type.to_string(),
+            action_data: intent.action_data.clone(),
+            priority: 10, // 即时高优先级
+        };
+
+        if let Err(e) = self.client.send_immediate_message(msg).await {
+            warn!(
+                "[天魂] 即时 intent 发送失败 ({}): {}",
+                intent.action_type, e
+            );
+        } else {
+            info!(
+                "[天魂] 即时 intent 已发送: {} {:?}",
+                intent.action_type, intent.action_data
+            );
         }
     }
 

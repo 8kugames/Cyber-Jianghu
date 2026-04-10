@@ -370,6 +370,19 @@ impl DirectLlmClient {
             .context("Failed to build HTTP client")
     }
 
+    /// 根据模型名称返回额外请求参数
+    ///
+    /// 部分 LLM（如 kimi）要求特定参数：
+    /// - kimi 系列：非流式调用必须 `enable_thinking: false`
+    fn extra_body_for_model(model: &str) -> Option<serde_json::Value> {
+        let lower = model.to_ascii_lowercase();
+        if lower.contains("kimi") {
+            Some(serde_json::json!({"enable_thinking": false}))
+        } else {
+            None
+        }
+    }
+
     /// 发送 OpenAI 兼容 API 请求（公共 HTTP 逻辑）
     async fn send_request(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
         let client = self.build_http_client()?;
@@ -439,6 +452,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
+            extra_body: Self::extra_body_for_model(&self.config.get_model_with_default()),
         };
 
         let response_data = self.send_request(&request).await?;
@@ -475,6 +489,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
+            extra_body: Self::extra_body_for_model(&self.config.get_model_with_default()),
         };
 
         debug!("Calling OpenAI-compatible API (system+user)");
@@ -518,6 +533,7 @@ impl DirectLlmClient {
                 max_tokens: Some(self.config.max_tokens),
                 tools: Some(tools.to_vec()),
                 tool_choice: Some(serde_json::json!("auto")),
+                extra_body: Self::extra_body_for_model(&model),
             };
 
             let response_data = self.send_request(&request).await?;

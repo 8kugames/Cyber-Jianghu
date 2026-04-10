@@ -93,13 +93,13 @@ impl RuleEngine {
     pub fn with_default_config() -> Self {
         let mut rule_set = RuleSet::new();
 
-        // eat 的 item_id 必须在背包中
+        // eat 的 item_id 必须在背包中（蕴含式：非 eat 放行，是 eat 则校验 item_id）
         rule_set.add_rule(Rule::new(
             "valid_item_id_eat".to_string(),
             "eat 的 item_id 必须在背包中".to_string(),
             super::types::RuleType::ResourceConstraint,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
                     serde_json::json!("eat"),
                 ),
@@ -111,13 +111,13 @@ impl RuleEngine {
             format!("{}，请使用背包中物品的精确ID", ERR_EAT_INVALID_ITEM),
         ));
 
-        // drink 的 item_id 必须在背包中
+        // drink 的 item_id 必须在背包中（蕴含式）
         rule_set.add_rule(Rule::new(
             "valid_item_id_drink".to_string(),
             "drink 的 item_id 必须在背包中".to_string(),
             super::types::RuleType::ResourceConstraint,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
                     serde_json::json!("drink"),
                 ),
@@ -129,13 +129,13 @@ impl RuleEngine {
             format!("{}，请使用背包中物品的精确ID", ERR_DRINK_INVALID_ITEM),
         ));
 
-        // move 的 target_location 必须可达
+        // move 的 target_location 必须可达（蕴含式）
         rule_set.add_rule(Rule::new(
             "valid_target_node_move".to_string(),
             "move 的 target_location 必须可达".to_string(),
             super::types::RuleType::StateRestriction,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
                     serde_json::json!("move"),
                 ),

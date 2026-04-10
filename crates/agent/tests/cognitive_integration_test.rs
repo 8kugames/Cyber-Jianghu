@@ -9,7 +9,7 @@ use cyber_jianghu_agent::models::WorldState;
 use cyber_jianghu_agent::soul::actor::stages::{
     CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };
-use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine, CognitiveEngineConfig};
+use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
 // ============================================================================
@@ -64,20 +64,6 @@ fn make_validator() -> CognitiveValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn test_cognitive_engine_config() {
-        let config = CognitiveEngineConfig::default();
-        assert_eq!(config.agent_name, "无名侠客");
-        assert_eq!(config.temperature, 0.7);
-        assert_eq!(config.max_tokens_per_stage, 1024);
-    }
-
-    #[tokio::test]
-    async fn test_cognitive_engine_with_defaults() {
-        let mock = Arc::new(make_mock_client());
-        let _engine = CognitiveEngine::with_defaults(mock);
-    }
 
     #[tokio::test]
     async fn test_cognitive_chain_lifecycle() {

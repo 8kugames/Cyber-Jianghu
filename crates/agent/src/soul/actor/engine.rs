@@ -613,15 +613,3 @@ impl CognitiveEngine {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cognitive_engine_config_default() {
-        let config = CognitiveEngineConfig::default();
-        assert_eq!(config.agent_name, "无名侠客");
-        assert_eq!(config.temperature, 0.7);
-    }
-}

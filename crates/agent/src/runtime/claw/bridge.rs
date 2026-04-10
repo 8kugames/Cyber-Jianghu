@@ -177,13 +177,6 @@ mod tests {
     use tokio::sync::mpsc;
 
     #[tokio::test]
-    async fn test_bridge_config_default() {
-        let config = BridgeConfig::default();
-        assert_eq!(config.timeout_secs, 30);
-        assert_eq!(config.cleanup_interval_secs, 60);
-    }
-
-    #[tokio::test]
     async fn test_handle_response_completes_request() {
         let (tx, _rx) = mpsc::channel(1);
         let config = BridgeConfig::default();

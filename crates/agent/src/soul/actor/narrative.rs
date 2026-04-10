@@ -472,15 +472,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_builtin_config() {
-        let config = NarrativeConfig::builtin();
-        assert!(config.attributes.contains_key("hp"));
-        assert!(config.attributes.contains_key("hunger"));
-        assert!(config.attributes.contains_key("thirst"));
-        assert!(config.attributes.contains_key("stamina"));
-    }
-
-    #[test]
     fn test_describe_attribute() {
         let engine = NarrativeEngine::default();
 

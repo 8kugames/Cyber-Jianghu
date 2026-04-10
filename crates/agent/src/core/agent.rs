@@ -27,6 +27,7 @@ use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{PersonaInfo, Validator};
 use crate::soul::translator::IntentTranslator;
+use crate::soul::translator::TranslationResult;
 
 use super::builder::AgentBuilder;
 use super::{DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
@@ -455,22 +456,28 @@ impl Agent {
         &self,
         intent: Intent,
         world_state: &WorldState,
-    ) -> Intent {
+    ) -> TranslationResult {
         // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
         if intent.action_type.as_str() != "narrative" {
-            return intent;
+            return TranslationResult {
+                intent,
+                speech_intent: None,
+            };
         }
 
         let translator = match &self.intent_translator {
             Some(t) => t,
             None => {
                 tracing::error!("人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle");
-                return Intent::new(
-                    intent.agent_id,
-                    intent.tick_id,
-                    "idle",
-                    None,
-                ).with_thought(intent.thought_log.unwrap_or_default());
+                return TranslationResult {
+                    intent: Intent::new(
+                        intent.agent_id,
+                        intent.tick_id,
+                        "idle",
+                        None,
+                    ).with_thought(intent.thought_log.unwrap_or_default()),
+                    speech_intent: None,
+                };
             }
         };
 
@@ -485,24 +492,32 @@ impl Agent {
 
         if narrative.is_empty() {
             warn!("人魂 narrative intent 缺少叙事文本，降级为 idle");
-            return Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                .with_thought(thought_log.to_string());
+            return TranslationResult {
+                intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                    .with_thought(thought_log.to_string()),
+                speech_intent: None,
+            };
         }
 
         info!("[天魂] 翻译叙事意图: {}", narrative);
 
         match translator.translate(narrative, thought_log, world_state).await {
-            Ok(translated) => {
+            Ok(result) => {
                 info!(
-                    "[天魂] 翻译完成: action_type={}, action_data={:?}",
-                    translated.action_type, translated.action_data
+                    "[天魂] 翻译完成: action_type={}, action_data={:?}, speech={:?}",
+                    result.intent.action_type,
+                    result.intent.action_data,
+                    result.speech_intent.as_ref().map(|i| i.action_type.to_string())
                 );
-                translated
+                result
             }
             Err(e) => {
                 warn!("[天魂] 翻译失败: {}, 降级为 idle", e);
-                Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                    .with_thought(format!("意图翻译失败: {}", e))
+                TranslationResult {
+                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(format!("意图翻译失败: {}", e)),
+                    speech_intent: None,
+                }
             }
         }
     }
