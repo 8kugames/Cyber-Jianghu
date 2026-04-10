@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>群像传记 | Cyber-Jianghu</title>
+    <style>
+        :root {
+            --primary-color: #8b5cf6;
+            --bg-dark: #0f0f0f;
+            --bg-card: #1a1a1a;
+            --text-primary: #f5f5f5;
+            --text-secondary: #a0a0a0;
+            --border-color: #2a2a2a;
+            --accent-gold: #d4af37;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--accent-gold), #fff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .back-btn {
+            padding: 8px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            border-color: var(--primary-color);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .search-input {
+            padding: 10px 15px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 6px;
+            font-size: 14px;
+            min-width: 250px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #7c3aed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--primary-color);
+        }
+
+        .chronicles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .chronicle-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .chronicle-card:hover {
+            border-color: var(--primary-color);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(139, 92, 246, 0.15);
+        }
+
+        .chronicle-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .chronicle-id {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--accent-gold);
+        }
+
+        .chronicle-season {
+            padding: 4px 10px;
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--primary-color);
+            border-radius: 20px;
+            font-size: 12px;
+        }
+
+        .chronicle-period {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .chronicle-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .chronicle-preview {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .chronicle-status {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-top: 12px;
+        }
+
+        .status-template {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+
+        .status-llm {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--primary-color);
+        }
+
+        .status-both {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+
+        /* Detail Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 900px;
+            padding: 30px;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-header h2 {
+            font-size: 24px;
+            color: var(--accent-gold);
+        }
+
+        .close-btn {
+            font-size: 28px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .detail-section {
+            margin-bottom: 25px;
+        }
+
+        .detail-section h3 {
+            font-size: 16px;
+            color: var(--primary-color);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .detail-item {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+
+        .detail-item .label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .detail-item .value {
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .narrative {
+            background: rgba(212, 175, 55, 0.05);
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            border-radius: 8px;
+            padding: 20px;
+            white-space: pre-wrap;
+            font-size: 14px;
+            line-height: 1.8;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .highlight-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .highlight-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+
+        .highlight-type {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .type-death { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .type-dialogue { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+        .type-combat { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .type-social { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+
+        .highlight-desc {
+            flex: 1;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .agent-card {
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+
+        .agent-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .agent-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .agent-died {
+            color: #ef4444;
+            font-weight: 500;
+        }
+
+        .tab-nav {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--primary-color);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        @media (max-width: 768px) {
+            .chronicles-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>群像传记</h1>
+        <button class="back-btn" onclick="history.back()">返回仪表盘</button>
+    </header>
+
+    <div class="controls">
+        <input type="text" class="search-input" placeholder="搜索传记内容..." id="search-input" oninput="filterChronicles()">
+        <button class="btn btn-primary" onclick="generateChronicle()">手动生成</button>
+        <button class="btn btn-secondary" onclick="loadChronicles()">刷新</button>
+    </div>
+
+    <div id="chronicles-container" class="chronicles-grid">
+        <div class="loading">加载中...</div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">群像传记详情</h2>
+                <span class="close-btn" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modal-body">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/dashboard';
+        let chronicles = [];
+        let authToken = localStorage.getItem('admin_token') || '';
+
+        function getHeaders() {
+            return {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            };
+        }
+
+        async function loadChronicles() {
+            try {
+                const res = await fetch(`${API_BASE}/chronicles`, { headers: getHeaders() });
+                if (res.status === 401) {
+                    alert('请先登录');
+                    window.location.href = '/admin/';
+                    return;
+                }
+                const data = await res.json();
+                chronicles = data.chronicles || [];
+                renderChronicles(chronicles);
+            } catch (e) {
+                document.getElementById('chronicles-container').innerHTML =
+                    '<div class="empty-state">加载失败，请刷新重试</div>';
+            }
+        }
+
+        function renderChronicles(list) {
+            const container = document.getElementById('chronicles-container');
+            if (!list.length) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+                        </svg>
+                        <p>暂无群像传记</p>
+                        <p style="font-size: 13px; margin-top: 8px;">每7个游戏日会自动生成</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = list.map(c => `
+                <div class="chronicle-card" onclick="openChronicle('${c.chronicle_id}')">
+                    <div class="chronicle-header">
+                        <span class="chronicle-id">${c.chronicle_id}</span>
+                        <span class="chronicle-season">${c.season}</span>
+                    </div>
+                    <div class="chronicle-period">第${c.game_day_start}日 - 第${c.game_day_end}日</div>
+                    <div class="chronicle-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">${c.agent_count}</div>
+                            <div class="stat-label">江湖儿女</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${c.actions_count}</div>
+                            <div class="stat-label">行动次数</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${c.deaths}</div>
+                            <div class="stat-label">陨落</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${c.births}</div>
+                            <div class="stat-label">新生</div>
+                        </div>
+                    </div>
+                    <div class="chronicle-preview">${escapeHtml(c.summary_preview)}</div>
+                    <span class="chronicle-status status-${c.status}">${statusText(c.status)}</span>
+                </div>
+            `).join('');
+        }
+
+        function statusText(status) {
+            switch(status) {
+                case 'template': return '模板生成';
+                case 'llm': return 'LLM 生成中';
+                case 'both': return '完整版';
+                default: return status;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function filterChronicles() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            if (!query) {
+                renderChronicles(chronicles);
+                return;
+            }
+            const filtered = chronicles.filter(c =>
+                c.summary_preview.toLowerCase().includes(query) ||
+                c.chronicle_id.toLowerCase().includes(query) ||
+                c.season.toLowerCase().includes(query)
+            );
+            renderChronicles(filtered);
+        }
+
+        async function openChronicle(id) {
+            try {
+                const res = await fetch(`${API_BASE}/chronicles/${id}`, { headers: getHeaders() });
+                const c = await res.json();
+                showModal(c);
+            } catch (e) {
+                alert('加载失败');
+            }
+        }
+
+        function showModal(c) {
+            document.getElementById('modal-title').textContent = `${c.chronicle_id} · ${c.season}季`;
+            document.getElementById('modal-body').innerHTML = `
+                <div class="detail-section">
+                    <h3>基本统计</h3>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="label">周期</div>
+                            <div class="value">第${c.game_day_start} - ${c.game_day_end}日</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">江湖儿女</div>
+                            <div class="value">${c.agent_count}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">行动次数</div>
+                            <div class="value">${c.actions_count}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">陨落人数</div>
+                            <div class="value">${c.deaths}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">新生人数</div>
+                            <div class="value">${c.births}</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="label">状态</div>
+                            <div class="value">${statusText(c.status)}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tab-nav">
+                    <button class="tab-btn active" onclick="switchTab('template')">模板版本</button>
+                    ${c.summary_llm ? '<button class="tab-btn" onclick="switchTab(\'llm\')">LLM 版本</button>' : ''}
+                </div>
+
+                <div id="tab-template" class="tab-content active">
+                    <div class="narrative">${escapeHtml(c.summary)}</div>
+                </div>
+                ${c.summary_llm ? `
+                <div id="tab-llm" class="tab-content">
+                    <div class="narrative">${escapeHtml(c.summary_llm)}</div>
+                </div>
+                ` : ''}
+
+                ${c.highlights && c.highlights.length > 0 ? `
+                <div class="detail-section" style="margin-top: 25px;">
+                    <h3>关键事件</h3>
+                    <div class="highlight-list">
+                        ${c.highlights.map(h => `
+                            <div class="highlight-item">
+                                <span class="highlight-type type-${h.event_type}">${eventTypeName(h.event_type)}</span>
+                                <span class="highlight-desc">${escapeHtml(h.description)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                ${c.agent_summaries && c.agent_summaries.length > 0 ? `
+                <div class="detail-section" style="margin-top: 25px;">
+                    <h3>江湖群像</h3>
+                    <div class="agents-grid">
+                        ${c.agent_summaries.map(a => `
+                            <div class="agent-card">
+                                <div class="agent-name">${escapeHtml(a.name)}</div>
+                                <div class="agent-info">
+                                    <div>位置: ${escapeHtml(a.location)}</div>
+                                    <div>行动: ${a.actions_count}次</div>
+                                    ${a.died_this_period ? '<div class="agent-died">已于本周期陨落</div>' : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+            `;
+            document.getElementById('detail-modal').classList.add('active');
+        }
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById(`tab-${tab}`).classList.add('active');
+        }
+
+        function eventTypeName(type) {
+            const names = {
+                death: '陨落',
+                dialogue: '对话',
+                combat: '战斗',
+                social: '交际'
+            };
+            return names[type] || type;
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.remove('active');
+        }
+
+        async function generateChronicle() {
+            if (!confirm('确定要手动生成一份群像传记吗？')) return;
+            try {
+                const res = await fetch(`${API_BASE}/chronicles/generate`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({})
+                });
+                if (res.ok) {
+                    alert('生成成功');
+                    loadChronicles();
+                } else {
+                    alert('生成失败');
+                }
+            } catch (e) {
+                alert('生成失败: ' + e.message);
+            }
+        }
+
+        // Close modal on escape
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        // Load on mount
+        loadChronicles();
+    </script>
+</body>
+</html>
