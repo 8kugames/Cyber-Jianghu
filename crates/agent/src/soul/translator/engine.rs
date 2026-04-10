@@ -331,3 +331,151 @@ impl IntentTranslator {
         table
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::llm::MockLlmClient;
+    use uuid::Uuid;
+
+    fn make_translator() -> IntentTranslator {
+        IntentTranslator::new(std::sync::Arc::new(MockLlmClient::with_response("")))
+    }
+
+    fn make_intent(action_type: &str, action_data: Option<serde_json::Value>) -> Intent {
+        Intent::new(Uuid::new_v4(), 42, action_type, action_data)
+            .with_thought("test thought".to_string())
+    }
+
+    // ========================================================================
+    // route_intents tests
+    // ========================================================================
+
+    #[test]
+    fn test_route_pure_speak_to_immediate() {
+        let translator = make_translator();
+        let intent = make_intent("speak", Some(serde_json::json!({"content": "你好"})));
+        let (main, speech) = translator.route_intents(intent, None, "对大家说你好");
+
+        assert_eq!(main.action_type.as_str(), "idle");
+        assert!(main.action_data.is_none());
+        assert!(speech.is_some());
+        let sp = speech.unwrap();
+        assert_eq!(sp.action_type.as_str(), "speak");
+        assert_eq!(sp.action_data.unwrap()["content"], "你好");
+    }
+
+    #[test]
+    fn test_route_pure_whisper_to_immediate() {
+        let translator = make_translator();
+        let intent = make_intent("whisper", Some(serde_json::json!({"content": "秘密", "target_agent_id": "abc"})));
+        let (main, speech) = translator.route_intents(intent, None, "悄悄说秘密");
+
+        assert_eq!(main.action_type.as_str(), "idle");
+        assert!(speech.is_some());
+        let sp = speech.unwrap();
+        assert_eq!(sp.action_type.as_str(), "whisper");
+    }
+
+    #[test]
+    fn test_route_shout_stays_main() {
+        let translator = make_translator();
+        let intent = make_intent("shout", Some(serde_json::json!({"content": "救命"})));
+        let (main, speech) = translator.route_intents(intent, None, "大喊救命");
+
+        assert_eq!(main.action_type.as_str(), "shout");
+        assert!(speech.is_none());
+    }
+
+    #[test]
+    fn test_route_mixed_with_llm_speech() {
+        let translator = make_translator();
+        let intent = make_intent("eat", Some(serde_json::json!({"item_id": "mantou"})));
+        let (main, speech) = translator.route_intents(intent, Some("你好"), "一边说你好一边吃馒头");
+
+        // main keeps eat
+        assert_eq!(main.action_type.as_str(), "eat");
+        assert_eq!(main.action_data.unwrap()["item_id"], "mantou");
+        // speech extracted
+        assert!(speech.is_some());
+        let sp = speech.unwrap();
+        assert_eq!(sp.action_type.as_str(), "speak");
+        assert_eq!(sp.action_data.unwrap()["content"], "你好");
+    }
+
+    #[test]
+    fn test_route_mixed_with_regex_speech() {
+        let translator = make_translator();
+        let intent = make_intent("eat", Some(serde_json::json!({"item_id": "mantou"})));
+        let (main, speech) = translator.route_intents(intent, None, "一边说'你好'一边吃馒头");
+
+        assert_eq!(main.action_type.as_str(), "eat");
+        assert!(speech.is_some());
+        let sp = speech.unwrap();
+        assert_eq!(sp.action_type.as_str(), "speak");
+        assert_eq!(sp.action_data.unwrap()["content"], "你好");
+    }
+
+    #[test]
+    fn test_route_no_speech() {
+        let translator = make_translator();
+        let intent = make_intent("idle", None);
+        let (main, speech) = translator.route_intents(intent, None, "静静坐着");
+
+        assert_eq!(main.action_type.as_str(), "idle");
+        assert!(speech.is_none());
+    }
+
+    // ========================================================================
+    // extract_speech tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_speech_llm_provided() {
+        let translator = make_translator();
+        let result = translator.extract_speech(Some("你好世界"), "一边说'xxx'一边走");
+        assert_eq!(result.as_deref(), Some("你好世界"));
+    }
+
+    #[test]
+    fn test_extract_speech_llm_empty_falls_back_to_regex() {
+        let translator = make_translator();
+        let result = translator.extract_speech(Some(""), "一边说'你好'一边走");
+        assert_eq!(result.as_deref(), Some("你好"));
+    }
+
+    #[test]
+    fn test_extract_speech_regex_single_quotes() {
+        let translator = make_translator();
+        let result = translator.extract_speech(None, "一边说'你好'一边走");
+        assert_eq!(result.as_deref(), Some("你好"));
+    }
+
+    #[test]
+    fn test_extract_speech_regex_double_quotes() {
+        let translator = make_translator();
+        let result = translator.extract_speech(None, r#"说着"小心脚下""#);
+        assert_eq!(result.as_deref(), Some("小心脚下"));
+    }
+
+    #[test]
+    fn test_extract_speech_regex_corner_brackets() {
+        let translator = make_translator();
+        let result = translator.extract_speech(None, "说「天机不可泄露」");
+        assert_eq!(result.as_deref(), Some("天机不可泄露"));
+    }
+
+    #[test]
+    fn test_extract_speech_regex_with_zhe() {
+        let translator = make_translator();
+        let result = translator.extract_speech(None, "说着'出发吧'然后走了");
+        assert_eq!(result.as_deref(), Some("出发吧"));
+    }
+
+    #[test]
+    fn test_extract_speech_empty() {
+        let translator = make_translator();
+        let result = translator.extract_speech(None, "吃馒头充饥");
+        assert!(result.is_none());
+    }
+}

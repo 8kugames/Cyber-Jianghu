@@ -211,11 +211,18 @@ loop {
 ```
 
 - **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent
-- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON with correct action_type, item_id, target_location etc.
+- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON with correct action_type, item_id, target_location etc. Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
 - **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM)
 - **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
 - **Deadline timeout**: Tick关单打断循环，超时提交 idle
 - **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
+
+**Speech Routing** (天魂 → 即时通道):
+天魂翻译后通过 `route_intents()` 决定 intent 路由：
+- **speak/whisper** → 主 intent 降级 idle，说话走 `immediate_msg_tx`（priority=10，不占 tick 配额）
+- **shout** → 保持主 intent（喊叫需要占据本 tick 的行动位）
+- **混合**（说话+行动）→ 行动走主流程，说话提取后走即时通道
+- **纯行动** → 无 `speech_intent`，正常走主流程
 
 **Immediate Event System**:
 - Server broadcasts `ImmediateEvent` (speak) to co-located agents mid-tick
