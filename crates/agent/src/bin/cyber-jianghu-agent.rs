@@ -71,7 +71,7 @@ enum Commands {
     /// 运行 Agent（默认命令）
     Run {
         /// 监听端口
-        /// 0 = 在 23340~23349 范围内随机选择（推荐，避免与服务器端口 23333 冲突）
+        /// 0 = 在 23340~23999 范围内随机选择（推荐，避免与服务器端口 23333 冲突）
         #[arg(short, long, default_value = "0")]
         port: u16,
 
@@ -1135,8 +1135,8 @@ fn start_claw_server(
 ) -> Result<ServerSetup> {
     let actual_port = if port == 0 {
         use rand::RngExt;
-        let random_port = rand::rng().random_range(23340..=23349);
-        info!("随机选择端口: {} (范围: 23340-23349)", random_port);
+        let random_port = rand::rng().random_range(23340..=23999);
+        info!("随机选择端口: {} (范围: 23340-23999)", random_port);
         random_port
     } else {
         port
@@ -1207,7 +1207,7 @@ fn start_http_api_server(
     >,
 ) -> Result<(Arc<cyber_jianghu_agent::infra::api::HttpApiState>, u16)> {
     let port_range_start = 23340u16;
-    let port_range_end = 23349u16;
+    let port_range_end = 23999u16;
 
     let actual_port = if port == 0 {
         use rand::RngExt;

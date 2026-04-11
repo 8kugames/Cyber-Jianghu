@@ -51,7 +51,7 @@ cargo clippy --workspace --all-targets --fix --allow-dirty
 cyber-jianghu-agent run
 
 # Run agent in Claw mode (for OpenClaw integration)
-cyber-jianghu-agent run --mode claw --port 23340
+cyber-jianghu-agent run --mode claw --port 0
 
 # Run with debug logging
 RUST_LOG=debug cargo run -p cyber-jianghu-server
@@ -164,7 +164,7 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
    - Real-time Tick notifications and Intent submission
 
 2. **HTTP API (Auxiliary)**:
-   - Runs with HTTP API on port 23340-23349
+   - Runs with HTTP API on port 23340-23999
    - Used for data queries, Web panel, debugging
    - **NOT** a replacement for WebSocket
 
@@ -461,9 +461,9 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_c
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
 
-### Agent HTTP API (port 23340-23349, auxiliary to WebSocket)
+### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 
-> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws`) 提交意图，HTTP API 仅用于调试和数据查询。
+> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws` 或指定端口) 提交意图，HTTP API 仅用于调试和数据查询。
 
 - `GET /api/v1` - API discovery endpoint (returns all available APIs with examples)
 - `GET /api/v1/health` - Health check
