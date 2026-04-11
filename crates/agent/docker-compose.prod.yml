@@ -66,7 +66,7 @@ services:
       # 数据持久化 - SQLite 数据库和记忆存储
       - agent_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:23340/api/v1/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:$${PORT:-23340}/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3

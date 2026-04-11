@@ -185,6 +185,9 @@ pub struct HttpApiState {
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
+    /// LLM Client 容器（支持热重载时重建）
+    pub llm_container:
+        std::sync::Arc<tokio::sync::RwLock<Option<crate::runtime::claw::LlmClientContainer>>>,
 }
 
 /// HTTP 决策状态
@@ -728,6 +731,7 @@ pub fn create_http_state(
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         actual_port,
+        llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {

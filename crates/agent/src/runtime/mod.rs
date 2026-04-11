@@ -18,7 +18,7 @@ mod decision;
 // 重导出 cognitive
 pub use decision::{
     CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_chain,
-    cognitive_decision_with_retry,
+    
 };
 // 重导出 http（已迁移至 infra::api）
 pub use crate::infra::api::{

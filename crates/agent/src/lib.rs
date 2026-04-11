@@ -100,7 +100,7 @@ pub use soul::translator::IntentTranslator;
 pub use runtime::{
     CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
     DecisionWithMemoryCallback, HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest,
-    claw, cognitive_decision, cognitive_decision_with_chain, cognitive_decision_with_retry,
+    claw, cognitive_decision, cognitive_decision_with_chain,
     create_http_state, http_decision, run_http_server,
 };
 
