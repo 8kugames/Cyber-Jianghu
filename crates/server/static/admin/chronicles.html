@@ -445,7 +445,7 @@
 <body>
     <header>
         <h1>群像传记</h1>
-        <button class="back-btn" onclick="history.back()">返回仪表盘</button>
+        <button class="back-btn" onclick="window.location.href='index.html'">返回仪表盘</button>
     </header>
 
     <div class="controls">
@@ -689,20 +689,32 @@
 
         async function generateChronicle() {
             if (!confirm('确定要手动生成一份群像传记吗？')) return;
+            const btn = document.querySelector('.btn-primary');
+            btn.disabled = true;
+            btn.textContent = '生成中...';
             try {
                 const res = await fetch(`${API_BASE}/chronicles/generate`, {
                     method: 'POST',
                     headers: getHeaders(),
                     body: JSON.stringify({})
                 });
+                if (res.status === 401) {
+                    alert('请先登录');
+                    window.location.href = 'index.html';
+                    return;
+                }
+                const text = await res.text();
                 if (res.ok) {
                     alert('生成成功');
                     loadChronicles();
                 } else {
-                    alert('生成失败');
+                    alert('生成失败: ' + text);
                 }
             } catch (e) {
                 alert('生成失败: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '手动生成';
             }
         }
 

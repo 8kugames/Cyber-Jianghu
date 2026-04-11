@@ -100,7 +100,7 @@ pub struct GenerateRequest {
 pub async fn generate_chronicle(
     State(state): State<Arc<AppState>>,
     Json(params): Json<GenerateRequest>,
-) -> Result<Json<chronicle::Chronicle>, axum::http::StatusCode> {
+) -> Result<Json<chronicle::Chronicle>, (axum::http::StatusCode, Json<serde_json::Value>)> {
     let current_tick = crate::db::get_current_world_tick_id(&state.db_pool)
         .await
         .unwrap_or(0);
@@ -114,7 +114,10 @@ pub async fn generate_chronicle(
         Ok(chronicle) => Ok(Json(chronicle)),
         Err(e) => {
             tracing::error!("生成 chronicle 失败: {}", e);
-            Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+            Err((
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            ))
         }
     }
 }
