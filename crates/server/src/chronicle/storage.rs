@@ -94,7 +94,7 @@ pub async fn store(
     .bind(raw_data)
     .fetch_one(db_pool)
     .await
-    .context("插入 chronicles 记录失败")?;
+    .map_err(|e| anyhow::anyhow!("插入 chronicles 记录失败: {}", e))?;
 
     let id = row.0;
 
