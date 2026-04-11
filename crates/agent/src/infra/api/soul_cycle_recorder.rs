@@ -61,6 +61,14 @@ pub struct ImmediateIntentRecord {
     pub created_at: DateTime<Utc>,
 }
 
+/// 构建 SQLite IN 子句占位符：`build_in_placeholders(3)` → `"?1,?2,?3"`
+fn build_in_placeholders(count: usize) -> String {
+    (1..=count)
+        .map(|i| format!("?{}", i))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// 三魂循环记录器（SQLite 持久化）
 ///
 /// 按 agent_id 隔离，使用独立的 SQLite 文件。
@@ -475,12 +483,6 @@ impl SoulCycleRecorder {
             Err(_) => return vec![],
         };
 
-        let placeholders: String = tick_ids
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(",");
         let sql = format!(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_action_type, tianhun_action_data, tianhun_speech_content,
@@ -489,7 +491,7 @@ impl SoulCycleRecorder {
                     final_intent_id, final_action_type, final_action_data, route_type,
                     world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
-            placeholders
+            build_in_placeholders(tick_ids.len())
         );
 
         let mut stmt = match conn.prepare(&sql) {
@@ -516,18 +518,11 @@ impl SoulCycleRecorder {
             Err(_) => return vec![],
         };
 
-        // 构建 IN 子句
-        let placeholders: String = tick_ids
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(",");
         let sql = format!(
             "SELECT id, tick_id, intent_id, source_narrative, route_type,
                     action_type, action_data, speech_content, send_status, send_error, created_at
              FROM immediate_intent_record WHERE tick_id IN ({}) ORDER BY id ASC",
-            placeholders
+            build_in_placeholders(tick_ids.len())
         );
 
         let mut stmt = match conn.prepare(&sql) {

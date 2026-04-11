@@ -408,10 +408,6 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 属性元数据（分类）
         .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
         .route(
-            "/api/v1/character/experiences",
-            get(handlers::get_experiences_handler),
-        ) // 获取经历日志（分页）
-        .route(
             "/api/v1/character/soul-cycles",
             get(handlers::get_soul_cycles_handler),
         ) // 获取三魂循环完整记录

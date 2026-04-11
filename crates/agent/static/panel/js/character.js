@@ -393,13 +393,16 @@ async function loadCharacterIntoDrawer(char) {
     // 经历日志（仅当前角色）
     if (isCurrent) {
         try {
-            const expData = await apiGet('/api/v1/character/experiences?page=1&limit=3');
-            if (expData.experiences && expData.experiences.length > 0) {
-                const expList = expData.experiences.map(e => {
-                    const tick = e.tick_id ? `T${e.tick_id}` : '';
-                    const event = e.event || e.intent_summary || '-';
+            const expData = await apiGet('/api/v1/character/soul-cycles?page=1&limit=3');
+            const recordsMap = expData.records || {};
+            const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
+            if (tickIds.length > 0) {
+                const expList = tickIds.slice(0, 3).map(tid => {
+                    const attempts = recordsMap[tid];
+                    const first = attempts[0];
+                    const event = (first.renhun && first.renhun.narrative) || (first.tianhun && first.tianhun.action_type) || '-';
                     return `<div class="exp-mini-item">
-                        <span class="exp-tick">${tick}</span>
+                        <span class="exp-tick">T${tid}</span>
                         <span class="exp-event">${escapeHtml(event.substring(0, 30))}${event.length > 30 ? '...' : ''}</span>
                     </div>`;
                 }).join('');
@@ -686,20 +689,13 @@ async function loadExperiences(page = 1) {
 
         if (page === 1) expEl.innerHTML = '';
 
-        if (data.records && data.records.length > 0) {
-            // 按 tick_id 分组
-            const tickGroups = new Map();
-            data.records.forEach(r => {
-                if (!tickGroups.has(r.tick_id)) {
-                    tickGroups.set(r.tick_id, []);
-                }
-                tickGroups.get(r.tick_id).push(r);
-            });
+        const recordsMap = data.records || {};
+        const immMap = data.immediate_intents || {};
+        const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
 
-            // 获取即时意图
-            const immMap = data.immediate_intents || {};
-
-            tickGroups.forEach((attempts, tickId) => {
+        if (tickIds.length > 0) {
+            tickIds.forEach(tickId => {
+                const attempts = recordsMap[tickId];
                 const div = document.createElement('div');
                 div.className = 'tick-card';
 
@@ -733,8 +729,7 @@ async function loadExperiences(page = 1) {
                 html += `</div>`;
 
                 // 即时分区
-                const immKey = String(tickId);
-                const immIntents = immMap[immKey] || [];
+                const immIntents = immMap[tickId] || [];
                 if (immIntents.length > 0) {
                     html += `<div class="tick-section tick-section-immediate">
                         <div class="tick-section-title">即时</div>`;
