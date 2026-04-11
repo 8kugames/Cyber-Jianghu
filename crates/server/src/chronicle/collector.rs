@@ -150,14 +150,15 @@ async fn collect_agents(
     .context("查询动作统计失败")?;
 
     // 按 agent_id 分组统计
-    let mut agent_actions: std::collections::HashMap<uuid::Uuid, (i32, Vec<(String, i32)>)> =
+    let mut agent_actions: std::collections::HashMap<uuid::Uuid, (i64, Vec<(String, i64)>)> =
         std::collections::HashMap::new();
 
     for row in action_stats_rows {
         let agent_id: uuid::Uuid = row.get("agent_id");
-        let actions_count: i32 = row.get("actions_count");
+        // COUNT(*) returns BIGINT in PostgreSQL, use i64
+        let actions_count: i64 = row.get("actions_count");
         let action_type: String = row.get("action_type");
-        let type_count: i32 = row.get("type_count");
+        let type_count: i64 = row.get("type_count");
 
         agent_actions
             .entry(agent_id)
@@ -231,6 +232,11 @@ async fn collect_agents(
 
             let (actions_count, top_actions) =
                 agent_actions.remove(&agent_id).unwrap_or((0, Vec::new()));
+            let actions_count = actions_count as i32;
+            let top_actions: Vec<(String, i32)> = top_actions
+                .into_iter()
+                .map(|(k, v)| (k, v as i32))
+                .collect();
 
             let narratives: Vec<String> = narratives_map
                 .get(&agent_id)
