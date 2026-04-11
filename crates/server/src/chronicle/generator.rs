@@ -7,8 +7,37 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::collector::CollectedData;
+
+/// LLM Token 统计（全局）
+static LLM_INPUT_TOKENS: AtomicU64 = AtomicU64::new(0);
+static LLM_OUTPUT_TOKENS: AtomicU64 = AtomicU64::new(0);
+static LLM_REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
+static LLM_ERROR_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// 获取 Token 统计
+pub fn get_llm_stats() -> (u64, u64, u64, u64) {
+    (
+        LLM_INPUT_TOKENS.load(Ordering::Relaxed),
+        LLM_OUTPUT_TOKENS.load(Ordering::Relaxed),
+        LLM_REQUEST_COUNT.load(Ordering::Relaxed),
+        LLM_ERROR_COUNT.load(Ordering::Relaxed),
+    )
+}
+
+/// 记录 Token 使用
+pub fn record_llm_tokens(input_tokens: u64, output_tokens: u64) {
+    LLM_INPUT_TOKENS.fetch_add(input_tokens, Ordering::Relaxed);
+    LLM_OUTPUT_TOKENS.fetch_add(output_tokens, Ordering::Relaxed);
+    LLM_REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 记录 LLM 错误
+pub fn record_llm_error() {
+    LLM_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
+}
 
 /// 动作类型中文映射
 fn action_type_display(action_type: &str) -> String {
@@ -290,12 +319,15 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        record_llm_error();
         anyhow::bail!("LLM 返回错误状态 {}: {}", status, body);
     }
 
     #[derive(serde::Deserialize)]
     struct LlmResponse {
         choices: Vec<Choice>,
+        #[serde(default)]
+        usage: Option<Usage>,
     }
 
     #[derive(serde::Deserialize)]
@@ -308,7 +340,26 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         content: String,
     }
 
+    #[derive(serde::Deserialize)]
+    struct Usage {
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        #[serde(default)]
+        total_tokens: u32,
+    }
+
     let llm_response: LlmResponse = response.json().await.context("解析 LLM 响应失败")?;
+
+    let usage = llm_response.usage.as_ref();
+    let input_tokens = usage.map(|u| u.prompt_tokens as u64).unwrap_or(0);
+    let output_tokens = usage
+        .map(|u| u.completion_tokens as u64)
+        .unwrap_or(0);
+
+    // 记录 Token 使用
+    if input_tokens > 0 || output_tokens > 0 {
+        record_llm_tokens(input_tokens, output_tokens);
+    }
 
     let content = llm_response
         .choices
@@ -316,7 +367,9 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         .map(|c| c.message.content.clone())
         .unwrap_or_default();
 
+
     if content.trim().is_empty() {
+        record_llm_error();
         anyhow::bail!("LLM 返回空内容");
     }
 
