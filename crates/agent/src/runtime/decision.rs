@@ -17,7 +17,6 @@ use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 /// Cognitive 决策配置
 pub struct CognitiveDecisionConfig {
@@ -35,7 +34,6 @@ impl Default for CognitiveDecisionConfig {
 ///
 /// 使用认知引擎进行决策（5 阶段管线，2 次合并 LLM 调用）
 pub fn cognitive_decision(
-    agent_id: Uuid,
     engine: Arc<CognitiveEngine>,
     _config: CognitiveDecisionConfig,
 ) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
@@ -49,8 +47,13 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-                    Intent::new(agent_id, world_state.tick_id, "idle", None)
-                        .with_thought(format!("认知失败: {}", e))
+                    Intent::new(
+                        world_state.agent_id.unwrap_or_default(),
+                        world_state.tick_id,
+                        "idle",
+                        None,
+                    )
+                    .with_thought(format!("认知失败: {}", e))
                 }
             }
         })
@@ -62,7 +65,6 @@ pub fn cognitive_decision(
 /// 使用认知引擎进行决策，返回 (Intent, Option<CognitiveChain>) 元组。
 /// CognitiveChain 供天魂翻译时获取认知上下文辅助指代消解。
 pub fn cognitive_decision_with_chain(
-    agent_id: Uuid,
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
 ) -> impl Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
@@ -122,10 +124,14 @@ pub fn cognitive_decision_with_chain(
                 }
             }
 
-            let idle_intent = Intent::new(agent_id, world_state.tick_id, "idle", None)
-                .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
+            let idle_intent = Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "idle",
+                None,
+            )
+            .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
             (idle_intent, last_chain)
         })
     }
 }
-
