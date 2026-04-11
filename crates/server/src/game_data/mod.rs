@@ -29,8 +29,8 @@ mod test_utils;
 pub use cache::GameDataCache;
 pub use loader::load_from_dir;
 pub use registry::{
-    ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, NetworkRegistry,
-    StateRegistry, init_registry, registry, registry_or_error,
+    ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, ItemRegistry,
+    NetworkRegistry, StateRegistry, init_registry, registry, registry_or_error,
 };
 pub use types::{ActionEffect, ActionRequirement, GameData, ItemConfigEntry, ItemEffect};
 

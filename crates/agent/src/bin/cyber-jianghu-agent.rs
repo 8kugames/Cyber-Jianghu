@@ -730,7 +730,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
             let cognitive_decision_with_chain_cb: DecisionWithChainCallback =
                 Arc::new(cognitive_decision_with_chain(
-                    agent_id,
                     cognitive_engine.clone(),
                     CognitiveDecisionConfig::default().max_retries,
                 ));
@@ -746,8 +745,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                         Ok(chain) => chain.final_intent,
                         Err(e) => {
                             error!("[cognitive] Decision failed: {}", e);
-                            Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
-                                .with_thought(format!("认知失败: {}", e))
+                            Intent::new(
+                                ws.agent_id.unwrap_or_default(),
+                                ws.tick_id,
+                                "idle",
+                                None,
+                            )
+                            .with_thought(format!("认知失败: {}", e))
                         }
                     }
                 })
@@ -929,7 +933,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
                 let claw_decision_with_chain: DecisionWithChainCallback =
                     Arc::new(cognitive_decision_with_chain(
-                        agent_id,
                         cognitive_engine.clone(),
                         CognitiveDecisionConfig::default().max_retries,
                     ));

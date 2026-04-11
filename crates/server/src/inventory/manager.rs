@@ -41,7 +41,10 @@ impl InventoryManager {
         if let Some(item) = existing {
             // 已存在，检查堆叠上限
             let new_quantity = item.quantity + quantity;
-            let max_stack_size = crate::inventory::types::get_max_stack_size();
+            // 优先使用 items.yaml 中 per-item stack_size，fallback 到 inventory.yaml 全局上限
+            let max_stack_size = crate::game_data::ItemRegistry::get(item_id)
+                .map(|cfg| cfg.stack_size)
+                .unwrap_or_else(crate::inventory::types::get_max_stack_size);
 
             if new_quantity > max_stack_size {
                 return Err(InventoryError::StackLimitExceeded {
@@ -289,11 +292,23 @@ impl InventoryManager {
         })?;
 
         if let Some(target_qty) = target_existing {
-            // 目标已有该物品，增加数量
+            // 目标已有该物品，检查堆叠上限后增加数量
+            let max_stack = crate::game_data::ItemRegistry::get(item_id)
+                .map(|cfg| cfg.stack_size)
+                .unwrap_or_else(crate::inventory::types::get_max_stack_size);
+            let new_qty = target_qty + quantity;
+            if new_qty > max_stack {
+                return Err(InventoryError::StackLimitExceeded {
+                    item_id: item_id.to_string(),
+                    current: target_qty,
+                    requested: quantity,
+                    max: max_stack,
+                });
+            }
             sqlx::query(
                 "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
             )
-            .bind(target_qty + quantity)
+            .bind(new_qty)
             .bind(to_agent)
             .bind(item_id)
             .execute(&mut *tx)
