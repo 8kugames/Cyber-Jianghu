@@ -456,7 +456,7 @@
             resultEl.textContent = '';
             resultEl.className = 'result';
 
-            // 使用用户配置的 base_url，移除末尾的 /v1
+            // 基础 URL（移除末尾的 /v1）
             let baseUrl = document.getElementById('llm-base-url').value.replace(/\/v1\/?$/, '').trim();
             if (!baseUrl) {
                 resultEl.textContent = '请先填写 Base URL';
@@ -471,6 +471,8 @@
                 btn.textContent = '测试连通性';
                 return;
             }
+            // 拼接 API 路径（Ollama 使用 /v1 前缀）
+            const apiPath = `${baseUrl}/v1/chat/completions`;
             const apiKey = document.getElementById('llm-api-key').value;
             const model = document.getElementById('llm-model').value;
 
@@ -482,7 +484,7 @@
                     headers['Authorization'] = `Bearer ${apiKey}`;
                 }
 
-                const response = await fetch(`${baseUrl}/chat/completions`, {
+                const response = await fetch(apiPath, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
