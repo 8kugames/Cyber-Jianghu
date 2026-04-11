@@ -368,7 +368,7 @@ pub struct RuntimeConfig {
     pub mode: RuntimeMode,
 
     /// HTTP API 端口
-    /// 0 = 在 23340~23349 范围内随机选择
+    /// 0 = 在 23340~23999 范围内随机选择
     #[serde(default)]
     pub port: u16,
 }
