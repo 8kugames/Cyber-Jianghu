@@ -254,6 +254,18 @@ loop {
 - Agent consumes via `server_error_feedback` channel → `last_rejection_reason`
 - Injected into next tick's ActorSoul context as `[意图被驳回: {reason}]`
 
+**Intent Duplicate Policy**:
+- Immediate actions (speak/whisper/emote etc.): allowed to resubmit (overwrite previous intent)
+- Normal actions: duplicate submission silently ignored (first intent already stored, no side effect)
+- Agent does not need to handle duplicate rejection separately
+
+**WebSocket Auto-Reconnect**:
+- **Read timeout**: 120s no message (server sends Ping every 30s) = connection dead
+- **Reconnect strategy**: initial delay 1s, max delay = tick_duration / 2, exponential backoff
+- **Reconnect triggers**: WebSocket disconnect, read timeout, auth failure (400)
+- **Post-reconnect**: auto re-register identity, reload character.yaml persona, update PromptCache
+- **Token refresh**: on auth failure (HTTP 400), auto-refreshes device token via HTTP API before retrying
+
 **LLM Fallback** (Cognitive mode):
 - `FallbackLlmClient` wraps multiple LLM models sharing the same provider/api_key
 - Auto-downgrade on 403 (quota), 429 (rate limit), connection failure
