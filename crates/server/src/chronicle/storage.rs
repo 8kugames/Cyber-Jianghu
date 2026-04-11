@@ -303,7 +303,7 @@ async fn generate_chronicle_id(db_pool: &crate::db::DbPool) -> Result<String> {
     )
     .fetch_one(db_pool)
     .await
-    .context("生成 chronicle_id 失败")?;
+    .map_err(|e| anyhow::anyhow!("生成 chronicle_id 失败: {}", e))?;
 
     Ok(format!("C-{:03}", max_id + 1))
 }
