@@ -237,19 +237,19 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
     let config = match crate::game_data::loaders::load_llm(&crate::paths::get_config_dir()) {
         Ok(cfg) => cfg,
         Err(e) => {
-            tracing::warn!("LLM 配置加载失败，使用模板生成: {}", e);
-            return generate_template(data);
+            tracing::warn!("LLM 配置加载失败: {}", e);
+            anyhow::bail!("LLM 配置加载失败");
         }
     };
 
     if !config.enabled {
-        tracing::info!("LLM 生成已禁用，使用模板生成");
-        return generate_template(data);
+        tracing::info!("LLM 生成已禁用");
+        anyhow::bail!("LLM 生成已禁用");
     }
 
     if config.api_key.is_empty() {
-        tracing::warn!("LLM API 密钥未设置，跳过 LLM 生成");
-        return generate_template(data);
+        tracing::warn!("LLM API 密钥未设置");
+        anyhow::bail!("LLM API 密钥未设置");
     }
 
     let prompt = build_llm_prompt(data);
