@@ -299,6 +299,11 @@ async fn main() -> Result<()> {
             post(handlers::validation::validate_action),
         )
         .route("/ws", get(websocket::websocket_handler))
+        // Dashboard API - 无需认证
+        .route(
+            "/api/dashboard/actions-map",
+            get(handlers::dashboard::get_actions_map),
+        )
         // Dashboard API (需要 Read 权限)
         .route(
             "/api/dashboard/stats",

@@ -1017,3 +1017,15 @@ pub async fn get_agent_experiences(
         limit,
     }))
 }
+
+/// GET /api/dashboard/actions-map - 返回 action_type -> 中文名映射
+///
+/// 无需认证（action 映射不是敏感数据，供前端渲染使用）
+pub async fn get_actions_map() -> Json<std::collections::HashMap<String, String>> {
+    let map: std::collections::HashMap<String, String> =
+        crate::game_data::ActionRegistry::build_available_actions()
+            .into_iter()
+            .map(|a| (a.action, a.description))
+            .collect();
+    Json(map)
+}
