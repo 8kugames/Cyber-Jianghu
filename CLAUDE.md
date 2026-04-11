@@ -198,10 +198,12 @@ The agent uses a three-stage pipeline: 人魂 (narrative) → 天魂 (translatio
 loop {
     人魂 ActorSoul (行动之魂)     天魂 IntentTranslator          地魂 ReflectorSoul (反思之魂)
       叙事意图                      格式化翻译                      三层审查
+      + CognitiveChain ────────────────────────────────────────────────────────
            │                              │                              │
            │  "吃馒头充饥"               │  action_type=eat             │  Layer 1: action_type 合法性
-           │  ──────────────────────>     │  action_data={item_id:       │  Layer 2: RuleEngine 规则校验
-           │                              │    "mantou"}                 │  Layer 3: LLM 人设/世界观审查
+           │  + key_observations          │  action_data={item_id:       │  Layer 2: RuleEngine 规则校验
+           │  + primary_drive      ─────> │    "mantou"}                 │  Layer 3: LLM 人设/世界观审查
+           │  + thought_process           │  (含指代消解上下文)          │
            │                              │  ──────────────────────>     │
            │                              │                              │
            │<─────── Approved: send intent ───────────────────────────── │
@@ -211,8 +213,8 @@ loop {
 }
 ```
 
-- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent
-- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON with correct action_type, item_id, target_location etc. Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
+- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent + CognitiveChain (含 key_observations, primary_drive, thought_process)
+- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON. Receives CognitiveChain from 人魂 to enhance coreference resolution (指代消解) by providing cognitive context (who is "him/her/it"?). Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
 - **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM)
 - **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
 - **Deadline timeout**: Tick关单打断循环，超时提交 idle
