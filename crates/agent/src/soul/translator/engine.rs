@@ -15,6 +15,7 @@ use crate::component::llm::LlmClientExt;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::models::Intent;
 use crate::models::WorldState;
+use crate::soul::actor::CognitiveChain;
 use cyber_jianghu_protocol::AvailableAction;
 
 /// LLM 翻译响应（JSON 解析用）
@@ -55,6 +56,8 @@ pub struct TranslationResult {
 ///
 /// 将 ActorSoul 的自然语言意图翻译为服务端格式化 Intent。
 /// 不参与推理，只做数据映射。
+///
+/// 可选接收人魂的 CognitiveChain，提供认知上下文以增强指代消解。
 pub struct IntentTranslator {
     llm_client: Arc<dyn crate::component::llm::LlmClient>,
 }
@@ -70,6 +73,7 @@ impl IntentTranslator {
     /// * `narrative` - ActorSoul 的自然语言意图（如 "一边说'你好'，一边吃馒头"）
     /// * `thought_log` - ActorSoul 的思考过程
     /// * `world_state` - 当前世界状态（含背包物品 ID、可达位置 ID）
+    /// * `cognitive_chain` - 人魂的认知链（可选，提供感知/动机/思考上下文辅助指代消解）
     ///
     /// 内置 30 秒超时保护，避免单次 LLM 调用吃掉整个 tick deadline。
     pub async fn translate(
@@ -77,8 +81,9 @@ impl IntentTranslator {
         narrative: &str,
         thought_log: &str,
         world_state: &WorldState,
+        cognitive_chain: Option<&CognitiveChain>,
     ) -> Result<TranslationResult> {
-        let prompt = self.build_prompt(narrative, thought_log, world_state);
+        let prompt = self.build_prompt(narrative, thought_log, world_state, cognitive_chain);
 
         debug!("[天魂] 翻译叙事意图: {}", narrative);
 
@@ -178,35 +183,68 @@ impl IntentTranslator {
 
     /// 从叙事中提取说话内容
     ///
-    /// 策略：
-    /// 1. 优先使用 LLM 返回的 speech_content
-    /// 2. Fallback: 正则从 narrative 中提取引号内容
+    /// 策略（纯结构特征，无硬编码词表）：
+    /// 1. 从 narrative 引号中提取基准内容（最可靠）
+    /// 2. LLM speech_content 需要引号佐证才信任；短单句（≤20字且≤1逗号）例外
+    /// 3. Fallback: 直接返回引号内容
     fn extract_speech(&self, llm_speech: Option<&str>, narrative: &str) -> Option<String> {
-        // 优先使用 LLM 提取的结果
+        let quoted = Self::extract_quoted_from_narrative(narrative);
+
         if let Some(speech) = llm_speech {
             let trimmed = speech.trim();
             if !trimmed.is_empty() {
-                debug!("[天魂] LLM 提取说话内容: {}", trimmed);
-                return Some(trimmed.to_string());
+                // 引号佐证：LLM speech 与引号内容重叠 → 使用 LLM 版本（更精确）
+                if let Some(ref q) = quoted
+                    && (trimmed.contains(q.as_str()) || q.contains(trimmed))
+                {
+                    debug!("[天魂] LLM 提取说话内容（引号佐证）: {}", trimmed);
+                    return Some(trimmed.to_string());
+                }
+
+                // 无引号佐证时，只信任短单句
+                let comma_count = trimmed.chars().filter(|c| *c == '，' || *c == ',').count();
+                let char_count = trimmed.chars().count();
+                if char_count <= 20 && comma_count <= 1 {
+                    debug!("[天魂] LLM 提取说话内容（短句信任）: {}", trimmed);
+                    return Some(trimmed.to_string());
+                }
+
+                debug!(
+                    "[天魂] LLM speech_content 无引号佐证且非短句，忽略 ({}字/{}逗号): {}",
+                    char_count, comma_count, trimmed
+                );
             }
         }
 
-        // Fallback: 正则从叙事中提取（一边说'xxx' / 说着'xxx'）
-        if let Ok(re) = regex::Regex::new(r#"说[着了]?['"「]([^'"」]+)['"」]"#)
-            && let Some(caps) = re.captures(narrative)
-            && let Some(m) = caps.get(1)
-        {
-            let speech = m.as_str().to_string();
-            if !speech.is_empty() {
-                debug!("[天魂] 正则 fallback 提取说话内容: {}", speech);
-                return Some(speech);
-            }
+        // Fallback: 引号内容（引号包裹的天然是说话，无需额外验证）
+        if let Some(q) = quoted {
+            debug!("[天魂] 引号 fallback 提取说话内容: {}", q);
+            return Some(q);
         }
 
         None
     }
 
-    fn build_prompt(&self, narrative: &str, thought_log: &str, world_state: &WorldState) -> String {
+    /// 从叙事中提取引号包裹的说话内容
+    fn extract_quoted_from_narrative(narrative: &str) -> Option<String> {
+        let re = regex::Regex::new(r#"说[着了]?['"「]([^'"」]+)['"」]"#).ok()?;
+        let caps = re.captures(narrative)?;
+        let m = caps.get(1)?;
+        let speech = m.as_str().to_string();
+        if speech.is_empty() {
+            None
+        } else {
+            Some(speech)
+        }
+    }
+
+    fn build_prompt(
+        &self,
+        narrative: &str,
+        thought_log: &str,
+        world_state: &WorldState,
+        cognitive_chain: Option<&CognitiveChain>,
+    ) -> String {
         let inventory = if world_state.self_state.inventory.is_empty() {
             "空".to_string()
         } else {
@@ -261,6 +299,14 @@ impl IntentTranslator {
 
         let action_table = Self::build_action_table(&load_available_actions_from_file());
 
+        // 提取人魂认知上下文（辅助指代消解）
+        let cognitive_context = Self::extract_cognitive_context(cognitive_chain);
+        let cognitive_section = if cognitive_context.is_empty() {
+            String::new()
+        } else {
+            format!("\n\n## Agent 认知轨迹（辅助指代消解）\n{cognitive_context}")
+        };
+
         format!(
             r#"你是意图翻译器。将角色的自然语言意图转换为服务端格式化 JSON。
 
@@ -299,7 +345,7 @@ impl IntentTranslator {
 - 背包有馒头却说"吃馒头"→ eat（不是 pickup！）
 
 ## 输出格式
-{{"action_type": "动作名", "action_data": {{}}, "speech_content": "说话内容或空字符串"}}"#,
+{{"action_type": "动作名", "action_data": {{}}, "speech_content": "说话内容或空字符串"}}{cognitive_section}"#,
             narrative = narrative,
             thought_log = thought_log,
             inventory = inventory,
@@ -342,6 +388,66 @@ impl IntentTranslator {
         }
 
         table
+    }
+
+    /// 从人魂的 CognitiveChain 提取认知上下文
+    ///
+    /// 从各阶段的 metadata 中提取：
+    /// - Perception.key_observations: 关键观察（包含感知到的人物、物品名称）
+    /// - Motivation.primary_drive: 主要驱动力（揭示 agent 当前关注什么）
+    /// - Decision.thought_process: 完整思考链（包含指代消解线索）
+    ///
+    /// 这些信息帮助天魂理解叙事中的指代词（如"他"、"她"、"那个"）指向谁/什么。
+    fn extract_cognitive_context(chain: Option<&CognitiveChain>) -> String {
+        let Some(chain) = chain else {
+            return String::new();
+        };
+
+        let mut ctx = String::new();
+
+        // 从 Perception stage 提取 key_observations
+        if let Some(stage) = chain.get_stage(crate::soul::actor::CognitiveStage::Perception)
+            && let Some(observations) = stage
+                .metadata
+                .get("key_observations")
+                .and_then(|v| v.as_array())
+        {
+            let obs: Vec<&str> = observations
+                .iter()
+                .filter_map(|v| v.as_str())
+                .take(5)
+                .collect();
+            if !obs.is_empty() {
+                ctx.push_str("关键观察: ");
+                ctx.push_str(&obs.join(", "));
+                ctx.push('\n');
+            }
+        }
+
+        // 从 Motivation stage 提取 primary_drive
+        if let Some(stage) = chain.get_stage(crate::soul::actor::CognitiveStage::Motivation)
+            && let Some(drive) = stage.metadata.get("primary_drive").and_then(|v| v.as_str())
+        {
+            ctx.push_str(&format!("当前驱动力: {}\n", drive));
+        }
+
+        // 从 Decision stage 提取完整 thought_process（包含人名、物品名引用）
+        if let Some(stage) = chain.get_stage(crate::soul::actor::CognitiveStage::Decision)
+            && let Some(thought) = stage
+                .metadata
+                .get("thought_process")
+                .and_then(|v| v.as_str())
+        {
+            // 只取前 300 字，避免 prompt 过长
+            let truncated = if thought.chars().count() > 300 {
+                thought.chars().take(297).collect::<String>() + "..."
+            } else {
+                thought.to_string()
+            };
+            ctx.push_str(&format!("决策思考: {}\n", truncated));
+        }
+
+        if ctx.is_empty() { String::new() } else { ctx }
     }
 }
 
@@ -447,9 +553,16 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_extract_speech_llm_provided() {
+    fn test_extract_speech_llm_with_quote_support() {
         let translator = make_translator();
-        let result = translator.extract_speech(Some("你好世界"), "一边说'xxx'一边走");
+        let result = translator.extract_speech(Some("你好世界"), "一边说'你好世界'一边走");
+        assert_eq!(result.as_deref(), Some("你好世界"));
+    }
+
+    #[test]
+    fn test_extract_speech_llm_short_trusted() {
+        let translator = make_translator();
+        let result = translator.extract_speech(Some("你好世界"), "对大家打招呼");
         assert_eq!(result.as_deref(), Some("你好世界"));
     }
 
@@ -493,5 +606,59 @@ mod tests {
         let translator = make_translator();
         let result = translator.extract_speech(None, "吃馒头充饥");
         assert!(result.is_none());
+    }
+
+    // ========================================================================
+    // extract_cognitive_context tests
+    // ========================================================================
+
+    #[test]
+    fn test_extract_cognitive_context_none() {
+        let result = IntentTranslator::extract_cognitive_context(None);
+        assert_eq!(result, String::new());
+    }
+
+    #[test]
+    fn test_extract_cognitive_context_with_observations() {
+        use crate::soul::actor::{CognitiveChain, CognitiveStage, StageOutput};
+
+        // 创建测试用 CognitiveChain
+        let mut chain = CognitiveChain::from_persona(
+            &crate::component::persona::DynamicPersona::new(
+                uuid::Uuid::new_v4(),
+                "测试角色",
+                "你是一个测试角色",
+            ),
+            1,
+        );
+
+        // 添加 Perception stage
+        let perception = StageOutput::with_metadata(
+            CognitiveStage::Perception,
+            "test perception".to_string(),
+            serde_json::json!({
+                "key_observations": ["张三在左边", "地上有个馒头"],
+                "self_status": "饥饿",
+                "environment": "客栈"
+            }),
+        );
+        chain.add_stage(perception);
+
+        // 添加 Motivation stage
+        let motivation = StageOutput::with_metadata(
+            CognitiveStage::Motivation,
+            "test motivation".to_string(),
+            serde_json::json!({
+                "primary_drive": "获取食物",
+                "drive_intensity": 8
+            }),
+        );
+        chain.add_stage(motivation);
+
+        // 测试提取
+        let result = IntentTranslator::extract_cognitive_context(Some(&chain));
+        assert!(result.contains("张三在左边"));
+        assert!(result.contains("地上有个馒头"));
+        assert!(result.contains("获取食物"));
     }
 }
