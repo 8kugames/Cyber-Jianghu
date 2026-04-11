@@ -203,7 +203,12 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
             // 从叙事中提取一句作为代表
             if let Some(first_narrative) = agent.narratives.first() {
                 let snippet = if first_narrative.len() > 50 {
-                    format!("{}...", &first_narrative[..47])
+                    let end = first_narrative
+                        .char_indices()
+                        .nth(47)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(first_narrative.len());
+                    format!("{}...", &first_narrative[..end])
                 } else {
                     first_narrative.clone()
                 };

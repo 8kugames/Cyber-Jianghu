@@ -181,10 +181,14 @@ impl NarrativeSummary {
     #[allow(dead_code)]
     fn truncate(text: &str, max_len: usize) -> String {
         if text.len() <= max_len {
-            text.to_string()
-        } else {
-            format!("{}...", &text[..max_len])
+            return text.to_string();
         }
+        let end = text
+            .char_indices()
+            .nth(max_len.saturating_sub(3))
+            .map(|(idx, _)| idx)
+            .unwrap_or(text.len());
+        format!("{}...", &text[..end])
     }
 }
 
