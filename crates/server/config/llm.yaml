@@ -1,33 +1,13 @@
-# ============================================================================
-# LLM 配置
-# ============================================================================
-#
-# 用于群像传记的 LLM 增强生成
-# ============================================================================
-
-version: "0.0.1"
-description: "LLM 配置，用于群像传记的 LLM 增强生成"
-
+version: 0.0.1
+description: LLM 配置，用于群像传记的 LLM 增强生成
 meta:
-  created_at: "2026-04-10"
-  author: "Cyber-Jianghu"
-
+  created_at: 2026-04-11
+  author: Cyber-Jianghu
 data:
-  # 是否启用 LLM 生成
   enabled: true
-
-  # Provider: openai / openai_compatible / ollama
-  provider: "ollama"
-
-  # API 地址
-  base_url: "http://host.docker.internal:11434/v1"
-
-  # API 密钥
-  api_key: "omlx-hs8nchuqx6eigger"
-
-  # 模型名称
-  model: "Qwen3.5-4B-MLX-4bit"
-
-  # 生成参数
+  provider: ollama
+  base_url: http://host.docker.internal:11434/v1
+  api_key: omlx-hs8nchuqx6eigger
+  model: gemma-4-e4b-it-mxfp8
   temperature: 0.8
   max_tokens: 4096
