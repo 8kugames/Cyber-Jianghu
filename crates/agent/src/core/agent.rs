@@ -209,6 +209,37 @@ impl Agent {
             .unwrap_or("(未创建)")
     }
 
+    /// 从 character.yaml 重新加载人设到认知引擎
+    ///
+    /// 用于注册确认、重连后恢复人设。如果 character.yaml 存在，加载完整人设
+    /// 并刷新 PromptCache；否则仅更新名称。
+    pub(crate) fn reload_character_persona(&mut self, agent_id: Uuid, name: &str) {
+        if let Some(ref engine) = self.cognitive_engine {
+            let server_dir = self.config.server_dir(&self.config.server.ws_url);
+            let char_yaml = server_dir
+                .join("characters")
+                .join(agent_id.to_string())
+                .join("character.yaml");
+
+            if char_yaml.exists() {
+                match crate::config::CharacterConfig::from_file(&char_yaml) {
+                    Ok(char_config) => {
+                        let prompt = char_config.generate_system_prompt();
+                        engine.update_persona(name, &prompt);
+                        self.character_config = Some(char_config);
+                        info!("已从 character.yaml 重新加载人设并更新认知引擎");
+                    }
+                    Err(e) => {
+                        warn!("加载 character.yaml 失败，仅更新名称: {}", e);
+                        engine.update_agent_name(name);
+                    }
+                }
+            } else {
+                engine.update_agent_name(name);
+            }
+        }
+    }
+
     /// 连接服务端
     pub async fn connect(&mut self) -> Result<()> {
         self.client.connect().await?;

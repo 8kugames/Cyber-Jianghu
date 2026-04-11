@@ -72,29 +72,7 @@ impl super::Agent {
                             // 更新 agent 名称和人设（与 lifecycle 注册确认逻辑对齐）
                             if let Some(ref name) = registered_name {
                                 self.server_assigned_name = Some(name.clone());
-                                if let Some(ref engine) = self.cognitive_engine {
-                                    let server_dir = self.config.server_dir(&self.config.server.ws_url);
-                                    let char_yaml = server_dir
-                                        .join("characters")
-                                        .join(agent_id.to_string())
-                                        .join("character.yaml");
-                                    if char_yaml.exists() {
-                                        match crate::config::CharacterConfig::from_file(&char_yaml) {
-                                            Ok(char_config) => {
-                                                let prompt = char_config.generate_system_prompt();
-                                                engine.update_persona(name, &prompt);
-                                                self.character_config = Some(char_config);
-                                                info!("重连后从 character.yaml 重新加载人设");
-                                            }
-                                            Err(e) => {
-                                                warn!("重连后加载 character.yaml 失败: {}", e);
-                                                engine.update_agent_name(name);
-                                            }
-                                        }
-                                    } else {
-                                        engine.update_agent_name(name);
-                                    }
-                                }
+                                self.reload_character_persona(agent_id, name);
                                 info!("从服务器获取角色名称: {}", name);
                             }
 
