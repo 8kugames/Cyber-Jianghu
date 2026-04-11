@@ -64,7 +64,7 @@ pub async fn store(
         "highlights_count": data.highlights.len(),
     });
 
-    let row = sqlx::query_scalar::<_, (i64,)>(
+    let row = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO chronicles (
             chronicle_id, period_start, period_end,
@@ -96,7 +96,7 @@ pub async fn store(
     .await
     .map_err(|e| anyhow::anyhow!("插入 chronicles 记录失败: {}", e))?;
 
-    let id = row.0;
+    let id = row;
 
     Ok(Chronicle {
         id,
