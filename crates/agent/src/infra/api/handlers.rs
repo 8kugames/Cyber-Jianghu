@@ -3254,7 +3254,7 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
-/// 获取 LLM 紧急停止状态
+/// 获取 LLM 停止状态
 ///
 /// GET /api/v1/config/llm-disabled
 pub(super) async fn get_llm_disabled_handler(_state: State<HttpApiState>) -> impl IntoResponse {
@@ -3263,7 +3263,7 @@ pub(super) async fn get_llm_disabled_handler(_state: State<HttpApiState>) -> imp
     Json(serde_json::json!({"llm_disabled": disabled}))
 }
 
-/// 设置 LLM 紧急停止状态
+/// 设置 LLM 停止状态
 ///
 /// POST /api/v1/config/llm-disabled
 pub(super) async fn set_llm_disabled_handler(
@@ -3293,7 +3293,7 @@ pub(super) async fn set_llm_disabled_handler(
     });
 
     if disabled {
-        tracing::warn!("[llm-disabled] LLM 调用已紧急停止");
+        tracing::warn!("[llm-disabled] LLM 调用已停止");
     } else {
         tracing::info!("[llm-disabled] LLM 调用已恢复");
     }
@@ -3301,7 +3301,7 @@ pub(super) async fn set_llm_disabled_handler(
     Json(serde_json::json!({
         "success": true,
         "llm_disabled": disabled,
-        "message": if disabled { "LLM 调用已紧急停止" } else { "LLM 调用已恢复" }
+        "message": if disabled { "LLM 调用已停止" } else { "LLM 调用已恢复" }
     }))
         .into_response()
 }

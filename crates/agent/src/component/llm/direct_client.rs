@@ -17,15 +17,15 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, error};
 
-/// 全局 LLM 紧急停止标志
+/// 全局 LLM 停止标志
 static LLM_DISABLED: AtomicBool = AtomicBool::new(false);
 
-/// 检查 LLM 是否被紧急禁用
+/// 检查 LLM 是否被禁用
 pub fn is_llm_disabled() -> bool {
     LLM_DISABLED.load(Ordering::Relaxed)
 }
 
-/// 设置 LLM 紧急停止状态
+/// 设置 LLM 停止状态
 pub fn set_llm_disabled(disabled: bool) {
     LLM_DISABLED.store(disabled, Ordering::Relaxed);
 }
@@ -611,7 +611,7 @@ impl DirectLlmClient {
 impl LlmClient for DirectLlmClient {
     async fn complete(&self, prompt: &str) -> Result<String> {
         if is_llm_disabled() {
-            anyhow::bail!("LLM 调用已被紧急停止");
+            anyhow::bail!("LLM 调用已被停止");
         }
         // 所有三种 provider 都使用 OpenAI 兼容接口
         self.call_openai_compatible_api(prompt).await
@@ -619,7 +619,7 @@ impl LlmClient for DirectLlmClient {
 
     async fn complete_with_system(&self, system: &str, prompt: &str) -> Result<String> {
         if is_llm_disabled() {
-            anyhow::bail!("LLM 调用已被紧急停止");
+            anyhow::bail!("LLM 调用已被停止");
         }
         self.call_openai_compatible_api_with_system(system, prompt)
             .await
@@ -638,7 +638,7 @@ impl LlmClient for DirectLlmClient {
         max_rounds: usize,
     ) -> Result<String> {
         if is_llm_disabled() {
-            anyhow::bail!("LLM 调用已被紧急停止");
+            anyhow::bail!("LLM 调用已被停止");
         }
         self.call_openai_compatible_api_with_tools(system, prompt, tools, executor, max_rounds)
             .await

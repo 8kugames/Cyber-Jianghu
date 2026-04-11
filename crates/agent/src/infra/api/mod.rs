@@ -461,11 +461,11 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route(
             "/api/v1/config/llm-disabled",
             get(handlers::get_llm_disabled_handler),
-        ) // 获取 LLM 紧急停止状态
+        ) // 获取 LLM 停止状态
         .route(
             "/api/v1/config/llm-disabled",
             post(handlers::set_llm_disabled_handler),
-        ) // 设置 LLM 紧急停止状态
+        ) // 设置 LLM 停止状态
         .route("/api/v1/actions", get(handlers::get_actions_handler)) // 获取动作类型映射
         .route(
             "/api/v1/config/reload",
