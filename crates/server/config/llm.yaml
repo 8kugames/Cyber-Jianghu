@@ -1,5 +1,5 @@
 version: 0.0.1
-description: LLM 配置，用于群像传记的 LLM 增强生成
+description: LLM 配置
 meta:
   created_at: 2026-04-11
   author: Cyber-Jianghu
