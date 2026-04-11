@@ -787,11 +787,13 @@ async fn websocket_background_task(
         }
     }
 
-    // 清理连接状态：drop worldstate_tx 使所有 receiver 收到 Closed 错误
+    // 清理连接状态：drop 所有 channel 使 receiver 收到 Closed 错误
+    // 注意：此路径与 disconnect() 互斥（disconnect 通过 shutdown_rx 优雅关闭）
     {
         let mut guard = state.write().await;
         guard.connected = false;
         guard.worldstate_tx = None;
+        guard.registered_tx = None;
         guard.intent_tx = None;
         guard.immediate_msg_tx = None;
     }
