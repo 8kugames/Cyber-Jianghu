@@ -2212,14 +2212,11 @@ fn record_to_attempt_entry(
         }
     })
     .collect();
-    let world_time: Option<serde_json::Value> = r
-        .world_time
-        .as_ref()
-        .and_then(|s| {
-            serde_json::from_str(s)
-                .ok()
-                .or_else(|| Some(serde_json::Value::String(s.clone())))
-        });
+    let world_time: Option<serde_json::Value> = r.world_time.as_ref().and_then(|s| {
+        serde_json::from_str(s)
+            .ok()
+            .or_else(|| Some(serde_json::Value::String(s.clone())))
+    });
 
     SoulCycleAttemptEntry {
         tick_id: r.tick_id,
@@ -3380,6 +3377,26 @@ pub(super) async fn reload_config_handler(
                 "[config] 已从文件重载配置: http={}, ws={}",
                 config.server.http_url, config.server.ws_url
             );
+
+            // 重建 LLM Client（clone Arc 后立即释放读锁）
+            let container = {
+                let guard = state.llm_container.read().await;
+                guard.clone()
+            };
+            if let Some(container) = container {
+                match crate::component::llm::build_fallback_client(&config.llm) {
+                    Ok(new_client) => {
+                        *container.write().await = new_client;
+                        info!(
+                            "[config] LLM Client 已重建: provider={}, model={:?}",
+                            config.llm.provider, config.llm.model
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("[config] LLM Client 重建失败: {}（保留旧实例）", e);
+                    }
+                }
+            }
 
             let response_config = ConfigResponse {
                 server_http_url: config.server.http_url,
