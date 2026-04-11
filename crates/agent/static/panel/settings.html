@@ -119,14 +119,25 @@
                     <form id="server-form">
                         <div class="form-group">
                             <label for="server-ws-url">WebSocket 地址</label>
-                            <input type="text" id="server-ws-url" value="ws://localhost:23333/ws" required />
+                            <input
+                                type="text"
+                                id="server-ws-url"
+                                value="ws://localhost:23333/ws"
+                                required
+                            />
                         </div>
                         <div class="form-group">
                             <label for="server-http-url">HTTP 地址</label>
-                            <input type="text" id="server-http-url" placeholder="http://localhost:23333" />
+                            <input
+                                type="text"
+                                id="server-http-url"
+                                placeholder="http://localhost:23333"
+                            />
                         </div>
                         <div class="form-actions">
-                            <button type="submit" id="save-server-btn">保存并重连</button>
+                            <button type="submit" id="save-server-btn">
+                                保存并重连
+                            </button>
                         </div>
                     </form>
 
@@ -140,30 +151,32 @@
 
                 <section class="form-section">
                     <h2>LLM 配置</h2>
-                    <p class="section-desc">
-                        配置 LLM Provider 和模型参数。
-                    </p>
+                    <p class="section-desc">配置 LLM Provider 和模型参数。</p>
 
-                    <!-- LLM 紧急停止开关 -->
+                    <!-- LLM 停止开关 -->
                     <div class="form-group toggle-group">
                         <div class="toggle-row">
-                            <span>紧急停止 LLM 调用</span>
+                            <span>停止 LLM 调用</span>
                             <label class="toggle">
-                                <input type="checkbox" id="llm-disabled">
+                                <input type="checkbox" id="llm-disabled" />
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
-                        <p class="hint">启用后将立即停止所有 LLM 调用</p>
+                        <p class="hint">启用后将停止所有 LLM 调用</p>
                     </div>
 
                     <!-- Token 统计 -->
                     <div class="stats-grid" id="token-stats">
                         <div class="stat-card">
-                            <div class="stat-value" id="stat-input-tokens">-</div>
+                            <div class="stat-value" id="stat-input-tokens">
+                                -
+                            </div>
                             <div class="stat-label">输入 Token</div>
                         </div>
                         <div class="stat-card">
-                            <div class="stat-value" id="stat-output-tokens">-</div>
+                            <div class="stat-value" id="stat-output-tokens">
+                                -
+                            </div>
                             <div class="stat-label">输出 Token</div>
                         </div>
                         <div class="stat-card">
@@ -171,7 +184,9 @@
                             <div class="stat-label">累计请求</div>
                         </div>
                         <div class="stat-card">
-                            <div class="stat-value" id="stat-error-count">-</div>
+                            <div class="stat-value" id="stat-error-count">
+                                -
+                            </div>
                             <div class="stat-label">错误次数</div>
                         </div>
                     </div>
@@ -179,28 +194,47 @@
                     <form id="llm-form">
                         <div class="form-group">
                             <label for="llm-provider">Provider</label>
-                            <select id="llm-provider">
-                            </select>
+                            <select id="llm-provider"></select>
                             <p id="llm-provider-hint" class="hint hidden"></p>
                         </div>
                         <div class="form-group">
                             <label for="llm-model">模型</label>
-                            <input type="text" id="llm-model" placeholder="如: qwen2.5:14b 或 gpt-4o" required />
+                            <input
+                                type="text"
+                                id="llm-model"
+                                placeholder="如: qwen2.5:14b 或 gpt-4o"
+                                required
+                            />
                         </div>
                         <div class="form-group" id="base-url-group">
                             <label for="llm-base-url">Base URL</label>
-                            <input type="text" id="llm-base-url" placeholder="如: http://localhost:11434" />
+                            <input
+                                type="text"
+                                id="llm-base-url"
+                                placeholder="如: http://localhost:11434"
+                            />
                         </div>
                         <div class="form-group hidden" id="api-key-group">
                             <label for="llm-api-key">API Key</label>
-                            <input type="password" id="llm-api-key" placeholder="输入 API Key" />
+                            <input
+                                type="password"
+                                id="llm-api-key"
+                                placeholder="输入 API Key"
+                            />
                         </div>
 
                         <div class="form-actions">
-                            <button type="button" class="btn btn-secondary" id="test-llm-btn" onclick="testLlmConnection()">
+                            <button
+                                type="button"
+                                class="btn btn-secondary"
+                                id="test-llm-btn"
+                                onclick="testLlmConnection()"
+                            >
                                 测试连通性
                             </button>
-                            <button type="submit" id="save-llm-btn">保存配置</button>
+                            <button type="submit" id="save-llm-btn">
+                                保存配置
+                            </button>
                         </div>
                     </form>
 
@@ -222,211 +256,295 @@
         <script>
             async function loadProviders() {
                 try {
-                    var data = await apiGet('/api/v1/config/llm/providers');
+                    var data = await apiGet("/api/v1/config/llm/providers");
                     var providersData = data.providers || [];
-                    var select = document.getElementById('llm-provider');
-                    select.innerHTML = '';
+                    var select = document.getElementById("llm-provider");
+                    select.innerHTML = "";
 
-                    providersData.forEach(p => {
-                        var option = document.createElement('option');
+                    providersData.forEach((p) => {
+                        var option = document.createElement("option");
                         option.value = p.value;
                         option.textContent = p.label;
                         option.disabled = p.disabled || false;
-                        option.dataset.requiresBaseUrl = p.requires_base_url || false;
+                        option.dataset.requiresBaseUrl =
+                            p.requires_base_url || false;
                         if (p.disabled_reason) {
                             option.title = p.disabled_reason;
                         }
                         select.appendChild(option);
                     });
 
-                    select.dispatchEvent(new Event('change'));
+                    select.dispatchEvent(new Event("change"));
                 } catch (err) {
-                    console.error('加载 Provider 列表失败:', err);
+                    console.error("加载 Provider 列表失败:", err);
                 }
             }
 
             async function loadTokenStats() {
                 try {
-                    var data = await apiGet('/api/v1/config/llm/usage');
-                    document.getElementById('stat-input-tokens').textContent = formatNumber(data.input_tokens || 0);
-                    document.getElementById('stat-output-tokens').textContent = formatNumber(data.output_tokens || 0);
-                    document.getElementById('stat-total-cost').textContent = formatNumber(data.total_requests || 0);
-                    document.getElementById('stat-error-count').textContent = formatNumber(data.error_count || 0);
+                    var data = await apiGet("/api/v1/config/llm/usage");
+                    document.getElementById("stat-input-tokens").textContent =
+                        formatNumber(data.input_tokens || 0);
+                    document.getElementById("stat-output-tokens").textContent =
+                        formatNumber(data.output_tokens || 0);
+                    document.getElementById("stat-total-cost").textContent =
+                        formatNumber(data.total_requests || 0);
+                    document.getElementById("stat-error-count").textContent =
+                        formatNumber(data.error_count || 0);
                 } catch (err) {
-                    console.error('加载 Token 统计失败:', err);
+                    console.error("加载 Token 统计失败:", err);
                 }
             }
 
             function formatNumber(n) {
-                if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-                if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+                if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+                if (n >= 1000) return (n / 1000).toFixed(1) + "K";
                 return n.toString();
             }
 
             async function testLlmConnection() {
-                const btn = document.getElementById('test-llm-btn');
-                const resultEl = document.getElementById('test-result');
+                const btn = document.getElementById("test-llm-btn");
+                const resultEl = document.getElementById("test-result");
                 btn.disabled = true;
-                btn.textContent = '测试中...';
-                resultEl.className = 'test-result hidden';
+                btn.textContent = "测试中...";
+                resultEl.className = "test-result hidden";
 
-                const baseUrl = document.getElementById('llm-base-url').value.trim() || 'http://localhost:11434';
-                const model = document.getElementById('llm-model').value;
-                const apiKey = document.getElementById('llm-api-key').value;
+                const baseUrl =
+                    document.getElementById("llm-base-url").value.trim() ||
+                    "http://localhost:11434";
+                const model = document.getElementById("llm-model").value;
+                const apiKey = document.getElementById("llm-api-key").value;
 
-                const headers = { 'Content-Type': 'application/json' };
+                const headers = { "Content-Type": "application/json" };
                 if (apiKey) {
-                    headers['Authorization'] = `Bearer ${apiKey}`;
+                    headers["Authorization"] = `Bearer ${apiKey}`;
                 }
 
                 try {
-                    const response = await fetch(`${baseUrl}/chat/completions`, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                            model: model || 'llama3.2:3b',
-                            messages: [{ role: 'user', content: 'Hi' }],
-                            max_tokens: 10
-                        })
-                    });
+                    const response = await fetch(
+                        `${baseUrl}/chat/completions`,
+                        {
+                            method: "POST",
+                            headers,
+                            body: JSON.stringify({
+                                model: model || "llama3.2:3b",
+                                messages: [{ role: "user", content: "Hi" }],
+                                max_tokens: 10,
+                            }),
+                        },
+                    );
 
                     if (response.ok) {
                         const data = await response.json();
-                        resultEl.textContent = `✓ 连接成功！模型响应: ${data.choices?.[0]?.message?.content || 'OK'}`;
-                        resultEl.className = 'test-result success';
+                        resultEl.textContent = `✓ 连接成功！模型响应: ${data.choices?.[0]?.message?.content || "OK"}`;
+                        resultEl.className = "test-result success";
                     } else {
                         const text = await response.text();
                         resultEl.textContent = `✗ 连接失败: HTTP ${response.status} - ${text.substring(0, 100)}`;
-                        resultEl.className = 'test-result error';
+                        resultEl.className = "test-result error";
                     }
                 } catch (e) {
                     resultEl.textContent = `✗ 连接失败: ${e.message}`;
-                    resultEl.className = 'test-result error';
+                    resultEl.className = "test-result error";
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = '测试连通性';
+                    btn.textContent = "测试连通性";
                 }
             }
 
-            document.getElementById('llm-provider').addEventListener('change', function() {
-                var selectedOption = this.options[this.selectedIndex];
-                var isDisabled = selectedOption.disabled;
-                var hint = document.getElementById('llm-provider-hint');
+            document
+                .getElementById("llm-provider")
+                .addEventListener("change", function () {
+                    var selectedOption = this.options[this.selectedIndex];
+                    var isDisabled = selectedOption.disabled;
+                    var hint = document.getElementById("llm-provider-hint");
 
-                if (isDisabled) {
-                    hint.textContent = selectedOption.title || '此 Provider 当前不可用';
-                    hint.classList.remove('hidden');
-                } else {
-                    hint.classList.add('hidden');
-                }
-
-                var isLocal = this.value === 'ollama';
-                document.getElementById('base-url-group').classList.toggle('hidden', false);
-                document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
-
-                if (isLocal) {
-                    document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
-                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b 或 llama3.2:3b';
-                } else {
-                    document.getElementById('llm-base-url').placeholder = '如: https://api.openai.com/v1';
-                    document.getElementById('llm-model').placeholder = '如: gpt-4o';
-                }
-            });
-
-            document.getElementById('server-form').addEventListener('submit', async function(e) {
-                e.preventDefault();
-                var btn = document.getElementById('save-server-btn');
-                btn.disabled = true;
-                btn.textContent = '保存中...';
-
-                try {
-                    var ws_url = document.getElementById('server-ws-url').value.trim();
-                    var http_url = document.getElementById('server-http-url').value.trim();
-                    await apiPost('/api/v1/config/server', { ws_url: ws_url, http_url: http_url });
-
-                    document.getElementById('server-result').classList.remove('hidden');
-                    document.getElementById('server-message').textContent = '服务器配置已保存';
-                    document.getElementById('server-error').classList.add('hidden');
-                } catch (err) {
-                    document.getElementById('server-error').classList.remove('hidden');
-                    document.getElementById('server-error-msg').textContent = err.message;
-                    document.getElementById('server-result').classList.add('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '保存并重连';
-                }
-            });
-
-            document.getElementById('llm-form').addEventListener('submit', async function(e) {
-                e.preventDefault();
-                var btn = document.getElementById('save-llm-btn');
-                btn.disabled = true;
-                btn.textContent = '保存中...';
-
-                try {
-                    var provider = document.getElementById('llm-provider').value;
-                    var selectedOption = document.getElementById('llm-provider').options[document.getElementById('llm-provider').selectedIndex];
-
-                    if (selectedOption.disabled) {
-                        throw new Error('当前选择的 Provider 不可用');
+                    if (isDisabled) {
+                        hint.textContent =
+                            selectedOption.title || "此 Provider 当前不可用";
+                        hint.classList.remove("hidden");
+                    } else {
+                        hint.classList.add("hidden");
                     }
 
-                    var model = document.getElementById('llm-model').value.trim();
-                    var base_url = document.getElementById('llm-base-url').value.trim() || null;
-                    var api_key = document.getElementById('llm-api-key').value || null;
+                    var isLocal = this.value === "ollama";
+                    document
+                        .getElementById("base-url-group")
+                        .classList.toggle("hidden", false);
+                    document
+                        .getElementById("api-key-group")
+                        .classList.toggle("hidden", isLocal);
 
-                    await apiPost('/api/v1/config/llm', {
-                        actor: { provider: provider, model: model, base_url: base_url, api_key: api_key },
-                        reflector: null,
-                        reflector_inherits_actor: true
-                    });
+                    if (isLocal) {
+                        document.getElementById("llm-base-url").placeholder =
+                            "http://localhost:11434";
+                        document.getElementById("llm-model").placeholder =
+                            "如: qwen2.5:14b 或 llama3.2:3b";
+                    } else {
+                        document.getElementById("llm-base-url").placeholder =
+                            "如: https://api.openai.com/v1";
+                        document.getElementById("llm-model").placeholder =
+                            "如: gpt-4o";
+                    }
+                });
 
-                    document.getElementById('llm-result').classList.remove('hidden');
-                    document.getElementById('llm-message').textContent = 'LLM 配置已保存';
-                    document.getElementById('llm-error').classList.add('hidden');
-                } catch (err) {
-                    document.getElementById('llm-error').classList.remove('hidden');
-                    document.getElementById('llm-error-msg').textContent = err.message;
-                    document.getElementById('llm-result').classList.add('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '保存配置';
-                }
-            });
+            document
+                .getElementById("server-form")
+                .addEventListener("submit", async function (e) {
+                    e.preventDefault();
+                    var btn = document.getElementById("save-server-btn");
+                    btn.disabled = true;
+                    btn.textContent = "保存中...";
+
+                    try {
+                        var ws_url = document
+                            .getElementById("server-ws-url")
+                            .value.trim();
+                        var http_url = document
+                            .getElementById("server-http-url")
+                            .value.trim();
+                        await apiPost("/api/v1/config/server", {
+                            ws_url: ws_url,
+                            http_url: http_url,
+                        });
+
+                        document
+                            .getElementById("server-result")
+                            .classList.remove("hidden");
+                        document.getElementById("server-message").textContent =
+                            "服务器配置已保存";
+                        document
+                            .getElementById("server-error")
+                            .classList.add("hidden");
+                    } catch (err) {
+                        document
+                            .getElementById("server-error")
+                            .classList.remove("hidden");
+                        document.getElementById(
+                            "server-error-msg",
+                        ).textContent = err.message;
+                        document
+                            .getElementById("server-result")
+                            .classList.add("hidden");
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = "保存并重连";
+                    }
+                });
+
+            document
+                .getElementById("llm-form")
+                .addEventListener("submit", async function (e) {
+                    e.preventDefault();
+                    var btn = document.getElementById("save-llm-btn");
+                    btn.disabled = true;
+                    btn.textContent = "保存中...";
+
+                    try {
+                        var provider =
+                            document.getElementById("llm-provider").value;
+                        var selectedOption =
+                            document.getElementById("llm-provider").options[
+                                document.getElementById("llm-provider")
+                                    .selectedIndex
+                            ];
+
+                        if (selectedOption.disabled) {
+                            throw new Error("当前选择的 Provider 不可用");
+                        }
+
+                        var model = document
+                            .getElementById("llm-model")
+                            .value.trim();
+                        var base_url =
+                            document
+                                .getElementById("llm-base-url")
+                                .value.trim() || null;
+                        var api_key =
+                            document.getElementById("llm-api-key").value ||
+                            null;
+
+                        await apiPost("/api/v1/config/llm", {
+                            actor: {
+                                provider: provider,
+                                model: model,
+                                base_url: base_url,
+                                api_key: api_key,
+                            },
+                            reflector: null,
+                            reflector_inherits_actor: true,
+                        });
+
+                        document
+                            .getElementById("llm-result")
+                            .classList.remove("hidden");
+                        document.getElementById("llm-message").textContent =
+                            "LLM 配置已保存";
+                        document
+                            .getElementById("llm-error")
+                            .classList.add("hidden");
+                    } catch (err) {
+                        document
+                            .getElementById("llm-error")
+                            .classList.remove("hidden");
+                        document.getElementById("llm-error-msg").textContent =
+                            err.message;
+                        document
+                            .getElementById("llm-result")
+                            .classList.add("hidden");
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = "保存配置";
+                    }
+                });
 
             async function preloadConfig() {
                 try {
-                    var serverData = await apiGet('/api/v1/config');
-                    document.getElementById('server-ws-url').value = serverData.server_ws_url || 'ws://localhost:23333/ws';
-                    document.getElementById('server-http-url').value = serverData.server_http_url || 'http://localhost:23333';
+                    var serverData = await apiGet("/api/v1/config");
+                    document.getElementById("server-ws-url").value =
+                        serverData.server_ws_url || "ws://localhost:23333/ws";
+                    document.getElementById("server-http-url").value =
+                        serverData.server_http_url || "http://localhost:23333";
 
-                    var llmData = await apiGet('/api/v1/config/llm');
+                    var llmData = await apiGet("/api/v1/config/llm");
                     if (llmData && llmData.actor) {
-                        document.getElementById('llm-provider').value = llmData.actor.provider;
-                        document.getElementById('llm-model').value = llmData.actor.model || '';
-                        document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
-                        document.getElementById('llm-provider').dispatchEvent(new Event('change'));
+                        document.getElementById("llm-provider").value =
+                            llmData.actor.provider;
+                        document.getElementById("llm-model").value =
+                            llmData.actor.model || "";
+                        document.getElementById("llm-base-url").value =
+                            llmData.actor.base_url || "";
+                        document
+                            .getElementById("llm-provider")
+                            .dispatchEvent(new Event("change"));
                     }
 
-                    // 加载 LLM 紧急停止状态
-                    var disabledData = await apiGet('/api/v1/config/llm-disabled');
-                    document.getElementById('llm-disabled').checked = disabledData.llm_disabled || false;
+                    // 加载 LLM 停止状态
+                    var disabledData = await apiGet(
+                        "/api/v1/config/llm-disabled",
+                    );
+                    document.getElementById("llm-disabled").checked =
+                        disabledData.llm_disabled || false;
                 } catch (err) {
-                    console.log('加载配置失败:', err);
+                    console.log("加载配置失败:", err);
                 }
             }
 
-            // LLM 紧急停止开关事件
-            document.getElementById('llm-disabled').addEventListener('change', async function() {
-                const disabled = this.checked;
-                try {
-                    await apiPost('/api/v1/config/llm-disabled', { llm_disabled: disabled });
-                    alert(disabled ? 'LLM 调用已紧急停止' : 'LLM 调用已恢复');
-                } catch (err) {
-                    alert('设置失败: ' + err.message);
-                    this.checked = !disabled; // 恢复原状态
-                }
-            });
+            // LLM 停止开关事件
+            document
+                .getElementById("llm-disabled")
+                .addEventListener("change", async function () {
+                    const disabled = this.checked;
+                    try {
+                        await apiPost("/api/v1/config/llm-disabled", {
+                            llm_disabled: disabled,
+                        });
+                        alert(disabled ? "LLM 调用已停止" : "LLM 调用已恢复");
+                    } catch (err) {
+                        alert("设置失败: " + err.message);
+                        this.checked = !disabled; // 恢复原状态
+                    }
+                });
 
             async function init() {
                 await loadProviders();
