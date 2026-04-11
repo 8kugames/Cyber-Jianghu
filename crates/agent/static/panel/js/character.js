@@ -185,6 +185,60 @@ function renderWorldTree() {
     });
 }
 
+// 渲染抽屉内的经历日志（与经历日志 Tab 保持一致）
+function renderDrawerSoulCycles(recordsMap, immMap) {
+    const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
+    if (tickIds.length === 0) {
+        return '<p class="no-data">暂无经历记录</p>';
+    }
+
+    let html = '<div class="drawer-experiences">';
+    tickIds.forEach(tickId => {
+        const attempts = recordsMap[tickId];
+        const first = attempts[0];
+        const worldTimeText = formatWorldTime(first.world_time);
+        const realTimeText = formatRealTime(first.created_at);
+
+        html += `<div class="tick-card">
+            <div class="tick-card-header">
+                <span class="tick-badge">T${tickId}</span>
+                <span class="tick-world-time">${escapeHtml(worldTimeText)}</span>
+                <span class="tick-real-time">${escapeHtml(realTimeText)}</span>
+            </div>`;
+
+        // 行动分区
+        html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+        attempts.forEach((a, idx) => {
+            if (attempts.length > 1) {
+                html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+            }
+            html += renderSoulInline('人魂', a.renhun, 'renhun');
+            html += renderSoulInline('天魂', a.tianhun, 'tianhun');
+            html += renderSoulInline('地魂', a.dihun, 'dihun');
+        });
+        html += '</div>';
+
+        // 即时分区
+        const immIntents = immMap[tickId] || [];
+        if (immIntents.length > 0) {
+            html += '<div class="tick-section tick-section-immediate">';
+            html += '<div class="tick-section-title">即时</div>';
+            immIntents.forEach(imm => {
+                html += `<div class="imm-item">
+                    <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                    <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
+                    ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
+                </div>`;
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
 // 打开角色抽屉
 async function openCharacterDrawer(char) {
     const drawer = document.getElementById('character-drawer');
@@ -390,32 +444,29 @@ async function loadCharacterIntoDrawer(char) {
         }
     }
 
-    // 经历日志（仅当前角色）
-    if (isCurrent) {
-        try {
-            const expData = await apiGet('/api/v1/character/soul-cycles?page=1&limit=3');
-            const recordsMap = expData.records || {};
-            const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
-            if (tickIds.length > 0) {
-                const expList = tickIds.slice(0, 3).map(tid => {
-                    const attempts = recordsMap[tid];
-                    const first = attempts[0];
-                    const event = (first.renhun && first.renhun.narrative) || (first.tianhun && first.tianhun.action_type) || '-';
-                    return `<div class="exp-mini-item">
-                        <span class="exp-tick">T${tid}</span>
-                        <span class="exp-event">${escapeHtml(event.substring(0, 30))}${event.length > 30 ? '...' : ''}</span>
-                    </div>`;
-                }).join('');
-                html += `
-                    <section class="drawer-section">
-                        <div class="drawer-section-title">经历日志</div>
-                        <div class="exp-mini-list">${expList}</div>
-                    </section>
-                `;
-            }
-        } catch (err) {
-            console.warn('加载经历日志失败:', err);
-        }
+    // 经历日志（与经历日志 Tab 保持一致）
+    try {
+        const expParams = isCurrent
+            ? '?page=1&limit=3'
+            : `?agent_id=${char.agent_id}&page=1&limit=3`;
+        const expData = await apiGet(`/api/v1/character/soul-cycles${expParams}`);
+        const recordsMap = expData.records || {};
+        const immMap = expData.immediate_intents || {};
+        const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">经历日志</div>
+                ${expHtml}
+            </section>
+        `;
+    } catch (err) {
+        console.warn('加载经历日志失败:', err);
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">经历日志</div>
+                <p class="no-data">暂无经历记录</p>
+            </section>
+        `;
     }
 
     // 托梦记录（仅当前角色）

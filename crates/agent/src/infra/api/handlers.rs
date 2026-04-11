@@ -2267,10 +2267,11 @@ fn immediate_record_to_entry(
     }
 }
 
-/// 获取指定 tick 的三魂完整记录
+/// 获取指定角色的三魂完整记录
 ///
 /// GET /api/v1/character/soul-cycles?tick_id=123
 /// GET /api/v1/character/soul-cycles?page=1&limit=20
+/// GET /api/v1/character/soul-cycles?agent_id=xxx&page=1&limit=20  # 指定角色
 pub(super) async fn get_soul_cycles_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -2283,11 +2284,26 @@ pub(super) async fn get_soul_cycles_handler(
         .unwrap_or(20)
         .min(50);
 
-    let recorder_guard = state.soul_cycle_recorder.read().await;
-    let Some(recorder) = recorder_guard.as_ref() else {
+    // 确定查询目标角色：优先使用 agent_id 参数，否则用当前角色
+    let target_agent_id = if let Some(id_str) = params.get("agent_id") {
+        match uuid::Uuid::parse_str(id_str) {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "Invalid agent_id format"})),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        *state.agent_id.read().await
+    };
+
+    let Some(recorder) = state.soul_recorder_for(target_agent_id).await else {
         return (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"error": "SoulCycleRecorder not available"})),
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Soul cycle record not found for this agent"})),
         )
             .into_response();
     };
