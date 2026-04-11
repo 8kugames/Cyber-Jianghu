@@ -81,7 +81,7 @@ attack:
  - [x] **默认 LLM**: 默认改为 openclaw，支持 ollama 自定义端口配置。
  - [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
  - [x] **WebSocket 心跳**: 内置 Ping/Pong 消息机制，保持连接活跃。
- - [x] **LLM 开关闸**: 紧急停止 token 消耗的控制机制，Web 面板可操作。
+ - [x] **LLM 开关闸**: 停止 token 消耗的控制机制，Web 面板可操作。
 
 ### 2. AI 与认知核心
 
