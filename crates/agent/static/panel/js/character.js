@@ -400,8 +400,8 @@ async function loadCharacterIntoDrawer(char) {
                 const isEnriched = value && typeof value === 'object' && value.current !== undefined;
                 const displayName = isEnriched ? value.name : key.replace(/_/g, ' ');
                 const displayValue = isEnriched
-                    ? (typeof value.current === 'number' ? value.current.toFixed(2) : value.current)
-                    : (typeof value === 'number' ? value.toFixed(2) : value);
+                    ? (typeof value.current === 'number' ? value.current.toFixed(3) : value.current)
+                    : (typeof value === 'number' ? value.toFixed(3) : value);
                 const desc = isEnriched ? (value.description || '') : '';
                 attrHtml += `<div class="attr-item" title="${escapeHtml(desc)}"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${displayValue}</span></div>`;
             });
@@ -687,7 +687,8 @@ function renderAttributes(attributes, derivedAttributes) {
             // 先看 derived_attributes，再看 attributes
             const attr = derivedSource[key] || attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
+                const displayVal = typeof attr.current === 'number' ? attr.current.toFixed(3) : attr.current;
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayVal}</span></div>`;
             }
         });
         html += '</div></div>';
