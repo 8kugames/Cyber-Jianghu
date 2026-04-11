@@ -268,10 +268,97 @@ impl NarrativeConfig {
             },
         );
 
+        // 先天属性叙事配置
+        attributes.insert(
+            "strength".to_string(),
+            NarrativeAttributeConfig {
+                name: "strength".to_string(),
+                display_name: "力量".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "agility".to_string(),
+            NarrativeAttributeConfig {
+                name: "agility".to_string(),
+                display_name: "敏捷".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "constitution".to_string(),
+            NarrativeAttributeConfig {
+                name: "constitution".to_string(),
+                display_name: "根骨".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "intelligence".to_string(),
+            NarrativeAttributeConfig {
+                name: "intelligence".to_string(),
+                display_name: "悟性".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "charisma".to_string(),
+            NarrativeAttributeConfig {
+                name: "charisma".to_string(),
+                display_name: "魅力".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "luck".to_string(),
+            NarrativeAttributeConfig {
+                name: "luck".to_string(),
+                display_name: "福缘".to_string(),
+                thresholds: vec![],
+                note: None,
+            },
+        );
+
+        // 属性分类映射
+        let mut attribute_categories = HashMap::new();
+        attribute_categories.insert(
+            "primary".to_string(),
+            vec![
+                "strength".to_string(),
+                "agility".to_string(),
+                "constitution".to_string(),
+                "intelligence".to_string(),
+                "charisma".to_string(),
+                "luck".to_string(),
+            ],
+        );
+        attribute_categories.insert(
+            "status".to_string(),
+            vec![
+                "hp".to_string(),
+                "stamina".to_string(),
+                "hunger".to_string(),
+                "thirst".to_string(),
+            ],
+        );
+        attribute_categories.insert(
+            "derived".to_string(),
+            vec![
+                "attack_power".to_string(),
+                "defense".to_string(),
+                "speed".to_string(),
+            ],
+        );
+
         Self {
             version: "0.0.1-builtin".to_string(),
             description: "内置默认叙事配置".to_string(),
-            attribute_categories: HashMap::new(),
+            attribute_categories,
             attributes,
             status_effects,
         }

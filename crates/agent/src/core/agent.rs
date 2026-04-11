@@ -810,7 +810,11 @@ impl Agent {
                     passed: true,
                     detail: None,
                 });
-                return Ok(ReflectorResult::Approved(intent, layers));
+                return Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: None,
+                });
             }
         };
 
@@ -831,7 +835,11 @@ impl Agent {
                     passed: true,
                     detail: Some(format!("LLM error, bypassed: {}", e)),
                 });
-                return Ok(ReflectorResult::Approved(intent, layers));
+                return Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: None,
+                });
             }
         };
 
@@ -841,16 +849,24 @@ impl Agent {
                 narrative,
             } => {
                 info!("ReflectorSoul approved");
-                if !narrative.is_empty() {
+                let narrative_opt = if !narrative.is_empty() {
                     self.save_observer_narrative(world_state.tick_id, &narrative)
-                        .await?;
-                }
+                        .await
+                        .ok();
+                    Some(narrative)
+                } else {
+                    None
+                };
                 layers.push(LayerResult {
                     layer: "layer3",
                     passed: true,
                     detail: None,
                 });
-                Ok(ReflectorResult::Approved(intent, layers))
+                Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: narrative_opt,
+                })
             }
             crate::soul::reflector::ValidationResult::Rejected {
                 reason,
@@ -868,12 +884,13 @@ impl Agent {
     }
 
     /// 获取三魂循环记录器（如果可用）
-    pub(crate) fn soul_recorder(
+    /// 获取当前角色的三魂记录器（从注册表按需加载）
+    pub(crate) async fn soul_recorder(
         &self,
     ) -> Option<Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
-        let guard = self.http_api_state.as_ref()?;
-        let guard = guard.soul_cycle_recorder.try_read().ok()?;
-        guard.as_ref().cloned()
+        let state = self.http_api_state.as_ref()?;
+        let agent_id = *state.agent_id.read().await;
+        state.soul_recorder_for(agent_id).await
     }
 }
 
@@ -890,8 +907,12 @@ pub struct LayerResult {
 
 /// ReflectorSoul 审查结果
 pub enum ReflectorResult {
-    /// 审查通过，携带修正后的 Intent 和三层中间结果
-    Approved(Intent, Vec<LayerResult>),
+    /// 审查通过，携带修正后的 Intent、三层中间结果和叙事化摘要
+    Approved {
+        intent: Intent,
+        layers: Vec<LayerResult>,
+        narrative: Option<String>,
+    },
     /// 审查拒绝，携带叙事化原因和三层中间结果
     Rejected {
         reason: String,

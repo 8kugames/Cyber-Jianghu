@@ -913,15 +913,54 @@ pub struct ExperiencesResponse {
 }
 
 /// 获取 Agent 经历日志
-/// GET /api/dashboard/agent/{id}/experiences?page=1&limit=20
+///
+/// 支持两种认证方式：
+/// 1. Admin token (Bearer auth): 查看任意角色的经历日志
+/// 2. Device auth (query params): 设备只能查看自己归属角色的经历日志
+///
+/// GET /api/dashboard/agent/{id}/experiences?page=1&limit=20&device_id=xxx&auth_token=yyy
 pub async fn get_agent_experiences(
     State(state): State<Arc<AppState>>,
     Path(agent_id): Path<Uuid>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ExperiencesResponse>, StatusCode> {
+    // 设备认证：如果提供了 device_id 和 auth_token，使用设备归属校验
+    if let (Some(device_id_str), Some(auth_token)) = (
+        params.get("device_id"),
+        params.get("auth_token"),
+    ) {
+        if let Ok(device_id) = Uuid::parse_str(device_id_str) {
+            match crate::db::verify_device_token(&state.db_pool, device_id, auth_token).await {
+                Ok(true) => {
+                    // 验证通过，检查设备是否归属该 agent
+                    let owner_device_id: Option<Uuid> = sqlx::query_scalar(
+                        "SELECT device_id FROM agents WHERE agent_id = $1",
+                    )
+                    .bind(agent_id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .unwrap_or(None);
+
+                    if owner_device_id != Some(device_id) {
+                        tracing::warn!(
+                            "Device {} attempted to access agent {} experiences without ownership",
+                            device_id,
+                            agent_id
+                        );
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                }
+                Ok(false) => return Err(StatusCode::UNAUTHORIZED),
+                Err(e) => {
+                    tracing::warn!("Device token verify error: {}", e);
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
+            }
+        }
+    }
+
     let page: i32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let limit: i32 = params
-        .get("limit")
+    let limit: i32 = params.get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
     let offset = (page - 1) * limit;

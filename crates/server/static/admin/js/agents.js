@@ -290,11 +290,12 @@ function renderExperiences(data) {
 function renderTickCard(exp, metadata, time) {
     var attempts = metadata.cycles || [];
     var immediate = metadata.immediate_intents || [];
+    var worldTimeDisplay = metadata.world_time || (exp.action_type_display || exp.action_type || '-');
 
     var html = '<div class="tick-card">' +
         '<div class="tick-card-header">' +
         '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
-        '<span class="tick-world-time">' + escapeHtml(exp.action_type_display || exp.action_type || '-') + '</span>' +
+        '<span class="tick-world-time">' + escapeHtml(worldTimeDisplay) + '</span>' +
         '<span class="tick-real-time">' + time + '</span>' +
         '</div>';
 

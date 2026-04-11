@@ -305,6 +305,9 @@ pub enum ClientMessage {
 /// 三魂循环元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoulCycleMetadata {
+    /// 游戏内时间（用于经历日志显示）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_time: Option<String>,
     /// 三魂循环记录
     pub cycles: Vec<SoulCycleAttempt>,
     /// 即时通道意图记录

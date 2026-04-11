@@ -2373,6 +2373,69 @@ button[type="button"]:disabled {
     margin-bottom: 10px;
 }
 
+/* 抽屉内经历日志 - 与经历日志 Tab 保持一致 */
+.drawer-section .drawer-experiences {
+    max-height: 500px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.drawer-section .tick-card {
+    margin-bottom: 12px;
+    padding: 10px;
+}
+
+.drawer-section .tick-card-header {
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+}
+
+.drawer-section .tick-section {
+    margin-bottom: 4px;
+}
+
+.drawer-section .exp-renhun,
+.drawer-section .exp-tianhun,
+.drawer-section .exp-dihun {
+    padding: 6px 8px;
+    margin-bottom: 4px;
+}
+
+.drawer-section .exp-soul-label {
+    min-width: 48px;
+    font-size: 10px;
+    padding: 2px 4px;
+}
+
+.drawer-section .soul-text,
+.drawer-section .soul-thought,
+.drawer-section .soul-speech,
+.drawer-section .soul-error,
+.drawer-section .exp-dihun-result,
+.drawer-section .exp-dihun-reason,
+.drawer-section .exp-dihun-narrative {
+    font-size: 12px;
+}
+
+.drawer-section .soul-layers {
+    gap: 4px;
+}
+
+.drawer-section .soul-layer-tag {
+    font-size: 10px;
+    padding: 2px 4px;
+}
+
+.drawer-section .tick-section-immediate {
+    margin-top: 6px;
+    padding-top: 6px;
+}
+
+.drawer-section .imm-item {
+    padding: 4px 8px;
+    margin-bottom: 2px;
+}
+
 .favorability-bar-wrap {
     display: flex;
     align-items: center;

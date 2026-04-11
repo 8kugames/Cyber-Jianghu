@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS chronicles (
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_chronicles_period ON chronicles(period_start, period_end);
-CREATE INDEX idx_chronicles_game_day ON chronicles(game_day_start DESC);
-CREATE INDEX idx_chronicles_created_at ON chronicles(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chronicles_period ON chronicles(period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_chronicles_game_day ON chronicles(game_day_start DESC);
+CREATE INDEX IF NOT EXISTS idx_chronicles_created_at ON chronicles(created_at DESC);
 
 COMMENT ON TABLE chronicles IS '群像传记表，每7游戏日生成一份世界群像';
 COMMENT ON COLUMN chronicles.chronicle_id IS '传记ID，如 C-001';
