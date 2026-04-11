@@ -191,6 +191,21 @@ Key agent modules:
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
 
+**Decision Callbacks** (SDK API):
+- `cognitive_decision_with_chain()` - **推荐**：返回 `(Intent, CognitiveChain)` 元组，CognitiveChain 传递给天魂辅助指代消解
+- `cognitive_decision_with_retry()` - **已废弃**：仅返回 Intent，请迁移到 `cognitive_decision_with_chain`
+
+```rust
+use cyber_jianghu_agent::cognitive_decision_with_chain;
+
+let callback = cognitive_decision_with_chain(agent_id, engine.clone(), 3);
+
+Agent::builder(config, base_callback)
+    .with_decision_chain(callback)  // 传递 CognitiveChain 给天魂
+    .with_intent_translator(translator)
+    .build();
+```
+
 **Three-Soul Architecture** (三魂, Cognitive mode):
 The agent uses a three-stage pipeline: 人魂 (narrative) → 天魂 (translation) → 地魂 (validation)
 
