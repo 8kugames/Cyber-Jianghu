@@ -748,10 +748,12 @@ impl super::Agent {
                     let final_intent = match final_intent {
                         Some(intent) => intent,
                         None => {
-                            warn!("Tick {} 无有效 intent（超时或被驳回耗尽），等待下个 tick", world_state.tick_id);
+                            warn!("Tick {} 无有效 intent（超时或被驳回耗尽），发送 idle", world_state.tick_id);
                             self.consecutive_idle_count += 1;
                             self.maybe_rotate_model().await;
-                            continue;
+                            // 构造 idle intent 并继续发送+上报（保证 server-web 经历日志完整）
+                            Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                .with_thought("三魂循环未产出有效意图".to_string())
                         }
                     };
 

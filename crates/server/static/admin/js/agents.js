@@ -18,6 +18,22 @@ async function loadStatusConfigs() {
     }
 }
 
+// Action type display name mapping (loaded from server)
+var actionTypeMap = {};
+async function loadActionTypeMap() {
+    try {
+        var res = await fetch("/api/dashboard/actions-map");
+        if (res.ok) {
+            actionTypeMap = await res.json();
+        }
+    } catch (e) {
+        console.warn("[actions] Failed to load action type map:", e);
+    }
+}
+function getActionTypeDisplay(actionType) {
+    return actionTypeMap[actionType] || actionType;
+}
+
 async function loadAllAgents() {
     try {
         var res = await fetch("/api/dashboard/agents", { headers: getAuthHeaders() });
@@ -343,7 +359,7 @@ function renderServerSoulInline(label, data, type) {
     } else if (type === 'tianhun') {
         if (!data.success) html += '<div class="soul-error">翻译失败: ' + escapeHtml(data.error || '未知错误') + '</div>';
         if (data.action_type) {
-            html += '<div class="soul-text">' + escapeHtml(data.action_type);
+            html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(data.action_type));
             if (data.action_data && Object.keys(data.action_data).length > 0) {
                 html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(data.action_data)) + '</span>';
             }
