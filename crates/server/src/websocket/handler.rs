@@ -604,7 +604,7 @@ async fn handle_client_message(
             tick_id,
             agent_id: msg_agent_id,
             metadata,
-        } => handle_soul_cycle_report(*agent_id, msg_agent_id, tick_id, &metadata, state).await,
+        } => handle_soul_cycle_report(device_id, msg_agent_id, tick_id, &metadata, state).await,
     }
 }
 
@@ -1021,13 +1021,13 @@ async fn handle_dialogue_message(
 /// Agent 在 intent 发送后通过 WebSocket SoulCycleReport 消息上报三魂循环详情。
 /// Server 将元数据关联到同一 tick 的 agent_action_logs 记录。
 async fn handle_soul_cycle_report(
-    connection_agent_id: uuid::Uuid,
+    device_id: uuid::Uuid,
     msg_agent_id: Option<uuid::Uuid>,
     tick_id: i64,
     metadata: &SoulCycleMetadata,
     state: &Arc<crate::state::AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 确定最终的 agent_id（与 handle_intent 相同逻辑）
+    // 确定最终的 agent_id（与 handle_intent 相同逻辑：比较 device_id）
     let agent_id = match msg_agent_id {
         Some(id) => {
             let owner_device_id: Option<uuid::Uuid> =
@@ -1038,15 +1038,25 @@ async fn handle_soul_cycle_report(
                     .context("查询 Agent 归属失败")?;
 
             match owner_device_id {
-                Some(owner) if owner == connection_agent_id => id,
+                Some(owner) if owner == device_id => id,
                 Some(_) => {
-                    warn!("SoulCycleReport: Agent ownership mismatch: agent={}", id);
+                    warn!(
+                        "SoulCycleReport: Agent ownership mismatch: agent={}, device={}",
+                        id, device_id
+                    );
                     return Err("无权操作此角色".into());
                 }
                 None => return Err("Agent 不存在".into()),
             }
         }
-        None => connection_agent_id,
+        None => {
+            // 无 msg_agent_id 时，通过 device_id 查找当前 agent
+            match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
+                Ok(Some(agent)) => agent.agent_id,
+                Ok(None) => return Err("无关联角色".into()),
+                Err(e) => return Err(format!("查询角色失败: {}", e).into()),
+            }
+        }
     };
 
     debug!(
