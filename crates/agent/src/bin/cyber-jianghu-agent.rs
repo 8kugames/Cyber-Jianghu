@@ -20,6 +20,8 @@
 // 6. HTTP API：http://localhost:<端口>/api/v1/*
 // ============================================================================
 
+#![allow(deprecated, unused_imports)]
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use notify::{self, Watcher};
@@ -32,7 +34,6 @@ use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
 
 use cyber_jianghu_agent::component::llm::{
-    DirectLlmClient, DirectLlmClientConfig, FallbackLlmClient, LlmClient, LlmProvider,
 };
 use cyber_jianghu_agent::config::{
     CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
@@ -43,9 +44,10 @@ use cyber_jianghu_agent::{
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::claw::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::create_http_state,
+    component::llm::LlmClient,
     runtime::{
-        CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
-        cognitive_decision_with_retry,
+        CognitiveDecisionConfig, DecisionCallback, DecisionWithChainCallback,
+        cognitive_decision_with_chain,
     },
     soul::actor::{CognitiveEngine, CognitiveEngineConfig},
     soul::translator::IntentTranslator,
@@ -525,43 +527,6 @@ fn reset_agent() -> Result<()> {
     Ok(())
 }
 
-fn create_llm_client(llm_config: &LlmConfig) -> Result<DirectLlmClient> {
-    let provider = LlmProvider::parse(&llm_config.provider)
-        .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
-
-    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
-
-    if let Some(url) = &llm_config.base_url {
-        client_config = client_config.with_base_url(url);
-    }
-    if let Some(model) = &llm_config.model {
-        client_config = client_config.with_model(model);
-    }
-    client_config = client_config
-        .with_temperature(llm_config.temperature)
-        .with_max_tokens(llm_config.max_tokens);
-
-    DirectLlmClient::new(client_config)
-}
-
-/// 创建指定 model name 的 LLM 客户端（用于 fallback）
-fn create_llm_client_with_model(llm_config: &LlmConfig, model: &str) -> Result<DirectLlmClient> {
-    let provider = LlmProvider::parse(&llm_config.provider)
-        .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
-
-    let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
-
-    if let Some(url) = &llm_config.base_url {
-        client_config = client_config.with_base_url(url);
-    }
-    client_config = client_config
-        .with_model(model)
-        .with_temperature(llm_config.temperature)
-        .with_max_tokens(llm_config.max_tokens);
-
-    DirectLlmClient::new(client_config)
-}
-
 // ============================================================================
 // 等待角色创建
 // ============================================================================
@@ -740,35 +705,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
             info!("创建 Cognitive 模式组件...");
-            let llm_client = create_llm_client(&config.llm)?;
-            info!(
-                "LLM 配置: provider={}, model={}",
-                config.llm.provider,
-                config.llm.model.as_deref().unwrap_or("default")
-            );
-
-            // 构建 LLM 客户端列表（主模型 + fallback）
-            let mut llm_clients: Vec<Arc<dyn LlmClient>> = vec![Arc::new(llm_client)];
-            for (i, fallback_model) in config.llm.fallback_models.iter().enumerate() {
-                match create_llm_client_with_model(&config.llm, fallback_model) {
-                    Ok(client) => {
-                        info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
-                        llm_clients.push(Arc::new(client));
-                    }
-                    Err(e) => warn!(
-                        "Fallback 模型 #{} ({}) 创建失败: {}",
-                        i + 1,
-                        fallback_model,
-                        e
-                    ),
-                }
-            }
-
-            let llm_arc: Arc<dyn LlmClient> = if llm_clients.len() > 1 {
-                Arc::new(FallbackLlmClient::new(llm_clients))
-            } else {
-                llm_clients.into_iter().next().unwrap()
-            };
+            let llm_arc = cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?;
             let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
             info!("LLM Client 容器已创建（支持热重载 + fallback）");
 
@@ -791,8 +728,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 Arc::new(CognitiveEngine::new(llm_arc.clone(), cognitive_config));
             let cognitive_engine_for_builder = cognitive_engine.clone();
 
-            let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
-                Arc::new(cognitive_decision_with_retry(
+            let cognitive_decision_with_chain_cb: DecisionWithChainCallback =
+                Arc::new(cognitive_decision_with_chain(
                     agent_id,
                     cognitive_engine.clone(),
                     CognitiveDecisionConfig::default().max_retries,
@@ -886,9 +823,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let mut builder = AgentBuilder::new(config_for_builder, decision)
                 .device_config(device.clone())
                 .data_dir(data_dir.clone())
-                .with_decision_feedback(cognitive_decision_with_feedback)
+                .with_decision_chain(cognitive_decision_with_chain_cb)
                 .with_decision_memory(decision_with_memory)
-                .with_llm_container(llm_container)
+                .with_llm_container(llm_container.clone())
                 .with_llm_client(llm_arc.clone(), None)
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
@@ -907,6 +844,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             builder = builder.character_config(character.clone());
 
             let agent = builder.build();
+
+            // 注入 LLM container 到 HttpApiState（支持热重载重建）
+            {
+                *api_state.llm_container.write().await = Some(llm_container.clone());
+                info!("LLM container 已注入 HttpApiState（支持热重载）");
+            }
 
             maybe_callback_setup = None;
             cognitive_death_event_tx = Some(api_state.death_event_tx.clone());
@@ -979,13 +922,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     max_tokens_per_stage: config.llm.max_tokens,
                 };
 
-                let llm_client: Arc<dyn LlmClient> = openclaw_bridge;
+                let llm_client: Arc<dyn cyber_jianghu_agent::component::llm::LlmClient> = openclaw_bridge;
                 let cognitive_engine =
                     Arc::new(CognitiveEngine::new(llm_client.clone(), cognitive_config));
                 info!("CognitiveEngine 已创建（Claw 模式统一认知架构）");
 
-                let cognitive_decision_with_feedback: DecisionWithFeedbackCallback =
-                    Arc::new(cognitive_decision_with_retry(
+                let claw_decision_with_chain: DecisionWithChainCallback =
+                    Arc::new(cognitive_decision_with_chain(
                         agent_id,
                         cognitive_engine.clone(),
                         CognitiveDecisionConfig::default().max_retries,
@@ -1010,7 +953,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
                     .data_dir(data_dir.clone())
-                    .with_decision_feedback(cognitive_decision_with_feedback)
+                    .with_decision_chain(claw_decision_with_chain)
                     .with_reconnect_rx(setup.reconnect_rx)
                     .with_llm_client(llm_client.clone(), None);
 

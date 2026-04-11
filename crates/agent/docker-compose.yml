@@ -65,9 +65,9 @@ services:
       - ./config:/app/config
       # 数据持久化（SQLite 数据库、记忆存储等)
       - agent_data:/app/data
-    command: ["./agent", "run", "--port", "23340"]
+    command: ["sh", "-c", "./agent run --port $${PORT:-23340}"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "--max-time", "10", "http://localhost:23340/api/v1/health"]
+      test: ["CMD", "sh", "-c", "curl -f --max-time 10 http://localhost:$${PORT:-23340}/api/v1/health"]
       interval: 30s
       timeout: 30s
       retries: 3
