@@ -11,11 +11,21 @@ use sqlx::Row;
 use super::collector::CollectedData;
 use super::{AgentSummary, Chronicle, Highlight, LocationStat};
 
-/// 存储群像传记
+/// 存储群像传记（兼容旧接口，summary_llm = None）
 pub async fn store(
     db_pool: &crate::db::DbPool,
     data: &CollectedData,
     summary: &str,
+) -> Result<Chronicle> {
+    store_with_llm(db_pool, data, summary, None).await
+}
+
+/// 存储群像传记（支持同时指定主版本摘要）
+pub async fn store_with_llm(
+    db_pool: &crate::db::DbPool,
+    data: &CollectedData,
+    summary: &str,
+    summary_llm: Option<&str>,
 ) -> Result<Chronicle> {
     // 生成 chronicle_id
     let chronicle_id = generate_chronicle_id(db_pool).await?;
@@ -64,15 +74,19 @@ pub async fn store(
         "highlights_count": data.highlights.len(),
     });
 
+    // 根据是否有 LLM 摘要决定状态
+    let status = if summary_llm.is_some() { "llm" } else { "template" };
+    let summary_llm_value = summary_llm.map(|s| s.to_string());
+
     let row = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO chronicles (
             chronicle_id, period_start, period_end,
             game_day_start, game_day_end, season,
-            summary, agent_count, actions_count,
+            summary, summary_llm, agent_count, actions_count,
             highlights, agent_summaries, action_stats,
             location_stats, deaths, births, raw_data, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'template')
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING id
         "#,
     )
@@ -83,6 +97,7 @@ pub async fn store(
     .bind(data.game_day_end)
     .bind(&data.season)
     .bind(summary)
+    .bind(&summary_llm_value)
     .bind(data.agents.len() as i32)
     .bind(data.action_stats.total)
     .bind(highlights_json)
@@ -92,6 +107,7 @@ pub async fn store(
     .bind(data.deaths)
     .bind(data.births)
     .bind(raw_data)
+    .bind(status)
     .fetch_one(db_pool)
     .await
     .map_err(|e| anyhow::anyhow!("插入 chronicles 记录失败: {}", e))?;
@@ -107,7 +123,7 @@ pub async fn store(
         game_day_end: data.game_day_end,
         season: data.season.clone(),
         summary: summary.to_string(),
-        summary_llm: None,
+        summary_llm: summary_llm_value,
         agent_count: data.agents.len() as i32,
         actions_count: data.action_stats.total,
         highlights: data.highlights.clone(),
@@ -116,7 +132,7 @@ pub async fn store(
         location_stats: data.location_stats.clone(),
         deaths: data.deaths,
         births: data.births,
-        status: "template".to_string(),
+        status: status.to_string(),
         created_at: chrono::Utc::now(),
     })
 }
@@ -131,7 +147,7 @@ pub async fn update_llm_summary(
         r#"
         UPDATE chronicles
         SET summary_llm = $1,
-            status = 'both'
+            status = CASE WHEN summary IS NOT NULL THEN 'both' ELSE status END
         WHERE chronicle_id = $2
         "#,
     )
@@ -140,6 +156,34 @@ pub async fn update_llm_summary(
     .execute(db_pool)
     .await
     .context("更新 LLM 摘要失败")?;
+
+    Ok(())
+}
+
+/// 更新模板摘要
+pub async fn update_template_summary(
+    db_pool: &crate::db::DbPool,
+    chronicle_id: &str,
+    summary_template: &str,
+) -> Result<()> {
+    // 只有当 summary_llm 已存在时才更新 summary（作为补充版本）
+    // 如果 summary 已存在，说明主版本就是模板，不覆盖
+    sqlx::query(
+        r#"
+        UPDATE chronicles
+        SET summary = COALESCE(NULLIF(summary, ''), $1),
+            status = CASE 
+                WHEN summary_llm IS NOT NULL AND summary_llm != '' THEN 'both'
+                ELSE status 
+            END
+        WHERE chronicle_id = $2
+        "#,
+    )
+    .bind(summary_template)
+    .bind(chronicle_id)
+    .execute(db_pool)
+    .await
+    .context("更新模板摘要失败")?;
 
     Ok(())
 }
