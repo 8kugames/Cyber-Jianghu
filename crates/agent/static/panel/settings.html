@@ -29,28 +29,6 @@
                 color: var(--text-secondary);
                 margin-top: 5px;
             }
-            .test-section {
-                display: flex;
-                gap: 10px;
-                align-items: center;
-                margin-top: 15px;
-            }
-            .test-result {
-                font-size: 13px;
-                padding: 8px 12px;
-                border-radius: 6px;
-                flex: 1;
-            }
-            .test-result.success {
-                background: rgba(34, 197, 94, 0.1);
-                border: 1px solid rgba(34, 197, 94, 0.3);
-                color: var(--success);
-            }
-            .test-result.error {
-                background: rgba(239, 68, 68, 0.1);
-                border: 1px solid rgba(239, 68, 68, 0.3);
-                color: var(--error);
-            }
             .toggle-row {
                 display: flex;
                 justify-content: space-between;
@@ -95,6 +73,81 @@
             }
             .toggle input:checked + .toggle-slider:before {
                 transform: translateX(24px);
+            }
+            .status-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+                gap: 15px;
+            }
+            .status-left {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .status-left h2 {
+                margin: 0;
+            }
+            .status-right {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .connection-indicator {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                color: var(--text-secondary);
+            }
+            .connection-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #6b7280;
+            }
+            .connection-dot.connected {
+                background: #4ade80;
+                box-shadow: 0 0 6px #4ade80;
+            }
+            .connection-dot.disconnected {
+                background: #ef4444;
+            }
+            .mode-badge {
+                font-size: 11px;
+                padding: 3px 8px;
+                border-radius: 10px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .mode-badge.cognitive {
+                background: rgba(96, 165, 250, 0.15);
+                color: #60a5fa;
+                border: 1px solid rgba(96, 165, 250, 0.3);
+            }
+            .mode-badge.claw {
+                background: rgba(251, 191, 36, 0.15);
+                color: #fbbf24;
+                border: 1px solid rgba(251, 191, 36, 0.3);
+            }
+            .llm-form-disabled-overlay {
+                opacity: 0.5;
+                pointer-events: none;
+            }
+            .llm-disabled-notice {
+                display: none;
+                background: rgba(251, 191, 36, 0.1);
+                border: 1px solid rgba(251, 191, 36, 0.3);
+                color: #fbbf24;
+                padding: 12px 15px;
+                border-radius: 6px;
+                font-size: 13px;
+                margin-bottom: 15px;
+            }
+            .llm-disabled-notice.visible {
+                display: block;
             }
         </style>
     </head>
@@ -149,20 +202,34 @@
                     </div>
                 </section>
 
-                <section class="form-section">
-                    <h2>LLM 配置</h2>
-                    <p class="section-desc">配置 LLM Provider 和模型参数。</p>
-
-                    <!-- LLM 停止开关 -->
-                    <div class="form-group toggle-group">
-                        <div class="toggle-row">
-                            <span>停止 LLM 调用</span>
+                <section class="form-section" id="llm-section">
+                    <div class="status-row">
+                        <div class="status-left">
+                            <h2>LLM 配置</h2>
+                            <span class="mode-badge cognitive" id="mode-badge"
+                                >Cognitive</span
+                            >
+                        </div>
+                        <div class="status-right">
+                            <!--<span class="toggle-label">停止LLM</span>-->
                             <label class="toggle">
                                 <input type="checkbox" id="llm-disabled" />
                                 <span class="toggle-slider"></span>
                             </label>
+                            <div class="connection-indicator">
+                                <span
+                                    class="connection-dot"
+                                    id="connection-dot"
+                                ></span>
+                                <span id="connection-text">未连接</span>
+                            </div>
                         </div>
-                        <p class="hint">启用后将停止所有 LLM 调用</p>
+                    </div>
+
+                    <p class="section-desc">配置 LLM Provider 和模型参数。</p>
+
+                    <div class="llm-disabled-notice" id="llm-claw-notice">
+                        当前运行在 Claw 模式，无需 LLM 配置（由外部调度器控制）
                     </div>
 
                     <!-- Token 统计 -->
@@ -224,23 +291,11 @@
                         </div>
 
                         <div class="form-actions">
-                            <button
-                                type="button"
-                                class="btn btn-secondary"
-                                id="test-llm-btn"
-                                onclick="testLlmConnection()"
-                            >
-                                测试连通性
-                            </button>
                             <button type="submit" id="save-llm-btn">
                                 保存配置
                             </button>
                         </div>
                     </form>
-
-                    <div class="test-section">
-                        <div id="test-result" class="test-result hidden"></div>
-                    </div>
 
                     <div id="llm-result" class="result hidden">
                         <p id="llm-message"></p>
@@ -283,14 +338,24 @@
             async function loadTokenStats() {
                 try {
                     var data = await apiGet("/api/v1/config/llm/usage");
+                    // API 返回数组，按 provider/model 聚合
+                    var totalInput = 0;
+                    var totalOutput = 0;
+                    var totalCalls = 0;
+                    if (Array.isArray(data)) {
+                        data.forEach(function(item) {
+                            totalInput += item.prompt_tokens || 0;
+                            totalOutput += item.completion_tokens || 0;
+                            totalCalls += item.calls || 0;
+                        });
+                    }
                     document.getElementById("stat-input-tokens").textContent =
-                        formatNumber(data.input_tokens || 0);
+                        formatNumber(totalInput);
                     document.getElementById("stat-output-tokens").textContent =
-                        formatNumber(data.output_tokens || 0);
+                        formatNumber(totalOutput);
                     document.getElementById("stat-total-cost").textContent =
-                        formatNumber(data.total_requests || 0);
-                    document.getElementById("stat-error-count").textContent =
-                        formatNumber(data.error_count || 0);
+                        formatNumber(totalCalls);
+                    document.getElementById("stat-error-count").textContent = "-";
                 } catch (err) {
                     console.error("加载 Token 统计失败:", err);
                 }
@@ -300,56 +365,6 @@
                 if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
                 if (n >= 1000) return (n / 1000).toFixed(1) + "K";
                 return n.toString();
-            }
-
-            async function testLlmConnection() {
-                const btn = document.getElementById("test-llm-btn");
-                const resultEl = document.getElementById("test-result");
-                btn.disabled = true;
-                btn.textContent = "测试中...";
-                resultEl.className = "test-result hidden";
-
-                const baseUrl =
-                    document.getElementById("llm-base-url").value.trim() ||
-                    "http://localhost:11434";
-                const model = document.getElementById("llm-model").value;
-                const apiKey = document.getElementById("llm-api-key").value;
-
-                const headers = { "Content-Type": "application/json" };
-                if (apiKey) {
-                    headers["Authorization"] = `Bearer ${apiKey}`;
-                }
-
-                try {
-                    const response = await fetch(
-                        `${baseUrl}/chat/completions`,
-                        {
-                            method: "POST",
-                            headers,
-                            body: JSON.stringify({
-                                model: model || "llama3.2:3b",
-                                messages: [{ role: "user", content: "Hi" }],
-                                max_tokens: 10,
-                            }),
-                        },
-                    );
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        resultEl.textContent = `✓ 连接成功！模型响应: ${data.choices?.[0]?.message?.content || "OK"}`;
-                        resultEl.className = "test-result success";
-                    } else {
-                        const text = await response.text();
-                        resultEl.textContent = `✗ 连接失败: HTTP ${response.status} - ${text.substring(0, 100)}`;
-                        resultEl.className = "test-result error";
-                    }
-                } catch (e) {
-                    resultEl.textContent = `✗ 连接失败: ${e.message}`;
-                    resultEl.className = "test-result error";
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = "测试连通性";
-                }
             }
 
             document
@@ -506,6 +521,13 @@
                     document.getElementById("server-http-url").value =
                         serverData.server_http_url || "http://localhost:23333";
 
+                    // 设置运行时模式标签
+                    var runtimeMode = serverData.runtime_mode || "Cognitive";
+                    var modeBadge = document.getElementById("mode-badge");
+                    modeBadge.textContent = runtimeMode;
+                    modeBadge.className =
+                        "mode-badge " + runtimeMode.toLowerCase();
+
                     var llmData = await apiGet("/api/v1/config/llm");
                     if (llmData && llmData.actor) {
                         document.getElementById("llm-provider").value =
@@ -525,8 +547,64 @@
                     );
                     document.getElementById("llm-disabled").checked =
                         disabledData.llm_disabled || false;
+
+                    // Claw 模式时禁用 LLM 配置
+                    if (runtimeMode === "Claw") {
+                        setLlmFormDisabled(true);
+                    }
                 } catch (err) {
                     console.log("加载配置失败:", err);
+                }
+            }
+
+            async function checkConnectionStatus() {
+                try {
+                    // 有 tick_id 说明已连接到服务器并收到 WorldState
+                    var stateData = await apiGet("/api/v1/state");
+                    var isConnected = stateData && stateData.tick_id != null;
+                    updateConnectionIndicator(isConnected);
+                } catch (err) {
+                    updateConnectionIndicator(false);
+                }
+            }
+
+            function updateConnectionIndicator(connected) {
+                var dot = document.getElementById("connection-dot");
+                var text = document.getElementById("connection-text");
+                if (connected) {
+                    dot.className = "connection-dot connected";
+                    text.textContent = "已连接";
+                } else {
+                    dot.className = "connection-dot disconnected";
+                    text.textContent = "未连接";
+                }
+            }
+
+            function setLlmFormDisabled(disabled) {
+                var llmForm = document.getElementById("llm-form");
+                var notice = document.getElementById("llm-claw-notice");
+                var saveBtn = document.getElementById("save-llm-btn");
+                var providerSelect = document.getElementById("llm-provider");
+                var modelInput = document.getElementById("llm-model");
+                var baseUrlInput = document.getElementById("llm-base-url");
+                var apiKeyInput = document.getElementById("llm-api-key");
+
+                if (disabled) {
+                    llmForm.classList.add("llm-form-disabled-overlay");
+                    notice.classList.add("visible");
+                    saveBtn.disabled = true;
+                    providerSelect.disabled = true;
+                    modelInput.disabled = true;
+                    baseUrlInput.disabled = true;
+                    apiKeyInput.disabled = true;
+                } else {
+                    llmForm.classList.remove("llm-form-disabled-overlay");
+                    notice.classList.remove("visible");
+                    saveBtn.disabled = false;
+                    providerSelect.disabled = false;
+                    modelInput.disabled = false;
+                    baseUrlInput.disabled = false;
+                    apiKeyInput.disabled = false;
                 }
             }
 
@@ -547,14 +625,16 @@
                 });
 
             async function init() {
+                await checkConnectionStatus();
                 await loadProviders();
                 await preloadConfig();
                 await loadTokenStats();
             }
             init();
 
-            // 每 30 秒刷新 Token 统计
+            // 每 30 秒刷新 Token 统计和连接状态
             setInterval(loadTokenStats, 30000);
+            setInterval(checkConnectionStatus, 30000);
         </script>
     </body>
 </html>
