@@ -417,7 +417,11 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route(
             "/api/v1/character/soul-cycles",
             get(handlers::get_soul_cycles_handler),
-        ) // 获取三魂循环完整记录
+        ) // 获取三魂循环完整记录（当前角色）
+        .route(
+            "/api/v1/characters/{agent_id}/soul-cycles",
+            get(handlers::get_character_soul_cycles_handler),
+        ) // 获取指定角色的经历日志（代理到 Server）
         .route(
             "/api/v1/character/rebirth",
             post(handlers::rebirth_character_handler),
