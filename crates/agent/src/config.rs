@@ -371,6 +371,10 @@ pub struct RuntimeConfig {
     /// 0 = 在 23340~23999 范围内随机选择
     #[serde(default)]
     pub port: u16,
+
+    /// 紧急停止 LLM 调用（用于避免计费黑洞）
+    #[serde(default)]
+    pub llm_disabled: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -378,6 +382,7 @@ impl Default for RuntimeConfig {
         Self {
             mode: RuntimeMode::Cognitive,
             port: 0,
+            llm_disabled: false,
         }
     }
 }
@@ -756,6 +761,7 @@ impl Config {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(0),
+            llm_disabled: false,
         };
 
         Ok(Config {

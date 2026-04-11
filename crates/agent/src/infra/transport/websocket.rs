@@ -502,9 +502,31 @@ async fn websocket_background_task(
     mut immediate_msg_rx: tokio::sync::mpsc::Receiver<ClientMessage>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
+    /// 读超时：server 每 30s 发 Ping，120s 无任何消息 = 连接已死
+    const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
     info!("WebSocket background task started");
+    let mut last_message_time = std::time::Instant::now();
+
     loop {
+        let remaining = READ_TIMEOUT.saturating_sub(last_message_time.elapsed());
+
         tokio::select! {
+            // 读超时：连接静默死亡（server 重启、网络断开、TCP 半开）
+            _ = tokio::time::sleep(remaining) => {
+                warn!(
+                    "Background: 读超时 ({:?} 无消息)，连接已死",
+                    last_message_time.elapsed()
+                );
+                if let Some(ref tx) = {
+                    let guard = state.read().await;
+                    guard.worldstate_tx.clone()
+                } {
+                    let _ = tx.send(None);
+                }
+                break;
+            }
+
             // 检查关闭信号
             res = shutdown_rx.recv() => {
                 match res {
@@ -525,6 +547,7 @@ async fn websocket_background_task(
 
             // 接收消息（持续轮询，自动响应 Ping）
             msg_result = ws.next() => {
+                last_message_time = std::time::Instant::now();
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）

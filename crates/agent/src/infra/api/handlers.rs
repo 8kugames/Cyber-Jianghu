@@ -3254,6 +3254,58 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
+/// 获取 LLM 紧急停止状态
+///
+/// GET /api/v1/config/llm-disabled
+pub(super) async fn get_llm_disabled_handler(_state: State<HttpApiState>) -> impl IntoResponse {
+    // 从全局标志读取状态
+    let disabled = crate::component::llm::direct_client::is_llm_disabled();
+    Json(serde_json::json!({"llm_disabled": disabled}))
+}
+
+/// 设置 LLM 紧急停止状态
+///
+/// POST /api/v1/config/llm-disabled
+pub(super) async fn set_llm_disabled_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let disabled = req.get("llm_disabled").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 立即设置全局标志（立即生效）
+    crate::component::llm::direct_client::set_llm_disabled(disabled);
+
+    // 异步保存配置到文件
+    let config_path = state.config_path.clone();
+    let config_disabled = disabled;
+    tokio::spawn(async move {
+        let mut config = match crate::config::Config::from_file(&config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("[llm-disabled] 读取配置失败: {}", e);
+                return;
+            }
+        };
+        config.runtime.llm_disabled = config_disabled;
+        if let Err(e) = config.save_to_file(&config_path) {
+            error!("[llm-disabled] 保存配置失败: {}", e);
+        }
+    });
+
+    if disabled {
+        tracing::warn!("[llm-disabled] LLM 调用已紧急停止");
+    } else {
+        tracing::info!("[llm-disabled] LLM 调用已恢复");
+    }
+
+    Json(serde_json::json!({
+        "success": true,
+        "llm_disabled": disabled,
+        "message": if disabled { "LLM 调用已紧急停止" } else { "LLM 调用已恢复" }
+    }))
+        .into_response()
+}
+
 /// 获取动作类型到中文描述的映射
 ///
 /// GET /api/v1/actions - 返回 action_type -> description 映射

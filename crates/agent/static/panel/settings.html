@@ -99,6 +99,15 @@
                         配置 LLM Provider 和模型参数。
                     </p>
 
+                    <!-- LLM 紧急停止开关 -->
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="llm-disabled">
+                            <label for="llm-disabled">紧急停止 LLM 调用</label>
+                        </div>
+                        <p class="hint">启用后将立即停止所有 LLM 调用，用于避免计费黑洞</p>
+                    </div>
+
                     <!-- Token 统计 -->
                     <div class="stats-grid" id="token-stats">
                         <div class="stat-card">
@@ -350,10 +359,26 @@
                         document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
                         document.getElementById('llm-provider').dispatchEvent(new Event('change'));
                     }
+
+                    // 加载 LLM 紧急停止状态
+                    var disabledData = await apiGet('/api/v1/config/llm-disabled');
+                    document.getElementById('llm-disabled').checked = disabledData.llm_disabled || false;
                 } catch (err) {
                     console.log('加载配置失败:', err);
                 }
             }
+
+            // LLM 紧急停止开关事件
+            document.getElementById('llm-disabled').addEventListener('change', async function() {
+                const disabled = this.checked;
+                try {
+                    await apiPost('/api/v1/config/llm-disabled', { llm_disabled: disabled });
+                    alert(disabled ? 'LLM 调用已紧急停止' : 'LLM 调用已恢复');
+                } catch (err) {
+                    alert('设置失败: ' + err.message);
+                    this.checked = !disabled; // 恢复原状态
+                }
+            });
 
             async function init() {
                 await loadProviders();
