@@ -7,7 +7,7 @@
 // ============================================================================
 
 use anyhow::Result;
-use cyber_jianghu_protocol::ServerMessage;
+use cyber_jianghu_protocol::{ServerMessage, WorldTime};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -630,20 +630,23 @@ impl super::Agent {
                             .and_then(|n| n.as_str())
                             .unwrap_or("");
                         let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
-                        if let Some(recorder) = self.soul_recorder() {
+                        if let Some(recorder) = self.soul_recorder().await {
                             recorder.record_renhun(
                                 world_state.tick_id,
                                 attempt,
                                 renhun_narrative,
                                 renhun_thought_log,
                             ).await;
+                            // 记录游戏内时间和现实时间
+                            let world_time_str = Self::format_world_time(&world_state.world_time);
+                            recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         }
 
                         // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化
                         let translation = self.translate_intent(raw_intent, &world_state, cognitive_chain.as_ref()).await;
 
                         // 记录天魂翻译结果
-                        if let Some(recorder) = self.soul_recorder() {
+                        if let Some(recorder) = self.soul_recorder().await {
                             let action_data_str = translation.intent.action_data.as_ref()
                                 .map(|d| serde_json::to_string(d).unwrap_or_default());
                             recorder.record_tianhun(
@@ -662,7 +665,7 @@ impl super::Agent {
                         // 5b'. 如果天魂拆分出说话 intent，走即时通道
                         if let Some(speech) = &translation.speech_intent {
                             let status = self.send_immediate_intent(speech).await;
-                            if let Some(recorder) = self.soul_recorder() {
+                            if let Some(recorder) = self.soul_recorder().await {
                                 recorder.record_immediate(
                                     world_state.tick_id,
                                     &speech.intent_id.to_string(),
@@ -681,9 +684,9 @@ impl super::Agent {
 
                         // 5c. 地魂 (ReflectorSoul) 审查 — 三层验证
                         match self.validate_with_reflector(intent, &world_state).await? {
-                            super::agent::ReflectorResult::Approved(approved_intent, layers) => {
+                            super::agent::ReflectorResult::Approved { intent: approved_intent, layers, narrative } => {
                                 // 记录地魂审查结果
-                                if let Some(recorder) = self.soul_recorder() {
+                                if let Some(recorder) = self.soul_recorder().await {
                                     let layer1 = layers.iter().find(|l| l.layer == "layer1");
                                     let layer2 = layers.iter().find(|l| l.layer == "layer2");
                                     let layer3 = layers.iter().find(|l| l.layer == "layer3");
@@ -695,7 +698,7 @@ impl super::Agent {
                                         layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
                                         layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
                                         None,
-                                        None,
+                                        narrative.as_deref(),
                                     ).await;
                                     recorder.record_final_intent(
                                         world_state.tick_id,
@@ -716,7 +719,7 @@ impl super::Agent {
                                     Some(narrated_reason.clone());
 
                                 // 记录地魂审查结果
-                                if let Some(recorder) = self.soul_recorder() {
+                                if let Some(recorder) = self.soul_recorder().await {
                                     let layer1 = layers.iter().find(|l| l.layer == "layer1");
                                     let layer2 = layers.iter().find(|l| l.layer == "layer2");
                                     let layer3 = layers.iter().find(|l| l.layer == "layer3");
@@ -833,9 +836,12 @@ impl super::Agent {
 
                         // 7.5 上报三魂循环元数据到服务器（使 server-web 可见）
                         let tick_id_for_report = final_intent.tick_id;
-                        if let Some(recorder) = self.soul_recorder() {
+                        if let Some(recorder) = self.soul_recorder().await {
                             let records = recorder.get_by_tick(tick_id_for_report).await;
                             let immediate_records = recorder.get_immediate_by_tick(tick_id_for_report).await;
+
+                            // 从第一条记录获取游戏内时间
+                            let world_time = records.first().and_then(|r| r.world_time.clone());
 
                             let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records.into_iter().map(|r| {
                                 let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
@@ -890,6 +896,7 @@ impl super::Agent {
                             }).collect();
 
                             let metadata = cyber_jianghu_protocol::SoulCycleMetadata {
+                                world_time,
                                 cycles,
                                 immediate_intents,
                             };
@@ -940,5 +947,10 @@ impl super::Agent {
         self.client.close().await;
         info!("Agent '{}' stopped", self.character_name());
         Ok(())
+    }
+
+    /// 格式化游戏内时间（WorldTime → 中文武侠风格字符串）
+    fn format_world_time(wt: &WorldTime) -> String {
+        wt.to_chinese()
     }
 }

@@ -96,42 +96,22 @@ pub trait LlmClientExt {
 /// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
 /// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
 fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
-    // 常见 thinking 标签模式
-    let patterns = [
-        "<think_tag>",
-        "<think/>",
-        "<think/>>",
-        "<reasoning>",
-        "<thought>",
-    ];
-    let lower = response.to_ascii_lowercase();
+    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think*>, <reasoning>...</reasoning>, <thought>...</thought>
+    let paired_re = regex::Regex::new(
+        r"(?is)<(?:think_tag|think|reasoning|thought)[^>]*>.*?</(?:think_tag|think|reasoning|thought)\s*>"
+    ).unwrap();
 
-    // 查找第一个 thinking 标签
-    let first_tag_pos = patterns.iter().filter_map(|tag| lower.find(tag)).min();
+    let cleaned = paired_re.replace_all(response, "").to_string();
 
-    let Some(tag_start) = first_tag_pos else {
-        return std::borrow::Cow::Borrowed(response);
-    };
+    // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
+    let self_closing_re = regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*").unwrap();
+    let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
 
-    // 找到 thinking 内容的结束位置
-    let close_patterns = ["</think_tag>", "</think/>", "</reasoning>", "</thought>"];
-    let content_start = lower[tag_start..]
-        .find('>')
-        .map(|p| tag_start + p + 1)
-        .unwrap_or(tag_start);
-
-    let after_thinking = close_patterns
-        .iter()
-        .filter_map(|tag| lower.find(tag))
-        .map(|pos| {
-            // 跳过 close tag 到其末尾
-            pos + lower[pos..].find('>').map(|p| p + 1).unwrap_or(pos)
-        })
-        .filter(|&pos| pos > content_start)
-        .min()
-        .unwrap_or(content_start);
-
-    std::borrow::Cow::Owned(response[after_thinking..].to_string())
+    if cleaned == response {
+        std::borrow::Cow::Borrowed(response)
+    } else {
+        std::borrow::Cow::Owned(cleaned)
+    }
 }
 
 /// 从 LLM 响应中提取 JSON 字符串
@@ -603,5 +583,47 @@ mod tests {
         let input = "";
         let result = strip_thinking_tags(input);
         assert!(result.is_empty());
+    }
+
+    // MiniMax-M2.7 实际输出格式
+    #[test]
+    fn test_strip_minimax_think_with_attrs() {
+        let input = r#"<think.../>
+思考过程...
+
+{"action_type": "eat", "action_data": {"item_id": "mantou"}, "speech_content": ""}"#;
+        let result = strip_thinking_tags(input);
+        assert!(result.contains(r#"{"action_type": "eat"#), "应保留 JSON，实际: {}", result);
+        assert!(!result.contains("<think"), "应移除 think 标签，实际: {}", result);
+    }
+
+    #[test]
+    fn test_strip_think_self_closing() {
+        let input = "<think/>{\"a\":1}";
+        let result = strip_thinking_tags(input);
+        assert_eq!(result.as_ref(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_strip_think_with_spaces() {
+        let input = "<think />{\"a\":1}";
+        let result = strip_thinking_tags(input);
+        assert_eq!(result.as_ref(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_strip_thought_tag() {
+        let input = "<thought>思考中...</thought>{\"a\":1}";
+        let result = strip_thinking_tags(input);
+        assert_eq!(result.as_ref(), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_strip_minimax_full_response() {
+        // 完整 MiniMax 输出：thinking 后跟换行和 JSON
+        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"water\"}, \"speech_content\": \"\"}";
+        let result = strip_thinking_tags(input);
+        let trimmed = result.trim();
+        assert!(trimmed.starts_with('{'), "应从 JSON 开始，实际: {}", trimmed);
     }
 }

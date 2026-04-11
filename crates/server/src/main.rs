@@ -413,6 +413,20 @@ async fn main() -> Result<()> {
                     handlers::auth::require_write_token,
                 )),
         )
+        // LLM Config API (独立于通用配置编辑器)
+        .route(
+            "/api/config/llm",
+            get(handlers::config_llm::get_llm_config)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .post(handlers::config_llm::save_llm_config)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
+        )
         // Config Reload API (需要 Write 权限)
         .route(
             "/api/admin/reload-config",
