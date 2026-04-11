@@ -465,9 +465,50 @@ impl SoulCycleRecorder {
         (tick_ids, total)
     }
 
+    /// 批量获取多个 tick 的三魂循环记录（单次 SQL，消除 N+1）
+    pub async fn get_by_ticks(&self, tick_ids: &[i64]) -> Vec<SoulCycleRecord> {
+        if tick_ids.is_empty() || tick_ids.len() > 100 {
+            return vec![];
+        }
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return vec![],
+        };
+
+        let placeholders: String = tick_ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
+                    tianhun_action_type, tianhun_action_data, tianhun_speech_content,
+                    tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
+                    dihun_layer2_result, dihun_layer3_result, dihun_reason, dihun_narrative,
+                    final_intent_id, final_action_type, final_action_data, route_type,
+                    world_time, created_at
+             FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
+            placeholders
+        );
+
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let params: Vec<&dyn rusqlite::ToSql> = tick_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        stmt.query_map(params.as_slice(), |row| Ok(Self::row_to_record(row)))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
     /// 批量获取多个 tick 的即时意图记录
     pub async fn get_immediate_by_ticks(&self, tick_ids: &[i64]) -> Vec<ImmediateIntentRecord> {
-        if tick_ids.is_empty() {
+        if tick_ids.is_empty() || tick_ids.len() > 100 {
             return vec![];
         }
         let conn = match self.conn.lock() {
@@ -773,5 +814,115 @@ mod tests {
         recorder.record_world_time(1, 0, "第三天 申时").await;
         let records = recorder.get_by_tick(1).await;
         assert_eq!(records[0].world_time.as_deref(), Some("第三天 申时"));
+    }
+
+    #[tokio::test]
+    async fn test_get_tick_ids_page_dedup_and_order() {
+        let (_dir, recorder) = make_recorder();
+        // tick 1 有 2 次 attempt，tick 2 和 3 各 1 次
+        recorder.record_renhun(1, 0, "a1", "...").await;
+        recorder.record_renhun(1, 1, "a2", "...").await;
+        recorder.record_renhun(3, 0, "c", "...").await;
+        recorder.record_renhun(2, 0, "b", "...").await;
+
+        let (ids, total) = recorder.get_tick_ids_page(1, 10).await;
+        assert_eq!(total, 3);
+        assert_eq!(ids, vec![3, 2, 1]); // 降序，tick 1 只出现一次
+    }
+
+    #[tokio::test]
+    async fn test_get_tick_ids_page_pagination() {
+        let (_dir, recorder) = make_recorder();
+        for i in 1..=5 {
+            recorder
+                .record_renhun(i, 0, &format!("n{}", i), "...")
+                .await;
+        }
+
+        let (p1, total) = recorder.get_tick_ids_page(1, 3).await;
+        let (p2, _) = recorder.get_tick_ids_page(2, 3).await;
+        assert_eq!(total, 5);
+        assert_eq!(p1, vec![5, 4, 3]);
+        assert_eq!(p2, vec![2, 1]);
+    }
+
+    #[tokio::test]
+    async fn test_get_tick_ids_page_empty() {
+        let (_dir, recorder) = make_recorder();
+        let (ids, total) = recorder.get_tick_ids_page(1, 10).await;
+        assert!(ids.is_empty());
+        assert_eq!(total, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_by_ticks_batch() {
+        let (_dir, recorder) = make_recorder();
+        recorder.record_renhun(1, 0, "a", "...").await;
+        recorder.record_renhun(1, 1, "a2", "...").await;
+        recorder.record_renhun(3, 0, "c", "...").await;
+        // tick 2 不存在
+
+        let records = recorder.get_by_ticks(&[1, 2, 3]).await;
+        assert_eq!(records.len(), 3); // tick1×2 + tick3×1
+        assert_eq!(records[0].tick_id, 3); // 降序
+        assert_eq!(records[1].tick_id, 1);
+        assert_eq!(records[2].tick_id, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_by_ticks_empty() {
+        let (_dir, recorder) = make_recorder();
+        let records = recorder.get_by_ticks(&[]).await;
+        assert!(records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_immediate_by_ticks_batch() {
+        let (_dir, recorder) = make_recorder();
+        recorder
+            .record_immediate(
+                1,
+                "id1",
+                None,
+                "extracted",
+                "speak",
+                None,
+                Some("hi"),
+                "sent",
+                None,
+            )
+            .await;
+        recorder
+            .record_immediate(
+                3,
+                "id2",
+                None,
+                "pure",
+                "speak",
+                None,
+                Some("bye"),
+                "sent",
+                None,
+            )
+            .await;
+        recorder
+            .record_immediate(
+                3,
+                "id3",
+                None,
+                "pure",
+                "speak",
+                None,
+                Some("yo"),
+                "failed",
+                Some("err"),
+            )
+            .await;
+
+        let records = recorder.get_immediate_by_ticks(&[1, 2, 3]).await;
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].tick_id, 1);
+        assert_eq!(records[1].tick_id, 3);
+        assert_eq!(records[2].tick_id, 3);
     }
 }
