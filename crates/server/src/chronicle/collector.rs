@@ -569,11 +569,16 @@ async fn get_ticks_per_hour() -> Option<i64> {
     crate::game_data::registry::TimeRegistry::get_config().map(|c| c.ticks_per_hour as i64)
 }
 
-/// 截断字符串
+/// 截断字符串（正确处理 UTF-8 字符边界）
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        return s.to_string();
     }
+    // 确保截断点在字符边界上
+    let end = s
+        .char_indices()
+        .nth(max_len.saturating_sub(3))
+        .map(|(idx, _)| idx)
+        .unwrap_or(s.len());
+    format!("{}...", &s[..end])
 }

@@ -140,6 +140,22 @@ impl CognitiveEngine {
         let mut config = self.config.write().unwrap();
         config.agent_name = new_name.to_string();
         config.persona.name = new_name.to_string();
+        info!("认知引擎 agent_name 已更新: {}", new_name);
+    }
+
+    /// 更新 Agent 人设（rebirth 后调用）
+    pub fn update_persona(&self, name: &str, system_prompt: &str) {
+        let mut config = self.config.write().unwrap();
+        config.agent_name = name.to_string();
+        config.persona.name = name.to_string();
+        config.persona.base_description = system_prompt.to_string();
+
+        // 同步刷新 PromptCache 中的 persona 快照
+        let new_desc = config.persona.generate_description();
+        let mut cache = self.prompt_cache.write().unwrap();
+        cache.invalidate_persona(new_desc, &config.persona);
+
+        info!("认知引擎人设已更新: name={}, prompt_len={}", name, system_prompt.len());
     }
 
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
