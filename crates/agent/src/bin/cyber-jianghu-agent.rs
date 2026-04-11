@@ -1128,6 +1128,42 @@ struct ClawCallbackSetup {
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
 }
 
+/// 检查端口是否可用（未被占用）
+async fn is_port_available(port: u16) -> bool {
+    tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .is_ok()
+}
+
+/// 自动选择可用端口，优先 23340
+async fn pick_auto_port() -> u16 {
+    const PREFERRED_PORT: u16 = 23340;
+    const PORT_RANGE_START: u16 = 23340;
+    const PORT_RANGE_END: u16 = 23999;
+
+    // 优先尝试 23340
+    if is_port_available(PREFERRED_PORT).await {
+        info!("使用首选端口: {}", PREFERRED_PORT);
+        return PREFERRED_PORT;
+    }
+
+    // 23340 被占用，随机选择其他端口
+    use rand::RngExt;
+    let mut rng = rand::rng();
+    let available_ports: Vec<u16> = (PORT_RANGE_START..=PORT_RANGE_END)
+        .filter(|&p| p != PREFERRED_PORT)
+        .collect();
+
+    // 随机打乱可用端口
+    let random_idx = rng.random_range(0..available_ports.len());
+    let selected_port = available_ports[random_idx];
+    info!(
+        "首选端口 {} 被占用，选择端口: {} (范围: {}-{}, 已排除 {})",
+        PREFERRED_PORT, selected_port, PORT_RANGE_START, PORT_RANGE_END, PREFERRED_PORT
+    );
+    selected_port
+}
+
 fn start_claw_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
@@ -1137,10 +1173,9 @@ fn start_claw_server(
     server_dir: PathBuf,
 ) -> Result<ServerSetup> {
     let actual_port = if port == 0 {
-        use rand::RngExt;
-        let random_port = rand::rng().random_range(23340..=23999);
-        info!("随机选择端口: {} (范围: 23340-23999)", random_port);
-        random_port
+        // 使用同步阻塞方式等待端口选择（避免 async trait 复杂化）
+        let chosen_port = tokio::runtime::Handle::current().block_on(pick_auto_port());
+        chosen_port
     } else {
         port
     };
@@ -1213,13 +1248,9 @@ fn start_http_api_server(
     let port_range_end = 23999u16;
 
     let actual_port = if port == 0 {
-        use rand::RngExt;
-        let random_port = rand::rng().random_range(port_range_start..=port_range_end);
-        info!(
-            "随机选择 HTTP API 端口: {} (范围: {}-{})",
-            random_port, port_range_start, port_range_end
-        );
-        random_port
+        // 使用同步阻塞方式等待端口选择
+        let chosen_port = tokio::runtime::Handle::current().block_on(pick_auto_port());
+        chosen_port
     } else {
         port
     };

@@ -40,7 +40,8 @@ pub struct ModelTokenStats {
     pub model: String,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
-    pub total_tokens: u64,
+    #[serde(skip)]
+    pub total_tokens: u64, // 仅在聚合时使用，不序列化
     pub calls: u64,
 }
 
@@ -91,12 +92,13 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
             } else {
                 ("unknown".to_string(), key.clone())
             };
+            let total = s.prompt_tokens + s.completion_tokens;
             ModelTokenStats {
                 provider,
                 model,
                 prompt_tokens: s.prompt_tokens,
                 completion_tokens: s.completion_tokens,
-                total_tokens: s.prompt_tokens + s.completion_tokens,
+                total_tokens: total,
                 calls: s.calls,
             }
         })
@@ -127,7 +129,7 @@ pub fn persist_and_reset() {
             if let Some(existing) = merged.get_mut(&key) {
                 existing.prompt_tokens += s.prompt_tokens;
                 existing.completion_tokens += s.completion_tokens;
-                existing.total_tokens += s.total_tokens;
+                existing.total_tokens += s.prompt_tokens + s.completion_tokens;
                 existing.calls += s.calls;
             } else {
                 merged.insert(key, s.clone());
