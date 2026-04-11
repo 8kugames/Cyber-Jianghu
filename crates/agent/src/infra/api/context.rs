@@ -107,10 +107,10 @@ pub fn create_attributes_glimpse(
         });
     }
 
-    // 添加派生属性（从 derived_raw 获取，格式化为两位小数）
+    // 添加派生属性（从 derived_raw 获取，格式化为三位小数）
     for (name, &value) in &derived_raw {
         let display_name = engine.get_display_name(name).unwrap_or(name).to_string();
-        let value_str = format!("{:.2}", value);
+        let value_str = format!("{:.3}", value);
 
         formatted.push(FormattedAttribute {
             name: name.clone(),

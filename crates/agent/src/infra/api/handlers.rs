@@ -2070,10 +2070,10 @@ fn enrich_derived_attributes(
                         .rev()
                         .find(|t| (value as i32) >= t.min && (value as i32) <= t.max)
                         .map(|t| t.description.clone())
-                        .unwrap_or_else(|| format!("{}: {:.1}", name, value));
+                        .unwrap_or_else(|| format!("{}: {:.3}", name, value));
                     (name, desc)
                 })
-                .unwrap_or_else(|| (key.clone(), format!("{}: {:.1}", key, value)));
+                .unwrap_or_else(|| (key.clone(), format!("{}: {:.3}", key, value)));
 
             let attr_obj = serde_json::json!({
                 "name": display_name,
