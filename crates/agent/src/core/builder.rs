@@ -27,7 +27,10 @@ use crate::soul::reflector::{ReflectorSoul, Validator};
 use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
-use super::{Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
+use super::{
+    Agent, DecisionCallback, DecisionWithChainCallback, DecisionWithFeedbackCallback,
+    DecisionWithMemoryCallback,
+};
 
 /// Agent 构建器
 pub struct AgentBuilder {
@@ -35,6 +38,7 @@ pub struct AgentBuilder {
     decision_callback: DecisionCallback,
     decision_with_memory_callback: Option<DecisionWithMemoryCallback>,
     decision_with_feedback_callback: Option<DecisionWithFeedbackCallback>,
+    decision_with_chain_callback: Option<DecisionWithChainCallback>,
     enable_memory: bool,
     memory_config: Option<MemoryManagerConfig>,
     llm_client: Option<Arc<dyn LlmClient>>,
@@ -72,6 +76,7 @@ impl AgentBuilder {
             decision_callback,
             decision_with_memory_callback: None,
             decision_with_feedback_callback: None,
+            decision_with_chain_callback: None,
             enable_memory: true,
             memory_config: None,
             llm_client: None,
@@ -114,6 +119,17 @@ impl AgentBuilder {
     /// 此回调接收世界状态和记忆上下文，用于认知引擎集成
     pub fn with_decision_memory(mut self, callback: DecisionWithMemoryCallback) -> Self {
         self.decision_with_memory_callback = Some(callback);
+        self
+    }
+
+    /// 设置带 CognitiveChain 的决策回调
+    ///
+    /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
+    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    ///
+    /// 当设置了此回调时，将优先于 `with_decision_memory` 和 `with_decision_feedback` 使用。
+    pub fn with_decision_chain(mut self, callback: DecisionWithChainCallback) -> Self {
+        self.decision_with_chain_callback = Some(callback);
         self
     }
 
@@ -301,6 +317,7 @@ impl AgentBuilder {
             decision_callback: self.decision_callback,
             decision_with_memory_callback: self.decision_with_memory_callback,
             decision_with_feedback_callback: self.decision_with_feedback_callback,
+            decision_with_chain_callback: self.decision_with_chain_callback,
             memory_manager,
             dialogue_client: self.dialogue_client,
             relationship_store: self.relationship_store,

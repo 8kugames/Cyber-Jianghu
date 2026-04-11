@@ -18,6 +18,8 @@
 // │   ├── social/   #   社交系统（关系 + 对话）
 // │   └── llm/      #   LLM 客户端抽象层
 // ├── infra/        # 基础设施
+
+#![allow(deprecated)]
 // │   ├── api/      #   HTTP API 服务器
 // │   └── transport/#   游戏服务器 WebSocket 客户端
 // ├── runtime/      # 模式入口（cognitive / claw）
@@ -98,8 +100,8 @@ pub use soul::translator::IntentTranslator;
 pub use runtime::{
     CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,
     DecisionWithMemoryCallback, HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest,
-    claw, cognitive_decision, cognitive_decision_with_retry, create_http_state, http_decision,
-    run_http_server,
+    claw, cognitive_decision, cognitive_decision_with_chain, cognitive_decision_with_retry,
+    create_http_state, http_decision, run_http_server,
 };
 
 // 组件
