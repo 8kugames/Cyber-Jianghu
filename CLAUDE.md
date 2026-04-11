@@ -446,8 +446,9 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 Every 7 game days, the server auto-generates a **Chronicle** summarizing world events:
 
 - **Auto-generation**: Triggers every 7 game days (period calculated from `time.yaml` config)
-- **Template mode**: Pure rule-based generation (no external dependency)
-- **LLM mode**: Optional AI-enhanced narrative via `config/llm.yaml`
+- **Generation strategy**: LLM version (if available) stored in `summary_llm`, template always stored in `summary`
+- **Async supplement**: If LLM fails, auto-retry asynchronously with progress tracking
+- **LLM mode**: Enabled via `config/llm.yaml` (provider, model, api_key required)
 
 ### Deployment
 
@@ -471,6 +472,8 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_c
 - `GET /api/dashboard/chronicles` - List chronicles (paginated, requires admin token)
 - `GET /api/dashboard/chronicles/{id}` - Get chronicle detail (requires admin token)
 - `POST /api/dashboard/chronicles/generate` - Manually generate a chronicle (requires admin token)
+- `GET /api/dashboard/chronicles/llm-stats` - Get LLM token usage statistics (requires admin token)
+- `GET /api/dashboard/chronicles/pending` - Get pending async generation tasks with progress (requires admin token)
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
 

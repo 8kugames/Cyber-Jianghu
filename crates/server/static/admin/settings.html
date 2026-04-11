@@ -1,546 +1,797 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM 配置 | Cyber-Jianghu</title>
-    <style>
-        :root {
-            --primary-color: #8b5cf6;
-            --bg-dark: #0f0f0f;
-            --bg-card: #1a1a1a;
-            --text-primary: #f5f5f5;
-            --text-secondary: #a0a0a0;
-            --border-color: #2a2a2a;
-            --accent-gold: #d4af37;
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --error: #ef4444;
-        }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>LLM 配置 | Cyber-Jianghu</title>
+        <style>
+            :root {
+                --primary-color: #8b5cf6;
+                --bg-dark: #0f0f0f;
+                --bg-card: #1a1a1a;
+                --text-primary: #f5f5f5;
+                --text-secondary: #a0a0a0;
+                --border-color: #2a2a2a;
+                --accent-gold: #d4af37;
+                --success: #22c55e;
+                --warning: #f59e0b;
+                --error: #ef4444;
+            }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
-            min-height: 100vh;
-            padding: 20px;
-        }
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                background: var(--bg-dark);
+                color: var(--text-primary);
+                min-height: 100vh;
+                padding: 20px;
+            }
 
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
-        }
+            header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid var(--border-color);
+            }
 
-        h1 {
-            font-size: 28px;
-            font-weight: 600;
-            background: linear-gradient(135deg, var(--accent-gold), #fff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
+            h1 {
+                font-size: 28px;
+                font-weight: 600;
+                background: linear-gradient(135deg, var(--accent-gold), #fff);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
 
-        .back-btn {
-            padding: 8px 16px;
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-            text-decoration: none;
-        }
-        .back-btn:hover {
-            border-color: var(--primary-color);
-            background: rgba(139, 92, 246, 0.1);
-        }
+            .back-btn {
+                padding: 8px 16px;
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                color: var(--text-primary);
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: all 0.2s;
+                text-decoration: none;
+            }
+            .back-btn:hover {
+                border-color: var(--primary-color);
+                background: rgba(139, 92, 246, 0.1);
+            }
 
-        .container {
-            max-width: 700px;
-            margin: 0 auto;
-        }
+            .container {
+                max-width: 1280px;
+                margin: 0 auto;
+            }
 
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 20px;
-        }
+            .card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                padding: 30px;
+                margin-bottom: 20px;
+            }
 
-        .card-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: var(--primary-color);
-        }
+            .card-title {
+                font-size: 18px;
+                font-weight: 600;
+                margin-bottom: 8px;
+                color: var(--primary-color);
+            }
 
-        .card-desc {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-bottom: 25px;
-        }
+            .card-desc {
+                font-size: 14px;
+                color: var(--text-secondary);
+                margin-bottom: 25px;
+            }
 
-        .form-group {
-            margin-bottom: 20px;
-        }
+            .form-group {
+                margin-bottom: 20px;
+            }
 
-        .form-group label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 8px;
-            color: var(--text-primary);
-        }
+            .form-group label {
+                display: block;
+                font-size: 14px;
+                font-weight: 500;
+                margin-bottom: 8px;
+                color: var(--text-primary);
+            }
 
-        .form-group .hint {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 4px;
-        }
+            .form-group .hint {
+                font-size: 12px;
+                color: var(--text-secondary);
+                margin-top: 4px;
+            }
 
-        input[type="text"],
-        input[type="password"],
-        input[type="number"],
-        select {
-            width: 100%;
-            padding: 12px 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            color: var(--text-primary);
-            font-size: 14px;
-            transition: border-color 0.2s;
-        }
+            input[type="text"],
+            input[type="password"],
+            input[type="number"],
+            select {
+                width: 100%;
+                padding: 12px 15px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                color: var(--text-primary);
+                font-size: 14px;
+                transition: border-color 0.2s;
+            }
 
-        input:focus, select:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
+            input:focus,
+            select:focus {
+                outline: none;
+                border-color: var(--primary-color);
+            }
 
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+            .checkbox-group {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
 
-        .checkbox-group input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            accent-color: var(--primary-color);
-        }
+            .checkbox-group input[type="checkbox"] {
+                width: 20px;
+                height: 20px;
+                accent-color: var(--primary-color);
+            }
 
-        .btn {
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: none;
-        }
+            .btn {
+                padding: 12px 24px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s;
+                border: none;
+            }
 
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-        .btn-primary:hover {
-            background: #7c3aed;
-        }
+            .btn-primary {
+                background: var(--primary-color);
+                color: white;
+            }
+            .btn-primary:hover {
+                background: #7c3aed;
+            }
 
-        .btn-secondary {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-        }
-        .btn-secondary:hover {
-            border-color: var(--primary-color);
-            color: var(--text-primary);
-        }
+            .btn-secondary {
+                background: transparent;
+                border: 1px solid var(--border-color);
+                color: var(--text-secondary);
+            }
+            .btn-secondary:hover {
+                border-color: var(--primary-color);
+                color: var(--text-primary);
+            }
 
-        .result {
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            font-size: 14px;
-            display: none;
-        }
+            .result {
+                padding: 15px;
+                border-radius: 8px;
+                margin-top: 20px;
+                font-size: 14px;
+                display: none;
+            }
 
-        .result.success {
-            background: rgba(34, 197, 94, 0.1);
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            color: var(--success);
-            display: block;
-        }
+            .result.success {
+                background: rgba(34, 197, 94, 0.1);
+                border: 1px solid rgba(34, 197, 94, 0.3);
+                color: var(--success);
+                display: block;
+            }
 
-        .result.error {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: var(--error);
-            display: block;
-        }
+            .result.error {
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                color: var(--error);
+                display: block;
+            }
 
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: var(--text-secondary);
-        }
+            .loading {
+                text-align: center;
+                padding: 40px;
+                color: var(--text-secondary);
+            }
 
-        .provider-hint {
-            background: rgba(139, 92, 246, 0.1);
-            border: 1px solid rgba(139, 92, 246, 0.3);
-            border-radius: 6px;
-            padding: 10px 15px;
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-top: 10px;
-        }
+            .provider-hint {
+                background: rgba(139, 92, 246, 0.1);
+                border: 1px solid rgba(139, 92, 246, 0.3);
+                border-radius: 6px;
+                padding: 10px 15px;
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-top: 10px;
+            }
 
-        .info-box {
-            background: rgba(139, 92, 246, 0.05);
-            border: 1px solid rgba(139, 92, 246, 0.2);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 25px;
-        }
+            .info-box {
+                background: rgba(139, 92, 246, 0.05);
+                border: 1px solid rgba(139, 92, 246, 0.2);
+                border-radius: 8px;
+                padding: 15px;
+                margin-bottom: 25px;
+            }
 
-        .info-box p {
-            font-size: 13px;
-            color: var(--text-secondary);
-            line-height: 1.6;
-        }
+            .info-box p {
+                font-size: 13px;
+                color: var(--text-secondary);
+                line-height: 1.6;
+            }
 
-        .info-box strong {
-            color: var(--primary-color);
-        }
+            .info-box strong {
+                color: var(--primary-color);
+            }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 25px;
-        }
-        .stat-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 15px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 24px;
-            font-weight: 600;
-            color: var(--accent-gold);
-        }
-        .stat-label {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 5px;
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <h1>LLM 配置</h1>
-        <a href="index.html" class="back-btn">← 返回面板</a>
-    </header>
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+                margin-bottom: 25px;
+            }
+            .stat-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                padding: 15px;
+                text-align: center;
+            }
+            .stat-value {
+                font-size: 24px;
+                font-weight: 600;
+                color: var(--accent-gold);
+            }
+            .stat-label {
+                font-size: 12px;
+                color: var(--text-secondary);
+                margin-top: 5px;
+            }
 
-    <div class="container" id="app">
-        <div class="loading" id="loading">加载中...</div>
+            .status-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+            .status-left {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .status-left h2 {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--primary-color);
+                margin: 0;
+            }
+            .status-right {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .connection-indicator {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                color: var(--text-secondary);
+            }
+            .connection-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #6b7280;
+            }
+            .connection-dot.connected {
+                background: #4ade80;
+                box-shadow: 0 0 6px #4ade80;
+            }
+            .connection-dot.disconnected {
+                background: #ef4444;
+            }
+            .toggle {
+                position: relative;
+                display: inline-block;
+                width: 50px;
+                height: 26px;
+            }
+            .toggle input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #ccc;
+                transition: 0.3s;
+                border-radius: 26px;
+            }
+            .toggle-slider:before {
+                position: absolute;
+                content: "";
+                height: 20px;
+                width: 20px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                transition: 0.3s;
+                border-radius: 50%;
+            }
+            .toggle input:checked + .toggle-slider {
+                background-color: var(--primary-color);
+            }
+            .toggle input:checked + .toggle-slider:before {
+                transform: translateX(24px);
+            }
+            .form-section-disabled {
+                opacity: 0.5;
+                pointer-events: none;
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>LLM 配置</h1>
+            <a href="index.html" class="back-btn">← 返回面板</a>
+        </header>
 
-        <div id="settings-form" style="display: none;">
-            <div class="card">
-                <div class="info-box">
-                    <p><strong>群像传记 LLM 配置</strong> — 用于增强群像传记的叙事质量。当启用 LLM 生成时，系统会调用外部 LLM API 生成更具文采的传记内容。</p>
-                </div>
+        <div class="container" id="app">
+            <div class="loading" id="loading">加载中...</div>
 
-                <!-- Token 统计 -->
-                <div class="stats-grid" id="token-stats">
-                    <div class="stat-card">
-                        <div class="stat-value" id="stat-input-tokens">-</div>
-                        <div class="stat-label">输入 Token</div>
+            <div id="settings-form" style="display: none">
+                <div class="card">
+                    <div class="status-row">
+                        <div class="status-left">
+                            <h2>LLM 配置</h2>
+                            <label class="toggle">
+                                <input
+                                    type="checkbox"
+                                    id="llm-enabled-toggle"
+                                />
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="status-right">
+                            <div class="connection-indicator">
+                                <span
+                                    class="connection-dot"
+                                    id="connection-dot"
+                                ></span>
+                                <span id="connection-text">检测中...</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="stat-output-tokens">-</div>
-                        <div class="stat-label">输出 Token</div>
+
+                    <div class="info-box">
+                        <p>
+                            <strong>LLM 服务配置</strong> — 为游戏系统提供 LLM
+                            增强能力。当前用于群像传记生成，后续可扩展其他 LLM
+                            增强功能。
+                        </p>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="stat-total-requests">-</div>
-                        <div class="stat-label">累计请求</div>
+
+                    <!-- 表单内容区域 -->
+                    <div id="form-content">
+                        <!-- Token 统计 -->
+                        <div class="stats-grid" id="token-stats">
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-input-tokens">
+                                    -
+                                </div>
+                                <div class="stat-label">输入 Token</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-output-tokens">
+                                    -
+                                </div>
+                                <div class="stat-label">输出 Token</div>
+                            </div>
+                            <div class="stat-card">
+                                <div
+                                    class="stat-value"
+                                    id="stat-total-requests"
+                                >
+                                    -
+                                </div>
+                                <div class="stat-label">累计请求</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="stat-error-count">
+                                    -
+                                </div>
+                                <div class="stat-label">错误次数</div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="llm-provider">Provider</label>
+                            <select id="llm-provider">
+                                <option value="ollama">
+                                    Ollama (本地模型)
+                                </option>
+                                <option value="openai">OpenAI</option>
+                                <option value="openai_compatible">
+                                    OpenAI 兼容接口
+                                </option>
+                            </select>
+                            <p id="provider-hint" class="provider-hint"></p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="llm-base-url">Base URL</label>
+                            <input
+                                type="text"
+                                id="llm-base-url"
+                                placeholder="http://localhost:11434/v1"
+                            />
+                            <p class="hint">
+                                Ollama 默认: http://localhost:11434/v1
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="llm-api-key">API Key</label>
+                            <input
+                                type="password"
+                                id="llm-api-key"
+                                placeholder="输入 API Key"
+                            />
+                            <p class="hint">
+                                Ollama 通常无需 Key；OpenAI 需要填写
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="llm-model">模型名称</label>
+                            <input
+                                type="text"
+                                id="llm-model"
+                                placeholder="qwen2.5:14b"
+                            />
+                            <p class="hint">确保模型已下载并可通过 API 访问</p>
+                        </div>
+
+                        <div
+                            style="
+                                display: grid;
+                                grid-template-columns: 1fr 1fr;
+                                gap: 15px;
+                            "
+                        >
+                            <div class="form-group">
+                                <label for="llm-temperature">Temperature</label>
+                                <input
+                                    type="number"
+                                    id="llm-temperature"
+                                    min="0"
+                                    max="2"
+                                    step="0.1"
+                                    value="0.8"
+                                />
+                                <p class="hint">控制随机性 (0=确定, 2=创意)</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="llm-max-tokens"
+                                    >最大 Token 数</label
+                                >
+                                <input
+                                    type="number"
+                                    id="llm-max-tokens"
+                                    min="256"
+                                    max="8192"
+                                    step="256"
+                                    value="4096"
+                                />
+                                <p class="hint">生成文本的最大长度</p>
+                            </div>
+                        </div>
+
+                        <!-- 按钮区域 -->
+                        <div
+                            style="
+                                display: flex;
+                                gap: 10px;
+                                align-items: center;
+                                margin-top: 20px;
+                            "
+                        >
+                            <button
+                                class="btn btn-primary"
+                                id="save-btn"
+                                onclick="saveConfig()"
+                            >
+                                保存配置
+                            </button>
+                        </div>
+
+                        <div id="result" class="result"></div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value" id="stat-error-count">-</div>
-                        <div class="stat-label">错误次数</div>
-                    </div>
                 </div>
-
-                <div class="form-group">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="llm-enabled">
-                        <label for="llm-enabled">启用 LLM 生成</label>
-                    </div>
-                    <p class="hint">禁用后，群像传记将使用模板生成模式</p>
-                </div>
-
-                <div class="form-group">
-                    <label for="llm-provider">Provider</label>
-                    <select id="llm-provider">
-                        <option value="ollama">Ollama (本地模型)</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="openai_compatible">OpenAI 兼容接口</option>
-                    </select>
-                    <p id="provider-hint" class="provider-hint"></p>
-                </div>
-
-                <div class="form-group">
-                    <label for="llm-base-url">Base URL</label>
-                    <input type="text" id="llm-base-url" placeholder="http://localhost:11434/v1">
-                    <p class="hint">Ollama 默认: http://localhost:11434/v1</p>
-                </div>
-
-                <div class="form-group">
-                    <label for="llm-api-key">API Key</label>
-                    <input type="password" id="llm-api-key" placeholder="输入 API Key">
-                    <p class="hint">Ollama 通常无需 Key；OpenAI 需要填写</p>
-                </div>
-
-                <div class="form-group">
-                    <label for="llm-model">模型名称</label>
-                    <input type="text" id="llm-model" placeholder="qwen2.5:14b">
-                    <p class="hint">确保模型已下载并可通过 API 访问</p>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                    <div class="form-group">
-                        <label for="llm-temperature">Temperature</label>
-                        <input type="number" id="llm-temperature" min="0" max="2" step="0.1" value="0.8">
-                        <p class="hint">控制随机性 (0=确定, 2=创意)</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="llm-max-tokens">最大 Token 数</label>
-                        <input type="number" id="llm-max-tokens" min="256" max="8192" step="256" value="4096">
-                        <p class="hint">生成文本的最大长度</p>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button class="btn btn-secondary" id="test-btn" onclick="testConnection()">
-                        测试连通性
-                    </button>
-                    <button class="btn btn-primary" id="save-btn" onclick="saveConfig()">
-                        保存配置
-                    </button>
-                </div>
-                <div id="test-result" class="result"></div>
-
-                <div id="result" class="result"></div>
             </div>
         </div>
-    </div>
 
-    <script>
-        const API_BASE = '/api';
-        let authToken = localStorage.getItem('admin_token') || '';
+        <script>
+            const API_BASE = "/api";
+            let authToken = localStorage.getItem("admin_token") || "";
 
-        const PROVIDER_HINTS = {
-            ollama: 'Ollama 是本地模型运行器。请确保已安装并运行：<br>• <code>ollama serve</code> 启动服务<br>• <code>ollama pull qwen2.5:14b</code> 下载模型',
-            openai: '使用 OpenAI 官方 API。请填写有效的 API Key。',
-            openai_compatible: '兼容 OpenAI 格式的第三方 API（如 vLLM、FastChat 等）'
-        };
-
-        async function loadConfig() {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('settings-form').style.display = 'block';
-
-            const res = await fetch(`${API_BASE}/config/llm`, {
-                headers: getHeaders()
-            });
-
-            if (res.status === 401) {
-                alert('请先在首页登录');
-                window.location.href = 'index.html';
-                return;
-            }
-
-            if (!res.ok) {
-                showResult('加载配置失败', false);
-                return;
-            }
-
-            const config = await res.json();
-            populateForm(config);
-        }
-
-        function populateForm(config) {
-            document.getElementById('llm-enabled').checked = config.data?.enabled ?? false;
-            document.getElementById('llm-provider').value = config.data?.provider ?? 'ollama';
-            document.getElementById('llm-base-url').value = config.data?.base_url ?? '';
-            document.getElementById('llm-api-key').value = config.data?.api_key ?? '';
-            document.getElementById('llm-model').value = config.data?.model ?? '';
-            document.getElementById('llm-temperature').value = config.data?.temperature ?? 0.8;
-            document.getElementById('llm-max-tokens').value = config.data?.max_tokens ?? 4096;
-            updateProviderHint();
-        }
-
-        function updateProviderHint() {
-            const provider = document.getElementById('llm-provider').value;
-            document.getElementById('provider-hint').innerHTML = PROVIDER_HINTS[provider] || '';
-        }
-
-        document.getElementById('llm-provider').addEventListener('change', updateProviderHint);
-
-        async function saveConfig() {
-            const btn = document.getElementById('save-btn');
-            btn.disabled = true;
-            btn.textContent = '保存中...';
-
-            const config = {
-                version: '0.0.1',
-                description: 'LLM 配置，用于群像传记的 LLM 增强生成',
-                meta: {
-                    created_at: new Date().toISOString().split('T')[0],
-                    author: 'Cyber-Jianghu'
-                },
-                data: {
-                    enabled: document.getElementById('llm-enabled').checked,
-                    provider: document.getElementById('llm-provider').value,
-                    base_url: document.getElementById('llm-base-url').value,
-                    api_key: document.getElementById('llm-api-key').value,
-                    model: document.getElementById('llm-model').value,
-                    temperature: parseFloat(document.getElementById('llm-temperature').value),
-                    max_tokens: parseInt(document.getElementById('llm-max-tokens').value)
-                }
+            const PROVIDER_HINTS = {
+                ollama: "Ollama 是本地模型运行器。请确保已安装并运行：<br>• <code>ollama serve</code> 启动服务<br>• <code>ollama pull qwen2.5:14b</code> 下载模型",
+                openai: "使用 OpenAI 官方 API。请填写有效的 API Key。",
+                openai_compatible:
+                    "兼容 OpenAI 格式的第三方 API（如 vLLM、FastChat 等）",
             };
 
-            try {
+            async function loadConfig() {
+                document.getElementById("loading").style.display = "none";
+                document.getElementById("settings-form").style.display =
+                    "block";
+
                 const res = await fetch(`${API_BASE}/config/llm`, {
-                    method: 'POST',
-                    headers: {
-                        ...getHeaders(),
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(config)
+                    headers: getHeaders(),
                 });
 
                 if (res.status === 401) {
-                    alert('请先在首页登录');
-                    window.location.href = 'index.html';
+                    alert("请先在首页登录");
+                    window.location.href = "index.html";
                     return;
                 }
 
-                const result = await res.json();
-                if (res.ok) {
-                    showResult('配置已保存', true);
-                } else {
-                    showResult(result.message || '保存失败', false);
+                if (!res.ok) {
+                    showResult("加载配置失败", false);
+                    return;
                 }
-            } catch (e) {
-                showResult('保存失败: ' + e.message, false);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '保存配置';
+
+                const config = await res.json();
+                populateForm(config);
             }
-        }
 
-        async function testConnection() {
-            const btn = document.getElementById('test-btn');
-            const resultEl = document.getElementById('test-result');
-            btn.disabled = true;
-            btn.textContent = '测试中...';
-            resultEl.textContent = '';
-            resultEl.className = 'result';
+            // 保存原始配置（用于 api_key 掩码处理）
+            let originalConfig = null;
 
-            const baseUrl = document.getElementById('llm-base-url').value.trim();
-            if (!baseUrl) {
-                resultEl.textContent = '请先填写 Base URL';
-                resultEl.className = 'result error';
-                return;
-            }
-            const apiKey = document.getElementById('llm-api-key').value;
-            const model = document.getElementById('llm-model').value;
-
-            try {
-                const headers = {
-                    'Content-Type': 'application/json'
-                };
+            function populateForm(config) {
+                originalConfig = config;
+                const enabled = config.data?.enabled ?? false;
+                document.getElementById("llm-enabled-toggle").checked = enabled;
+                document.getElementById("llm-provider").value =
+                    config.data?.provider ?? "ollama";
+                document.getElementById("llm-base-url").value =
+                    config.data?.base_url ?? "";
+                // api_key 掩码展示，只显示长度提示
+                const apiKey = config.data?.api_key ?? "";
+                const apiKeyInput = document.getElementById("llm-api-key");
                 if (apiKey) {
-                    headers['Authorization'] = `Bearer ${apiKey}`;
-                }
-
-                const response = await fetch(baseUrl, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [{ role: 'user', content: 'Hi' }],
-                        max_tokens: 10
-                    })
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    resultEl.textContent = `✓ 连接成功！模型响应: ${data.choices?.[0]?.message?.content || 'OK'}`;
-                    resultEl.className = 'result success';
+                    apiKeyInput.placeholder = "已填写（修改请输入新值）";
+                    apiKeyInput.value = maskApiKey(apiKey);
                 } else {
-                    const text = await response.text();
-                    resultEl.textContent = `✗ 连接失败: HTTP ${response.status} - ${text.substring(0, 100)}`;
-                    resultEl.className = 'result error';
+                    apiKeyInput.placeholder = "API 密钥";
+                    apiKeyInput.value = "";
                 }
-            } catch (e) {
-                resultEl.textContent = `✗ 连接失败: ${e.message}`;
-                resultEl.className = 'result error';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '测试连通性';
+                document.getElementById("llm-model").value =
+                    config.data?.model ?? "";
+                document.getElementById("llm-temperature").value =
+                    config.data?.temperature ?? 0.8;
+                document.getElementById("llm-max-tokens").value =
+                    config.data?.max_tokens ?? 4096;
+                updateProviderHint();
+                updateFormState(enabled);
             }
-        }
 
-        function showResult(msg, success) {
-            const el = document.getElementById('result');
-            el.textContent = msg;
-            el.className = 'result ' + (success ? 'success' : 'error');
-            setTimeout(() => el.className = 'result', 3000);
-        }
+            function maskApiKey(key) {
+                if (!key || key.length < 4) return "••••••••";
+                return key.substring(0, 2) + "••••••••" + key.substring(key.length - 2);
+            }
 
-        function getHeaders() {
-            return authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
-        }
+            function isMasked(value) {
+                // 检测是否为掩码格式
+                return value.includes("••••") || value === "" || value === "已填写（修改请输入新值）";
+            }
 
-        loadConfig();
+            function updateFormState(enabled) {
+                const formContent = document.getElementById("form-content");
+                if (enabled) {
+                    formContent.classList.remove("form-section-disabled");
+                } else {
+                    formContent.classList.add("form-section-disabled");
+                }
+            }
 
-        // 加载 Token 统计
-        async function loadTokenStats() {
-            try {
-                const res = await fetch(`${API_BASE}/chronicles/llm-stats`, {
-                    headers: getHeaders()
+            function updateProviderHint() {
+                const provider = document.getElementById("llm-provider").value;
+                document.getElementById("provider-hint").innerHTML =
+                    PROVIDER_HINTS[provider] || "";
+            }
+
+            document
+                .getElementById("llm-provider")
+                .addEventListener("change", updateProviderHint);
+
+            async function saveConfig() {
+                const btn = document.getElementById("save-btn");
+                btn.disabled = true;
+                btn.textContent = "保存中...";
+
+                const apiKeyInput = document.getElementById("llm-api-key").value;
+                // 如果是掩码或空，保持原 api_key
+                const apiKey = isMasked(apiKeyInput)
+                    ? (originalConfig?.data?.api_key ?? "")
+                    : apiKeyInput;
+
+                const config = {
+                    version: "0.0.1",
+                    description: "LLM 配置",
+                    meta: {
+                        created_at: originalConfig?.meta?.created_at ?? new Date().toISOString().split("T")[0],
+                        author: originalConfig?.meta?.author ?? "Cyber-Jianghu",
+                    },
+                    data: {
+                        enabled:
+                            document.getElementById("llm-enabled-toggle")
+                                .checked,
+                        provider: document.getElementById("llm-provider").value,
+                        base_url: document.getElementById("llm-base-url").value,
+                        api_key: apiKey,
+                        model: document.getElementById("llm-model").value,
+                        temperature: parseFloat(
+                            document.getElementById("llm-temperature").value,
+                        ),
+                        max_tokens: parseInt(
+                            document.getElementById("llm-max-tokens").value,
+                        ),
+                    },
+                };
+
+                try {
+                    const res = await fetch(`${API_BASE}/config/llm`, {
+                        method: "POST",
+                        headers: {
+                            ...getHeaders(),
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(config),
+                    });
+
+                    if (res.status === 401) {
+                        alert("请先在首页登录");
+                        window.location.href = "index.html";
+                        return;
+                    }
+
+                    const result = await res.json();
+                    if (res.ok) {
+                        showResult("配置已保存", true);
+                    } else {
+                        showResult(result.message || "保存失败", false);
+                    }
+                } catch (e) {
+                    showResult("保存失败: " + e.message, false);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "保存配置";
+                }
+            }
+
+            function showResult(msg, success) {
+                const el = document.getElementById("result");
+                el.textContent = msg;
+                el.className = "result " + (success ? "success" : "error");
+                setTimeout(() => (el.className = "result"), 3000);
+            }
+
+            function getHeaders() {
+                return authToken
+                    ? { Authorization: `Bearer ${authToken}` }
+                    : {};
+            }
+
+            // LLM 启用开关事件
+            document
+                .getElementById("llm-enabled-toggle")
+                .addEventListener("change", async function () {
+                    const enabled = this.checked;
+                    try {
+                        const res = await fetch(
+                            `${API_BASE}/config/llm/enabled`,
+                            {
+                                method: "POST",
+                                headers: {
+                                    ...getHeaders(),
+                                    "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({ enabled }),
+                            },
+                        );
+                        if (res.ok) {
+                            updateFormState(enabled);
+                            checkLlmStatus();
+                        } else {
+                            alert("设置失败");
+                            this.checked = !enabled;
+                        }
+                    } catch (e) {
+                        alert("设置失败: " + e.message);
+                        this.checked = !enabled;
+                    }
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    document.getElementById('stat-input-tokens').textContent = formatNumber(data.input_tokens || 0);
-                    document.getElementById('stat-output-tokens').textContent = formatNumber(data.output_tokens || 0);
-                    document.getElementById('stat-total-requests').textContent = formatNumber(data.total_requests || 0);
-                    document.getElementById('stat-error-count').textContent = formatNumber(data.error_count || 0);
+
+            // 检测 LLM 连接状态
+            async function checkLlmStatus() {
+                try {
+                    const res = await fetch(`${API_BASE}/config/llm/status`, {
+                        headers: getHeaders(),
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        updateConnectionIndicator(data.connected, data.message);
+                    }
+                } catch (e) {
+                    updateConnectionIndicator(false, "检测失败");
                 }
-            } catch (e) {
-                console.warn('加载 Token 统计失败:', e);
             }
-        }
 
-        function formatNumber(n) {
-            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-            return n.toString();
-        }
+            function updateConnectionIndicator(connected, message) {
+                const dot = document.getElementById("connection-dot");
+                const text = document.getElementById("connection-text");
+                if (connected) {
+                    dot.className = "connection-dot connected";
+                    text.textContent = "已连接";
+                } else {
+                    dot.className = "connection-dot disconnected";
+                    text.textContent = message || "未连接";
+                }
+            }
 
-        loadTokenStats();
-        // 每 30 秒刷新统计
-        setInterval(loadTokenStats, 30000);
-    </script>
-</body>
+            // 加载 Token 统计
+            async function loadTokenStats() {
+                try {
+                    const res = await fetch(
+                        `${API_BASE}/chronicles/llm-stats`,
+                        {
+                            headers: getHeaders(),
+                        },
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        document.getElementById(
+                            "stat-input-tokens",
+                        ).textContent = formatNumber(data.input_tokens || 0);
+                        document.getElementById(
+                            "stat-output-tokens",
+                        ).textContent = formatNumber(data.output_tokens || 0);
+                        document.getElementById(
+                            "stat-total-requests",
+                        ).textContent = formatNumber(data.total_requests || 0);
+                        document.getElementById(
+                            "stat-error-count",
+                        ).textContent = formatNumber(data.error_count || 0);
+                    }
+                } catch (e) {
+                    console.warn("加载 Token 统计失败:", e);
+                }
+            }
+
+            function formatNumber(n) {
+                if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+                if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+                return n.toString();
+            }
+
+            loadConfig();
+            loadTokenStats();
+            checkLlmStatus();
+
+            // 每 30 秒刷新统计和连接状态
+            setInterval(loadTokenStats, 30000);
+            setInterval(checkLlmStatus, 30000);
+        </script>
+    </body>
 </html>

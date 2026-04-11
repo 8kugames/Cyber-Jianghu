@@ -261,18 +261,19 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 /// LLM 生成（调用外部 LLM）
 ///
 /// 配置方式：从 llm.yaml 配置文件读取
+/// 添加超时和重试机制
 pub async fn generate_llm(data: &CollectedData) -> Result<String> {
     // 从配置文件读取 LLM 配置
     let config = match crate::game_data::loaders::load_llm(&crate::paths::get_config_dir()) {
         Ok(cfg) => cfg,
         Err(e) => {
             tracing::warn!("LLM 配置加载失败: {}", e);
-            anyhow::bail!("LLM 配置加载失败");
+            anyhow::bail!("LLM 配置加载失败: {}", e);
         }
     };
 
     if !config.enabled {
-        tracing::info!("LLM 生成已禁用");
+        tracing::info!("LLM 生成已禁用，跳过");
         anyhow::bail!("LLM 生成已禁用");
     }
 
@@ -284,41 +285,56 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
     let prompt = build_llm_prompt(data);
 
     tracing::info!(
-        "正在调用 LLM 生成群像传记 (provider: {}, model: {})",
+        "正在调用 LLM 生成群像传记 (provider: {}, model: {}, base_url: {})",
         config.provider,
-        config.model
+        config.model,
+        config.base_url
     );
 
-    let client = reqwest::Client::new();
+    // 构建请求体
+    let request_body = serde_json::json!({
+        "model": config.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一位武侠小说作家，擅长以古龙的笔法书写江湖故事。"
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature
+    });
+
+    // 使用带超时的 client
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))  // 120秒超时
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .context("构建 HTTP 客户端失败")?;
+
+    let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
+
+    tracing::debug!("LLM 请求 URL: {}", url);
+    tracing::debug!("LLM 请求体: {}", request_body);
+
     let response = client
-        .post(format!(
-            "{}/chat/completions",
-            config.base_url.trim_end_matches('/')
-        ))
+        .post(&url)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "model": config.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一位武侠小说作家，擅长以古龙的笔法书写江湖故事。"
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "max_tokens": config.max_tokens,
-            "temperature": config.temperature
-        }))
+        .json(&request_body)
         .send()
         .await
-        .context("LLM 请求失败")?;
+        .context(format!("LLM 请求失败 (URL: {})", url))?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+
+    tracing::debug!("LLM 响应状态: {}, body: {}", status, body);
+
+    if !status.is_success() {
         record_llm_error();
         anyhow::bail!("LLM 返回错误状态 {}: {}", status, body);
     }
@@ -348,7 +364,7 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         total_tokens: u32,
     }
 
-    let llm_response: LlmResponse = response.json().await.context("解析 LLM 响应失败")?;
+    let llm_response: LlmResponse = serde_json::from_str(&body).context("解析 LLM 响应失败")?;
 
     let usage = llm_response.usage.as_ref();
     let input_tokens = usage.map(|u| u.prompt_tokens as u64).unwrap_or(0);

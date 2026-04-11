@@ -136,3 +136,59 @@ pub async fn get_llm_stats() -> Json<serde_json::Value> {
         "error_count": error_count,
     }))
 }
+
+/// 获取进行中的异步生成任务
+///
+/// GET /api/dashboard/chronicles/pending
+pub async fn get_pending_generations() -> Json<serde_json::Value> {
+    let tracker = chronicle::get_generation_tracker();
+    let tasks = tracker.get_pending_tasks().await;
+
+    // 格式化为友好的响应
+    let task_summaries: Vec<serde_json::Value> = tasks
+        .iter()
+        .map(|t| {
+            let status_str = match &t.status {
+                chronicle::GenerationStatus::Pending => "pending",
+                chronicle::GenerationStatus::Generating => "generating",
+                chronicle::GenerationStatus::Completed => "completed",
+                chronicle::GenerationStatus::Failed(e) => return serde_json::json!({
+                    "chronicle_id": t.chronicle_id,
+                    "status": "failed",
+                    "error": e,
+                    "started_at": t.started_at,
+                    "completed_at": t.completed_at,
+                }),
+            };
+
+            let supplement_str = match &t.supplement_status {
+                chronicle::GenerationStatus::Pending => "pending",
+                chronicle::GenerationStatus::Generating => "generating",
+                chronicle::GenerationStatus::Completed => "completed",
+                chronicle::GenerationStatus::Failed(e) => return serde_json::json!({
+                    "chronicle_id": t.chronicle_id,
+                    "status": status_str,
+                    "supplement_status": "failed",
+                    "supplement_error": e,
+                    "primary_version": t.primary_version,
+                    "started_at": t.started_at,
+                    "completed_at": t.completed_at,
+                }),
+            };
+
+            serde_json::json!({
+                "chronicle_id": t.chronicle_id,
+                "status": status_str,
+                "primary_version": t.primary_version,
+                "supplement_status": supplement_str,
+                "started_at": t.started_at,
+                "completed_at": t.completed_at,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "pending_count": task_summaries.len(),
+        "tasks": task_summaries,
+    }))
+}
