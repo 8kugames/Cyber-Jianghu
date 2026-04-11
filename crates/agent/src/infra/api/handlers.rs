@@ -2302,7 +2302,11 @@ fn record_to_attempt_entry(
     let world_time: Option<serde_json::Value> = r
         .world_time
         .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
+        .and_then(|s| {
+            serde_json::from_str(s)
+                .ok()
+                .or_else(|| Some(serde_json::Value::String(s.clone())))
+        });
 
     SoulCycleAttemptEntry {
         tick_id: r.tick_id,
@@ -2366,7 +2370,8 @@ pub(super) async fn get_soul_cycles_handler(
     let limit: u32 = params
         .get("limit")
         .and_then(|s| s.parse().ok())
-        .unwrap_or(20);
+        .unwrap_or(20)
+        .min(50);
 
     let recorder_guard = state.soul_cycle_recorder.read().await;
     let Some(recorder) = recorder_guard.as_ref() else {
