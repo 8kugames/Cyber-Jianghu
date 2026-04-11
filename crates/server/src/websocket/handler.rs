@@ -720,18 +720,15 @@ async fn handle_intent(
     }
 
     // 即时动作：允许重复提交（覆盖之前的 intent）
-    // 普通动作：检查是否已有 intent
+    // 普通动作：已有 intent 时静默忽略（第一个已正确存储，重复提交无副作用）
     if !is_immediate_action {
         let intents = state.intent_manager.read().await;
         if intents.contains_key(&agent_id) {
-            warn!(
-                "Intent duplicate: agent {} already has intent for tick {}",
+            debug!(
+                "Intent duplicate ignored: agent {} already has intent for tick {}",
                 agent_id, tick_id
             );
-            return Err(Box::new(GameError::TickMismatch {
-                intent_tick_id: tick_id,
-                current_tick_id: current_tick,
-            }) as Box<dyn std::error::Error + Send + Sync>);
+            return Ok(());
         }
     }
 
