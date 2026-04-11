@@ -446,10 +446,14 @@ async function loadCharacterIntoDrawer(char) {
 
     // 经历日志（与经历日志 Tab 保持一致）
     try {
-        const expParams = isCurrent
-            ? '?page=1&limit=3'
-            : `?agent_id=${char.agent_id}&page=1&limit=3`;
-        const expData = await apiGet(`/api/v1/character/soul-cycles${expParams}`);
+        let expData;
+        if (isCurrent) {
+            // 当前角色：从本地 SQLite 获取
+            expData = await apiGet('/api/v1/character/soul-cycles?page=1&limit=3');
+        } else {
+            // 其他角色：从 Server API 获取
+            expData = await apiGet(`/api/v1/characters/${char.agent_id}/soul-cycles?page=1&limit=3`);
+        }
         const recordsMap = expData.records || {};
         const immMap = expData.immediate_intents || {};
         const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
