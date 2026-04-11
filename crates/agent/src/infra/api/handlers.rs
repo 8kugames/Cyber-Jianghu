@@ -2091,93 +2091,6 @@ fn enrich_derived_attributes(
     }
 }
 
-/// 经历日志条目
-#[derive(Debug, Clone, Serialize)]
-pub struct ExperienceEntry {
-    /// Tick ID
-    pub tick_id: i64,
-    /// 游戏时间
-    pub world_time: Option<serde_json::Value>,
-    /// 事件描述
-    pub event: String,
-    /// 观察者思维链（可选）
-    pub observer_thought: Option<String>,
-    /// 意图摘要（可选）
-    pub intent_summary: Option<String>,
-}
-
-/// 经历日志响应
-#[derive(Debug, Serialize)]
-pub struct ExperiencesResponse {
-    /// 当前页
-    pub page: u32,
-    /// 每页数量
-    pub limit: u32,
-    /// 总数
-    pub total: u32,
-    /// 是否有更多
-    pub has_more: bool,
-    /// 经历列表
-    pub experiences: Vec<ExperienceEntry>,
-}
-
-/// 获取经历日志（分页）
-///
-/// GET /api/v1/character/experiences?page=1&limit=20
-///
-/// 数据来源：IntentHistoryStore（SQLite 持久化，按角色隔离）
-/// - event: WorldState.events_log 中的事件描述
-/// - observer_thought: Observer Agent 审查时的思维链
-/// - intent_summary: Agent 提交 Intent 时的 thought_log
-pub(super) async fn get_experiences_handler(
-    State(state): State<HttpApiState>,
-    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> impl IntoResponse {
-    let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let limit: u32 = params
-        .get("limit")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(20);
-
-    let (entries, total) = {
-        let history_guard = state.intent_history.read().await;
-        match history_guard.as_ref() {
-            Some(history) => match history.get_page(page, limit).await {
-                Ok(result) => result,
-                Err(e) => {
-                    tracing::warn!("[experiences] Failed to query intent history: {}", e);
-                    (vec![], 0)
-                }
-            },
-            None => (vec![], 0),
-        }
-    };
-
-    let experiences: Vec<ExperienceEntry> = entries
-        .into_iter()
-        .map(|e| {
-            let world_time = e.world_time.and_then(|s| serde_json::from_str(&s).ok());
-            ExperienceEntry {
-                tick_id: e.tick_id,
-                world_time,
-                event: e.event.unwrap_or_default(),
-                observer_thought: e.observer_thought,
-                intent_summary: e.thought_log,
-            }
-        })
-        .collect();
-
-    let has_more = (page * limit) < total;
-
-    Json(ExperiencesResponse {
-        page,
-        limit,
-        total,
-        has_more,
-        experiences,
-    })
-}
-
 // ============================================================================
 // 三魂循环记录 API
 // ============================================================================
@@ -2264,7 +2177,7 @@ struct SoulCyclesPageResponse {
     limit: u32,
     total: u32,
     has_more: bool,
-    records: Vec<SoulCycleAttemptEntry>,
+    records: std::collections::HashMap<String, Vec<SoulCycleAttemptEntry>>,
     immediate_intents: std::collections::HashMap<String, Vec<ImmediateIntentEntry>>,
 }
 
@@ -2409,10 +2322,14 @@ pub(super) async fn get_soul_cycles_handler(
         let all_records = recorder.get_by_ticks(&tick_ids).await;
         let all_immediate = recorder.get_immediate_by_ticks(&tick_ids).await;
 
-        let attempts: Vec<SoulCycleAttemptEntry> = all_records
-            .into_iter()
-            .map(record_to_attempt_entry)
-            .collect();
+        // 按 tick_id 分组记录
+        let mut records_map: std::collections::HashMap<String, Vec<SoulCycleAttemptEntry>> =
+            std::collections::HashMap::new();
+        for r in all_records {
+            let tick_key = r.tick_id.to_string();
+            let entry = record_to_attempt_entry(r);
+            records_map.entry(tick_key).or_default().push(entry);
+        }
 
         // 按 tick_id 分组即时意图
         let mut immediate_map: std::collections::HashMap<String, Vec<ImmediateIntentEntry>> =
@@ -2429,7 +2346,7 @@ pub(super) async fn get_soul_cycles_handler(
             limit,
             total,
             has_more,
-            records: attempts,
+            records: records_map,
             immediate_intents: immediate_map,
         })
         .into_response()
