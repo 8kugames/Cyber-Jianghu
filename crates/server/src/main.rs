@@ -392,6 +392,14 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // LLM Token 统计
+        .route(
+            "/api/dashboard/chronicles/llm-stats",
+            get(handlers::chronicle::get_llm_stats).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
         .route(
             "/api/config",

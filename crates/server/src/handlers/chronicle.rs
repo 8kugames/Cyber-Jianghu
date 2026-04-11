@@ -121,3 +121,18 @@ pub async fn generate_chronicle(
         }
     }
 }
+
+/// 获取 LLM Token 统计
+///
+/// GET /api/dashboard/chronicles/llm-stats
+pub async fn get_llm_stats() -> Json<serde_json::Value> {
+    let (input_tokens, output_tokens, request_count, error_count) =
+        chronicle::generator::get_llm_stats();
+
+    Json(serde_json::json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_requests": request_count,
+        "error_count": error_count,
+    }))
+}
