@@ -30,7 +30,10 @@ use crate::soul::translator::IntentTranslator;
 use crate::soul::translator::TranslationResult;
 
 use super::builder::AgentBuilder;
-use super::{DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
+use super::{
+    DecisionCallback, DecisionWithChainCallback, DecisionWithFeedbackCallback,
+    DecisionWithMemoryCallback,
+};
 
 // ============================================================================
 // Agent
@@ -54,6 +57,12 @@ pub struct Agent {
 
     /// 带反馈的决策回调（可选，用于验证器集成）
     pub(crate) decision_with_feedback_callback: Option<DecisionWithFeedbackCallback>,
+
+    /// 带 CognitiveChain 的决策回调（可选，用于天魂翻译时获取人魂认知上下文）
+    ///
+    /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
+    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    pub(crate) decision_with_chain_callback: Option<DecisionWithChainCallback>,
 
     /// 记忆管理器（可选）
     pub(crate) memory_manager: Option<MemoryManager>,
@@ -164,6 +173,7 @@ impl Agent {
             decision_callback,
             decision_with_memory_callback: None,
             decision_with_feedback_callback: None,
+            decision_with_chain_callback: None,
             memory_manager: None,
             dialogue_client: None,
             relationship_store: None,
@@ -449,18 +459,20 @@ impl Agent {
     /// 否则直接返回原 intent（Claw 模式或已经是格式化 Intent）。
     ///
     /// 翻译失败时返回 idle intent 作为降级。
+    ///
+    /// # Arguments
+    /// * `intent` - 人魂输出的叙事意图
+    /// * `world_state` - 当前世界状态
+    /// * `cognitive_chain` - 人魂的认知链（可选，用于辅助天魂指代消解）
     pub(crate) async fn translate_intent(
         &self,
         intent: Intent,
         world_state: &WorldState,
+        cognitive_chain: Option<&crate::soul::actor::CognitiveChain>,
     ) -> TranslationResult {
         // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
         if intent.action_type.as_str() != "narrative" {
-            let thought = intent
-                .thought_log
-                .as_ref()
-                .map(|s| s.clone())
-                .unwrap_or_default();
+            let thought = intent.thought_log.clone().unwrap_or_default();
             return TranslationResult {
                 intent,
                 speech_intent: None,
@@ -515,7 +527,7 @@ impl Agent {
         info!("[天魂] 翻译叙事意图: {}", narrative);
 
         match translator
-            .translate(narrative, thought_log, world_state)
+            .translate(narrative, thought_log, world_state, cognitive_chain)
             .await
         {
             Ok(result) => {

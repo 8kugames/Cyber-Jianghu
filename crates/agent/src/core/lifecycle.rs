@@ -566,13 +566,22 @@ impl super::Agent {
                             }
 
                         // 5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
-                        let raw_intent = {
+                        // 优先使用 decision_with_chain_callback（返回 CognitiveChain 供天魂使用）
+                        let (raw_intent, cognitive_chain) = {
                             let decision_future = async {
-                                // 有 rejection reason 时优先走 feedback callback（使用 [验证反馈] section）
+                                // 最高优先级：decision_with_chain_callback（支持天魂翻译）
+                                if let Some(ref chain_callback) = self.decision_with_chain_callback {
+                                    // 有 rejection reason 时传递 feedback
+                                    let fb = self.last_rejection_reason.as_deref();
+                                    return chain_callback(&world_state, &memory_context, fb).await;
+                                }
+
+                                // 有 rejection reason 时走 feedback callback（使用 [验证反馈] section）
                                 // feedback callback 内部有 CognitiveValidator 重试
                                 if let Some(ref reason) = self.last_rejection_reason {
                                     if let Some(ref callback) = self.decision_with_feedback_callback {
-                                        callback(&world_state, &memory_context, Some(reason.as_str())).await
+                                        let intent = callback(&world_state, &memory_context, Some(reason.as_str())).await;
+                                        (intent, None)
                                     } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
                                         // fallback: 将 rejection 混入 memory context
                                         let combined = if memory_context.is_empty() {
@@ -580,21 +589,25 @@ impl super::Agent {
                                         } else {
                                             format!("{}\n[意图被驳回: {}，请重新决策]", memory_context, reason)
                                         };
-                                        memory_callback(&world_state, &combined).await
+                                        let intent = memory_callback(&world_state, &combined).await;
+                                        (intent, None)
                                     } else {
-                                        (self.decision_callback)(&world_state).await
+                                        let intent = (self.decision_callback)(&world_state).await;
+                                        (intent, None)
                                     }
                                 } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                                    memory_callback(&world_state, &memory_context).await
+                                    let intent = memory_callback(&world_state, &memory_context).await;
+                                    (intent, None)
                                 } else {
-                                    (self.decision_callback)(&world_state).await
+                                    let intent = (self.decision_callback)(&world_state).await;
+                                    (intent, None)
                                 }
                             };
 
                             if let Some(dl) = deadline_at {
                                 let remaining = dl.saturating_duration_since(std::time::Instant::now());
                                 match tokio::time::timeout(remaining, decision_future).await {
-                                    Ok(intent) => intent,
+                                    Ok(result) => result,
                                     Err(_) => {
                                         warn!("Tick {} 第 {} 次人魂推理超时，放弃本轮", world_state.tick_id, attempt);
                                         // 不发送 intent（server 可能已关单）
@@ -620,14 +633,14 @@ impl super::Agent {
                         if let Some(recorder) = self.soul_recorder() {
                             recorder.record_renhun(
                                 world_state.tick_id,
-                                attempt as i32,
+                                attempt,
                                 renhun_narrative,
                                 renhun_thought_log,
                             ).await;
                         }
 
                         // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化
-                        let translation = self.translate_intent(raw_intent, &world_state).await;
+                        let translation = self.translate_intent(raw_intent, &world_state, cognitive_chain.as_ref()).await;
 
                         // 记录天魂翻译结果
                         if let Some(recorder) = self.soul_recorder() {
@@ -635,7 +648,7 @@ impl super::Agent {
                                 .map(|d| serde_json::to_string(d).unwrap_or_default());
                             recorder.record_tianhun(
                                 world_state.tick_id,
-                                attempt as i32,
+                                attempt,
                                 Some(translation.intent.action_type.as_str()),
                                 action_data_str.as_deref(),
                                 translation.speech_intent.as_ref().and_then(|s| {
@@ -676,7 +689,7 @@ impl super::Agent {
                                     let layer3 = layers.iter().find(|l| l.layer == "layer3");
                                     recorder.record_dihun(
                                         world_state.tick_id,
-                                        attempt as i32,
+                                        attempt,
                                         "approved",
                                         layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                                         layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
@@ -686,7 +699,7 @@ impl super::Agent {
                                     ).await;
                                     recorder.record_final_intent(
                                         world_state.tick_id,
-                                        attempt as i32,
+                                        attempt,
                                         Some(&approved_intent.intent_id.to_string()),
                                         Some(approved_intent.action_type.as_str()),
                                         approved_intent.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
@@ -709,7 +722,7 @@ impl super::Agent {
                                     let layer3 = layers.iter().find(|l| l.layer == "layer3");
                                     recorder.record_dihun(
                                         world_state.tick_id,
-                                        attempt as i32,
+                                        attempt,
                                         "rejected",
                                         layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
                                         layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),

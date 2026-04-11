@@ -35,5 +35,6 @@ pub use crate::soul::actor::{
 
 // 从 runtime 模块重导出决策类型
 pub use crate::runtime::{
-    DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback,
+    DecisionCallback, DecisionWithChainCallback, DecisionWithFeedbackCallback,
+    DecisionWithMemoryCallback,
 };
