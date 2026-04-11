@@ -2269,7 +2269,9 @@ struct SoulCyclesPageResponse {
 }
 
 /// SoulCycleRecord → SoulCycleAttemptEntry 转换（消除重复代码）
-fn record_to_attempt_entry(r: super::soul_cycle_recorder::SoulCycleRecord) -> SoulCycleAttemptEntry {
+fn record_to_attempt_entry(
+    r: super::soul_cycle_recorder::SoulCycleRecord,
+) -> SoulCycleAttemptEntry {
     let action_data: Option<serde_json::Value> = r
         .tianhun_action_data
         .as_ref()
@@ -2399,15 +2401,13 @@ pub(super) async fn get_soul_cycles_handler(
         let (tick_ids, total) = recorder.get_tick_ids_page(page, limit).await;
 
         // 批量获取所有 tick 的记录和即时意图
-        let mut all_records = Vec::new();
-        for tid in &tick_ids {
-            let records = recorder.get_by_tick(*tid).await;
-            all_records.extend(records);
-        }
+        let all_records = recorder.get_by_ticks(&tick_ids).await;
         let all_immediate = recorder.get_immediate_by_ticks(&tick_ids).await;
 
-        let attempts: Vec<SoulCycleAttemptEntry> =
-            all_records.into_iter().map(record_to_attempt_entry).collect();
+        let attempts: Vec<SoulCycleAttemptEntry> = all_records
+            .into_iter()
+            .map(record_to_attempt_entry)
+            .collect();
 
         // 按 tick_id 分组即时意图
         let mut immediate_map: std::collections::HashMap<String, Vec<ImmediateIntentEntry>> =
@@ -2415,10 +2415,7 @@ pub(super) async fn get_soul_cycles_handler(
         for imm in all_immediate {
             let tick_key = imm.tick_id.to_string();
             let entry = immediate_record_to_entry(imm);
-            immediate_map
-                .entry(tick_key)
-                .or_default()
-                .push(entry);
+            immediate_map.entry(tick_key).or_default().push(entry);
         }
 
         let has_more = (page * limit) < total;

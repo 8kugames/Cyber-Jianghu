@@ -741,7 +741,7 @@ async function loadExperiences(page = 1) {
                     immIntents.forEach(imm => {
                         html += `<div class="imm-item">
                             <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
-                            <span class="imm-status ${imm.send_status}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
+                            <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
                             ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
                         </div>`;
                     });
