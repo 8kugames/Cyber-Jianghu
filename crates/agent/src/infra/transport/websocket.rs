@@ -787,10 +787,13 @@ async fn websocket_background_task(
         }
     }
 
-    // 清理连接状态
+    // 清理连接状态：drop worldstate_tx 使所有 receiver 收到 Closed 错误
     {
         let mut guard = state.write().await;
         guard.connected = false;
+        guard.worldstate_tx = None;
+        guard.intent_tx = None;
+        guard.immediate_msg_tx = None;
     }
 
     info!("WebSocket background task exiting");

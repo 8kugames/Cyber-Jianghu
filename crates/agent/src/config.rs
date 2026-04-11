@@ -372,7 +372,7 @@ pub struct RuntimeConfig {
     #[serde(default)]
     pub port: u16,
 
-    /// 紧急停止 LLM 调用（用于避免计费黑洞）
+    /// 停止 LLM 调用
     #[serde(default)]
     pub llm_disabled: bool,
 }
