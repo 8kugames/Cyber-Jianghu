@@ -298,7 +298,8 @@ pub async fn count_chronicles(db_pool: &crate::db::DbPool) -> Result<i64> {
 
 /// 生成 chronicle_id (C-001, C-002, ...)
 async fn generate_chronicle_id(db_pool: &crate::db::DbPool) -> Result<String> {
-    let max_id: i64 = sqlx::query_scalar(
+    // CAST(SUBSTRING(...) AS INT) 返回 INT4 (i32)
+    let max_id: i32 = sqlx::query_scalar(
         "SELECT COALESCE(MAX(CAST(SUBSTRING(chronicle_id FROM 3) AS INT)), 0) FROM chronicles WHERE chronicle_id LIKE 'C-%'"
     )
     .fetch_one(db_pool)
