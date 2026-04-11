@@ -995,16 +995,14 @@ impl HttpApiState {
                 return Some(recorder.clone());
             }
         }
-        // 2. 按需加载
+        // 2. 按需加载/创建
         // 其他角色的数据在 character_dir/{agent_id}/data/soul_cycle_{agent_id}.db
+        // 注意：SoulCycleRecorder::open 会通过 Connection::open 自动创建不存在的文件
         let character_dir = self.character_dir.read().await;
         let db_path = character_dir
             .join(agent_id.to_string())
             .join("data")
             .join(format!("soul_cycle_{}.db", agent_id));
-        if !db_path.exists() {
-            return None;
-        }
         match soul_cycle_recorder::SoulCycleRecorder::open(agent_id, &db_path) {
             Ok(recorder) => {
                 let recorder = Arc::new(recorder);
