@@ -456,25 +456,12 @@
             resultEl.textContent = '';
             resultEl.className = 'result';
 
-            // 基础 URL
-            let baseUrl = document.getElementById('llm-base-url').value.trim();
+            const baseUrl = document.getElementById('llm-base-url').value.trim();
             if (!baseUrl) {
                 resultEl.textContent = '请先填写 Base URL';
                 resultEl.className = 'result error';
                 return;
             }
-            // 提示 Docker 内部地址无法在浏览器中测试
-            if (baseUrl.includes('host.docker.internal')) {
-                resultEl.textContent = '请将 Base URL 改为 localhost 地址后再测试';
-                resultEl.className = 'result error';
-                btn.disabled = false;
-                btn.textContent = '测试连通性';
-                return;
-            }
-            // 拼接 /v1/chat/completions（标准 OpenAI 兼容接口）
-            const apiPath = baseUrl.endsWith('/v1')
-                ? `${baseUrl}/chat/completions`
-                : `${baseUrl}/v1/chat/completions`;
             const apiKey = document.getElementById('llm-api-key').value;
             const model = document.getElementById('llm-model').value;
 
@@ -486,7 +473,7 @@
                     headers['Authorization'] = `Bearer ${apiKey}`;
                 }
 
-                const response = await fetch(apiPath, {
+                const response = await fetch(baseUrl, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({

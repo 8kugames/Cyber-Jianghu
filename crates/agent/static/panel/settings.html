@@ -222,7 +222,7 @@
                 btn.textContent = '测试中...';
                 resultEl.className = 'test-result hidden';
 
-                const baseUrl = document.getElementById('llm-base-url').value.replace(/\/v1\/?$/, '') || 'http://localhost:11434';
+                const baseUrl = document.getElementById('llm-base-url').value.trim() || 'http://localhost:11434';
                 const model = document.getElementById('llm-model').value;
                 const apiKey = document.getElementById('llm-api-key').value;
 
