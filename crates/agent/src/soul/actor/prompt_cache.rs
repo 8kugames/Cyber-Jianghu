@@ -126,6 +126,13 @@ impl PromptCache {
         }
     }
 
+    /// 失效 persona 缓存（rebirth 后调用）
+    pub fn invalidate_persona(&mut self, persona_desc: String, persona: &DynamicPersona) {
+        self.persona_desc = persona_desc;
+        self.persona_summary = Self::build_structured_summary(persona);
+        self.persona_initialized = false; // 强制下一轮使用完整版
+    }
+
     /// 获取 actions_list
     pub fn get_actions_list(&self) -> &str {
         &self.actions_list

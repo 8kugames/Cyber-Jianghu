@@ -171,8 +171,30 @@ impl super::Agent {
         // 使用服务器返回的角色名更新 Agent 名称追踪
         if let Some(ref name) = registered_name {
             self.server_assigned_name = Some(name.clone());
+
+            // 重新加载 character.yaml 以获取新角色的完整人设（rebirth 场景）
             if let Some(ref engine) = self.cognitive_engine {
-                engine.update_agent_name(name);
+                let server_dir = self.config.server_dir(&self.config.server.ws_url);
+                let char_yaml = server_dir
+                    .join("characters")
+                    .join(agent_id.to_string())
+                    .join("character.yaml");
+                if char_yaml.exists() {
+                    match crate::config::CharacterConfig::from_file(&char_yaml) {
+                        Ok(char_config) => {
+                            let prompt = char_config.generate_system_prompt();
+                            engine.update_persona(name, &prompt);
+                            self.character_config = Some(char_config);
+                            info!("已从 character.yaml 重新加载人设并更新认知引擎");
+                        }
+                        Err(e) => {
+                            warn!("加载 character.yaml 失败，仅更新名称: {}", e);
+                            engine.update_agent_name(name);
+                        }
+                    }
+                } else {
+                    engine.update_agent_name(name);
+                }
             }
             info!("已更新 agent 名称为: {}", name);
         }

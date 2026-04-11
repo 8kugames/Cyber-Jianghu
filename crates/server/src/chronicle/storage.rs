@@ -309,13 +309,18 @@ async fn generate_chronicle_id(db_pool: &crate::db::DbPool) -> Result<String> {
     Ok(format!("C-{:03}", max_id + 1))
 }
 
-/// 截断文本
+/// 截断文本（正确处理 UTF-8 字符边界）
 fn truncate_text(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        return s.to_string();
     }
+    // 确保截断点在字符边界上
+    let end = s
+        .char_indices()
+        .nth(max_len.saturating_sub(3))
+        .map(|(idx, _)| idx)
+        .unwrap_or(s.len());
+    format!("{}...", &s[..end])
 }
 
 /// Chronicle 列表元数据
