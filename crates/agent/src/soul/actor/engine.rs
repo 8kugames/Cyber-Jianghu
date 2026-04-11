@@ -23,9 +23,11 @@ use std::sync::Arc;
 use tracing::{debug, info};
 
 use super::chain::CognitiveChain;
+use super::prompt_cache::PromptCache;
 use super::stages::{
     CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };
+use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
@@ -68,18 +70,64 @@ impl Default for CognitiveEngineConfig {
 /// - LLM Call 1: Perception + Motivation（感知+动机）
 /// - LLM Call 2: Planning + Decision（规划+决策）
 /// - Validation 由 ReflectorSoul 在 engine 外部执行
+///
+/// 【Prompt 缓存优化】
+/// 使用 PromptCache 实现三层缓存，减少重复内容：
+/// - Layer 1: 静态缓存（persona、actions）进程生命周期内不变
+/// - Layer 2: 半静态缓存（inventory、locations、entities）变化时更新
+/// - Layer 3: 动态状态（self_status、recent_speeches）每轮生成
+///
+/// 【滑动上下文窗口】
+/// 使用 NarrativeSummaryWindow 保留最近 N 轮的行动轨迹摘要，
+/// 帮助 LLM 理解连续决策的上下文。
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: std::sync::RwLock<CognitiveEngineConfig>,
+    /// Prompt 缓存（分层缓存优化）
+    prompt_cache: std::sync::RwLock<PromptCache>,
+    /// 滑动上下文窗口（保留最近 N 轮摘要）
+    summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
 }
 
 impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
+        // 初始化 Prompt 缓存
+        let persona_desc = config.persona.generate_description();
+        let actions_list = Self::load_actions_list();
+        let prompt_cache = PromptCache::new(persona_desc, actions_list, &config.persona);
+
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
+            prompt_cache: std::sync::RwLock::new(prompt_cache),
+            // 默认窗口大小为 3
+            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
         }
+    }
+
+    /// 使用自定义窗口大小创建认知引擎
+    pub fn with_window_size(
+        llm_client: Arc<dyn LlmClient>,
+        config: CognitiveEngineConfig,
+        window_size: usize,
+    ) -> Self {
+        let persona_desc = config.persona.generate_description();
+        let actions_list = Self::load_actions_list();
+        let prompt_cache = PromptCache::new(persona_desc, actions_list, &config.persona);
+
+        Self {
+            llm_client,
+            config: std::sync::RwLock::new(config),
+            prompt_cache: std::sync::RwLock::new(prompt_cache),
+            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
+        }
+    }
+
+    /// 加载动作列表（用于缓存）
+    fn load_actions_list() -> String {
+        let available_actions = load_available_actions_from_file();
+        Self::build_action_list(&available_actions)
     }
 
     /// 使用默认配置创建
@@ -137,15 +185,21 @@ impl CognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
-        // 缓存 persona description（同一 tick 内人设不变）
-        let persona_desc = persona.generate_description();
+        // 【Prompt 缓存优化】
+        // - 差异化 persona：第一轮完整，后续摘要
+        // - 半静态内容变化时更新缓存
+        let persona_for_prompt = {
+            let mut cache = self.prompt_cache.write().unwrap();
+            cache.check_and_update(world_state);
+            cache.get_persona(world_state).to_string()
+        };
 
         // === Stage 1: Perception+Motivation (感知+动机，合并为单次 LLM 调用) ===
         let prompt = self.build_perception_motivation_prompt(
             world_state,
             memory_context,
             validation_feedback,
-            &persona_desc,
+            &persona_for_prompt,
             &agent_name,
         );
         let (pm_response, perception, motivation) = self.perceive_and_motivate(&prompt).await?;
@@ -163,17 +217,19 @@ impl CognitiveEngine {
         debug!("执行 Stage 2: Plan+Decide");
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
+
+        // 【Prompt 缓存优化】Plan+Decision 也使用差异化的 persona
         let pd_prompt = self.build_plan_decision_prompt(
             &perception_output,
             &motivation_output,
-            &persona_desc,
+            &persona_for_prompt,
             &agent_name,
         );
         let (pd_response, planning, decision, intent) =
             self.plan_and_decide(&pd_prompt, world_state).await?;
         chain.add_stage(planning);
         chain.add_stage(decision);
-        chain.final_intent = intent;
+        chain.final_intent = intent.clone();
         thinking_log::log_llm(
             &agent_name,
             tick_id,
@@ -185,6 +241,9 @@ impl CognitiveEngine {
         // 记录耗时
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
+        // 【滑动上下文窗口】将结果添加到摘要窗口
+        self.push_summary_to_window(&chain, &intent);
+
         info!(
             "[{}-{}] 认知完成，耗时 {}ms",
             agent_name, tick_id, chain.duration_ms
@@ -193,6 +252,39 @@ impl CognitiveEngine {
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
 
         Ok(chain)
+    }
+
+    /// 将认知结果添加到滑动上下文窗口
+    fn push_summary_to_window(&self, chain: &CognitiveChain, intent: &Intent) {
+        // 提取叙事意图
+        let decision = intent
+            .action_data
+            .as_ref()
+            .and_then(|d| d.get("narrative"))
+            .and_then(|n| n.as_str())
+            .unwrap_or(&intent.action_type)
+            .to_string();
+
+        // 提取感知和动机摘要
+        let perception = chain
+            .get_stage(CognitiveStage::Perception)
+            .map(|s| s.content.chars().take(50).collect())
+            .unwrap_or_default();
+
+        let motivation = chain
+            .get_stage(CognitiveStage::Motivation)
+            .map(|s| s.content.chars().take(50).collect())
+            .unwrap_or_default();
+
+        let summary = NarrativeSummary {
+            tick_id: chain.tick_id,
+            perception,
+            motivation,
+            decision,
+            outcome: "待执行".to_string(), // 结果由外部更新
+        };
+
+        self.push_summary(summary);
     }
 
     // ========================================================================
@@ -304,6 +396,12 @@ impl CognitiveEngine {
     // Prompt 构建方法
     // ========================================================================
 
+    /// 构建感知+动机阶段 prompt
+    ///
+    /// 【Prompt 缓存优化】
+    /// - persona_desc：已由调用方从缓存获取（第一轮完整，后续摘要）
+    /// - inventory/locations/entities：已由调用方更新到缓存
+    /// - 只有 self_status/recent_speeches 每轮生成
     fn build_perception_motivation_prompt(
         &self,
         world_state: &WorldState,
@@ -314,6 +412,7 @@ impl CognitiveEngine {
     ) -> String {
         let self_state = &world_state.self_state;
 
+        // 【动态状态】每轮生成
         let engine = NarrativeEngine::default();
         let narrative = PerceptionNarrative::from_attributes_with_engine(
             &engine,
@@ -322,48 +421,22 @@ impl CognitiveEngine {
         );
         let self_status_section = narrative.to_prompt_section();
 
-        let inventory_str = if self_state.inventory.is_empty() {
-            "空".to_string()
-        } else {
-            self_state
-                .inventory
-                .iter()
-                // 人魂只看到物品名称和数量，不暴露 item_id（精确 ID 由天魂处理）
-                .map(|i| format!("{} x{}", i.name, i.quantity))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
+        // 【半静态缓存】从缓存获取（已在 think_with_memory_and_feedback 中更新）
+        let cache = self.prompt_cache.read().unwrap();
+        let inventory_str = cache.get_inventory().to_string();
+        let adjacent_locations = cache.get_adjacent().to_string();
+        let entities_str = cache.get_entities().to_string();
+        let items_str = cache.get_nearby_items().to_string();
+        drop(cache); // 释放读锁
 
-        let entities_str = if world_state.entities.is_empty() {
-            "无".to_string()
-        } else {
-            world_state
-                .entities
-                .iter()
-                .map(|e| format!("{}({})", e.name, e.state))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let items_str = if world_state.nearby_items.is_empty() {
-            "无".to_string()
-        } else {
-            world_state
-                .nearby_items
-                .iter()
-                // 人魂只看到物品名称和数量，不暴露 item_id
-                .map(|i| format!("{} x{}", i.name, i.quantity))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
+        // 【动态状态】每轮生成
         let memory_section = if memory_context.is_empty() {
             String::new()
         } else {
             format!("\n### 相关记忆\n{memory_context}\n")
         };
 
-        // 从events_log中提取最近说过的话和行动反馈（用于去重和反馈）
+        // 从 events_log 中提取最近说过的话和行动反馈（用于去重和反馈）
         let recent_speeches: Vec<String> = world_state
             .events_log
             .iter()
@@ -424,25 +497,6 @@ impl CognitiveEngine {
             format!("\n### 近期密语\n{}\n", entries.join("\n"))
         };
 
-        let adjacent_locations = if world_state.location.adjacent_nodes.is_empty() {
-            "无（当前位置无法移动）".to_string()
-        } else {
-            world_state
-                .location
-                .adjacent_nodes
-                .iter()
-                // 人魂只看到地点中文名，不暴露 node_id
-                .map(|n| {
-                    if n.travel_cost > 1 {
-                        format!("{} (耗时{}tick)", n.name, n.travel_cost)
-                    } else {
-                        n.name.clone()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
         let location_constraint = if world_state.location.adjacent_nodes.is_empty() {
             "\n【重要】当前位置无法移动到任何地方，你必须留在当前位置。"
         } else {
@@ -465,6 +519,9 @@ impl CognitiveEngine {
             }
         };
 
+        // 【滑动上下文窗口】获取近期行动轨迹
+        let summary_context = self.get_summary_context();
+
         format!(
             r#"# 感知与动机阶段 (Perception + Motivation)
 {feedback_section}{time_info}
@@ -484,7 +541,7 @@ impl CognitiveEngine {
 ### 环境
 - 附近的人: {entities}
 - 地上的物品: {items}
-{memory_section}{recent_speeches_section}{private_dialogue_section}
+{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -512,6 +569,7 @@ impl CognitiveEngine {
             memory_section = memory_section,
             recent_speeches_section = recent_speeches_section,
             private_dialogue_section = private_dialogue_section,
+            summary_context = summary_context,
             feedback_section = feedback_section,
         )
     }
@@ -523,9 +581,10 @@ impl CognitiveEngine {
         persona_desc: &str,
         agent_name: &str,
     ) -> String {
-        // 加载动作表（仅作为参考，人魂不需要输出结构化 action_data）
-        let available_actions = load_available_actions_from_file();
-        let action_list = Self::build_action_list(&available_actions);
+        // 【静态缓存】从缓存获取 actions_list
+        let cache = self.prompt_cache.read().unwrap();
+        let action_list = cache.get_actions_list().to_string();
+        drop(cache);
 
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
@@ -593,6 +652,49 @@ impl CognitiveEngine {
     // ========================================================================
     // 辅助方法
     // ========================================================================
+
+    /// 添加摘要到滑动窗口
+    pub fn push_summary(&self, summary: NarrativeSummary) {
+        if let Ok(mut window) = self.summary_window.write() {
+            window.push(summary);
+        }
+    }
+
+    /// 获取滑动窗口上下文（用于 prompt 注入）
+    pub fn get_summary_context(&self) -> String {
+        if let Ok(window) = self.summary_window.read() {
+            window.to_context()
+        } else {
+            String::new()
+        }
+    }
+
+    /// 获取详细滑动窗口上下文（用于调试）
+    #[allow(dead_code)]
+    pub fn get_detailed_summary_context(&self) -> String {
+        if let Ok(window) = self.summary_window.read() {
+            window.to_detailed_context()
+        } else {
+            String::new()
+        }
+    }
+
+    /// 清空滑动窗口
+    pub fn clear_summary_window(&self) {
+        if let Ok(mut window) = self.summary_window.write() {
+            window.clear();
+        }
+    }
+
+    /// 获取窗口大小
+    #[allow(dead_code)]
+    pub fn summary_window_size(&self) -> usize {
+        if let Ok(window) = self.summary_window.read() {
+            window.len()
+        } else {
+            0
+        }
+    }
 }
 
 // ============================================================================
