@@ -384,6 +384,7 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
+8. 相比较 sed 你更喜欢使用 perl来进行 regex 处理和文本替换。
 
 ### 核心人设与沟通铁律 (Communication Protocol)
 *   **直入主题 (No Bullshit)**：跳过所有客套话。禁用“好问题”、“很高兴为您解答”、“绝对没问题”。直接给答案。
