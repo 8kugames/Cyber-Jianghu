@@ -107,7 +107,7 @@ pub use runtime::{
 // 组件
 pub use component::llm::LlmClient;
 pub use component::memory::{
-    ArchiveMemoryBackend, ClientMemory, EbbinghausConfig, EmbedderService, EpisodicMemoryBackend,
+    ClientMemory, EbbinghausConfig, EmbedderService, EpisodicMemoryBackend,
     ForgettingReport, ForgettingScheduler, ImportanceScorer, LocalEmbedder, MemoryEntry,
     MemoryManager, MemoryManagerConfig, MemoryManagerStats, MemoryToolDefinition,
     RecallArchivedParams, SearchMemoryParams, WorkingMemoryBackend,
