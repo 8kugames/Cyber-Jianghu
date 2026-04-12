@@ -139,12 +139,8 @@ impl SessionRegistry {
     ///
     /// 返回新创建的会话
     pub fn create_session(&mut self, agent_a: Uuid, agent_b: Uuid) -> DialogueSession {
-        let session = DialogueSession::new(
-            agent_a,
-            agent_a.to_string(),
-            agent_b,
-            agent_b.to_string(),
-        );
+        let session =
+            DialogueSession::new(agent_a, agent_a.to_string(), agent_b, agent_b.to_string());
         let session_id = session.session_id.clone();
 
         info!(

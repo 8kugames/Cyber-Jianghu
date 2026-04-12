@@ -32,9 +32,6 @@ cargo build -p cyber-jianghu-server --release
 # Build agent
 cargo build -p cyber-jianghu-agent
 
-# Run tests (CI uses nextest)
-cargo test --workspace
-
 # Run tests with nextest (faster, used in CI)
 cargo nextest run --workspace
 
@@ -54,7 +51,7 @@ cargo clippy --workspace --all-targets --fix --allow-dirty
 cyber-jianghu-agent run
 
 # Run agent in Claw mode (for OpenClaw integration)
-cyber-jianghu-agent run --mode claw --port 23340
+cyber-jianghu-agent run --mode claw --port 0
 
 # Run with debug logging
 RUST_LOG=debug cargo run -p cyber-jianghu-server
@@ -146,6 +143,7 @@ Key server modules:
 - `src/websocket/` - WebSocket connection management
 - `src/handlers/` - HTTP API endpoints
 - `src/state.rs` - Shared AppState and rate limiting
+- `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
 
 ### Agent Architecture
 
@@ -166,7 +164,7 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
    - Real-time Tick notifications and Intent submission
 
 2. **HTTP API (Auxiliary)**:
-   - Runs with HTTP API on port 23340-23349
+   - Runs with HTTP API on port 23340-23999
    - Used for data queries, Web panel, debugging
    - **NOT** a replacement for WebSocket
 
@@ -178,12 +176,13 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - ActorSoul: cognitive engine, narrative engine, intent generation
-- `src/soul/reflector/` - ReflectorSoul: intent validation, rule engine, review store
+- `src/soul/actor/` - 人魂 ActorSoul: cognitive engine, narrative engine, narrative intent generation
+- `src/soul/translator/` - 天魂 IntentTranslator: LLM-based narrative→structured intent translation
+- `src/soul/reflector/` - 地魂 ReflectorSoul: intent validation, rule engine, review store
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
 - `src/component/social/` - Relationship store, dialogue client
-- `src/component/llm/` - LLM client abstraction
+- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` auto-downgrade)
 - `src/infra/transport/` - WebSocket communication layer
 - `src/infra/api/` - HTTP API server, handlers, services
 - `src/runtime/` - Decision modes (cognitive + claw)
@@ -192,25 +191,87 @@ Key agent modules:
 - `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
 - `claw` - WebSocket server for OpenClaw/external scheduler integration
 
-**Dual Soul Architecture** (Cognitive mode):
-The agent uses a dual-soul design for intent generation and moral review:
+**Decision Callbacks** (SDK API):
+- `cognitive_decision_with_chain()` - **推荐**：返回 `(Intent, CognitiveChain)` 元组，CognitiveChain 传递给天魂辅助指代消解
+- `cognitive_decision_with_retry()` - **已废弃**：仅返回 Intent，请迁移到 `cognitive_decision_with_chain`
+
+```rust
+use cyber_jianghu_agent::cognitive_decision_with_chain;
+
+let callback = cognitive_decision_with_chain(agent_id, engine.clone(), 3);
+
+Agent::builder(config, base_callback)
+    .with_decision_chain(callback)  // 传递 CognitiveChain 给天魂
+    .with_intent_translator(translator)
+    .build();
+```
+
+**Three-Soul Architecture** (三魂, Cognitive mode):
+The agent uses a three-stage pipeline: 人魂 (narrative) → 天魂 (translation) → 地魂 (validation)
 
 ```
-ActorSoul (行动之魂/本我)     ReflectorSoul (反思之魂/超我)
-       │                              │
-       │  submit_for_review()        │  poll ReviewStore
-       │  ─────────────────────────> │
-       │                              │  LLM review
-       │  <─────────────────────────  │  submit_review()
-       │  await approval              │
-       ▼
-   send_intent()
+loop {
+    人魂 ActorSoul (行动之魂)     天魂 IntentTranslator          地魂 ReflectorSoul (反思之魂)
+      叙事意图                      格式化翻译                      三层审查
+      + CognitiveChain ────────────────────────────────────────────────────────
+           │                              │                              │
+           │  "吃馒头充饥"               │  action_type=eat             │  Layer 1: action_type 合法性
+           │  + key_observations          │  action_data={item_id:       │  Layer 2: RuleEngine 规则校验
+           │  + primary_drive      ─────> │    "mantou"}                 │  Layer 3: LLM 人设/世界观审查
+           │  + thought_process           │  (含指代消解上下文)          │
+           │                              │  ──────────────────────>     │
+           │                              │                              │
+           │<─────── Approved: send intent ───────────────────────────── │
+           │<─────── Rejected: retry with reason ────────────────────── │
+           │                                                              │
+           │  (max 3 retries, deadline timeout → idle)                   │
+}
 ```
 
-- **ActorSoul**: Generates intents, pursues immediate goals (id/本我)
-- **ReflectorSoul**: Reviews intents against moral values, approves/rejects (superego/超我)
-- **ReviewStore**: In-memory shared state for pending reviews and results
-- **Timeout**: Default 30s, auto-approves on timeout to prevent tick expiry
+- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent + CognitiveChain (含 key_observations, primary_drive, thought_process)
+- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON. Receives CognitiveChain from 人魂 to enhance coreference resolution (指代消解) by providing cognitive context (who is "him/her/it"?). Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
+- **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM)
+- **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
+- **Deadline timeout**: Tick关单打断循环，超时提交 idle
+- **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
+
+**Speech Routing** (天魂 → 即时通道):
+天魂翻译后通过 `route_intents()` 决定 intent 路由：
+- **speak/whisper** → 主 intent 降级 idle，说话走 `immediate_msg_tx`（priority=10，不占 tick 配额）
+- **shout** → 保持主 intent（喊叫需要占据本 tick 的行动位）
+- **混合**（说话+行动）→ 行动走主流程，说话提取后走即时通道
+- **纯行动** → 无 `speech_intent`，正常走主流程
+
+**Immediate Event System**:
+- Server broadcasts `ImmediateEvent` (speak) to co-located agents mid-tick
+- Agent's `ImmediateEventHandler` decides: RespondNow / DeferToMainTick / Ignore
+- RespondNow sends speak intent via dedicated `immediate_msg_tx` channel (不占 intent 配额)
+- Deferred events injected into next tick's LLM context as "待回应的对话"
+- All ImmediateEvents immediately stored in working memory (即时感知)
+
+**Server Error Feedback**:
+- Server sends `ServerMessage::Error` with `ERROR_CODE_ACTION_FAILED` on validation failure
+- Agent consumes via `server_error_feedback` channel → `last_rejection_reason`
+- Injected into next tick's ActorSoul context as `[意图被驳回: {reason}]`
+
+**Intent Duplicate Policy**:
+- Immediate actions (speak/whisper/emote etc.): allowed to resubmit (overwrite previous intent)
+- Normal actions: duplicate submission silently ignored (first intent already stored, no side effect)
+- Agent does not need to handle duplicate rejection separately
+
+**WebSocket Auto-Reconnect**:
+- **Read timeout**: 120s no message (server sends Ping every 30s) = connection dead
+- **Reconnect strategy**: initial delay 1s, max delay = tick_duration / 2, exponential backoff
+- **Reconnect triggers**: WebSocket disconnect, read timeout, auth failure (400)
+- **Post-reconnect**: auto re-register identity, reload character.yaml persona, update PromptCache
+- **Token refresh**: on auth failure (HTTP 400), auto-refreshes device token via HTTP API before retrying
+
+**LLM Fallback** (Cognitive mode):
+- `FallbackLlmClient` wraps multiple LLM models sharing the same provider/api_key
+- Auto-downgrade on 403 (quota), 429 (rate limit), connection failure
+- Sticky fallback: stays on working model until it also fails
+- Config: `fallback_models: ["model-b", "model-c"]` in `agent.yaml`
+- Final fallback: idle intent with wuxia-style thought_log
 
 ### Protocol Layer
 
@@ -335,6 +396,7 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
+8. 相比较 sed 你更喜欢使用 perl来进行 regex 处理和文本替换。
 
 ### 核心人设与沟通铁律 (Communication Protocol)
 *   **直入主题 (No Bullshit)**：跳过所有客套话。禁用“好问题”、“很高兴为您解答”、“绝对没问题”。直接给答案。
@@ -379,6 +441,25 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 | OpenClaw integration | [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw) |
 
+## Chronicle (群像传记)
+
+Every 7 game days, the server auto-generates a **Chronicle** summarizing world events:
+
+- **Auto-generation**: Triggers every 7 game days (period calculated from `time.yaml` config)
+- **Generation strategy**: LLM version (if available) stored in `summary_llm`, template always stored in `summary`
+- **Async supplement**: If LLM fails, auto-retry asynchronously with progress tracking
+- **LLM mode**: Enabled via `config/llm.yaml` (provider, model, api_key required)
+
+### Deployment
+
+```bash
+# Run database migration
+docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_chronicles.sql
+
+# (Optional) Configure LLM in config/llm.yaml
+# Restart server to apply changes
+```
+
 ## API Endpoints
 
 ### Server (port 23333)
@@ -388,12 +469,17 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
 - `POST /api/v1/agent/rebirth` - Delete agent (CASCADE delete states/inventory)
 - `GET /api/dashboard/stats` - Dashboard statistics (requires admin token)
+- `GET /api/dashboard/chronicles` - List chronicles (paginated, requires admin token)
+- `GET /api/dashboard/chronicles/{id}` - Get chronicle detail (requires admin token)
+- `POST /api/dashboard/chronicles/generate` - Manually generate a chronicle (requires admin token)
+- `GET /api/dashboard/chronicles/llm-stats` - Get LLM token usage statistics (requires admin token)
+- `GET /api/dashboard/chronicles/pending` - Get pending async generation tasks with progress (requires admin token)
 - `GET /api/config` - List configurations
 - `WS /ws?token={auth_token}` - WebSocket connection
 
-### Agent HTTP API (port 23340-23349, auxiliary to WebSocket)
+### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 
-> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws`) 提交意图，HTTP API 仅用于调试和数据查询。
+> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws` 或指定端口) 提交意图，HTTP API 仅用于调试和数据查询。
 
 - `GET /api/v1` - API discovery endpoint (returns all available APIs with examples)
 - `GET /api/v1/health` - Health check
@@ -414,7 +500,8 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 #### Character Management (Web Panel)
 
 - `GET /api/v1/character` - Get character info (name, age, gender, status, registered_at, birth_attributes, attributes, inventory)
-- `GET /api/v1/character/experiences?page=1&limit=20` - Get experience logs (paginated, with intent_summary and observer_thought)
+- `GET /api/v1/character/soul-cycles?page=1&limit=20` - Get soul cycle records grouped by tick (paginated, full three-soul data with immediate intents)
+- `GET /api/v1/character/soul-cycles?tick_id=123` - Get soul cycle records for a specific tick
 - `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
 - `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
 - `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)
@@ -431,9 +518,12 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 - `GET /api/v1/config` - Get current configuration (server URLs, runtime mode, port)
 - `POST /api/v1/config/reload` - Hot reload configuration from file
 - `POST /api/v1/config/server` - Set server address (triggers WebSocket reconnection)
+- `GET /api/v1/metrics` - LLM performance metrics (calls, failures, token usage)
 
-### Agent Web Panel
+### Admin Web Panel (Server Dashboard)
 
+- `GET /admin/` - Main dashboard
+- `GET /admin/chronicles` - Chronicles page (群像传记)
 - `GET /welcome.html` - Home page (shows status-based cards)
 - `GET /create.html` - Character creation page
 - `GET /character.html` - Character info page (dream injection, rebirth, intent_history)
@@ -474,14 +564,12 @@ This ensures agent can function in production without accessing server's develop
 *   **字字珠玑 (Brevity)**：一句话能说完，绝不说第二句。
 *   **拒绝骑墙 (Take a Stand)**：封杀“看情况 (It depends)”、“各有优劣”。你必须有明确的技术站位，给我一个你认为物理极限下最优的方案。
 *   **直言不讳 (Call Me Out)**：如果我提出了愚蠢的设计或做法，直接指出来。用聪明人的机智点醒我，不要刻意搞笑，不要人身攻击，但也绝不粉饰太平。
-*   **去企业化 (Anti-Corporate)**：像一个实战经验丰富的顶尖黑客那样交流，而不是像在背诵大厂的员工手册。
-*   **双语引擎 (Language)**：内部逻辑推演和技术分析优先使用英文（保持技术纯粹性），仅在最终向我输出结论和交互时使用中文。
 
 ### 技术绝对底线 (Technical Absolutes)
 *   **第一性原理 (First Principles)**：撕碎一切流行语（Buzzwords）、设计模式崇拜和盲从的“大厂最佳实践”。把问题暴力拆解到计算科学的物理极值（CPU时钟周期、内存带宽、网络I/O）。拒绝类比，拒绝“大家都是这么做的”（Cargo Cult）。只基于不可证伪的公理，从零推演架构的唯一解。
 *   **YAGNI & KISS**：坚决砍掉为“虚无的未来”买单的架构。组合优于继承。极简不等于简陋，严禁为了少敲键盘而写出丧失健壮性的烂代码。
-*   **Fail Fast**：零信任，悲观预期。宁可原地崩溃宕机，也绝不让脏数据过境。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
-*   **拒绝臆想 (Data-Driven)**：没有 Profiler 数据，绝不提前优化。消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计），榨干缓存行（Cache Line）。
+*   **Fail Fast**：零信任，悲观预期。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
+*   **数据驱动 (Data-Driven)**：消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计）。
 
 ### 触发器：何时必须闭嘴并反问 (Hard Interrupts)
 如果你在编码前或推演中遇到以下情况，**立即中断，先向我发问**：

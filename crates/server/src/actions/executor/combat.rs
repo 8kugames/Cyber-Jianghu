@@ -10,7 +10,7 @@ use super::super::{AttackData, UseData};
 use crate::game_data::{ActionField, ActionRegistry};
 use crate::items::get_item_definition;
 use crate::models::{AgentState, Intent};
-use evalexpr::ContextWithMutableVariables;
+
 use uuid::Uuid;
 
 /// 战斗动作执行器
@@ -162,41 +162,27 @@ impl CombatActionExecutor {
             ActionRegistry::get_string("attack", ActionField::DamageFormula)
         {
             let context = agent_state.get_formula_context();
-            let mut eval_context = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
-            for (k, v) in &context {
-                let _ = eval_context.set_value(k.clone(), evalexpr::Value::Int(*v as i64));
-            }
-            // 加上武器加成作为变量
+            let i64_context: std::collections::HashMap<String, i64> = context
+                .iter()
+                .map(|(k, v)| (k.clone(), *v as i64))
+                .collect();
+
+            // 武器加成作为额外变量
             let weapon_bonus =
                 ActionRegistry::get_i32("attack", ActionField::WeaponBonus).unwrap_or(0);
             let weapon_multiplier =
                 ActionRegistry::get_f32("attack", ActionField::WeaponBonusMultiplier)
                     .unwrap_or(1.0);
-            let _ = eval_context.set_value(
-                "weapon_bonus".to_string(),
-                evalexpr::Value::Int(weapon_bonus as i64),
-            );
-            let _ = eval_context.set_value(
-                "weapon_multiplier".to_string(),
-                evalexpr::Value::Float(weapon_multiplier as f64),
-            );
+            let mut float_extras = std::collections::HashMap::new();
+            float_extras.insert("weapon_bonus".to_string(), weapon_bonus as f64);
+            float_extras.insert("weapon_multiplier".to_string(), weapon_multiplier as f64);
 
-            let res = evalexpr::eval_with_context(&formula, &eval_context);
-            match res {
-                Ok(evalexpr::Value::Int(val)) => val as i32,
-                Ok(evalexpr::Value::Float(val)) => val as i32,
-                Ok(_) => {
-                    // 公式返回了非数值类型
-                    return ActionExecutionResult::failure(
-                        format!("伤害公式返回了无效类型: {}", formula),
-                        intent.action_type.to_string(),
-                        Some(intent.intent_id),
-                    );
-                }
+            let engine = crate::game_data::formula_engine::FormulaEngine::new();
+            match engine.evaluate_int_with_extras(&formula, &i64_context, &float_extras) {
+                Ok(val) => val,
                 Err(e) => {
-                    // 公式解析错误，应该失败而不是静默回退
                     return ActionExecutionResult::failure(
-                        format!("伤害公式解析失败: {} - 公式: {}", e, formula),
+                        format!("伤害公式错误: {}", e),
                         intent.action_type.to_string(),
                         Some(intent.intent_id),
                     );

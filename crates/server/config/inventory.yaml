@@ -26,4 +26,4 @@ data:
   # 背包最大槽位数（不同物品类型上限）
   max_slots: 10
   # 每个槽位最大堆叠数量（同类物品可堆叠上限，具体物品可覆盖此值）
-  max_stack_size: 10
+  max_stack_size: 100

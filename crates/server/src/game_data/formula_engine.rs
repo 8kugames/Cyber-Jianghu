@@ -2,28 +2,19 @@
 // 公式计算引擎
 // ============================================================================
 //
-// 用于解析和计算派生属性公式，支持：
-// - 基本数学运算：+, -, *, /, ()
-// - 变量引用：strength, agility, constitution, intelligence, charisma, luck
-// - 函数支持：max, min, floor, ceil
+// 基于 evalexpr 的统一公式求值接口。
+// 所有公式计算（派生属性、状态上限、伤害、恢复）都通过 FormulaEngine。
 //
-// 示例公式：
-// - "100 + constitution * 2"
-// - "50 + strength * 2"
-// - "0.05 + agility * 0.005"
+// 支持：
+// - 基本数学运算：+, -, *, /, ()
+// - 变量引用：任意属性名（从 HashMap 上下文注入）
+// - 函数支持：max, min, floor, ceil 等 evalexpr 内置函数
+// - 混合 int/float 上下文
 // ============================================================================
 
-// 模块声明
-mod context;
 mod engine;
-mod evaluator;
-mod parser;
-mod types;
 
-// 测试模块
 #[cfg(test)]
 mod tests;
 
-// 重新导出公共API
-pub use context::PrimaryAttributeProvider;
 pub use engine::FormulaEngine;

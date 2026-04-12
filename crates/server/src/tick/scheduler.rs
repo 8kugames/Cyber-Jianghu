@@ -249,10 +249,12 @@ impl TickScheduler {
             interval.tick().await;
 
             let new_tick_id = self.calculate_tick_id_from_time(game_epoch);
-            self.current_tick_id = new_tick_id;
+            // 防御时钟回拨：tick_id 只增不减
+            self.current_tick_id = self.current_tick_id.max(new_tick_id);
 
-            // 1. 开单 + 广播
-            self.accepting_tick_id.store(new_tick_id, Ordering::Release);
+            // 1. 开单 + 广播（使用 max 守卫后的值，保证 Agent 看到的 tick_id 单调递增）
+            self.accepting_tick_id
+                .store(self.current_tick_id, Ordering::Release);
 
             let collection_window_secs = {
                 let gd = self.game_data_cache.get();
@@ -492,11 +494,38 @@ impl TickScheduler {
             .collect_intents(&self.intent_manager, tick_id, &agent_states)
             .await
             .context("收集意图失败")?;
-        let (intent_processed_states, executed_actions, processor_events, action_logs) = self
+        let (
+            intent_processed_states,
+            executed_actions,
+            processor_events,
+            action_logs,
+            validation_errors,
+        ) = self
             .state_processor
             .process_intents(tick_id, agent_states, &intents)
             .await
             .context("结算意图失败")?;
+
+        // 发送验证错误通知给 agent
+        if !validation_errors.is_empty() {
+            for (agent_id, reason) in &validation_errors {
+                let msg = cyber_jianghu_protocol::ServerMessage::Error {
+                    code: cyber_jianghu_protocol::ERROR_CODE_ACTION_FAILED.to_string(),
+                    message: reason.clone(),
+                    current_tick_id: Some(tick_id),
+                };
+                if let Err(e) = super::broadcaster::send_to_agent(
+                    *agent_id,
+                    &msg,
+                    &self.connection_manager,
+                    &self.agent_to_device_map,
+                )
+                .await
+                {
+                    debug!("验证错误通知发送失败: agent={}, error={}", agent_id, e);
+                }
+            }
+        }
 
         for (agent_id, event) in processor_events {
             self.event_manager.add_event_for_agent(agent_id, event);
@@ -707,6 +736,35 @@ impl TickScheduler {
         }
 
         self.closed_dialogue_records = self.dialogue_manager.close_all_sessions().await;
+
+        // 群像传记生成：每 168 tick (7 游戏日) 生成一次
+        let period_ticks = crate::chronicle::ChronicleConfig::default().period_ticks;
+        if tick_id > 0 && tick_id % period_ticks == 0 {
+            let period_start = tick_id - period_ticks + 1;
+            info!(
+                "7 日周期完成 (tick {} - {}), 开始生成群像传记...",
+                period_start, tick_id
+            );
+
+            // 异步生成，不阻塞 tick 结算
+            let db_pool = self.db_pool.clone();
+            tokio::spawn(async move {
+                match crate::chronicle::generate_and_store(period_start, tick_id, &db_pool).await {
+                    Ok(chronicle) => {
+                        info!(
+                            "群像传记生成完成: {} (第{}-{}日, {}季)",
+                            chronicle.chronicle_id,
+                            chronicle.game_day_start,
+                            chronicle.game_day_end,
+                            chronicle.season
+                        );
+                    }
+                    Err(e) => {
+                        error!("群像传记生成失败: {}", e);
+                    }
+                }
+            });
+        }
 
         Ok((agents_processed, actions_executed))
     }

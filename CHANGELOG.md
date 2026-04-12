@@ -26,6 +26,28 @@
 
 ### Added
 
+- **Protocol**: `ImmediateEvent` 新增 `event_id: Uuid` 字段
+  - 用于唯一标识即时事件，支持去重和追踪
+  - 使用 `#[serde(default)]` 反序列化兼容
+
+- **Server**: `send_to_agent()` 通用单播函数 (`tick/broadcaster.rs`)
+  - 通过 agent_id → device_id → WebSocket 连接发送消息
+  - 用于 tick processor 的验证错误通知
+
+- **Server**: 即时动作（speak, whisper, emote 等）允许重复提交
+  - 不检查 IntentManager 中是否已有该 agent 的 intent
+  - 支持玩家在同一 tick 内多次说话/交流
+
+- **Server**: 验证错误实时反馈机制
+  - `StateProcessor::process_intents()` 返回 `validation_errors` 列表
+  - `TickScheduler` 在结算后发送 `ServerMessage::Error` 给对应 agent
+  - Agent 可实时感知意图被驳回的原因
+
+- **Agent**: `ImmediateEventHandler` 模块 (`component/immediate/`)
+  - 处理服务器推送的 `ImmediateEvent`
+  - 支持三种响应策略：`RespondNow` / `DeferToMainTick` / `Ignore`
+  - `RespondNow` 通过专用 channel 发送 speak intent（不占 intent 配额）
+
 - **Protocol**: 结构化错误码常量 (`crates/protocol/src/lib.rs`)
   - `ERROR_CODE_TICK_MISMATCH` = `"tick_mismatch"`
   - `ERROR_CODE_NOT_ACCEPTING` = `"not_accepting"`
@@ -118,7 +140,7 @@
 - **Agent**: ActorSoul + ReflectorSoul 双 Soul 架构
   - 新增 `ReviewStore` 共享内存用于进程内审查通信
   - ActorSoul (行动之魂)：生成意图，执行行动
-  - ReflectorSoul (反思之魂)：审查意图，道德判断（默认启用）
+  - ReflectorSoul (反思之魂)：审查意图，世界观一致性审查（默认启用）
   - AgentBuilder 新增 `with_review_store()` 和 `with_reconnect_rx()` 方法
 
 - **Agent**: 审查系统默认启用

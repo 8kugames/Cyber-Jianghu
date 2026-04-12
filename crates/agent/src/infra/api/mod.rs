@@ -30,12 +30,12 @@
 // - 并发安全：所有可变状态都使用 tokio 的读写锁保护
 
 pub mod cognitive_context;
-pub mod config_watcher;
 mod context;
 mod dto;
 mod handlers;
 pub mod intent_history;
 pub mod service;
+pub mod soul_cycle_recorder;
 pub mod thinking_log;
 
 use axum::{
@@ -46,6 +46,7 @@ use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -75,9 +76,6 @@ use crate::soul::reflector::{RuleEngineValidator, Validator};
 // 重导出 review 模块的公共 API（已迁移至 soul::reflector::store）
 pub use crate::soul::reflector::store::ReviewStore;
 pub type ReviewState = std::sync::Arc<ReviewStore>;
-
-// 重导出 config_watcher 模块的公共 API
-pub use config_watcher::ConfigWatcher;
 
 // 重导出 context 模块的公共 API
 pub use context::{
@@ -171,6 +169,11 @@ pub struct HttpApiState {
     pub review_store: Option<Arc<ReviewStore>>,
     /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
     pub intent_history: Arc<RwLock<Option<Arc<intent_history::IntentHistoryStore>>>>,
+    /// 三魂循环记录器注册表，按 agent_id 隔离
+    /// 支持多角色：当前角色写入 + 所有角色读取
+    pub soul_cycle_registrar: Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>,
+    /// 数据目录路径（用于按需加载角色的 SQLite 文件）
+    pub data_dir: PathBuf,
     /// 托梦存储，管理持续 n 回合的念头注入
     pub dream_store: Option<Arc<RwLock<DreamState>>>,
     /// 重连请求发送通道（用于热切换触发重连）
@@ -186,6 +189,9 @@ pub struct HttpApiState {
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
+    /// LLM Client 容器（支持热重载时重建）
+    pub llm_container:
+        std::sync::Arc<tokio::sync::RwLock<Option<crate::runtime::claw::LlmClientContainer>>>,
 }
 
 /// HTTP 决策状态
@@ -409,9 +415,9 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 属性元数据（分类）
         .route("/api/v1/character", get(handlers::get_character_handler)) // 获取角色信息
         .route(
-            "/api/v1/character/experiences",
-            get(handlers::get_experiences_handler),
-        ) // 获取经历日志（分页）
+            "/api/v1/character/soul-cycles",
+            get(handlers::get_soul_cycles_handler),
+        ) // 获取三魂循环完整记录（本地内存）
         .route(
             "/api/v1/character/rebirth",
             post(handlers::rebirth_character_handler),
@@ -452,6 +458,16 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         // === 配置管理端点 ===
         .route("/api/v1/config", get(handlers::get_config_handler)) // 获取当前配置
+        .route(
+            "/api/v1/config/llm-disabled",
+            get(handlers::get_llm_disabled_handler),
+        ) // 获取 LLM 停止状态
+        .route(
+            "/api/v1/config/llm-disabled",
+            post(handlers::set_llm_disabled_handler),
+        ) // 设置 LLM 停止状态
+        .route("/api/v1/actions", get(handlers::get_actions_handler)) // 获取动作类型映射
+        .route("/api/v1/metrics", get(handlers::get_metrics_handler)) // LLM 性能指标
         .route(
             "/api/v1/config/reload",
             post(handlers::reload_config_handler),
@@ -683,6 +699,24 @@ pub fn create_http_state(
     let (death_event_tx, _) = broadcast::channel(100);
     let (tick_update_tx, _) = broadcast::channel(64);
 
+    // 预注册当前角色的记录器
+    let soul_cycle_registrar =
+        Arc::new(RwLock::new(HashMap::new())) as Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>;
+    if !current_agent_id.is_nil() {
+        if let Ok(recorder) = soul_cycle_recorder::SoulCycleRecorder::open(
+            current_agent_id,
+            &data_dir.join(format!("soul_cycle_{}.db", current_agent_id)),
+        ) {
+            let recorder = Arc::new(recorder);
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    soul_cycle_registrar.write().await.insert(current_agent_id, recorder);
+                })
+            });
+        }
+    }
+    let data_dir_clone = data_dir.clone();
+
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
         last_state_update: Arc::new(RwLock::new(None)),
@@ -707,11 +741,13 @@ pub fn create_http_state(
         intent_history: Arc::new(RwLock::new(
             intent_history::IntentHistoryStore::open(
                 current_agent_id,
-                &data_dir.join(format!("intent_history_{}.db", current_agent_id)),
+                &data_dir_clone.join(format!("intent_history_{}.db", current_agent_id)),
             )
             .ok()
             .map(Arc::new),
         )),
+        soul_cycle_registrar: soul_cycle_registrar.clone(),
+        data_dir: data_dir_clone.clone(),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
         reconnect_tx,
         death_event_tx,
@@ -720,6 +756,7 @@ pub fn create_http_state(
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         actual_port,
+        llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -943,5 +980,41 @@ impl HttpApiState {
         }
 
         Ok(())
+    }
+
+    /// 获取指定角色的三魂记录器（按需加载）
+    ///
+    /// 如果记录器已缓存则直接返回，否则从磁盘加载对应角色的 SQLite 文件。
+    pub async fn soul_recorder_for(
+        &self,
+        agent_id: Uuid,
+    ) -> Option<Arc<soul_cycle_recorder::SoulCycleRecorder>> {
+        // 1. 检查缓存
+        {
+            let registrar = self.soul_cycle_registrar.read().await;
+            if let Some(recorder) = registrar.get(&agent_id) {
+                return Some(recorder.clone());
+            }
+        }
+        // 2. 按需加载/创建
+        // 其他角色的数据在 character_dir/{agent_id}/data/soul_cycle_{agent_id}.db
+        // 注意：SoulCycleRecorder::open 会通过 Connection::open 自动创建不存在的文件
+        let character_dir = self.character_dir.read().await;
+        let db_path = character_dir
+            .join(agent_id.to_string())
+            .join("data")
+            .join(format!("soul_cycle_{}.db", agent_id));
+        match soul_cycle_recorder::SoulCycleRecorder::open(agent_id, &db_path) {
+            Ok(recorder) => {
+                let recorder = Arc::new(recorder);
+                let mut registrar = self.soul_cycle_registrar.write().await;
+                registrar.insert(agent_id, recorder.clone());
+                Some(recorder)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to open soul_cycle DB for {}: {}", agent_id, e);
+                None
+            }
+        }
     }
 }

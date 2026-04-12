@@ -16,4 +16,4 @@
 
 pub mod websocket;
 
-pub use websocket::{AgentClient, ConnectError, ServerConfig, TickMismatchError, WebSocketClient};
+pub use websocket::{AgentClient, ConnectError, ServerConfig, WebSocketClient};

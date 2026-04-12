@@ -17,8 +17,7 @@
 // ============================================================================
 
 mod cache;
-#[allow(unused)]
-mod formula_engine;
+pub mod formula_engine;
 mod loader;
 pub mod loaders;
 pub mod registry;
@@ -30,8 +29,8 @@ mod test_utils;
 pub use cache::GameDataCache;
 pub use loader::load_from_dir;
 pub use registry::{
-    ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, NetworkRegistry,
-    StateRegistry, init_registry, registry, registry_or_panic,
+    ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, ItemRegistry,
+    NetworkRegistry, StateRegistry, init_registry, registry, registry_or_error,
 };
 pub use types::{ActionEffect, ActionRequirement, GameData, ItemConfigEntry, ItemEffect};
 
