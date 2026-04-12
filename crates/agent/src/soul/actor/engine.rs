@@ -773,13 +773,7 @@ fn build_distant_destinations(world_state: &crate::models::WorldState) -> String
         .adjacent_nodes
         .iter()
         .filter(|n| n.travel_cost > 1)
-        .map(|n| {
-            if n.travel_cost > 1 {
-                format!("- {} ({}tick)", n.name, n.travel_cost)
-            } else {
-                n.name.clone()
-            }
-        })
+        .map(|n| format!("- {} ({}tick)", n.name, n.travel_cost))
         .collect();
 
     if distant.is_empty() {

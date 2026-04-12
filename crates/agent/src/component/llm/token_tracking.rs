@@ -86,10 +86,9 @@ pub fn record_token_usage(
 pub fn record_failure(provider: &LlmProvider, model: &str) {
     let key = model_key(provider, model);
     if let Ok(mut stats) = token_stats().lock() {
-        stats
-            .entry(key)
-            .or_insert_with(PerModelStats::new)
-            .failures += 1;
+        let entry = stats.entry(key).or_insert_with(PerModelStats::new);
+        entry.calls += 1;
+        entry.failures += 1;
     }
 }
 
@@ -147,6 +146,7 @@ pub fn persist_and_reset() {
                 existing.completion_tokens += s.completion_tokens;
                 existing.total_tokens += s.prompt_tokens + s.completion_tokens;
                 existing.calls += s.calls;
+                existing.failures += s.failures;
             } else {
                 merged.insert(key, s.clone());
             }
