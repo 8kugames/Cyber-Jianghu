@@ -42,7 +42,16 @@ impl BasicActionExecutor {
         };
 
         // 获取位置注册表
-        let registry = crate::game_data::registry_or_panic();
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(e) => {
+                return ActionExecutionResult::failure(
+                    format!("注册表未初始化: {}", e),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
 
         // 验证目标位置存在
         if !registry
@@ -211,7 +220,16 @@ impl BasicActionExecutor {
         };
 
         // 获取位置注册表
-        let registry = crate::game_data::registry_or_panic();
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(e) => {
+                return ActionExecutionResult::failure(
+                    format!("注册表未初始化: {}", e),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
         let location_registry = registry.location_registry.read().unwrap();
 
         // 校验当前位置是否可以采集该物品

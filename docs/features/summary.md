@@ -57,7 +57,15 @@ attack:
 
 `ActionType` 为字符串包装（任何字符串均有效），扩展动作只需编辑 YAML。
 
-**已实现动作**: `idle`, `move`, `attack`, `gather`, `speak`, `whisper`, `steal`, `give`, `discard`, `use_item`, `equip`, `unequip`, `dialogue_request`, `dialogue_accept`, `dialogue_reject`, `dialogue_end`
+**已实现动作** (基于 `actions.yaml`):
+- 基础生存: `idle`, `use`, `eat`, `drink`
+- 移动: `move`, `follow`, `flee`
+- 战斗: `attack`, `defend`, `dodge`, `parry`, `heavy_strike`, `stealth`
+- 采集: `gather`
+- 社交: `speak`, `whisper`, `shout`, `steal`
+- 经济: `give`, `drop`, `pickup`, `trade`, `craft`, `repair`
+- 技能: `poison`, `practice`, `meditate`
+- 对话动作通过 `ClientMessage::Dialogue` 而非独立 ActionType
 
 **物品与背包**: 地上物品拾取、背包容量校验、物品消耗（武器/消耗品/任务道具）
 
@@ -73,7 +81,7 @@ attack:
  - [x] **默认 LLM**: 默认改为 openclaw，支持 ollama 自定义端口配置。
  - [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
  - [x] **WebSocket 心跳**: 内置 Ping/Pong 消息机制，保持连接活跃。
- - [x] **LLM 开关闸**: 紧急停止 token 消耗的控制机制，Web 面板可操作。
+ - [x] **LLM 开关闸**: 停止 token 消耗的控制机制，Web 面板可操作。
 
 ### 2. AI 与认知核心
 
@@ -100,9 +108,10 @@ attack:
 
  **动态人设**: `Persona` 根据外界反馈（被攻击/被治愈）动态偏移；支持好感度/信任度关系图谱。
 
- **双 Soul 架构**:
- - ActorSoul (行动之魂/本我): 生成意图，执行行动
- - ReflectorSoul (反思之魂/超我): 审查意图，道德判断（默认启用）
+ **三魂架构**:
+ - ActorSoul (人魂/行动之魂): 生成叙事意图，纯推理不涉及 ID
+ - IntentTranslator (天魂): LLM 翻译叙事→格式化 Intent（精确 ID 映射）
+ - ReflectorSoul (地魂/反思之魂): 审查格式化 Intent，世界观一致性审查（默认启用）
  - `ReviewStore` 共享内存用于进程内审查通信
 
 ### 3. 意图控制（三层架构）
@@ -116,16 +125,14 @@ attack:
  - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
  - [x] 默认冷却规则: speak/move 动作冷却（`with_default_config()` 预注册）
  - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
- - [x] Cognitive 路径: 决策 → 验证 → 驳回 → `think_with_feedback(feedback)` 重试（验证器与认知引擎共用 `llm_arc`）
- - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: 新增 `llm_reflector` 字段
- - [x] **LLM 配置热重载**: 文件监听自动热重载 + API Key 验证 + zeroize 内存安全
+ - [x] Cognitive 路径: 人魂决策 → 天魂翻译 → 地魂验证 → 驳回 → `think_with_feedback(feedback)` 重试（天魂/地魂与人魂共用 `llm_arc`）
 
-**第二层: 超我审查**（ActorSoul + ReflectorSoul，进程内双 Soul 架构）:
- - [x] `ActorSoul.submit_for_review()` 在 `lifecycle.rs:296-300` 被调用，intent 经审查后再发送
- - [x] `ReflectorSoul` 后台任务每 5 秒轮询 `ReviewStore`，超时 30 秒自动通过
- - [x] **ActorSoul + ReflectorSoul LLM 独立配置**: `llm_reflector` 字段支持独立配置审查 LLM
+**第二层: 地魂审查**（天魂 + 地魂，三魂架构）:
+ - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，翻译后的 intent 经审查后再发送
+ - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
  - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
  - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
+ - [x] 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
 
 ## 三、 通信协议 (Protocol)
 
@@ -179,7 +186,7 @@ attack:
 
 ### Agent SDK
 
-- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/backend.rs`
+- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/`
   - 基础设施已就绪（HNSW 向量索引 + FTS fallback + LocalEmbedder）
   - 需要实现：`SemanticMemoryBackend::add()` 空操作 → 改为真正写入向量存储
   - 需要实现：`ensure_embeddings_for_priority()` stub → 实现优先级记忆的向量生成

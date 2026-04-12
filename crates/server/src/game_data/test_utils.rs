@@ -265,7 +265,7 @@ pub fn init_test_registry() {
                         "stamina_cost": 3,
                         "validation": {
                             "requires_target": true,
-                            "required_fields": ["target_agent_id"]
+                            "required_fields": ["target_agent_id", "item_id", "quantity", "price"]
                         },
                         "requirements": [],
                         "effects": []

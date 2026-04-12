@@ -16,7 +16,10 @@ pub mod claw;
 mod decision;
 
 // 重导出 cognitive
-pub use decision::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_retry};
+pub use decision::{
+    CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_chain,
+    
+};
 // 重导出 http（已迁移至 infra::api）
 pub use crate::infra::api::{
     HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest, create_http_state,
@@ -41,14 +44,27 @@ use std::sync::Arc;
 /// 无状态，可组合
 pub type DecisionCallback = Arc<dyn Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync>;
 
-/// 带反馈的决策回调类型
+/// 带反馈和记忆上下文的决策回调类型
 ///
-/// 接收世界状态和验证反馈（驳回原因），返回异步 Future
+/// 接收世界状态、记忆上下文和验证反馈（驳回原因），返回异步 Future
 pub type DecisionWithFeedbackCallback =
-    Arc<dyn Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
+    Arc<dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带记忆上下文的决策回调类型
 ///
 /// 接收世界状态和记忆上下文字符串，返回异步 Future
 pub type DecisionWithMemoryCallback =
     Arc<dyn Fn(&WorldState, &str) -> BoxFuture<'static, Intent> + Send + Sync>;
+
+// 从 soul::actor 重新导出 CognitiveChain
+pub use crate::soul::actor::CognitiveChain;
+
+/// 带 CognitiveChain 的决策回调类型
+///
+/// 返回 (Intent, CognitiveChain) 元组，
+/// 用于三魂架构中天魂翻译时获取人魂的认知上下文辅助指代消解。
+pub type DecisionWithChainCallback = Arc<
+    dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+        + Send
+        + Sync,
+>;

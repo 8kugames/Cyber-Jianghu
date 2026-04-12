@@ -5,6 +5,151 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>赛博江湖 - 设置</title>
         <link rel="stylesheet" href="style.css" />
+        <style>
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+                margin-bottom: 20px;
+            }
+            .stat-card {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+                padding: 15px;
+                text-align: center;
+            }
+            .stat-value {
+                font-size: 24px;
+                font-weight: 600;
+                color: var(--primary-color);
+            }
+            .stat-label {
+                font-size: 12px;
+                color: var(--text-secondary);
+                margin-top: 5px;
+            }
+            .toggle-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+            }
+            .toggle {
+                position: relative;
+                display: inline-block;
+                width: 50px;
+                height: 26px;
+            }
+            .toggle input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            .toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: #ccc;
+                transition: 0.3s;
+                border-radius: 26px;
+            }
+            .toggle-slider:before {
+                position: absolute;
+                content: "";
+                height: 20px;
+                width: 20px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                transition: 0.3s;
+                border-radius: 50%;
+            }
+            .toggle input:checked + .toggle-slider {
+                background-color: #ef4444;
+            }
+            .toggle input:checked + .toggle-slider:before {
+                transform: translateX(24px);
+            }
+            .status-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+                gap: 15px;
+            }
+            .status-left {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .status-left h2 {
+                margin: 0;
+            }
+            .status-right {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            .connection-indicator {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                color: var(--text-secondary);
+            }
+            .connection-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #6b7280;
+            }
+            .connection-dot.connected {
+                background: #4ade80;
+                box-shadow: 0 0 6px #4ade80;
+            }
+            .connection-dot.disconnected {
+                background: #ef4444;
+            }
+            .mode-badge {
+                font-size: 11px;
+                padding: 3px 8px;
+                border-radius: 10px;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            .mode-badge.cognitive {
+                background: rgba(96, 165, 250, 0.15);
+                color: #60a5fa;
+                border: 1px solid rgba(96, 165, 250, 0.3);
+            }
+            .mode-badge.claw {
+                background: rgba(251, 191, 36, 0.15);
+                color: #fbbf24;
+                border: 1px solid rgba(251, 191, 36, 0.3);
+            }
+            .llm-form-disabled-overlay {
+                opacity: 0.5;
+                pointer-events: none;
+            }
+            .llm-disabled-notice {
+                display: none;
+                background: rgba(251, 191, 36, 0.1);
+                border: 1px solid rgba(251, 191, 36, 0.3);
+                color: #fbbf24;
+                padding: 12px 15px;
+                border-radius: 6px;
+                font-size: 13px;
+                margin-bottom: 15px;
+            }
+            .llm-disabled-notice.visible {
+                display: block;
+            }
+        </style>
     </head>
     <body class="full-width-page">
         <div class="container">
@@ -27,14 +172,25 @@
                     <form id="server-form">
                         <div class="form-group">
                             <label for="server-ws-url">WebSocket 地址</label>
-                            <input type="text" id="server-ws-url" value="ws://localhost:23333/ws" required />
+                            <input
+                                type="text"
+                                id="server-ws-url"
+                                value="ws://localhost:23333/ws"
+                                required
+                            />
                         </div>
                         <div class="form-group">
                             <label for="server-http-url">HTTP 地址</label>
-                            <input type="text" id="server-http-url" placeholder="http://localhost:23333" />
+                            <input
+                                type="text"
+                                id="server-http-url"
+                                placeholder="http://localhost:23333"
+                            />
                         </div>
                         <div class="form-actions">
-                            <button type="submit" id="save-server-btn">保存并重连</button>
+                            <button type="submit" id="save-server-btn">
+                                保存并重连
+                            </button>
                         </div>
                     </form>
 
@@ -46,33 +202,98 @@
                     </div>
                 </section>
 
-                <section class="form-section">
-                    <h2>LLM 配置</h2>
-                    <p class="section-desc">
-                        配置 LLM Provider 和模型参数。
-                    </p>
+                <section class="form-section" id="llm-section">
+                    <div class="status-row">
+                        <div class="status-left">
+                            <h2>LLM 配置</h2>
+                            <span class="mode-badge cognitive" id="mode-badge"
+                                >Cognitive</span
+                            >
+                        </div>
+                        <div class="status-right">
+                            <!--<span class="toggle-label">停止LLM</span>-->
+                            <label class="toggle">
+                                <input type="checkbox" id="llm-disabled" />
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <div class="connection-indicator">
+                                <span
+                                    class="connection-dot"
+                                    id="connection-dot"
+                                ></span>
+                                <span id="connection-text">未连接</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="section-desc">配置 LLM Provider 和模型参数。</p>
+
+                    <div class="llm-disabled-notice" id="llm-claw-notice">
+                        当前运行在 Claw 模式，无需 LLM 配置（由外部调度器控制）
+                    </div>
+
+                    <!-- Token 统计 -->
+                    <div class="stats-grid" id="token-stats">
+                        <div class="stat-card">
+                            <div class="stat-value" id="stat-input-tokens">
+                                -
+                            </div>
+                            <div class="stat-label">输入 Token</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="stat-output-tokens">
+                                -
+                            </div>
+                            <div class="stat-label">输出 Token</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="stat-total-cost">-</div>
+                            <div class="stat-label">累计请求</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="stat-error-count">
+                                -
+                            </div>
+                            <div class="stat-label">错误次数</div>
+                        </div>
+                    </div>
 
                     <form id="llm-form">
                         <div class="form-group">
                             <label for="llm-provider">Provider</label>
-                            <select id="llm-provider">
-                            </select>
+                            <select id="llm-provider"></select>
                             <p id="llm-provider-hint" class="hint hidden"></p>
                         </div>
                         <div class="form-group">
                             <label for="llm-model">模型</label>
-                            <input type="text" id="llm-model" placeholder="如: qwen2.5:14b 或 gpt-4o" required />
+                            <input
+                                type="text"
+                                id="llm-model"
+                                placeholder="如: qwen2.5:14b 或 gpt-4o"
+                                required
+                            />
                         </div>
                         <div class="form-group" id="base-url-group">
                             <label for="llm-base-url">Base URL</label>
-                            <input type="text" id="llm-base-url" placeholder="如: http://localhost:11434" />
+                            <input
+                                type="text"
+                                id="llm-base-url"
+                                placeholder="如: http://localhost:11434"
+                            />
                         </div>
                         <div class="form-group hidden" id="api-key-group">
                             <label for="llm-api-key">API Key</label>
-                            <input type="password" id="llm-api-key" placeholder="输入 API Key" />
+                            <input
+                                type="password"
+                                id="llm-api-key"
+                                placeholder="输入 API Key"
+                            />
                         </div>
+
                         <div class="form-actions">
-                            <button type="submit" id="save-llm-btn">保存配置</button>
+                            <button type="submit" id="save-llm-btn">
+                                保存配置
+                            </button>
                         </div>
                     </form>
 
@@ -90,138 +311,330 @@
         <script>
             async function loadProviders() {
                 try {
-                    var data = await apiGet('/api/v1/config/llm/providers');
+                    var data = await apiGet("/api/v1/config/llm/providers");
                     var providersData = data.providers || [];
-                    var select = document.getElementById('llm-provider');
-                    select.innerHTML = '';
+                    var select = document.getElementById("llm-provider");
+                    select.innerHTML = "";
 
-                    providersData.forEach(p => {
-                        var option = document.createElement('option');
+                    providersData.forEach((p) => {
+                        var option = document.createElement("option");
                         option.value = p.value;
                         option.textContent = p.label;
                         option.disabled = p.disabled || false;
-                        option.dataset.requiresBaseUrl = p.requires_base_url || false;
+                        option.dataset.requiresBaseUrl =
+                            p.requires_base_url || false;
                         if (p.disabled_reason) {
                             option.title = p.disabled_reason;
                         }
                         select.appendChild(option);
                     });
 
-                    select.dispatchEvent(new Event('change'));
+                    select.dispatchEvent(new Event("change"));
                 } catch (err) {
-                    console.error('加载 Provider 列表失败:', err);
+                    console.error("加载 Provider 列表失败:", err);
                 }
             }
 
-            document.getElementById('llm-provider').addEventListener('change', function() {
-                var selectedOption = this.options[this.selectedIndex];
-                var isDisabled = selectedOption.disabled;
-                var hint = document.getElementById('llm-provider-hint');
-
-                if (isDisabled) {
-                    hint.textContent = selectedOption.title || '此 Provider 当前不可用';
-                    hint.classList.remove('hidden');
-                } else {
-                    hint.classList.add('hidden');
-                }
-
-                var isLocal = this.value === 'ollama';
-                document.getElementById('base-url-group').classList.toggle('hidden', false);
-                document.getElementById('api-key-group').classList.toggle('hidden', isLocal);
-
-                if (isLocal) {
-                    document.getElementById('llm-base-url').placeholder = 'http://localhost:11434';
-                    document.getElementById('llm-model').placeholder = '如: qwen2.5:14b 或 llama3.2:3b';
-                } else {
-                    document.getElementById('llm-base-url').placeholder = '如: https://api.openai.com/v1';
-                    document.getElementById('llm-model').placeholder = '如: gpt-4o';
-                }
-            });
-
-            document.getElementById('server-form').addEventListener('submit', async function(e) {
-                e.preventDefault();
-                var btn = document.getElementById('save-server-btn');
-                btn.disabled = true;
-                btn.textContent = '保存中...';
-
+            async function loadTokenStats() {
                 try {
-                    var ws_url = document.getElementById('server-ws-url').value.trim();
-                    var http_url = document.getElementById('server-http-url').value.trim();
-                    await apiPost('/api/v1/config/server', { ws_url: ws_url, http_url: http_url });
-
-                    document.getElementById('server-result').classList.remove('hidden');
-                    document.getElementById('server-message').textContent = '服务器配置已保存';
-                    document.getElementById('server-error').classList.add('hidden');
+                    var data = await apiGet("/api/v1/config/llm/usage");
+                    // API 返回数组，按 provider/model 聚合
+                    var totalInput = 0;
+                    var totalOutput = 0;
+                    var totalCalls = 0;
+                    if (Array.isArray(data)) {
+                        data.forEach(function(item) {
+                            totalInput += item.prompt_tokens || 0;
+                            totalOutput += item.completion_tokens || 0;
+                            totalCalls += item.calls || 0;
+                        });
+                    }
+                    document.getElementById("stat-input-tokens").textContent =
+                        formatNumber(totalInput);
+                    document.getElementById("stat-output-tokens").textContent =
+                        formatNumber(totalOutput);
+                    document.getElementById("stat-total-cost").textContent =
+                        formatNumber(totalCalls);
+                    document.getElementById("stat-error-count").textContent = "-";
                 } catch (err) {
-                    document.getElementById('server-error').classList.remove('hidden');
-                    document.getElementById('server-error-msg').textContent = err.message;
-                    document.getElementById('server-result').classList.add('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '保存并重连';
+                    console.error("加载 Token 统计失败:", err);
                 }
-            });
+            }
 
-            document.getElementById('llm-form').addEventListener('submit', async function(e) {
-                e.preventDefault();
-                var btn = document.getElementById('save-llm-btn');
-                btn.disabled = true;
-                btn.textContent = '保存中...';
+            function formatNumber(n) {
+                if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+                if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+                return n.toString();
+            }
 
-                try {
-                    var provider = document.getElementById('llm-provider').value;
-                    var selectedOption = document.getElementById('llm-provider').options[document.getElementById('llm-provider').selectedIndex];
+            document
+                .getElementById("llm-provider")
+                .addEventListener("change", function () {
+                    var selectedOption = this.options[this.selectedIndex];
+                    var isDisabled = selectedOption.disabled;
+                    var hint = document.getElementById("llm-provider-hint");
 
-                    if (selectedOption.disabled) {
-                        throw new Error('当前选择的 Provider 不可用');
+                    if (isDisabled) {
+                        hint.textContent =
+                            selectedOption.title || "此 Provider 当前不可用";
+                        hint.classList.remove("hidden");
+                    } else {
+                        hint.classList.add("hidden");
                     }
 
-                    var model = document.getElementById('llm-model').value.trim();
-                    var base_url = document.getElementById('llm-base-url').value.trim() || null;
-                    var api_key = document.getElementById('llm-api-key').value || null;
+                    var isLocal = this.value === "ollama";
+                    document
+                        .getElementById("base-url-group")
+                        .classList.toggle("hidden", false);
+                    document
+                        .getElementById("api-key-group")
+                        .classList.toggle("hidden", isLocal);
 
-                    await apiPost('/api/v1/config/llm', {
-                        actor: { provider: provider, model: model, base_url: base_url, api_key: api_key },
-                        reflector: null,
-                        reflector_inherits_actor: true
-                    });
+                    if (isLocal) {
+                        document.getElementById("llm-base-url").placeholder =
+                            "http://localhost:11434";
+                        document.getElementById("llm-model").placeholder =
+                            "如: qwen2.5:14b 或 llama3.2:3b";
+                    } else {
+                        document.getElementById("llm-base-url").placeholder =
+                            "如: https://api.openai.com/v1";
+                        document.getElementById("llm-model").placeholder =
+                            "如: gpt-4o";
+                    }
+                });
 
-                    document.getElementById('llm-result').classList.remove('hidden');
-                    document.getElementById('llm-message').textContent = 'LLM 配置已保存';
-                    document.getElementById('llm-error').classList.add('hidden');
-                } catch (err) {
-                    document.getElementById('llm-error').classList.remove('hidden');
-                    document.getElementById('llm-error-msg').textContent = err.message;
-                    document.getElementById('llm-result').classList.add('hidden');
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = '保存配置';
-                }
-            });
+            document
+                .getElementById("server-form")
+                .addEventListener("submit", async function (e) {
+                    e.preventDefault();
+                    var btn = document.getElementById("save-server-btn");
+                    btn.disabled = true;
+                    btn.textContent = "保存中...";
+
+                    try {
+                        var ws_url = document
+                            .getElementById("server-ws-url")
+                            .value.trim();
+                        var http_url = document
+                            .getElementById("server-http-url")
+                            .value.trim();
+                        await apiPost("/api/v1/config/server", {
+                            ws_url: ws_url,
+                            http_url: http_url,
+                        });
+
+                        document
+                            .getElementById("server-result")
+                            .classList.remove("hidden");
+                        document.getElementById("server-message").textContent =
+                            "服务器配置已保存";
+                        document
+                            .getElementById("server-error")
+                            .classList.add("hidden");
+                    } catch (err) {
+                        document
+                            .getElementById("server-error")
+                            .classList.remove("hidden");
+                        document.getElementById(
+                            "server-error-msg",
+                        ).textContent = err.message;
+                        document
+                            .getElementById("server-result")
+                            .classList.add("hidden");
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = "保存并重连";
+                    }
+                });
+
+            document
+                .getElementById("llm-form")
+                .addEventListener("submit", async function (e) {
+                    e.preventDefault();
+                    var btn = document.getElementById("save-llm-btn");
+                    btn.disabled = true;
+                    btn.textContent = "保存中...";
+
+                    try {
+                        var provider =
+                            document.getElementById("llm-provider").value;
+                        var selectedOption =
+                            document.getElementById("llm-provider").options[
+                                document.getElementById("llm-provider")
+                                    .selectedIndex
+                            ];
+
+                        if (selectedOption.disabled) {
+                            throw new Error("当前选择的 Provider 不可用");
+                        }
+
+                        var model = document
+                            .getElementById("llm-model")
+                            .value.trim();
+                        var base_url =
+                            document
+                                .getElementById("llm-base-url")
+                                .value.trim() || null;
+                        var api_key =
+                            document.getElementById("llm-api-key").value ||
+                            null;
+
+                        await apiPost("/api/v1/config/llm", {
+                            actor: {
+                                provider: provider,
+                                model: model,
+                                base_url: base_url,
+                                api_key: api_key,
+                            },
+                            reflector: null,
+                            reflector_inherits_actor: true,
+                        });
+
+                        document
+                            .getElementById("llm-result")
+                            .classList.remove("hidden");
+                        document.getElementById("llm-message").textContent =
+                            "LLM 配置已保存";
+                        document
+                            .getElementById("llm-error")
+                            .classList.add("hidden");
+                    } catch (err) {
+                        document
+                            .getElementById("llm-error")
+                            .classList.remove("hidden");
+                        document.getElementById("llm-error-msg").textContent =
+                            err.message;
+                        document
+                            .getElementById("llm-result")
+                            .classList.add("hidden");
+                    } finally {
+                        btn.disabled = false;
+                        btn.textContent = "保存配置";
+                    }
+                });
 
             async function preloadConfig() {
                 try {
-                    var serverData = await apiGet('/api/v1/config');
-                    document.getElementById('server-ws-url').value = serverData.server_ws_url || 'ws://localhost:23333/ws';
-                    document.getElementById('server-http-url').value = serverData.server_http_url || 'http://localhost:23333';
+                    var serverData = await apiGet("/api/v1/config");
+                    document.getElementById("server-ws-url").value =
+                        serverData.server_ws_url || "ws://localhost:23333/ws";
+                    document.getElementById("server-http-url").value =
+                        serverData.server_http_url || "http://localhost:23333";
 
-                    var llmData = await apiGet('/api/v1/config/llm');
+                    // 设置运行时模式标签
+                    var runtimeMode = serverData.runtime_mode || "Cognitive";
+                    var modeBadge = document.getElementById("mode-badge");
+                    modeBadge.textContent = runtimeMode;
+                    modeBadge.className =
+                        "mode-badge " + runtimeMode.toLowerCase();
+
+                    var llmData = await apiGet("/api/v1/config/llm");
                     if (llmData && llmData.actor) {
-                        document.getElementById('llm-provider').value = llmData.actor.provider;
-                        document.getElementById('llm-model').value = llmData.actor.model || '';
-                        document.getElementById('llm-base-url').value = llmData.actor.base_url || '';
-                        document.getElementById('llm-provider').dispatchEvent(new Event('change'));
+                        document.getElementById("llm-provider").value =
+                            llmData.actor.provider;
+                        document.getElementById("llm-model").value =
+                            llmData.actor.model || "";
+                        document.getElementById("llm-base-url").value =
+                            llmData.actor.base_url || "";
+                        document
+                            .getElementById("llm-provider")
+                            .dispatchEvent(new Event("change"));
+                    }
+
+                    // 加载 LLM 停止状态
+                    var disabledData = await apiGet(
+                        "/api/v1/config/llm-disabled",
+                    );
+                    document.getElementById("llm-disabled").checked =
+                        disabledData.llm_disabled || false;
+
+                    // Claw 模式时禁用 LLM 配置
+                    if (runtimeMode === "Claw") {
+                        setLlmFormDisabled(true);
                     }
                 } catch (err) {
-                    console.log('加载配置失败:', err);
+                    console.log("加载配置失败:", err);
                 }
             }
 
+            async function checkConnectionStatus() {
+                try {
+                    // 有 tick_id 说明已连接到服务器并收到 WorldState
+                    var stateData = await apiGet("/api/v1/state");
+                    var isConnected = stateData && stateData.tick_id != null;
+                    updateConnectionIndicator(isConnected);
+                } catch (err) {
+                    updateConnectionIndicator(false);
+                }
+            }
+
+            function updateConnectionIndicator(connected) {
+                var dot = document.getElementById("connection-dot");
+                var text = document.getElementById("connection-text");
+                if (connected) {
+                    dot.className = "connection-dot connected";
+                    text.textContent = "已连接";
+                } else {
+                    dot.className = "connection-dot disconnected";
+                    text.textContent = "未连接";
+                }
+            }
+
+            function setLlmFormDisabled(disabled) {
+                var llmForm = document.getElementById("llm-form");
+                var notice = document.getElementById("llm-claw-notice");
+                var saveBtn = document.getElementById("save-llm-btn");
+                var providerSelect = document.getElementById("llm-provider");
+                var modelInput = document.getElementById("llm-model");
+                var baseUrlInput = document.getElementById("llm-base-url");
+                var apiKeyInput = document.getElementById("llm-api-key");
+
+                if (disabled) {
+                    llmForm.classList.add("llm-form-disabled-overlay");
+                    notice.classList.add("visible");
+                    saveBtn.disabled = true;
+                    providerSelect.disabled = true;
+                    modelInput.disabled = true;
+                    baseUrlInput.disabled = true;
+                    apiKeyInput.disabled = true;
+                } else {
+                    llmForm.classList.remove("llm-form-disabled-overlay");
+                    notice.classList.remove("visible");
+                    saveBtn.disabled = false;
+                    providerSelect.disabled = false;
+                    modelInput.disabled = false;
+                    baseUrlInput.disabled = false;
+                    apiKeyInput.disabled = false;
+                }
+            }
+
+            // LLM 停止开关事件
+            document
+                .getElementById("llm-disabled")
+                .addEventListener("change", async function () {
+                    const disabled = this.checked;
+                    try {
+                        await apiPost("/api/v1/config/llm-disabled", {
+                            llm_disabled: disabled,
+                        });
+                        alert(disabled ? "LLM 调用已停止" : "LLM 调用已恢复");
+                    } catch (err) {
+                        alert("设置失败: " + err.message);
+                        this.checked = !disabled; // 恢复原状态
+                    }
+                });
+
             async function init() {
+                await checkConnectionStatus();
                 await loadProviders();
                 await preloadConfig();
+                await loadTokenStats();
             }
             init();
+
+            // 每 30 秒刷新 Token 统计和连接状态
+            setInterval(loadTokenStats, 30000);
+            setInterval(checkConnectionStatus, 30000);
         </script>
     </body>
 </html>

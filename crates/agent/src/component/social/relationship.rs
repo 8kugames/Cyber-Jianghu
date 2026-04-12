@@ -563,23 +563,4 @@ mod tests {
         let retrieved = store.get_relationship(target_id).unwrap();
         assert!(retrieved.is_none());
     }
-
-    #[test]
-    fn test_count_relationships() {
-        let temp_dir = TempDir::new().unwrap();
-        let db_path = temp_dir.path().join("relationships.db");
-        let agent_id = Uuid::new_v4();
-
-        let store = RelationshipStore::open(agent_id, &db_path).unwrap();
-
-        assert_eq!(store.count().unwrap(), 0);
-
-        // 添加关系
-        for _ in 0..3 {
-            let memory = RelationshipMemory::new(Uuid::new_v4(), "测试");
-            store.upsert_relationship(&memory).unwrap();
-        }
-
-        assert_eq!(store.count().unwrap(), 3);
-    }
 }

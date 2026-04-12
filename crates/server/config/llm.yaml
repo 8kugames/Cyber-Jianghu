@@ -1,0 +1,13 @@
+version: 0.0.1
+description: LLM 配置
+meta:
+  created_at: 2026-04-11
+  author: Cyber-Jianghu
+data:
+  enabled: true
+  provider: ollama
+  base_url: http://host.docker.internal:11434/v1
+  api_key: omlx-hs8nchuqx6eigger
+  model: gemma-4-e4b-it-mxfp8
+  temperature: 0.8
+  max_tokens: 4096

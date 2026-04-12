@@ -155,10 +155,13 @@ cmd_component_start() {
         agent)
             info "启动 Agent ($mode)..."
             local agent_port="${AGENT_PORT:-23340}"
-            docker compose -f "$compose_file" up -d \
-                -e SERVER_WS_URL="ws://cyber-jianghu-server:23333/ws" \
-                -e SERVER_HTTP_URL="http://cyber-jianghu-server:23333" \
-                -e AGENT_PORT="$agent_port"
+            local agent_env_file="$PROJECT_ROOT/crates/agent/.env.agent"
+            cat > "$agent_env_file" << EOF
+SERVER_WS_URL=ws://cyber-jianghu-server:23333/ws
+SERVER_HTTP_URL=http://cyber-jianghu-server:23333
+AGENT_PORT=$agent_port
+EOF
+            docker compose -f "$compose_file" --env-file "$agent_env_file" up -d
             success "Agent 已启动"
             echo ""
             info "访问地址:"

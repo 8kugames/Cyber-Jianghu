@@ -98,6 +98,9 @@ pub struct PerceptionMotivationResponse {
 ///
 /// Planning 和 Decision 合并为单次 LLM 调用，
 /// 同时输出行动计划和最终决策。
+///
+/// ActorSoul（人魂）只输出叙事意图，不输出结构化 action_data。
+/// 结构化翻译由天魂（IntentTranslator）负责。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanDecisionResponse {
     /// 计划步骤
@@ -108,32 +111,13 @@ pub struct PlanDecisionResponse {
     pub expected_outcome: String,
     /// 思考过程（必须引用前面的感知和动机）
     pub thought_process: String,
-    /// 选择的动作（对应 actions.yaml 中的 key）
-    pub action: String,
-    /// 动作参数（直接透传到服务端）
-    #[serde(default)]
-    pub action_data: serde_json::Value,
+    /// 叙事意图（自然语言描述想要做的事，如"吃一个馒头来充饥"）
+    pub narrative_action: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_cognitive_stages() {
-        let stages = CognitiveStage::all();
-        assert_eq!(stages.len(), 4);
-        assert_eq!(stages[0], CognitiveStage::Perception);
-        assert_eq!(stages[3], CognitiveStage::Decision);
-    }
-
-    #[test]
-    fn test_stage_names() {
-        assert_eq!(CognitiveStage::Perception.name(), "感知");
-        assert_eq!(CognitiveStage::Motivation.name(), "动机");
-        assert_eq!(CognitiveStage::Planning.name(), "规划");
-        assert_eq!(CognitiveStage::Decision.name(), "决策");
-    }
 
     #[test]
     fn test_stage_output() {

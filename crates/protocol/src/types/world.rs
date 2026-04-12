@@ -36,6 +36,69 @@ pub struct WorldTime {
     pub weather: String,
 }
 
+/// 数字转中文大写（0-9）
+fn digit_to_chinese(n: i32) -> String {
+    let digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+    n.to_string()
+        .chars()
+        .filter_map(|c| c.to_digit(10).and_then(|d| digits.get(d as usize)).copied())
+        .collect()
+}
+
+/// 数字转中文大写
+fn number_to_chinese(n: i32) -> String {
+    if n == 0 {
+        return "零".to_string();
+    }
+    digit_to_chinese(n)
+}
+
+/// 时辰名称（十二时辰制，每时辰两小时）
+fn shichen_name(hour: i32) -> &'static str {
+    match hour {
+        0..=1 => "子时",
+        2..=3 => "丑时",
+        4..=5 => "寅时",
+        6..=7 => "卯时",
+        8..=9 => "辰时",
+        10..=11 => "巳时",
+        12..=13 => "午时",
+        14..=15 => "未时",
+        16..=17 => "申时",
+        18..=19 => "酉时",
+        20..=21 => "戌时",
+        22..=23 => "亥时",
+        _ => "时辰",
+    }
+}
+
+impl WorldTime {
+    /// 格式化为中文武侠风格时间表述
+    ///
+    /// 格式："天道历三二五年元月四日申时"
+    pub fn to_chinese(&self) -> String {
+        let year = number_to_chinese(self.year);
+        let month = match self.month {
+            1 => "元月",
+            2 => "二月",
+            3 => "三月",
+            4 => "四月",
+            5 => "五月",
+            6 => "六月",
+            7 => "七月",
+            8 => "八月",
+            9 => "九月",
+            10 => "十月",
+            11 => "十一月",
+            12 => "腊月",
+            _ => return format!("第{}天{:02}:{:02}", self.day, self.hour, self.minute),
+        };
+        let day = number_to_chinese(self.day);
+        let shichen = shichen_name(self.hour);
+        format!("天道历{}{}{}{}", year, month, day, shichen)
+    }
+}
+
 /// 世界事件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,7 +201,6 @@ pub struct WorldEvent {
     /// 元数据（JSON 格式，包含参与实体、物品、地点等）
     pub metadata: serde_json::Value,
 }
-
 
 /// 密语记录（不含内容，仅索引）
 #[derive(Debug, Clone, Serialize, Deserialize)]

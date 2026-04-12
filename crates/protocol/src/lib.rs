@@ -38,7 +38,11 @@ pub mod types;
 pub mod sqlx_types;
 
 // 重导出常用类型
-pub use messages::{ClientMessage, DialogueMessage, DialogueSession, ServerMessage};
+pub use messages::{
+    ClientMessage, DialogueMessage, DialogueSession, DihunReport, FinalIntentReport,
+    ImmediateIntentReport, LayerReport, RenhunReport, ServerMessage, SoulCycleAttempt,
+    SoulCycleMetadata, TianhunReport,
+};
 pub use types::*;
 
 // 重导出错误类型（从 common 合并）

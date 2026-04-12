@@ -5,13 +5,13 @@
 //
 // 协调所有记忆后端，提供统一的记忆管理接口
 // - WorkingMemory: RAM FIFO 队列
-// - EpisodicMemory: SQLite 持久化 + 遗忘
+// - EpisodicMemory: SQLite 持久化 + 遗忘（is_archived 标记归档）
 // - SemanticMemory: 向量检索 + FTS 降级
-// - ArchiveMemory: 遗忘归档存储
 // ============================================================================
 
-use crate::component::memory::backend::{MemoryBackend, SearchableBackend, SemanticSearchable};
-use crate::component::memory::backends::archive::ArchiveMemoryBackend;
+use crate::component::memory::backend::{
+    ForgettableBackend, MemoryBackend, SearchableBackend, SemanticSearchable,
+};
 use crate::component::memory::backends::episodic::EpisodicMemoryBackend;
 use crate::component::memory::backends::semantic::SemanticMemoryBackend;
 use crate::component::memory::backends::working::WorkingMemoryBackend;
@@ -62,8 +62,6 @@ pub struct MemoryManager {
     working: WorkingMemoryBackend,
     /// 情景记忆后端
     episodic: EpisodicMemoryBackend,
-    /// 归档记忆后端
-    archive: ArchiveMemoryBackend,
     /// 语义记忆后端（可选，使用本地 embedder）
     semantic: Option<Arc<tokio::sync::Mutex<SemanticMemoryBackend>>>,
     /// 遗忘调度器
@@ -82,8 +80,6 @@ impl MemoryManager {
         let working = WorkingMemoryBackend::new(config.working_memory_size);
         let episodic = EpisodicMemoryBackend::new(config.agent_id, &config.db_dir)
             .context("Failed to create episodic memory backend")?;
-        let archive = ArchiveMemoryBackend::new(config.agent_id, &config.db_dir)
-            .context("Failed to create archive memory backend")?;
 
         // 初始化语义记忆（使用本地 embedder）
         let embedder = Arc::new(EmbedderService::new());
@@ -112,7 +108,6 @@ impl MemoryManager {
             config,
             working,
             episodic,
-            archive,
             semantic,
             forgetting_scheduler,
             scorer: ImportanceScorer::new(),
@@ -163,8 +158,8 @@ impl MemoryManager {
         let all_memories = self.episodic.get_recent(10000).await?;
         let checked_count = all_memories.len();
 
-        // 计算需要归档的记忆
-        let mut to_archive = Vec::new();
+        // 计算需要归档的记忆 ID
+        let mut to_archive_ids = Vec::new();
         let mut retained_count = 0;
 
         for memory in &all_memories {
@@ -173,20 +168,27 @@ impl MemoryManager {
                 .calculate_retention(memory, current_tick);
 
             if retention < self.forgetting_scheduler.config().retention_threshold {
-                to_archive.push(memory.clone());
+                if let Some(id) = memory.id {
+                    to_archive_ids.push(id);
+                }
             } else {
                 retained_count += 1;
             }
         }
 
-        // 归档记忆
-        let archived_count = to_archive.len();
-        for memory in &to_archive {
-            if let Some(id) = memory.id {
-                self.archive.add(memory.clone()).await?;
-                // 标记情景记忆为已归档（需要 EpisodicMemoryBackend 支持）
-                let _ = id; // 避免 unused warning
-            }
+        // 批量归档（is_archived 标记）
+        let archived_count = if !to_archive_ids.is_empty() {
+            self.episodic
+                .archive_memories(&to_archive_ids)
+                .await
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // 衰减所有未归档记忆的强度
+        if let Err(e) = self.episodic.decay_strength().await {
+            tracing::warn!("Memory strength decay failed: {}", e);
         }
 
         // 标记已执行
@@ -212,8 +214,8 @@ impl MemoryManager {
             }
         }
 
-        // 降级到归档检索
-        self.archive.search(query, limit)
+        // 降级到情景记忆的归档检索（is_archived=TRUE）
+        self.episodic.search_archived(query, limit).await
     }
 
     /// 构建 LLM 上下文
@@ -257,7 +259,7 @@ impl MemoryManager {
         MemoryManagerStats {
             working_count: self.working.count().await.unwrap_or(0),
             episodic_count: self.episodic.count().await.unwrap_or(0),
-            archive_count: self.archive.count().await.unwrap_or(0),
+            archive_count: self.episodic.archived_count().await.unwrap_or(0),
         }
     }
 
@@ -265,7 +267,6 @@ impl MemoryManager {
     pub async fn clear_all(&mut self) -> Result<()> {
         MemoryBackend::clear(&mut self.working).await?;
         MemoryBackend::clear(&mut self.episodic).await?;
-        MemoryBackend::clear(&mut self.archive).await?;
         Ok(())
     }
 
@@ -287,16 +288,6 @@ impl MemoryManager {
     /// 获取情景记忆的可变引用
     pub fn episodic_mut(&mut self) -> &mut EpisodicMemoryBackend {
         &mut self.episodic
-    }
-
-    /// 获取归档记忆
-    pub fn archive(&self) -> &ArchiveMemoryBackend {
-        &self.archive
-    }
-
-    /// 获取归档记忆的可变引用
-    pub fn archive_mut(&mut self) -> &mut ArchiveMemoryBackend {
-        &mut self.archive
     }
 
     /// 获取 Agent ID
@@ -406,18 +397,5 @@ mod tests {
         let context = manager.build_llm_context().await;
         assert!(context.contains("你吃了馒头"));
         assert!(context.contains("最近事件"));
-    }
-
-    #[test]
-    fn test_memory_manager_stats() {
-        let stats = MemoryManagerStats {
-            working_count: 10,
-            episodic_count: 50,
-            archive_count: 5,
-        };
-
-        assert_eq!(stats.working_count, 10);
-        assert_eq!(stats.episodic_count, 50);
-        assert_eq!(stats.archive_count, 5);
     }
 }

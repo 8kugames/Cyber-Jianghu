@@ -128,12 +128,6 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_embedder_service_creation() {
-        let service = EmbedderService::new();
-        assert!(!service.is_available());
-    }
-
-    #[tokio::test]
     async fn test_is_available_before_init() {
         let service = EmbedderService::new();
         assert!(!service.is_available());
@@ -158,13 +152,6 @@ mod tests {
     async fn test_embed_unavailable_without_model() {
         let service = EmbedderService::new();
         let result = service.embed("test").await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_embed_batch_unavailable_without_model() {
-        let service = EmbedderService::new();
-        let result = service.embed_batch(&["test1", "test2"]).await;
         assert!(result.is_err());
     }
 

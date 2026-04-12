@@ -313,7 +313,13 @@ pub async fn apply_state_change(
             quantity,
         } => {
             let recipe_to_craft = {
-                let cache = crate::game_data::registry_or_panic().get();
+                let cache = match crate::game_data::registry_or_error() {
+                    Ok(r) => r.get(),
+                    Err(e) => {
+                        tracing::warn!("注册表未初始化，跳过 craft: {}", e);
+                        return false;
+                    }
+                };
                 cache
                     .recipes
                     .data

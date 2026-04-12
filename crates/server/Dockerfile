@@ -9,7 +9,7 @@
 # ============================================================================
 # Stage 1: 构建阶段 - 编译Rust代码
 # ============================================================================
-FROM rust:bookworm AS builder
+FROM rust:trixie AS builder
 
 # 配置 crates.io sparse 协议（更稳定）
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
@@ -62,7 +62,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-server; \
+        cargo build --release -p cyber-jianghu-server; \
     else \
         cargo build --release -p cyber-jianghu-server; \
     fi
@@ -77,7 +77,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
     touch crates/protocol/src/lib.rs && \
     if [ -f Cargo.lock ]; then \
-        cargo build --release --locked -p cyber-jianghu-server; \
+        cargo build --release -p cyber-jianghu-server; \
     else \
         cargo build --release -p cyber-jianghu-server; \
     fi && \
@@ -86,7 +86,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # ============================================================================
 # Stage 2: 运行阶段 - 最小化镜像
 # ============================================================================
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 # 配置 Debian 镜像源（阿里云）
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || \

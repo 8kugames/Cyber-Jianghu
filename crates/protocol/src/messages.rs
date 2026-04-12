@@ -216,6 +216,8 @@ pub enum ServerMessage {
     /// - speak 广播：同场景所有在线 Agent 立即收到
     /// - 其他需要实时通知的事件
     ImmediateEvent {
+        /// 事件唯一 ID（用于即时意图追踪）
+        event_id: Uuid,
         /// 事件内容
         event: WorldEvent,
         /// 当前 tick 截止时间（Unix ms）
@@ -284,6 +286,94 @@ pub enum ClientMessage {
         #[serde(flatten)]
         message: DialogueMessage,
     },
+
+    /// 三魂循环元数据上报（agent → server）
+    ///
+    /// 在 intent 发送后立即发送此消息，server 将其关联到同一 tick 的 agent_action_logs。
+    /// 作用：使 server-web 能看到与 agent-web 完全相同的三魂详情。
+    SoulCycleReport {
+        /// Tick 编号
+        tick_id: i64,
+        /// Agent ID（可选）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        agent_id: Option<Uuid>,
+        /// 三魂循环完整元数据
+        metadata: SoulCycleMetadata,
+    },
+}
+
+/// 三魂循环元数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoulCycleMetadata {
+    /// 游戏内时间（用于经历日志显示）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_time: Option<String>,
+    /// 三魂循环记录
+    pub cycles: Vec<SoulCycleAttempt>,
+    /// 即时通道意图记录
+    pub immediate_intents: Vec<ImmediateIntentReport>,
+}
+
+/// 单次三魂尝试
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoulCycleAttempt {
+    pub attempt: i32,
+    /// 人魂输出
+    pub renhun: RenhunReport,
+    /// 天魂翻译结果
+    pub tianhun: TianhunReport,
+    /// 地魂审查结果
+    pub dihun: DihunReport,
+    /// 最终 Intent
+    pub final_intent: Option<FinalIntentReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenhunReport {
+    pub narrative: Option<String>,
+    pub thought_log: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TianhunReport {
+    pub action_type: Option<String>,
+    pub action_data: Option<serde_json::Value>,
+    pub speech_content: Option<String>,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DihunReport {
+    pub result: Option<String>,
+    pub layers: Vec<LayerReport>,
+    pub reason: Option<String>,
+    pub narrative: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayerReport {
+    pub layer: String,
+    pub passed: bool,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinalIntentReport {
+    pub intent_id: Option<String>,
+    pub action_type: Option<String>,
+    pub action_data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImmediateIntentReport {
+    pub intent_id: String,
+    pub route_type: String,
+    pub action_type: String,
+    pub action_data: Option<serde_json::Value>,
+    pub speech_content: Option<String>,
+    pub send_status: String,
+    pub send_error: Option<String>,
 }
 
 // ============================================================================

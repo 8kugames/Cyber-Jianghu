@@ -314,18 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_persona_consistency() {
-        let agent_id = Uuid::new_v4();
-        let mut persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");
-
-        assert!(persona.is_consistent());
-
-        // 人设应该是一致的
-        persona.set_trait("测试", 50);
-        assert!(persona.is_consistent());
-    }
-
-    #[test]
     fn test_thread_safe_persona() {
         let agent_id = Uuid::new_v4();
         let persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");

@@ -12,6 +12,7 @@ use cyber_jianghu_agent::{
 };
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 // ============================================================================
 // Mock LLM 客户端（仅用于示例）
@@ -62,8 +63,10 @@ async fn main() -> anyhow::Result<()> {
     let llm_client = Arc::new(ExampleLlmClient);
 
     // 3. 创建 ReflectorSoul（意图审查引擎）
-    let validator: Arc<dyn Validator> =
-        Arc::new(ReflectorSoul::new(world_rules.clone(), llm_client));
+    let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(
+        world_rules.clone(),
+        Arc::new(RwLock::new(llm_client)),
+    ));
     println!("ReflectorSoul 已创建\n");
 
     // 4. 创建 LifespanCalculator
@@ -139,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
     println!("2. 从服务端获取 WorldBuildingRules");
     println!("3. 将验证器注入到 Agent 中：");
     println!(
-        "   let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(rules, llm_client));"
+        "   let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(rules, Arc::new(RwLock::new(llm_client))));"
     );
     println!("   agent.set_validator(validator);");
 

@@ -17,6 +17,21 @@ const STATUS_MAP = {
 };
 function statusOf(s) { return STATUS_MAP[s] || { label: s, treeLabel: s, tag: '' }; }
 
+let actionTypeMap = {};
+async function loadActionTypeMap() {
+    try {
+        const data = await apiGet('/api/v1/actions');
+        if (data && typeof data === 'object') {
+            actionTypeMap = data;
+        }
+    } catch (e) {
+        console.warn('[actions] Failed to load action type map:', e);
+    }
+}
+function getActionTypeDisplay(actionType) {
+    return actionTypeMap[actionType] || actionType;
+}
+
 function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
     if (typeof worldTime === 'string' || typeof worldTime === 'number') {
@@ -170,6 +185,60 @@ function renderWorldTree() {
     });
 }
 
+// 渲染抽屉内的经历日志（与经历日志 Tab 保持一致）
+function renderDrawerSoulCycles(recordsMap, immMap) {
+    const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
+    if (tickIds.length === 0) {
+        return '<p class="no-data">暂无经历记录</p>';
+    }
+
+    let html = '<div class="drawer-experiences">';
+    tickIds.forEach(tickId => {
+        const attempts = recordsMap[tickId];
+        const first = attempts[0];
+        const worldTimeText = formatWorldTime(first.world_time);
+        const realTimeText = formatRealTime(first.created_at);
+
+        html += `<div class="tick-card">
+            <div class="tick-card-header">
+                <span class="tick-badge">T${tickId}</span>
+                <span class="tick-world-time">${escapeHtml(worldTimeText)}</span>
+                <span class="tick-real-time">${escapeHtml(realTimeText)}</span>
+            </div>`;
+
+        // 行动分区
+        html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+        attempts.forEach((a, idx) => {
+            if (attempts.length > 1) {
+                html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+            }
+            html += renderSoulInline('人魂', a.renhun, 'renhun');
+            html += renderSoulInline('天魂', a.tianhun, 'tianhun');
+            html += renderSoulInline('地魂', a.dihun, 'dihun');
+        });
+        html += '</div>';
+
+        // 即时分区
+        const immIntents = immMap[tickId] || [];
+        if (immIntents.length > 0) {
+            html += '<div class="tick-section tick-section-immediate">';
+            html += '<div class="tick-section-title">即时</div>';
+            immIntents.forEach(imm => {
+                html += `<div class="imm-item">
+                    <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                    <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
+                    ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
+                </div>`;
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
 // 打开角色抽屉
 async function openCharacterDrawer(char) {
     const drawer = document.getElementById('character-drawer');
@@ -270,9 +339,7 @@ async function loadCharacterIntoDrawer(char) {
         </div>
     `;
 
-    console.log('[DEBUG] 渲染前检查 - appearance:', charData.appearance, 'identity:', charData.identity);
     if (charData.appearance || charData.identity) {
-        console.log('[DEBUG] 进入人物画像分支');
         html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">人物画像</div>
@@ -282,9 +349,7 @@ async function loadCharacterIntoDrawer(char) {
         `;
     }
 
-    console.log('[DEBUG] personality:', charData.personality, 'values:', charData.values);
     if ((charData.personality && charData.personality.length > 0) || (charData.values && charData.values.length > 0)) {
-        console.log('[DEBUG] 进入性格与价值观分支');
         html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">性格与价值观</div>
@@ -297,16 +362,6 @@ async function loadCharacterIntoDrawer(char) {
     // 属性（使用 renderAttributes 的分组逻辑）
     if (charData.attributes) {
         const categories = attributeMeta ? attributeMeta.categories : null;
-        const statusKeys = new Set(categories?.status || []);
-        const primaryKeys = new Set(categories?.primary || []);
-        const knownKeys = new Set([...statusKeys, ...primaryKeys]);
-
-        const isRedundantMax = (key) => {
-            if (typeof key !== 'string' || !key.endsWith('_max')) return false;
-            const base = key.slice(0, -4);
-            return knownKeys.has(base);
-        };
-
         let attrHtml = '';
 
         // 先天属性
@@ -345,8 +400,8 @@ async function loadCharacterIntoDrawer(char) {
                 const isEnriched = value && typeof value === 'object' && value.current !== undefined;
                 const displayName = isEnriched ? value.name : key.replace(/_/g, ' ');
                 const displayValue = isEnriched
-                    ? (typeof value.current === 'number' ? value.current.toFixed(2) : value.current)
-                    : (typeof value === 'number' ? value.toFixed(2) : value);
+                    ? (typeof value.current === 'number' ? value.current.toFixed(3) : value.current)
+                    : (typeof value === 'number' ? value.toFixed(3) : value);
                 const desc = isEnriched ? (value.description || '') : '';
                 attrHtml += `<div class="attr-item" title="${escapeHtml(desc)}"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${displayValue}</span></div>`;
             });
@@ -389,29 +444,26 @@ async function loadCharacterIntoDrawer(char) {
         }
     }
 
-    // 经历日志（仅当前角色）
-    if (isCurrent) {
-        try {
-            const expData = await apiGet('/api/v1/character/experiences?page=1&limit=3');
-            if (expData.experiences && expData.experiences.length > 0) {
-                const expList = expData.experiences.map(e => {
-                    const tick = e.tick_id ? `T${e.tick_id}` : '';
-                    const event = e.event || e.intent_summary || '-';
-                    return `<div class="exp-mini-item">
-                        <span class="exp-tick">${tick}</span>
-                        <span class="exp-event">${escapeHtml(event.substring(0, 30))}${event.length > 30 ? '...' : ''}</span>
-                    </div>`;
-                }).join('');
-                html += `
-                    <section class="drawer-section">
-                        <div class="drawer-section-title">经历日志</div>
-                        <div class="exp-mini-list">${expList}</div>
-                    </section>
-                `;
-            }
-        } catch (err) {
-            console.warn('加载经历日志失败:', err);
-        }
+    // 经历日志（与经历日志 Tab 保持一致）
+    try {
+        const expData = await apiGet('/api/v1/character/soul-cycles?agent_id=' + char.agent_id + '&page=1&limit=3');
+        const recordsMap = expData.records || {};
+        const immMap = expData.immediate_intents || {};
+        const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">经历日志</div>
+                ${expHtml}
+            </section>
+        `;
+    } catch (err) {
+        console.warn('加载经历日志失败:', err);
+        html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">经历日志</div>
+                <p class="no-data">暂无经历记录</p>
+            </section>
+        `;
     }
 
     // 托梦记录（仅当前角色）
@@ -457,7 +509,6 @@ async function loadCharacterIntoDrawer(char) {
     }
 
     body.innerHTML = html;
-    console.log('[DEBUG] 最终渲染的 html 长度:', html.length);
 }
 
 // 切换角色
@@ -493,7 +544,6 @@ async function loadCharacter() {
 
     try {
         const data = await apiGet('/api/v1/character');
-        console.log('[DEBUG] loadCharacter API完整返回:', JSON.stringify(data, null, 2));
 
         // 基本信息
         document.getElementById('name').textContent = data.name || '-';
@@ -637,7 +687,8 @@ function renderAttributes(attributes, derivedAttributes) {
             // 先看 derived_attributes，再看 attributes
             const attr = derivedSource[key] || attributes[key];
             if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
+                const displayVal = typeof attr.current === 'number' ? attr.current.toFixed(3) : attr.current;
+                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayVal}</span></div>`;
             }
         });
         html += '</div></div>';
@@ -671,7 +722,7 @@ function renderInventory(inventory) {
     });
 }
 
-// 加载经历日志
+// 加载经历日志（按 Tick 卡片展示，三魂数据内联）
 async function loadExperiences(page = 1) {
     const expEl = document.getElementById('experiences');
     const loadMoreEl = document.getElementById('load-more');
@@ -681,46 +732,66 @@ async function loadExperiences(page = 1) {
     }
 
     try {
-        const data = await apiGet(`/api/v1/character/experiences?page=${page}&limit=${PAGE_LIMIT}`);
+        const data = await apiGet(`/api/v1/character/soul-cycles?page=${page}&limit=${PAGE_LIMIT}`);
         hasMore = data.has_more;
         currentPage = page;
 
         if (page === 1) expEl.innerHTML = '';
 
-        if (data.experiences && data.experiences.length > 0) {
-            data.experiences.forEach(exp => {
+        const recordsMap = data.records || {};
+        const immMap = data.immediate_intents || {};
+        const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
+
+        if (tickIds.length > 0) {
+            tickIds.forEach(tickId => {
+                const attempts = recordsMap[tickId];
                 const div = document.createElement('div');
-                div.className = 'exp-item';
+                div.className = 'tick-card';
 
-                const worldTimeText = formatWorldTime(exp.world_time);
-                const realTimeText = formatRealTime(exp.created_at);
-                const eventText = (exp.event !== undefined && exp.event !== null) ? exp.event : '-';
-                const actionType = exp.action_type || '';
+                const first = attempts[0];
+                const worldTimeText = formatWorldTime(first.world_time);
+                const realTimeText = formatRealTime(first.created_at);
 
-                // 解析 observer_thought JSON
-                let observerData = null;
-                if (exp.observer_thought) {
-                    try {
-                        observerData = JSON.parse(exp.observer_thought);
-                    } catch (e) {
-                        // ignore parse error
+                let html = `<div class="tick-card-header">
+                    <span class="tick-badge">T${tickId}</span>
+                    <span class="tick-world-time">${escapeHtml(worldTimeText)}</span>
+                    <span class="tick-real-time">${escapeHtml(realTimeText)}</span>
+                </div>`;
+
+                // 行动分区
+                html += `<div class="tick-section">
+                    <div class="tick-section-title">行动</div>`;
+
+                attempts.forEach((a, idx) => {
+                    if (attempts.length > 1) {
+                        html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
                     }
+
+                    // 人魂
+                    html += renderSoulInline('人魂', a.renhun, 'renhun');
+                    // 天魂
+                    html += renderSoulInline('天魂', a.tianhun, 'tianhun');
+                    // 地魂
+                    html += renderSoulInline('地魂', a.dihun, 'dihun');
+                });
+
+                html += `</div>`;
+
+                // 即时分区
+                const immIntents = immMap[tickId] || [];
+                if (immIntents.length > 0) {
+                    html += `<div class="tick-section tick-section-immediate">
+                        <div class="tick-section-title">即时</div>`;
+                    immIntents.forEach(imm => {
+                        html += `<div class="imm-item">
+                            <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                            <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
+                            ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
+                        </div>`;
+                    });
+                    html += `</div>`;
                 }
 
-                let html = `<div class="exp-header"><span class="exp-tick-badge">T${exp.tick_id || '-'}</span><span class="exp-time-info"><span class="exp-world-time">${escapeHtml(worldTimeText)}</span><span class="exp-real-time">${escapeHtml(realTimeText)}</span></span></div>`;
-                if (actionType) {
-                    html += `<div class="exp-action-tag">${escapeHtml(actionType)}</div>`;
-                }
-                html += `<div class="exp-body"><div class="exp-content">${escapeHtml(eventText)}</div></div>`;
-                if (observerData && observerData.narrative) {
-                    html += `<div class="exp-review-narrative">${escapeHtml(observerData.narrative)}</div>`;
-                }
-                if (exp.intent_summary) {
-                    html += `<div class="exp-thought">意图: ${escapeHtml(exp.intent_summary)}</div>`;
-                }
-                if (observerData) {
-                    html += `<div class="exp-observer">审查: ${escapeHtml(observerData.result || '-')} - ${escapeHtml(observerData.reason || '-')}</div>`;
-                }
                 div.innerHTML = html;
                 expEl.appendChild(div);
             });
@@ -733,6 +804,54 @@ async function loadExperiences(page = 1) {
     } catch (err) {
         expEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
     }
+}
+
+// 渲染单魂内联区块
+function renderSoulInline(label, data, type) {
+    if (!data) return '';
+    let html = `<div class="exp-${type}"><span class="exp-soul-label">${label}</span><div class="exp-soul-content">`;
+
+    if (type === 'renhun') {
+        if (data.narrative) {
+            html += `<div class="soul-text">${escapeHtml(data.narrative)}</div>`;
+        }
+        if (data.thought_log) {
+            html += `<div class="soul-thought">${escapeHtml(data.thought_log)}</div>`;
+        }
+    } else if (type === 'tianhun') {
+        if (!data.success) {
+            html += `<div class="soul-error">翻译失败: ${escapeHtml(data.error || '未知错误')}</div>`;
+        }
+        if (data.action_type) {
+            html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(data.action_type))}`;
+            if (data.action_data && Object.keys(data.action_data).length > 0) {
+                html += ` <span class="soul-params">${escapeHtml(JSON.stringify(data.action_data))}</span>`;
+            }
+            html += `</div>`;
+        }
+        if (data.speech_content) {
+            html += `<div class="soul-speech">${escapeHtml(data.speech_content)}</div>`;
+        }
+    } else if (type === 'dihun') {
+        html += `<div class="exp-dihun-result ${data.result || ''}">${escapeHtml(data.result || '-')}</div>`;
+        if (data.layers && data.layers.length > 0) {
+            html += `<div class="soul-layers">`;
+            data.layers.forEach(l => {
+                const cls = l.passed ? 'passed' : 'failed';
+                html += `<span class="soul-layer-tag ${cls}">${l.layer}${l.passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
+            });
+            html += `</div>`;
+        }
+        if (data.reason) {
+            html += `<div class="exp-dihun-reason">${escapeHtml(data.reason)}</div>`;
+        }
+        if (data.narrative) {
+            html += `<div class="exp-dihun-narrative">${escapeHtml(data.narrative)}</div>`;
+        }
+    }
+
+    html += `</div></div>`;
+    return html;
 }
 
 function loadMoreExperiences() {
@@ -898,7 +1017,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function connectDeathEvents() {
         deathEventSource = new EventSource('/api/v1/events');
         deathEventSource.addEventListener('connected', () => {
-            console.log('SSE connected');
+            // SSE 连接成功
         });
         deathEventSource.addEventListener('agent_died', (e) => {
             try {
@@ -963,6 +1082,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     loadAttributeMeta().then(async () => {
+        await loadActionTypeMap();
         await loadCharacterList();
         const currentChar = allCharacters.find(c => c.is_current);
 

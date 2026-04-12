@@ -4,7 +4,7 @@
 
 use super::evaluator::{ConditionEvaluator, DefaultEvaluator};
 use super::registry::{RuleRegistry, RuleSet};
-use super::types::{Rule, RuleValidationContext};
+use super::types::{Rule, RuleValidationContext, extract_ids_from_world_state};
 use crate::soul::reflector::{
     PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
 };
@@ -12,6 +12,18 @@ use async_trait::async_trait;
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+// ============================================================================
+// RuleEngine 错误消息常量
+// ============================================================================
+// 集中定义，供 narrativize_rejection() 引用，避免 string.contains 紧耦合
+
+/// eat item_id 无效
+pub const ERR_EAT_INVALID_ITEM: &str = "吃东西失败：物品ID无效";
+/// drink item_id 无效
+pub const ERR_DRINK_INVALID_ITEM: &str = "喝水失败：物品ID无效";
+/// move target_location 无效
+pub const ERR_MOVE_INVALID_TARGET: &str = "移动失败：目标地点ID无效";
 
 /// 规则引擎
 ///
@@ -28,16 +40,21 @@ impl Validator for RuleEngine {
     async fn validate(&self, request: ValidationRequest) -> anyhow::Result<ValidationResult> {
         // 构建验证上下文
         let tick_id = request.intent.tick_id;
+        let (available_item_ids, reachable_node_ids) = request
+            .world_state
+            .as_ref()
+            .map(extract_ids_from_world_state)
+            .unwrap_or_default();
+
         let context = RuleValidationContext {
             intent: request.intent,
             persona_info: request.persona,
             world_context: request.world_context,
             tick_id,
-            // 注意：RuleValidationContext 的 history_intents 和 attributes 字段暂未填充
-            // 当前规则引擎在空数据上下文中进行验证，结果可能不准确
-            // 如需启用规则验证，需从 WorldState/AgentState 获取这些数据并传入
             history_intents: vec![],
             attributes: HashMap::new(),
+            available_item_ids,
+            reachable_node_ids,
         };
 
         // 调用内部验证逻辑
@@ -67,45 +84,67 @@ impl RuleEngine {
         }
     }
 
-    /// 创建带有默认配置的规则引擎（兼容性方法）
+    /// 创建带有默认配置的规则引擎
     ///
     /// 预加载默认的验证规则（硬编码，未来从 YAML 配置加载）：
-    /// - cooldown_speak: speak 冷却检查（需 history_intents 数据）
-    /// - cooldown_move: move 冷却检查（需 history_intents 数据）
-    ///
-    /// 注意：当前 history_intents 为空，冷却规则暂不触发。
-    /// 当 decision pipeline 接入历史意图数据后自动生效。
+    /// - valid_item_id_eat: eat 的 item_id 必须在背包中
+    /// - valid_item_id_drink: drink 的 item_id 必须在背包中
+    /// - valid_target_node_move: move 的 target_location 必须可达
     pub fn with_default_config() -> Self {
         let mut rule_set = RuleSet::new();
 
-        // speak 冷却规则
+        // eat 的 item_id 必须在背包中（蕴含式：非 eat 放行，是 eat 则校验 item_id）
         rule_set.add_rule(Rule::new(
-            "cooldown_speak".to_string(),
-            "说话冷却: 连续说话需间隔".to_string(),
-            super::types::RuleType::ActionCooldown,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
+            "valid_item_id_eat".to_string(),
+            "eat 的 item_id 必须在背包中".to_string(),
+            super::types::RuleType::ResourceConstraint,
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
-                    serde_json::json!("speak"),
+                    serde_json::json!("eat"),
                 ),
-                super::types::RuleCondition::GreaterThan("cooldown_speak".to_string(), 0.0),
+                super::types::RuleCondition::In(
+                    "intent.action_data.item_id".to_string(),
+                    "available_item_ids".to_string(),
+                ),
             ]),
-            "刚说过话，等一会儿再说".to_string(),
+            format!("{}，请使用背包中物品的精确ID", ERR_EAT_INVALID_ITEM),
         ));
 
-        // move 冷却规则
+        // drink 的 item_id 必须在背包中（蕴含式）
         rule_set.add_rule(Rule::new(
-            "cooldown_move".to_string(),
-            "移动冷却: 连续移动需间隔".to_string(),
-            super::types::RuleType::ActionCooldown,
-            super::types::RuleCondition::And(vec![
-                super::types::RuleCondition::Equals(
+            "valid_item_id_drink".to_string(),
+            "drink 的 item_id 必须在背包中".to_string(),
+            super::types::RuleType::ResourceConstraint,
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
+                    "intent.action_type".to_string(),
+                    serde_json::json!("drink"),
+                ),
+                super::types::RuleCondition::In(
+                    "intent.action_data.item_id".to_string(),
+                    "available_item_ids".to_string(),
+                ),
+            ]),
+            format!("{}，请使用背包中物品的精确ID", ERR_DRINK_INVALID_ITEM),
+        ));
+
+        // move 的 target_location 必须可达（蕴含式）
+        rule_set.add_rule(Rule::new(
+            "valid_target_node_move".to_string(),
+            "move 的 target_location 必须可达".to_string(),
+            super::types::RuleType::StateRestriction,
+            super::types::RuleCondition::Or(vec![
+                super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
                     serde_json::json!("move"),
                 ),
-                super::types::RuleCondition::GreaterThan("cooldown_move".to_string(), 0.0),
+                super::types::RuleCondition::In(
+                    "intent.action_data.target_location".to_string(),
+                    "reachable_node_ids".to_string(),
+                ),
             ]),
-            "刚移动过，休息一下再走".to_string(),
+            format!("{}，请使用可达地点的精确ID", ERR_MOVE_INVALID_TARGET),
         ));
 
         Self {
@@ -244,6 +283,8 @@ mod tests {
             tick_id: 10,
             history_intents: vec![],
             attributes,
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         }
     }
 

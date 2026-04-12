@@ -23,7 +23,7 @@ let agent = AgentBuilder::new(config, decision)
 ### ActorSoul + ReflectorSoul 架构
 
 - **ActorSoul (行动之魂)**：生成意图，执行行动
-- **ReflectorSoul (反思之魂)**：审查意图，道德判断
+- **ReflectorSoul (反思之魂)**：审查意图，世界观一致性审查
 - **共享内存通信**：通过 `ReviewStore` 进行进程内通信
 
 ### 两种运行模式

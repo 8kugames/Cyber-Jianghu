@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -39,6 +39,9 @@ impl MemoryStore {
 
         // 初始化数据库结构
         Self::init_schema(&conn)?;
+
+        // 渐进式迁移：添加遗忘机制所需的新列
+        Self::migrate_forgetting_columns(&conn)?;
 
         Ok(Self {
             conn,
@@ -99,14 +102,52 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// 渐进式迁移：检查并添加遗忘机制所需的新列（幂等操作）
+    fn migrate_forgetting_columns(conn: &Connection) -> Result<()> {
+        let columns = vec![
+            ("strength", "REAL DEFAULT 0.5"),
+            ("last_accessed_at", "TIMESTAMP"),
+            ("access_count", "INTEGER DEFAULT 0"),
+            ("is_archived", "BOOLEAN DEFAULT FALSE"),
+        ];
+
+        for (column, col_type) in columns {
+            let exists: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('client_memories') WHERE name='{}'",
+                        column
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .context("Failed to check column existence")?;
+
+            if exists == 0 {
+                conn.execute(
+                    &format!(
+                        "ALTER TABLE client_memories ADD COLUMN {} {}",
+                        column, col_type
+                    ),
+                    [],
+                )
+                .with_context(|| format!("Failed to add column: {}", column))?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// 添加记忆
     pub fn add_memory(&self, memory: &ClientMemory) -> Result<i64> {
         self.conn
             .execute(
                 "INSERT INTO client_memories
              (agent_id, tick_id, event_type, content, metadata,
-              importance_score, sentiment_score, memory_type, is_confirmed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              importance_score, sentiment_score, memory_type, is_confirmed,
+              created_at, updated_at,
+              strength, last_accessed_at, access_count, is_archived)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     memory.agent_id.to_string(),
                     memory.tick_id,
@@ -117,6 +158,12 @@ impl MemoryStore {
                     memory.sentiment_score,
                     &memory.memory_type,
                     memory.is_confirmed,
+                    &memory.created_at,
+                    &memory.updated_at,
+                    memory.strength,
+                    memory.last_accessed_at.as_deref(),
+                    memory.access_count,
+                    memory.is_archived,
                 ],
             )
             .context("Failed to insert memory")?;
@@ -135,8 +182,10 @@ impl MemoryStore {
             tx.execute(
                 "INSERT INTO client_memories
                  (agent_id, tick_id, event_type, content, metadata,
-                  importance_score, sentiment_score, memory_type, is_confirmed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                  importance_score, sentiment_score, memory_type, is_confirmed,
+                  created_at, updated_at,
+                  strength, last_accessed_at, access_count, is_archived)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     memory.agent_id.to_string(),
                     memory.tick_id,
@@ -147,6 +196,12 @@ impl MemoryStore {
                     memory.sentiment_score,
                     &memory.memory_type,
                     memory.is_confirmed,
+                    &memory.created_at,
+                    &memory.updated_at,
+                    memory.strength,
+                    memory.last_accessed_at.as_deref(),
+                    memory.access_count,
+                    memory.is_archived,
                 ],
             )
             .context("Failed to insert memory in batch")?;
@@ -156,38 +211,50 @@ impl MemoryStore {
         Ok(memories.len())
     }
 
-    /// 查询重要记忆（Top K）
+    /// 从 SELECT * 行反序列化为 ClientMemory
+    ///
+    /// 列顺序：id(0), agent_id(1), tick_id(2), event_type(3), content(4),
+    /// metadata(5), importance_score(6), sentiment_score(7), memory_type(8),
+    /// is_confirmed(9), created_at(10), updated_at(11),
+    /// strength(12), last_accessed_at(13), access_count(14), is_archived(15)
+    fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClientMemory> {
+        Ok(ClientMemory {
+            id: Some(row.get(0)?),
+            agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
+            tick_id: row.get(2)?,
+            event_type: row.get(3)?,
+            content: row.get(4)?,
+            metadata: row
+                .get::<_, Option<String>>(5)?
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or(Value::Null),
+            importance_score: row.get(6)?,
+            sentiment_score: row.get(7)?,
+            memory_type: row.get(8)?,
+            is_confirmed: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            strength: row.get(12)?,
+            last_accessed_at: row.get(13)?,
+            access_count: row.get(14)?,
+            is_archived: row.get(15)?,
+        })
+    }
+
+    /// 查询重要记忆（Top K，排除已归档）
     pub fn get_top_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT * FROM client_memories
-             WHERE agent_id = ?1
+             WHERE agent_id = ?1 AND is_archived = FALSE
              ORDER BY importance_score DESC, created_at DESC
              LIMIT ?2",
             )
             .context("Failed to prepare query")?;
 
         let memories = stmt
-            .query_map(params![self.agent_id.to_string(), limit as i64], |row| {
-                Ok(ClientMemory {
-                    id: Some(row.get(0)?),
-                    agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
-                    tick_id: row.get(2)?,
-                    event_type: row.get(3)?,
-                    content: row.get(4)?,
-                    metadata: row
-                        .get::<_, Option<String>>(5)?
-                        .and_then(|s| serde_json::from_str(&s).ok())
-                        .unwrap_or(Value::Null),
-                    importance_score: row.get(6)?,
-                    sentiment_score: row.get(7)?,
-                    memory_type: row.get(8)?,
-                    is_confirmed: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            })
+            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
             .context("Failed to execute query")?;
 
         memories
@@ -195,38 +262,20 @@ impl MemoryStore {
             .map_err(|e| e.into())
     }
 
-    /// 查询最近 N 条记忆
+    /// 查询最近 N 条记忆（排除已归档）
     pub fn get_recent_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT * FROM client_memories
-             WHERE agent_id = ?1
+             WHERE agent_id = ?1 AND is_archived = FALSE
              ORDER BY created_at DESC
              LIMIT ?2",
             )
             .context("Failed to prepare query")?;
 
         let memories = stmt
-            .query_map(params![self.agent_id.to_string(), limit as i64], |row| {
-                Ok(ClientMemory {
-                    id: Some(row.get(0)?),
-                    agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
-                    tick_id: row.get(2)?,
-                    event_type: row.get(3)?,
-                    content: row.get(4)?,
-                    metadata: row
-                        .get::<_, Option<String>>(5)?
-                        .and_then(|s| serde_json::from_str(&s).ok())
-                        .unwrap_or(Value::Null),
-                    importance_score: row.get(6)?,
-                    sentiment_score: row.get(7)?,
-                    memory_type: row.get(8)?,
-                    is_confirmed: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            })
+            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
             .context("Failed to execute query")?;
 
         memories
@@ -234,7 +283,7 @@ impl MemoryStore {
             .map_err(|e| e.into())
     }
 
-    /// 按事件类型查询记忆
+    /// 按事件类型查询记忆（排除已归档）
     pub fn get_memories_by_type(
         &self,
         event_type: &str,
@@ -244,7 +293,7 @@ impl MemoryStore {
             .conn
             .prepare(
                 "SELECT * FROM client_memories
-             WHERE agent_id = ?1 AND event_type = ?2
+             WHERE agent_id = ?1 AND event_type = ?2 AND is_archived = FALSE
              ORDER BY created_at DESC
              LIMIT ?3",
             )
@@ -253,25 +302,7 @@ impl MemoryStore {
         let memories = stmt
             .query_map(
                 params![self.agent_id.to_string(), event_type, limit as i64],
-                |row| {
-                    Ok(ClientMemory {
-                        id: Some(row.get(0)?),
-                        agent_id: Uuid::parse_str(&row.get::<_, String>(1)?).unwrap_or_default(),
-                        tick_id: row.get(2)?,
-                        event_type: row.get(3)?,
-                        content: row.get(4)?,
-                        metadata: row
-                            .get::<_, Option<String>>(5)?
-                            .and_then(|s| serde_json::from_str(&s).ok())
-                            .unwrap_or(Value::Null),
-                        importance_score: row.get(6)?,
-                        sentiment_score: row.get(7)?,
-                        memory_type: row.get(8)?,
-                        is_confirmed: row.get(9)?,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                    })
-                },
+                Self::row_to_memory,
             )
             .context("Failed to execute query")?;
 
@@ -292,6 +323,41 @@ impl MemoryStore {
             .context("Failed to count memories")?;
 
         Ok(count as usize)
+    }
+
+    /// 更新记忆强度（检索时调用，每次访问 +0.1，上限 1.0）
+    pub fn update_strength(&self, id: i64) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE client_memories
+                 SET strength = CASE WHEN strength + 0.1 > 1.0 THEN 1.0 ELSE strength + 0.1 END,
+                     last_accessed_at = CURRENT_TIMESTAMP,
+                     access_count = access_count + 1
+                 WHERE id = ?1",
+                params![id],
+            )
+            .context("Failed to update memory strength")?;
+
+        Ok(())
+    }
+
+    /// 衰减所有未归档记忆的强度（遗忘机制调用）
+    pub fn decay_strength(&self, decay_rate: f32) -> Result<usize> {
+        self.conn
+            .execute(
+                "UPDATE client_memories
+                 SET strength = strength * ?1
+                 WHERE agent_id = ?2 AND is_archived = FALSE",
+                params![decay_rate, self.agent_id.to_string()],
+            )
+            .context("Failed to decay memory strength")?;
+
+        let changes: i64 = self
+            .conn
+            .query_row("SELECT changes()", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        Ok(changes as usize)
     }
 
     /// 清理旧记忆（保留最近 N 条）
@@ -321,6 +387,86 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// 归档低强度记忆（strength < threshold）
+    pub fn archive_weak_memories(&self, threshold: f32) -> Result<usize> {
+        self.conn
+            .execute(
+                "UPDATE client_memories
+                 SET is_archived = TRUE
+                 WHERE agent_id = ?1
+                   AND strength < ?2
+                   AND is_archived = FALSE",
+                params![self.agent_id.to_string(), threshold],
+            )
+            .context("Failed to archive weak memories")?;
+
+        let changes: i64 = self
+            .conn
+            .query_row("SELECT changes()", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        Ok(changes as usize)
+    }
+
+    /// 获取已归档记忆
+    pub fn get_archived_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM client_memories
+                 WHERE agent_id = ?1 AND is_archived = TRUE
+                 ORDER BY created_at DESC
+                 LIMIT ?2",
+            )
+            .context("Failed to prepare archived query")?;
+
+        let memories = stmt
+            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
+            .context("Failed to execute archived query")?;
+
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
+    /// 获取所有未归档记忆（遗忘机制使用）
+    pub fn get_all_unarchived(&self) -> Result<Vec<ClientMemory>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM client_memories
+                 WHERE agent_id = ?1 AND is_archived = FALSE
+                 ORDER BY importance_score DESC",
+            )
+            .context("Failed to prepare unarchived query")?;
+
+        let memories = stmt
+            .query_map(params![self.agent_id.to_string()], Self::row_to_memory)
+            .context("Failed to execute unarchived query")?;
+
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
+    /// 根据 ID 获取单条记忆（检索后自动增强）
+    pub fn get_by_id(&self, id: i64) -> Result<Option<ClientMemory>> {
+        let result = self
+            .conn
+            .query_row(
+                "SELECT * FROM client_memories WHERE id = ?1",
+                params![id],
+                Self::row_to_memory,
+            )
+            .optional()?;
+
+        if result.is_some() {
+            self.update_strength(id)?;
+        }
+
+        Ok(result)
+    }
+
     /// 获取数据库路径
     pub fn db_path(&self) -> &Path {
         &self.db_path
@@ -329,6 +475,52 @@ impl MemoryStore {
     /// 获取 Agent ID
     pub fn agent_id(&self) -> Uuid {
         self.agent_id
+    }
+
+    /// 获取已归档记忆数量（直接 COUNT，不加载全量数据）
+    pub fn count_archived(&self) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM client_memories WHERE agent_id = ?1 AND is_archived = TRUE",
+                params![self.agent_id.to_string()],
+                |row| row.get(0),
+            )
+            .context("Failed to count archived memories")?;
+
+        Ok(count as usize)
+    }
+
+    /// 批量归档指定 ID 的记忆
+    pub fn archive_by_ids(&self, ids: &[i64]) -> Result<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let query = format!(
+            "UPDATE client_memories SET is_archived = TRUE WHERE agent_id = ?1 AND id IN ({})",
+            placeholders.join(",")
+        );
+
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(self.agent_id.to_string())];
+        for &id in ids {
+            params_vec.push(Box::new(id));
+        }
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        self.conn
+            .execute(&query, params_refs.as_slice())
+            .context("Failed to archive memories by ids")?;
+
+        let changes: i64 = self
+            .conn
+            .query_row("SELECT changes()", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        Ok(changes as usize)
     }
 }
 
@@ -359,6 +551,14 @@ pub struct ClientMemory {
     pub created_at: String,
     /// 更新时间
     pub updated_at: String,
+    /// 记忆强度（0.0-1.0，用于遗忘计算）
+    pub strength: f32,
+    /// 最后访问时间（RFC3339）
+    pub last_accessed_at: Option<String>,
+    /// 访问次数
+    pub access_count: i32,
+    /// 是否已归档
+    pub is_archived: bool,
 }
 
 impl ClientMemory {
@@ -377,6 +577,10 @@ impl ClientMemory {
             is_confirmed: true,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
+            strength: 0.5,
+            last_accessed_at: None,
+            access_count: 0,
+            is_archived: false,
         }
     }
 

@@ -9,15 +9,14 @@
 //   4. 决策 (Decision)     ─┘ LLM Call 2（合并）
 //   5. 验证 (Validation)
 //      5a. CognitiveValidator 认知链质量审查（本文件，重试循环内）
-//      5b. ReflectorSoul 规则/道德审查（lifecycle.rs，外部）
+//      5b. ReflectorSoul 规则/世界观审查（lifecycle.rs，外部）
 
-use crate::soul::actor::CognitiveEngine;
+use crate::soul::actor::{CognitiveChain, CognitiveEngine};
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;
 use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 /// Cognitive 决策配置
 pub struct CognitiveDecisionConfig {
@@ -35,7 +34,6 @@ impl Default for CognitiveDecisionConfig {
 ///
 /// 使用认知引擎进行决策（5 阶段管线，2 次合并 LLM 调用）
 pub fn cognitive_decision(
-    agent_id: Uuid,
     engine: Arc<CognitiveEngine>,
     _config: CognitiveDecisionConfig,
 ) -> impl Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
@@ -49,38 +47,57 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-                    Intent::new(agent_id, world_state.tick_id, "idle", None)
-                        .with_thought(format!("认知失败: {}", e))
+                    Intent::new(
+                        world_state.agent_id.unwrap_or_default(),
+                        world_state.tick_id,
+                        "idle",
+                        None,
+                    )
+                    .with_thought(format!("认知失败: {}", e))
                 }
             }
         })
     }
 }
 
-pub fn cognitive_decision_with_retry(
-    agent_id: Uuid,
+/// 创建带 CognitiveChain 返回的认知决策函数
+///
+/// 使用认知引擎进行决策，返回 (Intent, Option<CognitiveChain>) 元组。
+/// CognitiveChain 供天魂翻译时获取认知上下文辅助指代消解。
+pub fn cognitive_decision_with_chain(
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
-) -> impl Fn(&WorldState, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
-    move |world_state: &WorldState, feedback: Option<&str>| {
+) -> impl Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
++ Send
++ Sync
++ 'static {
+    move |world_state: &WorldState, memory_context: &str, feedback: Option<&str>| {
         let engine = engine.clone();
         let world_state = world_state.clone();
+        let memory_context = memory_context.to_string();
         let feedback = feedback.map(|s| s.to_string());
 
         Box::pin(async move {
             let mut last_error = String::new();
+            let mut last_chain: Option<CognitiveChain> = None;
 
             for attempt in 0..=max_retries {
                 match engine
-                    .think_with_memory_and_feedback(&world_state, "", feedback.as_deref())
+                    .think_with_memory_and_feedback(
+                        &world_state,
+                        &memory_context,
+                        feedback.as_deref(),
+                    )
                     .await
                 {
                     Ok(chain) => {
+                        let final_intent = chain.final_intent.clone();
+                        last_chain = Some(chain.clone());
                         // CognitiveValidator: 验证认知链质量
                         let validator = CognitiveValidator::new(chain.persona.clone());
                         let validation = validator.validate(&chain);
                         if validation.is_valid {
-                            return chain.final_intent;
+                            return (final_intent, Some(chain));
                         }
 
                         let reason = validation.reason.unwrap_or_default();
@@ -97,7 +114,7 @@ pub fn cognitive_decision_with_retry(
                             warn!(
                                 "[cognitive] Max retries reached, using intent despite validation failure"
                             );
-                            return chain.final_intent;
+                            return (final_intent, Some(chain));
                         }
                     }
                     Err(e) => {
@@ -107,8 +124,14 @@ pub fn cognitive_decision_with_retry(
                 }
             }
 
-            Intent::new(agent_id, world_state.tick_id, "idle", None)
-                .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error))
+            let idle_intent = Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "idle",
+                None,
+            )
+            .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
+            (idle_intent, last_chain)
         })
     }
 }

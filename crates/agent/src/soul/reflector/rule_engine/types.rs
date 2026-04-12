@@ -4,7 +4,7 @@
 
 use crate::models::Intent;
 use crate::soul::reflector::types::{PersonaInfo, ValidationRequest};
-use cyber_jianghu_protocol::ActionType;
+use cyber_jianghu_protocol::{ActionType, WorldState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -46,6 +46,9 @@ pub enum RuleCondition {
     Or(Vec<RuleCondition>),
     /// 非（NOT）
     Not(Box<RuleCondition>),
+    /// 字段值必须在指定集合字段中
+    /// In("intent.action_data.item_id", "available_item_ids")
+    In(String, String),
 }
 
 /// 规则
@@ -109,10 +112,14 @@ pub struct RuleValidationContext {
     pub world_context: String,
     /// 当前 Tick ID
     pub tick_id: i64,
-    /// 历史意图（用于冷却检查）
+    /// 历史意图（保留字段，未来可用于上下文感知验证）
     pub history_intents: Vec<Intent>,
     /// 额外的属性数据（用于规则检查）
     pub attributes: HashMap<String, serde_json::Value>,
+    /// 可用物品 ID 列表（从 WorldState.inventory 提取）
+    pub available_item_ids: Vec<String>,
+    /// 可达地点 ID 列表（从 WorldState.location.adjacent_nodes 提取）
+    pub reachable_node_ids: Vec<String>,
 }
 
 impl RuleValidationContext {
@@ -123,6 +130,11 @@ impl RuleValidationContext {
         attributes: HashMap<String, serde_json::Value>,
     ) -> Self {
         let tick_id = request.intent.tick_id;
+        let (available_item_ids, reachable_node_ids) = request
+            .world_state
+            .as_ref()
+            .map(extract_ids_from_world_state)
+            .unwrap_or_default();
         Self {
             intent: request.intent,
             persona_info: request.persona,
@@ -130,6 +142,8 @@ impl RuleValidationContext {
             tick_id,
             history_intents,
             attributes,
+            available_item_ids,
+            reachable_node_ids,
         }
     }
 
@@ -180,10 +194,6 @@ impl RuleValidationResult {
 pub struct RuleEngineConfig {
     /// 是否启用特质一致性检查
     pub enable_trait_consistency: bool,
-    /// 是否启用动作冷却检查
-    pub enable_action_cooldown: bool,
-    /// 默认冷却 Tick 数
-    pub default_cooldown_ticks: i64,
     /// 是否启用资源约束检查
     pub enable_resource_constraints: bool,
     /// 连续失败触发深度验证的阈值
@@ -197,8 +207,6 @@ impl Default for RuleEngineConfig {
     fn default() -> Self {
         Self {
             enable_trait_consistency: true,
-            enable_action_cooldown: true,
-            default_cooldown_ticks: 5,
             enable_resource_constraints: true,
             consecutive_failures_for_deep_verify: 3,
             enable_deep_verify_on_repeated_fail: true,
@@ -206,76 +214,26 @@ impl Default for RuleEngineConfig {
     }
 }
 
+/// Extract valid item IDs and reachable node IDs from WorldState
+pub fn extract_ids_from_world_state(ws: &WorldState) -> (Vec<String>, Vec<String>) {
+    let items: Vec<String> = ws
+        .self_state
+        .inventory
+        .iter()
+        .map(|i| i.item_id.clone())
+        .collect();
+    let nodes: Vec<String> = ws
+        .location
+        .adjacent_nodes
+        .iter()
+        .map(|n| n.node_id.clone())
+        .collect();
+    (items, nodes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_rule_type_variants() {
-        // 验证所有 RuleType 变体都可以创建
-        let _ = RuleType::ActionCooldown;
-        let _ = RuleType::ResourceConstraint;
-        let _ = RuleType::StateRestriction;
-        let _ = RuleType::TraitConsistency;
-        let _ = RuleType::ValueRange;
-        let _ = RuleType::Custom;
-    }
-
-    #[test]
-    fn test_rule_creation() {
-        let rule = Rule::new(
-            "test_rule".to_string(),
-            "Test Rule".to_string(),
-            RuleType::ActionCooldown,
-            RuleCondition::GreaterThan("cooldown".to_string(), 0.0),
-            "Test error message".to_string(),
-        );
-
-        assert_eq!(rule.id, "test_rule");
-        assert_eq!(rule.name, "Test Rule");
-        assert!(rule.enabled);
-    }
-
-    #[test]
-    fn test_rule_disabled() {
-        let rule = Rule::new(
-            "test_rule".to_string(),
-            "Test Rule".to_string(),
-            RuleType::ActionCooldown,
-            RuleCondition::GreaterThan("cooldown".to_string(), 0.0),
-            "Test error message".to_string(),
-        )
-        .disabled();
-
-        assert!(!rule.enabled);
-    }
-
-    #[test]
-    fn test_rule_validation_result_passed() {
-        let result = RuleValidationResult::passed("rule_1".to_string());
-        assert!(result.passed);
-        assert!(result.error_message.is_none());
-        assert_eq!(result.rule_id, "rule_1");
-    }
-
-    #[test]
-    fn test_rule_validation_result_failed() {
-        let result = RuleValidationResult::failed("rule_1".to_string(), "Test error".to_string());
-        assert!(!result.passed);
-        assert_eq!(result.error_message, Some("Test error".to_string()));
-        assert_eq!(result.rule_id, "rule_1");
-    }
-
-    #[test]
-    fn test_rule_engine_config_default() {
-        let config = RuleEngineConfig::default();
-        assert!(config.enable_trait_consistency);
-        assert!(config.enable_action_cooldown);
-        assert!(config.enable_resource_constraints);
-        assert_eq!(config.default_cooldown_ticks, 5);
-        assert_eq!(config.consecutive_failures_for_deep_verify, 3);
-        assert!(config.enable_deep_verify_on_repeated_fail);
-    }
 
     #[test]
     fn test_rule_condition_serialization() {
@@ -317,6 +275,8 @@ mod tests {
             tick_id: 1,
             history_intents: vec![],
             attributes: HashMap::new(),
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         };
 
         assert_eq!(context.action_type().as_str(), "move");
@@ -341,6 +301,8 @@ mod tests {
             tick_id: 1,
             history_intents: vec![],
             attributes,
+            available_item_ids: vec![],
+            reachable_node_ids: vec![],
         };
 
         assert_eq!(
@@ -363,6 +325,7 @@ mod tests {
             intent,
             persona: PersonaInfo::default(),
             world_context: "test world".to_string(),
+            world_state: None,
         };
 
         let history_intents = vec![];

@@ -299,6 +299,11 @@ async fn main() -> Result<()> {
             post(handlers::validation::validate_action),
         )
         .route("/ws", get(websocket::websocket_handler))
+        // Dashboard API - 无需认证
+        .route(
+            "/api/dashboard/actions-map",
+            get(handlers::dashboard::get_actions_map),
+        )
         // Dashboard API (需要 Read 权限)
         .route(
             "/api/dashboard/stats",
@@ -368,6 +373,45 @@ async fn main() -> Result<()> {
                 ),
             ),
         )
+        // Chronicle API (群像传记)
+        .route(
+            "/api/dashboard/chronicles",
+            get(handlers::chronicle::list_chronicles).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/chronicles/{id}",
+            get(handlers::chronicle::get_chronicle).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/chronicles/generate",
+            post(handlers::chronicle::generate_chronicle).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
+        )
+        // LLM Token 统计
+        .route(
+            "/api/dashboard/chronicles/llm-stats",
+            get(handlers::chronicle::get_llm_stats).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        // 异步生成任务进度
+        .route(
+            "/api/dashboard/chronicles/pending",
+            get(handlers::chronicle::get_pending_generations).layer(
+                axum::middleware::from_fn_with_state(state.clone(), handlers::auth::require_read_token),
+            ),
+        )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
         .route(
             "/api/config",
@@ -384,6 +428,42 @@ async fn main() -> Result<()> {
                     handlers::auth::require_read_token,
                 ))
                 .put(handlers::config_editor::update_config_content)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
+        )
+        // LLM Config API (独立于通用配置编辑器)
+        .route(
+            "/api/config/llm",
+            get(handlers::config_llm::get_llm_config)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .post(handlers::config_llm::save_llm_config)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
+        )
+        // LLM Status & Enabled API
+        .route(
+            "/api/config/llm/status",
+            get(handlers::config_llm::get_llm_status)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                )),
+        )
+        .route(
+            "/api/config/llm/enabled",
+            get(handlers::config_llm::get_llm_enabled)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .post(handlers::config_llm::set_llm_enabled)
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_write_token,
@@ -410,6 +490,10 @@ async fn main() -> Result<()> {
         // Auth is enforced client-side: frontend stores token in localStorage,
         // sends it via Bearer header on API calls. API routes have their own middleware.
         .route("/admin/", get(serve_admin_index))
+        .route(
+            "/admin/chronicles",
+            get(|| async { serve_admin_file("chronicles.html") }),
+        )
         .route("/admin/{*path}", get(serve_admin))
         // Redirect /admin to /admin/
         .route(

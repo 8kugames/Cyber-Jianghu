@@ -57,16 +57,68 @@ impl EpisodicMemoryBackend {
             .with_importance(entry.importance_score)
             .with_metadata(entry.metadata);
 
-        memory.is_confirmed = !entry.is_archived;
+        memory.strength = entry.strength;
+        memory.is_archived = entry.is_archived;
+        memory.access_count = entry.access_count as i32;
+        memory.last_accessed_at = entry.last_accessed_at.map(|dt| dt.to_rfc3339());
         memory
     }
 
     /// 将 ClientMemory 转换为 MemoryEntry
     fn memory_to_entry(memory: &ClientMemory) -> MemoryEntry {
-        MemoryEntry::new(memory.agent_id, memory.tick_id, memory.content.clone())
+        let mut entry = MemoryEntry::new(memory.agent_id, memory.tick_id, memory.content.clone())
             .with_event_type(memory.event_type.clone())
             .with_importance(memory.importance_score)
-            .with_metadata(memory.metadata.clone())
+            .with_metadata(memory.metadata.clone());
+
+        // 搬运遗忘机制关键字段
+        entry.strength = memory.strength;
+        entry.is_archived = memory.is_archived;
+        entry.access_count = memory.access_count as u32;
+        entry.last_accessed_at = memory
+            .last_accessed_at
+            .as_ref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        entry
+    }
+
+    /// 搜索已归档记忆（"努力回忆"）
+    pub async fn search_archived(&self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        let archived = store.get_archived_memories(limit)?;
+
+        // 简单 LIKE 过滤
+        let pattern = query.to_lowercase();
+        let results: Vec<MemoryEntry> = archived
+            .iter()
+            .filter(|m| m.content.to_lowercase().contains(&pattern))
+            .map(Self::memory_to_entry)
+            .collect();
+
+        Ok(results)
+    }
+
+    /// 获取已归档记忆数量
+    pub async fn archived_count(&self) -> Result<usize> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        store.count_archived()
+    }
+
+    /// 衰减所有未归档记忆的强度
+    pub async fn decay_strength(&self) -> Result<usize> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        store.decay_strength(0.999)
     }
 }
 
@@ -164,17 +216,19 @@ impl ForgettableBackend for EpisodicMemoryBackend {
     }
 
     async fn archive_memories(&mut self, ids: &[i64]) -> Result<usize> {
-        // 简化实现：直接删除低重要性记忆
-        // 生产环境应该移动到 archived_memories 表
-        let count = ids.len();
-        // TODO: 实现归档逻辑
-        Ok(count)
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        store.archive_by_ids(ids)
     }
 
-    async fn strengthen_memory(&mut self, _id: i64) -> Result<()> {
-        // TODO: 实现记忆强度更新
-        // 需要 MemoryStore 支持更新 strength 字段
-        Ok(())
+    async fn strengthen_memory(&mut self, id: i64) -> Result<()> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        store.update_strength(id)
     }
 }
 

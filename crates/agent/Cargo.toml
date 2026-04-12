@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.0.195"
+version = "0.0.255"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ description = "Agent SDK for Cyber-Jianghu MMO-MAS - connects to game server wit
 
 [dependencies]
 # 协议（包含合并后的 GameError)
-cyber-jianghu-protocol = { version = "0.0.34", path = "../protocol" }
+cyber-jianghu-protocol = { version = "0.0.37", path = "../protocol" }
 
 # 异步运行时
 tokio = { workspace = true }
@@ -70,6 +70,9 @@ instant-distance = "0.6"
 
 # 并行计算
 rayon = "1.10"
+
+# 快速哈希（用于缓存变化检测）
+fnv = "1.0"
 
 # 随机数生成
 rand = { workspace = true }

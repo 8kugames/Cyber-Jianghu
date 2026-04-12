@@ -6,14 +6,16 @@
 // ============================================================================
 
 use anyhow::Result;
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
-use crate::component::memory::tools::{MemoryToolDefinition, MemoryToolResult};
+
 use crate::component::memory::types::MemoryEntry;
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
@@ -24,9 +26,14 @@ use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{PersonaInfo, Validator};
+use crate::soul::translator::IntentTranslator;
+use crate::soul::translator::TranslationResult;
 
 use super::builder::AgentBuilder;
-use super::{DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
+use super::{
+    DecisionCallback, DecisionWithChainCallback, DecisionWithFeedbackCallback,
+    DecisionWithMemoryCallback,
+};
 
 // ============================================================================
 // Agent
@@ -50,6 +57,12 @@ pub struct Agent {
 
     /// 带反馈的决策回调（可选，用于验证器集成）
     pub(crate) decision_with_feedback_callback: Option<DecisionWithFeedbackCallback>,
+
+    /// 带 CognitiveChain 的决策回调（可选，用于天魂翻译时获取人魂认知上下文）
+    ///
+    /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
+    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    pub(crate) decision_with_chain_callback: Option<DecisionWithChainCallback>,
 
     /// 记忆管理器（可选）
     pub(crate) memory_manager: Option<MemoryManager>,
@@ -88,9 +101,6 @@ pub struct Agent {
     /// 允许热重载时更新 LLM Client，决策回调会自动使用新配置
     pub(crate) actor_llm_container: Option<LlmClientContainer>,
 
-    /// 配置重载通知接收通道
-    pub(crate) config_reload_rx: Option<broadcast::Receiver<()>>,
-
     /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 
@@ -106,6 +116,25 @@ pub struct Agent {
     /// 服务器分配的角色名称（注册时由 ServerMessage::Registered.agent_name 填充）
     /// 优先于 character_config.name，解决本地无 character.yaml 时显示"(未创建)"的问题
     pub(crate) server_assigned_name: Option<String>,
+
+    /// 即时事件处理器（处理 ImmediateEvent）
+    pub(crate) immediate_handler: Option<Arc<ImmediateEventHandler>>,
+
+    /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
+    pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,
+
+    /// 即时事件缓冲区（Fn callback 写入，主循环消费写入工作记忆）
+    pub(crate) immediate_event_buffer: Arc<Mutex<Vec<cyber_jianghu_protocol::WorldEvent>>>,
+
+    /// RuleEngine 缓存（避免每 tick 重建）
+    pub(crate) rule_engine: crate::soul::reflector::rule_engine::RuleEngine,
+
+    /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
+    pub(crate) consecutive_idle_count: u32,
+
+    /// 天魂 — 意图翻译器（Cognitive 模式，将叙事意图翻译为格式化 Intent）
+    /// Claw 模式下为 None（外部系统直接提供格式化 Intent）
+    pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl Agent {
@@ -144,6 +173,7 @@ impl Agent {
             decision_callback,
             decision_with_memory_callback: None,
             decision_with_feedback_callback: None,
+            decision_with_chain_callback: None,
             memory_manager: None,
             dialogue_client: None,
             relationship_store: None,
@@ -155,12 +185,17 @@ impl Agent {
             reconnect_rx,
             death_reported: false,
             actor_llm_container: None,
-            config_reload_rx: None,
             http_api_state: None,
             device_config,
             character_config: None,
             cognitive_engine: None,
             server_assigned_name: None,
+            immediate_handler: None,
+            server_error_feedback: Arc::new(Mutex::new(None)),
+            immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
+            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
+            consecutive_idle_count: 0,
+            intent_translator: None,
         }
     }
 
@@ -172,6 +207,37 @@ impl Agent {
             .as_deref()
             .or_else(|| self.character_config.as_ref().map(|c| c.name.as_str()))
             .unwrap_or("(未创建)")
+    }
+
+    /// 从 character.yaml 重新加载人设到认知引擎
+    ///
+    /// 用于注册确认、重连后恢复人设。如果 character.yaml 存在，加载完整人设
+    /// 并刷新 PromptCache；否则仅更新名称。
+    pub(crate) fn reload_character_persona(&mut self, agent_id: Uuid, name: &str) {
+        if let Some(ref engine) = self.cognitive_engine {
+            let server_dir = self.config.server_dir(&self.config.server.ws_url);
+            let char_yaml = server_dir
+                .join("characters")
+                .join(agent_id.to_string())
+                .join("character.yaml");
+
+            if char_yaml.exists() {
+                match crate::config::CharacterConfig::from_file(&char_yaml) {
+                    Ok(char_config) => {
+                        let prompt = char_config.generate_system_prompt();
+                        engine.update_persona(name, &prompt);
+                        self.character_config = Some(char_config);
+                        info!("已从 character.yaml 重新加载人设并更新认知引擎");
+                    }
+                    Err(e) => {
+                        warn!("加载 character.yaml 失败，仅更新名称: {}", e);
+                        engine.update_agent_name(name);
+                    }
+                }
+            } else {
+                engine.update_agent_name(name);
+            }
+        }
     }
 
     /// 连接服务端
@@ -280,6 +346,15 @@ impl Agent {
         self.validator.is_some()
     }
 
+    /// 设置即时事件处理器
+    pub fn set_immediate_handler(&mut self, handler: Arc<ImmediateEventHandler>) {
+        self.immediate_handler = Some(handler);
+        info!(
+            "Immediate event handler set for agent '{}'",
+            self.character_name()
+        );
+    }
+
     /// 获取记忆上下文字符串（用于 LLM）
     pub async fn get_memory_context(&self) -> String {
         if let Some(ref manager) = self.memory_manager {
@@ -359,23 +434,6 @@ impl Agent {
         self.character_config.as_ref()
     }
 
-    /// 获取所有记忆工具定义（供 LLM function calling）
-    pub fn get_memory_tools() -> Vec<MemoryToolDefinition> {
-        super::tools::get_memory_tools()
-    }
-
-    /// 执行工具调用
-    #[allow(dead_code)]
-    async fn execute_tool_call(
-        &mut self,
-        world_state: &crate::models::WorldState,
-        tool_name: &str,
-        arguments: &str,
-    ) -> MemoryToolResult {
-        super::tools::execute_tool_call(&mut self.memory_manager, world_state, tool_name, arguments)
-            .await
-    }
-
     /// 处理世界事件并更新记忆
     pub async fn process_events(&mut self, events: &[crate::models::WorldEvent]) -> Result<()> {
         if let Some(ref mut manager) = self.memory_manager {
@@ -409,6 +467,127 @@ impl Agent {
             .unwrap_or(Duration::from_secs(60))
     }
 
+    /// 检查连续 idle 计数是否达到阈值，触发模型切换
+    pub(crate) async fn maybe_rotate_model(&mut self) {
+        let threshold = self.config.llm.idle_rotate_threshold;
+        if threshold == 0 || self.consecutive_idle_count < threshold {
+            return;
+        }
+        let count = self.consecutive_idle_count;
+        if let Some(ref container) = self.actor_llm_container {
+            let llm = container.read().await;
+            if llm.force_rotate_model() {
+                warn!("连续 {} tick idle，已切换到下一个 LLM 模型", count);
+                // 切换后重置计数器，给新模型机会
+                self.consecutive_idle_count = 0;
+            }
+        }
+    }
+
+    /// 天魂翻译：将人魂的叙事意图翻译为服务端格式化 Intent
+    ///
+    /// 如果 intent 的 action_type 为 "narrative"（人魂标记），调用天魂翻译。
+    /// 否则直接返回原 intent（Claw 模式或已经是格式化 Intent）。
+    ///
+    /// 翻译失败时返回 idle intent 作为降级。
+    ///
+    /// # Arguments
+    /// * `intent` - 人魂输出的叙事意图
+    /// * `world_state` - 当前世界状态
+    /// * `cognitive_chain` - 人魂的认知链（可选，用于辅助天魂指代消解）
+    pub(crate) async fn translate_intent(
+        &self,
+        intent: Intent,
+        world_state: &WorldState,
+        cognitive_chain: Option<&crate::soul::actor::CognitiveChain>,
+    ) -> TranslationResult {
+        // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
+        if intent.action_type.as_str() != "narrative" {
+            let thought = intent.thought_log.clone().unwrap_or_default();
+            return TranslationResult {
+                intent,
+                speech_intent: None,
+                original_narrative: String::new(),
+                original_thought_log: thought,
+                success: true,
+                error: None,
+            };
+        }
+
+        // 从 action_data 提取叙事文本（提前提取，避免变量作用域问题）
+        let narrative = intent
+            .action_data
+            .as_ref()
+            .and_then(|d| d.get("narrative"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("");
+
+        let thought_log = intent.thought_log.as_deref().unwrap_or("");
+
+        let translator = match &self.intent_translator {
+            Some(t) => t,
+            None => {
+                tracing::error!(
+                    "人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle"
+                );
+                return TranslationResult {
+                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(intent.thought_log.clone().unwrap_or_default()),
+                    speech_intent: None,
+                    original_narrative: narrative.to_string(),
+                    original_thought_log: thought_log.to_string(),
+                    success: false,
+                    error: Some("IntentTranslator not configured".to_string()),
+                };
+            }
+        };
+
+        if narrative.is_empty() {
+            warn!("人魂 narrative intent 缺少叙事文本，降级为 idle");
+            return TranslationResult {
+                intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                    .with_thought(thought_log.to_string()),
+                speech_intent: None,
+                original_narrative: String::new(),
+                original_thought_log: thought_log.to_string(),
+                success: false,
+                error: Some("Empty narrative".to_string()),
+            };
+        }
+
+        info!("[天魂] 翻译叙事意图: {}", narrative);
+
+        match translator
+            .translate(narrative, thought_log, world_state, cognitive_chain)
+            .await
+        {
+            Ok(result) => {
+                info!(
+                    "[天魂] 翻译完成: action_type={}, action_data={:?}, speech={:?}",
+                    result.intent.action_type,
+                    result.intent.action_data,
+                    result
+                        .speech_intent
+                        .as_ref()
+                        .map(|i| i.action_type.to_string())
+                );
+                result
+            }
+            Err(e) => {
+                warn!("[天魂] 翻译失败: {}, 降级为 idle", e);
+                TranslationResult {
+                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(format!("意图翻译失败: {}", e)),
+                    speech_intent: None,
+                    original_narrative: narrative.to_string(),
+                    original_thought_log: thought_log.to_string(),
+                    success: false,
+                    error: Some(e.to_string()),
+                }
+            }
+        }
+    }
+
     /// 提取人设信息
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
         match &self.character_config {
@@ -437,6 +616,31 @@ impl Agent {
     /// 构建世界上下文
     pub(crate) fn build_world_context(&self, world_state: &crate::models::WorldState) -> String {
         super::utils::build_world_context(world_state, self.lifespan_calculator.as_ref())
+    }
+
+    /// 将地魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈
+    ///
+    /// 人魂不应看到 "item_id 无效" 这样的 meta 信息，
+    /// 只需要知道"想做的事没做成"以及"为什么"的叙事化描述。
+    ///
+    /// 使用 RuleEngine 常量前缀匹配，避免 string.contains 紧耦合。
+    pub(crate) fn narrativize_rejection(reason: &str) -> String {
+        use crate::soul::reflector::rule_engine::engine::{
+            ERR_DRINK_INVALID_ITEM, ERR_EAT_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
+        };
+
+        // RuleEngine 技术性驳回 → 叙事化（用常量前缀匹配）
+        if reason.starts_with(ERR_EAT_INVALID_ITEM) || reason.starts_with(ERR_DRINK_INVALID_ITEM) {
+            "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。"
+                .to_string()
+        } else if reason.starts_with(ERR_MOVE_INVALID_TARGET) {
+            "你想要移动到别处，但发现那条路走不通。也许该重新考虑目的地。".to_string()
+        } else if reason.contains("不在合法列表") {
+            "你想做一件事，但似乎无法如愿。也许该换个行动方式。".to_string()
+        } else {
+            // LLM 驳回（人设/世界观）已经是自然语言，直接使用
+            reason.to_string()
+        }
     }
 
     /// 保存观察者叙事到情景记忆
@@ -483,57 +687,268 @@ impl Agent {
         }
     }
 
+    /// RuleEngine 规则校验（确定性，不经过 LLM）
+    ///
+    /// 使用默认规则集（eat/drink item_id 有效性、move 目标可达性等）。
+    /// 从 WorldState 提取背包物品 ID 和可达地点 ID 供规则匹配。
+    async fn validate_with_rule_engine(
+        &self,
+        intent: &Intent,
+        world_state: &WorldState,
+    ) -> Result<(), String> {
+        use crate::soul::reflector::rule_engine::{
+            RuleValidationContext, types::extract_ids_from_world_state,
+        };
+
+        let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
+
+        let context = RuleValidationContext {
+            intent: intent.clone(),
+            persona_info: self.extract_persona(),
+            world_context: String::new(),
+            tick_id: world_state.tick_id,
+            history_intents: vec![],
+            attributes: std::collections::HashMap::new(),
+            available_item_ids,
+            reachable_node_ids,
+        };
+
+        match self.rule_engine.validate_context(&context).await {
+            Ok(crate::soul::reflector::ValidationResult::Approved { .. }) => Ok(()),
+            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => {
+                // 三魂架构中，驳回信息会在 lifecycle 中被 narrativize_rejection 叙事化
+                // 不在此处增强 ID 信息——人魂不应看到任何技术性 meta 数据
+                Err(reason)
+            }
+            Err(e) => {
+                // 规则引擎出错时放行（fail-open）
+                tracing::warn!("RuleEngine error, bypassing: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    /// 确定性 action_type 校验（不经过 LLM）
+    ///
+    /// 从本地 actions.json 加载合法 action 列表，检查 intent 的 action_type 是否在列。
+    /// idle 动作始终放行。
+    /// actions.json 不存在时放行（无数据不做拦截）。
+    fn validate_action_type(&self, intent: &Intent) -> Result<(), String> {
+        // idle 始终合法
+        if intent.action_type.as_str() == "idle" {
+            return Ok(());
+        }
+
+        // Fail-safe: "narrative" sentinel 绝不应到达此处（天魂应已翻译）
+        // 如果到达，说明 translate_intent 路径有 bug
+        if intent.action_type.as_str() == "narrative" {
+            tracing::error!(
+                "narrative sentinel 泄漏到 validate_action_type（天魂翻译未执行？），强制拒绝"
+            );
+            return Err("意图格式异常：narrative 未被翻译".to_string());
+        }
+
+        let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
+        if actions.is_empty() {
+            // 无数据不做拦截
+            return Ok(());
+        }
+
+        let valid_names: Vec<&str> = actions.iter().map(|a| a.action.as_str()).collect();
+        if valid_names.contains(&intent.action_type.as_str()) {
+            return Ok(());
+        }
+
+        // 找最接近的合法 action（简单前缀匹配 + 包含匹配）
+        let action_lower = intent.action_type.as_str().to_lowercase();
+        let suggestion = valid_names
+            .iter()
+            .find(|name| {
+                let name_lower = name.to_lowercase();
+                name_lower.contains(&action_lower) || action_lower.contains(&name_lower)
+            })
+            .unwrap_or(&"idle");
+
+        Err(format!(
+            "action '{}' 不在合法列表中，合法值: [{}]，最接近: '{}'",
+            intent.action_type,
+            valid_names.join(", "),
+            suggestion,
+        ))
+    }
+
     /// ReflectorSoul 同步审查 Intent
     ///
-    /// 单次 LLM 调用，无 retry 循环。
-    /// 审查通过返回原始 Intent，审查拒绝返回 idle Intent。
-    /// LLM 错误时 fail-open（自动通过）。
+    /// 三层审查，规则型在 LLM 之前：
+    /// 1. action_type 确定性校验：是否在合法动作列表中
+    /// 2. RuleEngine 规则校验：eat/drink item_id 有效性、move 目标可达性等
+    /// 3. LLM 审查：人设/世界观合规
+    ///
+    /// 每层结果作为 LayerResult 返回，调用方聚合为 Vec<LayerResult> 传入 ReflectorResult。
     pub async fn validate_with_reflector(
         &mut self,
         intent: Intent,
         world_state: &WorldState,
-    ) -> Result<Intent> {
+    ) -> Result<ReflectorResult> {
+        let mut layers = Vec::with_capacity(3);
+
+        // 第一层：action_type 确定性校验（不经过 LLM）
+        match self.validate_action_type(&intent) {
+            Ok(()) => {
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: true,
+                    detail: None,
+                });
+            }
+            Err(e) => {
+                warn!("Action type validation failed: {}", e);
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
+        }
+
+        // 第二层：RuleEngine 规则校验（确定性，不经过 LLM）
+        match self.validate_with_rule_engine(&intent, world_state).await {
+            Ok(()) => {
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: true,
+                    detail: None,
+                });
+            }
+            Err(e) => {
+                warn!("Rule engine validation failed: {}", e);
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
+        }
+
+        // 第三层：LLM 审查（人设/世界观）
         let validator = match &self.validator {
             Some(v) => v,
-            None => return Ok(intent),
+            None => {
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: None,
+                });
+                return Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: None,
+                });
+            }
         };
 
         let request = crate::soul::reflector::ValidationRequest {
             intent: intent.clone(),
             persona: self.extract_persona(),
             world_context: self.build_world_context(world_state),
+            world_state: Some(world_state.clone()),
         };
 
-        // 验证意图（验证失败时降级为通过，不中断 agent）
+        // LLM 错误时 fail-open（自动通过）
         let validation_result = match validator.validate(request).await {
             Ok(result) => result,
             Err(e) => {
                 warn!("ReflectorSoul validation error, auto-approving: {}", e);
-                self.last_rejection_reason = None;
-                return Ok(intent);
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: Some(format!("LLM error, bypassed: {}", e)),
+                });
+                return Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: None,
+                });
             }
         };
 
         match validation_result {
-            crate::soul::reflector::ValidationResult::Approved { reason, narrative } => {
-                info!("ReflectorSoul approved: {:?}", reason);
-                self.save_observer_narrative(world_state.tick_id, &narrative)
-                    .await?;
-                self.last_rejection_reason = None;
-                Ok(intent)
+            crate::soul::reflector::ValidationResult::Approved {
+                reason: _,
+                narrative,
+            } => {
+                info!("ReflectorSoul approved");
+                let narrative_opt = if !narrative.is_empty() {
+                    self.save_observer_narrative(world_state.tick_id, &narrative)
+                        .await
+                        .ok();
+                    Some(narrative)
+                } else {
+                    None
+                };
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: None,
+                });
+                Ok(ReflectorResult::Approved {
+                    intent,
+                    layers,
+                    narrative: narrative_opt,
+                })
             }
             crate::soul::reflector::ValidationResult::Rejected {
                 reason,
-                rejection_type,
+                rejection_type: _,
             } => {
-                warn!("ReflectorSoul rejected: {} [{:?}]", reason, rejection_type);
-                self.last_rejection_reason = Some(reason.clone());
-                let agent_id = self.client.agent_id().await.unwrap_or_default();
-                Ok(Intent::new(agent_id, world_state.tick_id, "idle", None)
-                    .with_thought(format!("被反思之魂驳回: {}", reason)))
+                warn!("ReflectorSoul rejected: {}", reason);
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                Ok(ReflectorResult::Rejected { reason, layers })
             }
         }
     }
+
+    /// 获取三魂循环记录器（如果可用）
+    /// 获取当前角色的三魂记录器（从注册表按需加载）
+    pub(crate) async fn soul_recorder(
+        &self,
+    ) -> Option<Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
+        let state = self.http_api_state.as_ref()?;
+        let agent_id = *state.agent_id.read().await;
+        state.soul_recorder_for(agent_id).await
+    }
+}
+
+/// 地魂单层审查结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LayerResult {
+    /// 层标识
+    pub layer: &'static str,
+    /// 是否通过
+    pub passed: bool,
+    /// 详情，通过时为 None，驳回时包含原因
+    pub detail: Option<String>,
+}
+
+/// ReflectorSoul 审查结果
+pub enum ReflectorResult {
+    /// 审查通过，携带修正后的 Intent、三层中间结果和叙事化摘要
+    Approved {
+        intent: Intent,
+        layers: Vec<LayerResult>,
+        narrative: Option<String>,
+    },
+    /// 审查拒绝，携带叙事化原因和三层中间结果
+    Rejected {
+        reason: String,
+        layers: Vec<LayerResult>,
+    },
 }
 
 /// 人设验证结果

@@ -149,6 +149,8 @@ pub struct TradeData {
     pub target_agent_id: String,
     /// 物品 ID
     pub item_id: String,
+    /// 物品数量
+    pub quantity: i32,
     /// 价格（单位：两银子）
     pub price: i32,
 }

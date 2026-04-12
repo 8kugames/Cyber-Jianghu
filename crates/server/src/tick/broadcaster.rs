@@ -77,21 +77,22 @@ impl Broadcaster {
             connections.values().map(|c| c.agent_id).collect()
         };
 
-        // 批量加载所有 Agent 的背包
-        let mut agent_inventories = HashMap::new();
-        for agent_state in agent_states {
-            match crate::inventory::InventoryManager::get_all_items(db_pool, agent_state.agent_id)
-                .await
-            {
-                Ok(items) => {
-                    // 转换为 protocol::InventoryItem
+        // 批量加载所有 Agent 的背包（单次 DB 查询，解决 N+1 问题）
+        let agent_ids: Vec<Uuid> = agent_states.iter().map(|s| s.agent_id).collect();
+        let agent_inventories = match crate::inventory::InventoryManager::get_all_items_batch(
+            db_pool, &agent_ids,
+        )
+        .await
+        {
+            Ok(batch) => {
+                let mut map: HashMap<Uuid, Vec<crate::models::InventoryItem>> = HashMap::new();
+                for (agent_id, items) in batch {
                     let proto_items: Vec<crate::models::InventoryItem> = items
                         .into_iter()
                         .map(|item| {
                             let name = ItemRegistry::get(&item.item_id)
                                 .map(|config| config.name)
                                 .unwrap_or_else(|| item.item_id.clone());
-
                             crate::models::InventoryItem {
                                 item_id: item.item_id.clone(),
                                 name,
@@ -100,13 +101,31 @@ impl Broadcaster {
                             }
                         })
                         .collect();
-                    agent_inventories.insert(agent_state.agent_id, proto_items);
+                    map.insert(agent_id, proto_items);
                 }
-                Err(e) => {
-                    warn!("加载 Agent {} 背包失败: {}", agent_state.agent_id, e);
-                }
+                map
             }
-        }
+            Err(e) => {
+                warn!("批量加载背包失败: {}", e);
+                HashMap::new()
+            }
+        };
+
+        // 批量加载所有节点的地面物品（单次 DB 查询）
+        let node_ids: Vec<String> = agent_states
+            .iter()
+            .map(|s| s.node_id.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let ground_items_map = match crate::db::get_ground_items_by_nodes(db_pool, &node_ids).await
+        {
+            Ok(map) => map,
+            Err(e) => {
+                warn!("批量加载地面物品失败: {}", e);
+                HashMap::new()
+            }
+        };
 
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
@@ -117,6 +136,26 @@ impl Broadcaster {
                 .cloned()
                 .unwrap_or_default();
 
+            let nearby_items = ground_items_map
+                .get(&agent_state.node_id)
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|gi| {
+                            let name = ItemRegistry::get(&gi.item_id)
+                                .map(|c| c.name.clone())
+                                .unwrap_or_else(|| gi.item_id.clone());
+                            cyber_jianghu_protocol::SceneItem {
+                                item_id: gi.item_id.clone(),
+                                name,
+                                quantity: gi.quantity,
+                                item_type: String::new(),
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let world_state = self.build_world_state_for_agent(
                 agent_state,
                 tick_id,
@@ -125,6 +164,7 @@ impl Broadcaster {
                 agent_states,
                 &agent_names,
                 inventory,
+                nearby_items,
                 &online_agent_ids,
                 game_data_cache,
                 closed_dialogue_records,
@@ -163,6 +203,7 @@ impl Broadcaster {
         all_agent_states: &[AgentState],
         agent_names: &HashMap<Uuid, String>,
         inventory: Vec<crate::models::InventoryItem>,
+        nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
         closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
@@ -360,8 +401,7 @@ impl Broadcaster {
                 }
             },
             entities, // 包含同节点的其他Agent
-            // 注意：nearby_items 暂未实现，场景物品功能未开发
-            nearby_items: vec![],
+            nearby_items,
             events_log: events, // 传递本 Tick 发生的事件
             private_dialogue_log: closed_dialogue_records.to_vec(), // 上一轮关闭的密语会话记录
             deadline_ms,
@@ -376,7 +416,13 @@ impl Broadcaster {
 fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
     let time_config = crate::game_data::registry::TimeRegistry::get_config();
     if let Some(config) = time_config {
-        let registry = crate::game_data::registry_or_panic();
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("注册表未初始化，使用默认时间: {}", e);
+                return (1, 1, 1, 0);
+            }
+        };
         let real_seconds_per_tick = registry
             .get()
             .game_rules
@@ -413,6 +459,37 @@ fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
     }
 }
 
+/// 向指定 agent 发送任意 ServerMessage
+///
+/// 通用单播函数，通过 agent_id → device_id → WebSocket 连接 发送消息。
+/// 用于 tick processor 的验证错误通知等场景。
+pub async fn send_to_agent(
+    agent_id: Uuid,
+    msg: &cyber_jianghu_protocol::ServerMessage,
+    connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let device_id = {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&agent_id) {
+            Some(&device_id) => device_id,
+            None => return Ok(()), // agent 不在线，静默跳过
+        }
+    };
+
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            return Ok(());
+        }
+        let json = serde_json::to_string(msg)?;
+        let _ = connection
+            .send(axum::extract::ws::Message::Text(json.into()))
+            .await;
+    }
+    Ok(())
+}
+
 impl Default for Broadcaster {
     fn default() -> Self {
         Self::new()
@@ -428,6 +505,7 @@ pub fn build_initial_world_state(
     game_data_cache: &Arc<GameDataCache>,
     deadline_ms: u64,
     initial_inventory: Vec<crate::models::InventoryItem>,
+    nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
     override_tick_id: Option<i64>,
 ) -> crate::models::WorldState {
     let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
@@ -524,7 +602,7 @@ pub fn build_initial_world_state(
             inventory: initial_inventory,
         },
         entities: vec![], // 连接时不含其他 agent
-        nearby_items: vec![],
+        nearby_items,
         events_log: events,
         private_dialogue_log: vec![],
         deadline_ms,

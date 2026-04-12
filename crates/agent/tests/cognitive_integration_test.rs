@@ -9,7 +9,7 @@ use cyber_jianghu_agent::models::WorldState;
 use cyber_jianghu_agent::soul::actor::stages::{
     CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
 };
-use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine, CognitiveEngineConfig};
+use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
 // ============================================================================
@@ -45,8 +45,7 @@ fn make_mock_client() -> MockLlmClient {
         thought_process:
             "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作"
                 .to_string(),
-        action: "use".to_string(),
-        action_data: serde_json::json!({"item_id": "包子"}),
+        narrative_action: "去包子摊买包子充饥".to_string(),
     })
     .unwrap();
 
@@ -65,20 +64,6 @@ fn make_validator() -> CognitiveValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn test_cognitive_engine_config() {
-        let config = CognitiveEngineConfig::default();
-        assert_eq!(config.agent_name, "无名侠客");
-        assert_eq!(config.temperature, 0.7);
-        assert_eq!(config.max_tokens_per_stage, 1024);
-    }
-
-    #[tokio::test]
-    async fn test_cognitive_engine_with_defaults() {
-        let mock = Arc::new(make_mock_client());
-        let _engine = CognitiveEngine::with_defaults(mock);
-    }
 
     #[tokio::test]
     async fn test_cognitive_chain_lifecycle() {

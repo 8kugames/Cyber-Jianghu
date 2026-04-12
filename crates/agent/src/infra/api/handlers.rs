@@ -396,6 +396,25 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 "reviewed_at": "2024-03-19T10:00:15Z"
             })),
         },
+        // === 性能指标 ===
+        ApiEndpoint {
+            path: "/api/v1/metrics".to_string(),
+            method: "GET".to_string(),
+            description: "LLM 性能指标（调用次数、失败率、token 使用）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "llm": [{
+                    "provider": "minimax",
+                    "model": "M2.7-highspeed",
+                    "calls": 1234,
+                    "failures": 5,
+                    "success_rate": "99%",
+                    "prompt_tokens": 100000,
+                    "completion_tokens": 50000,
+                    "total_tokens": 150000
+                }]
+            })),
+        },
     ];
 
     let agent_id = *state.agent_id.read().await;
@@ -594,6 +613,17 @@ pub(super) async fn submit_intent_handler(
 
     let action_type: ActionType = req.action_type.into();
     let action_type_str = action_type.to_string();
+
+    // "narrative" 是三魂架构的内部 sentinel，不应通过 HTTP API 提交
+    if action_type_str == "narrative" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "action_type 'narrative' is an internal sentinel, use a valid action type"
+            })),
+        )
+            .into_response();
+    }
     let intent = if let Some(id_str) = &req.intent_id {
         if let Ok(id) = Uuid::parse_str(id_str) {
             Intent::new_with_id(id, agent_id, tick_id, action_type, req.action_data)
@@ -940,6 +970,19 @@ pub(super) async fn validate_intent_handler(
         .into_response();
     }
 
+    // "narrative" 是三魂架构的内部 sentinel，不应通过 HTTP API 提交
+    if req.action_type.trim() == "narrative" {
+        return Json(ValidateResponse {
+            valid: false,
+            reason: Some(
+                "action_type 'narrative' is an internal sentinel, not a valid action".to_string(),
+            ),
+            rejection_type: None,
+            narrative: None,
+        })
+        .into_response();
+    }
+
     let tick_id = match resolve_tick_id_or_reject(req.tick_id, &state).await {
         Ok(id) => id,
         Err(resp) => return resp,
@@ -985,6 +1028,7 @@ pub(super) async fn validate_intent_handler(
         intent,
         persona: persona_info,
         world_context,
+        world_state: None,
     };
 
     match validator.validate(validation_req).await {
@@ -2045,10 +2089,10 @@ fn enrich_derived_attributes(
                         .rev()
                         .find(|t| (value as i32) >= t.min && (value as i32) <= t.max)
                         .map(|t| t.description.clone())
-                        .unwrap_or_else(|| format!("{}: {:.1}", name, value));
+                        .unwrap_or_else(|| format!("{}: {:.3}", name, value));
                     (name, desc)
                 })
-                .unwrap_or_else(|| (key.clone(), format!("{}: {:.1}", key, value)));
+                .unwrap_or_else(|| (key.clone(), format!("{}: {:.3}", key, value)));
 
             let attr_obj = serde_json::json!({
                 "name": display_name,
@@ -2066,91 +2110,279 @@ fn enrich_derived_attributes(
     }
 }
 
-/// 经历日志条目
-#[derive(Debug, Clone, Serialize)]
-pub struct ExperienceEntry {
-    /// Tick ID
-    pub tick_id: i64,
-    /// 游戏时间
-    pub world_time: Option<serde_json::Value>,
-    /// 事件描述
-    pub event: String,
-    /// 观察者思维链（可选）
-    pub observer_thought: Option<String>,
-    /// 意图摘要（可选）
-    pub intent_summary: Option<String>,
-}
+// ============================================================================
+// 三魂循环记录 API
+// ============================================================================
 
-/// 经历日志响应
+/// Layer 结果条目
 #[derive(Debug, Serialize)]
-pub struct ExperiencesResponse {
-    /// 当前页
-    pub page: u32,
-    /// 每页数量
-    pub limit: u32,
-    /// 总数
-    pub total: u32,
-    /// 是否有更多
-    pub has_more: bool,
-    /// 经历列表
-    pub experiences: Vec<ExperienceEntry>,
+struct LayerResultEntry {
+    layer: String,
+    passed: bool,
+    detail: Option<String>,
 }
 
-/// 获取经历日志（分页）
+/// 人魂记录
+#[derive(Debug, Serialize)]
+struct RenhunEntry {
+    narrative: Option<String>,
+    thought_log: Option<String>,
+}
+
+/// 天魂记录
+#[derive(Debug, Serialize)]
+struct TianhunEntry {
+    action_type: Option<String>,
+    action_data: Option<serde_json::Value>,
+    speech_content: Option<String>,
+    success: bool,
+    error: Option<String>,
+}
+
+/// 地魂记录
+#[derive(Debug, Serialize)]
+struct DihunEntry {
+    result: Option<String>,
+    layers: Vec<LayerResultEntry>,
+    reason: Option<String>,
+    narrative: Option<String>,
+}
+
+/// 最终 Intent 记录
+#[derive(Debug, Serialize)]
+struct FinalIntentEntry {
+    intent_id: Option<String>,
+    action_type: Option<String>,
+    action_data: Option<serde_json::Value>,
+}
+
+/// 单条三魂尝试记录
+#[derive(Debug, Serialize)]
+struct SoulCycleAttemptEntry {
+    tick_id: i64,
+    world_time: Option<serde_json::Value>,
+    created_at: String,
+    attempt: i32,
+    renhun: RenhunEntry,
+    tianhun: TianhunEntry,
+    dihun: DihunEntry,
+    final_intent: Option<FinalIntentEntry>,
+}
+
+/// 即时意图记录
+#[derive(Debug, Serialize)]
+struct ImmediateIntentEntry {
+    intent_id: String,
+    route_type: String,
+    action_type: String,
+    action_data: Option<serde_json::Value>,
+    speech_content: Option<String>,
+    send_status: String,
+    send_error: Option<String>,
+}
+
+/// 三魂循环完整记录响应
+#[derive(Debug, Serialize)]
+struct SoulCyclesResponse {
+    tick_id: i64,
+    attempts: Vec<SoulCycleAttemptEntry>,
+    immediate_intents: Vec<ImmediateIntentEntry>,
+}
+
+/// 三魂循环分页响应（按 tick 分组）
+#[derive(Debug, Serialize)]
+struct SoulCyclesPageResponse {
+    page: u32,
+    limit: u32,
+    total: u32,
+    has_more: bool,
+    records: std::collections::HashMap<String, Vec<SoulCycleAttemptEntry>>,
+    immediate_intents: std::collections::HashMap<String, Vec<ImmediateIntentEntry>>,
+}
+
+/// SoulCycleRecord → SoulCycleAttemptEntry 转换（消除重复代码）
+fn record_to_attempt_entry(
+    r: super::soul_cycle_recorder::SoulCycleRecord,
+) -> SoulCycleAttemptEntry {
+    let action_data: Option<serde_json::Value> = r
+        .tianhun_action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let final_action_data: Option<serde_json::Value> = r
+        .final_action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    let layers = [
+        (r.dihun_layer1_result.as_deref(), "layer1"),
+        (r.dihun_layer2_result.as_deref(), "layer2"),
+        (r.dihun_layer3_result.as_deref(), "layer3"),
+    ]
+    .iter()
+    .map(|(detail, layer)| {
+        let passed = detail.map(|d| d == "通过" || d.is_empty()).unwrap_or(true);
+        LayerResultEntry {
+            layer: layer.to_string(),
+            passed,
+            detail: if passed {
+                None
+            } else {
+                Some(detail.unwrap_or("驳回").to_string())
+            },
+        }
+    })
+    .collect();
+    let world_time: Option<serde_json::Value> = r.world_time.as_ref().and_then(|s| {
+        serde_json::from_str(s)
+            .ok()
+            .or_else(|| Some(serde_json::Value::String(s.clone())))
+    });
+
+    SoulCycleAttemptEntry {
+        tick_id: r.tick_id,
+        world_time,
+        created_at: r.created_at.to_rfc3339(),
+        attempt: r.attempt,
+        renhun: RenhunEntry {
+            narrative: r.renhun_narrative,
+            thought_log: r.renhun_thought_log,
+        },
+        tianhun: TianhunEntry {
+            action_type: r.tianhun_action_type,
+            action_data,
+            speech_content: r.tianhun_speech_content,
+            success: r.tianhun_success,
+            error: r.tianhun_error,
+        },
+        dihun: DihunEntry {
+            result: r.dihun_result,
+            layers,
+            reason: r.dihun_reason,
+            narrative: r.dihun_narrative,
+        },
+        final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
+            intent_id: Some(id),
+            action_type: r.final_action_type,
+            action_data: final_action_data,
+        }),
+    }
+}
+
+/// ImmediateIntentRecord → ImmediateIntentEntry 转换
+fn immediate_record_to_entry(
+    r: super::soul_cycle_recorder::ImmediateIntentRecord,
+) -> ImmediateIntentEntry {
+    let action_data: Option<serde_json::Value> = r
+        .action_data
+        .as_ref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    ImmediateIntentEntry {
+        intent_id: r.intent_id,
+        route_type: r.route_type,
+        action_type: r.action_type,
+        action_data,
+        speech_content: r.speech_content,
+        send_status: r.send_status,
+        send_error: r.send_error,
+    }
+}
+
+/// 获取指定角色的三魂完整记录
 ///
-/// GET /api/v1/character/experiences?page=1&limit=20
-///
-/// 数据来源：IntentHistoryStore（SQLite 持久化，按角色隔离）
-/// - event: WorldState.events_log 中的事件描述
-/// - observer_thought: Observer Agent 审查时的思维链
-/// - intent_summary: Agent 提交 Intent 时的 thought_log
-pub(super) async fn get_experiences_handler(
+/// GET /api/v1/character/soul-cycles?tick_id=123
+/// GET /api/v1/character/soul-cycles?page=1&limit=20
+/// GET /api/v1/character/soul-cycles?agent_id=xxx&page=1&limit=20  # 指定角色
+pub(super) async fn get_soul_cycles_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    let tick_id: Option<i64> = params.get("tick_id").and_then(|s| s.parse().ok());
     let page: u32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
     let limit: u32 = params
         .get("limit")
         .and_then(|s| s.parse().ok())
-        .unwrap_or(20);
+        .unwrap_or(20)
+        .min(50);
 
-    let (entries, total) = {
-        let history_guard = state.intent_history.read().await;
-        match history_guard.as_ref() {
-            Some(history) => match history.get_page(page, limit).await {
-                Ok(result) => result,
-                Err(e) => {
-                    tracing::warn!("[experiences] Failed to query intent history: {}", e);
-                    (vec![], 0)
-                }
-            },
-            None => (vec![], 0),
+    // 确定查询目标角色：优先使用 agent_id 参数，否则用当前角色
+    let target_agent_id = if let Some(id_str) = params.get("agent_id") {
+        match uuid::Uuid::parse_str(id_str) {
+            Ok(id) => id,
+            Err(_) => {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "Invalid agent_id format"})),
+                )
+                    .into_response();
+            }
         }
+    } else {
+        *state.agent_id.read().await
     };
 
-    let experiences: Vec<ExperienceEntry> = entries
-        .into_iter()
-        .map(|e| {
-            let world_time = e.world_time.and_then(|s| serde_json::from_str(&s).ok());
-            ExperienceEntry {
-                tick_id: e.tick_id,
-                world_time,
-                event: e.event.unwrap_or_default(),
-                observer_thought: e.observer_thought,
-                intent_summary: e.thought_log,
-            }
+    let Some(recorder) = state.soul_recorder_for(target_agent_id).await else {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Soul cycle record not found for this agent"})),
+        )
+            .into_response();
+    };
+
+    if let Some(tid) = tick_id {
+        // 按 tick_id 查询
+        let records = recorder.get_by_tick(tid).await;
+        let immediate = recorder.get_immediate_by_tick(tid).await;
+
+        let attempts: Vec<SoulCycleAttemptEntry> =
+            records.into_iter().map(record_to_attempt_entry).collect();
+
+        let immediate_intents: Vec<ImmediateIntentEntry> = immediate
+            .into_iter()
+            .map(immediate_record_to_entry)
+            .collect();
+
+        Json(SoulCyclesResponse {
+            tick_id: tid,
+            attempts,
+            immediate_intents,
         })
-        .collect();
+        .into_response()
+    } else {
+        // 分页查询：按 tick_id 分组
+        let (tick_ids, total) = recorder.get_tick_ids_page(page, limit).await;
 
-    let has_more = (page * limit) < total;
+        // 批量获取所有 tick 的记录和即时意图
+        let all_records = recorder.get_by_ticks(&tick_ids).await;
+        let all_immediate = recorder.get_immediate_by_ticks(&tick_ids).await;
 
-    Json(ExperiencesResponse {
-        page,
-        limit,
-        total,
-        has_more,
-        experiences,
-    })
+        // 按 tick_id 分组记录
+        let mut records_map: std::collections::HashMap<String, Vec<SoulCycleAttemptEntry>> =
+            std::collections::HashMap::new();
+        for r in all_records {
+            let tick_key = r.tick_id.to_string();
+            let entry = record_to_attempt_entry(r);
+            records_map.entry(tick_key).or_default().push(entry);
+        }
+
+        // 按 tick_id 分组即时意图
+        let mut immediate_map: std::collections::HashMap<String, Vec<ImmediateIntentEntry>> =
+            std::collections::HashMap::new();
+        for imm in all_immediate {
+            let tick_key = imm.tick_id.to_string();
+            let entry = immediate_record_to_entry(imm);
+            immediate_map.entry(tick_key).or_default().push(entry);
+        }
+
+        let has_more = (page * limit) < total;
+        Json(SoulCyclesPageResponse {
+            page,
+            limit,
+            total,
+            has_more,
+            records: records_map,
+            immediate_intents: immediate_map,
+        })
+        .into_response()
+    }
 }
 
 /// 转生请求
@@ -3041,6 +3273,70 @@ pub(super) async fn get_config_handler(State(state): State<HttpApiState>) -> imp
     })
 }
 
+/// 获取 LLM 停止状态
+///
+/// GET /api/v1/config/llm-disabled
+pub(super) async fn get_llm_disabled_handler(_state: State<HttpApiState>) -> impl IntoResponse {
+    // 从全局标志读取状态
+    let disabled = crate::component::llm::direct_client::is_llm_disabled();
+    Json(serde_json::json!({"llm_disabled": disabled}))
+}
+
+/// 设置 LLM 停止状态
+///
+/// POST /api/v1/config/llm-disabled
+pub(super) async fn set_llm_disabled_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let disabled = req.get("llm_disabled").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // 立即设置全局标志（立即生效）
+    crate::component::llm::direct_client::set_llm_disabled(disabled);
+
+    // 异步保存配置到文件
+    let config_path = state.config_path.clone();
+    let config_disabled = disabled;
+    tokio::spawn(async move {
+        let mut config = match crate::config::Config::from_file(&config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("[llm-disabled] 读取配置失败: {}", e);
+                return;
+            }
+        };
+        config.runtime.llm_disabled = config_disabled;
+        if let Err(e) = config.save_to_file(&config_path) {
+            error!("[llm-disabled] 保存配置失败: {}", e);
+        }
+    });
+
+    if disabled {
+        tracing::warn!("[llm-disabled] LLM 调用已停止");
+    } else {
+        tracing::info!("[llm-disabled] LLM 调用已恢复");
+    }
+
+    Json(serde_json::json!({
+        "success": true,
+        "llm_disabled": disabled,
+        "message": if disabled { "LLM 调用已停止" } else { "LLM 调用已恢复" }
+    }))
+        .into_response()
+}
+
+/// 获取动作类型到中文描述的映射
+///
+/// GET /api/v1/actions - 返回 action_type -> description 映射
+pub(super) async fn get_actions_handler() -> impl IntoResponse {
+    let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
+    let map: std::collections::HashMap<String, String> = actions
+        .into_iter()
+        .map(|a| (a.action, a.description))
+        .collect();
+    Json(map)
+}
+
 /// GET /api/v1/setup/status - 返回引导状态
 pub(super) async fn setup_status_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let config = match crate::config::Config::from_file(&state.config_path) {
@@ -3168,6 +3464,26 @@ pub(super) async fn reload_config_handler(
                 "[config] 已从文件重载配置: http={}, ws={}",
                 config.server.http_url, config.server.ws_url
             );
+
+            // 重建 LLM Client（clone Arc 后立即释放读锁）
+            let container = {
+                let guard = state.llm_container.read().await;
+                guard.clone()
+            };
+            if let Some(container) = container {
+                match crate::component::llm::build_fallback_client(&config.llm) {
+                    Ok(new_client) => {
+                        *container.write().await = new_client;
+                        info!(
+                            "[config] LLM Client 已重建: provider={}, model={:?}",
+                            config.llm.provider, config.llm.model
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("[config] LLM Client 重建失败: {}（保留旧实例）", e);
+                    }
+                }
+            }
 
             let response_config = ConfigResponse {
                 server_http_url: config.server.http_url,
@@ -3731,6 +4047,8 @@ pub(super) async fn update_llm_config_handler(
         model: Some(req.actor.model.clone()),
         temperature: config.llm.temperature,
         max_tokens: config.llm.max_tokens,
+        fallback_models: config.llm.fallback_models.clone(),
+        idle_rotate_threshold: config.llm.idle_rotate_threshold,
     };
 
     // 更新 reflector 配置
@@ -3748,6 +4066,8 @@ pub(super) async fn update_llm_config_handler(
             model: Some(reflector.model.clone()),
             temperature: config.llm.temperature,
             max_tokens: config.llm.max_tokens,
+            fallback_models: Vec::new(),
+            idle_rotate_threshold: config.llm.idle_rotate_threshold,
         });
     }
 
@@ -3964,4 +4284,39 @@ pub(super) async fn death_events_handler(State(state): State<HttpApiState>) -> i
         .header("X-Accel-Buffering", "no")
         .body(body)
         .unwrap()
+}
+
+// ============================================================================
+// LLM Metrics
+// ============================================================================
+
+/// GET /api/v1/metrics — LLM 性能指标
+pub async fn get_metrics_handler() -> Json<serde_json::Value> {
+    use crate::component::llm::snapshot_all_stats;
+
+    let stats = snapshot_all_stats();
+    let models: Vec<serde_json::Value> = stats
+        .iter()
+        .map(|s| {
+            let success_rate = if s.calls > 0 {
+                (s.calls - s.failures) as f64 / s.calls as f64
+            } else {
+                1.0
+            };
+            serde_json::json!({
+                "provider": s.provider,
+                "model": s.model,
+                "calls": s.calls,
+                "failures": s.failures,
+                "success_rate": format!("{:.0}%", success_rate * 100.0),
+                "prompt_tokens": s.prompt_tokens,
+                "completion_tokens": s.completion_tokens,
+                "total_tokens": s.prompt_tokens + s.completion_tokens,
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "llm": models,
+    }))
 }
