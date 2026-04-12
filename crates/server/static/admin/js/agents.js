@@ -18,6 +18,22 @@ async function loadStatusConfigs() {
     }
 }
 
+// Action type display name mapping (loaded from server)
+var actionTypeMap = {};
+async function loadActionTypeMap() {
+    try {
+        var res = await fetch("/api/dashboard/actions-map");
+        if (res.ok) {
+            actionTypeMap = await res.json();
+        }
+    } catch (e) {
+        console.warn("[actions] Failed to load action type map:", e);
+    }
+}
+function getActionTypeDisplay(actionType) {
+    return actionTypeMap[actionType] || actionType;
+}
+
 async function loadAllAgents() {
     try {
         var res = await fetch("/api/dashboard/agents", { headers: getAuthHeaders() });
@@ -274,40 +290,135 @@ function renderExperiences(data) {
 
     var expHtml = data.experiences.map(function (exp) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
-        var actionData = exp.action_data || {};
-        var actionSummary = formatActionSummary(exp.action_type, actionData);
+        var metadata = exp.soul_cycle_metadata;
 
-        var narrativeBlocks = '';
-
-        if (exp.thought_log) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #6c5ce7; background: #f8f4ff; padding: 8px; border-radius: 4px; border-left: 2px solid #6c5ce7;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F916; ActorSoul 思考:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.thought_log) + '</div></div>';
+        if (metadata && metadata.cycles && metadata.cycles.length > 0) {
+            return renderTickCard(exp, metadata, time);
         }
 
-        if (exp.observer_thought) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #e17055; background: #fff4f0; padding: 8px; border-radius: 4px; border-left: 2px solid #e17055;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F9D9; ReflectorSoul 审查:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.observer_thought) + '</div></div>';
-        }
-
-        if (exp.narrative) {
-            narrativeBlocks += '<div style="margin-top: 8px; font-size: 12px; color: #00b894; background: #f0fff4; padding: 8px; border-radius: 4px; border-left: 2px solid #00b894;">' +
-                '<strong style="display: block; margin-bottom: 4px;">&#x1F4DD; 叙事:</strong>' +
-                '<div style="white-space: pre-wrap; word-break: break-word;">' + escapeHtml(exp.narrative) + '</div></div>';
-        }
-
-        return '<div style="border-left: 3px solid var(--accent-color); padding: 12px; margin-bottom: 12px; background: #f8f9fa; border-radius: 0 8px 8px 0;">' +
-            '<div style="display: flex; justify-content: space-between; margin-bottom: 8px;">' +
-            '<span style="font-weight: 600; color: var(--primary-color);">' + escapeHtml(exp.action_type) + '</span>' +
-            '<span style="font-size: 12px; color: #999;">' + time + '</span></div>' +
-            '<div style="font-size: 14px; margin-bottom: 6px;">' + actionSummary + '</div>' +
-            narrativeBlocks +
-            (exp.result ? '<div style="font-size: 13px; color: #27ae60; font-style: italic; background: white; padding: 8px; border-radius: 4px; margin-top: 8px;"><strong>结果:</strong> ' + escapeHtml(exp.result) + '</div>' : '') +
-            '</div>';
+        return renderLegacyTickCard(exp, time);
     }).join("");
 
-    return '<div class="experiences-list">' + expHtml + '</div>';
+    return '<div class="experience-list">' + expHtml + '</div>';
+}
+
+// 渲染 Tick 卡片（三魂完整链路）
+function renderTickCard(exp, metadata, time) {
+    var attempts = metadata.cycles || [];
+    var immediate = metadata.immediate_intents || [];
+    var worldTimeDisplay = metadata.world_time || '-';
+
+    var html = '<div class="tick-card">' +
+        '<div class="tick-card-header">' +
+        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+        '<span class="tick-world-time">' + escapeHtml(worldTimeDisplay) + '</span>' +
+        '<span class="tick-real-time">' + time + '</span>' +
+        '</div>';
+
+    // 行动分区
+    html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+    attempts.forEach(function(attempt, idx) {
+        if (attempts.length > 1) {
+            html += '<div class="tick-attempt-label">第 ' + (idx + 1) + ' 次尝试</div>';
+        }
+        html += renderServerSoulInline('人魂', attempt.renhun, 'renhun');
+        html += renderServerSoulInline('天魂', attempt.tianhun, 'tianhun');
+        html += renderServerSoulInline('地魂', attempt.dihun, 'dihun');
+    });
+    html += '</div>';
+
+    // 即时分区
+    if (immediate.length > 0) {
+        html += '<div class="tick-section tick-section-immediate"><div class="tick-section-title">即时</div>';
+        immediate.forEach(function(imm) {
+            html += '<div class="imm-item">' +
+                '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(imm.action_type) +
+                (imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : '') +
+                '</span></div>' +
+                '<span class="imm-status ' + (imm.send_status === 'sent' ? 'sent' : 'failed') + '">' +
+                (imm.send_status === 'sent' ? '已发送' : '失败') + '</span>' +
+                (imm.send_error ? '<span class="imm-error">' + escapeHtml(imm.send_error) + '</span>' : '') +
+                '</div>';
+        });
+        html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+// 渲染单魂内联区块（server 版本）
+function renderServerSoulInline(label, data, type) {
+    if (!data) return '';
+    var html = '<div class="exp-' + type + '"><span class="exp-soul-label">' + label + '</span><div class="exp-soul-content">';
+
+    if (type === 'renhun') {
+        if (data.narrative) html += '<div class="soul-text">' + escapeHtml(data.narrative) + '</div>';
+        if (data.thought_log) html += '<div class="soul-thought">' + escapeHtml(data.thought_log) + '</div>';
+    } else if (type === 'tianhun') {
+        if (!data.success) html += '<div class="soul-error">翻译失败: ' + escapeHtml(data.error || '未知错误') + '</div>';
+        if (data.action_type) {
+            html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(data.action_type));
+            if (data.action_data && Object.keys(data.action_data).length > 0) {
+                html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(data.action_data)) + '</span>';
+            }
+            html += '</div>';
+        }
+        if (data.speech_content) html += '<div class="soul-speech">' + escapeHtml(data.speech_content) + '</div>';
+    } else if (type === 'dihun') {
+        html += '<div class="exp-dihun-result ' + (data.result || '') + '">' + escapeHtml(data.result || '-') + '</div>';
+        if (data.layers && data.layers.length > 0) {
+            html += '<div class="soul-layers">';
+            data.layers.forEach(function(l) {
+                var cls = l.passed ? 'passed' : 'failed';
+                html += '<span class="soul-layer-tag ' + cls + '">' + l.layer +
+                    (l.passed ? '' : ': ' + escapeHtml(l.detail || '')) + '</span>';
+            });
+            html += '</div>';
+        }
+        if (data.reason) html += '<div class="exp-dihun-reason">' + escapeHtml(data.reason) + '</div>';
+        if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
+}
+
+// 渲染旧数据（兜底）
+function renderLegacyTickCard(exp, time) {
+    var html = '<div class="tick-card">' +
+        '<div class="tick-card-header">' +
+        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+        '<span class="tick-world-time">' + escapeHtml((exp.soul_cycle_metadata && exp.soul_cycle_metadata.world_time) || '-') + '</span>' +
+        '<span class="tick-real-time">' + time + '</span>' +
+        '</div>' +
+        '<div class="tick-section">';
+
+    if (exp.thought_log) {
+        html += '<div class="exp-renhun"><span class="exp-soul-label">人魂</span>' +
+            '<span class="exp-soul-content">' + escapeHtml(exp.thought_log) + '</span></div>';
+    }
+    if (exp.action_type) {
+        html += '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>' +
+            '<span class="exp-soul-content">' + escapeHtml(exp.action_type) + '</span></div>';
+    }
+    if (exp.observer_thought) {
+        try {
+            var od = JSON.parse(exp.observer_thought);
+            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-dihun-content">' +
+                '<div class="exp-dihun-result">' + escapeHtml(od.result || '-') + '</div>' +
+                (od.reason ? '<div class="exp-dihun-reason">' + escapeHtml(od.reason) + '</div>' : '') +
+                (od.narrative ? '<div class="exp-dihun-narrative">' + escapeHtml(od.narrative) + '</div>' : '') +
+                '</div></div>';
+        } catch (e) {
+            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span>' +
+                '<span class="exp-soul-content">' + escapeHtml(exp.observer_thought) + '</span></div>';
+        }
+    }
+
+    html += '</div></div>';
+    return html;
 }
 
 function escapeHtml(text) {
@@ -315,34 +426,6 @@ function escapeHtml(text) {
     var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function formatActionSummary(actionType, actionData) {
-    actionData = actionData || {};
-    switch (actionType) {
-        case "move":
-            return "<strong>移动至:</strong> " + escapeHtml(getLocationName(actionData.target_location || actionData.target || "未知"));
-        case "rest":
-            return "<strong>休息恢复</strong>";
-        case "eat":
-            return "<strong>进食:</strong> " + escapeHtml(actionData.item_name || actionData.food || "食物");
-        case "drink":
-            return "<strong>饮水:</strong> " + escapeHtml(actionData.item_name || actionData.drink || "水");
-        case "speak":
-            var content = actionData.content || "...";
-            var preview = content.length > 50 ? content.substring(0, 50) + "..." : content;
-            return '<strong>对话:</strong> "' + escapeHtml(preview) + '"';
-        case "idle":
-            return "<strong>静待时机</strong>";
-        case "craft":
-            return "<strong>制作:</strong> " + escapeHtml(actionData.recipe_id || actionData.recipe || "物品");
-        case "pickup":
-            return "<strong>拾取:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
-        case "drop":
-            return "<strong>丢弃:</strong> " + escapeHtml(actionData.item_name || actionData.item || "物品");
-        default:
-            return "<strong>" + escapeHtml(actionType) + "</strong>";
-    }
 }
 
 async function cleanupOfflineAgents() {

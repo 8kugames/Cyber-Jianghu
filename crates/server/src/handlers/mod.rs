@@ -1,7 +1,9 @@
 pub mod admin_auth;
 pub mod agent;
 pub mod auth;
+pub mod chronicle;
 pub mod config_editor;
+pub mod config_llm;
 pub mod config_reload;
 pub mod context;
 pub mod dashboard;

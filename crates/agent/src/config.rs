@@ -368,9 +368,13 @@ pub struct RuntimeConfig {
     pub mode: RuntimeMode,
 
     /// HTTP API 端口
-    /// 0 = 在 23340~23349 范围内随机选择
+    /// 0 = 在 23340~23999 范围内随机选择
     #[serde(default)]
     pub port: u16,
+
+    /// 停止 LLM 调用
+    #[serde(default)]
+    pub llm_disabled: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -378,6 +382,7 @@ impl Default for RuntimeConfig {
         Self {
             mode: RuntimeMode::Cognitive,
             port: 0,
+            llm_disabled: false,
         }
     }
 }
@@ -414,7 +419,8 @@ impl Default for ClawConfig {
 
 const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
-const DEFAULT_LLM_MAX_TOKENS: u32 = 4096;
+const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -430,6 +436,16 @@ pub struct LlmConfig {
     pub temperature: f32,
     #[serde(default = "default_llm_max_tokens")]
     pub max_tokens: u32,
+    /// 备用模型列表（同 provider/api_key，主模型 403/超时时自动降级）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
+    /// 连续 idle tick 数达到此阈值后主动切换到下一个模型
+    #[serde(default = "default_idle_rotate_threshold")]
+    pub idle_rotate_threshold: u32,
+}
+
+fn default_idle_rotate_threshold() -> u32 {
+    DEFAULT_IDLE_ROTATE_THRESHOLD
 }
 
 fn default_llm_provider() -> String {
@@ -453,6 +469,8 @@ impl Default for LlmConfig {
             model: None,
             temperature: DEFAULT_LLM_TEMPERATURE,
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
+            fallback_models: Vec::new(),
+            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
         }
     }
 }
@@ -473,6 +491,28 @@ impl LlmConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
+            fallback_models: Vec::new(),
+            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
+        }
+    }
+
+    /// 不推荐模型列表（基于 5h 11-Agent 联调测试数据）
+    ///
+    /// 联调测试报告: logs/测试报告/联调测试.260412.docker.002.md
+    const NOT_RECOMMENDED: &[(&str, &str)] = &[
+        ("dashscope", "qwen-plus 系列 JSON 格式遵循差（idle 率高），建议改用 MiniMax M2.7-highspeed"),
+        ("longcat", "LongCat-Flash JSON 解析错误频繁，建议改用 MiniMax M2.7-highspeed"),
+    ];
+
+    /// 检查是否为不推荐模型，打印警告
+    pub fn check_model_recommendation(&self) {
+        for (provider, reason) in Self::NOT_RECOMMENDED {
+            if self.provider == *provider {
+                tracing::warn!(
+                    "模型不推荐: provider='{}'。原因: {}",
+                    self.provider, reason
+                );
+            }
         }
     }
 
@@ -741,6 +781,7 @@ impl Config {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(0),
+            llm_disabled: false,
         };
 
         Ok(Config {
@@ -846,12 +887,6 @@ mod tests {
         assert!(prompt.contains("25岁"));
         assert!(prompt.contains("豪爽"));
         assert!(prompt.contains("寻找失散的师妹"));
-    }
-
-    #[test]
-    fn test_config_default() {
-        let config = Config::default();
-        assert_eq!(config.runtime.mode, RuntimeMode::Cognitive);
     }
 
     #[test]

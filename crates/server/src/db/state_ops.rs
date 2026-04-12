@@ -12,7 +12,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
 
@@ -146,6 +146,9 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 
     info!("批量插入 {} 个Agent状态", states.len());
 
+    // 显式事务：保证原子性，防御未来扩展为多语句操作
+    let mut tx = pool.begin().await.context("开启事务失败")?;
+
     // F-05: 预先序列化所有属性，失败时立即返回错误（禁止静默吞掉）
     let serialized: Vec<(uuid::Uuid, i64, serde_json::Value, String, bool)> = states
         .iter()
@@ -183,7 +186,7 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 
     query_builder
         .build()
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             error!("批量插入Agent状态失败: {}", e);
@@ -191,6 +194,8 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
             e
         })
         .context("批量插入 Agent 状态失败")?;
+
+    tx.commit().await.context("提交事务失败")?;
 
     info!("批量插入完成");
     Ok(())
@@ -301,18 +306,21 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_data, result, thought_log, observer_thought, narrative) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
         b.push_bind(action.tick_id)
             .push_bind(action.agent_id)
             .push_bind(action.action_type.to_string())
+            .push_bind(&action.action_type_display)
             .push_bind(&action.action_data)
             .push_bind(action.result.to_string())
+            .push_bind(&action.result_message)
             .push_bind(&action.thought_log)
             .push_bind(&action.observer_thought)
-            .push_bind(&action.narrative);
+            .push_bind(&action.narrative)
+            .push_bind(&action.soul_cycle_metadata);
     });
 
     query_builder
@@ -322,5 +330,53 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
         .context("批量插入动作日志失败")?;
 
     debug!("批量插入动作日志完成");
+    Ok(())
+}
+
+/// 更新指定 tick 的三魂循环元数据
+///
+/// 由 agent 在 intent 发送后通过 WebSocket SoulCycleReport 消息上报。
+/// 由于 agent_action_logs 已在 tick 结算时插入，此处执行 UPDATE。
+pub async fn update_soul_cycle_metadata(
+    pool: &PgPool,
+    agent_id: uuid::Uuid,
+    tick_id: i64,
+    metadata: &serde_json::Value,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "UPDATE agent_action_logs SET soul_cycle_metadata = $1
+         WHERE agent_id = $2 AND tick_id = $3",
+    )
+    .bind(metadata)
+    .bind(agent_id)
+    .bind(tick_id)
+    .execute(pool)
+    .await
+    .context("更新三魂循环元数据失败")?;
+
+    if rows.rows_affected() == 0 {
+        warn!(
+            "未找到 agent_action_logs 记录，插入新记录：agent_id={}, tick_id={}",
+            agent_id, tick_id
+        );
+        // Upsert：SoulCycleReport 可能先于 tick processor 到达
+        sqlx::query(
+            "INSERT INTO agent_action_logs (agent_id, tick_id, soul_cycle_metadata)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (agent_id, tick_id) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
+        )
+        .bind(agent_id)
+        .bind(tick_id)
+        .bind(metadata)
+        .execute(pool)
+        .await
+        .context("插入三魂循环元数据失败")?;
+    } else {
+        debug!(
+            "已更新 agent_id={}, tick_id={} 的三魂循环元数据",
+            agent_id, tick_id
+        );
+    }
+
     Ok(())
 }

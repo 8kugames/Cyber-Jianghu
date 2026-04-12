@@ -150,3 +150,32 @@ pub async fn get_ground_items_by_node(pool: &PgPool, node_id: &str) -> Result<Ve
 
     Ok(items)
 }
+
+/// 批量获取多个节点的地面物品（单次 DB 查询，解决 N+1 问题）
+pub async fn get_ground_items_by_nodes(
+    pool: &PgPool,
+    node_ids: &[String],
+) -> Result<std::collections::HashMap<String, Vec<GroundItem>>> {
+    if node_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let items = sqlx::query_as::<_, GroundItem>(
+        r#"
+        SELECT id, node_id, item_id, quantity, dropped_by
+        FROM ground_items
+        WHERE node_id = ANY($1)
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(node_ids)
+    .fetch_all(pool)
+    .await
+    .context("批量查询节点地面物品失败")?;
+
+    let mut map: std::collections::HashMap<String, Vec<GroundItem>> =
+        std::collections::HashMap::new();
+    for item in items {
+        map.entry(item.node_id.clone()).or_default().push(item);
+    }
+    Ok(map)
+}

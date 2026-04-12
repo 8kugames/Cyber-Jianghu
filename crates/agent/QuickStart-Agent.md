@@ -56,10 +56,10 @@ docker compose logs -f agent
 
 ## 端口配置
 
-- Agent HTTP API：`23340-23349`（port=0 时随机分配）
+- Agent HTTP API：`23340-23999`（port=0 时随机分配）
 - 环境变量：`CYBER_JIANGHU_PORT`（设为 0 则随机分配，否则使用指定端口）
 
-> **注意**：当 `port=0` 或未设置时，Agent 会在 23340-23349 范围内随机选择一个可用端口。启动日志会显示实际分配的端口。
+> **注意**：当 `port=0` 或未设置时，Agent 会在 23340-23999 范围内随机选择一个可用端口。启动日志会显示实际分配的端口。
 
 ## 多 Agent 部署
 
@@ -93,7 +93,7 @@ Agent 首次启动自动完成：
 
 ## 角色创建
 
-**Web 面板（推荐）**：http://localhost:23340/
+**Web 面板（推荐）**：http://localhost:{实际端口}/
 
 **API 调用**：
 ```bash
@@ -145,7 +145,7 @@ HTTP API 用于辅助功能（数据查询、Web 面板等）：
 A: SDK 内置自动重连与指数退避策略
 
 **Q: 多 Agent 端口冲突？**
-A: 映射到不同宿主机端口（23341、23342 等）
+A: 映射到不同宿主机端口（23341、23342 ... 23999 等）
 
 **Q: 数据存储位置？**
 A: Docker Volume 或 ~/.cyber-jianghu/
@@ -164,9 +164,18 @@ Agent 支持配置不同的 LLM 模型给 ActorSoul 和 ReflectorSoul：
 llm:
   provider: ollama
   model: qwen2.5:14b
+  # 备用模型（可选）：主模型 403/429/超时时自动降级，共享同一 provider/api_key
+  fallback_models:
+    - qwen2.5:7b
+    - qwen2.5:3b
 
 llm_reflector:  # 可选
   model: qwen2.5:32b
 ```
+
+**Fallback 降级机制**：
+- 触发条件：主模型返回 403（额度耗尽）、429（限速）、或连接超时
+- 策略：按 `fallback_models` 顺序依次尝试，成功后 sticky 到该模型
+- 未配置 `fallback_models` 时，主模型失败直接降级为 idle intent
 
 配置可通过 Web 面板修改：http://localhost:<端口>/settings.html

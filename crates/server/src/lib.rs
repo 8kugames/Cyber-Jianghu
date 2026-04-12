@@ -3,6 +3,7 @@
 // ============================================================================
 
 pub mod actions;
+pub mod chronicle;
 pub mod config;
 pub mod db;
 pub mod dialogue;

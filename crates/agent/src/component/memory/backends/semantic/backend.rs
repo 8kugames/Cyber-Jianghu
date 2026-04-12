@@ -134,10 +134,21 @@ impl SemanticMemoryBackend {
     }
 
     fn client_memory_to_entry(memory: ClientMemory) -> MemoryEntry {
-        MemoryEntry::new(memory.agent_id, memory.tick_id, memory.content)
+        let mut entry = MemoryEntry::new(memory.agent_id, memory.tick_id, memory.content)
             .with_event_type(memory.event_type)
             .with_importance(memory.importance_score)
-            .with_metadata(memory.metadata)
+            .with_metadata(memory.metadata);
+
+        entry.id = memory.id;
+        entry.strength = memory.strength;
+        entry.is_archived = memory.is_archived;
+        entry.access_count = memory.access_count as u32;
+        entry.last_accessed_at = memory
+            .last_accessed_at
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        entry
     }
 }
 

@@ -44,7 +44,7 @@ data:
     effects:
       - attribute: "hunger"
         operation: "add"
-        value: 30
+        value: 60
     description: "热腾腾的馒头，吃了不饿。恢复30点饥饿值。"
     stack_size: 10
 
@@ -54,8 +54,8 @@ data:
     effects:
       - attribute: "thirst"
         operation: "add"
-        value: 30
-    description: "清凉的井水，解渴必备。恢复30点口渴值。"
+        value: 60
+    description: "清凉的井水，解渴必备。恢复60点口渴值。"
     stack_size: 10
 
   - item_id: "li_guang_apricot"

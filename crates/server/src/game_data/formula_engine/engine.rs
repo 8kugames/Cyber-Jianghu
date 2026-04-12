@@ -1,128 +1,124 @@
 // ============================================================================
-// 公式引擎 - 主入口和变量替换
+// 公式引擎 - 基于 evalexpr 的统一公式求值
+// ============================================================================
+//
+// 所有公式求值（派生属性、状态上限、伤害计算、恢复公式）都通过本引擎。
+// 统一使用 evalexpr 作为后端，消灭系统中混用的两套逻辑。
 // ============================================================================
 
-use super::context::PrimaryAttributeProvider;
-use super::evaluator::Evaluator;
-use super::parser::Parser;
-use anyhow::Result;
+use anyhow::{Context, Result};
+use evalexpr::ContextWithMutableVariables;
+use std::collections::HashMap;
 
-/// 公式引擎（数据驱动，支持任意属性名）
-#[derive(Debug, Clone)]
+/// 公式引擎
+///
+/// 基于 evalexpr 的薄封装，提供类型安全的公式求值接口。
+/// 无状态结构，可自由 clone 或作为函数参数传递。
+#[derive(Debug, Clone, Default)]
 pub struct FormulaEngine;
 
-impl Default for FormulaEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FormulaEngine {
-    /// 创建新的公式引擎（数据驱动，无需硬编码属性列表）
     pub fn new() -> Self {
         Self
     }
 
-    /// 计算公式
+    /// 求值公式（f64 上下文，返回 f64）
     ///
-    /// # 参数
-    /// - `formula`: 公式字符串，如 "100 + constitution * 2"
-    /// - `provider`: 主属性值提供者
-    ///
-    /// # 返回
-    /// 计算结果（f64）
-    pub fn evaluate(&self, formula: &str, provider: &dyn PrimaryAttributeProvider) -> Result<f64> {
-        // 1. 变量替换
-        let expanded = self.replace_variables(formula, provider)?;
-
-        // 2. 解析并计算
-        let tokens = Parser::tokenize(&expanded)?;
-        let result = Evaluator::evaluate(&tokens)?;
-
-        Ok(result)
+    /// 适用于需要 float 变量的场景（如 weapon_multiplier）。
+    pub fn evaluate(&self, formula: &str, context: &HashMap<String, f64>) -> Result<f64> {
+        let mut eval_ctx = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
+        for (k, v) in context {
+            let _ = eval_ctx.set_value(k.clone(), evalexpr::Value::Float(*v));
+        }
+        match evalexpr::eval_with_context(formula, &eval_ctx) {
+            Ok(evalexpr::Value::Float(v)) => Ok(v),
+            Ok(evalexpr::Value::Int(v)) => Ok(v as f64),
+            Ok(other) => anyhow::bail!("公式返回非数值类型: {:?}", other),
+            Err(e) => anyhow::bail!("公式解析失败: {} - 公式: {}", e, formula),
+        }
     }
 
-    /// 变量替换（数据驱动：动态提取变量名，而非硬编码）
-    fn replace_variables(
+    /// 求值公式（i64 上下文，返回 i32）
+    ///
+    /// 适用于纯整数变量场景（属性恢复、伤害计算等）。
+    /// Float 结果会被 floor 为 i32。
+    pub fn evaluate_int(&self, formula: &str, context: &HashMap<String, i64>) -> Result<i32> {
+        let mut eval_ctx = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
+        for (k, v) in context {
+            let _ = eval_ctx.set_value(k.clone(), evalexpr::Value::Int(*v));
+        }
+        match evalexpr::eval_with_context(formula, &eval_ctx) {
+            Ok(evalexpr::Value::Int(v)) => Ok(v as i32),
+            Ok(evalexpr::Value::Float(v)) => Ok(v.floor() as i32),
+            Ok(other) => anyhow::bail!("公式返回非数值类型: {:?}", other),
+            Err(e) => anyhow::bail!("公式解析失败: {} - 公式: {}", e, formula),
+        }
+    }
+
+    /// 求值带额外 float 变量的公式（i64 基础上下文 + f64 额外变量，返回 i32）
+    ///
+    /// 适用于混合 int/float 变量的场景（如伤害公式中的 weapon_bonus + weapon_multiplier）。
+    pub fn evaluate_int_with_extras(
         &self,
         formula: &str,
-        provider: &dyn PrimaryAttributeProvider,
-    ) -> Result<String> {
-        let mut result = formula.to_string();
-        let mut replaced = std::collections::HashSet::new();
+        int_context: &HashMap<String, i64>,
+        float_extras: &HashMap<String, f64>,
+    ) -> Result<i32> {
+        let mut eval_ctx = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
+        for (k, v) in int_context {
+            let _ = eval_ctx.set_value(k.clone(), evalexpr::Value::Int(*v));
+        }
+        for (k, v) in float_extras {
+            let _ = eval_ctx.set_value(k.clone(), evalexpr::Value::Float(*v));
+        }
+        match evalexpr::eval_with_context(formula, &eval_ctx) {
+            Ok(evalexpr::Value::Int(v)) => Ok(v as i32),
+            Ok(evalexpr::Value::Float(v)) => Ok(v.floor() as i32),
+            Ok(other) => anyhow::bail!("公式返回非数值类型: {:?}", other),
+            Err(e) => anyhow::bail!("公式解析失败: {} - 公式: {}", e, formula),
+        }
+    }
 
-        // 动态提取公式中的所有变量名（字母开头的标识符）
-        let mut chars = formula.chars().peekable();
-        while let Some(&ch) = chars.peek() {
-            if ch.is_alphabetic() {
-                let mut var_name = String::new();
-                while let Some(&c) = chars.peek() {
-                    if c.is_alphabetic() || c == '_' {
-                        var_name.push(c);
-                        chars.next();
-                    } else {
-                        break;
+    /// 求值状态属性上限公式（带 fallback）
+    ///
+    /// 公式求值失败时尝试直接 parse 为 f32，再 fallback 到 default_max。
+    pub fn evaluate_max(
+        &self,
+        formula: &Option<String>,
+        default_max: f32,
+        context: &HashMap<String, i64>,
+    ) -> f32 {
+        if let Some(f) = formula {
+            let mut eval_ctx = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
+            for (k, v) in context {
+                let _ = eval_ctx.set_value(k.clone(), evalexpr::Value::Int(*v));
+            }
+            match evalexpr::eval_with_context(f, &eval_ctx) {
+                Ok(evalexpr::Value::Int(v)) => return v as f32,
+                Ok(evalexpr::Value::Float(v)) => return v as f32,
+                _ => {
+                    // 尝试直接解析为数字（如 "255" 这种纯数字公式）
+                    if let Ok(parsed) = f.parse::<f32>() {
+                        return parsed;
                     }
                 }
-
-                // 检查是否是函数名（已知的函数列表）
-                if matches!(var_name.as_str(), "max" | "min" | "floor" | "ceil") {
-                    continue;
-                }
-
-                // 从 provider 获取变量值
-                if let Some(value) = provider.get_attribute(&var_name) {
-                    // 只替换每个变量一次，避免重复替换
-                    if !replaced.contains(&var_name) {
-                        result = result.replace(&var_name, &value.to_string());
-                        replaced.insert(var_name);
-                    }
-                }
-            } else {
-                chars.next();
             }
         }
-
-        Ok(result)
+        default_max
     }
 
     /// 验证公式语法是否正确
-    ///
-    /// # 参数
-    /// - `formula`: 公式字符串
-    /// - `known_attributes`: 可选的已知属性名列表，用于验证公式中的变量引用
-    ///
-    /// # 返回
-    /// - `Ok(())`: 公式语法正确
-    /// - `Err`: 公式语法错误或包含未知的属性名
     pub fn validate_formula(&self, formula: &str, known_attributes: Option<&[&str]>) -> Result<()> {
-        // 创建一个动态的属性提供者
-        struct DynamicMockProvider<'a> {
-            known_attributes: Option<&'a [&'a str]>,
-        }
+        let mut eval_ctx = evalexpr::HashMapContext::<evalexpr::DefaultNumericTypes>::new();
 
-        impl<'a> PrimaryAttributeProvider for DynamicMockProvider<'a> {
-            fn get_attribute(&self, name: &str) -> Option<u8> {
-                // 如果提供了已知属性列表，只对这些属性返回有效值
-                // 否则对所有看起来像属性名的标识符返回默认值
-                if let Some(attrs) = self.known_attributes {
-                    if attrs.contains(&name) {
-                        Some(10)
-                    } else {
-                        None
-                    }
-                } else {
-                    // 没有提供属性列表时，对所有字母开头的标识符返回默认值
-                    // 这样可以验证公式语法，而不验证具体的属性名
-                    Some(10)
-                }
+        if let Some(attrs) = known_attributes {
+            for attr in attrs {
+                let _ = eval_ctx.set_value(attr.to_string(), evalexpr::Value::Int(10));
             }
         }
 
-        let provider = DynamicMockProvider { known_attributes };
-
-        // 尝试计算公式
-        self.evaluate(formula, &provider)?;
+        evalexpr::eval_with_context(formula, &eval_ctx)
+            .with_context(|| format!("公式验证失败: {}", formula))?;
         Ok(())
     }
 }

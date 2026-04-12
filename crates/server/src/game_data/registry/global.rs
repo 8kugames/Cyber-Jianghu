@@ -24,13 +24,14 @@ pub fn registry() -> Option<&'static GameDataCache> {
     CONFIG_REGISTRY.get().map(|arc| arc.as_ref())
 }
 
-/// 获取全局配置注册表（panic 版本）
+/// 获取全局配置注册表（Result 版本）
 ///
-/// 如果注册表未初始化会 panic
-pub fn registry_or_panic() -> &'static GameDataCache {
+/// 如果注册表未初始化返回错误，避免运行时 panic
+pub fn registry_or_error() -> Result<&'static GameDataCache, String> {
     CONFIG_REGISTRY
         .get()
-        .expect("CONFIG_REGISTRY 未初始化，请先调用 init_registry()")
+        .map(|arc| arc.as_ref())
+        .ok_or_else(|| "CONFIG_REGISTRY 未初始化，请先调用 init_registry()".to_string())
 }
 
 /// 重置全局配置注册表（仅用于测试）

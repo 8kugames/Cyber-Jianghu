@@ -882,12 +882,24 @@ pub async fn cleanup_offline_agents(
 #[derive(Debug, serde::Serialize)]
 pub struct ExperienceEntry {
     pub tick_id: i64,
+    /// 动作原始类型（如 idle, speak）
     pub action_type: String,
+    /// 动作中文描述（如 "休息，不做任何操作"）
+    pub action_type_display: Option<String>,
     pub action_data: serde_json::Value,
+    /// 执行结果（success/failed）
     pub result: Option<String>,
+    /// 执行结果详细描述
+    pub result_message: Option<String>,
+    /// ActorSoul 思考日志
     pub thought_log: Option<String>,
+    /// ReflectorSoul 审查理由
     pub observer_thought: Option<String>,
+    /// 叙事化经历描述
     pub narrative: Option<String>,
+    /// 三魂循环元数据
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub soul_cycle_metadata: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -901,15 +913,54 @@ pub struct ExperiencesResponse {
 }
 
 /// 获取 Agent 经历日志
-/// GET /api/dashboard/agent/{id}/experiences?page=1&limit=20
+///
+/// 支持两种认证方式：
+/// 1. Admin token (Bearer auth): 查看任意角色的经历日志
+/// 2. Device auth (query params): 设备只能查看自己归属角色的经历日志
+///
+/// GET /api/dashboard/agent/{id}/experiences?page=1&limit=20&device_id=xxx&auth_token=yyy
 pub async fn get_agent_experiences(
     State(state): State<Arc<AppState>>,
     Path(agent_id): Path<Uuid>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ExperiencesResponse>, StatusCode> {
+    // 设备认证：如果提供了 device_id 和 auth_token，使用设备归属校验
+    if let (Some(device_id_str), Some(auth_token)) = (
+        params.get("device_id"),
+        params.get("auth_token"),
+    ) {
+        if let Ok(device_id) = Uuid::parse_str(device_id_str) {
+            match crate::db::verify_device_token(&state.db_pool, device_id, auth_token).await {
+                Ok(true) => {
+                    // 验证通过，检查设备是否归属该 agent
+                    let owner_device_id: Option<Uuid> = sqlx::query_scalar(
+                        "SELECT device_id FROM agents WHERE agent_id = $1",
+                    )
+                    .bind(agent_id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .unwrap_or(None);
+
+                    if owner_device_id != Some(device_id) {
+                        tracing::warn!(
+                            "Device {} attempted to access agent {} experiences without ownership",
+                            device_id,
+                            agent_id
+                        );
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                }
+                Ok(false) => return Err(StatusCode::UNAUTHORIZED),
+                Err(e) => {
+                    tracing::warn!("Device token verify error: {}", e);
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
+            }
+        }
+    }
+
     let page: i32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let limit: i32 = params
-        .get("limit")
+    let limit: i32 = params.get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
     let offset = (page - 1) * limit;
@@ -924,7 +975,7 @@ pub async fn get_agent_experiences(
 
     // 获取经历日志
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_data, result, thought_log, observer_thought, narrative, created_at
+        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, created_at
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -945,13 +996,16 @@ pub async fn get_agent_experiences(
         .map(|row| ExperienceEntry {
             tick_id: row.get("tick_id"),
             action_type: row.get("action_type"),
+            action_type_display: row.get("action_type_display"),
             action_data: row
                 .get::<Option<serde_json::Value>, _>("action_data")
                 .unwrap_or(serde_json::Value::Null),
             result: row.get("result"),
+            result_message: row.get("result_message"),
             thought_log: row.get("thought_log"),
             observer_thought: row.get("observer_thought"),
             narrative: row.get("narrative"),
+            soul_cycle_metadata: row.get("soul_cycle_metadata"),
             created_at: row.get("created_at"),
         })
         .collect();
@@ -962,4 +1016,16 @@ pub async fn get_agent_experiences(
         page,
         limit,
     }))
+}
+
+/// GET /api/dashboard/actions-map - 返回 action_type -> 中文名映射
+///
+/// 无需认证（action 映射不是敏感数据，供前端渲染使用）
+pub async fn get_actions_map() -> Json<std::collections::HashMap<String, String>> {
+    let map: std::collections::HashMap<String, String> =
+        crate::game_data::ActionRegistry::build_available_actions()
+            .into_iter()
+            .map(|a| (a.action, a.description))
+            .collect();
+    Json(map)
 }

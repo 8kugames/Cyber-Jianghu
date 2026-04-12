@@ -8,10 +8,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tokio::sync::RwLock;
 use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::component::immediate::{ImmediateEventHandler, RuleBasedImmediateDecisionMaker};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::LifespanCalculator;
@@ -22,9 +24,13 @@ use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{ReflectorSoul, Validator};
+use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
-use super::{Agent, DecisionCallback, DecisionWithFeedbackCallback, DecisionWithMemoryCallback};
+use super::{
+    Agent, DecisionCallback, DecisionWithChainCallback, DecisionWithFeedbackCallback,
+    DecisionWithMemoryCallback,
+};
 
 /// Agent 构建器
 pub struct AgentBuilder {
@@ -32,6 +38,7 @@ pub struct AgentBuilder {
     decision_callback: DecisionCallback,
     decision_with_memory_callback: Option<DecisionWithMemoryCallback>,
     decision_with_feedback_callback: Option<DecisionWithFeedbackCallback>,
+    decision_with_chain_callback: Option<DecisionWithChainCallback>,
     enable_memory: bool,
     memory_config: Option<MemoryManagerConfig>,
     llm_client: Option<Arc<dyn LlmClient>>,
@@ -45,8 +52,6 @@ pub struct AgentBuilder {
     lifespan_calculator: Option<LifespanCalculator>,
     /// 重连请求接收通道
     reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
-    /// 配置重载通知接收通道
-    config_reload_rx: Option<broadcast::Receiver<()>>,
     /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
     /// 设备身份配置（可选，从 device.yaml 加载）
@@ -57,6 +62,10 @@ pub struct AgentBuilder {
     cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
     /// 数据目录
     data_dir: PathBuf,
+    /// 即时事件处理器
+    immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
+    /// 天魂 — 意图翻译器（Cognitive 模式）
+    intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl AgentBuilder {
@@ -67,6 +76,7 @@ impl AgentBuilder {
             decision_callback,
             decision_with_memory_callback: None,
             decision_with_feedback_callback: None,
+            decision_with_chain_callback: None,
             enable_memory: true,
             memory_config: None,
             llm_client: None,
@@ -76,12 +86,13 @@ impl AgentBuilder {
             validator: None,
             lifespan_calculator: None,
             reconnect_rx: None,
-            config_reload_rx: None,
             http_api_state: None,
             device_config: None,
             character_config: None,
             cognitive_engine: None,
             data_dir: PathBuf::from("."),
+            immediate_handler: None,
+            intent_translator: None,
         }
     }
 
@@ -111,6 +122,17 @@ impl AgentBuilder {
         self
     }
 
+    /// 设置带 CognitiveChain 的决策回调
+    ///
+    /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
+    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    ///
+    /// 当设置了此回调时，将优先于 `with_decision_memory` 和 `with_decision_feedback` 使用。
+    pub fn with_decision_chain(mut self, callback: DecisionWithChainCallback) -> Self {
+        self.decision_with_chain_callback = Some(callback);
+        self
+    }
+
     /// 设置对话客户端
     pub fn with_dialogue_client(mut self, client: DialogueClient) -> Self {
         self.dialogue_client = Some(client);
@@ -129,16 +151,22 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 LLM 客户端（自动创建 ReflectorSoul）
+    /// 设置 LLM 客户端（自动创建 ReflectorSoul，共享 LlmClientContainer 支持热重载）
     pub fn with_llm_client(
         mut self,
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
         let rules = rules.unwrap_or_default();
-        let validator = Arc::new(ReflectorSoul::new(rules, llm_client.clone()));
+        // 复用已有 container 或创建新的，确保 ActorSoul 和 ReflectorSoul 共享
+        let container = self
+            .llm_container
+            .clone()
+            .unwrap_or_else(|| Arc::new(RwLock::new(llm_client.clone())));
+        let validator = Arc::new(ReflectorSoul::new(rules, container.clone()));
         self.validator = Some(validator);
         self.llm_client = Some(llm_client);
+        self.llm_container = Some(container);
         self
     }
 
@@ -161,12 +189,6 @@ impl AgentBuilder {
     /// 设置重连请求接收通道
     pub fn with_reconnect_rx(mut self, rx: broadcast::Receiver<ReconnectRequest>) -> Self {
         self.reconnect_rx = Some(rx);
-        self
-    }
-
-    /// 设置配置重载通知接收通道
-    pub fn with_config_reload_rx(mut self, rx: broadcast::Receiver<()>) -> Self {
-        self.config_reload_rx = Some(rx);
         self
     }
 
@@ -197,9 +219,39 @@ impl AgentBuilder {
         self
     }
 
+    /// 启用即时事件处理
+    ///
+    /// 创建即时事件处理器，用于处理 Server 下发的 ImmediateEvent（speak/whisper 等）
+    pub fn with_immediate_handler(mut self) -> Self {
+        use crate::component::immediate::ImmediateDecisionMaker;
+        use tokio::sync::mpsc;
+
+        // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 immediate_msg_tx）
+        let (tx, _rx) = mpsc::channel(32);
+
+        // 创建基于规则的决策器
+        let decision_maker: Arc<dyn ImmediateDecisionMaker> =
+            Arc::new(RuleBasedImmediateDecisionMaker::new());
+
+        // 创建处理器
+        let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx));
+
+        self.immediate_handler = Some(handler);
+        self
+    }
+
     /// 设置数据目录
     pub fn data_dir(mut self, path: PathBuf) -> Self {
         self.data_dir = path;
+        self
+    }
+
+    /// 设置天魂（IntentTranslator）— Cognitive 模式专用
+    ///
+    /// 天魂将人魂的叙事意图翻译为服务端格式化 Intent。
+    /// Claw 模式不需要（外部系统直接提供格式化数据）。
+    pub fn with_intent_translator(mut self, translator: Arc<IntentTranslator>) -> Self {
+        self.intent_translator = Some(translator);
         self
     }
 
@@ -265,6 +317,7 @@ impl AgentBuilder {
             decision_callback: self.decision_callback,
             decision_with_memory_callback: self.decision_with_memory_callback,
             decision_with_feedback_callback: self.decision_with_feedback_callback,
+            decision_with_chain_callback: self.decision_with_chain_callback,
             memory_manager,
             dialogue_client: self.dialogue_client,
             relationship_store: self.relationship_store,
@@ -276,12 +329,17 @@ impl AgentBuilder {
             reconnect_rx: self.reconnect_rx,
             death_reported: false,
             actor_llm_container: self.llm_container,
-            config_reload_rx: self.config_reload_rx,
             http_api_state: self.http_api_state,
             device_config: self.device_config,
             character_config: self.character_config,
             cognitive_engine: self.cognitive_engine,
             server_assigned_name: None,
+            immediate_handler: self.immediate_handler,
+            server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
+            immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
+            consecutive_idle_count: 0,
+            intent_translator: self.intent_translator,
         }
     }
 }

@@ -29,7 +29,9 @@ use crate::dialogue::DialogueResponse;
 use crate::game_data::registry::ItemRegistry;
 use crate::inventory::InventoryManager;
 use crate::models::Intent;
-use cyber_jianghu_protocol::{ClientMessage, DialogueMessage, GameError, ServerMessage};
+use cyber_jianghu_protocol::{
+    ClientMessage, DialogueMessage, GameError, ServerMessage, SoulCycleMetadata,
+};
 
 use super::connection::Connection;
 use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_building_rules};
@@ -302,6 +304,31 @@ async fn handle_websocket(
                         }
                     };
 
+                // 加载当前节点地面物品
+                let nearby_items =
+                    match crate::db::get_ground_items_by_node(&state.db_pool, &agent_state.node_id)
+                        .await
+                    {
+                        Ok(items) => items
+                            .into_iter()
+                            .map(|gi| {
+                                let name = ItemRegistry::get(&gi.item_id)
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| gi.item_id.clone());
+                                cyber_jianghu_protocol::SceneItem {
+                                    item_id: gi.item_id,
+                                    name,
+                                    quantity: gi.quantity,
+                                    item_type: String::new(),
+                                }
+                            })
+                            .collect(),
+                        Err(e) => {
+                            warn!("加载 Agent {} 地面物品失败: {}", agent_id, e);
+                            vec![]
+                        }
+                    };
+
                 // 构建 WorldState（简化版，不含其他 agent entities）
                 // 重连时使用当前 tick_id 而非 agent_state.tick_id，避免 TickMismatch
                 let current_tick = state
@@ -312,6 +339,7 @@ async fn handle_websocket(
                     &state.game_data,
                     deadline_ms,
                     initial_inventory,
+                    nearby_items,
                     Some(current_tick),
                 );
                 let ws_msg =
@@ -572,6 +600,11 @@ async fn handle_client_message(
         ClientMessage::Dialogue { message } => {
             handle_dialogue_message(*agent_id, message, state).await
         }
+        ClientMessage::SoulCycleReport {
+            tick_id,
+            agent_id: msg_agent_id,
+            metadata,
+        } => handle_soul_cycle_report(device_id, msg_agent_id, tick_id, &metadata, state).await,
     }
 }
 
@@ -668,7 +701,14 @@ async fn handle_intent(
         return Err(Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>);
     }
 
-    if tick_id != current_tick {
+    // 即时动作（speak、whisper、emote 等）允许在当前 tick 重复提交
+    // 这些动作不检查 IntentManager 中是否已有该 agent 的 intent
+    let is_immediate_action = matches!(
+        action_type.as_str(),
+        "speak" | "whisper" | "emote" | "laugh" | "nod" | "wave" | "bow"
+    );
+
+    if tick_id != current_tick && !is_immediate_action {
         warn!(
             "Intent tick_id mismatch: agent={}, intent_tick={}, accepting_tick={}",
             agent_id, tick_id, current_tick
@@ -677,6 +717,19 @@ async fn handle_intent(
             intent_tick_id: tick_id,
             current_tick_id: current_tick,
         }) as Box<dyn std::error::Error + Send + Sync>);
+    }
+
+    // 即时动作：允许重复提交（覆盖之前的 intent）
+    // 普通动作：已有 intent 时静默忽略（第一个已正确存储，重复提交无副作用）
+    if !is_immediate_action {
+        let intents = state.intent_manager.read().await;
+        if intents.contains_key(&agent_id) {
+            debug!(
+                "Intent duplicate ignored: agent {} already has intent for tick {}",
+                agent_id, tick_id
+            );
+            return Ok(());
+        }
     }
 
     info!(
@@ -792,7 +845,6 @@ async fn handle_intent(
 
 /// 处理对话消息
 ///
-/// 将对话消息转发给对话管理器，并根据响应路由到相应的 Agent
 async fn handle_dialogue_message(
     agent_id: uuid::Uuid,
     message: DialogueMessage,
@@ -956,6 +1008,67 @@ async fn handle_dialogue_message(
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+/// 处理三魂循环元数据上报
+///
+/// Agent 在 intent 发送后通过 WebSocket SoulCycleReport 消息上报三魂循环详情。
+/// Server 将元数据关联到同一 tick 的 agent_action_logs 记录。
+async fn handle_soul_cycle_report(
+    device_id: uuid::Uuid,
+    msg_agent_id: Option<uuid::Uuid>,
+    tick_id: i64,
+    metadata: &SoulCycleMetadata,
+    state: &Arc<crate::state::AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 确定最终的 agent_id（与 handle_intent 相同逻辑：比较 device_id）
+    let agent_id = match msg_agent_id {
+        Some(id) => {
+            let owner_device_id: Option<uuid::Uuid> =
+                sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
+                    .bind(id)
+                    .fetch_optional(&state.db_pool)
+                    .await
+                    .context("查询 Agent 归属失败")?;
+
+            match owner_device_id {
+                Some(owner) if owner == device_id => id,
+                Some(_) => {
+                    warn!(
+                        "SoulCycleReport: Agent ownership mismatch: agent={}, device={}",
+                        id, device_id
+                    );
+                    return Err("无权操作此角色".into());
+                }
+                None => return Err("Agent 不存在".into()),
+            }
+        }
+        None => {
+            // 无 msg_agent_id 时，通过 device_id 查找当前 agent
+            match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
+                Ok(Some(agent)) => agent.agent_id,
+                Ok(None) => return Err("无关联角色".into()),
+                Err(e) => return Err(format!("查询角色失败: {}", e).into()),
+            }
+        }
+    };
+
+    debug!(
+        "收到三魂循环元数据：agent={}, tick={}, attempts={}",
+        agent_id,
+        tick_id,
+        metadata.cycles.len()
+    );
+
+    // 将 metadata 序列化为 JSON
+    let metadata_json = serde_json::to_value(metadata).context("序列化三魂循环元数据失败")?;
+
+    // 更新 agent_action_logs 表
+    if let Err(e) = crate::db::update_soul_cycle_metadata(&state.db_pool, agent_id, tick_id, &metadata_json).await {
+        warn!("写入三魂循环元数据失败: agent={}, tick={}, err={}", agent_id, tick_id, e);
     }
 
     Ok(())

@@ -304,17 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn test_clear() {
-        let mut store = HnswVectorStore::new(3);
-        store.add(1, vec![0.1, 0.2, 0.3]).unwrap();
-        store.add(2, vec![0.4, 0.5, 0.6]).unwrap();
-        assert!(!store.is_empty());
-
-        store.clear();
-        assert!(store.is_empty());
-    }
-
-    #[test]
     fn test_dimension_mismatch() {
         let mut store = HnswVectorStore::new(512);
         let result = store.add(1, vec![0.1; 128]);

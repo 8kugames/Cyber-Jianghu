@@ -434,14 +434,16 @@ impl DownstreamMessage {
                 died_at,
                 rebirth_delay_ticks,
             }),
-            ServerMessage::ImmediateEvent { event, deadline_ms: _ } => {
-                Some(DownstreamMessage::ServerImmediateEvent {
-                    event_type: event.event_type.to_string(),
-                    tick_id: event.tick_id,
-                    description: event.description,
-                    metadata: event.metadata,
-                })
-            }
+            ServerMessage::ImmediateEvent {
+                event_id: _,
+                event,
+                deadline_ms: _,
+            } => Some(DownstreamMessage::ServerImmediateEvent {
+                event_type: event.event_type.to_string(),
+                tick_id: event.tick_id,
+                description: event.description,
+                metadata: event.metadata,
+            }),
             // 其他消息类型不透传
             _ => None,
         }

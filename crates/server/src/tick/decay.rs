@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::models::{AgentState, WorldEventType};
 
-use crate::game_data::registry_or_panic;
+use crate::game_data::registry_or_error;
 use cyber_jianghu_protocol::DeathInfo;
 
 /// 死亡通知（用于立即推送）
@@ -87,7 +87,13 @@ pub fn apply_decay_and_environmental_damage(
     let mut death_notifications = Vec::new();
 
     // 获取位置注册表
-    let registry = registry_or_panic();
+    let registry = match registry_or_error() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("注册表未初始化: {}", e);
+            return (agent_states, vec![], vec![], vec![]);
+        }
+    };
     let location_registry = registry.location_registry.read().unwrap();
 
     for state in &mut agent_states {
