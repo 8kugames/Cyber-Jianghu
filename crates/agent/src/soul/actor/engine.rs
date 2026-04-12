@@ -789,7 +789,7 @@ fn build_distant_destinations(world_state: &crate::models::WorldState) -> String
     }
 
     // 硬编码远端地点（从 locations.yaml edges 提取）
-    // FIXME(issue): 长期方案应从 server game_data 获取，避免与 locations.yaml 不同步
+    // TODO: 长期方案应从 server game_data 获取，避免与 locations.yaml 不同步
     "\n### 远端探索目标（需先移动到客栈再前往）\n\
      - 荒漠: 可采集李广杏、枯木，注意环境伤害（途经客栈，共约 3 tick）\n\
      - 酒泉: 绿洲小镇，可采集小麦和甘美泉水（途经客栈，共约 6 tick)\n"

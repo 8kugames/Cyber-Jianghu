@@ -518,6 +518,7 @@ docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_c
 - `GET /api/v1/config` - Get current configuration (server URLs, runtime mode, port)
 - `POST /api/v1/config/reload` - Hot reload configuration from file
 - `POST /api/v1/config/server` - Set server address (triggers WebSocket reconnection)
+- `GET /api/v1/metrics` - LLM performance metrics (calls, failures, token usage)
 
 ### Admin Web Panel (Server Dashboard)
 
