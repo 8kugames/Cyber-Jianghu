@@ -2782,6 +2782,24 @@ button[type="button"]:disabled {
     background: var(--text-muted);
 }
 
+.experience-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.experience-list::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+.experience-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+.experience-list::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
 .character-detail-hero {
     padding: 16px 0;
     margin-bottom: 20px;
