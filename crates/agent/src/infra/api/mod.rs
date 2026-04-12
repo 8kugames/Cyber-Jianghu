@@ -417,7 +417,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route(
             "/api/v1/character/soul-cycles",
             get(handlers::get_soul_cycles_handler),
-        ) // 获取三魂循环完整记录
+        ) // 获取三魂循环完整记录（本地内存）
         .route(
             "/api/v1/character/rebirth",
             post(handlers::rebirth_character_handler),
@@ -467,6 +467,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
             post(handlers::set_llm_disabled_handler),
         ) // 设置 LLM 停止状态
         .route("/api/v1/actions", get(handlers::get_actions_handler)) // 获取动作类型映射
+        .route("/api/v1/metrics", get(handlers::get_metrics_handler)) // LLM 性能指标
         .route(
             "/api/v1/config/reload",
             post(handlers::reload_config_handler),

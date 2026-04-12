@@ -15,6 +15,7 @@ struct PerModelStats {
     prompt_tokens: u64,
     completion_tokens: u64,
     calls: u64,
+    failures: u64,
 }
 
 impl PerModelStats {
@@ -23,6 +24,7 @@ impl PerModelStats {
             prompt_tokens: 0,
             completion_tokens: 0,
             calls: 0,
+            failures: 0,
         }
     }
 
@@ -43,6 +45,8 @@ pub struct ModelTokenStats {
     #[serde(skip)]
     pub total_tokens: u64, // 仅在聚合时使用，不序列化
     pub calls: u64,
+    #[serde(default)]
+    pub failures: u64,
 }
 
 static TOKEN_STATS: OnceLock<Mutex<HashMap<String, PerModelStats>>> = OnceLock::new();
@@ -78,6 +82,17 @@ pub fn record_token_usage(
     }
 }
 
+/// Record a failed LLM call for a specific provider-model
+pub fn record_failure(provider: &LlmProvider, model: &str) {
+    let key = model_key(provider, model);
+    if let Ok(mut stats) = token_stats().lock() {
+        stats
+            .entry(key)
+            .or_insert_with(PerModelStats::new)
+            .failures += 1;
+    }
+}
+
 /// Get snapshot of all model stats (does not clear)
 pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
     let Ok(stats) = token_stats().lock() else {
@@ -100,6 +115,7 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
                 completion_tokens: s.completion_tokens,
                 total_tokens: total,
                 calls: s.calls,
+                failures: s.failures,
             }
         })
         .collect()
