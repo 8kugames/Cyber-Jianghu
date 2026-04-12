@@ -158,6 +158,12 @@ impl CognitiveEngine {
         info!("认知引擎人设已更新: name={}, prompt_len={}", name, system_prompt.len());
     }
 
+    /// 记录最近一次 action_type（用于行为多样性检测）
+    pub fn record_action(&self, action_type: &str) {
+        let mut cache = self.prompt_cache.write().unwrap();
+        cache.record_action(action_type);
+    }
+
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
         self.think_with_feedback(world_state, None).await
     }
@@ -443,7 +449,11 @@ impl CognitiveEngine {
         let adjacent_locations = cache.get_adjacent().to_string();
         let entities_str = cache.get_entities().to_string();
         let items_str = cache.get_nearby_items().to_string();
+        let diversity_nudge = cache.get_diversity_nudge().unwrap_or_default();
         drop(cache); // 释放读锁
+
+        // 【Q2: 远端地点提示】独立于缓存逻辑，直接从 WorldState 判断
+        let distant_destinations = build_distant_destinations(world_state);
 
         // 【动态状态】每轮生成
         let memory_section = if memory_context.is_empty() {
@@ -552,12 +562,11 @@ impl CognitiveEngine {
 
 ### 位置
 - 地点: {location}
-- 可达位置: {adjacent_locations}{location_constraint}
-
+- 可达位置: {adjacent_locations}{location_constraint}{distant_destinations}
 ### 环境
 - 附近的人: {entities}
 - 地上的物品: {items}
-{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
+{diversity_nudge}{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -579,6 +588,8 @@ impl CognitiveEngine {
             location = world_state.location.name,
             adjacent_locations = adjacent_locations,
             location_constraint = location_constraint,
+            distant_destinations = distant_destinations,
+            diversity_nudge = diversity_nudge,
             time_info = time_info,
             entities = entities_str,
             items = items_str,
@@ -741,4 +752,46 @@ impl CognitiveEngine {
             })
         })
     }
+}
+
+// ============================================================================
+// 远端地点提示 (Q2) — 独立于 PromptCache 的业务逻辑
+// ============================================================================
+
+/// LocationNodeType 的 sub_scene 值
+///
+/// Server broadcaster 用 `format!("{:?}", n.node_type)` 填充 node_type，
+/// 对 `LocationNodeType::SubScene` 输出 `"SubScene"`（Debug 格式）。
+/// 如果 protocol crate 将 Location.node_type 改为 enum 反序列化，
+/// 此常量应同步更新或替换为 enum 比较。
+const NODE_TYPE_SUB_SCENE: &str = "SubScene";
+
+/// 构建远端可达地点提示
+///
+/// 当 agent 在 sub_scene（如大堂）时，提示从父级 map 可到达的更远地点。
+/// 在 map 节点不提示（adjacent 已包含远端）。
+///
+/// 短期硬编码实现 — 长期应从 server game_data 下发远端地点信息。
+fn build_distant_destinations(world_state: &crate::models::WorldState) -> String {
+    if world_state.location.node_type != NODE_TYPE_SUB_SCENE {
+        return String::new();
+    }
+
+    // 检查是否连接到 map 级中转节点
+    let has_map_hub = world_state
+        .location
+        .adjacent_nodes
+        .iter()
+        .any(|n| n.travel_cost == 1 && (n.name.contains("客栈") || n.name.contains("驿站")));
+
+    if !has_map_hub {
+        return String::new();
+    }
+
+    // 硬编码远端地点（从 locations.yaml edges 提取）
+    // FIXME(issue): 长期方案应从 server game_data 获取，避免与 locations.yaml 不同步
+    "\n### 远端探索目标（需先移动到客栈再前往）\n\
+     - 荒漠: 可采集李广杏、枯木，注意环境伤害（途经客栈，共约 3 tick）\n\
+     - 酒泉: 绿洲小镇，可采集小麦和甘美泉水（途经客栈，共约 6 tick)\n"
+        .to_string()
 }
