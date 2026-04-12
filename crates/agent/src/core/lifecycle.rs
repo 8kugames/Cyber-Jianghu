@@ -821,6 +821,10 @@ impl super::Agent {
                             "Intent sent successfully: tick={}, action={}, agent={}",
                             final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                         );
+                        // 记录 action_type 用于行为多样性检测
+                        if let Some(ref engine) = self.cognitive_engine {
+                            engine.record_action(&final_intent.action_type);
+                        }
                         // 非 idle 成功发送，重置连续 idle 计数
                         if final_intent.action_type.as_str() != "idle" {
                             self.consecutive_idle_count = 0;
