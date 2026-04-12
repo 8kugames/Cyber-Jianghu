@@ -83,6 +83,11 @@ impl super::Agent {
         }
         info!("Agent '{}' connected to server", self.character_name());
 
+        // 注入 HTTP API 状态到 ImmediateEventHandler（用于记录即时意图到 SoulRecorder）
+        if let (Some(handler), Some(api_state)) = (&self.immediate_handler, &self.http_api_state) {
+            handler.set_http_api_state(api_state.clone()).await;
+        }
+
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
         self.client
@@ -905,8 +910,20 @@ impl super::Agent {
                                 immediate_intents,
                             };
 
-                            // Fire-and-forget：上报失败不影响主循环
-                            self.client.send_soul_cycle_report(tick_id_for_report, metadata).await.ok();
+                            for attempt in 0..3 {
+                                match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
+                                    Ok(()) => {
+                                        debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        warn!("三魂循环元数据上报失败 (尝试 {}/3): tick={}, err={}", attempt + 1, tick_id_for_report, e);
+                                        if attempt < 2 {
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(100 * (1 << attempt))).await;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
