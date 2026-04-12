@@ -16,7 +16,7 @@ pub mod types;
 
 pub use backend::{ForgettableBackend, MemoryBackend, SearchableBackend, SemanticSearchable};
 pub use backends::{
-    ArchiveMemoryBackend, EpisodicMemoryBackend, FtsFallback, HnswVectorStore,
+    EpisodicMemoryBackend, FtsFallback, HnswVectorStore,
     SemanticMemoryBackend, WorkingMemoryBackend,
 };
 pub use embedder::EmbedderService;

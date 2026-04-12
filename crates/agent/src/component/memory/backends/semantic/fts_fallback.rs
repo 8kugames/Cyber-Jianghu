@@ -138,6 +138,10 @@ impl FtsFallback {
                         is_confirmed: row.get(9)?,
                         created_at: row.get(10)?,
                         updated_at: row.get(11)?,
+                        strength: 0.5,
+                        last_accessed_at: None,
+                        access_count: 0,
+                        is_archived: false,
                     })
                 },
             )
@@ -187,6 +191,10 @@ impl FtsFallback {
                         is_confirmed: row.get(9)?,
                         created_at: row.get(10)?,
                         updated_at: row.get(11)?,
+                        strength: 0.5,
+                        last_accessed_at: None,
+                        access_count: 0,
+                        is_archived: false,
                     })
                 },
             )
@@ -265,6 +273,10 @@ impl FtsFallback {
                     is_confirmed: row.get(9)?,
                     created_at: row.get(10)?,
                     updated_at: row.get(11)?,
+                    strength: 0.5,
+                    last_accessed_at: None,
+                    access_count: 0,
+                    is_archived: false,
                 })
             });
 
