@@ -110,6 +110,9 @@ pub struct ImmediateEventHandler {
 
     /// 是否正在运行
     running: Arc<AtomicBool>,
+
+    /// HTTP API 状态（用于访问 SoulRecorder 记录即时意图）
+    http_api_state: std::sync::Arc<tokio::sync::RwLock<Option<std::sync::Arc<crate::infra::api::HttpApiState>>>>,
 }
 
 impl ImmediateEventHandler {
@@ -125,6 +128,7 @@ impl ImmediateEventHandler {
             current_tick_id: Arc::new(RwLock::new(0)),
             current_intent_type: Arc::new(RwLock::new(None)),
             running: Arc::new(AtomicBool::new(true)),
+            http_api_state: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -139,6 +143,21 @@ impl ImmediateEventHandler {
         let mut guard = self.intent_tx.write().await;
         *guard = new_tx;
         info!("即时意图通道已绑定到 WebSocket");
+    }
+
+    /// 设置 HTTP API 状态（用于访问 SoulRecorder）
+    pub async fn set_http_api_state(&self, state: std::sync::Arc<crate::infra::api::HttpApiState>) {
+        let mut guard = self.http_api_state.write().await;
+        *guard = Some(state);
+    }
+
+    async fn get_soul_recorder(&self) -> Option<std::sync::Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
+        let api_state = {
+            let guard = self.http_api_state.read().await;
+            guard.as_ref()?.clone()
+        };
+        let agent_id = *api_state.agent_id.read().await;
+        api_state.soul_recorder_for(agent_id).await
     }
 
     /// 设置当前正在执行的意图（用于冲突检测）
@@ -221,10 +240,10 @@ impl ImmediateEventHandler {
 
             match decision {
                 Some(ResponseDecision::RespondNow { content, thought }) => {
-                    // 发送普通 Intent（使用当前 tick_id）
                     let tick_id = *self.current_tick_id.read().await;
+                    let response_uuid = uuid::Uuid::new_v4();
                     let intent = ClientMessage::Intent {
-                        intent_id: None,
+                        intent_id: Some(response_uuid),
                         tick_id,
                         agent_id: None,
                         thought_log: Some(thought),
@@ -232,17 +251,43 @@ impl ImmediateEventHandler {
                         action_data: Some(serde_json::json!({
                             "content": content
                         })),
-                        priority: 10, // 即时回应高优先级
+                        priority: 10,
                     };
 
                     if let Err(e) = self.intent_tx.read().await.send(intent).await {
                         error!("Failed to send immediate response Intent: {}", e);
+                        if let Some(recorder) = self.get_soul_recorder().await {
+                            let _ = recorder.record_immediate(
+                                tick_id,
+                                &response_uuid.to_string(),
+                                None,
+                                "immediate_response",
+                                "speak",
+                                Some(&serde_json::json!({"content": content}).to_string()),
+                                Some(&content),
+                                "failed",
+                                Some(&e.to_string()),
+                            ).await;
+                        }
                     } else {
                         info!(
                             "Sent immediate response for event {}: '{}'",
                             event.event_id, content
                         );
                         event.responded = true;
+                        if let Some(recorder) = self.get_soul_recorder().await {
+                            let _ = recorder.record_immediate(
+                                tick_id,
+                                &response_uuid.to_string(),
+                                None,
+                                "immediate_response",
+                                "speak",
+                                Some(&serde_json::json!({"content": content}).to_string()),
+                                Some(&content),
+                                "sent",
+                                None,
+                            ).await;
+                        }
                     }
                 }
                 Some(ResponseDecision::DeferToMainTick { reason }) => {
