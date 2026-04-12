@@ -11,12 +11,22 @@
             <header>
                 <h1>赛博江湖</h1>
                 <p class="header-subtitle">角色创建</p>
+                <nav class="nav-tabs">
+                    <a href="character.html" class="nav-tab active">角色信息</a>
+                    <a href="manage.html" class="nav-tab">管理</a>
+                </nav>
             </header>
 
             <main>
                 <!-- 一键生成 -->
                 <div class="generate-bar">
-                    <button type="button" id="generate-btn" class="btn-secondary">一键生成</button>
+                    <button
+                        type="button"
+                        id="generate-btn"
+                        class="btn-secondary"
+                    >
+                        一键生成
+                    </button>
                     <span id="generate-hint" class="hint"></span>
                 </div>
 
@@ -32,7 +42,9 @@
                     <section class="form-section">
                         <h2>基本信息</h2>
                         <div class="form-group">
-                            <label for="name">姓名 <span class="required">*</span></label>
+                            <label for="name"
+                                >姓名 <span class="required">*</span></label
+                            >
                             <input
                                 type="text"
                                 id="name"
@@ -100,7 +112,11 @@
                                 <span class="tag" data-value="忠诚">忠诚</span>
                                 <span class="tag" data-value="狡猾">狡猾</span>
                             </div>
-                            <input type="hidden" id="personality" name="personality" />
+                            <input
+                                type="hidden"
+                                id="personality"
+                                name="personality"
+                            />
                         </div>
                     </section>
 
@@ -141,15 +157,34 @@
                         </div>
                         <div class="form-group">
                             <label>说话特点（可多选）</label>
-                            <div class="tag-container" id="speech-patterns-tags">
-                                <span class="tag" data-value="喜欢引用古诗词">喜欢引用古诗词</span>
-                                <span class="tag" data-value="说话简洁">说话简洁</span>
-                                <span class="tag" data-value="喜欢用成语">喜欢用成语</span>
-                                <span class="tag" data-value="说话带方言">说话带方言</span>
-                                <span class="tag" data-value="喜欢开玩笑">喜欢开玩笑</span>
-                                <span class="tag" data-value="说话谨慎">说话谨慎</span>
+                            <div
+                                class="tag-container"
+                                id="speech-patterns-tags"
+                            >
+                                <span class="tag" data-value="喜欢引用古诗词"
+                                    >喜欢引用古诗词</span
+                                >
+                                <span class="tag" data-value="说话简洁"
+                                    >说话简洁</span
+                                >
+                                <span class="tag" data-value="喜欢用成语"
+                                    >喜欢用成语</span
+                                >
+                                <span class="tag" data-value="说话带方言"
+                                    >说话带方言</span
+                                >
+                                <span class="tag" data-value="喜欢开玩笑"
+                                    >喜欢开玩笑</span
+                                >
+                                <span class="tag" data-value="说话谨慎"
+                                    >说话谨慎</span
+                                >
                             </div>
-                            <input type="hidden" id="speech_patterns" name="speech_patterns" />
+                            <input
+                                type="hidden"
+                                id="speech_patterns"
+                                name="speech_patterns"
+                            />
                         </div>
                     </section>
 
