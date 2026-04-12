@@ -11,6 +11,7 @@
 // ============================================================================
 
 use fnv::FnvHasher;
+use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
 use crate::component::persona::DynamicPersona;
@@ -40,6 +41,9 @@ pub struct PromptCache {
     cached_nearby_items: String,
     cached_nearby_items_hash: u64,
     last_update_tick: i64,
+
+    /// 最近执行的 action_type（最多 5 条，用于检测重复行为）
+    recent_actions: VecDeque<String>,
 }
 
 impl PromptCache {
@@ -60,6 +64,7 @@ impl PromptCache {
             cached_nearby_items: String::new(),
             cached_nearby_items_hash: 0,
             last_update_tick: -1,
+            recent_actions: VecDeque::with_capacity(5),
         }
     }
 
@@ -295,6 +300,42 @@ impl PromptCache {
     pub fn last_update_tick(&self) -> i64 {
         self.last_update_tick
     }
+
+    // ========================================================================
+    // 行为多样性追踪 (Q1)
+    // ========================================================================
+
+    /// 记录最近一次提交的 action_type
+    pub fn record_action(&mut self, action_type: &str) {
+        self.recent_actions.push_back(action_type.to_string());
+        if self.recent_actions.len() > 5 {
+            self.recent_actions.pop_front();
+        }
+    }
+
+    /// 检测重复行为并生成多样性提示
+    ///
+    /// 最近 3 次动作相同且非 idle 时返回提示文本。
+    pub fn get_diversity_nudge(&self) -> Option<String> {
+        if self.recent_actions.len() < 3 {
+            return None;
+        }
+
+        let actions: Vec<&String> = self.recent_actions.iter().rev().take(3).collect();
+        if actions.iter().all(|a| *a == actions[0]) && actions[0] != "idle" {
+            return Some(format!(
+                "【行为提醒】你已经连续多次执行'{}'动作。考虑尝试其他行为：\n\
+                 - 探索其他地点（移动到更远的地方）\n\
+                 - 与附近的人交流\n\
+                 - 检查并使用背包物品\n\
+                 - 观察环境或寻找新的目标",
+                actions[0]
+            ));
+        }
+
+        None
+    }
+
 }
 
 /// 变化标记（用于 diff-based prompt 输出）
