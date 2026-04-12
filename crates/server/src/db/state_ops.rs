@@ -12,7 +12,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
 
@@ -355,10 +355,22 @@ pub async fn update_soul_cycle_metadata(
     .context("更新三魂循环元数据失败")?;
 
     if rows.rows_affected() == 0 {
-        debug!(
-            "未找到 agent_action_logs 记录：agent_id={}, tick_id={}",
+        warn!(
+            "未找到 agent_action_logs 记录，插入新记录：agent_id={}, tick_id={}",
             agent_id, tick_id
         );
+        // Upsert：SoulCycleReport 可能先于 tick processor 到达
+        sqlx::query(
+            "INSERT INTO agent_action_logs (agent_id, tick_id, soul_cycle_metadata)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (agent_id, tick_id) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
+        )
+        .bind(agent_id)
+        .bind(tick_id)
+        .bind(metadata)
+        .execute(pool)
+        .await
+        .context("插入三魂循环元数据失败")?;
     } else {
         debug!(
             "已更新 agent_id={}, tick_id={} 的三魂循环元数据",
