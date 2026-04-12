@@ -755,43 +755,39 @@ impl CognitiveEngine {
 }
 
 // ============================================================================
-// 远端地点提示 (Q2) — 独立于 PromptCache 的业务逻辑
+// 远端地点提示 (Q2) — 数据驱动
 // ============================================================================
-
-/// LocationNodeType 的 sub_scene 值
-///
-/// Server broadcaster 用 `format!("{:?}", n.node_type)` 填充 node_type，
-/// 对 `LocationNodeType::SubScene` 输出 `"SubScene"`（Debug 格式）。
-/// 如果 protocol crate 将 Location.node_type 改为 enum 反序列化，
-/// 此常量应同步更新或替换为 enum 比较。
-const NODE_TYPE_SUB_SCENE: &str = "SubScene";
 
 /// 构建远端可达地点提示
 ///
-/// 当 agent 在 sub_scene（如大堂）时，提示从父级 map 可到达的更远地点。
-/// 在 map 节点不提示（adjacent 已包含远端）。
+/// 当 agent 在 sub_scene 时，从 adjacent_nodes 中提取 travel_cost > 1 的节点
+/// 作为远端探索目标。数据完全来自 WorldState，无硬编码。
 ///
-/// 短期硬编码实现 — 长期应从 server game_data 下发远端地点信息。
+/// 限制：sub_scene 的 adjacent_nodes 通常只有 1 跳邻居，
+/// 远端目标需要 agent 先移动到 map 级节点后才能看到完整列表。
+/// 完整的 2 跳邻居方案需要 Server 协议支持（下发 parent map 的 adjacent_nodes）。
 fn build_distant_destinations(world_state: &crate::models::WorldState) -> String {
-    if world_state.location.node_type != NODE_TYPE_SUB_SCENE {
-        return String::new();
-    }
-
-    // 检查是否连接到 map 级中转节点
-    let has_map_hub = world_state
+    // 提取 travel_cost > 1 的相邻节点（远端地点）
+    let distant: Vec<_> = world_state
         .location
         .adjacent_nodes
         .iter()
-        .any(|n| n.travel_cost == 1 && (n.name.contains("客栈") || n.name.contains("驿站")));
+        .filter(|n| n.travel_cost > 1)
+        .map(|n| {
+            if n.travel_cost > 1 {
+                format!("- {} ({}tick)", n.name, n.travel_cost)
+            } else {
+                n.name.clone()
+            }
+        })
+        .collect();
 
-    if !has_map_hub {
+    if distant.is_empty() {
         return String::new();
     }
 
-    // 硬编码远端地点（从 locations.yaml edges 提取）
-    // TODO: 长期方案应从 server game_data 获取，避免与 locations.yaml 不同步
-    "\n### 远端探索目标（需先移动到客栈再前往）\n\
-     - 荒漠: 可采集李广杏、枯木，注意环境伤害（途经客栈，共约 3 tick）\n\
-     - 酒泉: 绿洲小镇，可采集小麦和甘美泉水（途经客栈，共约 6 tick)\n"
-        .to_string()
+    format!(
+        "\n### 远端地点\n{}\n",
+        distant.join("\n")
+    )
 }
