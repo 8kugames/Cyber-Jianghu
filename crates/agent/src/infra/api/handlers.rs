@@ -396,6 +396,25 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 "reviewed_at": "2024-03-19T10:00:15Z"
             })),
         },
+        // === 性能指标 ===
+        ApiEndpoint {
+            path: "/api/v1/metrics".to_string(),
+            method: "GET".to_string(),
+            description: "LLM 性能指标（调用次数、失败率、token 使用）".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "llm": [{
+                    "provider": "minimax",
+                    "model": "M2.7-highspeed",
+                    "calls": 1234,
+                    "failures": 5,
+                    "success_rate": "99%",
+                    "prompt_tokens": 100000,
+                    "completion_tokens": 50000,
+                    "total_tokens": 150000
+                }]
+            })),
+        },
     ];
 
     let agent_id = *state.agent_id.read().await;
