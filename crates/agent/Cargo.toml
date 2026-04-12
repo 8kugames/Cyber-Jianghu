@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.0.250"
+version = "0.0.251"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"

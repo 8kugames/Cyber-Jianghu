@@ -910,10 +910,12 @@ impl super::Agent {
                                 immediate_intents,
                             };
 
+                            let mut reported = false;
                             for attempt in 0..3 {
                                 match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
                                     Ok(()) => {
                                         debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
+                                        reported = true;
                                         break;
                                     }
                                     Err(e) => {
@@ -923,6 +925,9 @@ impl super::Agent {
                                         }
                                     }
                                 }
+                            }
+                            if !reported {
+                                error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
                             }
                         }
                     }
