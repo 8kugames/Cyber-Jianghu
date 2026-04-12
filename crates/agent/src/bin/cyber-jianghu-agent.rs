@@ -528,6 +528,34 @@ fn reset_agent() -> Result<()> {
 }
 
 // ============================================================================
+// LLM 客户端工厂（Claw vs Cognitive 的唯一架构差异）
+// ============================================================================
+
+/// 创建 LLM 客户端
+/// - Cognitive: 内置 FallbackLlmClient
+/// - Claw: OpenClawBridge (外部 OpenClaw 调度器)
+///   其他一切 agent 能力（记忆、关系、三魂）都应统一，不因模式而异
+fn create_llm_client(
+    runtime_mode: RuntimeMode,
+    config: &Config,
+    shared_state: Option<Arc<WsSharedState>>,
+) -> Result<Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>> {
+    match runtime_mode {
+        RuntimeMode::Cognitive => {
+            Ok(cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?)
+        }
+        RuntimeMode::Claw => {
+            let upstream_tx = shared_state
+                .expect("Claw mode needs shared_state")
+                .upstream_tx
+                .clone();
+            let bridge = OpenClawBridge::new(upstream_tx, BridgeConfig::default());
+            Ok(Arc::new(bridge) as Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>)
+        }
+    }
+}
+
+// ============================================================================
 // 等待角色创建
 // ============================================================================
 
@@ -631,6 +659,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Early HTTP API startup based on mode
     let _early_api_state: Option<Arc<cyber_jianghu_agent::infra::api::HttpApiState>>;
+    let _early_claw_setup: Option<LateClawSetup>;
     let early_actual_port: u16;
 
     match runtime_mode {
@@ -648,6 +677,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
             _early_api_state = Some(api_state);
+            _early_claw_setup = None;
             early_actual_port = actual_port;
         }
         RuntimeMode::Claw => {
@@ -659,7 +689,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 &device,
                 server_dir.clone(),
             )?;
-            _early_api_state = Some(Arc::new(setup.api_state.clone()));
+            _early_api_state = Some(setup.api_state.clone());
+            _early_claw_setup = Some(LateClawSetup {
+                shared_state: setup.shared_state.clone(),
+                api_state: setup.api_state.clone(),
+                server_msg_tx: setup.server_msg_tx.clone(),
+            });
             early_actual_port = setup.actual_port;
             info!(
                 "Claw HTTP API 已启动: http://localhost:{}",
@@ -688,8 +723,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .join(character.agent_id.unwrap().to_string())
         .join("data");
 
-    let device_id = Arc::new(RwLock::new(device_id_value));
-
     let persona_info = Some(cyber_jianghu_agent::soul::reflector::PersonaInfo {
         gender: character.gender.clone(),
         age: character.age,
@@ -705,7 +738,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     let mut agent = match runtime_mode {
         RuntimeMode::Cognitive => {
             info!("创建 Cognitive 模式组件...");
-            let llm_arc = cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?;
+            let llm_arc = create_llm_client(runtime_mode, &config, None)?;
             let llm_container = Arc::new(RwLock::new(llm_arc.clone()));
             info!("LLM Client 容器已创建（支持热重载 + fallback）");
 
@@ -862,14 +895,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         }
         RuntimeMode::Claw => {
             info!("创建 Claw 模式组件...");
-            let setup = start_claw_server(
-                port,
-                device_id.clone(),
-                &config,
-                ws_url,
-                &device,
-                server_dir.clone(),
-            )?;
+            let setup = _early_claw_setup.expect("early claw setup must exist");
             cognitive_death_event_tx = None;
             cognitive_api_state = None;
             maybe_callback_setup = Some(ClawCallbackSetup {
@@ -886,14 +912,15 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
             if use_unified_cognitive {
                 // === 统一认知架构路径 ===
-                // 获取 LLM 通信通道
-                let upstream_tx = setup.shared_state.upstream_tx.clone();
                 let llm_response_rx = setup.shared_state.llm_response_rx.lock().unwrap().take();
 
-                // 创建 OpenClawBridge 作为 LlmClient 实现
-                let openclaw_bridge =
-                    Arc::new(OpenClawBridge::new(upstream_tx, BridgeConfig::default()));
-                info!("OpenClawBridge 已创建（Claw 模式 LLM 客户端）");
+                // LLM 客户端（统一为 dyn LlmClient）
+                let openclaw_bridge = Arc::new(OpenClawBridge::new(
+                    setup.shared_state.upstream_tx.clone(),
+                    BridgeConfig::default(),
+                ));
+                let llm_client: Arc<dyn cyber_jianghu_agent::component::llm::LlmClient> = openclaw_bridge.clone();
+                info!("LLM 客户端已创建（Claw 模式，通过工厂函数）");
 
                 // 启动 LLM 响应转发任务
                 if let Some(mut response_rx) = llm_response_rx {
@@ -909,6 +936,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     });
                     info!("LLM 响应转发任务已启动");
                 }
+
+                // LLM 容器（与 Cognitive 模式统一）
+                let llm_container = Arc::new(RwLock::new(llm_client.clone()));
+                info!("LLM 容器已创建（Claw 模式）");
 
                 // 创建 CognitiveEngine（与 Cognitive 模式共享架构）
                 let agent_name = character.name.as_str();
@@ -926,7 +957,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     max_tokens_per_stage: config.llm.max_tokens,
                 };
 
-                let llm_client: Arc<dyn cyber_jianghu_agent::component::llm::LlmClient> = openclaw_bridge;
                 let cognitive_engine =
                     Arc::new(CognitiveEngine::new(llm_client.clone(), cognitive_config));
                 info!("CognitiveEngine 已创建（Claw 模式统一认知架构）");
@@ -937,6 +967,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                         CognitiveDecisionConfig::default().max_retries,
                     ));
 
+                // 带记忆上下文的决策回调（与 Cognitive 模式统一）
+                let cognitive_engine_for_memory = cognitive_engine.clone();
                 let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
                     let engine = cognitive_engine.clone();
                     let ws = ws.clone();
@@ -952,45 +984,65 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     })
                 });
 
-                // 使用 AgentBuilder 与 Cognitive 模式保持一致（COI 原则）
+                let decision_with_memory: cyber_jianghu_agent::runtime::DecisionWithMemoryCallback =
+                    Arc::new(move |ws: &WorldState, memory_context: &str| {
+                        let engine = cognitive_engine_for_memory.clone();
+                        let ws = ws.clone();
+                        let memory_context = memory_context.to_string();
+                        Box::pin(async move {
+                            match engine.think_with_memory(&ws, &memory_context).await {
+                                Ok(chain) => chain.final_intent,
+                                Err(e) => {
+                                    error!("[claw-cognitive] Decision with memory failed: {}", e);
+                                    Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                        .with_thought(format!("认知失败: {}", e))
+                                }
+                            }
+                        })
+                    });
+
+                // 关系存储（与 Cognitive 模式统一）
+                let agent_id_for_rel = character.agent_id.unwrap_or_else(Uuid::new_v4);
+                let relationship_db_path = data_dir.join("relationships.db");
+                let relationship_store =
+                    match cyber_jianghu_agent::component::social::RelationshipStore::open(
+                        agent_id_for_rel,
+                        &relationship_db_path,
+                    ) {
+                        Ok(store) => {
+                            info!("RelationshipStore 已初始化（Claw 模式）");
+                            Some(store)
+                        }
+                        Err(e) => {
+                            tracing::warn!("RelationshipStore 初始化失败: {}，继续无关系存储", e);
+                            None
+                        }
+                    };
+
+                // 使用 AgentBuilder（与 Cognitive 模式完全统一）
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
                     .data_dir(data_dir.clone())
                     .with_decision_chain(claw_decision_with_chain)
-                    .with_reconnect_rx(setup.reconnect_rx)
-                    .with_llm_client(llm_client.clone(), None);
+                    .with_decision_memory(decision_with_memory)
+                    .with_llm_container(llm_container.clone())
+                    .with_llm_client(llm_client.clone(), None)
+                    .with_http_api_state(setup.api_state.clone());
 
-                // 天魂: Claw unified cognitive 模式也使用三魂架构
+                // 天魂（与 Cognitive 模式统一）
                 let intent_translator = Arc::new(IntentTranslator::new(llm_client.clone()));
                 builder = builder.with_intent_translator(intent_translator);
+
+                if let Some(store) = relationship_store {
+                    builder = builder.with_relationship_store(store);
+                }
 
                 builder = builder.character_config(character.clone());
 
                 builder.build()
             } else {
-                // === Legacy 路径（http_decision） ===
-                // Agent 被动等待 OpenClaw 提交完整 Intent，不使用认知引擎
-                info!("使用 Legacy 路径，等待 OpenClaw 提交 Intent");
-
-                let agent_id = device.device_id;
-
-                let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
-                    let agent_id = agent_id;
-                    let tick_id = ws.tick_id;
-                    Box::pin(async move {
-                        Intent::new(agent_id, tick_id, "idle", None)
-                            .with_thought("等待 OpenClaw 提交 Intent".to_string())
-                    })
-                });
-
-                let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
-                    .device_config(device.clone())
-                    .data_dir(data_dir.clone())
-                    .with_reconnect_rx(setup.reconnect_rx);
-
-                builder = builder.character_config(character.clone());
-
-                builder.build()
+                // 【架构约束】Legacy 路径已被删除，统一认知架构是唯一选项
+                anyhow::bail!("Legacy 路径已被移除，请使用 use_unified_cognitive=true");
             }
         }
     };
@@ -1014,38 +1066,27 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     if let Some(setup) = maybe_callback_setup {
         let shared_state_clone = setup.shared_state.clone();
         let api_state_clone = setup.api_state.clone();
+        let api_state_for_callback = api_state_clone.clone();
         let server_msg_tx_clone = setup.server_msg_tx.clone();
         let device_id_clone = setup.device_id.clone();
         let persona_clone = setup.persona_info.clone();
 
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
-            let old_id = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(device_id_clone.read())
-            });
+            let old_id = *device_id_clone.blocking_read();
             info!(
                 "更新 Claw API device_id: {} -> {}",
-                *old_id, server_agent_id
+                old_id, server_agent_id
             );
-            drop(old_id);
-
-            let mut guard = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(device_id_clone.write())
-            });
-            *guard = server_agent_id;
+            *device_id_clone.blocking_write() = server_agent_id;
 
             if let Some(ref validator) = api_state_clone.intent_validator {
-                let mut validator_guard = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(shared_state_clone.intent_validator.write())
-                });
+                let mut validator_guard = shared_state_clone.intent_validator.blocking_write();
                 *validator_guard = Some(validator.clone());
                 info!("Validator injected into WsSharedState");
             }
 
             if let Some(ref persona) = persona_clone {
-                let mut persona_guard = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(shared_state_clone.persona.write())
-                });
+                let mut persona_guard = shared_state_clone.persona.blocking_write();
                 *persona_guard = Some(persona.clone());
                 info!("Persona injected into WsSharedState");
             }
@@ -1054,10 +1095,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         agent
             .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
                 if matches!(msg, ServerMessage::AgentDied { .. }) {
-                    api_state_clone
+                    api_state_for_callback
                         .is_dead
                         .store(true, std::sync::atomic::Ordering::Relaxed);
-                    let _ = api_state_clone.death_event_tx.send(msg.clone());
+                    let _ = api_state_for_callback.death_event_tx.send(msg.clone());
                 }
                 let current_tick = 0;
                 if let Some(downstream) = DownstreamMessage::from_server_message(msg, current_tick)
@@ -1112,17 +1153,22 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 }
 
 struct ServerSetup {
-    reconnect_rx:
-        tokio::sync::broadcast::Receiver<cyber_jianghu_agent::infra::api::ReconnectRequest>,
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     shared_state: Arc<WsSharedState>,
-    api_state: cyber_jianghu_agent::infra::api::HttpApiState,
+    api_state: Arc<cyber_jianghu_agent::infra::api::HttpApiState>,
     actual_port: u16,
+}
+
+#[derive(Clone)]
+struct LateClawSetup {
+    shared_state: Arc<WsSharedState>,
+    api_state: Arc<cyber_jianghu_agent::infra::api::HttpApiState>,
+    server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
 }
 
 struct ClawCallbackSetup {
     shared_state: Arc<WsSharedState>,
-    api_state: cyber_jianghu_agent::infra::api::HttpApiState,
+    api_state: Arc<cyber_jianghu_agent::infra::api::HttpApiState>,
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
     device_id: Arc<RwLock<Uuid>>,
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
@@ -1174,8 +1220,7 @@ fn start_claw_server(
 ) -> Result<ServerSetup> {
     let actual_port = if port == 0 {
         // 使用同步阻塞方式等待端口选择（避免 async trait 复杂化）
-        let chosen_port = tokio::runtime::Handle::current().block_on(pick_auto_port());
-        chosen_port
+        tokio::runtime::Handle::current().block_on(pick_auto_port())
     } else {
         port
     };
@@ -1188,7 +1233,7 @@ fn start_claw_server(
     let config_path_str = config_path().display().to_string();
     print_startup_banner(actual_port, ws_url, &config_path_str, "Claw");
 
-    let (reconnect_tx, reconnect_rx) =
+    let (reconnect_tx, _) =
         tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
     let mut ws_state = WsDecisionState::new();
@@ -1224,10 +1269,9 @@ fn start_claw_server(
     });
 
     Ok(ServerSetup {
-        reconnect_rx,
         server_msg_tx,
         shared_state: shared_state_for_callback,
-        api_state: api_state_for_callback,
+        api_state: Arc::new(api_state_for_callback),
         actual_port,
     })
 }
@@ -1249,8 +1293,7 @@ fn start_http_api_server(
 
     let actual_port = if port == 0 {
         // 使用同步阻塞方式等待端口选择
-        let chosen_port = tokio::runtime::Handle::current().block_on(pick_auto_port());
-        chosen_port
+        tokio::runtime::Handle::current().block_on(pick_auto_port())
     } else {
         port
     };
