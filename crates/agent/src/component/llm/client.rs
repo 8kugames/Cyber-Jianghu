@@ -228,9 +228,13 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
                 }
                 Err(e) => {
                     tracing::error!(
-                        "JSON parse failed even after fix attempt: {}. Raw response:\n{}",
-                        e,
-                        response
+                        error_type = ?e.classify(),
+                        error_msg = %e,
+                        line = e.line(),
+                        column = e.column(),
+                        json_len = json_str.len(),
+                        response_preview = %response.chars().take(200).collect::<String>(),
+                        "JSON parse failed (even after truncation fix)"
                     );
                     Err(first_err.into())
                 }

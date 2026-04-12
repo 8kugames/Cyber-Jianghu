@@ -540,6 +540,9 @@ fn create_llm_client(
     config: &Config,
     shared_state: Option<Arc<WsSharedState>>,
 ) -> Result<Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>> {
+    // 模型推荐检查（基于联调测试数据）
+    config.llm.check_model_recommendation();
+
     match runtime_mode {
         RuntimeMode::Cognitive => {
             Ok(cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?)
@@ -672,7 +675,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 &device,
                 server_dir.clone(),
                 Some(reconnect_tx.clone()),
-            )?;
+            ).await?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -1277,7 +1280,7 @@ fn start_claw_server(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn start_http_api_server(
+async fn start_http_api_server(
     port: u16,
     device_id: Arc<RwLock<Uuid>>,
     config: &Config,
@@ -1292,8 +1295,7 @@ fn start_http_api_server(
     let port_range_end = 23999u16;
 
     let actual_port = if port == 0 {
-        // 使用同步阻塞方式等待端口选择
-        tokio::runtime::Handle::current().block_on(pick_auto_port())
+        pick_auto_port().await
     } else {
         port
     };

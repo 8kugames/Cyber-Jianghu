@@ -496,6 +496,26 @@ impl LlmConfig {
         }
     }
 
+    /// 不推荐模型列表（基于 5h 11-Agent 联调测试数据）
+    ///
+    /// 联调测试报告: logs/测试报告/联调测试.260412.docker.002.md
+    const NOT_RECOMMENDED: &[(&str, &str)] = &[
+        ("dashscope", "qwen-plus 系列 JSON 格式遵循差（idle 率高），建议改用 MiniMax M2.7-highspeed"),
+        ("longcat", "LongCat-Flash JSON 解析错误频繁，建议改用 MiniMax M2.7-highspeed"),
+    ];
+
+    /// 检查是否为不推荐模型，打印警告
+    pub fn check_model_recommendation(&self) {
+        for (provider, reason) in Self::NOT_RECOMMENDED {
+            if self.provider == *provider {
+                tracing::warn!(
+                    "模型不推荐: provider='{}'。原因: {}",
+                    self.provider, reason
+                );
+            }
+        }
+    }
+
     /// API Key 格式验证
     pub fn validate_api_key(provider: &str, api_key: &str) -> Result<()> {
         if api_key.is_empty() {
