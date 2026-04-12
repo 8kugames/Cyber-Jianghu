@@ -540,11 +540,9 @@ fn create_llm_client(
     config: &Config,
     shared_state: Option<Arc<WsSharedState>>,
 ) -> Result<Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>> {
-    // 模型推荐检查（基于联调测试数据）
-    config.llm.check_model_recommendation();
-
     match runtime_mode {
         RuntimeMode::Cognitive => {
+            config.llm.check_model_recommendation();
             Ok(cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?)
         }
         RuntimeMode::Claw => {
