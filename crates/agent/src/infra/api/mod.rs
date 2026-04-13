@@ -702,8 +702,8 @@ pub fn create_http_state(
     // 预注册当前角色的记录器
     let soul_cycle_registrar =
         Arc::new(RwLock::new(HashMap::new())) as Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>;
-    if !current_agent_id.is_nil() {
-        if let Ok(recorder) = soul_cycle_recorder::SoulCycleRecorder::open(
+    if !current_agent_id.is_nil()
+        && let Ok(recorder) = soul_cycle_recorder::SoulCycleRecorder::open(
             current_agent_id,
             &data_dir.join(format!("soul_cycle_{}.db", current_agent_id)),
         ) {
@@ -714,7 +714,6 @@ pub fn create_http_state(
                 })
             });
         }
-    }
     let data_dir_clone = data_dir.clone();
 
     let api_state = HttpApiState {

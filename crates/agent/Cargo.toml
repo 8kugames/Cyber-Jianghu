@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.0.255"
+version = "0.0.256"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -8,7 +8,7 @@ description = "Agent SDK for Cyber-Jianghu MMO-MAS - connects to game server wit
 
 [dependencies]
 # 协议（包含合并后的 GameError)
-cyber-jianghu-protocol = { version = "0.0.37", path = "../protocol" }
+cyber-jianghu-protocol = { version = "0.0.38", path = "../protocol" }
 
 # 异步运行时
 tokio = { workspace = true }
@@ -39,6 +39,7 @@ url = "2.5"
 dirs = "6.0.0"
 clap = { version = "4.5", features = ["derive"] }
 regex = "1"
+lru = "0.12"
 
 # HTTP 客户端（用于 Server HTTP API 调用）
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

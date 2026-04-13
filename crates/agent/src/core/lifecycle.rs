@@ -541,9 +541,72 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
+                    // 4.5 地魂叙事生成（将 WorldState 转化为 NarrativeContext 注入人魂）
+                    if let Some(ref generator) = self.narrative_generator {
+                        let recent = self.memory_manager.as_ref()
+                            .map(|m| {
+                                m.working().get_top_n(5)
+                                    .into_iter()
+                                    .map(|e| e.content.clone())
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+
+                        let last_summary = world_state.last_execution_summary.as_ref();
+                        match generator.generate(&world_state, last_summary, &recent).await {
+                            Ok(narrative_ctx) => {
+                                // 将 NarrativeContext 的核心内容注入 memory_context
+                                let narrative_section = format!(
+                                    "\n### 当前感知\n{}\n{}\n{}\n{}",
+                                    narrative_ctx.self_perception.status_summary,
+                                    narrative_ctx.environment.location_description,
+                                    narrative_ctx.self_perception.inventory_narrative,
+                                    narrative_ctx.environment.ambient_features,
+                                );
+                                memory_context.push_str(&narrative_section);
+
+                                // 附近的人
+                                if !narrative_ctx.nearby_agents.is_empty() {
+                                    let agents: Vec<String> = narrative_ctx.nearby_agents.iter()
+                                        .take(5)
+                                        .map(|a| format!(
+                                            "- {} ({})",
+                                            a.appearance, a.current_activity
+                                        ))
+                                        .collect();
+                                    memory_context.push_str(&format!(
+                                        "\n附近的人:\n{}", agents.join("\n")
+                                    ));
+                                }
+
+                                // 可互动物品/元素
+                                if !narrative_ctx.environment.interactive_elements.is_empty() {
+                                    memory_context.push_str(&format!(
+                                        "\n可交互: {}",
+                                        narrative_ctx.environment.interactive_elements.join("、")
+                                    ));
+                                }
+
+                                debug!("NarrativeContext 注入成功");
+                            }
+                            Err(e) => {
+                                warn!("地魂叙事生成失败，使用原始 memory_context: {}", e);
+                            }
+                        }
+                    }
+
                     // 5. 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试
                     // 循环直到审查通过或 deadline 到期
-                    let max_retries = 3; // 防止无限循环
+                    let max_retries = self.config.game_rules
+                        .as_ref()
+                        .and_then(|g| g.intent_batch.as_ref())
+                        .map(|b| b.max_retries)
+                        .unwrap_or(3);
+                    let max_intents = self.config.game_rules
+                        .as_ref()
+                        .and_then(|g| g.intent_batch.as_ref())
+                        .map(|b| b.max_intents_per_tick)
+                        .unwrap_or(5);
                     let agent_id = world_state.agent_id.unwrap_or_default();
                     let mut final_intent = None;
 
@@ -623,7 +686,6 @@ impl super::Agent {
                         };
 
                         // 如果 final_intent 已被设为超时 idle，退出
-                        // 如果 final_intent 已被设为超时 idle，退出
                         if final_intent.is_some() { break; }
 
                         // 记录人魂输出
@@ -645,34 +707,41 @@ impl super::Agent {
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         }
 
-                        // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化
-                        let translation = self.translate_intent(raw_intent, &world_state, cognitive_chain.as_ref()).await;
+                        // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化（多 Intent Pipeline）
+                        let multi_translation = self.translate_multi_intent(
+                            raw_intent,
+                            &world_state,
+                            cognitive_chain.as_ref(),
+                            max_intents,
+                        ).await;
 
-                        // 记录天魂翻译结果
-                        if let Some(recorder) = self.soul_recorder().await {
-                            let action_data_str = translation.intent.action_data.as_ref()
-                                .map(|d| serde_json::to_string(d).unwrap_or_default());
-                            recorder.record_tianhun(
-                                world_state.tick_id,
-                                attempt,
-                                Some(translation.intent.action_type.as_str()),
-                                action_data_str.as_deref(),
-                                translation.speech_intent.as_ref().and_then(|s| {
-                                    s.action_data.as_ref()?.get("content")?.as_str()
-                                }),
-                                translation.success,
-                                translation.error.as_deref(),
-                            ).await;
+                        // 记录天魂翻译结果（取 primary intent）
+                        if let Some(recorder) = self.soul_recorder().await
+                            && let Some(primary) = multi_translation.intents.first()
+                        {
+                                let action_data_str = primary.action_data.as_ref()
+                                    .map(|d| serde_json::to_string(d).unwrap_or_default());
+                                recorder.record_tianhun(
+                                    world_state.tick_id,
+                                    attempt,
+                                    Some(primary.action_type.as_str()),
+                                    action_data_str.as_deref(),
+                                    multi_translation.speech_intent.as_ref().and_then(|s| {
+                                        s.action_data.as_ref()?.get("content")?.as_str()
+                                    }),
+                                    true,
+                                    None,
+                                ).await;
                         }
 
                         // 5b'. 如果天魂拆分出说话 intent，走即时通道
-                        if let Some(speech) = &translation.speech_intent {
+                        if let Some(speech) = &multi_translation.speech_intent {
                             let status = self.send_immediate_intent(speech).await;
                             if let Some(recorder) = self.soul_recorder().await {
                                 recorder.record_immediate(
                                     world_state.tick_id,
                                     &speech.intent_id.to_string(),
-                                    Some(&translation.original_narrative),
+                                    Some(&multi_translation.original_narrative),
                                     "extracted",
                                     speech.action_type.as_str(),
                                     speech.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
@@ -683,69 +752,138 @@ impl super::Agent {
                             }
                         }
 
-                        let intent = translation.intent;
+                        // 5c. 地魂 (ReflectorSoul) 批次审核 — 逐个审查翻译后的 Intent
+                        // 分级审核策略：根据 action_type 决定审核级别（Always/Adaptive/Skip）
+                        // 通过的 intent 组装 Pipeline，被驳回的丢弃
+                        let graded_config = self.config.game_rules
+                            .as_ref()
+                            .and_then(|g| g.intent_batch.as_ref())
+                            .map(|b| b.llm_validation.clone());
 
-                        // 5c. 地魂 (ReflectorSoul) 审查 — 三层验证
-                        match self.validate_with_reflector(intent, &world_state).await? {
-                            super::agent::ReflectorResult::Approved { intent: approved_intent, layers, narrative } => {
-                                // 记录地魂审查结果
-                                if let Some(recorder) = self.soul_recorder().await {
-                                    let layer1 = layers.iter().find(|l| l.layer == "layer1");
-                                    let layer2 = layers.iter().find(|l| l.layer == "layer2");
-                                    let layer3 = layers.iter().find(|l| l.layer == "layer3");
-                                    recorder.record_dihun(
-                                        world_state.tick_id,
-                                        attempt,
-                                        "approved",
-                                        layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        None,
-                                        narrative.as_deref(),
-                                    ).await;
-                                    recorder.record_final_intent(
-                                        world_state.tick_id,
-                                        attempt,
-                                        Some(&approved_intent.intent_id.to_string()),
-                                        Some(approved_intent.action_type.as_str()),
-                                        approved_intent.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
-                                    ).await;
+                        let mut approved_intents = Vec::new();
+                        let mut batch_rejection: Option<String> = None;
+                        let mut batch_layers: Vec<super::agent::LayerResult> = Vec::new();
+                        let mut batch_narrative: Option<String> = None;
+
+                        for intent in multi_translation.intents {
+                            // 分级决策：Skip 类型只做 RuleEngine（跳过 LLM）
+                            let skip_llm = Self::should_skip_llm_validation(
+                                &intent, graded_config.as_ref(),
+                            );
+
+                            if skip_llm {
+                                // 仅做 Layer 1 (action_type) + Layer 2 (RuleEngine)
+                                match self.validate_rules_only(&intent, &world_state).await {
+                                    Ok(()) => {
+                                        // 记录通过的两个 layer
+                                        if batch_layers.is_empty() {
+                                            batch_layers.push(super::agent::LayerResult {
+                                                layer: "layer1",
+                                                passed: true,
+                                                detail: None,
+                                            });
+                                            batch_layers.push(super::agent::LayerResult {
+                                                layer: "layer2",
+                                                passed: true,
+                                                detail: None,
+                                            });
+                                        }
+                                        approved_intents.push(intent);
+                                    }
+                                    Err(reason) => {
+                                        warn!("Tick {} 分级审核（Skip）驳回: {}", world_state.tick_id, reason);
+                                        batch_rejection = Some(reason.clone());
+                                        batch_layers.push(super::agent::LayerResult {
+                                            layer: "layer1",
+                                            passed: true,
+                                            detail: None,
+                                        });
+                                        batch_layers.push(super::agent::LayerResult {
+                                            layer: "layer2",
+                                            passed: false,
+                                            detail: Some(reason),
+                                        });
+                                    }
                                 }
-                                final_intent = Some(approved_intent);
+                            } else {
+                                // 完整三层审查（含 LLM）
+                                match self.validate_with_reflector(intent, &world_state).await? {
+                                    super::agent::ReflectorResult::Approved { intent: approved, layers, narrative } => {
+                                        batch_layers = layers;
+                                        batch_narrative = narrative;
+                                        approved_intents.push(approved);
+                                    }
+                                    super::agent::ReflectorResult::Rejected { reason, layers } => {
+                                        batch_layers = layers;
+                                        batch_rejection = Some(reason.clone());
+                                        // 叙事化驳回原因
+                                        let narrated = super::Agent::narrativize_rejection(&reason);
+                                        self.last_rejection_reason = Some(narrated.clone());
+                                        warn!("Tick {} 第 {} 次地魂审查驳回: {}", world_state.tick_id, attempt, reason);
+                                    }
+                                }
+                            }
+
+                            // primary intent 被驳回则终止批次（Pipeline 语义）
+                            if batch_rejection.is_some() {
                                 break;
                             }
-                            super::agent::ReflectorResult::Rejected { reason, layers } => {
-                                warn!("Tick {} 第 {} 次地魂审查驳回: {}", world_state.tick_id, attempt, reason);
-                                // 叙事化驳回原因：人魂不应看到技术性 meta 信息（item_id 等）
-                                let narrated_reason = super::Agent::narrativize_rejection(&reason);
-                                self.last_rejection_reason =
-                                    Some(narrated_reason.clone());
+                        }
 
-                                // 记录地魂审查结果
-                                if let Some(recorder) = self.soul_recorder().await {
-                                    let layer1 = layers.iter().find(|l| l.layer == "layer1");
-                                    let layer2 = layers.iter().find(|l| l.layer == "layer2");
-                                    let layer3 = layers.iter().find(|l| l.layer == "layer3");
-                                    recorder.record_dihun(
-                                        world_state.tick_id,
-                                        attempt,
-                                        "rejected",
-                                        layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
-                                        Some(&reason),
-                                        Some(&narrated_reason),
-                                    ).await;
-                                }
+                        if !approved_intents.is_empty() {
+                            // 记录地魂审查结果
+                            if let Some(recorder) = self.soul_recorder().await {
+                                let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
+                                let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
+                                let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
+                                recorder.record_dihun(
+                                    world_state.tick_id,
+                                    attempt,
+                                    "approved",
+                                    layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    None,
+                                    batch_narrative.as_deref(),
+                                ).await;
+                                let pipeline = Self::assemble_pipeline(approved_intents);
+                                recorder.record_final_intent(
+                                    world_state.tick_id,
+                                    attempt,
+                                    Some(&pipeline.intent_id.to_string()),
+                                    Some(pipeline.action_type.as_str()),
+                                    pipeline.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
+                                ).await;
+                                final_intent = Some(pipeline);
+                            } else {
+                                let pipeline = Self::assemble_pipeline(approved_intents);
+                                final_intent = Some(pipeline);
+                            }
+                            break;
+                        } else if let Some(reason) = batch_rejection {
+                            // 记录驳回
+                            if let Some(recorder) = self.soul_recorder().await {
+                                let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
+                                let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
+                                let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
+                                let narrated = super::Agent::narrativize_rejection(&reason);
+                                recorder.record_dihun(
+                                    world_state.tick_id,
+                                    attempt,
+                                    "rejected",
+                                    layer1.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    layer2.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    layer3.map(|l| l.detail.as_deref().unwrap_or("通过")),
+                                    Some(&reason),
+                                    Some(&narrated),
+                                ).await;
+                            }
 
-                                if attempt >= max_retries {
-                                    warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
-                                    final_intent = Some(Intent::new(agent_id, world_state.tick_id, "idle", None)
-                                        .with_thought(format!("意图多次被驳回: {}", reason)));
-                                    break;
-                                }
-                                // last_rejection_reason 已在此处叙事化设置
-                                // 下一轮人魂会看到叙事化的 rejection reason（不含 meta 信息）
+                            if attempt >= max_retries {
+                                warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
+                                final_intent = Some(Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                    .with_thought(format!("意图多次被驳回: {}", reason)));
+                                break;
                             }
                         }
                     }

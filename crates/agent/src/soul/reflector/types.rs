@@ -124,6 +124,26 @@ pub struct ValidationRequest {
     pub world_state: Option<cyber_jianghu_protocol::WorldState>,
 }
 
+/// 批次验证结果
+#[derive(Debug, Clone)]
+pub struct BatchValidationResult {
+    /// 通过验证的 Intent
+    pub valid_intents: Vec<crate::models::Intent>,
+    /// 被驳回的 Intent 及原因
+    pub rejections: Vec<(crate::models::Intent, RejectionReason)>,
+}
+
+/// 驳回原因
+#[derive(Debug, Clone)]
+pub struct RejectionReason {
+    /// 意图 ID
+    pub intent_id: uuid::Uuid,
+    /// 驳回原因
+    pub reason: String,
+    /// 驳回类型
+    pub rejection_type: RejectionType,
+}
+
 /// Deserializer that treats `null` as empty string
 fn deserialize_null_string<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where

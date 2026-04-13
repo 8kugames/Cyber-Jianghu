@@ -37,6 +37,187 @@ pub struct GameRules {
 
     /// 最后更新时间
     pub last_updated: String,
+
+    /// Intent 批次配置（multi-Intent）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_batch: Option<IntentBatchConfig>,
+
+    /// 地魂叙事生成配置
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reflector_narrative: Option<ReflectorNarrativeConfig>,
+}
+
+// ============================================================================
+// Multi-Intent 配置
+// ============================================================================
+
+/// Intent 批次配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentBatchConfig {
+    /// 每 tick 最大 Intent 数
+    #[serde(default = "default_max_intents")]
+    pub max_intents_per_tick: usize,
+
+    /// 三魂循环最大重试次数
+    #[serde(default = "default_max_retries")]
+    pub max_retries: i32,
+
+    /// 是否启用 Pipeline 执行
+    #[serde(default = "default_true")]
+    pub pipeline_execution_enabled: bool,
+
+    /// 是否允许部分执行
+    #[serde(default = "default_true")]
+    pub partial_execution_enabled: bool,
+
+    /// 分级审核配置
+    #[serde(default)]
+    pub llm_validation: GradedValidationConfig,
+}
+
+fn default_max_intents() -> usize { 5 }
+fn default_max_retries() -> i32 { 3 }
+
+/// 分级审核配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GradedValidationConfig {
+    /// 强制 LLM 审核的 action_type（speak/shout/whisper 等）
+    #[serde(default)]
+    pub always_types: Vec<String>,
+
+    /// 动态审核的 action_type（根据 action_data 判断）
+    #[serde(default)]
+    pub adaptive_types: Vec<String>,
+
+    /// 跳过 LLM 审核的 action_type
+    #[serde(default)]
+    pub skip_types: Vec<String>,
+
+    /// 每 tick 至少审核的 Intent 数量
+    #[serde(default = "default_minimum_per_tick")]
+    pub minimum_per_tick: usize,
+
+    /// 限制区域 node_id 前缀/关键词（move 审核用）
+    #[serde(default = "default_restricted_area_keywords")]
+    pub restricted_area_keywords: Vec<String>,
+
+    /// 高价值物品 item_id 前缀/关键词（trade/steal/give 审核用）
+    #[serde(default = "default_high_value_item_keywords")]
+    pub high_value_item_keywords: Vec<String>,
+}
+
+fn default_restricted_area_keywords() -> Vec<String> {
+    vec!["admin".into(), "vault".into(), "secret".into()]
+}
+
+fn default_high_value_item_keywords() -> Vec<String> {
+    vec!["silver".into(), "gold".into()]
+}
+
+/// 地魂叙事生成配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectorNarrativeConfig {
+    /// 是否启用 LLM 生成（false 时使用空 NarrativeContext）
+    #[serde(default = "default_true")]
+    pub enable_llm_generation: bool,
+
+    /// 是否启用语义缓存
+    #[serde(default = "default_true")]
+    pub cache_enabled: bool,
+
+    /// 缓存大小
+    #[serde(default = "default_cache_size")]
+    pub cache_size: usize,
+
+    /// 缓存 TTL（秒）
+    #[serde(default = "default_cache_ttl")]
+    pub cache_ttl_seconds: i64,
+
+    /// 是否使用 few-shot 示例
+    #[serde(default = "default_true")]
+    pub few_shot_examples: bool,
+
+    /// 数值泄露检测配置
+    #[serde(default)]
+    pub leak_detection: LeakDetectionConfig,
+}
+
+/// 数值泄露检测配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeakDetectionConfig {
+    /// 是否启用泄露检测
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// 高风险阈值（>=此分数触发重试）
+    #[serde(default = "default_suspicion_threshold")]
+    pub suspicion_threshold: u8,
+
+    /// 最大重试次数
+    #[serde(default = "default_max_retry")]
+    pub max_retry: usize,
+}
+
+// Default helpers
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_cache_size() -> usize {
+    1000
+}
+
+fn default_cache_ttl() -> i64 {
+    300
+}
+
+fn default_suspicion_threshold() -> u8 {
+    100
+}
+
+fn default_max_retry() -> usize {
+    2
+}
+
+fn default_minimum_per_tick() -> usize {
+    1
+}
+
+impl Default for GradedValidationConfig {
+    fn default() -> Self {
+        Self {
+            always_types: vec!["speak".into(), "shout".into(), "whisper".into()],
+            adaptive_types: vec!["steal".into(), "trade".into(), "give".into(), "move".into()],
+            skip_types: vec!["idle".into(), "wait".into()],
+            minimum_per_tick: 1,
+            restricted_area_keywords: default_restricted_area_keywords(),
+            high_value_item_keywords: default_high_value_item_keywords(),
+        }
+    }
+}
+
+impl Default for LeakDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            suspicion_threshold: 100,
+            max_retry: 2,
+        }
+    }
+}
+
+impl Default for ReflectorNarrativeConfig {
+    fn default() -> Self {
+        Self {
+            enable_llm_generation: true,
+            cache_enabled: true,
+            cache_size: 1000,
+            cache_ttl_seconds: 300,
+            few_shot_examples: true,
+            leak_detection: LeakDetectionConfig::default(),
+        }
+    }
 }
 
 // ============================================================================

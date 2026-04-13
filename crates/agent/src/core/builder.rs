@@ -23,7 +23,7 @@ use crate::config::{CharacterConfig, Config, DeviceConfig};
 use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::{ReflectorSoul, Validator};
+use crate::soul::reflector::{NarrativeGenerator, ReflectorSoul, Validator};
 use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
@@ -66,6 +66,8 @@ pub struct AgentBuilder {
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
     /// 天魂 — 意图翻译器（Cognitive 模式）
     intent_translator: Option<Arc<IntentTranslator>>,
+    /// 地魂叙事生成器（Cognitive 模式，可选）
+    narrative_generator: Option<Arc<NarrativeGenerator>>,
 }
 
 impl AgentBuilder {
@@ -93,6 +95,7 @@ impl AgentBuilder {
             data_dir: PathBuf::from("."),
             immediate_handler: None,
             intent_translator: None,
+            narrative_generator: None,
         }
     }
 
@@ -164,7 +167,18 @@ impl AgentBuilder {
             .clone()
             .unwrap_or_else(|| Arc::new(RwLock::new(llm_client.clone())));
         let validator = Arc::new(ReflectorSoul::new(rules, container.clone()));
+
+        // 地魂叙事生成器（使用 game_rules 中的 reflector_narrative 配置）
+        let narrative_config = self
+            .config
+            .game_rules
+            .as_ref()
+            .and_then(|g| g.reflector_narrative.clone())
+            .unwrap_or_default();
+        let narrative_generator = Arc::new(NarrativeGenerator::new(container.clone(), narrative_config));
+
         self.validator = Some(validator);
+        self.narrative_generator = Some(narrative_generator);
         self.llm_client = Some(llm_client);
         self.llm_container = Some(container);
         self
@@ -340,6 +354,7 @@ impl AgentBuilder {
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             intent_translator: self.intent_translator,
+            narrative_generator: self.narrative_generator,
         }
     }
 }
