@@ -29,6 +29,9 @@ use cyber_jianghu_protocol::{AvailableAction, ClientMessage, ServerMessage, Worl
 // 常量
 // ============================================================================
 
+/// 即时意图优先级（高于普通意图）
+pub const IMMEDIATE_INTENT_PRIORITY: i32 = 10;
+
 /// 即时决策超时（毫秒）
 const IMMEDIATE_DECISION_TIMEOUT_MS: u64 = 5000;
 
@@ -255,7 +258,7 @@ impl ImmediateEventHandler {
                         action_data: Some(serde_json::json!({
                             "content": content
                         })),
-                        priority: 10,
+                        priority: IMMEDIATE_INTENT_PRIORITY,
                     };
 
                     if let Err(e) = self.intent_tx.read().await.send(intent).await {

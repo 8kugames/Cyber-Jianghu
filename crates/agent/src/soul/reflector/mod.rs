@@ -26,7 +26,7 @@ pub use rule_engine::{
 };
 pub use store::{PendingReview, PendingReviewEntry, ReviewDecision, ReviewStatus, ReviewStore};
 pub use types::{
-    BatchValidationResult, LlmValidationResponse, PersonaInfo, RejectionReason, RejectionType,
-    ValidationRequest, ValidationResult,
+    LlmValidationResponse, PersonaInfo, RejectionReason, RejectionType, ValidationRequest,
+    ValidationResult,
 };
 pub use validator::{ReflectorSoul, Validator};
