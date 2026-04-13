@@ -361,6 +361,7 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         prompt_tokens: u32,
         completion_tokens: u32,
         #[serde(default)]
+        #[allow(dead_code)]
         total_tokens: u32,
     }
 

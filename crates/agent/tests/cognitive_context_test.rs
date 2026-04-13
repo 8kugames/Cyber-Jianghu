@@ -81,6 +81,7 @@ fn create_test_world_state() -> WorldState {
             metadata: serde_json::Value::Null,
         }],
         private_dialogue_log: vec![],
+        last_execution_summary: None,
     }
 }
 

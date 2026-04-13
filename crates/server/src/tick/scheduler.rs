@@ -83,6 +83,9 @@ pub struct TickScheduler {
     /// 上一轮关闭的对话记录（用于下一轮广播）
     closed_dialogue_records: Vec<cyber_jianghu_protocol::PrivateDialogueRecord>,
 
+    /// 上一轮 Pipeline 执行汇总（用于下一轮广播）
+    execution_summaries: std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
+
     /// 当前接受意图的 tick_id（与 AppState 共享）
     accepting_tick_id: Arc<AtomicI64>,
 
@@ -115,6 +118,7 @@ impl TickScheduler {
             state_processor: StateProcessor::new(db_pool),
             dialogue_manager,
             closed_dialogue_records: vec![],
+            execution_summaries: std::collections::HashMap::new(),
             accepting_tick_id,
             last_actions_mtime: None,
         }
@@ -319,6 +323,7 @@ impl TickScheduler {
                 &self.game_data_cache,
                 deadline_ms,
                 &self.closed_dialogue_records,
+                &self.execution_summaries,
             )
             .await
             .context("广播: 广播状态失败")?;
@@ -500,11 +505,15 @@ impl TickScheduler {
             processor_events,
             action_logs,
             validation_errors,
+            new_execution_summaries,
         ) = self
             .state_processor
             .process_intents(tick_id, agent_states, &intents)
             .await
             .context("结算意图失败")?;
+
+        // 存储 Pipeline 执行汇总（下轮广播时附加到 WorldState）
+        self.execution_summaries = new_execution_summaries;
 
         // 发送验证错误通知给 agent
         if !validation_errors.is_empty() {

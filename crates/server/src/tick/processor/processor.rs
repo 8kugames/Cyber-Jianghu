@@ -3,7 +3,8 @@
 //! 协调意图解析、状态变更和事件生成。
 
 use anyhow::Result;
-use tracing::{debug, warn};
+use std::collections::HashMap;
+use tracing::warn;
 
 use super::{
     executor::apply_state_change,
@@ -15,6 +16,7 @@ use crate::db::DbPool;
 use crate::models::{
     ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent, WorldEventType,
 };
+use cyber_jianghu_protocol::{ExecutionSummary, IntentExecutionResult, IntentExecutionStatus};
 
 /// 状态处理器
 ///
@@ -52,8 +54,9 @@ impl StateProcessor {
     /// 处理意图列表
     ///
     /// 这是主入口函数，协调整个处理流程。
-    /// 返回值中的 `validation_errors` 包含验证失败的 (agent_id, reason) 对，
-    /// 由调用方（scheduler）负责发送错误通知给 agent。
+    /// 支持多 Intent Pipeline 执行：主 Intent 成功后依次执行 subsequent_intents。
+    /// 返回值包含 `execution_summaries`：每个 Agent 的 Pipeline 执行汇总，
+    /// 由 scheduler 在下次广播时附加到 WorldState。
     pub async fn process_intents(
         &self,
         tick_id: i64,
@@ -65,12 +68,14 @@ impl StateProcessor {
         Vec<(uuid::Uuid, WorldEvent)>,
         Vec<AgentAction>,
         Vec<(uuid::Uuid, String)>,
+        HashMap<uuid::Uuid, ExecutionSummary>,
     )> {
         let mut actions_executed = 0;
         let executor = ActionExecutor::new(self.db_pool.clone());
         let mut events = Vec::new();
         let mut action_logs = Vec::new();
         let mut validation_errors: Vec<(uuid::Uuid, String)> = Vec::new();
+        let mut execution_summaries: HashMap<uuid::Uuid, ExecutionSummary> = HashMap::new();
 
         // 遍历所有意图
         for intent in intents {
@@ -100,113 +105,211 @@ impl StateProcessor {
                 }
             };
 
-            // 验证意图
-            if let Err(e) = self
-                .resolver
-                .validate_intent(intent, &agent_states[agent_idx], &agent_states)
-                .await
-            {
-                warn!("动作验证失败: agent={}, error={}", intent.agent_id, e);
-                validation_errors.push((intent.agent_id, format!("{}", e)));
-                continue;
+            // 构建 Pipeline intent 列表
+            let pipeline_intents = intent.as_pipeline();
+            let mut pipeline_results: Vec<IntentExecutionResult> = Vec::new();
+            let mut pipeline_failed = false;
+
+            // Sagas: 执行前快照 agent_state + events 长度，Pipeline 失败时回滚
+            let agent_state_snapshot = agent_states[agent_idx].clone();
+            let events_len_before = events.len();
+
+            for (pipe_idx, pipe_intent) in pipeline_intents.iter().enumerate() {
+                if pipeline_failed {
+                    // 前置 Intent 失败，跳过后续
+                    pipeline_results.push(IntentExecutionResult {
+                        intent_id: pipe_intent.intent_id,
+                        status: IntentExecutionStatus::Skipped,
+                        executed_quantity: None,
+                        error_reason: Some("前置Intent失败".to_string()),
+                    });
+                    continue;
+                }
+
+                // Pipeline 完整性校验（后续 intent 必须属于同一 agent 和 tick）
+                if pipe_idx > 0
+                    && (pipe_intent.agent_id != intent.agent_id
+                        || pipe_intent.tick_id != tick_id)
+                {
+                    pipeline_results.push(IntentExecutionResult {
+                        intent_id: pipe_intent.intent_id,
+                        status: IntentExecutionStatus::Failed,
+                        executed_quantity: None,
+                        error_reason: Some("Pipeline完整性校验失败".to_string()),
+                    });
+                    pipeline_failed = true;
+                    continue;
+                }
+
+                // 验证意图（基于当前状态，已随执行更新）
+                if let Err(e) = self
+                    .resolver
+                    .validate_intent(pipe_intent, &agent_states[agent_idx], &agent_states)
+                    .await
+                {
+                    warn!(
+                        "Pipeline intent {} 验证失败: agent={}, error={}",
+                        pipe_idx, pipe_intent.agent_id, e
+                    );
+                    pipeline_results.push(IntentExecutionResult {
+                        intent_id: pipe_intent.intent_id,
+                        status: IntentExecutionStatus::Failed,
+                        executed_quantity: None,
+                        error_reason: Some(format!("{}", e)),
+                    });
+                    // 主 Intent 验证失败走原有逻辑
+                    if pipe_idx == 0 {
+                        validation_errors.push((intent.agent_id, format!("{}", e)));
+                    }
+                    pipeline_failed = true;
+                    continue;
+                }
+
+                // 执行动作
+                let result = executor.execute(pipe_intent, &mut agent_states[agent_idx]);
+
+                if result.success {
+                    // 应用状态变更
+                    let mut all_changes_applied = true;
+                    for change in &result.state_changes {
+                        let mut ctx = MutationContext::new(
+                            &self.db_pool,
+                            tick_id,
+                            result.intent_id,
+                            &mut events,
+                        );
+
+                        let mut applied = false;
+                        for mutator in &self.mutators {
+                            if let Ok(true) =
+                                mutator.mutate(change, &mut agent_states, &mut ctx).await
+                            {
+                                applied = true;
+                                break;
+                            }
+                        }
+
+                        if !applied {
+                            applied = apply_state_change(
+                                &self.db_pool,
+                                tick_id,
+                                change,
+                                result.intent_id,
+                                &mut agent_states,
+                                &mut events,
+                            )
+                            .await;
+                        }
+
+                        if !applied {
+                            all_changes_applied = false;
+                        }
+                    }
+
+                    if all_changes_applied {
+                        actions_executed += 1;
+                        pipeline_results.push(IntentExecutionResult {
+                            intent_id: pipe_intent.intent_id,
+                            status: IntentExecutionStatus::Success,
+                            executed_quantity: None,
+                            error_reason: None,
+                        });
+                    } else {
+                        pipeline_results.push(IntentExecutionResult {
+                            intent_id: pipe_intent.intent_id,
+                            status: IntentExecutionStatus::Failed,
+                            executed_quantity: None,
+                            error_reason: Some("状态变更应用失败".to_string()),
+                        });
+                        pipeline_failed = true;
+                    }
+                } else {
+                    pipeline_results.push(IntentExecutionResult {
+                        intent_id: pipe_intent.intent_id,
+                        status: IntentExecutionStatus::Failed,
+                        executed_quantity: None,
+                        error_reason: Some(result.message.clone()),
+                    });
+                    pipeline_failed = true;
+                }
             }
 
-            // 执行动作
-            let result = executor.execute(intent, &mut agent_states[agent_idx]);
+            // Sagas: Pipeline 失败时回滚到快照（内存状态 + events 全部撤销）
+            // NOTE: apply_state_change 中通过 InventoryManager 写入的 DB 操作不会被回滚。
+            // 但下一个 tick 的持久化会用回滚后的内存状态覆盖 DB，保证最终一致性。
+            // 完整事务性回滚需要将 executor 改为接收 Transaction——代价过大，延后处理。
+            if pipeline_failed {
+                agent_states[agent_idx] = agent_state_snapshot;
+                events.truncate(events_len_before);
+            }
 
-            // 记录日志
-            let action_type = ActionType::new(&result.action_type);
-
-            // 从配置获取动作中文描述
+            // 记录主 Intent 的日志
+            let action_type = ActionType::new(intent.action_type.as_str());
             let action_type_display =
-                crate::game_data::registry::ActionRegistry::get(&result.action_type)
+                crate::game_data::registry::ActionRegistry::get(intent.action_type.as_str())
                     .map(|config| config.description.clone());
 
-            let mut action_log = AgentAction {
+            let main_success = pipeline_results
+                .first()
+                .map(|r| r.status == IntentExecutionStatus::Success)
+                .unwrap_or(false);
+
+            let action_log = AgentAction {
                 id: 0,
                 tick_id,
                 agent_id: intent.agent_id,
                 action_type,
                 action_type_display,
                 action_data: intent.action_data.clone(),
-                result: if result.success {
+                result: if main_success {
                     ActionResult::Success
                 } else {
                     ActionResult::Failed
                 },
-                result_message: Some(result.message.clone()),
+                result_message: pipeline_results
+                    .first()
+                    .and_then(|r| r.error_reason.clone())
+                    .or_else(|| {
+                        if main_success {
+                            Some("Pipeline执行成功".to_string())
+                        } else {
+                            None
+                        }
+                    }),
                 thought_log: intent.thought_log.clone(),
                 observer_thought: intent.observer_thought.clone(),
                 narrative: intent.narrative.clone(),
-                soul_cycle_metadata: None, // 由 agent 通过 SoulCycleReport 消息上报后更新
+                soul_cycle_metadata: None,
                 created_at: chrono::Utc::now(),
             };
 
-            if result.success {
-                debug!(
-                    "动作执行成功: agent={}, action={}",
-                    intent.agent_id, result.action_type
-                );
-
-                // 应用状态变更
-                let mut all_changes_applied = true;
-                for change in &result.state_changes {
-                    let mut ctx =
-                        MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
-
-                    // 尝试使用 mutator 处理状态变更
-                    let mut applied = false;
-                    for mutator in &self.mutators {
-                        if let Ok(true) = mutator.mutate(change, &mut agent_states, &mut ctx).await
-                        {
-                            applied = true;
-                            break;
-                        }
-                    }
-
-                    // 如果没有 mutator 处理，使用回退逻辑
-                    if !applied {
-                        applied = apply_state_change(
-                            &self.db_pool,
-                            tick_id,
-                            change,
-                            result.intent_id,
-                            &mut agent_states,
-                            &mut events,
-                        )
-                        .await;
-                    }
-
-                    if !applied {
-                        all_changes_applied = false;
-                    }
-                }
-
-                if all_changes_applied {
-                    actions_executed += 1;
-                } else {
-                    action_log.result = ActionResult::Failed;
-                }
-            } else {
-                warn!(
-                    "动作执行失败: agent={}, error={}",
-                    intent.agent_id, result.message
-                );
+            // 如果主 Intent 执行失败，生成失败事件
+            if !main_success {
+                let reason = pipeline_results
+                    .first()
+                    .and_then(|r| r.error_reason.clone())
+                    .unwrap_or_else(|| "未知原因".to_string());
                 let event = WorldEvent {
                     event_type: WorldEventType::ActionResult,
                     tick_id,
-                    description: format!("动作执行失败: {}", result.message),
+                    description: format!("动作执行失败: {}", reason),
                     metadata: serde_json::json!({
-                        "action": result.action_type,
+                        "action": intent.action_type.as_str(),
                         "intent_id": intent.intent_id,
                         "result": "failed",
-                        "reason": result.message,
+                        "reason": reason,
                     }),
                 };
                 events.push((intent.agent_id, event));
             }
 
             action_logs.push(action_log);
+
+            // 存储 ExecutionSummary
+            let summary = ExecutionSummary::from_results(&pipeline_results);
+            if pipeline_intents.len() > 1 || summary.failed > 0 || summary.skipped > 0 {
+                execution_summaries.insert(intent.agent_id, summary);
+            }
         }
 
         Ok((
@@ -215,6 +318,7 @@ impl StateProcessor {
             events,
             action_logs,
             validation_errors,
+            execution_summaries,
         ))
     }
 }

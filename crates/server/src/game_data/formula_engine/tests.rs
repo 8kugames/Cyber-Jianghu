@@ -3,6 +3,7 @@
 // ============================================================================
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use super::super::FormulaEngine;
     use std::collections::HashMap;

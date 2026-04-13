@@ -15,4 +15,4 @@
 
 mod engine;
 
-pub use engine::{IntentTranslator, TranslationResponse, TranslationResult};
+pub use engine::{IntentTranslator, MultiTranslationResult, TranslationResponse};

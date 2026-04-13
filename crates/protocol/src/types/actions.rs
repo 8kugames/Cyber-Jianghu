@@ -154,6 +154,13 @@ pub struct Intent {
     /// 用于关单时强制结束 Session
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+
+    /// Pipeline 后续 Intent（multi-Intent 支持）
+    ///
+    /// 主 Intent 执行成功后，Server 按顺序执行 subsequent_intents。
+    /// 任一失败则跳过后续所有 Intent。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subsequent_intents: Vec<Intent>,
 }
 
 fn default_priority() -> i32 {
@@ -180,6 +187,7 @@ impl Intent {
             narrative: None,
             already_broadcast: false,
             session_id: None,
+            subsequent_intents: vec![],
         }
     }
 
@@ -203,6 +211,7 @@ impl Intent {
             narrative: None,
             already_broadcast: false,
             session_id: None,
+            subsequent_intents: vec![],
         }
     }
 
@@ -222,6 +231,83 @@ impl Intent {
     pub fn with_narrative(mut self, narrative: String) -> Self {
         self.narrative = Some(narrative);
         self
+    }
+
+    /// 将 Intent 及其 subsequent_intents 展开为 Vec
+    pub fn as_pipeline(&self) -> Vec<Intent> {
+        let mut intents = vec![self.clone()];
+        intents.extend(self.subsequent_intents.clone());
+        intents
+    }
+}
+
+// ============================================================================
+// Pipeline 执行结果
+// ============================================================================
+
+/// 单个 Intent 执行状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentExecutionStatus {
+    /// 执行成功
+    Success,
+    /// 部分成功（如数量不足时部分执行）
+    PartialSuccess,
+    /// 执行失败
+    Failed,
+    /// 跳过（前置 Intent 失败）
+    Skipped,
+}
+
+/// 单个 Intent 执行结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntentExecutionResult {
+    /// Intent ID
+    pub intent_id: Uuid,
+    /// 执行状态
+    pub status: IntentExecutionStatus,
+    /// 实际执行数量（用于 partial success）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executed_quantity: Option<i32>,
+    /// 失败原因
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_reason: Option<String>,
+}
+
+/// Pipeline 执行汇总（广播用，不含私有数据）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionSummary {
+    /// 总 Intent 数
+    pub total: usize,
+    /// 成功数
+    pub succeeded: usize,
+    /// 部分成功数
+    pub partial: usize,
+    /// 失败数
+    pub failed: usize,
+    /// 跳过数
+    pub skipped: usize,
+}
+
+impl ExecutionSummary {
+    /// 从执行结果列表生成汇总
+    pub fn from_results(results: &[IntentExecutionResult]) -> Self {
+        let mut summary = Self {
+            total: results.len(),
+            succeeded: 0,
+            partial: 0,
+            failed: 0,
+            skipped: 0,
+        };
+        for r in results {
+            match r.status {
+                IntentExecutionStatus::Success => summary.succeeded += 1,
+                IntentExecutionStatus::PartialSuccess => summary.partial += 1,
+                IntentExecutionStatus::Failed => summary.failed += 1,
+                IntentExecutionStatus::Skipped => summary.skipped += 1,
+            }
+        }
+        summary
     }
 }
 

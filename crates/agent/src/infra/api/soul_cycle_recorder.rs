@@ -187,6 +187,7 @@ impl SoulCycleRecorder {
     }
 
     /// 记录天魂翻译结果
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_tianhun(
         &self,
         tick_id: i64,
@@ -244,6 +245,7 @@ impl SoulCycleRecorder {
     }
 
     /// 记录地魂审查结果
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_dihun(
         &self,
         tick_id: i64,
@@ -367,6 +369,7 @@ impl SoulCycleRecorder {
     }
 
     /// 记录即时通道意图
+    #[allow(clippy::too_many_arguments)]
     pub async fn record_immediate(
         &self,
         tick_id: i64,

@@ -110,6 +110,7 @@ pub async fn validate_action(
         narrative: None,
         already_broadcast: false,
         session_id: None,
+        subsequent_intents: vec![],
     };
 
     // For now, just return valid for alive agents

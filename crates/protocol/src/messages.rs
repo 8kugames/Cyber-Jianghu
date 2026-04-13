@@ -105,6 +105,8 @@ pub struct DialogueSession {
 ///     survival_threshold: 30,
 ///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
+///     intent_batch: None,
+///     reflector_narrative: None,
 /// };
 ///
 /// let msg = ServerMessage::Registered {
@@ -480,6 +482,8 @@ mod tests {
             survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
+            intent_batch: None,
+            reflector_narrative: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -538,6 +542,7 @@ mod tests {
             events_log: vec![],
             private_dialogue_log: vec![],
             deadline_ms: 0,
+            last_execution_summary: None,
         };
 
         let msg = ServerMessage::WorldState { data: world_state };
@@ -641,6 +646,8 @@ mod tests {
             survival_threshold: 30,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
+            intent_batch: None,
+            reflector_narrative: None,
         };
         let world_rules = WorldBuildingRules::default();
 

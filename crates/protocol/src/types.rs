@@ -149,6 +149,7 @@ mod tests {
             events_log: vec![],
             private_dialogue_log: vec![],
             deadline_ms: 0,
+            last_execution_summary: None,
         };
 
         let json = serde_json::to_string(&world_state).unwrap();

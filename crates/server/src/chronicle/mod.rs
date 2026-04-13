@@ -273,21 +273,18 @@ pub async fn generate_and_store(
     // 2. 生成策略：LLM 优先，模板兜底，两个版本都生成
     // - LLM 成功：summary_llm = LLM, summary = 模板（同步），异步生成 LLM 补充
     // - LLM 失败：summary = 模板（同步），summary_llm = None，异步生成 LLM 补充
-    let summary_llm: Option<String>;
-    let summary: String;
-
     // 2.1 先同步生成模板（总是需要）
-    summary = generator::generate_template(&data)?;
+    let summary = generator::generate_template(&data)?;
 
     // 2.2 尝试 LLM（如果成功则作为补充版本异步存储）
-    match generator::generate_llm(&data).await {
+    let summary_llm = match generator::generate_llm(&data).await {
         Ok(llm_summary) => {
             tracing::info!("LLM 生成成功");
-            summary_llm = Some(llm_summary);
+            Some(llm_summary)
         }
         Err(e) => {
             tracing::warn!("LLM 生成失败: {}", e);
-            summary_llm = None;
+            None
         }
     };
 

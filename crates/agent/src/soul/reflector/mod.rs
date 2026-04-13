@@ -8,12 +8,16 @@
 // ============================================================================
 
 pub mod cognitive_validator;
+pub mod leak_detector;
+pub mod narrative_generator;
 pub mod prompt;
 pub mod rule_engine;
 pub mod store;
 pub mod types;
 pub mod validator;
 
+pub use leak_detector::LeakDetector;
+pub use narrative_generator::NarrativeGenerator;
 pub use prompt::{ObserverPrompt, sanitize_for_prompt};
 pub use rule_engine::RuleEngine as RuleEngineValidator;
 pub use rule_engine::{
@@ -22,6 +26,7 @@ pub use rule_engine::{
 };
 pub use store::{PendingReview, PendingReviewEntry, ReviewDecision, ReviewStatus, ReviewStore};
 pub use types::{
-    LlmValidationResponse, PersonaInfo, RejectionType, ValidationRequest, ValidationResult,
+    BatchValidationResult, LlmValidationResponse, PersonaInfo, RejectionReason, RejectionType,
+    ValidationRequest, ValidationResult,
 };
 pub use validator::{ReflectorSoul, Validator};
