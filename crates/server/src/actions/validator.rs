@@ -401,6 +401,7 @@ mod tests {
             narrative: None,
             already_broadcast: false,
             session_id: None,
+            subsequent_intents: vec![],
         }
     }
 

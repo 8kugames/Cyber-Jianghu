@@ -56,6 +56,7 @@ impl Broadcaster {
         game_data_cache: &Arc<GameDataCache>,
         deadline_ms: u64,
         closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
+        execution_summaries: &std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 
@@ -168,6 +169,7 @@ impl Broadcaster {
                 &online_agent_ids,
                 game_data_cache,
                 closed_dialogue_records,
+                execution_summaries.get(&agent_state.agent_id).cloned(),
             );
 
             // 向该Agent发送其专属的WorldState
@@ -207,6 +209,7 @@ impl Broadcaster {
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
         closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
+        execution_summary: Option<cyber_jianghu_protocol::ExecutionSummary>,
     ) -> WorldState {
         // 游戏时间计算（数据驱动）
         let (year, month, day, hour) = compute_game_time(tick_id);
@@ -405,6 +408,7 @@ impl Broadcaster {
             events_log: events, // 传递本 Tick 发生的事件
             private_dialogue_log: closed_dialogue_records.to_vec(), // 上一轮关闭的密语会话记录
             deadline_ms,
+            last_execution_summary: execution_summary,
         }
     }
 }
@@ -606,5 +610,6 @@ pub fn build_initial_world_state(
         events_log: events,
         private_dialogue_log: vec![],
         deadline_ms,
+        last_execution_summary: None,
     }
 }

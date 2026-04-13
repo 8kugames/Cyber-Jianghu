@@ -25,9 +25,8 @@ use crate::infra::api::ReconnectRequest;
 use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::{PersonaInfo, Validator};
+use crate::soul::reflector::{NarrativeGenerator, PersonaInfo, Validator};
 use crate::soul::translator::IntentTranslator;
-use crate::soul::translator::TranslationResult;
 
 use super::builder::AgentBuilder;
 use super::{
@@ -135,6 +134,9 @@ pub struct Agent {
     /// 天魂 — 意图翻译器（Cognitive 模式，将叙事意图翻译为格式化 Intent）
     /// Claw 模式下为 None（外部系统直接提供格式化 Intent）
     pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
+
+    /// 地魂叙事生成器（可选，从 WorldState 生成 NarrativeContext 供人魂使用）
+    pub(crate) narrative_generator: Option<Arc<NarrativeGenerator>>,
 }
 
 impl Agent {
@@ -196,6 +198,7 @@ impl Agent {
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             intent_translator: None,
+            narrative_generator: None,
         }
     }
 
@@ -484,108 +487,94 @@ impl Agent {
         }
     }
 
-    /// 天魂翻译：将人魂的叙事意图翻译为服务端格式化 Intent
+    /// 天魂多 Intent 翻译（Pipeline 模式）
     ///
-    /// 如果 intent 的 action_type 为 "narrative"（人魂标记），调用天魂翻译。
-    /// 否则直接返回原 intent（Claw 模式或已经是格式化 Intent）。
-    ///
-    /// 翻译失败时返回 idle intent 作为降级。
-    ///
-    /// # Arguments
-    /// * `intent` - 人魂输出的叙事意图
-    /// * `world_state` - 当前世界状态
-    /// * `cognitive_chain` - 人魂的认知链（可选，用于辅助天魂指代消解）
-    pub(crate) async fn translate_intent(
+    /// 将叙事意图拆分为多个结构化 Intent，用于 Pipeline 执行。
+    /// 返回 MultiTranslationResult，包含按顺序执行的 Intent 列表。
+    pub(crate) async fn translate_multi_intent(
         &self,
         intent: Intent,
         world_state: &WorldState,
         cognitive_chain: Option<&crate::soul::actor::CognitiveChain>,
-    ) -> TranslationResult {
-        // 非 narrative action_type 直接放行（Claw 模式 / idle / 已格式化）
+        max_intents: usize,
+    ) -> crate::soul::translator::MultiTranslationResult {
+        use crate::soul::translator::MultiTranslationResult;
+
+        // 非 narrative 直接包装
         if intent.action_type.as_str() != "narrative" {
-            let thought = intent.thought_log.clone().unwrap_or_default();
-            return TranslationResult {
-                intent,
+            return MultiTranslationResult {
+                intents: vec![intent],
                 speech_intent: None,
                 original_narrative: String::new(),
-                original_thought_log: thought,
-                success: true,
-                error: None,
+                original_thought_log: String::new(),
             };
         }
 
-        // 从 action_data 提取叙事文本（提前提取，避免变量作用域问题）
         let narrative = intent
             .action_data
             .as_ref()
             .and_then(|d| d.get("narrative"))
             .and_then(|n| n.as_str())
             .unwrap_or("");
-
         let thought_log = intent.thought_log.as_deref().unwrap_or("");
 
         let translator = match &self.intent_translator {
             Some(t) => t,
             None => {
-                tracing::error!(
-                    "人魂输出了 narrative intent 但未配置天魂翻译器（配置错误），降级为 idle"
-                );
-                return TranslationResult {
-                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                        .with_thought(intent.thought_log.clone().unwrap_or_default()),
+                tracing::error!("未配置天魂翻译器，降级单 Intent idle");
+                return MultiTranslationResult {
+                    intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(thought_log.to_string())],
                     speech_intent: None,
                     original_narrative: narrative.to_string(),
                     original_thought_log: thought_log.to_string(),
-                    success: false,
-                    error: Some("IntentTranslator not configured".to_string()),
                 };
             }
         };
 
         if narrative.is_empty() {
-            warn!("人魂 narrative intent 缺少叙事文本，降级为 idle");
-            return TranslationResult {
-                intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                    .with_thought(thought_log.to_string()),
+            return MultiTranslationResult {
+                intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                    .with_thought(thought_log.to_string())],
                 speech_intent: None,
                 original_narrative: String::new(),
                 original_thought_log: thought_log.to_string(),
-                success: false,
-                error: Some("Empty narrative".to_string()),
             };
         }
 
-        info!("[天魂] 翻译叙事意图: {}", narrative);
-
         match translator
-            .translate(narrative, thought_log, world_state, cognitive_chain)
+            .translate_multi(narrative, thought_log, world_state, cognitive_chain, max_intents)
             .await
         {
-            Ok(result) => {
-                info!(
-                    "[天魂] 翻译完成: action_type={}, action_data={:?}, speech={:?}",
-                    result.intent.action_type,
-                    result.intent.action_data,
-                    result
-                        .speech_intent
-                        .as_ref()
-                        .map(|i| i.action_type.to_string())
-                );
-                result
-            }
+            Ok(result) => result,
             Err(e) => {
-                warn!("[天魂] 翻译失败: {}, 降级为 idle", e);
-                TranslationResult {
-                    intent: Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                        .with_thought(format!("意图翻译失败: {}", e)),
+                warn!("[天魂] 多Intent翻译失败: {}, 降级为 idle", e);
+                MultiTranslationResult {
+                    intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(format!("意图翻译失败: {}", e))],
                     speech_intent: None,
                     original_narrative: narrative.to_string(),
                     original_thought_log: thought_log.to_string(),
-                    success: false,
-                    error: Some(e.to_string()),
                 }
             }
         }
+    }
+
+    /// 组装 Pipeline Intent
+    ///
+    /// 将多个 Intent 组装为 primary + subsequent_intents 的 Pipeline 结构
+    pub(crate) fn assemble_pipeline(intents: Vec<Intent>) -> Intent {
+        if intents.is_empty() {
+            return Intent::new(uuid::Uuid::nil(), 0, "idle", None);
+        }
+        if intents.len() == 1 {
+            return intents.into_iter().next().unwrap();
+        }
+
+        let mut iter = intents.into_iter();
+        let mut primary = iter.next().unwrap();
+        primary.subsequent_intents = iter.collect();
+        primary
     }
 
     /// 提取人设信息
@@ -725,6 +714,74 @@ impl Agent {
                 tracing::warn!("RuleEngine error, bypassing: {}", e);
                 Ok(())
             }
+        }
+    }
+
+    /// 仅做确定性规则校验（Layer 1 + Layer 2，不经过 LLM）
+    ///
+    /// 用于分级审核中 Skip 级别的 Intent（idle、wait 等），
+    /// 只检查 action_type 合法性和 RuleEngine 规则，跳过 LLM 审查。
+    pub(crate) async fn validate_rules_only(
+        &self,
+        intent: &Intent,
+        world_state: &WorldState,
+    ) -> Result<(), String> {
+        // Layer 1: action_type
+        self.validate_action_type(intent)?;
+        // Layer 2: RuleEngine
+        self.validate_with_rule_engine(intent, world_state).await
+    }
+
+    /// 判断 Intent 是否应跳过 LLM 审核（分级审核策略）
+    ///
+    /// Skip 类型（idle, wait）→ true
+    /// Always 类型（speak, shout, whisper）→ false
+    /// Adaptive 类型 → 根据 action_data 判断
+    pub(crate) fn should_skip_llm_validation(
+        intent: &Intent,
+        config: Option<&cyber_jianghu_protocol::GradedValidationConfig>,
+    ) -> bool {
+        let Some(config) = config else {
+            return false;
+        };
+
+        let action_str = intent.action_type.as_str().to_string();
+
+        if config.skip_types.contains(&action_str) {
+            return true;
+        }
+        if config.always_types.contains(&action_str) {
+            return false;
+        }
+        if config.adaptive_types.contains(&action_str) {
+            return !Self::adaptive_needs_llm(intent, config);
+        }
+
+        true
+    }
+
+    /// Adaptive 检查：判断是否需要 LLM 审核
+    fn adaptive_needs_llm(
+        intent: &Intent,
+        config: &cyber_jianghu_protocol::GradedValidationConfig,
+    ) -> bool {
+        let action_data = match &intent.action_data {
+            Some(d) => d,
+            None => return false,
+        };
+
+        match intent.action_type.as_str() {
+            "move" => action_data
+                .get("target_location")
+                .and_then(|v| v.as_str())
+                .map(|loc| config.restricted_area_keywords.iter().any(|k| loc.contains(k.as_str())))
+                .unwrap_or(false),
+            "trade" | "steal" | "give" => action_data
+                .get("item_id")
+                .and_then(|v| v.as_str())
+                .map(|id| config.high_value_item_keywords.iter().any(|k| id.contains(k.as_str())))
+                .unwrap_or(false),
+            _ => true,
         }
     }
 
@@ -937,6 +994,7 @@ pub struct LayerResult {
 }
 
 /// ReflectorSoul 审查结果
+#[allow(clippy::large_enum_variant)]
 pub enum ReflectorResult {
     /// 审查通过，携带修正后的 Intent、三层中间结果和叙事化摘要
     Approved {

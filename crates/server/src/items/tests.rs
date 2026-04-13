@@ -3,7 +3,7 @@ use super::registry::*;
 #[cfg(test)]
 use crate::game_data::{ItemConfigEntry, ItemEffect};
 #[cfg(test)]
-use crate::models::{AgentState, ItemType};
+use crate::models::ItemType;
 
 use std::sync::Mutex;
 

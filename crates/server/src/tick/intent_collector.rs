@@ -66,6 +66,7 @@ impl IntentCollector {
                     narrative: Some("静待时机".to_string()),
                     already_broadcast: false,
                     session_id: None,
+                    subsequent_intents: vec![],
                 });
             }
         }

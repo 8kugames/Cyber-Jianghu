@@ -753,6 +753,7 @@ async fn handle_intent(
         narrative: None,
         already_broadcast: false,
         session_id: None,
+        subsequent_intents: vec![],
     };
 
     // 如果是 speak 动作，立即广播给同 Location 的所有在线 Agent

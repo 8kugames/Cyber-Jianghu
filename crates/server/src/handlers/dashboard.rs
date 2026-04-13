@@ -928,33 +928,31 @@ pub async fn get_agent_experiences(
     if let (Some(device_id_str), Some(auth_token)) = (
         params.get("device_id"),
         params.get("auth_token"),
-    ) {
-        if let Ok(device_id) = Uuid::parse_str(device_id_str) {
-            match crate::db::verify_device_token(&state.db_pool, device_id, auth_token).await {
-                Ok(true) => {
-                    // 验证通过，检查设备是否归属该 agent
-                    let owner_device_id: Option<Uuid> = sqlx::query_scalar(
-                        "SELECT device_id FROM agents WHERE agent_id = $1",
-                    )
-                    .bind(agent_id)
-                    .fetch_optional(&state.db_pool)
-                    .await
-                    .unwrap_or(None);
+    ) && let Ok(device_id) = Uuid::parse_str(device_id_str) {
+        match crate::db::verify_device_token(&state.db_pool, device_id, auth_token).await {
+            Ok(true) => {
+                // 验证通过，检查设备是否归属该 agent
+                let owner_device_id: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT device_id FROM agents WHERE agent_id = $1",
+                )
+                .bind(agent_id)
+                .fetch_optional(&state.db_pool)
+                .await
+                .unwrap_or(None);
 
-                    if owner_device_id != Some(device_id) {
-                        tracing::warn!(
-                            "Device {} attempted to access agent {} experiences without ownership",
-                            device_id,
-                            agent_id
-                        );
-                        return Err(StatusCode::FORBIDDEN);
-                    }
+                if owner_device_id != Some(device_id) {
+                    tracing::warn!(
+                        "Device {} attempted to access agent {} experiences without ownership",
+                        device_id,
+                        agent_id
+                    );
+                    return Err(StatusCode::FORBIDDEN);
                 }
-                Ok(false) => return Err(StatusCode::UNAUTHORIZED),
-                Err(e) => {
-                    tracing::warn!("Device token verify error: {}", e);
-                    return Err(StatusCode::UNAUTHORIZED);
-                }
+            }
+            Ok(false) => return Err(StatusCode::UNAUTHORIZED),
+            Err(e) => {
+                tracing::warn!("Device token verify error: {}", e);
+                return Err(StatusCode::UNAUTHORIZED);
             }
         }
     }

@@ -905,6 +905,8 @@ mod tests {
                 survival_threshold: 30,
                 version: "0.0.6".to_string(),
                 last_updated: "2024-03-22T12:00:00Z".to_string(),
+                intent_batch: None,
+                reflector_narrative: None,
             },
         };
 

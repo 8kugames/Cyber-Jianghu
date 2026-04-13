@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 use super::{entities::*, locations::Location};
 
+use super::actions::ExecutionSummary;
+
 /// 世界时间
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldTime {
@@ -73,7 +75,7 @@ fn shichen_name(hour: i32) -> &'static str {
 }
 
 impl WorldTime {
-    /// 格式化为中文武侠风格时间表述
+    /// 格式化为中文风格时间表述
     ///
     /// 格式："天道历三二五年元月四日申时"
     pub fn to_chinese(&self) -> String {
@@ -95,7 +97,7 @@ impl WorldTime {
         };
         let day = number_to_chinese(self.day);
         let shichen = shichen_name(self.hour);
-        format!("天道历{}{}{}{}", year, month, day, shichen)
+        format!("天道历{}年{}{}日{}", year, month, day, shichen)
     }
 }
 
@@ -265,4 +267,8 @@ pub struct WorldState {
     /// Agent 应在此时刻之前提交意图
     #[serde(default)]
     pub deadline_ms: u64,
+
+    /// 上一次 Pipeline 执行汇总（无数值泄露风险）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_execution_summary: Option<ExecutionSummary>,
 }

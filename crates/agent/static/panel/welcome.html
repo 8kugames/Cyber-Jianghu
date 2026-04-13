@@ -10,7 +10,7 @@
         <div class="welcome-container">
             <header class="welcome-header">
                 <h1>赛博江湖</h1>
-                <p class="welcome-subtitle">MMO-MAS 智能体世界</p>
+                <p class="welcome-subtitle">MMO-MAS</p>
             </header>
 
             <main class="welcome-main">
@@ -39,7 +39,7 @@
                         href="setup.html"
                         class="welcome-card"
                         id="card-setup"
-                        style="display: none;"
+                        style="display: none"
                     >
                         <div class="card-icon">配</div>
                         <h2>初始配置</h2>
@@ -78,7 +78,8 @@
                         cardNew.href = "create.html";
                         cardNew.querySelector(".card-icon").textContent = "死";
                         cardNew.querySelector("h2").textContent = "转世重生";
-                        cardNew.querySelector("p").textContent = "你的角色已死亡，点击进入轮回";
+                        cardNew.querySelector("p").textContent =
+                            "你的角色已死亡，点击进入轮回";
                         statusText.textContent =
                             "角色已死亡 | " +
                             (data.current_character || "未知") +
@@ -97,7 +98,8 @@
                         cardReturn.removeAttribute("href");
                         cardNew.href = "create.html";
                         cardNew.querySelector("h2").textContent = "再入江湖";
-                        cardNew.querySelector("p").textContent = "创建新角色，开始你的武侠人生";
+                        cardNew.querySelector("p").textContent =
+                            "创建新角色，开始你的武侠人生";
                         statusText.textContent =
                             "已配置服务器和 LLM，请创建角色";
                     }
