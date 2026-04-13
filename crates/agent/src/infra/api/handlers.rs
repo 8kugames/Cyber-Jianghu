@@ -1996,7 +1996,9 @@ pub(super) async fn get_attribute_meta_handler(
 
 /// 丰富属性数据，添加叙事描述
 /// 为 WorldTime JSON 添加 `display` 字段（中文格式）
-fn enrich_world_time_json(world_time: &cyber_jianghu_protocol::WorldTime) -> Option<serde_json::Value> {
+fn enrich_world_time_json(
+    world_time: &cyber_jianghu_protocol::WorldTime,
+) -> Option<serde_json::Value> {
     let mut val = serde_json::to_value(world_time).ok()?;
     if let Some(obj) = val.as_object_mut() {
         obj.insert(
@@ -3347,10 +3349,8 @@ pub(super) async fn set_llm_disabled_handler(
 /// GET /api/v1/actions - 返回 action_type -> name 映射（短中文名，用于前端展示）
 pub(super) async fn get_actions_handler() -> impl IntoResponse {
     let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
-    let map: std::collections::HashMap<String, String> = actions
-        .into_iter()
-        .map(|a| (a.action, a.name))
-        .collect();
+    let map: std::collections::HashMap<String, String> =
+        actions.into_iter().map(|a| (a.action, a.name)).collect();
     Json(map)
 }
 

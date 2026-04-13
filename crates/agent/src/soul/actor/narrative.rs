@@ -2,12 +2,16 @@
 // 叙事化状态描述模块 (数据驱动架构)
 // ============================================================================
 //
-// 将数值状态转换为叙事化描述，移除 Prompt 中的数字规则
+// [DEPRECATED] 此模块的属性映射功能计划由地魂 LLM 叙事管道替代。
+// NarrativeGenerator (reflector/narrative_generator.rs) 通过 LLM 将 WorldState
+// 数值转换为叙事描述，注入人魂 prompt 的 memory_context。
 //
-// 核心设计:
-// - COI (组合优于继承) 架构原则
-// - 数据驱动：所有叙事描述从配置文件加载
-// - 可热更新：支持运行时重新加载配置
+// 当前状态：NarrativeEngine 仍在以下路径中作为 primary 使用：
+//   - engine.rs: CognitiveEngine Stage 1 prompt 构建 (PerceptionNarrative)
+//   - claw/state.rs: Claw 模式上下文生成
+//   - infra/api/: HTTP API 端点 (/api/v1/context, /api/v1/attributes)
+// 两者（NarrativeEngine + NarrativeGenerator）是互补关系，不是替代关系。
+// 待后续重构将 Stage 1 也迁移到 LLM 叙事管道后，此模块可移除。
 //
 // 架构说明:
 // - NarrativeConfig: 配置数据结构（可从 JSON 加载）

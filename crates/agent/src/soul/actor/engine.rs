@@ -245,11 +245,13 @@ impl CognitiveEngine {
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
 
         // 【Prompt 缓存优化】Plan+Decision 也使用差异化的 persona
+        let critical_attrs = &world_state.self_state.attributes;
         let pd_prompt = self.build_plan_decision_prompt(
             &perception_output,
             &motivation_output,
             &persona_for_prompt,
             &agent_name,
+            critical_attrs,
         );
         let (pd_response, planning, decision, intent) =
             self.plan_and_decide(&pd_prompt, world_state).await?;
@@ -611,11 +613,15 @@ impl CognitiveEngine {
         motivation: &StageOutput,
         persona_desc: &str,
         agent_name: &str,
+        attributes: &std::collections::HashMap<String, i32>,
     ) -> String {
         // 【静态缓存】从缓存获取 actions_list
         let cache = self.prompt_cache.read().unwrap();
         let action_list = cache.get_actions_list().to_string();
         drop(cache);
+
+        // 生存紧急约束: hunger/thirst < 20 时追加
+        let survival_urgent = Self::build_survival_urgent_section(attributes);
 
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
@@ -640,7 +646,12 @@ impl CognitiveEngine {
 3. **必须以 JSON 格式输出**：不要包含其他文本。
 4. **narrative_action 是自然语言**：用你自己的话说想做什么（如"吃一个馒头充饥"、"走到后院看看"、"跟旁边的人打个招呼"）。不要填 ID 或英文字段名。
 
-## 可做之事（参考）
+## 生存法则
+- 如果感知到饥饿或口渴（特别是"饥肠辘辘"、"非常口渴"、"饥饿难耐"、"脱水"等严重状态），进食或饮水是最高优先级
+- 没有食物时：先拾取地上的食物/水，再进食/饮水
+- 背包和地面都没有时：移动到可能有资源的地点
+- 处于严重饥饿/口渴状态时，不要选择潜行、休息等非生存行为
+{survival_urgent}## 可做之事（参考）
 {action_list}
 
 ## 输出格式
@@ -657,6 +668,7 @@ impl CognitiveEngine {
             perception = perception.content,
             motivation = motivation.content,
             action_list = action_list,
+            survival_urgent = survival_urgent,
         )
     }
 
@@ -683,6 +695,37 @@ impl CognitiveEngine {
     // ========================================================================
     // 辅助方法
     // ========================================================================
+
+    /// 根据 hunger/thirst 属性值生成生存紧急约束 section
+    ///
+    /// 当 hunger 或 thirst < SURVIVAL_CRITICAL_THRESHOLD 时注入紧急提示,
+    /// 强制 LLM 优先选择觅食行为。阈值对齐 narrative_config.yaml 的 critical 区间 (0-19)。
+    fn build_survival_urgent_section(
+        attributes: &std::collections::HashMap<String, i32>,
+    ) -> String {
+        // 对齐 narrative_config.yaml: 0-19 = "饥饿难耐"/"渴得难以忍受"
+        const SURVIVAL_CRITICAL_THRESHOLD: i32 = 20;
+
+        // 属性缺失视为危险 (Fail Fast): 宁可误报也不漏报
+        let hunger = attributes.get("hunger").copied().unwrap_or(0);
+        let thirst = attributes.get("thirst").copied().unwrap_or(0);
+
+        if hunger < SURVIVAL_CRITICAL_THRESHOLD || thirst < SURVIVAL_CRITICAL_THRESHOLD {
+            let mut parts = vec![
+                "【紧急】你现在极度饥渴！本 tick 必须选择进食、饮水或拾取食物/水。".to_string(),
+            ];
+            if hunger < SURVIVAL_CRITICAL_THRESHOLD {
+                parts.push("你即将饿死，必须立即进食。".to_string());
+            }
+            if thirst < SURVIVAL_CRITICAL_THRESHOLD {
+                parts.push("你即将渴死，必须立即饮水。".to_string());
+            }
+            parts.push("不要选择 idle、stealth、meditate 等非生存行为。".to_string());
+            format!("\n{}\n", parts.join("\n"))
+        } else {
+            String::new()
+        }
+    }
 
     /// 添加摘要到滑动窗口
     pub fn push_summary(&self, summary: NarrativeSummary) {

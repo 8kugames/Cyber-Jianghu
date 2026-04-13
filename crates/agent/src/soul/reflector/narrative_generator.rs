@@ -65,6 +65,7 @@ impl NarrativeGenerator {
         world_state: &WorldState,
         last_summary: Option<&ExecutionSummary>,
         recent_memories: &[String],
+        execution_narrative: Option<String>,
     ) -> Result<NarrativeContext> {
         // 未启用 LLM 生成，直接降级
         if !self.config.enable_llm_generation {
@@ -83,7 +84,12 @@ impl NarrativeGenerator {
         // LLM 生成 + 泄露检测重试循环
         let max_attempts = self.config.leak_detection.max_retry + 1;
         for attempt in 1..=max_attempts {
-            let prompt = self.build_prompt(world_state, last_summary, recent_memories);
+            let prompt = self.build_prompt(
+                world_state,
+                last_summary,
+                recent_memories,
+                execution_narrative.clone(),
+            );
             let llm_client = self.llm_container.read().await.clone();
 
             let response = match llm_client
@@ -136,6 +142,7 @@ impl NarrativeGenerator {
         world_state: &WorldState,
         last_summary: Option<&ExecutionSummary>,
         recent_memories: &[String],
+        execution_narrative: Option<String>,
     ) -> String {
         let mut parts = Vec::new();
 
@@ -196,8 +203,11 @@ impl NarrativeGenerator {
             }
         }
 
-        // 上轮执行结果
-        if let Some(summary) = last_summary {
+        // 上轮经历（优先使用地魂生成的叙事化描述）
+        if let Some(narrative) = execution_narrative {
+            parts.push(format!("\n## 上一轮经历\n{}", narrative));
+        } else if let Some(summary) = last_summary {
+            // 降级：使用统计数字
             parts.push(format!(
                 "\n## 上轮行动结果: 共{}个意图, 成功{}, 失败{}, 跳过{}",
                 summary.total, summary.succeeded, summary.failed, summary.skipped
@@ -393,7 +403,7 @@ mod tests {
     async fn test_generate_basic() {
         let generator = NarrativeGenerator::with_defaults(mock_container());
         let ws = make_world_state();
-        let ctx = generator.generate(&ws, None, &[]).await.unwrap();
+        let ctx = generator.generate(&ws, None, &[], None).await.unwrap();
         assert_eq!(ctx.tick_id, 1);
         assert!(!ctx.self_perception.status_summary.is_empty());
         assert!(!ctx.environment.location_description.is_empty());

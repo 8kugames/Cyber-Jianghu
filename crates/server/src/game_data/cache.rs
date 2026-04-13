@@ -257,6 +257,8 @@ mod tests {
                         },
                     },
                     agent_statuses: std::collections::HashMap::new(),
+                    immediate_events: None,
+                    intent_batch: None,
                     validation: ValidationRulesData {
                         action_validation: ActionValidationRulesData {
                             max_content_length: 500,
