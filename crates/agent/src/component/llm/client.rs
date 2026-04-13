@@ -104,7 +104,8 @@ fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
     let cleaned = paired_re.replace_all(response, "").to_string();
 
     // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
-    let self_closing_re = regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*").unwrap();
+    let self_closing_re =
+        regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*").unwrap();
     let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
 
     if cleaned == response {
@@ -597,8 +598,16 @@ mod tests {
 
 {"action_type": "eat", "action_data": {"item_id": "mantou"}, "speech_content": ""}"#;
         let result = strip_thinking_tags(input);
-        assert!(result.contains(r#"{"action_type": "eat"#), "应保留 JSON，实际: {}", result);
-        assert!(!result.contains("<think"), "应移除 think 标签，实际: {}", result);
+        assert!(
+            result.contains(r#"{"action_type": "eat"#),
+            "应保留 JSON，实际: {}",
+            result
+        );
+        assert!(
+            !result.contains("<think"),
+            "应移除 think 标签，实际: {}",
+            result
+        );
     }
 
     #[test]

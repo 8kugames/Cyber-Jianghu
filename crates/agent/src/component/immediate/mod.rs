@@ -112,7 +112,9 @@ pub struct ImmediateEventHandler {
     running: Arc<AtomicBool>,
 
     /// HTTP API 状态（用于访问 SoulRecorder 记录即时意图）
-    http_api_state: std::sync::Arc<tokio::sync::RwLock<Option<std::sync::Arc<crate::infra::api::HttpApiState>>>>,
+    http_api_state: std::sync::Arc<
+        tokio::sync::RwLock<Option<std::sync::Arc<crate::infra::api::HttpApiState>>>,
+    >,
 }
 
 impl ImmediateEventHandler {
@@ -151,7 +153,9 @@ impl ImmediateEventHandler {
         *guard = Some(state);
     }
 
-    async fn get_soul_recorder(&self) -> Option<std::sync::Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
+    async fn get_soul_recorder(
+        &self,
+    ) -> Option<std::sync::Arc<crate::infra::api::soul_cycle_recorder::SoulCycleRecorder>> {
         let api_state = {
             let guard = self.http_api_state.read().await;
             guard.as_ref()?.clone()
@@ -257,17 +261,19 @@ impl ImmediateEventHandler {
                     if let Err(e) = self.intent_tx.read().await.send(intent).await {
                         error!("Failed to send immediate response Intent: {}", e);
                         if let Some(recorder) = self.get_soul_recorder().await {
-                            let _ = recorder.record_immediate(
-                                tick_id,
-                                &response_uuid.to_string(),
-                                None,
-                                "immediate_response",
-                                "speak",
-                                Some(&serde_json::json!({"content": content}).to_string()),
-                                Some(&content),
-                                "failed",
-                                Some(&e.to_string()),
-                            ).await;
+                            let _ = recorder
+                                .record_immediate(
+                                    tick_id,
+                                    &response_uuid.to_string(),
+                                    None,
+                                    "immediate_response",
+                                    "speak",
+                                    Some(&serde_json::json!({"content": content}).to_string()),
+                                    Some(&content),
+                                    "failed",
+                                    Some(&e.to_string()),
+                                )
+                                .await;
                         }
                     } else {
                         info!(
@@ -276,17 +282,19 @@ impl ImmediateEventHandler {
                         );
                         event.responded = true;
                         if let Some(recorder) = self.get_soul_recorder().await {
-                            let _ = recorder.record_immediate(
-                                tick_id,
-                                &response_uuid.to_string(),
-                                None,
-                                "immediate_response",
-                                "speak",
-                                Some(&serde_json::json!({"content": content}).to_string()),
-                                Some(&content),
-                                "sent",
-                                None,
-                            ).await;
+                            let _ = recorder
+                                .record_immediate(
+                                    tick_id,
+                                    &response_uuid.to_string(),
+                                    None,
+                                    "immediate_response",
+                                    "speak",
+                                    Some(&serde_json::json!({"content": content}).to_string()),
+                                    Some(&content),
+                                    "sent",
+                                    None,
+                                )
+                                .await;
                         }
                     }
                 }
@@ -486,13 +494,10 @@ mod tests {
         tokio::task::yield_now().await;
 
         // 验证发送了 Intent（加超时防止永久阻塞）
-        let intent = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            intent_rx.recv(),
-        )
-        .await
-        .expect("timeout waiting for immediate intent")
-        .unwrap();
+        let intent = tokio::time::timeout(std::time::Duration::from_secs(3), intent_rx.recv())
+            .await
+            .expect("timeout waiting for immediate intent")
+            .unwrap();
         match intent {
             ClientMessage::Intent {
                 tick_id,

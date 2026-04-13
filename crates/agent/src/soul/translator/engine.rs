@@ -71,7 +71,13 @@ impl IntentTranslator {
         cognitive_chain: Option<&CognitiveChain>,
         max_intents: usize,
     ) -> Result<MultiTranslationResult> {
-        let prompt = self.build_multi_prompt(narrative, thought_log, world_state, cognitive_chain, max_intents);
+        let prompt = self.build_multi_prompt(
+            narrative,
+            thought_log,
+            world_state,
+            cognitive_chain,
+            max_intents,
+        );
 
         debug!("[天魂] 多Intent翻译: {}", narrative);
 
@@ -102,8 +108,7 @@ impl IntentTranslator {
         // 空结果 → idle
         if intents.is_empty() {
             intents.push(
-                Intent::new(agent_id, tick_id, "idle", None)
-                    .with_thought(thought_log.to_string()),
+                Intent::new(agent_id, tick_id, "idle", None).with_thought(thought_log.to_string()),
             );
         }
 
@@ -112,8 +117,10 @@ impl IntentTranslator {
         let action_type = first.action_type.as_str();
         let speech_intent = if matches!(action_type, "speak" | "whisper") {
             let speak = intents.remove(0);
-            intents.insert(0, Intent::new(agent_id, tick_id, "idle", None)
-                .with_thought(thought_log.to_string()));
+            intents.insert(
+                0,
+                Intent::new(agent_id, tick_id, "idle", None).with_thought(thought_log.to_string()),
+            );
             Some(speak)
         } else {
             None

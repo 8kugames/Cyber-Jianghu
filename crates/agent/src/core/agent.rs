@@ -523,8 +523,10 @@ impl Agent {
             None => {
                 tracing::error!("未配置天魂翻译器，降级单 Intent idle");
                 return MultiTranslationResult {
-                    intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                        .with_thought(thought_log.to_string())],
+                    intents: vec![
+                        Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                            .with_thought(thought_log.to_string()),
+                    ],
                     speech_intent: None,
                     original_narrative: narrative.to_string(),
                     original_thought_log: thought_log.to_string(),
@@ -534,8 +536,10 @@ impl Agent {
 
         if narrative.is_empty() {
             return MultiTranslationResult {
-                intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                    .with_thought(thought_log.to_string())],
+                intents: vec![
+                    Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                        .with_thought(thought_log.to_string()),
+                ],
                 speech_intent: None,
                 original_narrative: String::new(),
                 original_thought_log: thought_log.to_string(),
@@ -543,15 +547,23 @@ impl Agent {
         }
 
         match translator
-            .translate_multi(narrative, thought_log, world_state, cognitive_chain, max_intents)
+            .translate_multi(
+                narrative,
+                thought_log,
+                world_state,
+                cognitive_chain,
+                max_intents,
+            )
             .await
         {
             Ok(result) => result,
             Err(e) => {
                 warn!("[天魂] 多Intent翻译失败: {}, 降级为 idle", e);
                 MultiTranslationResult {
-                    intents: vec![Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                        .with_thought(format!("意图翻译失败: {}", e))],
+                    intents: vec![
+                        Intent::new(intent.agent_id, intent.tick_id, "idle", None)
+                            .with_thought(format!("意图翻译失败: {}", e)),
+                    ],
                     speech_intent: None,
                     original_narrative: narrative.to_string(),
                     original_thought_log: thought_log.to_string(),
@@ -774,12 +786,22 @@ impl Agent {
             "move" => action_data
                 .get("target_location")
                 .and_then(|v| v.as_str())
-                .map(|loc| config.restricted_area_keywords.iter().any(|k| loc.contains(k.as_str())))
+                .map(|loc| {
+                    config
+                        .restricted_area_keywords
+                        .iter()
+                        .any(|k| loc.contains(k.as_str()))
+                })
                 .unwrap_or(false),
             "trade" | "steal" | "give" => action_data
                 .get("item_id")
                 .and_then(|v| v.as_str())
-                .map(|id| config.high_value_item_keywords.iter().any(|k| id.contains(k.as_str())))
+                .map(|id| {
+                    config
+                        .high_value_item_keywords
+                        .iter()
+                        .any(|k| id.contains(k.as_str()))
+                })
                 .unwrap_or(false),
             _ => true,
         }

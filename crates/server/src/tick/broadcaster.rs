@@ -56,7 +56,10 @@ impl Broadcaster {
         game_data_cache: &Arc<GameDataCache>,
         deadline_ms: u64,
         closed_dialogue_records: &[cyber_jianghu_protocol::PrivateDialogueRecord],
-        execution_summaries: &std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
+        execution_summaries: &std::collections::HashMap<
+            uuid::Uuid,
+            cyber_jianghu_protocol::ExecutionSummary,
+        >,
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 

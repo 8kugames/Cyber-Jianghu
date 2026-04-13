@@ -75,8 +75,12 @@ pub struct IntentBatchConfig {
     pub llm_validation: GradedValidationConfig,
 }
 
-fn default_max_intents() -> usize { 5 }
-fn default_max_retries() -> i32 { 3 }
+fn default_max_intents() -> usize {
+    5
+}
+fn default_max_retries() -> i32 {
+    3
+}
 
 /// 分级审核配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,7 +177,7 @@ fn default_cache_ttl() -> i64 {
 }
 
 fn default_suspicion_threshold() -> u8 {
-    100
+    65
 }
 
 fn default_max_retry() -> usize {

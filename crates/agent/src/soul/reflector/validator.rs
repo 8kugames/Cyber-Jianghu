@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
-use rand::RngExt;
 
 use crate::component::llm::LlmClientExt;
 use crate::infra::api::thinking_log;
@@ -16,8 +15,8 @@ use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::prompt::ObserverPrompt;
 use super::types::{
-    BatchValidationResult, LlmValidationResponse, PersonaInfo, RejectionReason,
-    ValidationRequest, ValidationResult,
+    BatchValidationResult, LlmValidationResponse, PersonaInfo, RejectionReason, ValidationRequest,
+    ValidationResult,
 };
 
 // ============================================================================
@@ -264,8 +263,9 @@ impl ReflectorSoul {
         }
 
         // 确保每 tick 至少 minimum_per_tick 个 Intent 经过 LLM 审查
+        // 智能选择：优先高风险（Always > Adaptive > Skip），而非随机
         if llm_count < config.minimum_per_tick && !valid_intents.is_empty() {
-            let idx = rand::rng().random_range(0..valid_intents.len());
+            let idx = self.select_highest_risk_intent_index(&valid_intents, &config);
             let intent = valid_intents.remove(idx);
             let intent_id = intent.intent_id;
             let request = ValidationRequest {
@@ -327,10 +327,41 @@ impl ReflectorSoul {
     ) -> bool {
         let action_data = intent.action_data.as_ref();
         match intent.action_type.as_str() {
-            "move" => action_data.is_some_and(|d| is_restricted_area(d, &config.restricted_area_keywords)),
-            "trade" | "steal" | "give" => action_data.is_some_and(|d| is_high_value_transaction(d, &config.high_value_item_keywords)),
+            "move" => {
+                action_data.is_some_and(|d| is_restricted_area(d, &config.restricted_area_keywords))
+            }
+            "trade" | "steal" | "give" => action_data
+                .is_some_and(|d| is_high_value_transaction(d, &config.high_value_item_keywords)),
             _ => true,
         }
+    }
+
+    /// 选择最高风险的 Intent 索引（用于 minimum_per_tick 智能选择）
+    ///
+    /// 优先级：Always (高风险) > Adaptive (中风险) > Skip (低风险)
+    /// 同级别保持原始顺序（stable）
+    fn select_highest_risk_intent_index(
+        &self,
+        intents: &[crate::models::Intent],
+        config: &cyber_jianghu_protocol::GradedValidationConfig,
+    ) -> usize {
+        intents
+            .iter()
+            .enumerate()
+            .max_by_key(|(idx, intent)| {
+                let level = Self::determine_validation_level(intent, config);
+                // 优先级分数：Always=2, Adaptive=1, Skip=0
+                let priority = match level {
+                    ValidationLevel::Always => 2,
+                    ValidationLevel::Adaptive => 1,
+                    ValidationLevel::Skip => 0,
+                };
+                // 使用 (priority, idx的反序) 作为排序键
+                // 这样同级别时保持原始顺序（较小的 idx 优先）
+                (priority, std::cmp::Reverse(*idx))
+            })
+            .map(|(idx, _)| idx)
+            .unwrap_or(0)
     }
 }
 
