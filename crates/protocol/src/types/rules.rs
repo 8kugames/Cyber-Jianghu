@@ -108,6 +108,17 @@ pub struct GradedValidationConfig {
     /// 高价值物品 item_id 前缀/关键词（trade/steal/give 审核用）
     #[serde(default = "default_high_value_item_keywords")]
     pub high_value_item_keywords: Vec<String>,
+
+    /// Adaptive 审核字段映射（数据驱动）
+    ///
+    /// 格式: { "action_type": "action_data_field_name" }
+    /// 例如: { "move": "target_location", "trade": "item_id", "steal": "item_id", "give": "item_id" }
+    /// 当 action_type 在此映射中时，检查对应字段的值是否匹配对应的关键词列表：
+    /// - "target_location" → 检查 restricted_area_keywords
+    /// - "item_id" → 检查 high_value_item_keywords
+    /// - 其他字段 → 默认需要 LLM 审核
+    #[serde(default)]
+    pub adaptive_field_mapping: std::collections::HashMap<String, String>,
 }
 
 fn default_restricted_area_keywords() -> Vec<String> {
@@ -116,6 +127,16 @@ fn default_restricted_area_keywords() -> Vec<String> {
 
 fn default_high_value_item_keywords() -> Vec<String> {
     vec!["silver".into(), "gold".into()]
+}
+
+fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String> {
+    [
+        ("move".into(), "target_location".into()),
+        ("trade".into(), "item_id".into()),
+        ("steal".into(), "item_id".into()),
+        ("give".into(), "item_id".into()),
+    ]
+    .into()
 }
 
 /// 地魂叙事生成配置
@@ -197,6 +218,7 @@ impl Default for GradedValidationConfig {
             minimum_per_tick: 1,
             restricted_area_keywords: default_restricted_area_keywords(),
             high_value_item_keywords: default_high_value_item_keywords(),
+            adaptive_field_mapping: default_adaptive_field_mapping(),
         }
     }
 }
@@ -205,8 +227,8 @@ impl Default for LeakDetectionConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            suspicion_threshold: 100,
-            max_retry: 2,
+            suspicion_threshold: default_suspicion_threshold(),
+            max_retry: default_max_retry(),
         }
     }
 }

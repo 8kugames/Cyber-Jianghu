@@ -241,7 +241,6 @@ impl StateProcessor {
             // TODO: 跟踪最终一致性边界情况
             // - 验证每个 tick 的持久化确实使用回滚后的内存状态
             // - 添加集成测试验证 Pipeline 失败 → 回滚 → 下一个 tick 持久化的完整流程
-            // - 跟踪 issue: https://github.com/8kugames/Cyber-Jianghu/issues/XXX
             if pipeline_failed {
                 agent_states[agent_idx] = agent_state_snapshot;
                 events.truncate(events_len_before);

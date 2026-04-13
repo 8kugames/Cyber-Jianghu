@@ -66,6 +66,46 @@ data:
     max_system_prompt_length: 102400
     max_speak_content_length: 500
 
+  # LLM 审核配置（地魂分级审核策略）
+  llm_validation:
+    # 强制 LLM 审核的 action_type（高优先级，如说话类）
+    always_types:
+      - speak
+      - shout
+      - whisper
+    # 动态审核的 action_type（根据 action_data 判断）
+    adaptive_types:
+      - steal
+      - trade
+      - give
+      - move
+    # 跳过 LLM 审核的 action_type（低风险）
+    skip_types:
+      - idle
+      - wait
+    # 每 tick 至少审核的 Intent 数量
+    minimum_per_tick: 1
+    # 限制区域 node_id 前缀/关键词（move 动作审核用）
+    restricted_area_keywords:
+      - admin
+      - vault
+      - secret
+    # 高价值物品 item_id 前缀/关键词（trade/steal/give 审核用）
+    high_value_item_keywords:
+      - silver
+      - gold
+    # Adaptive 审核字段映射（数据驱动）
+    # 格式: { "action_type": "action_data_field_name" }
+    # 系统根据此映射决定检查哪个字段：
+    # - "target_location" → 使用 restricted_area_keywords 检查
+    # - "item_id" → 使用 high_value_item_keywords 检查
+    # - 其他字段 → 默认需要 LLM 审核
+    adaptive_field_mapping:
+      move: target_location
+      trade: item_id
+      steal: item_id
+      give: item_id
+
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述
   agent_statuses:
