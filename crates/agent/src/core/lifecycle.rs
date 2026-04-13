@@ -905,6 +905,8 @@ impl super::Agent {
                             // 暂存 approved intents，供下一轮地魂生成叙事用
                             if let Ok(mut saved) = last_intents_for_narrative.lock() {
                                 saved.clone_from(&approved_intents);
+                            } else {
+                                warn!("暂存 approved_intents 失败：Mutex lock 获取失败");
                             }
                             break;
                         } else if let Some(reason) = batch_rejection {
