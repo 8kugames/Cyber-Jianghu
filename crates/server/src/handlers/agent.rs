@@ -176,13 +176,15 @@ pub async fn agent_register(
     }
 
     // 7. 构建游戏规则（从配置动态获取）
-    let tick_duration_secs = {
+    let (tick_duration_secs, survival_threshold, game_rules_version, immediate_events, intent_batch) = {
         let gd = state.game_data.get();
-        gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64
-    };
-    let survival_threshold = {
-        let gd = state.game_data.get();
-        gd.game_rules.data.agent_state.survival.critical_threshold
+        (
+            gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
+            gd.game_rules.data.agent_state.survival.critical_threshold,
+            gd.game_rules.version.clone(),
+            gd.game_rules.data.immediate_events.clone(),
+            gd.game_rules.data.intent_batch.clone(),
+        )
     };
     let game_rules = GameRules {
         tick_duration_secs,
@@ -198,11 +200,11 @@ pub async fn agent_register(
             .collect(),
         survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
         survival_threshold,
-        version: state.game_data.get().game_rules.version.clone(),
+        version: game_rules_version,
         last_updated: chrono::Utc::now().to_rfc3339(),
-        intent_batch: None,
+        intent_batch,
         reflector_narrative: None,
-        immediate_events: None,
+        immediate_events,
     };
 
     // 8. 获取叙事化配置（用于属性描述转换）

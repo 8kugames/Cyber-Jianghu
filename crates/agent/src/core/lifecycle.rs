@@ -294,6 +294,19 @@ impl super::Agent {
         // 更新游戏规则
         self.config.update_game_rules(game_rules.clone());
 
+        // 更新即时事件处理器配置（如果有 immediate_events 配置）
+        if let Some(ref immediate_events) = game_rules.immediate_events {
+            if let Some(ref handler) = self.immediate_handler {
+                use crate::component::immediate::RuleBasedImmediateDecisionMaker;
+                let new_maker = Arc::new(RuleBasedImmediateDecisionMaker::with_config(
+                    immediate_events.clone(),
+                )) as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
+                let new_handler = handler.with_updated_decision_maker(new_maker);
+                self.immediate_handler = Some(Arc::new(new_handler));
+                info!("即时事件处理器配置已更新");
+            }
+        }
+
         // 绑定即时意图通道到 WebSocket 的 immediate_msg_tx
         if let Some(ref handler) = self.immediate_handler {
             if let Some(tx) = self.client.immediate_msg_sender().await {

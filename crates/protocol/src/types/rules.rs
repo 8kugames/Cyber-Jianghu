@@ -113,15 +113,15 @@ fn default_max_retries() -> i32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradedValidationConfig {
     /// 强制 LLM 审核的 action_type（speak/shout/whisper 等）
-    #[serde(default)]
+    #[serde(default = "default_always_types")]
     pub always_types: Vec<String>,
 
     /// 动态审核的 action_type（根据 action_data 判断）
-    #[serde(default)]
+    #[serde(default = "default_adaptive_types")]
     pub adaptive_types: Vec<String>,
 
     /// 跳过 LLM 审核的 action_type
-    #[serde(default)]
+    #[serde(default = "default_skip_types")]
     pub skip_types: Vec<String>,
 
     /// 每 tick 至少审核的 Intent 数量
@@ -144,8 +144,23 @@ pub struct GradedValidationConfig {
     /// - "target_location" → 检查 restricted_area_keywords
     /// - "item_id" → 检查 high_value_item_keywords
     /// - 其他字段 → 默认需要 LLM 审核
-    #[serde(default)]
+    #[serde(default = "default_adaptive_field_mapping")]
     pub adaptive_field_mapping: std::collections::HashMap<String, String>,
+}
+
+fn default_always_types() -> Vec<String> {
+    // 武侠主题默认值：说话类动作强制审核
+    vec!["speak".into(), "shout".into(), "whisper".into()]
+}
+
+fn default_adaptive_types() -> Vec<String> {
+    // 武侠主题默认值：交易/移动类动作动态审核
+    vec!["steal".into(), "trade".into(), "give".into(), "move".into()]
+}
+
+fn default_skip_types() -> Vec<String> {
+    // 武侠主题默认值：空闲动作跳过审核
+    vec!["idle".into(), "wait".into()]
 }
 
 fn default_restricted_area_keywords() -> Vec<String> {
@@ -243,10 +258,10 @@ fn default_minimum_per_tick() -> usize {
 impl Default for GradedValidationConfig {
     fn default() -> Self {
         Self {
-            always_types: vec!["speak".into(), "shout".into(), "whisper".into()],
-            adaptive_types: vec!["steal".into(), "trade".into(), "give".into(), "move".into()],
-            skip_types: vec!["idle".into(), "wait".into()],
-            minimum_per_tick: 1,
+            always_types: default_always_types(),
+            adaptive_types: default_adaptive_types(),
+            skip_types: default_skip_types(),
+            minimum_per_tick: default_minimum_per_tick(),
             restricted_area_keywords: default_restricted_area_keywords(),
             high_value_item_keywords: default_high_value_item_keywords(),
             adaptive_field_mapping: default_adaptive_field_mapping(),
@@ -284,6 +299,7 @@ impl Default for ReflectorNarrativeConfig {
 /// 即时事件处理配置
 ///
 /// 控制 Agent 如何响应 Server 下发的即时事件（speak/whisper 等）
+/// 以及 Agent 发送意图的路由策略
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImmediateEventConfig {
     /// 冲突动作列表（执行这些动作时不立即回应）
@@ -301,6 +317,13 @@ pub struct ImmediateEventConfig {
     /// 默认回应内容
     #[serde(default = "default_default_response")]
     pub default_response: String,
+
+    /// 即时路由动作列表（这些动作走即时通道，不占 tick 配额）
+    ///
+    /// Agent 发送这些类型的意图时，会通过 `immediate_msg_tx` 立即发送给服务器，
+    /// 而不等待主 tick 周期。适用于说话类动作（speak, whisper）。
+    #[serde(default = "default_immediate_routing_actions")]
+    pub immediate_routing_actions: Vec<String>,
 }
 
 fn default_conflict_actions() -> Vec<String> {
@@ -334,6 +357,11 @@ fn default_default_response() -> String {
     "何事？".to_string()
 }
 
+fn default_immediate_routing_actions() -> Vec<String> {
+    // 武侠主题默认值：说话类动作走即时通道
+    vec!["speak".into(), "whisper".into()]
+}
+
 impl Default for ImmediateEventConfig {
     fn default() -> Self {
         Self {
@@ -341,6 +369,7 @@ impl Default for ImmediateEventConfig {
             call_keywords: default_call_keywords(),
             max_call_content_length: default_max_call_content_length(),
             default_response: default_default_response(),
+            immediate_routing_actions: default_immediate_routing_actions(),
         }
     }
 }
