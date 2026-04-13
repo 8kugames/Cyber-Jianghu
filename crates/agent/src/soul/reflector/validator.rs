@@ -33,6 +33,18 @@ pub trait Validator: Send + Sync {
 
     /// 更新世界观规则
     async fn update_rules(&self, rules: WorldBuildingRules);
+
+    /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
+    ///
+    /// 默认返回 None（不生成叙事）。
+    async fn generate_execution_narrative(
+        &self,
+        last_intents: &[crate::models::Intent],
+        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+    ) -> Result<Option<String>> {
+        let _ = (last_intents, execution_summary);
+        Ok(None)
+    }
 }
 
 /// 为 ReflectorSoul 实现 Validator trait
@@ -48,6 +60,15 @@ impl Validator for ReflectorSoul {
 
     async fn update_rules(&self, rules: WorldBuildingRules) {
         self.update_rules(rules).await
+    }
+
+    async fn generate_execution_narrative(
+        &self,
+        last_intents: &[crate::models::Intent],
+        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+    ) -> Result<Option<String>> {
+        self.generate_execution_narrative_impl(last_intents, execution_summary)
+            .await
     }
 }
 
@@ -193,6 +214,92 @@ impl ReflectorSoul {
             .await?;
 
         Ok(response.into_validation_result())
+    }
+
+    /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
+    ///
+    /// 在收到 server WorldState（包含 last_execution_summary）后、调用 NarrativeGenerator 之前调用。
+    /// 生成「上轮你做了什么，结果如何」的第一人称叙事。
+    async fn generate_execution_narrative_impl(
+        &self,
+        last_intents: &[crate::models::Intent],
+        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+    ) -> Result<Option<String>> {
+        if last_intents.is_empty() {
+            return Ok(None);
+        }
+
+        // 构建 intents 描述
+        let intents_desc: Vec<String> = last_intents
+            .iter()
+            .map(|i| {
+                let data_str = i
+                    .action_data
+                    .as_ref()
+                    .map(|d| serde_json::to_string(d).unwrap_or_default())
+                    .unwrap_or_default();
+                format!("- {}: {}", i.action_type, data_str)
+            })
+            .collect();
+
+        let prompt = format!(
+            r#"你是叙事生成器。基于以下上轮意图和执行结果，生成一段简短的第一人称叙事，描述「上轮你做了什么，结果如何」。
+
+## 上轮提交的意图
+{}
+
+## 执行结果
+- 总计: {} 个意图
+- 成功: {}
+- 部分成功: {}
+- 失败: {}
+- 跳过: {}
+
+## 要求
+1. 用武侠风格的第一人称叙事（如「我拾起了馒头」「我喝了几口水」）
+2. 不要提及具体数字或百分比
+3. 不要提及「意图」「执行」「成功」等游戏术语
+4. 生成的叙事应该让人魂能够理解上轮行动的效果
+5. 如果所有意图都失败或跳过，生成「似乎什么都没发生」类的叙事
+6. 简洁，一段话即可
+
+## 输出格式
+直接输出叙事文本，不要加引号或任何格式标记。"#,
+            intents_desc.join("\n"),
+            execution_summary.total,
+            execution_summary.succeeded,
+            execution_summary.partial,
+            execution_summary.failed,
+            execution_summary.skipped
+        );
+
+        // 重试机制：最多 2 次
+        let max_retries = 2;
+        for attempt in 1..=max_retries {
+            let llm_client = self.llm_container.read().await.clone();
+            match llm_client.complete(&prompt).await {
+                Ok(n) => {
+                    let narrative = n.trim().to_string();
+                    if !narrative.is_empty() {
+                        return Ok(Some(narrative));
+                    }
+                    warn!(
+                        "地魂生成执行叙事返回空 (attempt {}/{})",
+                        attempt, max_retries
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "地魂生成执行叙事失败 (attempt {}/{}): {}",
+                        attempt, max_retries, e
+                    );
+                }
+            }
+        }
+
+        // 所有重试都失败
+        warn!("地魂生成执行叙事重试耗尽，跳过本轮叙事");
+        Ok(None)
     }
 }
 

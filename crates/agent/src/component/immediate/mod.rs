@@ -153,10 +153,7 @@ impl ImmediateEventHandler {
     /// 更新决策器配置（返回新的 Handler 实例）
     ///
     /// 由于 decision_maker 是不可变的 Arc，此方法创建新的 Handler 实例
-    pub fn with_updated_decision_maker(
-        &self,
-        new_maker: Arc<dyn ImmediateDecisionMaker>,
-    ) -> Self {
+    pub fn with_updated_decision_maker(&self, new_maker: Arc<dyn ImmediateDecisionMaker>) -> Self {
         Self {
             pending_events: self.pending_events.clone(),
             decision_maker: new_maker,
