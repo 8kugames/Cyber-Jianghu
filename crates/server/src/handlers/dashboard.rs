@@ -925,20 +925,19 @@ pub async fn get_agent_experiences(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ExperiencesResponse>, StatusCode> {
     // 设备认证：如果提供了 device_id 和 auth_token，使用设备归属校验
-    if let (Some(device_id_str), Some(auth_token)) = (
-        params.get("device_id"),
-        params.get("auth_token"),
-    ) && let Ok(device_id) = Uuid::parse_str(device_id_str) {
+    if let (Some(device_id_str), Some(auth_token)) =
+        (params.get("device_id"), params.get("auth_token"))
+        && let Ok(device_id) = Uuid::parse_str(device_id_str)
+    {
         match crate::db::verify_device_token(&state.db_pool, device_id, auth_token).await {
             Ok(true) => {
                 // 验证通过，检查设备是否归属该 agent
-                let owner_device_id: Option<Uuid> = sqlx::query_scalar(
-                    "SELECT device_id FROM agents WHERE agent_id = $1",
-                )
-                .bind(agent_id)
-                .fetch_optional(&state.db_pool)
-                .await
-                .unwrap_or(None);
+                let owner_device_id: Option<Uuid> =
+                    sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
+                        .bind(agent_id)
+                        .fetch_optional(&state.db_pool)
+                        .await
+                        .unwrap_or(None);
 
                 if owner_device_id != Some(device_id) {
                     tracing::warn!(
@@ -958,7 +957,8 @@ pub async fn get_agent_experiences(
     }
 
     let page: i32 = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1);
-    let limit: i32 = params.get("limit")
+    let limit: i32 = params
+        .get("limit")
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
     let offset = (page - 1) * limit;

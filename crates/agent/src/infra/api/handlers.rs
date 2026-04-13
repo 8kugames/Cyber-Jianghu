@@ -3289,7 +3289,10 @@ pub(super) async fn set_llm_disabled_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let disabled = req.get("llm_disabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let disabled = req
+        .get("llm_disabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // 立即设置全局标志（立即生效）
     crate::component::llm::direct_client::set_llm_disabled(disabled);
@@ -3322,7 +3325,7 @@ pub(super) async fn set_llm_disabled_handler(
         "llm_disabled": disabled,
         "message": if disabled { "LLM 调用已停止" } else { "LLM 调用已恢复" }
     }))
-        .into_response()
+    .into_response()
 }
 
 /// 获取动作类型到中文描述的映射

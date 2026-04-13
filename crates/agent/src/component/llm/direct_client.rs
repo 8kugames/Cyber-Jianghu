@@ -426,17 +426,20 @@ impl DirectLlmClient {
                 .await
                 .unwrap_or_else(|_| "Unable to read error body".to_string());
             error!("LLM API error {}: {}", status, error_body);
-            super::token_tracking::record_failure(&self.config.provider, &self.config.get_model_with_default());
+            super::token_tracking::record_failure(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+            );
             anyhow::bail!("LLM API error {}: {}", status, error_body);
         }
 
-        let response_data: OpenAIResponse = response
-            .json()
-            .await
-            .map_err(|e| {
-                super::token_tracking::record_failure(&self.config.provider, &self.config.get_model_with_default());
-                anyhow::anyhow!("Failed to parse LLM response: {}", e)
-            })?;
+        let response_data: OpenAIResponse = response.json().await.map_err(|e| {
+            super::token_tracking::record_failure(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+            );
+            anyhow::anyhow!("Failed to parse LLM response: {}", e)
+        })?;
 
         let model = self.config.get_model_with_default();
         if let Some(ref usage) = response_data.usage {
@@ -484,7 +487,9 @@ impl DirectLlmClient {
                 .trim()
                 .to_string();
             if content.is_empty() {
-                anyhow::bail!("LLM API error: response content is empty (model may have returned null/whitespace)");
+                anyhow::bail!(
+                    "LLM API error: response content is empty (model may have returned null/whitespace)"
+                );
             }
             debug!("LLM response length: {} chars", content.len());
             Ok(content)
@@ -526,7 +531,9 @@ impl DirectLlmClient {
                 .trim()
                 .to_string();
             if content.is_empty() {
-                anyhow::bail!("LLM API error: response content is empty (model may have returned null/whitespace)");
+                anyhow::bail!(
+                    "LLM API error: response content is empty (model may have returned null/whitespace)"
+                );
             }
             debug!("LLM response length: {} chars", content.len());
             Ok(content)

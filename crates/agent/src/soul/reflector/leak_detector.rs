@@ -148,7 +148,11 @@ mod tests {
         let ctx = make_ctx("你的饥饿度很低", "你身处客栈");
         let detector = LeakDetector::new(100);
         let report = detector.detect_leaks(&ctx);
-        assert!(!report.is_high_risk(100), "单个关键词不应触发高风险: score={}", report.score);
+        assert!(
+            !report.is_high_risk(100),
+            "单个关键词不应触发高风险: score={}",
+            report.score
+        );
         assert!(report.score > 0, "但应检测到泄露: score={}", report.score);
     }
 
@@ -158,8 +162,16 @@ mod tests {
         let ctx = make_ctx("你状态还行", "HP 99%");
         let detector = LeakDetector::new(100);
         let report = detector.detect_leaks(&ctx);
-        assert!(!report.is_high_risk(100), "HP+百分比不应触发高风险: score={}", report.score);
-        assert!(report.score >= 50, "应检测到多个泄露: score={}", report.score);
+        assert!(
+            !report.is_high_risk(100),
+            "HP+百分比不应触发高风险: score={}",
+            report.score
+        );
+        assert!(
+            report.score >= 50,
+            "应检测到多个泄露: score={}",
+            report.score
+        );
     }
 
     #[test]
@@ -171,6 +183,11 @@ mod tests {
         );
         let detector = LeakDetector::new(100);
         let report = detector.detect_leaks(&ctx);
-        assert!(report.is_high_risk(100), "多泄露组合应触发高风险: score={}, evidences={:?}", report.score, report.evidences);
+        assert!(
+            report.is_high_risk(100),
+            "多泄露组合应触发高风险: score={}, evidences={:?}",
+            report.score,
+            report.evidences
+        );
     }
 }

@@ -45,8 +45,8 @@ use axum::{
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 use futures_util::future::BoxFuture;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -171,7 +171,8 @@ pub struct HttpApiState {
     pub intent_history: Arc<RwLock<Option<Arc<intent_history::IntentHistoryStore>>>>,
     /// 三魂循环记录器注册表，按 agent_id 隔离
     /// 支持多角色：当前角色写入 + 所有角色读取
-    pub soul_cycle_registrar: Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>,
+    pub soul_cycle_registrar:
+        Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>,
     /// 数据目录路径（用于按需加载角色的 SQLite 文件）
     pub data_dir: PathBuf,
     /// 托梦存储，管理持续 n 回合的念头注入
@@ -700,20 +701,24 @@ pub fn create_http_state(
     let (tick_update_tx, _) = broadcast::channel(64);
 
     // 预注册当前角色的记录器
-    let soul_cycle_registrar =
-        Arc::new(RwLock::new(HashMap::new())) as Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>;
+    let soul_cycle_registrar = Arc::new(RwLock::new(HashMap::new()))
+        as Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>;
     if !current_agent_id.is_nil()
         && let Ok(recorder) = soul_cycle_recorder::SoulCycleRecorder::open(
             current_agent_id,
             &data_dir.join(format!("soul_cycle_{}.db", current_agent_id)),
-        ) {
-            let recorder = Arc::new(recorder);
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    soul_cycle_registrar.write().await.insert(current_agent_id, recorder);
-                })
-            });
-        }
+        )
+    {
+        let recorder = Arc::new(recorder);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                soul_cycle_registrar
+                    .write()
+                    .await
+                    .insert(current_agent_id, recorder);
+            })
+        });
+    }
     let data_dir_clone = data_dir.clone();
 
     let api_state = HttpApiState {

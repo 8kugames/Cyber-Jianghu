@@ -310,7 +310,7 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
 
     // 使用带超时的 client
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))  // 120秒超时
+        .timeout(std::time::Duration::from_secs(120)) // 120秒超时
         .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .context("构建 HTTP 客户端失败")?;
@@ -369,9 +369,7 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
 
     let usage = llm_response.usage.as_ref();
     let input_tokens = usage.map(|u| u.prompt_tokens as u64).unwrap_or(0);
-    let output_tokens = usage
-        .map(|u| u.completion_tokens as u64)
-        .unwrap_or(0);
+    let output_tokens = usage.map(|u| u.completion_tokens as u64).unwrap_or(0);
 
     // 记录 Token 使用
     if input_tokens > 0 || output_tokens > 0 {
@@ -383,7 +381,6 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         .first()
         .map(|c| c.message.content.clone())
         .unwrap_or_default();
-
 
     if content.trim().is_empty() {
         record_llm_error();

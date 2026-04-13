@@ -128,8 +128,7 @@ impl StateProcessor {
 
                 // Pipeline 完整性校验（后续 intent 必须属于同一 agent 和 tick）
                 if pipe_idx > 0
-                    && (pipe_intent.agent_id != intent.agent_id
-                        || pipe_intent.tick_id != tick_id)
+                    && (pipe_intent.agent_id != intent.agent_id || pipe_intent.tick_id != tick_id)
                 {
                     pipeline_results.push(IntentExecutionResult {
                         intent_id: pipe_intent.intent_id,
@@ -238,6 +237,11 @@ impl StateProcessor {
             // NOTE: apply_state_change 中通过 InventoryManager 写入的 DB 操作不会被回滚。
             // 但下一个 tick 的持久化会用回滚后的内存状态覆盖 DB，保证最终一致性。
             // 完整事务性回滚需要将 executor 改为接收 Transaction——代价过大，延后处理。
+            //
+            // TODO: 跟踪最终一致性边界情况
+            // - 验证每个 tick 的持久化确实使用回滚后的内存状态
+            // - 添加集成测试验证 Pipeline 失败 → 回滚 → 下一个 tick 持久化的完整流程
+            // - 跟踪 issue: https://github.com/8kugames/Cyber-Jianghu/issues/XXX
             if pipeline_failed {
                 agent_states[agent_idx] = agent_state_snapshot;
                 events.truncate(events_len_before);

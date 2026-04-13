@@ -335,7 +335,6 @@ impl PromptCache {
 
         None
     }
-
 }
 
 /// 变化标记（用于 diff-based prompt 输出）

@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -254,7 +254,10 @@ impl MemoryStore {
             .context("Failed to prepare query")?;
 
         let memories = stmt
-            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
+            .query_map(
+                params![self.agent_id.to_string(), limit as i64],
+                Self::row_to_memory,
+            )
             .context("Failed to execute query")?;
 
         memories
@@ -275,7 +278,10 @@ impl MemoryStore {
             .context("Failed to prepare query")?;
 
         let memories = stmt
-            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
+            .query_map(
+                params![self.agent_id.to_string(), limit as i64],
+                Self::row_to_memory,
+            )
             .context("Failed to execute query")?;
 
         memories
@@ -421,7 +427,10 @@ impl MemoryStore {
             .context("Failed to prepare archived query")?;
 
         let memories = stmt
-            .query_map(params![self.agent_id.to_string(), limit as i64], Self::row_to_memory)
+            .query_map(
+                params![self.agent_id.to_string(), limit as i64],
+                Self::row_to_memory,
+            )
             .context("Failed to execute archived query")?;
 
         memories

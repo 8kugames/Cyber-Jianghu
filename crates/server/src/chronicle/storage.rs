@@ -75,7 +75,11 @@ pub async fn store_with_llm(
     });
 
     // 根据是否有 LLM 摘要决定状态
-    let status = if summary_llm.is_some() { "llm" } else { "template" };
+    let status = if summary_llm.is_some() {
+        "llm"
+    } else {
+        "template"
+    };
     let summary_llm_value = summary_llm.map(|s| s.to_string());
 
     let row = sqlx::query_scalar::<_, i64>(

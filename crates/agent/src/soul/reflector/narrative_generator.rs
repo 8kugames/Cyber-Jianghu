@@ -315,8 +315,9 @@ mod tests {
 
     fn mock_container() -> LlmClientContainer {
         use crate::component::llm::MockLlmClient;
-        Arc::new(tokio::sync::RwLock::new(Arc::new(MockLlmClient::with_response(
-            r#"{
+        Arc::new(tokio::sync::RwLock::new(Arc::new(
+            MockLlmClient::with_response(
+                r#"{
                 "tick_id": 1,
                 "self_perception": {
                     "status_summary": "你精神尚好，只是腹中微感空虚",
@@ -333,7 +334,8 @@ mod tests {
                 "recent_memories": [],
                 "last_outcome": null
             }"#,
-        ))))
+            ),
+        )))
     }
 
     fn make_world_state() -> WorldState {

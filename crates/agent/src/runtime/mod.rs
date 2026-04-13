@@ -16,10 +16,7 @@ pub mod claw;
 mod decision;
 
 // 重导出 cognitive
-pub use decision::{
-    CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_chain,
-    
-};
+pub use decision::{CognitiveDecisionConfig, cognitive_decision, cognitive_decision_with_chain};
 // 重导出 http（已迁移至 infra::api）
 pub use crate::infra::api::{
     HttpApiState, HttpDecisionConfig, HttpDecisionState, IntentRequest, create_http_state,

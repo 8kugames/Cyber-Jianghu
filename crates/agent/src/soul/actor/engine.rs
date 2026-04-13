@@ -155,7 +155,11 @@ impl CognitiveEngine {
         let mut cache = self.prompt_cache.write().unwrap();
         cache.invalidate_persona(new_desc, &config.persona);
 
-        info!("认知引擎人设已更新: name={}, prompt_len={}", name, system_prompt.len());
+        info!(
+            "认知引擎人设已更新: name={}, prompt_len={}",
+            name,
+            system_prompt.len()
+        );
     }
 
     /// 记录最近一次 action_type（用于行为多样性检测）
@@ -780,8 +784,5 @@ fn build_distant_destinations(world_state: &crate::models::WorldState) -> String
         return String::new();
     }
 
-    format!(
-        "\n### 远端地点\n{}\n",
-        distant.join("\n")
-    )
+    format!("\n### 远端地点\n{}\n", distant.join("\n"))
 }

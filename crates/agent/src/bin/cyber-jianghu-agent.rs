@@ -33,18 +33,16 @@ use tokio::sync::RwLock;
 use tracing::{Level, debug, error, info, warn};
 use uuid::Uuid;
 
-use cyber_jianghu_agent::component::llm::{
-};
 use cyber_jianghu_agent::config::{
     CharacterConfig, CharacterStatus, Config, DeviceConfig, LlmConfig, RuntimeMode,
 };
 use cyber_jianghu_agent::{
     AgentBuilder,
+    component::llm::LlmClient,
     infra::api::thinking_log,
     runtime::claw::{BridgeConfig, OpenClawBridge},
     runtime::claw::{DownstreamMessage, WsDecisionState, WsSharedState, run_ws_server},
     runtime::create_http_state,
-    component::llm::LlmClient,
     runtime::{
         CognitiveDecisionConfig, DecisionCallback, DecisionWithChainCallback,
         cognitive_decision_with_chain,
@@ -543,7 +541,9 @@ fn create_llm_client(
     match runtime_mode {
         RuntimeMode::Cognitive => {
             config.llm.check_model_recommendation();
-            Ok(cyber_jianghu_agent::component::llm::build_fallback_client(&config.llm)?)
+            Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
+                &config.llm,
+            )?)
         }
         RuntimeMode::Claw => {
             let upstream_tx = shared_state
@@ -673,7 +673,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 &device,
                 server_dir.clone(),
                 Some(reconnect_tx.clone()),
-            ).await?;
+            )
+            .await?;
             info!("HTTP API 已启动: http://localhost:{}", actual_port);
             info!("Web 面板: http://localhost:{}/", actual_port);
             info!("角色管理: http://localhost:{}/index.html", actual_port);
@@ -779,13 +780,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                         Ok(chain) => chain.final_intent,
                         Err(e) => {
                             error!("[cognitive] Decision failed: {}", e);
-                            Intent::new(
-                                ws.agent_id.unwrap_or_default(),
-                                ws.tick_id,
-                                "idle",
-                                None,
-                            )
-                            .with_thought(format!("认知失败: {}", e))
+                            Intent::new(ws.agent_id.unwrap_or_default(), ws.tick_id, "idle", None)
+                                .with_thought(format!("认知失败: {}", e))
                         }
                     }
                 })
@@ -920,7 +916,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     setup.shared_state.upstream_tx.clone(),
                     BridgeConfig::default(),
                 ));
-                let llm_client: Arc<dyn cyber_jianghu_agent::component::llm::LlmClient> = openclaw_bridge.clone();
+                let llm_client: Arc<dyn cyber_jianghu_agent::component::llm::LlmClient> =
+                    openclaw_bridge.clone();
                 info!("LLM 客户端已创建（Claw 模式，通过工厂函数）");
 
                 // 启动 LLM 响应转发任务
@@ -1074,10 +1071,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
             let old_id = *device_id_clone.blocking_read();
-            info!(
-                "更新 Claw API device_id: {} -> {}",
-                old_id, server_agent_id
-            );
+            info!("更新 Claw API device_id: {} -> {}", old_id, server_agent_id);
             *device_id_clone.blocking_write() = server_agent_id;
 
             if let Some(ref validator) = api_state_clone.intent_validator {

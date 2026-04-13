@@ -1068,8 +1068,14 @@ async fn handle_soul_cycle_report(
     let metadata_json = serde_json::to_value(metadata).context("序列化三魂循环元数据失败")?;
 
     // 更新 agent_action_logs 表
-    if let Err(e) = crate::db::update_soul_cycle_metadata(&state.db_pool, agent_id, tick_id, &metadata_json).await {
-        warn!("写入三魂循环元数据失败: agent={}, tick={}, err={}", agent_id, tick_id, e);
+    if let Err(e) =
+        crate::db::update_soul_cycle_metadata(&state.db_pool, agent_id, tick_id, &metadata_json)
+            .await
+    {
+        warn!(
+            "写入三魂循环元数据失败: agent={}, tick={}, err={}",
+            agent_id, tick_id, e
+        );
     }
 
     Ok(())

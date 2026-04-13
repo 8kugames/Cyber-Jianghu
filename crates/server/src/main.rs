@@ -409,7 +409,10 @@ async fn main() -> Result<()> {
         .route(
             "/api/dashboard/chronicles/pending",
             get(handlers::chronicle::get_pending_generations).layer(
-                axum::middleware::from_fn_with_state(state.clone(), handlers::auth::require_read_token),
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
             ),
         )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
@@ -450,11 +453,10 @@ async fn main() -> Result<()> {
         // LLM Status & Enabled API
         .route(
             "/api/config/llm/status",
-            get(handlers::config_llm::get_llm_status)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_read_token,
-                )),
+            get(handlers::config_llm::get_llm_status).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
         )
         .route(
             "/api/config/llm/enabled",
