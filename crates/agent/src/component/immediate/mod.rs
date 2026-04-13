@@ -377,21 +377,24 @@ impl ImmediateEventHandler {
 
 /// 基于规则的即时决策器
 pub struct RuleBasedImmediateDecisionMaker {
-    /// 是否启用即时响应
-    enable_immediate_response: bool,
+    /// 即时事件配置
+    config: cyber_jianghu_protocol::ImmediateEventConfig,
 }
 
 impl RuleBasedImmediateDecisionMaker {
     pub fn new() -> Self {
         Self {
-            enable_immediate_response: true,
+            config: cyber_jianghu_protocol::ImmediateEventConfig::default(),
         }
     }
 
-    pub fn with_enable(enable: bool) -> Self {
-        Self {
-            enable_immediate_response: enable,
-        }
+    pub fn with_config(config: cyber_jianghu_protocol::ImmediateEventConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn with_enable(_enable: bool) -> Self {
+        // 保留此方法以兼容旧代码，但不影响配置
+        Self::new()
     }
 }
 
@@ -408,12 +411,6 @@ impl ImmediateDecisionMaker for RuleBasedImmediateDecisionMaker {
         current_intent: Option<&str>,
         _available_actions: &[AvailableAction],
     ) -> Option<ResponseDecision> {
-        if !self.enable_immediate_response {
-            return Some(ResponseDecision::Ignore {
-                reason: "即时响应已禁用".to_string(),
-            });
-        }
-
         // 从元数据提取内容
         let content = event
             .metadata
@@ -421,10 +418,14 @@ impl ImmediateDecisionMaker for RuleBasedImmediateDecisionMaker {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // 冲突检测：移动中不立即回应
+        // 冲突检测：执行特定动作时不立即回应
         if let Some(intent_type) = current_intent {
-            let conflict_actions = ["move", "travel", "gather", "craft", "fight"];
-            if conflict_actions.iter().any(|a| intent_type.contains(a)) {
+            let has_conflict = self
+                .config
+                .conflict_actions
+                .iter()
+                .any(|a| intent_type.contains(a));
+            if has_conflict {
                 return Some(ResponseDecision::DeferToMainTick {
                     reason: format!("当前正在执行 {}，延迟处理", intent_type),
                 });
@@ -432,15 +433,15 @@ impl ImmediateDecisionMaker for RuleBasedImmediateDecisionMaker {
         }
 
         // 被直接呼唤：立即回应
-        let is_being_called = content.contains("喂")
-            || content.contains("哎")
-            || content.contains("这位")
-            || content.contains("侠客")
-            || content.contains("朋友");
+        let is_being_called = self
+            .config
+            .call_keywords
+            .iter()
+            .any(|keyword| content.contains(keyword));
 
-        if is_being_called && content.len() < 50 {
+        if is_being_called && content.len() <= self.config.max_call_content_length {
             return Some(ResponseDecision::RespondNow {
-                content: "何事？".to_string(),
+                content: self.config.default_response.clone(),
                 thought: format!("被人呼唤 '{}'，立即回应", content),
             });
         }

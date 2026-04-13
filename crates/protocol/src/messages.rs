@@ -484,6 +484,7 @@ mod tests {
             last_updated: "2024-01-01T00:00:00Z".to_string(),
             intent_batch: None,
             reflector_narrative: None,
+            immediate_events: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -648,6 +649,7 @@ mod tests {
             last_updated: "2024-01-01T00:00:00Z".to_string(),
             intent_batch: None,
             reflector_narrative: None,
+            immediate_events: None,
         };
         let world_rules = WorldBuildingRules::default();
 
