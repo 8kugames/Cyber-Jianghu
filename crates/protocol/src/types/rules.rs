@@ -1,6 +1,29 @@
 //! 游戏规则相关类型
 //!
 //! 包含游戏规则和世界观规则
+//!
+//! # 设计哲学
+//!
+//! 本协议 crate 为 Cyber-Jianghu 武侠 MMO 设计。
+//!
+//! ## 默认值说明
+//!
+//! 本类型中的 `Default` 实现和 `fn default_*()` 辅助函数包含武侠主题的默认值，
+//! 这些默认值用于：
+//! - 开发/测试环境（无配置文件时）
+//! - 配置缺失时的安全降级
+//!
+//! **生产环境应通过 `game_rules.yaml` 配置所有值**，而非依赖代码默认值。
+//!
+//! ## 武侠主题默认值示例
+//!
+//! - 呼唤词："喂", "哎", "侠客", "朋友"
+//! - 限制区域："admin", "vault", "secret"
+//! - 高价值物品："silver", "gold"
+//! - 默认回应："何事？"
+//!
+//! 这些默认值确保系统在无配置时仍可运行，但**不代表通用的设计决策**。
+//! 不同的游戏主题应通过配置文件覆盖这些值。
 
 use serde::{Deserialize, Serialize};
 
@@ -126,10 +149,14 @@ pub struct GradedValidationConfig {
 }
 
 fn default_restricted_area_keywords() -> Vec<String> {
+    // 武侠主题默认值：限制区域地点前缀
+    // 生产环境应通过 game_rules.yaml 配置
     vec!["admin".into(), "vault".into(), "secret".into()]
 }
 
 fn default_high_value_item_keywords() -> Vec<String> {
+    // 武侠主题默认值：高价值物品前缀
+    // 生产环境应通过 game_rules.yaml 配置
     vec!["silver".into(), "gold".into()]
 }
 
@@ -277,6 +304,7 @@ pub struct ImmediateEventConfig {
 }
 
 fn default_conflict_actions() -> Vec<String> {
+    // 武侠主题默认值：移动和战斗类动作不立即回应
     vec![
         "move".into(),
         "travel".into(),
@@ -287,6 +315,7 @@ fn default_conflict_actions() -> Vec<String> {
 }
 
 fn default_call_keywords() -> Vec<String> {
+    // 武侠主题默认值：传统呼唤方式
     vec![
         "喂".into(),
         "哎".into(),
@@ -301,6 +330,7 @@ fn default_max_call_content_length() -> usize {
 }
 
 fn default_default_response() -> String {
+    // 武侠主题默认回应
     "何事？".to_string()
 }
 
