@@ -46,10 +46,14 @@ pub type IntentManager = Arc<RwLock<HashMap<Uuid, Intent>>>;
 // ============================================================================
 
 /// 构建游戏规则（从配置注册表）
+///
+/// 从 GameData 缓存中读取配置，包括 immediate_events 和 intent_batch
 pub fn build_game_rules_from_config(
     tick_duration_secs: u64,
     survival_threshold: i32,
     version: String,
+    immediate_events: Option<cyber_jianghu_protocol::ImmediateEventConfig>,
+    intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
 ) -> GameRules {
     let available_actions = ActionRegistry::build_available_actions();
 
@@ -73,10 +77,10 @@ pub fn build_game_rules_from_config(
         survival_actions,
         survival_threshold,
         version,
-        last_updated: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-        intent_batch: None,
+        last_updated: Utc::now().to_rfc3339(),
+        intent_batch,
         reflector_narrative: None,
-        immediate_events: None,
+        immediate_events,
     }
 }
 

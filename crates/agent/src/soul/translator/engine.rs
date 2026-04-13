@@ -63,6 +63,10 @@ impl IntentTranslator {
     ///
     /// 将叙事意图拆分为多个结构化 Intent，支持 Pipeline 顺序执行。
     /// 用于天魂 translate_multi 场景：一个叙事意图可能包含多个步骤。
+    ///
+    /// # 参数
+    ///
+    /// * `immediate_routing_actions` - 走即时通道的动作类型列表（如 speak, whisper）
     pub async fn translate_multi(
         &self,
         narrative: &str,
@@ -70,6 +74,7 @@ impl IntentTranslator {
         world_state: &WorldState,
         cognitive_chain: Option<&CognitiveChain>,
         max_intents: usize,
+        immediate_routing_actions: &[String],
     ) -> Result<MultiTranslationResult> {
         let prompt = self.build_multi_prompt(
             narrative,
@@ -115,7 +120,7 @@ impl IntentTranslator {
         // 路由说话意图
         let first = &intents[0];
         let action_type = first.action_type.as_str();
-        let speech_intent = if matches!(action_type, "speak" | "whisper") {
+        let speech_intent = if immediate_routing_actions.iter().any(|a| a == action_type) {
             let speak = intents.remove(0);
             intents.insert(
                 0,

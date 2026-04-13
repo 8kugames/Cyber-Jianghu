@@ -179,6 +179,14 @@ pub struct GameRulesData {
     /// 死亡默认配置（当属性未配置 death_cause/death_message 时使用）
     #[serde(default)]
     pub death_defaults: Option<DeathDefaultsData>,
+
+    /// 即时事件配置
+    #[serde(default)]
+    pub immediate_events: Option<cyber_jianghu_protocol::ImmediateEventConfig>,
+
+    /// Intent批次配置（multi-Intent Pipeline执行）
+    #[serde(default)]
+    pub intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
 }
 
 /// Agent 状态配置（数据驱动）

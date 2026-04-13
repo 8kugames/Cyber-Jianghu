@@ -396,7 +396,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         .route(
             "/api/v1/memory/search",
             post(handlers::search_memory_handler),
-        ) // 搜索记忆 TODO: 语义搜索待实现
+        ) // 搜索记忆（语义搜索已实现，见 MemoryManager::recall_archived）
         .route("/api/v1/memory", post(handlers::store_memory_handler)) // 存储记忆
         // === 意图验证端点 ===
         .route("/api/v1/validate", post(handlers::validate_intent_handler)) // 验证意图是否符合人设
@@ -594,11 +594,10 @@ impl DialogueEventHandler for NoopDialogueHandler {
 ///
 /// 初始化策略：
 /// - 关系存储：使用默认数据库路径初始化，失败则为 None
-/// - 记忆管理器：使用无 LLM 版本（基础功能可用，语义搜索待实现），失败则为 None
+/// - 记忆管理器：使用默认配置初始化（语义搜索已实现，见 SemanticMemoryBackend）
 /// - 寿命计算器：使用默认配置强制初始化
 /// - 对话客户端：使用空操作处理器强制初始化
 /// - 意图验证器：使用默认规则引擎验证器强制初始化
-/// - 语义搜索：TODO: 下一阶段实现，需要 LLM 提供嵌入
 ///
 /// # 注意
 /// agent_id 是共享的，WebSocket 注册后会更新为服务器分配的真正 ID
@@ -650,8 +649,7 @@ pub fn create_http_state(
         .map(Arc::new)
     };
 
-    // 初始化记忆管理器（无 LLM 版本，基础功能可用）
-    // TODO: 语义搜索功能下一阶段实现，需要 LLM Client 提供嵌入能力
+    // 初始化记忆管理器（语义搜索已实现，见 SemanticMemoryBackend）
     let memory_config = MemoryManagerConfig {
         agent_id: current_agent_id,
         db_dir: data_dir.clone(),

@@ -546,6 +546,16 @@ impl Agent {
             };
         }
 
+        // 获取即时路由配置（默认 speak, whisper）
+        let default_routing: Vec<String> = vec!["speak".into(), "whisper".into()];
+        let immediate_routing_actions = self
+            .config
+            .game_rules
+            .as_ref()
+            .and_then(|g| g.immediate_events.as_ref())
+            .map(|e| e.immediate_routing_actions.as_slice())
+            .unwrap_or(default_routing.as_slice());
+
         match translator
             .translate_multi(
                 narrative,
@@ -553,6 +563,7 @@ impl Agent {
                 world_state,
                 cognitive_chain,
                 max_intents,
+                immediate_routing_actions,
             )
             .await
         {
