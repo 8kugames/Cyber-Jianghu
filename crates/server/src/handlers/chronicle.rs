@@ -152,28 +152,32 @@ pub async fn get_pending_generations() -> Json<serde_json::Value> {
                 chronicle::GenerationStatus::Pending => "pending",
                 chronicle::GenerationStatus::Generating => "generating",
                 chronicle::GenerationStatus::Completed => "completed",
-                chronicle::GenerationStatus::Failed(e) => return serde_json::json!({
-                    "chronicle_id": t.chronicle_id,
-                    "status": "failed",
-                    "error": e,
-                    "started_at": t.started_at,
-                    "completed_at": t.completed_at,
-                }),
+                chronicle::GenerationStatus::Failed(e) => {
+                    return serde_json::json!({
+                        "chronicle_id": t.chronicle_id,
+                        "status": "failed",
+                        "error": e,
+                        "started_at": t.started_at,
+                        "completed_at": t.completed_at,
+                    });
+                }
             };
 
             let supplement_str = match &t.supplement_status {
                 chronicle::GenerationStatus::Pending => "pending",
                 chronicle::GenerationStatus::Generating => "generating",
                 chronicle::GenerationStatus::Completed => "completed",
-                chronicle::GenerationStatus::Failed(e) => return serde_json::json!({
-                    "chronicle_id": t.chronicle_id,
-                    "status": status_str,
-                    "supplement_status": "failed",
-                    "supplement_error": e,
-                    "primary_version": t.primary_version,
-                    "started_at": t.started_at,
-                    "completed_at": t.completed_at,
-                }),
+                chronicle::GenerationStatus::Failed(e) => {
+                    return serde_json::json!({
+                        "chronicle_id": t.chronicle_id,
+                        "status": status_str,
+                        "supplement_status": "failed",
+                        "supplement_error": e,
+                        "primary_version": t.primary_version,
+                        "started_at": t.started_at,
+                        "completed_at": t.completed_at,
+                    });
+                }
             };
 
             serde_json::json!({

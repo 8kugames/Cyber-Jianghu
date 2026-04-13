@@ -84,7 +84,8 @@ pub struct TickScheduler {
     closed_dialogue_records: Vec<cyber_jianghu_protocol::PrivateDialogueRecord>,
 
     /// 上一轮 Pipeline 执行汇总（用于下一轮广播）
-    execution_summaries: std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
+    execution_summaries:
+        std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
 
     /// 当前接受意图的 tick_id（与 AppState 共享）
     accepting_tick_id: Arc<AtomicI64>,

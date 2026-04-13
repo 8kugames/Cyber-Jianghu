@@ -175,7 +175,8 @@ impl AgentBuilder {
             .as_ref()
             .and_then(|g| g.reflector_narrative.clone())
             .unwrap_or_default();
-        let narrative_generator = Arc::new(NarrativeGenerator::new(container.clone(), narrative_config));
+        let narrative_generator =
+            Arc::new(NarrativeGenerator::new(container.clone(), narrative_config));
 
         self.validator = Some(validator);
         self.narrative_generator = Some(narrative_generator);

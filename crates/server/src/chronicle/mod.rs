@@ -152,7 +152,7 @@ pub struct GenerationTask {
     /// 任务状态
     pub status: GenerationStatus,
     /// 主版本类型
-    pub primary_version: String,  // "llm" 或 "template"
+    pub primary_version: String, // "llm" 或 "template"
     /// 补充版本状态
     pub supplement_status: GenerationStatus,
     /// 任务开始时间
@@ -213,10 +213,12 @@ impl GenerationTracker {
             .read()
             .await
             .iter()
-            .filter(|t| matches!(
-                t.status,
-                GenerationStatus::Pending | GenerationStatus::Generating
-            ))
+            .filter(|t| {
+                matches!(
+                    t.status,
+                    GenerationStatus::Pending | GenerationStatus::Generating
+                )
+            })
             .cloned()
             .collect()
     }
@@ -225,11 +227,7 @@ impl GenerationTracker {
     pub async fn cleanup(&self) {
         let cutoff = chrono::Utc::now() - chrono::Duration::hours(1);
         let mut tasks = self.tasks.write().await;
-        tasks.retain(|t| {
-            t.completed_at
-                .map(|c| c > cutoff)
-                .unwrap_or(true)
-        });
+        tasks.retain(|t| t.completed_at.map(|c| c > cutoff).unwrap_or(true));
     }
 }
 
@@ -289,7 +287,8 @@ pub async fn generate_and_store(
     };
 
     // 3. 立即持久化（两个版本都同步存储）
-    let chronicle = storage::store_with_llm(db_pool, &data, &summary, summary_llm.as_deref()).await?;
+    let chronicle =
+        storage::store_with_llm(db_pool, &data, &summary, summary_llm.as_deref()).await?;
     tracing::info!(
         "群像传记已存储: {} (summary: {}, summary_llm: {})",
         chronicle.chronicle_id,
@@ -316,17 +315,35 @@ pub async fn generate_and_store(
             match generator::generate_llm(&data_clone).await {
                 Ok(llm_summary) => {
                     tracing::info!("[任务 {}] LLM 重试成功，更新数据库", chronicle_id_clone);
-                    if let Err(e) = storage::update_llm_summary(&db_pool_clone, &chronicle_id_clone, &llm_summary).await {
+                    if let Err(e) = storage::update_llm_summary(
+                        &db_pool_clone,
+                        &chronicle_id_clone,
+                        &llm_summary,
+                    )
+                    .await
+                    {
                         tracing::warn!("[任务 {}] LLM 摘要更新失败: {}", chronicle_id_clone, e);
-                        tracker_clone.update_supplement(&chronicle_id_clone, GenerationStatus::Failed(e.to_string())).await;
+                        tracker_clone
+                            .update_supplement(
+                                &chronicle_id_clone,
+                                GenerationStatus::Failed(e.to_string()),
+                            )
+                            .await;
                     } else {
                         tracing::info!("[任务 {}] LLM 版本更新完成", chronicle_id_clone);
-                        tracker_clone.update_supplement(&chronicle_id_clone, GenerationStatus::Completed).await;
+                        tracker_clone
+                            .update_supplement(&chronicle_id_clone, GenerationStatus::Completed)
+                            .await;
                     }
                 }
                 Err(e) => {
                     tracing::warn!("[任务 {}] 异步 LLM 重试失败: {}", chronicle_id_clone, e);
-                    tracker_clone.update_supplement(&chronicle_id_clone, GenerationStatus::Failed(e.to_string())).await;
+                    tracker_clone
+                        .update_supplement(
+                            &chronicle_id_clone,
+                            GenerationStatus::Failed(e.to_string()),
+                        )
+                        .await;
                 }
             }
         });
@@ -334,7 +351,9 @@ pub async fn generate_and_store(
         // LLM 成功，两个版本都有了
         let task_id = tracker.add_task(&chronicle_id, "both").await;
         tracing::info!("[任务 {}] LLM 和模板版本都已生成，无需异步任务", task_id);
-        tracker.update_supplement(&chronicle_id, GenerationStatus::Completed).await;
+        tracker
+            .update_supplement(&chronicle_id, GenerationStatus::Completed)
+            .await;
     }
 
     Ok(chronicle)

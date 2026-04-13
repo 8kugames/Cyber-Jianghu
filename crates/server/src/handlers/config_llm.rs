@@ -68,7 +68,8 @@ impl Default for LlmConfigWrapper {
 pub async fn get_llm_config() -> Result<Json<LlmConfigWrapper>, StatusCode> {
     let config_path = crate::paths::get_config_dir().join("llm.yaml");
     let wrapper = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let content =
+            fs::read_to_string(&config_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         serde_yaml::from_str(&content).unwrap_or_default()
     } else {
         LlmConfigWrapper::default()
@@ -100,14 +101,16 @@ pub async fn save_llm_config(
 pub async fn get_llm_status() -> Json<serde_json::Value> {
     let config_wrapper = match get_llm_config().await {
         Ok(axum::Json(c)) => c,
-        Err(_) => return Json(serde_json::json!({
-            "enabled": false,
-            "connected": false,
-            "message": "配置读取失败"
-        })),
+        Err(_) => {
+            return Json(serde_json::json!({
+                "enabled": false,
+                "connected": false,
+                "message": "配置读取失败"
+            }));
+        }
     };
     let enabled = config_wrapper.data.enabled;
-    
+
     if !enabled {
         return Json(serde_json::json!({
             "enabled": false,
@@ -129,11 +132,15 @@ pub async fn get_llm_status() -> Json<serde_json::Value> {
         .build()
         .unwrap_or_default();
 
-    let mut request = client.post(&check_url)
+    let mut request = client
+        .post(&check_url)
         .header("Content-Type", "application/json");
-    
+
     if !config_wrapper.data.api_key.is_empty() {
-        request = request.header("Authorization", format!("Bearer {}", config_wrapper.data.api_key));
+        request = request.header(
+            "Authorization",
+            format!("Bearer {}", config_wrapper.data.api_key),
+        );
     }
 
     let body = serde_json::json!({
@@ -143,27 +150,21 @@ pub async fn get_llm_status() -> Json<serde_json::Value> {
     });
 
     match request.body(body.to_string()).send().await {
-        Ok(response) if response.status().is_success() => {
-            Json(serde_json::json!({
-                "enabled": true,
-                "connected": true,
-                "message": "连接正常"
-            }))
-        }
-        Ok(response) => {
-            Json(serde_json::json!({
-                "enabled": true,
-                "connected": false,
-                "message": format!("连接失败: HTTP {}", response.status())
-            }))
-        }
-        Err(e) => {
-            Json(serde_json::json!({
-                "enabled": true,
-                "connected": false,
-                "message": format!("连接失败: {}", e)
-            }))
-        }
+        Ok(response) if response.status().is_success() => Json(serde_json::json!({
+            "enabled": true,
+            "connected": true,
+            "message": "连接正常"
+        })),
+        Ok(response) => Json(serde_json::json!({
+            "enabled": true,
+            "connected": false,
+            "message": format!("连接失败: HTTP {}", response.status())
+        })),
+        Err(e) => Json(serde_json::json!({
+            "enabled": true,
+            "connected": false,
+            "message": format!("连接失败: {}", e)
+        })),
     }
 }
 
@@ -179,7 +180,8 @@ pub async fn get_llm_enabled() -> Json<serde_json::Value> {
 pub async fn set_llm_enabled(
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let enabled = req.get("enabled")
+    let enabled = req
+        .get("enabled")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
