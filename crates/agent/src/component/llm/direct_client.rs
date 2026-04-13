@@ -389,11 +389,11 @@ impl DirectLlmClient {
     /// 部分 LLM 要求特定参数：
     /// - kimi 系列：非流式调用必须 `enable_thinking: false`
     /// - qwen 系列：DashScope 要求非流式调用 `enable_thinking: false`
-    fn extra_body_for_model(model: &str) -> Option<serde_json::Value> {
+    fn extra_body_for_model(model: &str) -> Option<bool> {
         let lower = model.to_ascii_lowercase();
         // DashScope (qwen) 和 Kimi 要求非流式调用禁用 thinking
         if lower.contains("kimi") || lower.contains("qwen") || lower.contains("qwq") || lower.contains("qvq") {
-            Some(serde_json::json!({"enable_thinking": false}))
+            Some(false)
         } else {
             None
         }
@@ -475,7 +475,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            extra_body: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
         };
 
         let response_data = self.send_request(&request).await?;
@@ -517,7 +517,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            extra_body: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
         };
 
         debug!("Calling OpenAI-compatible API (system+user)");
@@ -566,7 +566,7 @@ impl DirectLlmClient {
                 max_tokens: Some(self.config.max_tokens),
                 tools: Some(tools.to_vec()),
                 tool_choice: Some(serde_json::json!("auto")),
-                extra_body: Self::extra_body_for_model(&model),
+                enable_thinking: Self::extra_body_for_model(&model),
             };
 
             let response_data = self.send_request(&request).await?;

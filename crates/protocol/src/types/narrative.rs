@@ -4,7 +4,7 @@
 //
 // 将数值状态转换为叙事化描述的配置，由 Server 统一管理并下发给 Agent。
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 /// 单个阈值配置
@@ -297,6 +297,44 @@ pub struct AgentRecognition {
     pub relationship: Option<String>,
 }
 
+/// 容错反序列化：LLM 可能返回 string/bool/null 而非 AgentRecognition struct
+fn deserialize_recognition<'de, D>(deserializer: D) -> Result<Option<AgentRecognition>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value: serde_json::Value = match Option::deserialize(deserializer) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Ok(None),
+        Err(_) => return Ok(None),
+    };
+
+    match value {
+        serde_json::Value::Object(_) => {
+            match serde_json::from_value::<AgentRecognition>(value) {
+                Ok(r) => Ok(Some(r)),
+                Err(_) => Ok(None), // 缺必填字段的对象 → 降级为未知
+            }
+        }
+        serde_json::Value::String(name) if !name.trim().is_empty() => {
+            // LLM 返回 "recognition": "红娘子" → 视为已知角色
+            Ok(Some(AgentRecognition {
+                is_known: true,
+                known_name: Some(name),
+                relationship: None,
+            }))
+        }
+        serde_json::Value::String(_) => Ok(None), // 空字符串 → 未知
+        serde_json::Value::Bool(b) => {
+            Ok(Some(AgentRecognition {
+                is_known: b,
+                known_name: None,
+                relationship: None,
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
 /// 其他 Agent 感知
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentPerception {
@@ -307,7 +345,11 @@ pub struct AgentPerception {
     /// 当前活动
     pub current_activity: String,
     /// 识别信息（已知角色）
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_recognition"
+    )]
     pub recognition: Option<AgentRecognition>,
 }
 
@@ -386,5 +428,79 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let parsed: NarrativeConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config, parsed);
+    }
+
+    // --- AgentRecognition 容错反序列化测试 ---
+
+    #[test]
+    fn test_recognition_from_valid_object() {
+        let json = r#"{"relative_position":"身旁","appearance":"青衫剑客","current_activity":"饮酒","recognition":{"is_known":true,"known_name":"红娘子","relationship":"旧识"}}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        let r = p.recognition.unwrap();
+        assert!(r.is_known);
+        assert_eq!(r.known_name.as_deref(), Some("红娘子"));
+        assert_eq!(r.relationship.as_deref(), Some("旧识"));
+    }
+
+    #[test]
+    fn test_recognition_from_string() {
+        let json = r#"{"relative_position":"对面","appearance":"蒙面人","current_activity":"观察","recognition":"红娘子"}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        let r = p.recognition.unwrap();
+        assert!(r.is_known);
+        assert_eq!(r.known_name.as_deref(), Some("红娘子"));
+        assert!(r.relationship.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_bool() {
+        let json = r#"{"relative_position":"远处","appearance":"老者","current_activity":"打坐","recognition":true}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        let r = p.recognition.unwrap();
+        assert!(r.is_known);
+        assert!(r.known_name.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_null() {
+        let json = r#"{"relative_position":"角落","appearance":"陌生人","current_activity":"发呆","recognition":null}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_number() {
+        let json = r#"{"relative_position":"门外","appearance":"路人","current_activity":"行走","recognition":42}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
+    }
+
+    #[test]
+    fn test_recognition_missing_field() {
+        let json = r#"{"relative_position":"身旁","appearance":"剑客","current_activity":"练剑"}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_empty_string() {
+        let json = r#"{"relative_position":"身旁","appearance":"路人","current_activity":"发呆","recognition":""}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_whitespace_string() {
+        let json = r#"{"relative_position":"身旁","appearance":"路人","current_activity":"发呆","recognition":"   "}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
+    }
+
+    #[test]
+    fn test_recognition_from_partial_object() {
+        // 缺少必填字段 is_known
+        let json = r#"{"relative_position":"身旁","appearance":"路人","current_activity":"发呆","recognition":{"known_name":"红娘子"}}"#;
+        let p: AgentPerception = serde_json::from_str(json).unwrap();
+        assert!(p.recognition.is_none());
     }
 }
