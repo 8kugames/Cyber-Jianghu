@@ -45,6 +45,10 @@ pub struct GameRules {
     /// 地魂叙事生成配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflector_narrative: Option<ReflectorNarrativeConfig>,
+
+    /// 即时事件处理配置
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immediate_events: Option<ImmediateEventConfig>,
 }
 
 // ============================================================================
@@ -242,6 +246,71 @@ impl Default for ReflectorNarrativeConfig {
             cache_ttl_seconds: 300,
             few_shot_examples: true,
             leak_detection: LeakDetectionConfig::default(),
+        }
+    }
+}
+
+// ============================================================================
+// 即时事件配置
+// ============================================================================
+
+/// 即时事件处理配置
+///
+/// 控制 Agent 如何响应 Server 下发的即时事件（speak/whisper 等）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImmediateEventConfig {
+    /// 冲突动作列表（执行这些动作时不立即回应）
+    #[serde(default = "default_conflict_actions")]
+    pub conflict_actions: Vec<String>,
+
+    /// 呼唤关键词列表（匹配时立即回应）
+    #[serde(default = "default_call_keywords")]
+    pub call_keywords: Vec<String>,
+
+    /// 最大呼唤内容长度（超过此长度不触发立即回应）
+    #[serde(default = "default_max_call_content_length")]
+    pub max_call_content_length: usize,
+
+    /// 默认回应内容
+    #[serde(default = "default_default_response")]
+    pub default_response: String,
+}
+
+fn default_conflict_actions() -> Vec<String> {
+    vec![
+        "move".into(),
+        "travel".into(),
+        "gather".into(),
+        "craft".into(),
+        "fight".into(),
+    ]
+}
+
+fn default_call_keywords() -> Vec<String> {
+    vec![
+        "喂".into(),
+        "哎".into(),
+        "这位".into(),
+        "侠客".into(),
+        "朋友".into(),
+    ]
+}
+
+fn default_max_call_content_length() -> usize {
+    50
+}
+
+fn default_default_response() -> String {
+    "何事？".to_string()
+}
+
+impl Default for ImmediateEventConfig {
+    fn default() -> Self {
+        Self {
+            conflict_actions: default_conflict_actions(),
+            call_keywords: default_call_keywords(),
+            max_call_content_length: default_max_call_content_length(),
+            default_response: default_default_response(),
         }
     }
 }

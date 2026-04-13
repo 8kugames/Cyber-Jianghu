@@ -106,6 +106,27 @@ data:
       steal: item_id
       give: item_id
 
+  # 即时事件处理配置
+  immediate_events:
+    # 冲突动作列表（执行这些动作时不立即回应）
+    conflict_actions:
+      - move
+      - travel
+      - gather
+      - craft
+      - fight
+    # 呼唤关键词列表（匹配时立即回应）
+    call_keywords:
+      - 喂
+      - 哎
+      - 这位
+      - 侠客
+      - 朋友
+    # 最大呼唤内容长度（超过此长度不触发立即回应）
+    max_call_content_length: 50
+    # 默认回应内容
+    default_response: "何事？"
+
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述
   agent_statuses:

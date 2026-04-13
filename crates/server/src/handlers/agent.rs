@@ -202,6 +202,7 @@ pub async fn agent_register(
         last_updated: chrono::Utc::now().to_rfc3339(),
         intent_batch: None,
         reflector_narrative: None,
+        immediate_events: None,
     };
 
     // 8. 获取叙事化配置（用于属性描述转换）

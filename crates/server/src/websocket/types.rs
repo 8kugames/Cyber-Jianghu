@@ -76,6 +76,7 @@ pub fn build_game_rules_from_config(
         last_updated: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         intent_batch: None,
         reflector_narrative: None,
+        immediate_events: None,
     }
 }
 

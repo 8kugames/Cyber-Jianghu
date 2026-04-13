@@ -907,6 +907,7 @@ mod tests {
                 last_updated: "2024-03-22T12:00:00Z".to_string(),
                 intent_batch: None,
                 reflector_narrative: None,
+                immediate_events: None,
             },
         };
 

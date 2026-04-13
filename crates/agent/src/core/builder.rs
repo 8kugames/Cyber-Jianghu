@@ -244,9 +244,19 @@ impl AgentBuilder {
         // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 immediate_msg_tx）
         let (tx, _rx) = mpsc::channel(32);
 
-        // 创建基于规则的决策器
-        let decision_maker: Arc<dyn ImmediateDecisionMaker> =
-            Arc::new(RuleBasedImmediateDecisionMaker::new());
+        // 从配置中获取即时事件配置，不存在则使用默认值
+        let immediate_config = self
+            .config
+            .game_rules
+            .as_ref()
+            .and_then(|g| g.immediate_events.as_ref())
+            .cloned()
+            .unwrap_or_default();
+
+        // 创建基于规则的决策器（使用配置）
+        let decision_maker: Arc<dyn ImmediateDecisionMaker> = Arc::new(
+            RuleBasedImmediateDecisionMaker::with_config(immediate_config),
+        );
 
         // 创建处理器
         let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx));
