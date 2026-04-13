@@ -324,13 +324,11 @@ where
             }))
         }
         serde_json::Value::String(_) => Ok(None), // 空字符串 → 未知
-        serde_json::Value::Bool(b) => {
-            Ok(Some(AgentRecognition {
-                is_known: b,
-                known_name: None,
-                relationship: None,
-            }))
-        }
+        serde_json::Value::Bool(b) => Ok(Some(AgentRecognition {
+            is_known: b,
+            known_name: None,
+            relationship: None,
+        })),
         _ => Ok(None),
     }
 }

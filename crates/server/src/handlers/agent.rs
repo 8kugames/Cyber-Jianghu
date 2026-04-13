@@ -176,7 +176,13 @@ pub async fn agent_register(
     }
 
     // 7. 构建游戏规则（从配置动态获取）
-    let (tick_duration_secs, survival_threshold, game_rules_version, immediate_events, intent_batch) = {
+    let (
+        tick_duration_secs,
+        survival_threshold,
+        game_rules_version,
+        immediate_events,
+        intent_batch,
+    ) = {
         let gd = state.game_data.get();
         (
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,

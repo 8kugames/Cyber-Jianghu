@@ -374,7 +374,9 @@ impl FallbackLlmClient {
             disabled.insert(current_idx);
             tracing::warn!(
                 "LLM 模型 #{} 连续 idle {} 次，达到阈值 {}，标记为不可用",
-                current_idx, count, self.idle_threshold
+                current_idx,
+                count,
+                self.idle_threshold
             );
 
             // 切换到下一个可用模型
@@ -398,10 +400,7 @@ impl FallbackLlmClient {
             if !disabled.contains(&idx) {
                 let old = self.active.load(std::sync::atomic::Ordering::Relaxed);
                 self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
-                tracing::warn!(
-                    "LLM idle 旋转：模型 #{} → #{} (跳过不可用模型)",
-                    old, idx
-                );
+                tracing::warn!("LLM idle 旋转：模型 #{} → #{} (跳过不可用模型)", old, idx);
                 return;
             }
         }

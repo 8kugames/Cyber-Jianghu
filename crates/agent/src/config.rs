@@ -493,7 +493,12 @@ impl LlmConfig {
                 .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
             fallback_models: std::env::var("CYBER_JIANGHU_LLM_FALLBACK_MODELS")
                 .ok()
-                .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
         }

@@ -392,7 +392,11 @@ impl DirectLlmClient {
     fn extra_body_for_model(model: &str) -> Option<bool> {
         let lower = model.to_ascii_lowercase();
         // DashScope (qwen) 和 Kimi 要求非流式调用禁用 thinking
-        if lower.contains("kimi") || lower.contains("qwen") || lower.contains("qwq") || lower.contains("qvq") {
+        if lower.contains("kimi")
+            || lower.contains("qwen")
+            || lower.contains("qwq")
+            || lower.contains("qvq")
+        {
             Some(false)
         } else {
             None

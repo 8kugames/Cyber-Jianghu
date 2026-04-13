@@ -7,7 +7,7 @@
 // ============================================================================
 
 use anyhow::Result;
-use cyber_jianghu_protocol::{ServerMessage, WorldTime};
+use cyber_jianghu_protocol::{ExecutionSummary, ServerMessage, WorldTime};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -295,16 +295,17 @@ impl super::Agent {
         self.config.update_game_rules(game_rules.clone());
 
         // 更新即时事件处理器配置（如果有 immediate_events 配置）
-        if let Some(ref immediate_events) = game_rules.immediate_events {
-            if let Some(ref handler) = self.immediate_handler {
-                use crate::component::immediate::RuleBasedImmediateDecisionMaker;
-                let new_maker = Arc::new(RuleBasedImmediateDecisionMaker::with_config(
-                    immediate_events.clone(),
-                )) as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
-                let new_handler = handler.with_updated_decision_maker(new_maker);
-                self.immediate_handler = Some(Arc::new(new_handler));
-                info!("即时事件处理器配置已更新");
-            }
+        if let Some(ref immediate_events) = game_rules.immediate_events
+            && let Some(ref handler) = self.immediate_handler
+        {
+            use crate::component::immediate::RuleBasedImmediateDecisionMaker;
+            let new_maker = Arc::new(RuleBasedImmediateDecisionMaker::with_config(
+                immediate_events.clone(),
+            ))
+                as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
+            let new_handler = handler.with_updated_decision_maker(new_maker);
+            self.immediate_handler = Some(Arc::new(new_handler));
+            info!("即时事件处理器配置已更新");
         }
 
         // 绑定即时意图通道到 WebSocket 的 immediate_msg_tx
@@ -388,6 +389,10 @@ impl super::Agent {
             });
         self.client.set_server_msg_callback(callback).await;
         info!("Server 消息回调已注册（即时事件 + 验证错误 + 链式透传）");
+
+        // 暂存上轮提交的 intents，供地魂生成上一轮叙事用
+        let last_intents_for_narrative =
+            Arc::new(std::sync::Mutex::new(Vec::<crate::models::Intent>::new()));
 
         loop {
             tokio::select! {
@@ -565,8 +570,33 @@ impl super::Agent {
                             })
                             .unwrap_or_default();
 
+                        // 读取上轮提交的 intents
+                        let last_intents = last_intents_for_narrative.lock().unwrap().clone();
+
+                        // 地魂生成上一轮叙事
+                        let execution_narrative = if let Some(ref validator) = self.validator {
+                            match validator
+                                .generate_execution_narrative(&last_intents, world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
+                                    total: 0,
+                                    succeeded: 0,
+                                    partial: 0,
+                                    failed: 0,
+                                    skipped: 0,
+                                }))
+                                .await
+                            {
+                                Ok(n) => n,
+                                Err(e) => {
+                                    warn!("地魂生成执行叙事错误: {}", e);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
                         let last_summary = world_state.last_execution_summary.as_ref();
-                        match generator.generate(&world_state, last_summary, &recent).await {
+                        match generator.generate(&world_state, last_summary, &recent, execution_narrative).await {
                             Ok(narrative_ctx) => {
                                 // 将 NarrativeContext 的核心内容注入 memory_context
                                 let narrative_section = format!(
@@ -859,7 +889,7 @@ impl super::Agent {
                                     None,
                                     batch_narrative.as_deref(),
                                 ).await;
-                                let pipeline = Self::assemble_pipeline(approved_intents);
+                                let pipeline = Self::assemble_pipeline(approved_intents.clone());
                                 recorder.record_final_intent(
                                     world_state.tick_id,
                                     attempt,
@@ -869,8 +899,12 @@ impl super::Agent {
                                 ).await;
                                 final_intent = Some(pipeline);
                             } else {
-                                let pipeline = Self::assemble_pipeline(approved_intents);
+                                let pipeline = Self::assemble_pipeline(approved_intents.clone());
                                 final_intent = Some(pipeline);
+                            }
+                            // 暂存 approved intents，供下一轮地魂生成叙事用
+                            if let Ok(mut saved) = last_intents_for_narrative.lock() {
+                                saved.clone_from(&approved_intents);
                             }
                             break;
                         } else if let Some(reason) = batch_rejection {

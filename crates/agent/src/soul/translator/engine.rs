@@ -18,6 +18,23 @@ use crate::models::WorldState;
 use crate::soul::actor::CognitiveChain;
 use cyber_jianghu_protocol::AvailableAction;
 
+/// Few-shot 示例：多动作拆分
+const FEW_SHOT_EXAMPLES: &str = r#"### 示例：多动作拆分
+输入：「捡起馒头和井水，大口吃喝」
+推理：先拾取(pickup)，再吃喝(eat/drink)
+输出：
+[{"action_type": "pickup", "action_data": {"item_id": "mantou", "quantity": 1}},
+ {"action_type": "pickup", "action_data": {"item_id": "water", "quantity": 1}},
+ {"action_type": "eat", "action_data": {"item_id": "mantou"}},
+ {"action_type": "drink", "action_data": {"item_id": "water"}}]
+
+### 示例：多动作拆分
+输入：「走去客栈大堂然后吃点东西」
+推理：先移动(move)，再进食(eat)
+输出：
+[{"action_type": "move", "action_data": {"target_location": "inn_main_hall"}},
+ {"action_type": "eat", "action_data": {"item_id": "mantou"}}]"#;
+
 /// LLM 翻译响应（JSON 解析用）
 #[derive(Debug, Clone, Deserialize)]
 pub struct TranslationResponse {
@@ -204,6 +221,9 @@ impl IntentTranslator {
 
         format!(
             r#"你是意图翻译器。将角色的自然语言意图拆分为最多{max_intents}个按顺序执行的动作。
+
+## 示例
+{FEW_SHOT_EXAMPLES}
 
 ## 角色意图
 {narrative}

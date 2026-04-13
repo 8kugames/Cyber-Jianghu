@@ -315,22 +315,31 @@ impl PromptCache {
 
     /// 检测重复行为并生成多样性提示
     ///
-    /// 最近 3 次动作相同且非 idle 时返回提示文本。
+    /// 优先级: stealth 专项 (2次) > 通用重复 (3次相同非idle)
     pub fn get_diversity_nudge(&self) -> Option<String> {
-        if self.recent_actions.len() < 3 {
-            return None;
+        // Stealth 专项检测: 连续 2 次 stealth (优先于通用检测)
+        if self.recent_actions.len() >= 2 {
+            let recent_2: Vec<&String> = self.recent_actions.iter().rev().take(2).collect();
+            if recent_2.iter().all(|a| *a == "stealth") {
+                return Some(
+                    "【行为提醒】你已经连续处于潜行状态。潜行消耗体力且无法进食饮水，考虑恢复正常行动。".to_string()
+                );
+            }
         }
 
-        let actions: Vec<&String> = self.recent_actions.iter().rev().take(3).collect();
-        if actions.iter().all(|a| *a == actions[0]) && actions[0] != "idle" {
-            return Some(format!(
-                "【行为提醒】你已经连续多次执行'{}'动作。考虑尝试其他行为：\n\
-                 - 探索其他地点（移动到更远的地方）\n\
-                 - 与附近的人交流\n\
-                 - 检查并使用背包物品\n\
-                 - 观察环境或寻找新的目标",
-                actions[0]
-            ));
+        // 通用重复检测: 连续 3 次相同非 idle 动作
+        if self.recent_actions.len() >= 3 {
+            let actions: Vec<&String> = self.recent_actions.iter().rev().take(3).collect();
+            if actions.iter().all(|a| *a == actions[0]) && actions[0] != "idle" {
+                return Some(format!(
+                    "【行为提醒】你已经连续多次执行'{}'动作。考虑尝试其他行为：\n\
+                     - 探索其他地点（移动到更远的地方）\n\
+                     - 与附近的人交流\n\
+                     - 检查并使用背包物品\n\
+                     - 观察环境或寻找新的目标",
+                    actions[0]
+                ));
+            }
         }
 
         None
