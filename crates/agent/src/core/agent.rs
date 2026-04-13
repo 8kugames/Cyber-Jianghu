@@ -782,28 +782,37 @@ impl Agent {
             None => return false,
         };
 
-        match intent.action_type.as_str() {
-            "move" => action_data
-                .get("target_location")
-                .and_then(|v| v.as_str())
-                .map(|loc| {
-                    config
-                        .restricted_area_keywords
-                        .iter()
-                        .any(|k| loc.contains(k.as_str()))
-                })
-                .unwrap_or(false),
-            "trade" | "steal" | "give" => action_data
-                .get("item_id")
-                .and_then(|v| v.as_str())
-                .map(|id| {
-                    config
-                        .high_value_item_keywords
-                        .iter()
-                        .any(|k| id.contains(k.as_str()))
-                })
-                .unwrap_or(false),
-            _ => true,
+        // 数据驱动：根据配置的字段映射决定如何检查
+        if let Some(field_name) = config
+            .adaptive_field_mapping
+            .get(intent.action_type.as_str())
+        {
+            match field_name.as_str() {
+                "target_location" => action_data
+                    .get(field_name)
+                    .and_then(|v| v.as_str())
+                    .map(|loc| {
+                        config
+                            .restricted_area_keywords
+                            .iter()
+                            .any(|k| loc.contains(k.as_str()))
+                    })
+                    .unwrap_or(false),
+                "item_id" => action_data
+                    .get(field_name)
+                    .and_then(|v| v.as_str())
+                    .map(|id| {
+                        config
+                            .high_value_item_keywords
+                            .iter()
+                            .any(|k| id.contains(k.as_str()))
+                    })
+                    .unwrap_or(false),
+                _ => true, // 未知字段，默认需要 LLM 审核
+            }
+        } else {
+            // 配置中未指定此 action_type 的检查规则，默认需要 LLM 审核
+            true
         }
     }
 

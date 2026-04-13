@@ -1088,7 +1088,7 @@ impl super::Agent {
             thought_log: intent.thought_log.clone(),
             action_type: intent.action_type.to_string(),
             action_data: intent.action_data.clone(),
-            priority: 10, // 即时高优先级
+            priority: crate::component::immediate::IMMEDIATE_INTENT_PRIORITY,
         };
 
         if let Err(e) = self.client.send_immediate_message(msg).await {
