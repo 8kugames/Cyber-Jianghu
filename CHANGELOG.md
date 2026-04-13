@@ -26,6 +26,69 @@
 
 ### Added
 
+#### multi-Intent + 纯LLM叙事隔离架构 (v0.0.104+)
+
+- **Protocol**: `IntentBatchConfig` 批次配置
+  - `max_intents_per_tick`: 每 tick 最大 Intent 数（默认 5）
+  - `max_retries`: 三魂循环最大重试次数（默认 3）
+  - `pipeline_execution_enabled`: 是否启用 Pipeline 执行
+  - `partial_execution_enabled`: 是否允许部分执行
+
+- **Protocol**: `GradedValidationConfig` 分级审核配置
+  - `always_types`: 强制 LLM 审核的 action_type（speak/shout/whisper）
+  - `adaptive_types`: 动态审核的 action_type（steal/trade/give/move）
+  - `skip_types`: 跳过 LLM 审核的 action_type（idle/wait）
+  - `minimum_per_tick`: 每 tick 至少审核的 Intent 数量
+  - `restricted_area_keywords`: 限制区域关键词（move 审核用）
+  - `high_value_item_keywords`: 高价值物品关键词（trade/steal/give 审核用）
+  - `adaptive_field_mapping`: Adaptive 审核字段映射（数据驱动）
+
+- **Protocol**: `ExecutionSummary` 执行汇总
+  - Server 广播用，包含 total/succeeded/failed/skipped 计数
+
+- **Protocol**: `Intent.subsequent_intents` Pipeline 嵌套支持
+  - 单 tick 可提交多 Intent，顺序执行，失败回滚
+
+- **Agent**: `NarrativeGenerator` 叙事生成器 (`soul/reflector/narrative_generator.rs`)
+  - LLM 生成叙事上下文，语义缓存，泄露检测
+  - 人魂只接收格式化叙事，完全隔离技术细节
+
+- **Agent**: 分级审核策略
+  - `Skip`: 只做 RuleEngine Layer1+2 确定性校验
+  - `Always`: 完整三层审核（action_type → RuleEngine → LLM）
+  - `Adaptive`: 动态判断是否需要 LLM 审核（限制区域/高价值物品检测）
+
+- **Agent**: `WorldTime.to_chinese()` 武侠格式
+  - 三处统一使用"天道历三二五年元月四日申时"格式
+
+#### 即时事件配置驱动 (v0.0.103+)
+
+- **Protocol**: `ImmediateEventConfig` 即时事件配置
+  - `conflict_actions`: 冲突动作列表（执行时不立即回应）
+  - `call_keywords`: 呼唤关键词列表（匹配时立即回应）
+  - `max_call_content_length`: 最大呼唤内容长度
+  - `default_response`: 默认回应内容
+  - `immediate_routing_actions`: 即时路由动作列表（speak/whisper 不占 tick 配额）
+
+- **Server**: `game_rules.yaml` 即时事件配置段
+  - 移除 `immediate/mod.rs` 硬编码，改为配置驱动
+
+- **Agent**: `ImmediateEventHandler` 运行时更新
+  - 新增 `with_updated_decision_maker` 方法支持运行时更新
+  - 收到 `game_rules` 时自动更新配置
+
+#### 配置透传完整性修复 (v0.0.104)
+
+- **Server**: HTTP 注册路径正确透传 `immediate_events`
+  - `handlers/agent.rs`: 从 `game_data` 读取配置而非硬编码 None
+
+- **Server**: `llm_validation` 配置链完整性
+  - `GameRulesData` 添加 `intent_batch` 字段
+  - `build_game_rules_from_config` 传递 `intent_batch` 参数
+  - WebSocket/HTTP handler 正确透传配置
+
+#### 其他新增
+
 - **Protocol**: `ImmediateEvent` 新增 `event_id: Uuid` 字段
   - 用于唯一标识即时事件，支持去重和追踪
   - 使用 `#[serde(default)]` 反序列化兼容
@@ -87,6 +150,9 @@
 - **Agent**: `FORGETTING_INTERVAL_TICKS` 命名常量 (`crates/agent/src/core/mod.rs`)
   - 替代 magic number `84`（7 天 * 12 小时/天）
 
+- **Agent**: qwen/qwq/qvq 模型加入 `enable_thinking` disable list
+  - 推理模型不支持 thinking 参数
+
 ### Changed
 
 - **Server**: 错误响应使用结构化 `GameError` 而非裸字符串
@@ -110,6 +176,13 @@
 - **Agent**: lifecycle.rs 中 tick mismatch 文本解析
   - 删除 `rsplit("tick ")` + `rfind()` 数字提取逻辑
   - 替代为 `TickMismatchError` 结构化 downcast
+
+- **Protocol**: 移除死类型
+  - `AgentExecutionResult`, `NarrativeSource`, `IsolatedNarrate`
+
+- **Agent**: 移除死代码
+  - `translate()`, `build_prompt()`, `route_intents()` 等
+  - `TranslationResult` 单 Intent 版本
 
 ---
 

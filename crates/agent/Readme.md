@@ -22,9 +22,25 @@ let agent = AgentBuilder::new(config, decision)
 
 ### ActorSoul + ReflectorSoul 架构
 
-- **ActorSoul (行动之魂)**：生成意图，执行行动
-- **ReflectorSoul (反思之魂)**：审查意图，世界观一致性审查
+- **ActorSoul (行动之魂)**：生成意图，执行行动，纯叙事输出
+- **IntentTranslator (天魂)**：LLM 翻译叙事为格式化 Intent（精确 ID 映射）
+- **ReflectorSoul (反思之魂)**：分级审查，世界观一致性审查
+- **NarrativeGenerator (叙事生成器)**：LLM 生成叙事上下文，语义缓存，泄露检测
 - **共享内存通信**：通过 `ReviewStore` 进行进程内通信
+
+### 分级审核策略
+
+| 策略 | 说明 | 适用场景 |
+|------|------|---------|
+| Always | 完整三层审核 | speak/shout/whisper 等高优先级动作 |
+| Adaptive | 动态判断是否需要 LLM | steal/trade/give/move 等风险动作 |
+| Skip | 仅 RuleEngine 校验 | idle/wait 等低风险动作 |
+
+### multi-Intent Pipeline
+
+单 tick 可提交多 Intent，顺序执行，失败回滚：
+- `max_intents_per_tick`: 每 tick 最大 Intent 数（默认 5）
+- `max_retries`: 三魂循环最大重试次数（默认 3）
 
 ### 两种运行模式
 
