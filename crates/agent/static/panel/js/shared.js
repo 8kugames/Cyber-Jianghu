@@ -128,11 +128,26 @@ function formatDateTime(isoString) {
            date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function getShichen(hour) {
+    const table = [[0,1,'子时'],[2,3,'丑时'],[4,5,'寅时'],[6,7,'卯时'],[8,9,'辰时'],[10,11,'巳时'],[12,13,'午时'],[14,15,'未时'],[16,17,'申时'],[18,19,'酉时'],[20,21,'戌时'],[22,23,'亥时']];
+    for (const [lo, hi, name] of table) { if (hour >= lo && hour <= hi) return name; }
+    return '';
+}
+
 function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
-    const h = String(worldTime.hour || 0).padStart(2, '0');
-    const m = String(worldTime.minute || 0).padStart(2, '0');
-    return `${worldTime.year}年${worldTime.month}月${worldTime.day}日 ${h}:${m}`;
+    if (typeof worldTime === 'string' || typeof worldTime === 'number') return String(worldTime);
+    if (typeof worldTime === 'object') {
+        if (worldTime.display) return String(worldTime.display);
+        const year = worldTime.year ?? worldTime.y;
+        const month = worldTime.month ?? worldTime.m;
+        const day = worldTime.day ?? worldTime.d;
+        const hour = worldTime.hour ?? worldTime.h;
+        if (year !== undefined) {
+            return `${year}年${month ?? '?'}月${day ?? '?'}日 ${getShichen(hour ?? 0)}`;
+        }
+    }
+    return '-';
 }
 
 function setVisible(selector, visible) {

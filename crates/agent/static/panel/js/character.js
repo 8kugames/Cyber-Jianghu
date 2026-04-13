@@ -9,6 +9,7 @@ let hasMoreMemories = false;
 let hasMoreDreamRecords = false;
 let allCharacters = [];
 let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
+let _expLoadSeq = 0; // 经历日志请求序号，防竞态
 
 const STATUS_MAP = {
     alive:   { label: '存活', treeLabel: '存活', tag: '' },
@@ -32,33 +33,7 @@ function getActionTypeDisplay(actionType) {
     return actionTypeMap[actionType] || actionType;
 }
 
-function formatWorldTime(worldTime) {
-    if (!worldTime) return '-';
-    if (typeof worldTime === 'string' || typeof worldTime === 'number') {
-        return String(worldTime);
-    }
-    if (typeof worldTime === 'object') {
-        if (worldTime.display) return String(worldTime.display);
-        if (worldTime.text) return String(worldTime.text);
-        if (worldTime.label) return String(worldTime.label);
-        const year = worldTime.year ?? worldTime.y;
-        const month = worldTime.month ?? worldTime.m;
-        const day = worldTime.day ?? worldTime.d;
-        const hour = worldTime.hour ?? worldTime.h;
-        const minute = worldTime.minute ?? worldTime.min;
-        if (year || month || day || hour || minute) {
-            const datePart = [year, month, day].filter(v => v !== undefined).join('-');
-            const timePart = [hour, minute].filter(v => v !== undefined).join(':');
-            return [datePart, timePart].filter(Boolean).join(' ');
-        }
-        try {
-            return JSON.stringify(worldTime);
-        } catch {
-            return '-';
-        }
-    }
-    return '-';
-}
+// formatWorldTime / getShichen 由 shared.js 提供
 
 function formatRealTime(ts) {
     if (!ts) return '-';
@@ -359,51 +334,53 @@ async function loadCharacterIntoDrawer(char) {
         `;
     }
 
-    // 属性（使用 renderAttributes 的分组逻辑）
+    // 属性（使用 renderAttrItem 统一渲染）
     if (charData.attributes) {
         const categories = attributeMeta ? attributeMeta.categories : null;
         let attrHtml = '';
 
-        // 先天属性
-        const primaryList = categories?.primary || [];
-        if (primaryList.length > 0) {
-            attrHtml += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-            primaryList.forEach(key => {
-                const attr = charData.attributes[key];
-                if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                    attrHtml += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
+        if (categories && (categories.primary?.length || categories.status?.length)) {
+            const primaryList = categories.primary || [];
+            const statusList = categories.status || [];
+            if (primaryList.length > 0) {
+                attrHtml += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+                primaryList.forEach(key => { attrHtml += renderAttrItem(key, charData.attributes[key], false); });
+                attrHtml += '</div></div>';
+            }
+            if (statusList.length > 0) {
+                attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+                statusList.forEach(key => { attrHtml += renderAttrItem(key, charData.attributes[key], true); });
+                attrHtml += '</div></div>';
+            }
+        } else {
+            // 无分类信息，自动分组
+            const statusAttrs = [];
+            const otherAttrs = [];
+            Object.entries(charData.attributes).forEach(([key, val]) => {
+                if (key.endsWith('_max')) return;
+                if (val && typeof val === 'object' && val.max !== undefined) {
+                    statusAttrs.push([key, val]);
+                } else {
+                    otherAttrs.push([key, val]);
                 }
             });
-            attrHtml += '</div></div>';
+            if (otherAttrs.length > 0) {
+                attrHtml += '<div class="attr-section"><h4>属性</h4><div class="attr-group">';
+                otherAttrs.forEach(([k, v]) => { attrHtml += renderAttrItem(k, v, false); });
+                attrHtml += '</div></div>';
+            }
+            if (statusAttrs.length > 0) {
+                attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+                statusAttrs.forEach(([k, v]) => { attrHtml += renderAttrItem(k, v, true); });
+                attrHtml += '</div></div>';
+            }
         }
 
-        // 状态属性
-        const statusList = categories?.status || [];
-        if (statusList.length > 0) {
-            attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-            statusList.forEach(key => {
-                const attr = charData.attributes[key];
-                if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                    const displayValue = attr.max !== undefined ? `${attr.current}/${attr.max}` : attr.current;
-                    attrHtml += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayValue}</span></div>`;
-                }
-            });
-            attrHtml += '</div></div>';
-        }
-
-        // 派生属性（从 derived_attributes 字段获取，已由后端丰富为 {name, current, description}）
+        // 派生属性
         if (charData.derived_attributes) {
             attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
             Object.entries(charData.derived_attributes).forEach(([key, value]) => {
-                const isEnriched = value && typeof value === 'object' && value.current !== undefined;
-                const displayName = isEnriched ? value.name : key.replace(/_/g, ' ');
-                const displayValue = isEnriched
-                    ? (typeof value.current === 'number' ? value.current.toFixed(3) : value.current)
-                    : (typeof value === 'number' ? value.toFixed(3) : value);
-                const desc = isEnriched ? (value.description || '') : '';
-                attrHtml += `<div class="attr-item" title="${escapeHtml(desc)}"><span class="attr-name">${escapeHtml(displayName)}</span><span class="attr-value">${displayValue}</span></div>`;
+                attrHtml += renderAttrItem(key, value, false);
             });
             attrHtml += '</div></div>';
         }
@@ -418,7 +395,7 @@ async function loadCharacterIntoDrawer(char) {
         }
     }
 
-    // 记忆关系（仅当前角色）
+    // 记忆关系
     if (isCurrent) {
         try {
             const relData = await apiGet('/api/v1/relationship/list');
@@ -444,7 +421,7 @@ async function loadCharacterIntoDrawer(char) {
         }
     }
 
-    // 经历日志（与经历日志 Tab 保持一致）
+    // 经历日志（所有角色均可查看，通过 agent_id 加载各自 SQLite）
     try {
         const expData = await apiGet('/api/v1/character/soul-cycles?agent_id=' + char.agent_id + '&page=1&limit=3');
         const recordsMap = expData.records || {};
@@ -466,16 +443,16 @@ async function loadCharacterIntoDrawer(char) {
         `;
     }
 
-    // 托梦记录（仅当前角色）
+    // 托梦记录
     if (isCurrent) {
         try {
             const dreamData = await apiGet('/api/v1/character/dream/records?page=1&limit=3');
             if (dreamData.records && dreamData.records.length > 0) {
                 const dreamList = dreamData.records.map(d => {
-                    const tick = d.tick_id ? `T${d.tick_id}` : '';
-                    const content = d.content || '-';
+                    const time = d.injected_at ? formatRealTime(d.injected_at) : '';
+                    const content = d.thought || '-';
                     return `<div class="dream-mini-item">
-                        <span class="dream-tick">${tick}</span>
+                        <span class="dream-tick">${time}</span>
                         <span class="dream-content">${escapeHtml(content.substring(0, 25))}${content.length > 25 ? '...' : ''}</span>
                     </div>`;
                 }).join('');
@@ -491,19 +468,28 @@ async function loadCharacterIntoDrawer(char) {
         }
     }
 
-    // 持有物品
-    if (charData.inventory && charData.inventory.length > 0) {
+    // 持有物品（非当前角色仅在有数据时显示）
+    if (charData.inventory) {
+        if (Array.isArray(charData.inventory) && charData.inventory.length > 0) {
+            html += `
+                <section class="drawer-section">
+                    <div class="drawer-section-title">持有物品</div>
+                    <div class="inventory-list">
+                        ${charData.inventory.map(item => `
+                            <div class="inv-item">
+                                <span class="inv-name">${escapeHtml(item.name || item.item_id || '未知物品')}</span>
+                                <span class="inv-qty">x${item.quantity || 1}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </section>
+            `;
+        }
+    } else if (!isCurrent) {
         html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">持有物品</div>
-                <div class="inventory-list">
-                    ${charData.inventory.map(item => `
-                        <div class="inv-item">
-                            <span class="inv-name">${escapeHtml(item.name || item.item_id || '未知物品')}</span>
-                            <span class="inv-qty">x${item.quantity || 1}</span>
-                        </div>
-                    `).join('')}
-                </div>
+                <p class="no-data">非当前角色，无实时物品数据</p>
             </section>
         `;
     }
@@ -634,7 +620,26 @@ async function loadCharacter() {
     }
 }
 
-// 渲染属性
+// 渲染单个属性行
+function renderAttrItem(key, attr, withMax) {
+    if (attr && typeof attr === 'object' && attr.current !== undefined) {
+        if (withMax && attr.max !== undefined && attr.max !== null) {
+            const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
+            const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
+            return `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}/${attr.max}</span></div>`;
+        }
+        const displayVal = (typeof attr.current === 'number' && !Number.isInteger(attr.current))
+            ? attr.current.toFixed(3) : attr.current;
+        return `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayVal}</span></div>`;
+    }
+    // 兜底：原始数值型属性（非 enriched）
+    if (attr !== undefined && attr !== null && typeof attr !== 'object') {
+        return `<div class="attr-item"><span class="attr-name">${escapeHtml(key)}</span><span class="attr-value">${attr}</span></div>`;
+    }
+    return '';
+}
+
+// 渲染属性（含分类和无分类兜底）
 function renderAttributes(attributes, derivedAttributes) {
     const attrsEl = document.getElementById('attributes');
     if (!attributes) {
@@ -643,55 +648,61 @@ function renderAttributes(attributes, derivedAttributes) {
     }
 
     const categories = attributeMeta ? attributeMeta.categories : null;
-
     let html = '';
 
-    // 先天属性
-    const primaryList = categories?.primary || [];
-    if (primaryList.length > 0) {
-        html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-        primaryList.forEach(key => {
-            const attr = attributes[key];
-            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
-            }
-        });
-        html += '</div></div>';
-    }
+    if (categories && (categories.primary?.length || categories.status?.length || categories.derived?.length)) {
+        // 有分类信息，按分类渲染
+        const primaryList = categories.primary || [];
+        const statusKeys = new Set(categories.status || []);
+        const derivedList = categories.derived || [];
 
-    // 状态属性
-    const statusList = categories?.status || [];
-    if (statusList.length > 0) {
-        html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-        statusList.forEach(key => {
-            const attr = attributes[key];
-            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                if (attr.max !== undefined && attr.max !== null) {
-                    const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
-                    const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-                    html += `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}/${attr.max}</span></div>`;
-                } else {
-                    html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}</span></div>`;
-                }
+        if (primaryList.length > 0) {
+            html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+            primaryList.forEach(key => { html += renderAttrItem(key, attributes[key], false); });
+            html += '</div></div>';
+        }
+        if (statusKeys.size > 0) {
+            html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+            statusKeys.forEach(key => { html += renderAttrItem(key, attributes[key], true); });
+            html += '</div></div>';
+        }
+        const derivedSource = derivedAttributes || {};
+        if (derivedList.length > 0) {
+            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+            derivedList.forEach(key => {
+                const attr = derivedSource[key] || attributes[key];
+                html += renderAttrItem(key, attr, false);
+            });
+            html += '</div></div>';
+        }
+    } else {
+        // 无分类信息：自动将属性分为有 max 的（状态）和无 max 的（先天/派生）
+        const statusAttrs = [];
+        const otherAttrs = [];
+        Object.entries(attributes).forEach(([key, val]) => {
+            if (key.endsWith('_max')) return;
+            if (val && typeof val === 'object' && val.max !== undefined) {
+                statusAttrs.push([key, val]);
+            } else {
+                otherAttrs.push([key, val]);
             }
         });
-        html += '</div></div>';
-    }
-
-    // 派生属性：优先从 derivedAttributes 中取，兜底从 attributes 中取
-    const derivedList = categories?.derived || [];
-    const derivedSource = derivedAttributes || {};
-    if (derivedList.length > 0) {
-        html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-        derivedList.forEach(key => {
-            // 先看 derived_attributes，再看 attributes
-            const attr = derivedSource[key] || attributes[key];
-            if (attr && typeof attr === 'object' && attr.current !== undefined) {
-                const displayVal = typeof attr.current === 'number' ? attr.current.toFixed(3) : attr.current;
-                html += `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayVal}</span></div>`;
-            }
-        });
-        html += '</div></div>';
+        if (otherAttrs.length > 0) {
+            html += '<div class="attr-section"><h4>属性</h4><div class="attr-group">';
+            otherAttrs.forEach(([k, v]) => { html += renderAttrItem(k, v, false); });
+            html += '</div></div>';
+        }
+        if (statusAttrs.length > 0) {
+            html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+            statusAttrs.forEach(([k, v]) => { html += renderAttrItem(k, v, true); });
+            html += '</div></div>';
+        }
+        // 派生属性（有 derivedAttributes 时）
+        if (derivedAttributes && Object.keys(derivedAttributes).length > 0) {
+            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+            Object.entries(derivedAttributes).forEach(([k, v]) => { html += renderAttrItem(k, v, false); });
+            html += '</div></div>';
+        }
     }
 
     attrsEl.innerHTML = html;
@@ -724,6 +735,7 @@ function renderInventory(inventory) {
 
 // 加载经历日志（按 Tick 卡片展示，三魂数据内联）
 async function loadExperiences(page = 1) {
+    const seq = ++_expLoadSeq;
     const expEl = document.getElementById('experiences');
     const loadMoreEl = document.getElementById('load-more');
 
@@ -733,6 +745,7 @@ async function loadExperiences(page = 1) {
 
     try {
         const data = await apiGet(`/api/v1/character/soul-cycles?page=${page}&limit=${PAGE_LIMIT}`);
+        if (seq !== _expLoadSeq) return; // 过期请求，丢弃
         hasMore = data.has_more;
         currentPage = page;
 
