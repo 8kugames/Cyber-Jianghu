@@ -150,6 +150,24 @@ impl ImmediateEventHandler {
         info!("即时意图通道已绑定到 WebSocket");
     }
 
+    /// 更新决策器配置（返回新的 Handler 实例）
+    ///
+    /// 由于 decision_maker 是不可变的 Arc，此方法创建新的 Handler 实例
+    pub fn with_updated_decision_maker(
+        &self,
+        new_maker: Arc<dyn ImmediateDecisionMaker>,
+    ) -> Self {
+        Self {
+            pending_events: self.pending_events.clone(),
+            decision_maker: new_maker,
+            intent_tx: self.intent_tx.clone(),
+            current_tick_id: self.current_tick_id.clone(),
+            current_intent_type: self.current_intent_type.clone(),
+            running: self.running.clone(),
+            http_api_state: self.http_api_state.clone(),
+        }
+    }
+
     /// 设置 HTTP API 状态（用于访问 SoulRecorder）
     pub async fn set_http_api_state(&self, state: std::sync::Arc<crate::infra::api::HttpApiState>) {
         let mut guard = self.http_api_state.write().await;
@@ -391,11 +409,6 @@ impl RuleBasedImmediateDecisionMaker {
     pub fn with_config(config: cyber_jianghu_protocol::ImmediateEventConfig) -> Self {
         Self { config }
     }
-
-    pub fn with_enable(_enable: bool) -> Self {
-        // 保留此方法以兼容旧代码，但不影响配置
-        Self::new()
-    }
 }
 
 impl Default for RuleBasedImmediateDecisionMaker {
@@ -512,7 +525,7 @@ mod tests {
             } => {
                 assert_eq!(tick_id, 10);
                 assert_eq!(action_type, "speak");
-                assert_eq!(priority, 10);
+                assert_eq!(priority, IMMEDIATE_INTENT_PRIORITY);
                 assert_eq!(
                     action_data
                         .unwrap()

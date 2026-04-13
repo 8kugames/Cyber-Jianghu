@@ -126,6 +126,10 @@ data:
     max_call_content_length: 50
     # 默认回应内容
     default_response: "何事？"
+    # 即时路由动作列表（这些动作走即时通道，不占 tick 配额）
+    immediate_routing_actions:
+      - speak
+      - whisper
 
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述
