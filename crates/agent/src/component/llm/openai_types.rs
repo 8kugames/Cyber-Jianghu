@@ -22,9 +22,9 @@ pub(crate) struct OpenAIRequest {
     /// 工具选择策略（"auto" | "none" | specific）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
-    /// 模型特有额外参数（如 kimi 的 enable_thinking: false）
+    /// DashScope/Kimi 要求非流式调用禁用 thinking
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extra_body: Option<serde_json::Value>,
+    pub enable_thinking: Option<bool>,
 }
 
 /// 聊天消息

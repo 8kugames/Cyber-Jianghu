@@ -292,6 +292,16 @@ const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的地魂（Earth Soul）
       "relative_position": "与你的相对位置",
       "appearance": "外貌描述",
       "current_activity": "当前活动",
+      "recognition": {
+        "is_known": true,
+        "known_name": "已知的角色名",
+        "relationship": "与你的关系描述"
+      }
+    },
+    {
+      "relative_position": "远处",
+      "appearance": "陌生人的外貌",
+      "current_activity": "当前活动",
       "recognition": null
     }
   ],

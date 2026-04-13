@@ -68,7 +68,9 @@ pub fn build_fallback_client(llm_config: &crate::config::LlmConfig) -> Result<Ar
     }
 
     let llm_arc: Arc<dyn LlmClient> = if llm_clients.len() > 1 {
-        Arc::new(FallbackLlmClient::new(llm_clients))
+        let mut fb = FallbackLlmClient::new(llm_clients);
+        fb = fb.with_idle_threshold(llm_config.idle_rotate_threshold as usize);
+        Arc::new(fb)
     } else {
         llm_clients.into_iter().next().unwrap()
     };

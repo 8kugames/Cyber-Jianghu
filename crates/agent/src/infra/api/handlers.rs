@@ -1753,7 +1753,7 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
                 let inv = serde_json::to_value(&ws.self_state.inventory).ok();
                 let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
-                let time = serde_json::to_value(&ws.world_time).ok();
+                let time = enrich_world_time_json(&ws.world_time);
                 (agent_id, attrs, inv, loc, Some(ws.tick_id), time)
             }
             None => {
@@ -1881,7 +1881,7 @@ pub(super) async fn get_character_by_id_handler(
                 let attrs = serde_json::to_value(&ws.self_state.attributes).ok();
                 let inv = serde_json::to_value(&ws.self_state.inventory).ok();
                 let loc = Some(format!("{} ({})", ws.location.name, ws.location.node_type));
-                let time = serde_json::to_value(&ws.world_time).ok();
+                let time = enrich_world_time_json(&ws.world_time);
                 (attrs, inv, loc, Some(ws.tick_id), time)
             }
             None => (None, None, None, None, None),
@@ -1937,6 +1937,14 @@ pub(super) async fn get_character_by_id_handler(
     let current_server_url = state.server_http_url.read().await.clone();
     let server_url = character.server_url.clone().or(Some(current_server_url));
 
+    // 非当前角色也做属性丰富化，以便前端正确渲染
+    let raw_attrs = character
+        .birth_attributes
+        .as_ref()
+        .and_then(|a| serde_json::to_value(a).ok());
+    let narrative_config = state.narrative_config.read().await.clone();
+    let attributes = enrich_attributes_with_descriptions(raw_attrs.clone(), &narrative_config);
+
     let response = CharacterInfoResponse {
         agent_id: character.agent_id.map(|id| id.to_string()),
         server_url,
@@ -1948,14 +1956,8 @@ pub(super) async fn get_character_by_id_handler(
         personality: character.personality.clone(),
         values: character.values.clone(),
         registered_at: character.registered_at.map(|t| t.to_rfc3339()),
-        attributes: character
-            .birth_attributes
-            .as_ref()
-            .and_then(|a| serde_json::to_value(a).ok()),
-        birth_attributes: character
-            .birth_attributes
-            .as_ref()
-            .and_then(|a| serde_json::to_value(a).ok()),
+        attributes,
+        birth_attributes: raw_attrs,
         inventory: None,
         location: None,
         tick_id: None,
@@ -1993,6 +1995,18 @@ pub(super) async fn get_attribute_meta_handler(
 }
 
 /// 丰富属性数据，添加叙事描述
+/// 为 WorldTime JSON 添加 `display` 字段（中文格式）
+fn enrich_world_time_json(world_time: &cyber_jianghu_protocol::WorldTime) -> Option<serde_json::Value> {
+    let mut val = serde_json::to_value(world_time).ok()?;
+    if let Some(obj) = val.as_object_mut() {
+        obj.insert(
+            "display".to_string(),
+            serde_json::Value::String(world_time.to_chinese()),
+        );
+    }
+    Some(val)
+}
+
 ///
 /// 从服务器返回的原始属性中：
 /// - 提取 `{key}_max` 字段作为属性最大值（服务器通过 max_value_formula 计算）
@@ -3330,12 +3344,12 @@ pub(super) async fn set_llm_disabled_handler(
 
 /// 获取动作类型到中文描述的映射
 ///
-/// GET /api/v1/actions - 返回 action_type -> description 映射
+/// GET /api/v1/actions - 返回 action_type -> name 映射（短中文名，用于前端展示）
 pub(super) async fn get_actions_handler() -> impl IntoResponse {
     let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
     let map: std::collections::HashMap<String, String> = actions
         .into_iter()
-        .map(|a| (a.action, a.description))
+        .map(|a| (a.action, a.name))
         .collect();
     Json(map)
 }

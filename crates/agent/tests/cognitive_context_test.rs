@@ -94,19 +94,25 @@ fn test_build_with_world_state() {
     let injected_actions = vec![
         cyber_jianghu_protocol::AvailableAction {
             action: "speak".to_string(),
+            name: "交谈".to_string(),
             description: "与周围的人交谈".to_string(),
+            category: "social".to_string(),
             valid_targets: None,
             required_fields: vec![],
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "move".to_string(),
+            name: "移动".to_string(),
             description: "移动到其他地点".to_string(),
+            category: "movement".to_string(),
             valid_targets: Some(vec!["market".to_string(), "dojo".to_string()]),
             required_fields: vec!["target_location".to_string()],
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "use".to_string(),
+            name: "使用".to_string(),
             description: "使用物品".to_string(),
+            category: "interaction".to_string(),
             valid_targets: Some(vec!["wine_bottle".to_string()]),
             required_fields: vec!["item_id".to_string()],
         },

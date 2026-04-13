@@ -472,15 +472,15 @@ impl Agent {
 
     /// 检查连续 idle 计数是否达到阈值，触发模型切换
     pub(crate) async fn maybe_rotate_model(&mut self) {
-        let threshold = self.config.llm.idle_rotate_threshold;
-        if threshold == 0 || self.consecutive_idle_count < threshold {
-            return;
-        }
-        let count = self.consecutive_idle_count;
         if let Some(ref container) = self.actor_llm_container {
             let llm = container.read().await;
-            if llm.force_rotate_model() {
-                warn!("连续 {} tick idle，已切换到下一个 LLM 模型", count);
+            // 使用 FallbackLlmClient 的 record_idle 方法
+            // 该方法会自动检查阈值并切换到下一个可用模型
+            if llm.record_idle() {
+                warn!(
+                    "LLM 模型已自动切换（连续 idle 达到阈值 {}），consecutive_idle_count 重置为 0",
+                    self.config.llm.idle_rotate_threshold
+                );
                 // 切换后重置计数器，给新模型机会
                 self.consecutive_idle_count = 0;
             }

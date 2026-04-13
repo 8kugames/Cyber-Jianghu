@@ -913,11 +913,6 @@ impl super::Agent {
                         }
                     };
 
-                    // idle intent 也计入连续 idle
-                    if final_intent.action_type.as_str() == "idle" {
-                        self.consecutive_idle_count += 1;
-                    }
-
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state
                         && let Some(history) = api_state.intent_history.read().await.as_ref() {
@@ -981,9 +976,14 @@ impl super::Agent {
                         if let Some(ref engine) = self.cognitive_engine {
                             engine.record_action(&final_intent.action_type);
                         }
-                        // 非 idle 成功发送，重置连续 idle 计数
+                        // 非 idle 成功发送，重置连续 idle 计数和当前模型的 idle 计数
                         if final_intent.action_type.as_str() != "idle" {
                             self.consecutive_idle_count = 0;
+                            // 重置当前 LLM 模型的 idle 计数
+                            if let Some(ref container) = self.actor_llm_container {
+                                let llm = container.read().await;
+                                llm.reset_idle_count();
+                            }
                         }
                         // idle 发送成功后检查是否需要 rotate
                         if final_intent.action_type.as_str() == "idle" {

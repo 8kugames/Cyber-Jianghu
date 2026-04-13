@@ -85,7 +85,7 @@ data:
 
   use:
     name: "使用物品"
-    description: "对背包中的物品进行使用操作。根据物品类型产生不同效果（如使用钥匙开门、使用卷轴学习技能、使用药品获得增益状态）。此动作需要指定 item_id。不会消耗或丢弃物品（除非物品本身是一次性消耗品）。注意：eat 和 drink 是独立的进食/饮水动作，不要将 use 误用于进食饮水。"
+    description: "对背包中的物品进行使用操作。根据物品类型产生不同效果，此动作需要指定 item_id。不会消耗或丢弃物品（除非物品本身是一次性消耗品）。注意：eat 和 drink 是独立的进食/饮水动作，不要将 use 误用于进食饮水。"
     category: survival
     validation:
       required_fields:
@@ -98,7 +98,7 @@ data:
 
   eat:
     name: "进食"
-    description: "消耗食物以恢复饥饿度。必须指定要吃的食物物品 ID（如 item_id: \"mantou\" 表示吃馒头）。此动作会从背包中移除食物并恢复 hunger 属性。注意区分：eat 用于固体食物，drink 用于液体饮水，pickup 用于拾取地面物品，use 用于其他物品交互。"
+    description: '消耗食物以恢复饥饿度。必须指定要吃的食物物品 ID（如 item_id: "mantou" 表示吃馒头）。此动作会从背包中移除食物并恢复 hunger 属性。注意区分：eat 用于固体食物，drink 用于液体饮水，pickup 用于拾取地面物品，use 用于其他物品交互。'
     category: survival
     validation:
       required_fields:
@@ -111,7 +111,7 @@ data:
 
   drink:
     name: "饮水"
-    description: "消耗液体以恢复口渴度。必须指定要饮用的液体物品 ID（如 item_id: \"water\" 表示喝水）。此动作会从背包中移除液体并恢复 thirst 属性。注意区分：drink 用于饮水（water、wine 等液体），eat 用于进食（固体食物），pickup 用于拾取地面物品。"
+    description: '消耗液体以恢复口渴度。必须指定要饮用的液体物品 ID（如 item_id: "water" 表示喝水）。此动作会从背包中移除液体并恢复 thirst 属性。注意区分：drink 用于饮水（water、wine 等液体），eat 用于进食（固体食物），pickup 用于拾取地面物品。'
     category: survival
     validation:
       required_fields:
@@ -137,7 +137,7 @@ data:
 
   drop:
     name: "丢弃物品"
-    description: "从背包中丢弃物品到地面。必须指定物品 ID（item_id）和数量（quantity）。此动作从执行者背包中移除指定物品，放置到当前Location的地面物品列表。丢弃不消耗额外体力（已在 requirements 中定义 cost）。"
+    description: "从背包中丢弃物品到地面。必须指定物品 ID（item_id）和数量（quantity）。此动作从执行者背包中移除指定物品，放置到当前Location的地面物品列表。"
     category: survival
     validation:
       required_fields:

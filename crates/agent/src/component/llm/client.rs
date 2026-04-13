@@ -48,6 +48,22 @@ pub trait LlmClient: Send + Sync {
         false
     }
 
+    /// 记录当前模型返回 idle，自动切换到下一个模型
+    ///
+    /// 如果当前模型连续 idle 达到阈值，则标记为不可用并切换。
+    /// 返回 true 表示发生了切换，false 表示未达到阈值。
+    /// 默认实现不做任何操作（单模型客户端无需切换）。
+    fn record_idle(&self) -> bool {
+        false
+    }
+
+    /// 重置当前模型的 idle 计数（当模型返回非 idle 结果时调用）
+    ///
+    /// 默认实现不做任何操作。
+    fn reset_idle_count(&self) {
+        // 默认不做任何操作
+    }
+
     /// 使用 tool calling 的多轮对话
     ///
     /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
@@ -285,11 +301,19 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 /// 所有模型共享同一 provider/api_key，仅 model name 不同。
 ///
 /// 一旦某个 fallback 成功，后续调用优先使用该模型（sticky fallback）。
+///
+/// Idle 旋转机制：连续 idle 达到阈值时自动切换到下一个模型。
 pub struct FallbackLlmClient {
     /// LLM 客户端列表（index 0 = 主模型，1.. = fallback）
     clients: Vec<Arc<dyn LlmClient>>,
     /// 当前活跃客户端索引
     active: Arc<std::sync::atomic::AtomicUsize>,
+    /// 连续 idle 计数（每个模型独立计数）
+    idle_counts: Arc<std::sync::Mutex<Vec<usize>>>,
+    /// 旋转阈值
+    idle_threshold: usize,
+    /// 标记为不可用的模型索引集合
+    disabled_models: Arc<std::sync::Mutex<std::collections::HashSet<usize>>>,
 }
 
 impl FallbackLlmClient {
@@ -301,10 +325,20 @@ impl FallbackLlmClient {
             !clients.is_empty(),
             "FallbackLlmClient needs at least one client"
         );
+        let count = clients.len();
         Self {
             clients,
             active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            idle_counts: Arc::new(std::sync::Mutex::new(vec![0; count])),
+            idle_threshold: 5, // 默认阈值
+            disabled_models: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
+    }
+
+    /// 设置 idle 旋转阈值
+    pub fn with_idle_threshold(mut self, threshold: usize) -> Self {
+        self.idle_threshold = threshold;
+        self
     }
 
     /// 强制切换到下一个模型
@@ -322,6 +356,70 @@ impl FallbackLlmClient {
         true
     }
 
+    /// 记录当前模型的 idle 行为，自动切换到下一个模型
+    ///
+    /// 如果当前模型连续 idle 达到阈值，则标记为不可用并切换。
+    /// 返回 true 表示发生了切换，false 表示未达到阈值。
+    pub fn record_idle(&self) -> bool {
+        let current_idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let mut idle_counts = self.idle_counts.lock().unwrap();
+        let mut disabled = self.disabled_models.lock().unwrap();
+
+        // 增加当前模型的 idle 计数
+        idle_counts[current_idx] += 1;
+        let count = idle_counts[current_idx];
+
+        if count >= self.idle_threshold {
+            // 标记当前模型为不可用
+            disabled.insert(current_idx);
+            tracing::warn!(
+                "LLM 模型 #{} 连续 idle {} 次，达到阈值 {}，标记为不可用",
+                current_idx, count, self.idle_threshold
+            );
+
+            // 切换到下一个可用模型
+            drop(disabled);
+            self.rotate_to_next_available();
+            return true;
+        }
+
+        false
+    }
+
+    /// 切换到下一个可用模型
+    ///
+    /// 跳过已标记为不可用的模型。如果所有模型都不可用，则保持当前状态。
+    fn rotate_to_next_available(&self) {
+        let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let disabled = self.disabled_models.lock().unwrap();
+
+        for offset in 1..=self.clients.len() {
+            let idx = (start + offset) % self.clients.len();
+            if !disabled.contains(&idx) {
+                let old = self.active.load(std::sync::atomic::Ordering::Relaxed);
+                self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    "LLM idle 旋转：模型 #{} → #{} (跳过不可用模型)",
+                    old, idx
+                );
+                return;
+            }
+        }
+
+        tracing::error!("所有 LLM 模型都已标记为不可用，保持当前模型");
+    }
+
+    /// 重置当前模型的 idle 计数（当模型返回非 idle 结果时调用）
+    pub fn reset_idle_count(&self) {
+        let current_idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let mut idle_counts = self.idle_counts.lock().unwrap();
+        let old_count = idle_counts[current_idx];
+        if old_count > 0 {
+            idle_counts[current_idx] = 0;
+            tracing::debug!("LLM 模型 #{} idle 计数重置: {} → 0", current_idx, old_count);
+        }
+    }
+
     /// 获取当前活跃客户端
     fn active_client(&self) -> Arc<dyn LlmClient> {
         let idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
@@ -331,13 +429,16 @@ impl FallbackLlmClient {
     /// 判断错误是否应触发 fallback
     ///
     /// 匹配条件：
+    /// - HTTP 404 (model_not_found / 模型不存在或无权限)
     /// - HTTP 403 (AllocationQuota / 额度耗尽)
     /// - HTTP 429 (Rate limit)
+    /// - HTTP 400 (does not support http call / 模型不支持HTTP调用)
     /// - 空响应（模型返回 null/空内容）
     fn should_fallback(error: &anyhow::Error) -> bool {
         let msg = format!("{:#}", error);
         // HTTP 状态码匹配（直接来自 API 响应）
-        msg.contains("LLM API error 403")
+        msg.contains("LLM API error 404")
+            || msg.contains("LLM API error 403")
             || msg.contains("LLM API error 429")
             // 额度耗尽关键词
             || msg.contains("AllocationQuota")
@@ -345,6 +446,8 @@ impl FallbackLlmClient {
             || msg.contains("Failed to send request to LLM API")
             // 空响应（MiniMax 等模型偶尔返回 content=null）
             || msg.contains("response content is empty")
+            // DashScope "does not support http call"（开发测试用）
+            || msg.contains("does not support http call")
     }
 
     /// 执行带 fallback 的调用
