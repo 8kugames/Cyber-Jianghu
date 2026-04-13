@@ -386,11 +386,13 @@ impl DirectLlmClient {
 
     /// 根据模型名称返回额外请求参数
     ///
-    /// 部分 LLM（如 kimi）要求特定参数：
+    /// 部分 LLM 要求特定参数：
     /// - kimi 系列：非流式调用必须 `enable_thinking: false`
+    /// - qwen 系列：DashScope 要求非流式调用 `enable_thinking: false`
     fn extra_body_for_model(model: &str) -> Option<serde_json::Value> {
         let lower = model.to_ascii_lowercase();
-        if lower.contains("kimi") {
+        // DashScope (qwen) 和 Kimi 要求非流式调用禁用 thinking
+        if lower.contains("kimi") || lower.contains("qwen") || lower.contains("qwq") || lower.contains("qvq") {
             Some(serde_json::json!({"enable_thinking": false}))
         } else {
             None
