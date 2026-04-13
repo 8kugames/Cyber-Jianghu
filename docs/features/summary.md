@@ -111,13 +111,24 @@ attack:
  **三魂架构**:
  - ActorSoul (人魂/行动之魂): 生成叙事意图，纯推理不涉及 ID
  - IntentTranslator (天魂): LLM 翻译叙事→格式化 Intent（精确 ID 映射）
- - ReflectorSoul (地魂/反思之魂): 审查格式化 Intent，世界观一致性审查（默认启用）
+ - ReflectorSoul (地魂/反思之魂): 分级审查（Always/Adaptive/Skip）+ NarrativeGenerator 叙事隔离
  - `ReviewStore` 共享内存用于进程内审查通信
+ - **NarrativeGenerator**: LLM 生成叙事上下文，语义缓存，泄露检测
 
-### 3. 意图控制（三层架构）
+### 3. 意图控制（分级审核 + multi-Intent Pipeline）
+
+**multi-Intent Pipeline**:
+ - [x] 单 tick 可提交多 Intent，顺序执行，失败回滚
+ - [x] `IntentBatchConfig`: max_intents_per_tick（默认 5）, max_retries（默认 3）
+ - [x] `ExecutionSummary`: Server 广播执行汇总（total/succeeded/failed/skipped）
+
+**分级审核策略**（`GradedValidationConfig`）:
+ - [x] **Always**: 完整三层审核（action_type → RuleEngine → LLM），适用于 speak/shout/whisper
+ - [x] **Adaptive**: 动态判断（限制区域 move，高价值物品 trade/steal/give），根据 `adaptive_field_mapping` 配置
+ - [x] **Skip**: 仅 RuleEngine Layer1+2 确定性校验，适用于 idle/wait
 
 **第一层: 认知链质量验证**（决策循环内，重试机制）:
- - [x] `CognitiveValidator` - 5 条确定性规则（完整性、长度、状态引用、重复检测、连贯性），非 LLM
+ - [x] `CognitiveValidator` - 确定性规则（完整性、长度、状态引用、重复检测、连贯性），非 LLM
  - [x] 验证失败自动重试（`cognitive_decision_with_retry`），反馈注入下一轮 LLM 调用
  - [x] 达到最大重试后降级使用原始 intent
 
@@ -127,12 +138,12 @@ attack:
  - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
  - [x] Cognitive 路径: 人魂决策 → 天魂翻译 → 地魂验证 → 驳回 → `think_with_feedback(feedback)` 重试（天魂/地魂与人魂共用 `llm_arc`）
 
-**第二层: 地魂审查**（天魂 + 地魂，三魂架构）:
+**地魂审查**（三魂架构）:
  - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，翻译后的 intent 经审查后再发送
  - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
  - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
  - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
- - [x] 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
+ - [x] 三魂循环：人魂决策 → 天魂翻译 → 地魂分级审核 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
 
 ## 三、 通信协议 (Protocol)
 
