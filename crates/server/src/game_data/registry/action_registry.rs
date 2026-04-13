@@ -70,8 +70,10 @@ impl ActionRegistry {
             .filter_map(|action_name| {
                 let config = Self::get(&action_name)?;
                 Some(AvailableAction {
-                    action: action_name,
-                    description: config.description,
+                    action: action_name.clone(),
+                    name: config.name.clone(),
+                    description: config.description.clone(),
+                    category: config.category.clone(),
                     valid_targets: None,
                     required_fields: config
                         .validation

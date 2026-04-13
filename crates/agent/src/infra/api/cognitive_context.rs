@@ -109,6 +109,10 @@ pub struct PlanningContext {
 pub struct AvailableActionInfo {
     /// 动作名称
     pub action: String,
+    /// 动作简短名称
+    pub name: String,
+    /// 动作分类
+    pub category: String,
     /// 目标（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
@@ -448,6 +452,8 @@ impl CognitiveContextBuilder {
             .iter()
             .map(|action| AvailableActionInfo {
                 action: action.action.clone(),
+                name: action.name.clone(),
+                category: action.category.clone(),
                 target: None,
                 description: action.description.clone(),
             })
