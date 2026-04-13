@@ -140,9 +140,17 @@ pub struct AvailableAction {
     /// 动作类型
     pub action: String,
 
+    /// 动作名称（简短标识）
+    #[serde(default)]
+    pub name: String,
+
     /// 动作描述
     #[serde(default)]
     pub description: String,
+
+    /// 动作分类
+    #[serde(default)]
+    pub category: String,
 
     /// 有效目标（可选）
     #[serde(skip_serializing_if = "Option::is_none")]

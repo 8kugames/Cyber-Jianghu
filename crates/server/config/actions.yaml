@@ -4,6 +4,9 @@
 #
 # 动作定义：原子行为单元，不可再分
 #
+# name: 动作简短名称（用于日志、调试显示）
+# description: 动作详细描述（说明行为和效果，避免 LLM 歧义）
+#
 # requirements 字段说明（执行前校验 + 消耗）：
 #   - cost: 执行动作扣减的属性值（正值）
 #   - min: 执行动作前属性需达到的最小值
@@ -24,6 +27,8 @@
 # effects 示例（见 idle 动作的实际配置）：
 #
 #   idle:
+#     name: "休息"
+#     description: "不做任何操作，恢复体力和心神。恢复量由 effects 定义。"
 #     effects:
 #       - effect_type: attribute_change    # 属性变化
 #         attribute: stamina
@@ -50,7 +55,7 @@ description: "动作系统配置文件"
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-03-18"
+  updated_at: "2026-04-13"
   tags:
     - actions
     - config
@@ -60,7 +65,8 @@ data:
   # 基础生存
   # ==========================================================================
   idle:
-    description: "休息，不做任何操作"
+    name: "休息"
+    description: "不执行任何主动操作，静待下一个 tick。恢复效果由 effects 定义：通常恢复 stamina 和 sanity。此动作不会拾取、使用或丢弃任何物品，也不会与任何对象产生交互。切勿将 idle 与 eat/drink/pickup 等动作混淆。"
     category: survival
     validation: {}
     requirements:
@@ -78,7 +84,8 @@ data:
         value: 1
 
   use:
-    description: "使用物品"
+    name: "使用物品"
+    description: "对背包中的物品进行使用操作。根据物品类型产生不同效果（如使用钥匙开门、使用卷轴学习技能、使用药品获得增益状态）。此动作需要指定 item_id。不会消耗或丢弃物品（除非物品本身是一次性消耗品）。注意：eat 和 drink 是独立的进食/饮水动作，不要将 use 误用于进食饮水。"
     category: survival
     validation:
       required_fields:
@@ -90,7 +97,8 @@ data:
         cost: 1
 
   eat:
-    description: "进食"
+    name: "进食"
+    description: "消耗食物以恢复饥饿度。必须指定要吃的食物物品 ID（如 item_id: \"mantou\" 表示吃馒头）。此动作会从背包中移除食物并恢复 hunger 属性。注意区分：eat 用于固体食物，drink 用于液体饮水，pickup 用于拾取地面物品，use 用于其他物品交互。"
     category: survival
     validation:
       required_fields:
@@ -102,7 +110,8 @@ data:
         cost: 1
 
   drink:
-    description: "饮水"
+    name: "饮水"
+    description: "消耗液体以恢复口渴度。必须指定要饮用的液体物品 ID（如 item_id: \"water\" 表示喝水）。此动作会从背包中移除液体并恢复 thirst 属性。注意区分：drink 用于饮水（water、wine 等液体），eat 用于进食（固体食物），pickup 用于拾取地面物品。"
     category: survival
     validation:
       required_fields:
@@ -114,7 +123,8 @@ data:
         cost: 1
 
   pickup:
-    description: "拾取物品"
+    name: "拾取物品"
+    description: "从地面拾取物品到背包。必须指定要拾取的物品 ID（item_id）和数量（quantity）。此动作从当前Location的地面物品列表中移除指定物品，添加到执行者的背包。拾取需要消耗 stamina。必须确保目标位置有足够的物品可拾取。注意：拾取是将地面物品收入背包，不是饮用或进食。"
     category: survival
     validation:
       required_fields:
@@ -126,7 +136,8 @@ data:
         cost: 2
 
   drop:
-    description: "丢弃物品"
+    name: "丢弃物品"
+    description: "从背包中丢弃物品到地面。必须指定物品 ID（item_id）和数量（quantity）。此动作从执行者背包中移除指定物品，放置到当前Location的地面物品列表。丢弃不消耗额外体力（已在 requirements 中定义 cost）。"
     category: survival
     validation:
       required_fields:
@@ -143,7 +154,8 @@ data:
         cost: 1
 
   move:
-    description: "移动到指定位置"
+    name: "移动"
+    description: "移动到指定位置。必须指定目标位置 ID（target_location）。此动作根据 location 图中的边消耗 stamina 并改变 Agent 所在位置。移动路径由服务器根据位置图计算。目标位置必须是可达位置（相邻或通过多跳可达）。"
     category: survival
     validation:
       required_fields:
@@ -158,7 +170,8 @@ data:
   # 战斗
   # ==========================================================================
   attack:
-    description: "攻击目标"
+    name: "攻击"
+    description: "对目标 Agent 发起物理攻击。必须指定目标 Agent ID（target_agent_id）。伤害值由 base_damage + strength * 0.5 + weapon_bonus 计算。攻击会使目标损失 HP，目标死亡后会被移出战斗。注意：此动作用于主动攻击，defend 用于防御姿态，parry 用于招架反击。"
     category: combat
     base_damage: 10
     damage_formula: "10 + strength * 0.5 + weapon_bonus"
@@ -174,7 +187,8 @@ data:
         cost: 5
 
   defend:
-    description: "防御姿态"
+    name: "防御"
+    description: "进入防御姿态，减少本 tick 受到攻击的伤害。damage_reduction 为 0.5 表示受到伤害减半。持续时间由 duration_ticks 定义（通常为 1 tick）。防御姿态不针对特定目标，是被动技能。注意：defend 是主动防御，parry 是主动招架（需要指定目标），dodge 是闪避。"
     category: combat
     damage_reduction: 0.5
     duration_ticks: 1
@@ -186,7 +200,8 @@ data:
         cost: 8
 
   dodge:
-    description: "闪避"
+    name: "闪避"
+    description: "尝试躲避攻击或危险。闪避成功率由 agility * 0.01 + luck * 0.005 计算。成功闪避可以完全避免受到伤害。此动作不针对特定目标，是主动规避行为。注意：dodge 是主动闪避，defend 是减伤防御，parry 是招架反击。"
     category: combat
     dodge_chance_formula: "agility * 0.01 + luck * 0.005"
     validation: {}
@@ -197,7 +212,8 @@ data:
         cost: 6
 
   parry:
-    description: "招架"
+    name: "招架"
+    description: "对目标发起招架尝试，成功后可反弹伤害。招架成功率由 strength * 0.02 计算。必须指定目标 Agent ID（target_agent_id）。招架是一种反击行为，需要目标存在且存活。注意：parry 是招架反击（需要目标），defend 是防御姿态（不需目标），dodge 是闪避。"
     category: combat
     parry_chance_formula: "strength * 0.02"
     validation:
@@ -212,7 +228,8 @@ data:
         cost: 10
 
   heavy_strike:
-    description: "重击"
+    name: "重击"
+    description: "对目标发起强力攻击，造成更高伤害但消耗更多体力。基础伤害为 25，伤害公式为 25 + strength * 0.8，体力消耗为普通攻击的 2 倍。必须指定目标 Agent ID（target_agent_id）。使用此技能后本 tick 无法再行动。注意：这是攻击动作的高消耗版本，attack 是普通攻击。"
     category: combat
     base_damage: 25
     damage_formula: "25 + strength * 0.8"
@@ -229,7 +246,8 @@ data:
         cost: 20
 
   flee:
-    description: "逃跑"
+    name: "逃跑"
+    description: "尝试脱离战斗或危险情境。逃跑成功率由 agility * 0.03 计算。成功逃跑会将 Agent 从当前战斗场景移除或传送到安全位置。此动作不针对特定目标，是主动脱离行为。体力消耗较高（min: 15, cost: 10）。"
     category: combat
     flee_success_formula: "agility * 0.03"
     validation: {}
@@ -243,7 +261,8 @@ data:
   # 江湖技能
   # ==========================================================================
   steal:
-    description: "偷窃"
+    name: "偷窃"
+    description: "尝试从目标 Agent 身上偷取物品。必须指定目标 Agent ID（item_id）和物品 ID（item_id）。成功率和被发现概率由 agility * 0.02 + luck * 0.01 计算。失败可能被目标发现并遭受惩罚（如被攻击或被通缉）。此动作需要目标存活。注意区分：give 是给予物品（双方同意），steal 是偷窃（单方强制）。"
     category: martial
     success_rate_formula: "agility * 0.02 + luck * 0.01"
     detection_threshold: 0.3
@@ -260,7 +279,8 @@ data:
         cost: 5
 
   stealth:
-    description: "潜行"
+    name: "潜行"
+    description: "进入潜行状态，降低被发现的概率。潜行等级由 agility * 0.5 + luck * 0.3 计算。持续时间由 duration_ticks 定义（通常为 5 ticks）。潜行状态下进行偷窃、跟踪等行为有更高成功率。潜行期间如果发起攻击或使用其他明显动作，潜行状态会解除。"
     category: martial
     stealth_level_formula: "agility * 0.5 + luck * 0.3"
     duration_ticks: 5
@@ -272,7 +292,8 @@ data:
         cost: 8
 
   poison:
-    description: "下毒"
+    name: "下毒"
+    description: "对目标使用毒药。必须指定目标 Agent ID（target_agent_id）和毒药物品 ID（poison_item_id）。成功率为 0.6，毒药伤害为 5，持续时间为 3 ticks。下毒后目标会每 tick 受到毒药伤害。此动作需要目标存活。注意：下毒是战斗/暗杀技能，meditate 是打坐恢复内力，practice 是修炼武功。"
     category: martial
     poison_damage: 5
     poison_duration_ticks: 3
@@ -290,7 +311,8 @@ data:
         cost: 8
 
   meditate:
-    description: "打坐"
+    name: "打坐"
+    description: "通过打坐恢复内力（inner_power）。恢复量为 15 点。此动作不消耗 stamina（cost 为 0），但需要 min stamina >= 5 才能执行。打坐是内功修炼，不是休息（idle）。打坐不恢复 stamina 或 hunger/thirst，只恢复内力。注意区分：meditate 恢复内力，idle 恢复体力和心神，practice 修炼武功技能。"
     category: martial
     inner_power_recovery: 15
     validation: {}
@@ -301,7 +323,8 @@ data:
         cost: 0
 
   practice:
-    description: "修炼武功"
+    name: "修炼武功"
+    description: "通过练习提升武功技能进度。必须指定技能 ID（skill_id）。技能进度提升量为 5 点。修炼消耗较高体力（min: 15, cost: 10）。此动作用于提升战斗技能或江湖技能等级。注意区分：practice 修炼技能，meditate 恢复内力，idle 休息恢复体力。"
     category: martial
     skill_progress: 5
     validation:
@@ -317,7 +340,8 @@ data:
   # 社交
   # ==========================================================================
   speak:
-    description: "公开说话"
+    name: "说话"
+    description: "在当前Location公开说话，内容对所有在场 Agent 可见。必须指定说话内容（content），最大长度为 500 字符。说话不消耗体力（cost 为 0），但会影响在场其他 Agent。说话内容应该是正常的文本交流，不是广播（shout）也不是私语（whisper）。此动作通过即时事件通道广播，不占用 tick 配额。"
     category: social
     max_content_length: 500
     validation:
@@ -333,7 +357,8 @@ data:
         cost: 1
 
   whisper:
-    description: "私语"
+    name: "私语"
+    description: "对目标 Agent 说悄悄话，只有目标和说话者能听到。必须指定目标 Agent ID（target_agent_id）和内容（content），最大长度为 200 字符。私语是私密对话，不会被在场其他 Agent 听到。此动作建立对话 session，tick 关单时强制结束。注意区分：whisper 是私聊（只有目标听到），speak 是公开说（所有人都听到），shout 是大喊（广播范围更大）。"
     category: social
     max_content_length: 200
     validation:
@@ -348,7 +373,8 @@ data:
         cost: 1
 
   shout:
-    description: "大喊"
+    name: "大喊"
+    description: "向周围区域广播喊叫，内容可被半径 3 格范围内的 Agent 听到。必须指定内容（content），最大长度为 300 字符。喊叫消耗较多体力（min: 5, cost: 3）。此动作占用本 tick 的行动位（与普通动作一样）。注意区分：shout 是大喊（占用行动位，广播范围 3 格），speak 是普通说话（不占行动位，只在当前 Location），whisper 是私语。"
     category: social
     max_content_length: 300
     broadcast_radius: 3
@@ -362,7 +388,8 @@ data:
         cost: 3
 
   follow:
-    description: "跟随"
+    name: "跟随"
+    description: "跟随目标 Agent，保持一定距离。必须指定目标 Agent ID（target_agent_id）。跟随距离为 3 格。跟随后会在目标移动时自动跟随移动。此动作不消耗体力（cost 为 1）。注意：跟随是持续行为，每 tick 消耗体力来维持跟随状态。"
     category: social
     follow_distance: 3
     validation:
@@ -379,7 +406,8 @@ data:
   # 经济
   # ==========================================================================
   give:
-    description: "给予物品"
+    name: "给予物品"
+    description: "将自己的物品给予目标 Agent。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）和数量（quantity）。此动作是双方同意的物品转移，不消耗额外体力（已在 requirements 中定义）。注意区分：give 是给予（双方同意），steal 是偷窃（单方强制）。"
     category: economic
     validation:
       requires_target: true
@@ -399,7 +427,8 @@ data:
         cost: 2
 
   trade:
-    description: "交易"
+    name: "交易"
+    description: "与目标 Agent 进行物品交易。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）、数量（quantity）和价格（price）。交易是双方同意的交换行为，涉及物品和/或金钱的交换。价格可以为 0（表示赠送）。此动作验证双方都有足够的物品和金钱。注意：交易需要双方都提交相同的 trade intent 才能完成。"
     category: economic
     validation:
       requires_target: true
@@ -423,7 +452,8 @@ data:
         cost: 3
 
   gather:
-    description: "采集"
+    name: "采集"
+    description: "从目标资源点采集物品。必须指定资源点 ID（target_id）。采集产量由 1 + luck * 0.1 计算。采集消耗体力（min: 5, cost: 5）。资源点必须是有效的采集地点（如矿点、药草点）。采集可以获得原材料物品。注意：gather 是从资源点采集原材料，craft 是使用材料制造物品。"
     category: economic
     resource_yield: "1 + luck * 0.1"
     validation:
@@ -436,7 +466,8 @@ data:
         cost: 5
 
   craft:
-    description: "制造"
+    name: "制造"
+    description: "使用配方制造物品。必须指定配方 ID（recipe_id）。制造质量由 craft_skill * 0.5 + luck * 0.1 计算。制造会消耗材料（根据配方定义）并产生成品。制造需要较高体力（min: 10）。此动作需要先有对应的配方（recipe_id）。注意：craft 是制造成品，gather 是采集原材料。"
     category: economic
     quality_formula: "craft_skill * 0.5 + luck * 0.1"
     validation:
@@ -448,7 +479,8 @@ data:
         min: 10
 
   # repair:
-  #   description: "修理"
+  #   name: "修理"
+  #   description: "修理装备的耐久度"
   #   category: economic
   #   durability_restore: 50
   #   validation:
@@ -460,7 +492,7 @@ data:
   #     - requirement_type: attribute
   #       attribute: stamina
   #       min: 8
-      #       cost: 6
+  #       cost: 6
   #
   # NOTE: 修理动作暂未实现，依赖以下前置工作：
   #   1. 数据库: agent_inventory 添加 durability / max_durability 列

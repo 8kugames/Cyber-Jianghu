@@ -15,9 +15,17 @@ use std::collections::HashMap;
 /// 动作配置条目
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ActionConfigEntry {
-    /// 动作描述
+    /// 动作名称（简短标识）
+    #[serde(default)]
+    pub name: String,
+
+    /// 动作描述（详细说明行为和效果，避免 LLM 理解歧义）
     #[serde(default)]
     pub description: String,
+
+    /// 动作分类（survival/combat/martial/social/economic）
+    #[serde(default)]
+    pub category: String,
 
     /// 动作标签（用于分类和逻辑判断，如 [survival]）
     #[serde(default)]
