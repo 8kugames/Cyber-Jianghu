@@ -9,7 +9,6 @@
 
 use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
-use crate::soul::actor::narrative::{NarrativeConfig, NarrativeEngine};
 use cyber_jianghu_protocol::WorldState;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -60,15 +59,15 @@ pub struct FormattedAttribute {
 /// - 先天属性（growable）：{当前} ({上限})
 /// - 状态值：{当前}/{最大}
 /// - 派生属性：{计算值}
-pub fn create_attributes_glimpse(
-    state: &WorldState,
-    engine: &NarrativeEngine,
-) -> AttributesGlimpse {
+///
+/// display_name 优先从 WorldState.attribute_descriptions 获取（server 数据驱动），
+/// 回退到原始属性名。
+pub fn create_attributes_glimpse(state: &WorldState) -> AttributesGlimpse {
     let mut formatted = Vec::new();
     let raw: HashMap<String, i32> = state.self_state.attributes.clone();
     let derived_raw: HashMap<String, f32> = state.self_state.derived_attributes.clone();
+    let descriptions = &state.self_state.attribute_descriptions;
 
-    // 定义属性类别（基于名称前缀或具体名称）
     let status_attrs = [
         "hp",
         "stamina",
@@ -88,7 +87,10 @@ pub fn create_attributes_glimpse(
     ];
 
     for (name, &value) in &raw {
-        let display_name = engine.get_display_name(name).unwrap_or(name).to_string();
+        let display_name = descriptions
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.clone());
         let category = if status_attrs.contains(&name.as_str()) {
             "status"
         } else if primary_attrs.contains(&name.as_str()) {
@@ -107,9 +109,11 @@ pub fn create_attributes_glimpse(
         });
     }
 
-    // 添加派生属性（从 derived_raw 获取，格式化为三位小数）
     for (name, &value) in &derived_raw {
-        let display_name = engine.get_display_name(name).unwrap_or(name).to_string();
+        let display_name = descriptions
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.clone());
         let value_str = format!("{:.3}", value);
 
         formatted.push(FormattedAttribute {
@@ -120,7 +124,6 @@ pub fn create_attributes_glimpse(
         });
     }
 
-    // 按类别排序：primary -> status -> derived -> unknown
     formatted.sort_by(|a, b| {
         let order = |c: &str| match c {
             "primary" => 0,
@@ -144,26 +147,26 @@ pub fn create_attributes_glimpse(
 pub fn generate_context_markdown(
     state: &WorldState,
     relationship_store: &RelationshipStore,
-    engine: &NarrativeEngine,
     dream_thought: Option<&str>,
 ) -> String {
-    generate_impl(state, Some(relationship_store), engine, dream_thought)
+    generate_impl(state, Some(relationship_store), dream_thought)
 }
 
 /// 生成无关系存储的简化上下文
 pub fn generate_context_markdown_no_relationship(
     state: &WorldState,
-    engine: &NarrativeEngine,
     dream_thought: Option<&str>,
 ) -> String {
-    generate_impl(state, None, engine, dream_thought)
+    generate_impl(state, None, dream_thought)
 }
 
 /// 内部实现
+///
+/// 属性叙事描述使用 WorldState.attribute_descriptions（server 数据驱动），
+/// 不依赖本地 NarrativeEngine。
 fn generate_impl(
     state: &WorldState,
     relationship_store: Option<&RelationshipStore>,
-    engine: &NarrativeEngine,
     dream_thought: Option<&str>,
 ) -> String {
     let mut sections: Vec<String> = Vec::new();
@@ -174,7 +177,7 @@ fn generate_impl(
     sections.push(format!("> 生成时间: Tick {}", state.tick_id));
     sections.push("".to_string());
 
-    // 托梦（如果有）
+    // 托梦
     if let Some(thought) = dream_thought {
         sections.push("## 托梦".to_string());
         sections.push("> 此念头在心中萦绕，挥之不去...".to_string());
@@ -198,42 +201,40 @@ fn generate_impl(
         state.location.name, state.location.node_type
     ));
 
-    // 自身状态 - 叙事化描述（不暴露数值）
+    // 自身状态 - 使用 server 提供的 attribute_descriptions
     sections.push("".to_string());
     sections.push("## 自身状态".to_string());
 
-    let attrs: HashMap<String, i32> = state
-        .self_state
-        .attributes
-        .iter()
-        .map(|(k, v)| (k.clone(), *v))
-        .collect();
+    let descriptions = &state.self_state.attribute_descriptions;
+    let standard = ["hp", "hunger", "thirst", "stamina"];
 
-    let narrative = engine.generate_narrative(&attrs, &state.self_state.status_effects);
-
-    sections.push(format!("- 身体: {}", narrative.body_status));
-    sections.push(format!("- 饥饿: {}", narrative.hunger_status));
-    sections.push(format!("- 口渴: {}", narrative.thirst_status));
-    sections.push(format!("- 体力: {}", narrative.stamina_status));
+    // 标准属性用叙事描述
+    for attr in &standard {
+        if let Some(desc) = descriptions.get(*attr) {
+            let label = match *attr {
+                "hp" => "身体",
+                "hunger" => "饥饿",
+                "thirst" => "口渴",
+                "stamina" => "体力",
+                _ => *attr,
+            };
+            sections.push(format!("- {}: {}", label, desc));
+        }
+    }
 
     // 非标准属性
-    let standard = ["hp", "hunger", "thirst", "stamina"];
-    for (name, value) in &attrs {
+    for (name, desc) in descriptions {
         if !standard.contains(&name.as_str()) {
-            sections.push(format!(
-                "- {}: {}",
-                name,
-                engine.describe_attribute(name, *value)
-            ));
+            sections.push(format!("- {}: {}", name, desc));
         }
     }
 
     // 状态效果
-    if !narrative.status_effects.is_empty() {
+    if !state.self_state.status_effects.is_empty() {
         sections.push("".to_string());
         sections.push(format!(
             "**特殊状态**: {}",
-            narrative.status_effects.join("、")
+            state.self_state.status_effects.join("、")
         ));
     }
 
@@ -318,38 +319,4 @@ fn generate_impl(
     }
 
     sections.join("\n")
-}
-
-/// 创建叙事引擎
-///
-/// 配置加载优先级：
-/// 1. Agent 数据目录: ~/.cyber-jianghu/config/narrative_config.json
-/// 2. 内置配置（硬编码在二进制中）
-///
-/// 注意：Agent 不能直接访问 Server 的开发环境文件
-pub fn create_narrative_engine() -> NarrativeEngine {
-    // 尝试从 Agent 自己的数据目录加载
-    if let Some(home) = dirs::home_dir() {
-        let config_path = home
-            .join(".cyber-jianghu")
-            .join("config")
-            .join("narrative_config.json");
-
-        if config_path.exists() {
-            match NarrativeConfig::from_file(&config_path) {
-                Ok(config) => {
-                    tracing::info!(
-                        "[context] Loaded narrative config from {}",
-                        config_path.display()
-                    );
-                    return NarrativeEngine::new(config);
-                }
-                Err(e) => tracing::warn!("[context] Failed to load narrative config: {}", e),
-            }
-        }
-    }
-
-    // 使用内置配置
-    tracing::info!("[context] Using builtin narrative config");
-    NarrativeEngine::with_builtin_config()
 }

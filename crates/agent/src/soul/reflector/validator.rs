@@ -231,11 +231,7 @@ impl ReflectorSoul {
         execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
         first_tick: bool,
     ) -> Result<Option<String>> {
-        if last_intents.is_empty() {
-            return Ok(None);
-        }
-
-        // 构建 intents 描述
+        // 构建 intents 描述（空列表也能正常处理）
         let intents_desc: Vec<String> = last_intents
             .iter()
             .map(|i| {

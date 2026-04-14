@@ -32,6 +32,9 @@ use cyber_jianghu_protocol::{AvailableAction, ClientMessage, ServerMessage, Worl
 /// 即时意图优先级（高于普通意图）
 pub const IMMEDIATE_INTENT_PRIORITY: i32 = 10;
 
+// Type alias for rule validator callback
+pub type RuleValidatorFn = dyn Fn(&str) -> std::result::Result<(), String> + Send + Sync;
+
 /// 即时决策超时（毫秒）
 const IMMEDIATE_DECISION_TIMEOUT_MS: u64 = 5000;
 
@@ -105,6 +108,10 @@ pub struct ImmediateEventHandler {
     /// RwLock 允许运行时替换（连接后绑定到 WebSocket 的 immediate_msg_tx）
     intent_tx: Arc<RwLock<mpsc::Sender<ClientMessage>>>,
 
+    /// 规则验证回调（Layer 1 + Layer 2，不涉及 LLM）
+    /// 在发送前同步验证 RespondNow intent
+    rule_validator: Arc<tokio::sync::RwLock<Option<Arc<RuleValidatorFn>>>>,
+
     /// 当前 tick_id（用于发送 Intent）
     current_tick_id: Arc<RwLock<i64>>,
 
@@ -130,11 +137,18 @@ impl ImmediateEventHandler {
             pending_events: Arc::new(RwLock::new(Vec::new())),
             decision_maker,
             intent_tx: Arc::new(RwLock::new(intent_tx)),
+            rule_validator: Arc::new(tokio::sync::RwLock::new(None)),
             current_tick_id: Arc::new(RwLock::new(0)),
             current_intent_type: Arc::new(RwLock::new(None)),
             running: Arc::new(AtomicBool::new(true)),
             http_api_state: Arc::new(tokio::sync::RwLock::new(None)),
         }
+    }
+
+    /// 注入规则验证回调（地魂 Layer 1 + Layer 2）
+    pub async fn set_rule_validator(&self, validator: Arc<RuleValidatorFn>) {
+        let mut guard = self.rule_validator.write().await;
+        *guard = Some(validator);
     }
 
     /// 更新当前 tick_id
@@ -158,6 +172,7 @@ impl ImmediateEventHandler {
             pending_events: self.pending_events.clone(),
             decision_maker: new_maker,
             intent_tx: self.intent_tx.clone(),
+            rule_validator: self.rule_validator.clone(),
             current_tick_id: self.current_tick_id.clone(),
             current_intent_type: self.current_intent_type.clone(),
             running: self.running.clone(),
@@ -262,6 +277,20 @@ impl ImmediateEventHandler {
 
             match decision {
                 Some(ResponseDecision::RespondNow { content, thought }) => {
+                    {
+                        let validator_guard = self.rule_validator.read().await;
+                        if let Some(ref validator) = *validator_guard
+                            && let Err(reason) = validator("speak")
+                        {
+                            warn!(
+                                "RespondNow rejected by rule validation: {} (event {})",
+                                reason, event.event_id
+                            );
+                            event.responded = true;
+                            continue;
+                        }
+                    }
+
                     let tick_id = *self.current_tick_id.read().await;
                     let response_uuid = uuid::Uuid::new_v4();
                     let intent = ClientMessage::Intent {

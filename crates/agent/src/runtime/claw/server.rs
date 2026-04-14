@@ -29,7 +29,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, error, info, warn};
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, UpstreamMessage, WsIntent};
-use super::state::{WsSharedState, WsValidationRequest};
+use super::state::WsSharedState;
 use crate::infra::api::{HttpApiState, create_api_router, get_static_serve_dir};
 
 // ============================================================================
@@ -95,7 +95,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     let mut tick_closed_rx = state.tick_closed_tx.subscribe();
     // 订阅 Server 消息广播（用于透传）
     let mut server_msg_rx = state.server_msg_tx.subscribe();
-    let intent_tx = state.intent_tx.clone();
+    let _intent_tx = state.intent_tx.clone();
 
     // 获取上行消息接收通道（用于转发 OpenClawBridge 的 LLM 请求）
     let upstream_rx = state.upstream_rx.lock().unwrap().take();
@@ -133,75 +133,28 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
 
                     match serde_json::from_str::<UpstreamMessage>(&text) {
                         Ok(upstream) => {
-                            // 使用 From trait 转换
+                            // 统一认知模式：外部 Intent 提交已被禁用
+                            // 三魂管道内部处理所有 intent 生成，仅保留 LLMRequest 通道
                             let intent_opt: Option<WsIntent> = upstream.into();
                             if let Some(intent) = intent_opt {
                                 let current_tick = state.get_current_tick();
-
-                                // 严格检查：tick_id 必须等于 current_tick
-                                if intent.tick_id != current_tick {
-                                    // 发送 ServerError{TickExpired}
-                                    let error_msg = DownstreamMessage::ServerError {
-                                        code: ServerErrorCode::TickExpired,
-                                        message: format!(
-                                            "Intent tick {} != current tick {}",
-                                            intent.tick_id, current_tick
-                                        ),
-                                        tick_id: Some(intent.tick_id),
-                                        current_tick: Some(current_tick),
-                                    };
-
-                                    if let Ok(json) = serde_json::to_string(&error_msg) {
-                                        let mut tx = ws_tx.lock().await;
-                                        let _ = tx.send(Message::Text(json.into())).await;
-                                    }
-
-                                    warn!(
-                                        "Rejected intent: tick {} != current {}",
-                                        intent.tick_id, current_tick
-                                    );
-                                    continue;
-                                }
-
-                                // 保存 tick_id 用于错误消息
-                                let intent_tick_id = intent.tick_id;
-
-                                // 发送验证请求（非阻塞）
-                                // 注意：去重检查在验证任务中通过 CAS 操作原子性完成
-                                let validation_req = WsValidationRequest {
-                                    intent,
-                                    ws_tx: ws_tx.clone(),
+                                let error_msg = DownstreamMessage::ServerError {
+                                    code: ServerErrorCode::InvalidAction,
+                                    message: "Unified cognitive mode: intents generated internally"
+                                        .to_string(),
+                                    tick_id: Some(intent.tick_id),
+                                    current_tick: Some(current_tick),
                                 };
 
-                                // 使用 try_send 避免阻塞
-                                match state.validation_tx.try_send(validation_req) {
-                                    Ok(()) => {
-                                        debug!("Sent intent to validation task");
-                                    }
-                                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                        // 验证通道繁忙，发送错误
-                                        let error_msg = DownstreamMessage::ServerError {
-                                            code: ServerErrorCode::RateLimited,
-                                            message: "Validation busy, please retry".to_string(),
-                                            tick_id: Some(intent_tick_id),
-                                            current_tick: Some(current_tick),
-                                        };
-
-                                        if let Ok(json) = serde_json::to_string(&error_msg) {
-                                            let mut tx = ws_tx.lock().await;
-                                            let _ = tx.send(Message::Text(json.into())).await;
-                                        }
-
-                                        warn!("Validation channel full, intent rejected");
-                                    }
-                                    Err(tokio::sync::mpsc::error::TrySendError::Closed(req)) => {
-                                        // 验证通道已关闭，降级直接转发
-                                        warn!("Validation channel closed, forwarding directly");
-                                        if let Err(e) = intent_tx.send(req.intent).await {
-                                            error!("Failed to send intent: {}", e);
-                                        }
-                                    }
+                                if let Ok(json) = serde_json::to_string(&error_msg) {
+                                    let mut tx = ws_tx.lock().await;
+                                    let _ = tx.send(Message::Text(json.into())).await;
                                 }
+
+                                warn!(
+                                    "Rejected external intent in unified mode: tick {}",
+                                    intent.tick_id
+                                );
                             }
                         }
                         Err(e) => {

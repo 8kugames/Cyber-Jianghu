@@ -314,8 +314,7 @@ pub struct WsSharedState {
     /// Agent ID
     pub agent_id: Arc<AtomicI64>,
 
-    /// 叙事引擎（可选，用于生成上下文）
-    pub narrative_engine: Option<Arc<crate::soul::actor::narrative::NarrativeEngine>>,
+    /// 叙事引擎（已移除：统一模式下上下文由 NarrativeGenerator 生成）
 
     /// 认知上下文构建器（可选，用于生成结构化认知上下文）
     pub cognitive_context_builder:
@@ -423,7 +422,6 @@ impl From<&WsDecisionState> for WsSharedState {
             deadline_ms: state.deadline_ms.clone(),
             tick_duration_ms: state.tick_duration_ms.clone(),
             agent_id: state.agent_id.clone(),
-            narrative_engine: None,
             cognitive_context_builder: None,
             openclaw_connected: Arc::new(AtomicBool::new(false)),
             allow_external_connections,
@@ -458,26 +456,11 @@ impl WsSharedState {
 
     /// 生成叙事化上下文
     ///
-    /// 如果配置了叙事引擎，使用叙事引擎生成；否则返回 None
-    pub fn generate_context(&self, world_state: &WorldState) -> Option<String> {
-        use crate::soul::actor::narrative::NarrativeEngine;
-
-        // 获取叙事引擎（配置的或默认的）
-        let engine: &NarrativeEngine = self.narrative_engine.as_deref().unwrap_or_else(|| {
-            // 使用静态默认引擎
-            static DEFAULT_ENGINE: std::sync::OnceLock<NarrativeEngine> =
-                std::sync::OnceLock::new();
-            DEFAULT_ENGINE.get_or_init(NarrativeEngine::with_builtin_config)
-        });
-
-        // 生成简化上下文（不包含关系信息）
-        Some(
-            crate::infra::api::generate_context_markdown_no_relationship(
-                world_state,
-                engine,
-                None, // WebSocket 状态不包含托梦
-            ),
-        )
+    /// 统一认知模式下，上下文由 Agent 内部 NarrativeGenerator 生成，
+    /// 此方法返回 None（OpenClaw 仅接收原始 WorldState）。
+    /// 保留接口兼容性，Phase 4 将完整清理。
+    pub fn generate_context(&self, _world_state: &WorldState) -> Option<String> {
+        None
     }
 
     /// 生成认知上下文

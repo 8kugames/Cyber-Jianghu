@@ -33,7 +33,6 @@ use uuid::Uuid;
 use crate::config::{CharacterConfig, CharacterStatus};
 
 use crate::component::persona::LifespanStatus;
-use crate::soul::actor::narrative::NarrativeEngine;
 use crate::soul::reflector::{PersonaInfo, ValidationRequest, ValidationResult};
 use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
 
@@ -503,29 +502,10 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
 
     match current.as_ref() {
         Some(world_state) => {
-            // 使用叙事引擎生成上下文，不暴露原始数值
-            let engine = state
-                .narrative_engine
-                .as_ref()
-                .map(|e| e.as_ref())
-                .unwrap_or_else(|| {
-                    // 如果没有初始化，使用内置配置创建临时引擎
-                    static DEFAULT_ENGINE: std::sync::OnceLock<
-                        crate::soul::actor::narrative::NarrativeEngine,
-                    > = std::sync::OnceLock::new();
-                    DEFAULT_ENGINE.get_or_init(
-                        crate::soul::actor::narrative::NarrativeEngine::with_builtin_config,
-                    )
-                });
-
             let context = if let Some(store) = &state.relationship_store {
-                generate_context_markdown(world_state, store, engine, dream_thought.as_deref())
+                generate_context_markdown(world_state, store, dream_thought.as_deref())
             } else {
-                generate_context_markdown_no_relationship(
-                    world_state,
-                    engine,
-                    dream_thought.as_deref(),
-                )
+                generate_context_markdown_no_relationship(world_state, dream_thought.as_deref())
             };
             Json(ContextResponse {
                 context,
@@ -551,21 +531,7 @@ pub(super) async fn get_attributes_handler(State(state): State<HttpApiState>) ->
     let current = state.current_state.read().await;
     match current.as_ref() {
         Some(world_state) => {
-            // 使用叙事引擎获取属性显示名称
-            let engine = state
-                .narrative_engine
-                .as_ref()
-                .map(|e| e.as_ref())
-                .unwrap_or_else(|| {
-                    static DEFAULT_ENGINE: std::sync::OnceLock<
-                        crate::soul::actor::narrative::NarrativeEngine,
-                    > = std::sync::OnceLock::new();
-                    DEFAULT_ENGINE.get_or_init(
-                        crate::soul::actor::narrative::NarrativeEngine::with_builtin_config,
-                    )
-                });
-
-            let glimpse = create_attributes_glimpse(world_state, engine);
+            let glimpse = create_attributes_glimpse(world_state);
             Json(glimpse).into_response()
         }
         None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
@@ -2015,7 +1981,7 @@ fn enrich_world_time_json(
 /// - 如果没有 `{key}_max` 字段，说明该属性没有上限（如声望、派生属性）
 fn enrich_attributes_with_descriptions(
     raw_attributes: Option<serde_json::Value>,
-    narrative_config: &Option<crate::soul::actor::narrative::NarrativeConfig>,
+    narrative_config: &Option<cyber_jianghu_protocol::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let attrs = raw_attributes?;
     let attrs_obj = attrs.as_object()?;
@@ -2088,7 +2054,7 @@ fn enrich_attributes_with_descriptions(
 
 fn enrich_derived_attributes(
     derived: Option<std::collections::HashMap<String, f32>>,
-    narrative_config: &Option<crate::soul::actor::narrative::NarrativeConfig>,
+    narrative_config: &Option<cyber_jianghu_protocol::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let derived = derived?;
     let enriched: serde_json::Map<String, serde_json::Value> = derived
@@ -2273,7 +2239,7 @@ fn record_to_attempt_entry(
             result: r.dihun_result,
             layers,
             reason: r.dihun_reason,
-            narrative: r.dihun_narrative,
+            narrative: r.previous_round_narrative,
         },
         final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
             intent_id: Some(id),
@@ -4193,8 +4159,7 @@ pub(super) async fn get_cognitive_context_handler(
 
     match current.as_ref() {
         Some(world_state) => {
-            let narrative_engine = NarrativeEngine::default();
-            let builder = CognitiveContextBuilder::new(narrative_engine, Default::default());
+            let builder = CognitiveContextBuilder::new(Default::default());
 
             let (persona_info, persona_ref): (
                 Option<CognitivePersonaInfo>,
