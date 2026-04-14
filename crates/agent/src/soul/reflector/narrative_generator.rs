@@ -281,6 +281,7 @@ const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的地魂（Earth Soul）
 3. 禁止出现: HP、血量、生命值、体力值、饥饿度、口渴度、经验值、等级、攻击力、防御力 等游戏术语
 4. 用武侠风格的比喻和感官描述替代数值（如"精力充沛"替代"HP 100%"）
 5. 保持叙事的丰富性和沉浸感
+6. **必须**根据「上一轮经历」章节填充 `last_outcome` 字段的四个子字段：result_narrative（结果叙事）、success（布尔）、side_effects（数组）、unexpected_events（数组）；若为首次tick或无上一轮数据，设为 `null`
 
 ## 输出格式
 严格输出以下 JSON（不要添加任何额外文本）：
@@ -316,7 +317,12 @@ const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的地魂（Earth Soul）
     }
   ],
   "recent_memories": [],
-  "last_outcome": null
+  "last_outcome": {
+    "result_narrative": "上一轮行动的结果叙事（如：你吃了一个馒头，饥饿感消解）",
+    "success": true或false,
+    "side_effects": ["附带效果（如：体力小幅恢复）"],
+    "unexpected_events": ["意外事件（如：老板多送了一壶酒）"]
+  }
 }"#;
 
 /// Few-shot 指令

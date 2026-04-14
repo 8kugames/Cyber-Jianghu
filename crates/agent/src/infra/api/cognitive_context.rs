@@ -10,7 +10,6 @@
 
 use crate::component::persona::dynamic_persona::DynamicPersona;
 use crate::component::social::RelationshipStore;
-use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
 use cyber_jianghu_protocol::{AvailableAction, WorldState};
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +20,11 @@ use serde::{Deserialize, Serialize};
 /// 从本地文件加载天魂翻译 few-shot 示例
 pub fn load_translator_few_shot_examples() -> String {
     let examples_path = dirs::home_dir()
-        .map(|h| h.join(".cyber-jianghu").join("config").join("translator_examples.json"))
+        .map(|h| {
+            h.join(".cyber-jianghu")
+                .join("config")
+                .join("translator_examples.json")
+        })
         .unwrap_or_else(|| std::path::PathBuf::from(""));
 
     if !examples_path.exists() {
@@ -249,34 +252,22 @@ impl Default for CognitiveContextConfig {
 /// 认知上下文构建器
 ///
 /// 从 WorldState 生成结构化的认知上下文
+/// 属性叙事描述使用 WorldState.attribute_descriptions（server 数据驱动）
 pub struct CognitiveContextBuilder {
-    /// 叙事引擎
-    narrative_engine: NarrativeEngine,
     /// 配置
     config: CognitiveContextConfig,
 }
 
 impl Default for CognitiveContextBuilder {
     fn default() -> Self {
-        Self::new(
-            NarrativeEngine::default(),
-            CognitiveContextConfig::default(),
-        )
+        Self::new(CognitiveContextConfig::default())
     }
 }
 
 impl CognitiveContextBuilder {
     /// 创建新的构建器
-    pub fn new(narrative_engine: NarrativeEngine, config: CognitiveContextConfig) -> Self {
-        Self {
-            narrative_engine,
-            config,
-        }
-    }
-
-    /// 使用默认配置创建
-    pub fn with_narrative_engine(narrative_engine: NarrativeEngine) -> Self {
-        Self::new(narrative_engine, CognitiveContextConfig::default())
+    pub fn new(config: CognitiveContextConfig) -> Self {
+        Self { config }
     }
 
     /// 从 WorldState 构建认知上下文
@@ -341,17 +332,25 @@ impl CognitiveContextBuilder {
         relationship_store: Option<&RelationshipStore>,
     ) -> PerceptionContext {
         let self_state = &world_state.self_state;
+        let descriptions = &self_state.attribute_descriptions;
 
-        let narrative: PerceptionNarrative = self
-            .narrative_engine
-            .generate_narrative(&self_state.attributes, &self_state.status_effects);
+        let hp_desc = descriptions.get("hp").map(|s| s.as_str()).unwrap_or("未知");
+        let hunger_desc = descriptions
+            .get("hunger")
+            .map(|s| s.as_str())
+            .unwrap_or("未知");
+        let thirst_desc = descriptions
+            .get("thirst")
+            .map(|s| s.as_str())
+            .unwrap_or("未知");
+        let stamina_desc = descriptions
+            .get("stamina")
+            .map(|s| s.as_str())
+            .unwrap_or("未知");
 
         let self_status = format!(
             "{}, {}, {}, {}",
-            narrative.body_status,
-            narrative.hunger_status,
-            narrative.thirst_status,
-            narrative.stamina_status
+            hp_desc, hunger_desc, thirst_desc, stamina_desc
         );
 
         let environment = format!(

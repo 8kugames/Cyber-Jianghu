@@ -119,15 +119,24 @@ impl IntentTranslator {
             );
         }
 
-        // 路由说话意图
-        let first = &intents[0];
-        let action_type = first.action_type.as_str();
-        let speech_intent = if immediate_routing_actions.iter().any(|a| a == action_type) {
-            let speak = intents.remove(0);
-            intents.insert(
-                0,
-                Intent::new(agent_id, tick_id, "idle", None).with_thought(thought_log.to_string()),
-            );
+        // 路由说话意图（扫描全部 intents，不只检查 [0]）
+        let speech_idx = intents.iter().position(|i| {
+            immediate_routing_actions
+                .iter()
+                .any(|a| a == i.action_type.as_str())
+        });
+        let speech_intent = if let Some(idx) = speech_idx {
+            let speak = intents.remove(idx);
+            // 如果提取的不是第一个，在原位插入 idle；否则在 [0] 插入 idle
+            if idx == 0 {
+                intents.insert(
+                    0,
+                    Intent::new(agent_id, tick_id, "idle", None)
+                        .with_thought(thought_log.to_string()),
+                );
+            } else {
+                intents.insert(idx, Intent::new(agent_id, tick_id, "idle", None));
+            }
             Some(speak)
         } else {
             None

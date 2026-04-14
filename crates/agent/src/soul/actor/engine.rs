@@ -21,6 +21,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use super::chain::CognitiveChain;
 use super::prompt_cache::PromptCache;
@@ -32,8 +33,7 @@ use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
-use crate::models::{Intent, WorldEventType, WorldState};
-use crate::soul::actor::narrative::{NarrativeEngine, PerceptionNarrative};
+use crate::models::Intent;
 
 use cyber_jianghu_protocol::AvailableAction;
 
@@ -71,11 +71,13 @@ impl Default for CognitiveEngineConfig {
 /// - LLM Call 2: Planning + Decision（规划+决策）
 /// - Validation 由 ReflectorSoul 在 engine 外部执行
 ///
+/// 【信息隔离】人魂不直接访问 WorldState，所有外部信息通过
+/// memory_context（由 lifecycle.rs 从地魂 NarrativeContext 注入）传递。
+/// 内部只持有 tick_id 和 agent_id 作为标识符。
+///
 /// 【Prompt 缓存优化】
-/// 使用 PromptCache 实现三层缓存，减少重复内容：
-/// - Layer 1: 静态缓存（persona、actions）进程生命周期内不变
-/// - Layer 2: 半静态缓存（inventory、locations、entities）变化时更新
-/// - Layer 3: 动态状态（self_status、recent_speeches）每轮生成
+/// 使用 PromptCache 缓存 persona 和 actions，减少重复内容。
+/// 半静态/动态内容由 memory_context 外部注入。
 ///
 /// 【滑动上下文窗口】
 /// 使用 NarrativeSummaryWindow 保留最近 N 轮的行动轨迹摘要，
@@ -162,33 +164,36 @@ impl CognitiveEngine {
         );
     }
 
-    pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
-        self.think_with_feedback(world_state, None).await
+    pub async fn think(&self, tick_id: i64, agent_id: Uuid) -> Result<CognitiveChain> {
+        self.think_with_feedback(tick_id, agent_id, None).await
     }
 
     pub async fn think_with_feedback(
         &self,
-        world_state: &WorldState,
+        tick_id: i64,
+        agent_id: Uuid,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(world_state, "", validation_feedback)
+        self.think_with_memory_and_feedback(tick_id, agent_id, "", validation_feedback)
             .await
     }
 
     /// 使用记忆上下文执行认知流程
     pub async fn think_with_memory(
         &self,
-        world_state: &WorldState,
+        tick_id: i64,
+        agent_id: Uuid,
         memory_context: &str,
     ) -> Result<CognitiveChain> {
-        self.think_with_memory_and_feedback(world_state, memory_context, None)
+        self.think_with_memory_and_feedback(tick_id, agent_id, memory_context, None)
             .await
     }
 
     /// 核心认知流程：支持 memory context + validation feedback
     pub(crate) async fn think_with_memory_and_feedback(
         &self,
-        world_state: &WorldState,
+        tick_id: i64,
+        agent_id: Uuid,
         memory_context: &str,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
@@ -199,24 +204,19 @@ impl CognitiveEngine {
         };
 
         let start_time = std::time::Instant::now();
-        let tick_id = world_state.tick_id;
-
         info!("[{}-{}] 开始认知流程...", agent_name, tick_id);
 
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
-        // 【Prompt 缓存优化】
-        // - 差异化 persona：第一轮完整，后续摘要
-        // - 半静态内容变化时更新缓存
+        // Persona（简化：不再依赖 WorldState 更新半静态缓存）
         let persona_for_prompt = {
             let mut cache = self.prompt_cache.write().unwrap();
-            cache.check_and_update(world_state);
-            cache.get_persona(world_state).to_string()
+            cache.get_persona_simple().to_string()
         };
 
         // === Stage 1: Perception+Motivation (感知+动机，合并为单次 LLM 调用) ===
         let prompt = self.build_perception_motivation_prompt(
-            world_state,
+            tick_id,
             memory_context,
             validation_feedback,
             &persona_for_prompt,
@@ -238,17 +238,14 @@ impl CognitiveEngine {
         let perception_output = chain.get_stage(CognitiveStage::Perception).unwrap().clone();
         let motivation_output = chain.get_stage(CognitiveStage::Motivation).unwrap().clone();
 
-        // 【Prompt 缓存优化】Plan+Decision 也使用差异化的 persona
-        let critical_attrs = &world_state.self_state.attributes;
         let pd_prompt = self.build_plan_decision_prompt(
             &perception_output,
             &motivation_output,
             &persona_for_prompt,
             &agent_name,
-            critical_attrs,
         );
         let (pd_response, planning, decision, intent) =
-            self.plan_and_decide(&pd_prompt, world_state).await?;
+            self.plan_and_decide(&pd_prompt, tick_id, agent_id).await?;
         chain.add_stage(planning);
         chain.add_stage(decision);
         chain.final_intent = intent.clone();
@@ -363,7 +360,8 @@ impl CognitiveEngine {
     async fn plan_and_decide(
         &self,
         prompt: &str,
-        world_state: &WorldState,
+        tick_id: i64,
+        agent_id: Uuid,
     ) -> Result<(String, StageOutput, StageOutput, Intent)> {
         // 人魂只输出叙事意图，不需要 tool calling 查询精确 ID
         // 精确 ID 翻译由天魂（IntentTranslator）负责
@@ -390,9 +388,6 @@ impl CognitiveEngine {
 
         // Decision stage output: 用 "narrative" 哨兵 action_type 传递叙事意图
         // 天魂（IntentTranslator）在 lifecycle 中检测并翻译
-        let agent_id = world_state.agent_id.unwrap_or_default();
-        let tick_id = world_state.tick_id;
-
         let intent = Intent::new(
             agent_id,
             tick_id,
@@ -420,152 +415,38 @@ impl CognitiveEngine {
 
     /// 构建感知+动机阶段 prompt
     ///
-    /// 【Prompt 缓存优化】
-    /// - persona_desc：已由调用方从缓存获取（第一轮完整，后续摘要）
-    /// - inventory/locations/entities：已由调用方更新到缓存
-    /// - 只有 self_status/recent_speeches 每轮生成
+    /// 【信息隔离】不再直接访问 WorldState。
+    /// 所有外部信息通过 memory_context 传入。
     fn build_perception_motivation_prompt(
         &self,
-        world_state: &WorldState,
+        tick_id: i64,
         memory_context: &str,
         validation_feedback: Option<&str>,
         persona_desc: &str,
         agent_name: &str,
     ) -> String {
-        let self_state = &world_state.self_state;
-
-        // 【动态状态】每轮生成
-        let engine = NarrativeEngine::default();
-        let narrative = PerceptionNarrative::from_attributes_with_engine(
-            &engine,
-            &self_state.attributes,
-            &self_state.status_effects,
-        );
-        let self_status_section = narrative.to_prompt_section();
-
-        // 【半静态缓存】从缓存获取（已在 think_with_memory_and_feedback 中更新）
-        let cache = self.prompt_cache.read().unwrap();
-        let inventory_str = cache.get_inventory().to_string();
-        let adjacent_locations = cache.get_adjacent().to_string();
-        let entities_str = cache.get_entities().to_string();
-        let items_str = cache.get_nearby_items().to_string();
-        drop(cache); // 释放读锁
-
-        // 【Q2: 远端地点提示】独立于缓存逻辑，直接从 WorldState 判断
-        let distant_destinations = build_distant_destinations(world_state);
-
-        // 【动态状态】每轮生成
-        let memory_section = if memory_context.is_empty() {
-            String::new()
-        } else {
-            format!("\n### 相关记忆\n{memory_context}\n")
-        };
-
-        // 从 events_log 中提取最近说过的话和行动反馈（用于去重和反馈）
-        let recent_speeches: Vec<String> = world_state
-            .events_log
-            .iter()
-            .rev()
-            .filter_map(|e| {
-                match e.event_type {
-                    WorldEventType::PublicMessage => e
-                        .metadata
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                        .map(|s| s.to_string()),
-                    WorldEventType::ActionResult => {
-                        // 数据驱动：直接使用 server 提供的 description，不硬编码 action 类型
-                        if e.description.is_empty() {
-                            None
-                        } else {
-                            Some(e.description.clone())
-                        }
-                    }
-                    _ => None,
-                }
-            })
-            .take(10)
-            .collect();
-
-        let recent_speeches_section = if recent_speeches.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "\n### 最近说过的话和对话结果（避免重复）\n{}\n",
-                recent_speeches
-                    .iter()
-                    .map(|s| format!("- {}", s))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            )
-        };
-
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
             None => String::new(),
         };
 
-        // private_dialogue_log: 近期密语索引
-        let private_dialogue_section = if world_state.private_dialogue_log.is_empty() {
+        let memory_section = if memory_context.is_empty() {
             String::new()
         } else {
-            let entries: Vec<String> = world_state
-                .private_dialogue_log
-                .iter()
-                .map(|d| {
-                    format!(
-                        "- {} ↔ {} ({}条消息)",
-                        d.agent_a_name, d.agent_b_name, d.message_count
-                    )
-                })
-                .collect();
-            format!("\n### 近期密语\n{}\n", entries.join("\n"))
+            format!("\n### 当前状态与感知\n{memory_context}\n")
         };
 
-        let location_constraint = if world_state.location.adjacent_nodes.is_empty() {
-            "\n【重要】当前位置无法移动到任何地方，你必须留在当前位置。"
-        } else {
-            "\n【重要】只能移动到上述列出的位置，禁止编造或推断其他位置。"
-        };
-
-        let time_info = {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            let remaining = world_state.deadline_ms.saturating_sub(now_ms) / 1000;
-            if remaining > 0 && world_state.deadline_ms > 0 {
-                format!(
-                    "\n[时间提醒] 当前 Tick 剩余时间约 {} 秒，请在此时间内完成决策。",
-                    remaining
-                )
-            } else {
-                String::new()
-            }
-        };
-
-        // 【滑动上下文窗口】获取近期行动轨迹
+        // 滑动上下文窗口
         let summary_context = self.get_summary_context();
 
         format!(
             r#"# 感知与动机阶段 (Perception + Motivation)
-{feedback_section}{time_info}
+{feedback_section}
 你是 {agent_name}。
 {persona}
 
 ## 当前游戏状态 (Tick {tick_id})
-
-{self_status_section}
-### 背包物品
-{inventory}
-
-### 位置
-- 地点: {location}
-- 可达位置: {adjacent_locations}{location_constraint}{distant_destinations}
-### 环境
-- 附近的人: {entities}
-- 地上的物品: {items}
-{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
+{memory_section}{summary_context}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -581,19 +462,8 @@ impl CognitiveEngine {
 "#,
             agent_name = agent_name,
             persona = persona_desc,
-            tick_id = world_state.tick_id,
-            self_status_section = self_status_section,
-            inventory = inventory_str,
-            location = world_state.location.name,
-            adjacent_locations = adjacent_locations,
-            location_constraint = location_constraint,
-            distant_destinations = distant_destinations,
-            time_info = time_info,
-            entities = entities_str,
-            items = items_str,
+            tick_id = tick_id,
             memory_section = memory_section,
-            recent_speeches_section = recent_speeches_section,
-            private_dialogue_section = private_dialogue_section,
             summary_context = summary_context,
             feedback_section = feedback_section,
         )
@@ -605,15 +475,10 @@ impl CognitiveEngine {
         motivation: &StageOutput,
         persona_desc: &str,
         agent_name: &str,
-        attributes: &std::collections::HashMap<String, i32>,
     ) -> String {
-        // 【静态缓存】从缓存获取 actions_list
         let cache = self.prompt_cache.read().unwrap();
         let action_list = cache.get_actions_list().to_string();
         drop(cache);
-
-        // 生存紧急约束: hunger/thirst < 20 时追加
-        let survival_urgent = Self::build_survival_urgent_section(attributes);
 
         format!(
             r#"# 规划与决策阶段 (Planning + Decision)
@@ -643,7 +508,8 @@ impl CognitiveEngine {
 - 没有食物时：先拾取地上的食物/水，再进食/饮水
 - 背包和地面都没有时：移动到可能有资源的地点
 - 处于严重饥饿/口渴状态时，不要选择潜行、休息等非生存行为
-{survival_urgent}## 可做之事（参考）
+
+## 可做之事（参考）
 {action_list}
 
 ## 输出格式
@@ -660,7 +526,6 @@ impl CognitiveEngine {
             perception = perception.content,
             motivation = motivation.content,
             action_list = action_list,
-            survival_urgent = survival_urgent,
         )
     }
 
@@ -687,37 +552,6 @@ impl CognitiveEngine {
     // ========================================================================
     // 辅助方法
     // ========================================================================
-
-    /// 根据 hunger/thirst 属性值生成生存紧急约束 section
-    ///
-    /// 当 hunger 或 thirst < SURVIVAL_CRITICAL_THRESHOLD 时注入紧急提示,
-    /// 强制 LLM 优先选择觅食行为。阈值对齐 narrative_config.yaml 的 critical 区间 (0-19)。
-    fn build_survival_urgent_section(
-        attributes: &std::collections::HashMap<String, i32>,
-    ) -> String {
-        // 对齐 narrative_config.yaml: 0-19 = "饥饿难耐"/"渴得难以忍受"
-        const SURVIVAL_CRITICAL_THRESHOLD: i32 = 20;
-
-        // 属性缺失视为危险 (Fail Fast): 宁可误报也不漏报
-        let hunger = attributes.get("hunger").copied().unwrap_or(0);
-        let thirst = attributes.get("thirst").copied().unwrap_or(0);
-
-        if hunger < SURVIVAL_CRITICAL_THRESHOLD || thirst < SURVIVAL_CRITICAL_THRESHOLD {
-            let mut parts = vec![
-                "【紧急】你现在极度饥渴！本 tick 必须选择进食、饮水或拾取食物/水。".to_string(),
-            ];
-            if hunger < SURVIVAL_CRITICAL_THRESHOLD {
-                parts.push("你即将饿死，必须立即进食。".to_string());
-            }
-            if thirst < SURVIVAL_CRITICAL_THRESHOLD {
-                parts.push("你即将渴死，必须立即饮水。".to_string());
-            }
-            parts.push("不要选择 idle、stealth、meditate 等非生存行为。".to_string());
-            format!("\n{}\n", parts.join("\n"))
-        } else {
-            String::new()
-        }
-    }
 
     /// 添加摘要到滑动窗口
     pub fn push_summary(&self, summary: NarrativeSummary) {
@@ -768,56 +602,23 @@ impl CognitiveEngine {
 // ============================================================================
 
 impl CognitiveEngine {
-    /// 创建决策回调（兼容现有 Agent 接口）
+    /// 创建决策回调（兼容 Agent 接口）
+    ///
+    /// 回调接受 (tick_id, agent_id)，符合人魂信息隔离设计。
     pub fn create_decision_callback(self) -> crate::runtime::DecisionCallback {
         let engine = Arc::new(self);
-        Arc::new(move |world_state: &WorldState| {
+        Arc::new(move |tick_id: i64, agent_id: uuid::Uuid| {
             let engine = engine.clone();
-            let world_state = world_state.clone();
             Box::pin(async move {
-                match engine.think(&world_state).await {
+                match engine.think(tick_id, agent_id).await {
                     Ok(chain) => chain.final_intent,
                     Err(e) => {
                         tracing::error!("多阶段认知失败: {}", e);
-                        Intent::new(
-                            world_state.agent_id.unwrap_or_default(),
-                            world_state.tick_id,
-                            "idle",
-                            None,
-                        )
-                        .with_thought("忽然心神不宁，难以决断，只得暂且静候".to_string())
+                        Intent::new(agent_id, tick_id, "idle", None)
+                            .with_thought("忽然心神不宁，难以决断，只得暂且静候".to_string())
                     }
                 }
             })
         })
     }
-}
-
-// ============================================================================
-// 远端地点提示 (Q2) — 数据驱动
-// ============================================================================
-
-/// 构建远端可达地点提示
-///
-/// 当 agent 在 sub_scene 时，从 adjacent_nodes 中提取 travel_cost > 1 的节点
-/// 作为远端探索目标。数据完全来自 WorldState，无硬编码。
-///
-/// 限制：sub_scene 的 adjacent_nodes 通常只有 1 跳邻居，
-/// 远端目标需要 agent 先移动到 map 级节点后才能看到完整列表。
-/// 完整的 2 跳邻居方案需要 Server 协议支持（下发 parent map 的 adjacent_nodes）。
-fn build_distant_destinations(world_state: &crate::models::WorldState) -> String {
-    // 提取 travel_cost > 1 的相邻节点（远端地点）
-    let distant: Vec<_> = world_state
-        .location
-        .adjacent_nodes
-        .iter()
-        .filter(|n| n.travel_cost > 1)
-        .map(|n| format!("- {} ({}tick)", n.name, n.travel_cost))
-        .collect();
-
-    if distant.is_empty() {
-        return String::new();
-    }
-
-    format!("\n### 远端地点\n{}\n", distant.join("\n"))
 }

@@ -207,7 +207,9 @@ mod tests {
         let callback = engine.create_decision_callback();
 
         let world_state = make_minimal_world_state(1);
-        let intent = callback(&world_state).await;
+        let tick_id = world_state.tick_id;
+        let agent_id = world_state.agent_id.unwrap_or_default();
+        let intent = callback(tick_id, agent_id).await;
 
         // callback 要么返回引擎生成的 intent，要么返回 fallback idle
         // MockLlmClient 固定字符串可能导致解析失败，所以 idle fallback 是合理的
@@ -220,7 +222,12 @@ mod tests {
         let engine = CognitiveEngine::with_defaults(mock);
 
         let world_state = make_minimal_world_state(1);
-        let result = engine.think(&world_state).await;
+        let result = engine
+            .think(
+                world_state.tick_id,
+                world_state.agent_id.unwrap_or_default(),
+            )
+            .await;
 
         // MockLlmClient 返回固定字符串，后续阶段可能解析失败
         // 验证引擎不 panic，要么成功要么正确传播错误

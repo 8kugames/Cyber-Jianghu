@@ -27,9 +27,10 @@ pub use claw::{
     DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO, WsDecisionState, WsSharedState, ws_router,
 };
 
-use cyber_jianghu_protocol::{Intent, WorldState};
+use cyber_jianghu_protocol::Intent;
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
+use uuid::Uuid;
 
 // ============================================================================
 // 决策函数类型
@@ -37,21 +38,21 @@ use std::sync::Arc;
 
 /// 决策回调类型
 ///
-/// 纯函数: WorldState -> Intent
-/// 无状态，可组合
-pub type DecisionCallback = Arc<dyn Fn(&WorldState) -> BoxFuture<'static, Intent> + Send + Sync>;
+/// 纯函数: (tick_id, agent_id) -> Intent
+/// 人魂信息隔离：不传递 WorldState，外部信息由 memory_context 承载
+pub type DecisionCallback = Arc<dyn Fn(i64, Uuid) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带反馈和记忆上下文的决策回调类型
 ///
-/// 接收世界状态、记忆上下文和验证反馈（驳回原因），返回异步 Future
+/// 接收 tick_id、agent_id、记忆上下文和验证反馈（驳回原因），返回异步 Future
 pub type DecisionWithFeedbackCallback =
-    Arc<dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
+    Arc<dyn Fn(i64, Uuid, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带记忆上下文的决策回调类型
 ///
-/// 接收世界状态和记忆上下文字符串，返回异步 Future
+/// 接收 tick_id、agent_id 和记忆上下文字符串，返回异步 Future
 pub type DecisionWithMemoryCallback =
-    Arc<dyn Fn(&WorldState, &str) -> BoxFuture<'static, Intent> + Send + Sync>;
+    Arc<dyn Fn(i64, Uuid, &str) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 // 从 soul::actor 重新导出 CognitiveChain
 pub use crate::soul::actor::CognitiveChain;
@@ -61,7 +62,7 @@ pub use crate::soul::actor::CognitiveChain;
 /// 返回 (Intent, CognitiveChain) 元组，
 /// 用于三魂架构中天魂翻译时获取人魂的认知上下文辅助指代消解。
 pub type DecisionWithChainCallback = Arc<
-    dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+    dyn Fn(i64, Uuid, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
         + Send
         + Sync,
 >;

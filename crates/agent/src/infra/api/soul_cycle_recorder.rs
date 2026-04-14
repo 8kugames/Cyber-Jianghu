@@ -36,7 +36,7 @@ pub struct SoulCycleRecord {
     pub dihun_layer2_result: Option<String>,
     pub dihun_layer3_result: Option<String>,
     pub dihun_reason: Option<String>,
-    pub dihun_narrative: Option<String>,
+    pub previous_round_narrative: Option<String>,
     pub final_intent_id: Option<String>,
     pub final_action_type: Option<String>,
     pub final_action_data: Option<String>,
@@ -110,7 +110,7 @@ impl SoulCycleRecorder {
                 dihun_layer2_result TEXT,
                 dihun_layer3_result TEXT,
                 dihun_reason TEXT,
-                dihun_narrative TEXT,
+                previous_round_narrative TEXT,
                 final_intent_id TEXT,
                 final_action_type TEXT,
                 final_action_data TEXT,
@@ -255,7 +255,7 @@ impl SoulCycleRecorder {
         layer2: Option<&str>,
         layer3: Option<&str>,
         reason: Option<&str>,
-        narrative: Option<&str>,
+        _narrative: Option<&str>,
     ) {
         let conn = self
             .conn
@@ -263,6 +263,8 @@ impl SoulCycleRecorder {
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
+        // 注意: previous_round_narrative 由 update_previous_round_narrative() 独占管理
+        // 此处不再写入该列，避免当轮审批叙事覆盖上轮执行叙事
         let result = conn.execute(
             "UPDATE soul_cycle_record SET
                 dihun_result = ?1,
@@ -270,11 +272,10 @@ impl SoulCycleRecorder {
                 dihun_layer2_result = ?3,
                 dihun_layer3_result = ?4,
                 dihun_reason = ?5,
-                dihun_narrative = ?6,
-                created_at = ?7
-             WHERE tick_id = ?8 AND attempt = ?9",
+                created_at = ?6
+             WHERE tick_id = ?7 AND attempt = ?8",
             params![
-                result, layer1, layer2, layer3, reason, narrative, created_at, tick_id, attempt
+                result, layer1, layer2, layer3, reason, created_at, tick_id, attempt
             ],
         );
 
@@ -297,36 +298,32 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 更新 dihun_narrative（在感知阶段生成后回填）
+    /// 更新 previous_round_narrative（在感知阶段生成后回填）
     ///
     /// 在收到 WorldState 后、调用 NarrativeGenerator 之前调用。
     /// 用于将地魂生成的执行叙事回填到上一轮的 soul_cycle_record。
-    pub async fn update_dihun_narrative(
-        &self,
-        tick_id: i64,
-        narrative: &str,
-    ) {
+    pub async fn update_previous_round_narrative(&self, tick_id: i64, narrative: &str) {
         let conn = self
             .conn
             .lock()
             .expect("soul_cycle_recorder lock not poisoned");
 
         let result = conn.execute(
-            "UPDATE soul_cycle_record SET dihun_narrative = ?1 WHERE tick_id = ?2",
+            "UPDATE soul_cycle_record SET previous_round_narrative = ?1 WHERE tick_id = ?2",
             params![narrative, tick_id],
         );
 
         match result {
             Ok(n) if n > 0 => tracing::debug!(
-                "[soul_cycle] Updated dihun_narrative for tick {}",
+                "[soul_cycle] Updated previous_round_narrative for tick {}",
                 tick_id
             ),
             Ok(_) => tracing::warn!(
-                "[soul_cycle] No record found for tick {} when updating dihun_narrative",
+                "[soul_cycle] No record found for tick {} when updating previous_round_narrative",
                 tick_id
             ),
             Err(e) => tracing::warn!(
-                "[soul_cycle] Failed to update dihun_narrative for tick {}: {}",
+                "[soul_cycle] Failed to update previous_round_narrative for tick {}: {}",
                 tick_id,
                 e
             ),
@@ -466,7 +463,7 @@ impl SoulCycleRecorder {
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_action_type, tianhun_action_data, tianhun_speech_content,
                     tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
-                    dihun_layer2_result, dihun_layer3_result, dihun_reason, dihun_narrative,
+                    dihun_layer2_result, dihun_layer3_result, dihun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
                     world_time, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
@@ -526,7 +523,7 @@ impl SoulCycleRecorder {
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_action_type, tianhun_action_data, tianhun_speech_content,
                     tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
-                    dihun_layer2_result, dihun_layer3_result, dihun_reason, dihun_narrative,
+                    dihun_layer2_result, dihun_layer3_result, dihun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
                     world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
@@ -626,7 +623,7 @@ impl SoulCycleRecorder {
             dihun_layer2_result: row.get(12).ok(),
             dihun_layer3_result: row.get(13).ok(),
             dihun_reason: row.get(14).ok(),
-            dihun_narrative: row.get(15).ok(),
+            previous_round_narrative: row.get(15).ok(),
             final_intent_id: row.get(16).ok(),
             final_action_type: row.get(17).ok(),
             final_action_data: row.get(18).ok(),

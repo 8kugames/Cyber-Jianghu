@@ -308,11 +308,9 @@ impl StateProcessor {
 
             action_logs.push(action_log);
 
-            // 存储 ExecutionSummary
+            // 存储 ExecutionSummary（始终插入，单意图成功也需记录）
             let summary = ExecutionSummary::from_results(&pipeline_results);
-            if pipeline_intents.len() > 1 || summary.failed > 0 || summary.skipped > 0 {
-                execution_summaries.insert(intent.agent_id, summary);
-            }
+            execution_summaries.insert(intent.agent_id, summary);
         }
 
         Ok((

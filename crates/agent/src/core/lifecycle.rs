@@ -317,6 +317,27 @@ impl super::Agent {
             }
         }
 
+        // 注入规则验证回调到即时事件处理器（Layer 1: action_type 合法性）
+        if let Some(ref handler) = self.immediate_handler {
+            let available_actions = game_rules
+                .available_actions
+                .iter()
+                .map(|a| a.action.clone())
+                .collect::<Vec<String>>();
+            let rule_validator: Arc<crate::component::immediate::RuleValidatorFn> = Arc::new(
+                move |action_type: &str| -> std::result::Result<(), String> {
+                    if action_type == "idle" {
+                        return Ok(());
+                    }
+                    if !available_actions.iter().any(|a| a == action_type) {
+                        return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
+                    }
+                    Ok(())
+                },
+            );
+            handler.set_rule_validator(rule_validator).await;
+        }
+
         // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
         // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
         let prev_callback = self.client.get_server_msg_callback().await;
@@ -608,7 +629,7 @@ impl super::Agent {
                             && let Some(recorder) = self.soul_recorder().await
                         {
                             let prev_tick = world_state.tick_id - 1;
-                            recorder.update_dihun_narrative(prev_tick, narrative).await;
+                            recorder.update_previous_round_narrative(prev_tick, narrative).await;
                         }
 
                         let last_summary = world_state.last_execution_summary.as_ref();
@@ -644,6 +665,26 @@ impl super::Agent {
                                         "\n可交互: {}",
                                         narrative_ctx.environment.interactive_elements.join("、")
                                     ));
+                                }
+
+                                // 上一轮行动结果（last_outcome）
+                                if let Some(ref outcome) = narrative_ctx.last_outcome {
+                                    memory_context.push_str(&format!(
+                                        "\n### 上一轮行动结果\n{}\n",
+                                        outcome.result_narrative
+                                    ));
+                                    if !outcome.side_effects.is_empty() {
+                                        memory_context.push_str(&format!(
+                                            "附带效果: {}\n",
+                                            outcome.side_effects.join("；")
+                                        ));
+                                    }
+                                    if !outcome.unexpected_events.is_empty() {
+                                        memory_context.push_str(&format!(
+                                            "意外事件: {}\n",
+                                            outcome.unexpected_events.join("；")
+                                        ));
+                                    }
                                 }
 
                                 debug!("NarrativeContext 注入成功");
@@ -693,19 +734,21 @@ impl super::Agent {
                         // 5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
                         // 优先使用 decision_with_chain_callback（返回 CognitiveChain 供天魂使用）
                         let (raw_intent, cognitive_chain) = {
+                            let tick_id = world_state.tick_id;
+                            let agent_id = world_state.agent_id.unwrap_or_default();
                             let decision_future = async {
                                 // 最高优先级：decision_with_chain_callback（支持天魂翻译）
                                 if let Some(ref chain_callback) = self.decision_with_chain_callback {
                                     // 有 rejection reason 时传递 feedback
                                     let fb = self.last_rejection_reason.as_deref();
-                                    return chain_callback(&world_state, &memory_context, fb).await;
+                                    return chain_callback(tick_id, agent_id, &memory_context, fb).await;
                                 }
 
                                 // 有 rejection reason 时走 feedback callback（使用 [验证反馈] section）
                                 // feedback callback 内部有 CognitiveValidator 重试
                                 if let Some(ref reason) = self.last_rejection_reason {
                                     if let Some(ref callback) = self.decision_with_feedback_callback {
-                                        let intent = callback(&world_state, &memory_context, Some(reason.as_str())).await;
+                                        let intent = callback(tick_id, agent_id, &memory_context, Some(reason.as_str())).await;
                                         (intent, None)
                                     } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
                                         // fallback: 将 rejection 混入 memory context
@@ -714,17 +757,17 @@ impl super::Agent {
                                         } else {
                                             format!("{}\n[意图被驳回: {}，请重新决策]", memory_context, reason)
                                         };
-                                        let intent = memory_callback(&world_state, &combined).await;
+                                        let intent = memory_callback(tick_id, agent_id, &combined).await;
                                         (intent, None)
                                     } else {
-                                        let intent = (self.decision_callback)(&world_state).await;
+                                        let intent = (self.decision_callback)(tick_id, agent_id).await;
                                         (intent, None)
                                     }
                                 } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                                    let intent = memory_callback(&world_state, &memory_context).await;
+                                    let intent = memory_callback(tick_id, agent_id, &memory_context).await;
                                     (intent, None)
                                 } else {
-                                    let intent = (self.decision_callback)(&world_state).await;
+                                    let intent = (self.decision_callback)(tick_id, agent_id).await;
                                     (intent, None)
                                 }
                             };
@@ -793,21 +836,52 @@ impl super::Agent {
                                 ).await;
                         }
 
-                        // 5b'. 如果天魂拆分出说话 intent，走即时通道
+                        // 5b'. 如果天魂拆分出说话 intent，走地魂分级验证后再发即时通道
                         if let Some(speech) = &multi_translation.speech_intent {
-                            let status = self.send_immediate_intent(speech).await;
-                            if let Some(recorder) = self.soul_recorder().await {
-                                recorder.record_immediate(
-                                    world_state.tick_id,
-                                    &speech.intent_id.to_string(),
-                                    Some(&multi_translation.original_narrative),
-                                    "extracted",
-                                    speech.action_type.as_str(),
-                                    speech.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
-                                    speech.action_data.as_ref().and_then(|d| d.get("content")?.as_str()),
-                                    if status.is_ok() { "sent" } else { "failed" },
-                                    status.err().map(|e| e.to_string()).as_deref(),
-                                ).await;
+                            // 分级审核：speech 走 GradedValidationConfig（默认 skip LLM）
+                            let graded_config = self.config.game_rules
+                                .as_ref()
+                                .and_then(|g| g.intent_batch.as_ref())
+                                .map(|b| b.llm_validation.clone());
+                            let skip_llm = Self::should_skip_llm_validation(
+                                speech, graded_config.as_ref(),
+                            );
+
+                            let speech_result = if skip_llm {
+                                self.validate_rules_only(speech, &world_state).await
+                            } else {
+                                match self.validate_with_reflector(speech.clone(), &world_state).await {
+                                    Ok(r) => match r {
+                                        super::agent::ReflectorResult::Approved { .. } => Ok(()),
+                                        super::agent::ReflectorResult::Rejected { reason, .. } => Err(reason),
+                                    },
+                                    Err(e) => {
+                                        warn!("Speech reflector error, auto-approving: {}", e);
+                                        Ok(())
+                                    }
+                                }
+                            };
+
+                            match speech_result {
+                                Ok(()) => {
+                                    let status = self.send_immediate_intent(speech).await;
+                                    if let Some(recorder) = self.soul_recorder().await {
+                                        recorder.record_immediate(
+                                            world_state.tick_id,
+                                            &speech.intent_id.to_string(),
+                                            Some(&multi_translation.original_narrative),
+                                            "extracted",
+                                            speech.action_type.as_str(),
+                                            speech.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
+                                            speech.action_data.as_ref().and_then(|d| d.get("content")?.as_str()),
+                                            if status.is_ok() { "sent" } else { "failed" },
+                                            status.err().map(|e| e.to_string()).as_deref(),
+                                        ).await;
+                                    }
+                                }
+                                Err(reason) => {
+                                    warn!("Tick {} speech intent rejected by dihun: {}", world_state.tick_id, reason);
+                                }
                             }
                         }
 
@@ -987,150 +1061,147 @@ impl super::Agent {
                                 self.character_name(),
                                 status.age()
                             );
-                            // 发送最后一个 idle 意图后退出
+                            // 发送最后一个 idle 意图后退出（通过地魂规则验证保持不变量）
                             let agent_id = self.client.agent_id().await.unwrap_or_default();
-                            self.client
-                                .send_intent(&Intent::new(
-                                    agent_id,
-                                    world_state.tick_id,
-                                    "idle",
-                                    None,
-                                ))
-                                .await
-                                .ok();
+                            let death_idle = Intent::new(
+                                agent_id,
+                                world_state.tick_id,
+                                "idle",
+                                None,
+                            );
+                            if self.validate_rules_only(&death_idle, &world_state).await.is_ok() {
+                                self.client.send_intent(&death_idle).await.ok();
+                            }
                             return Ok(());
                         }
                     }
 
-                    // 7. 发送意图
-                    // 设置当前意图类型，让即时事件处理器进行冲突检测
-                    if let Some(ref handler) = self.immediate_handler {
-                        handler.set_current_intent(Some(final_intent.action_type.to_string())).await;
-                    }
-
-                    if let Err(e) = self.client.send_intent(&final_intent).await {
-                        error!("Failed to send intent: {}", e);
-                        // 清除当前意图类型
+                    // 7. 地魂验证 + 发送意图
+                    // 地魂唯一出入口：ALL intents 离开 Agent 前必须经过地魂验证
+                    // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
+                    if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {
+                        warn!("Tick {} 最终 intent 被地魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
                         if let Some(ref handler) = self.immediate_handler {
                             handler.set_current_intent(None).await;
-                        }
-                        // send_intent 是 fire-and-forget，tick mismatch 由 receive 路径处理
-                        // 此处只需重连
-                        if let Err(reconnect_err) = self.reconnect().await {
-                            error!("Reconnect failed: {}", reconnect_err);
                         }
                     } else {
-                        info!(
-                            "Intent sent successfully: tick={}, action={}, agent={}",
-                            final_intent.tick_id, final_intent.action_type, final_intent.agent_id
-                        );
-                        // 记录 action_type 用于行为多样性检测
-                        if let Some(ref engine) = self.cognitive_engine {
-                            engine.record_action(&final_intent.action_type);
-                        }
-                        // 非 idle 成功发送，重置连续 idle 计数和当前模型的 idle 计数
-                        if final_intent.action_type.as_str() != "idle" {
-                            self.consecutive_idle_count = 0;
-                            // 重置当前 LLM 模型的 idle 计数
-                            if let Some(ref container) = self.actor_llm_container {
-                                let llm = container.read().await;
-                                llm.reset_idle_count();
-                            }
-                        }
-                        // idle 发送成功后检查是否需要 rotate
-                        if final_intent.action_type.as_str() == "idle" {
-                            self.maybe_rotate_model().await;
-                        }
-                        // 清除当前意图类型
+                        // 设置当前意图类型，让即时事件处理器进行冲突检测
                         if let Some(ref handler) = self.immediate_handler {
-                            handler.set_current_intent(None).await;
+                            handler.set_current_intent(Some(final_intent.action_type.to_string())).await;
                         }
 
-                        // 7.5 上报三魂循环元数据到服务器（使 server-web 可见）
-                        let tick_id_for_report = final_intent.tick_id;
-                        if let Some(recorder) = self.soul_recorder().await {
-                            let records = recorder.get_by_tick(tick_id_for_report).await;
-                            let immediate_records = recorder.get_immediate_by_tick(tick_id_for_report).await;
+                        if let Err(e) = self.client.send_intent(&final_intent).await {
+                            error!("Failed to send intent: {}", e);
+                            if let Some(ref handler) = self.immediate_handler {
+                                handler.set_current_intent(None).await;
+                            }
+                            if let Err(reconnect_err) = self.reconnect().await {
+                                error!("Reconnect failed: {}", reconnect_err);
+                            }
+                        } else {
+                            info!(
+                                "Intent sent successfully: tick={}, action={}, agent={}",
+                                final_intent.tick_id, final_intent.action_type, final_intent.agent_id
+                            );
+                            if final_intent.action_type.as_str() != "idle" {
+                                self.consecutive_idle_count = 0;
+                                if let Some(ref container) = self.actor_llm_container {
+                                    let llm = container.read().await;
+                                    llm.reset_idle_count();
+                                }
+                            }
+                            if final_intent.action_type.as_str() == "idle" {
+                                self.maybe_rotate_model().await;
+                            }
+                            if let Some(ref handler) = self.immediate_handler {
+                                handler.set_current_intent(None).await;
+                            }
 
-                            // 从第一条记录获取游戏内时间
-                            let world_time = records.first().and_then(|r| r.world_time.clone());
+                            // 7.5 上报三魂循环元数据到服务器（使 server-web 可见）
+                            let tick_id_for_report = final_intent.tick_id;
+                            if let Some(recorder) = self.soul_recorder().await {
+                                let records = recorder.get_by_tick(tick_id_for_report).await;
+                                let immediate_records = recorder.get_immediate_by_tick(tick_id_for_report).await;
 
-                            let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records.into_iter().map(|r| {
-                                let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
-                                    (r.dihun_layer1_result.as_deref(), "layer1"),
-                                    (r.dihun_layer2_result.as_deref(), "layer2"),
-                                    (r.dihun_layer3_result.as_deref(), "layer3"),
-                                ].into_iter().filter_map(|(detail, layer)| {
-                                    detail.map(|d| cyber_jianghu_protocol::LayerReport {
-                                        layer: layer.to_string(),
-                                        passed: d == "通过" || d.is_empty(),
-                                        detail: if d == "通过" || d.is_empty() { None } else { Some(d.to_string()) },
-                                    })
+                                let world_time = records.first().and_then(|r| r.world_time.clone());
+
+                                let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records.into_iter().map(|r| {
+                                    let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
+                                        (r.dihun_layer1_result.as_deref(), "layer1"),
+                                        (r.dihun_layer2_result.as_deref(), "layer2"),
+                                        (r.dihun_layer3_result.as_deref(), "layer3"),
+                                    ].into_iter().filter_map(|(detail, layer)| {
+                                        detail.map(|d| cyber_jianghu_protocol::LayerReport {
+                                            layer: layer.to_string(),
+                                            passed: d == "通过" || d.is_empty(),
+                                            detail: if d == "通过" || d.is_empty() { None } else { Some(d.to_string()) },
+                                        })
+                                    }).collect();
+
+                                    cyber_jianghu_protocol::SoulCycleAttempt {
+                                        attempt: r.attempt,
+                                        renhun: cyber_jianghu_protocol::RenhunReport {
+                                            narrative: r.renhun_narrative,
+                                            thought_log: r.renhun_thought_log,
+                                        },
+                                        tianhun: cyber_jianghu_protocol::TianhunReport {
+                                            action_type: r.tianhun_action_type,
+                                            action_data: r.tianhun_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                            speech_content: r.tianhun_speech_content,
+                                            success: r.tianhun_success,
+                                            error: r.tianhun_error,
+                                        },
+                                        dihun: cyber_jianghu_protocol::DihunReport {
+                                            result: r.dihun_result,
+                                            layers,
+                                            reason: r.dihun_reason,
+                                            narrative: r.previous_round_narrative,
+                                        },
+                                        final_intent: r.final_intent_id.map(|id| cyber_jianghu_protocol::FinalIntentReport {
+                                            intent_id: Some(id),
+                                            action_type: r.final_action_type.clone(),
+                                            action_data: r.final_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                        }),
+                                    }
                                 }).collect();
 
-                                cyber_jianghu_protocol::SoulCycleAttempt {
-                                    attempt: r.attempt,
-                                    renhun: cyber_jianghu_protocol::RenhunReport {
-                                        narrative: r.renhun_narrative,
-                                        thought_log: r.renhun_thought_log,
-                                    },
-                                    tianhun: cyber_jianghu_protocol::TianhunReport {
-                                        action_type: r.tianhun_action_type,
-                                        action_data: r.tianhun_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                                        speech_content: r.tianhun_speech_content,
-                                        success: r.tianhun_success,
-                                        error: r.tianhun_error,
-                                    },
-                                    dihun: cyber_jianghu_protocol::DihunReport {
-                                        result: r.dihun_result,
-                                        layers,
-                                        reason: r.dihun_reason,
-                                        narrative: r.dihun_narrative,
-                                    },
-                                    final_intent: r.final_intent_id.map(|id| cyber_jianghu_protocol::FinalIntentReport {
-                                        intent_id: Some(id),
-                                        action_type: r.final_action_type.clone(),
-                                        action_data: r.final_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                                    }),
-                                }
-                            }).collect();
-
-                            let immediate_intents: Vec<cyber_jianghu_protocol::ImmediateIntentReport> = immediate_records.into_iter().map(|r| {
-                                cyber_jianghu_protocol::ImmediateIntentReport {
-                                    intent_id: r.intent_id,
-                                    route_type: r.route_type,
-                                    action_type: r.action_type,
-                                    action_data: r.action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                                    speech_content: r.speech_content,
-                                    send_status: r.send_status,
-                                    send_error: r.send_error,
-                                }
-                            }).collect();
-
-                            let metadata = cyber_jianghu_protocol::SoulCycleMetadata {
-                                world_time,
-                                cycles,
-                                immediate_intents,
-                            };
-
-                            let mut reported = false;
-                            for attempt in 0..3 {
-                                match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
-                                    Ok(()) => {
-                                        debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
-                                        reported = true;
-                                        break;
+                                let immediate_intents: Vec<cyber_jianghu_protocol::ImmediateIntentReport> = immediate_records.into_iter().map(|r| {
+                                    cyber_jianghu_protocol::ImmediateIntentReport {
+                                        intent_id: r.intent_id,
+                                        route_type: r.route_type,
+                                        action_type: r.action_type,
+                                        action_data: r.action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                        speech_content: r.speech_content,
+                                        send_status: r.send_status,
+                                        send_error: r.send_error,
                                     }
-                                    Err(e) => {
-                                        warn!("三魂循环元数据上报失败 (尝试 {}/3): tick={}, err={}", attempt + 1, tick_id_for_report, e);
-                                        if attempt < 2 {
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(100 * (1 << attempt))).await;
+                                }).collect();
+
+                                let metadata = cyber_jianghu_protocol::SoulCycleMetadata {
+                                    world_time,
+                                    cycles,
+                                    immediate_intents,
+                                };
+
+                                let mut reported = false;
+                                for attempt in 0..3 {
+                                    match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
+                                        Ok(()) => {
+                                            debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
+                                            reported = true;
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            warn!("三魂循环元数据上报失败 (尝试 {}/3): tick={}, err={}", attempt + 1, tick_id_for_report, e);
+                                            if attempt < 2 {
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(100 * (1 << attempt))).await;
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            if !reported {
-                                error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
+                                if !reported {
+                                    error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
+                                }
                             }
                         }
                     }
