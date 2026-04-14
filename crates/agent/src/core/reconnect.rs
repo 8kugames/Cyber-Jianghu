@@ -190,7 +190,10 @@ impl super::Agent {
                             }
 
                             // 更新游戏规则
-                            self.config.update_game_rules(game_rules);
+                            self.config.update_game_rules(game_rules.clone());
+
+                            // 重新注入 rule_validator（available_actions 可能已变更）
+                            self.inject_rule_validator(&game_rules.available_actions).await;
                         }
                         Ok(None) => {
                             // agent_id 为 nil，等待角色注册，保持连接

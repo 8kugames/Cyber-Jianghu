@@ -356,6 +356,41 @@ impl Agent {
         );
     }
 
+    /// 注入规则验证回调到即时事件处理器
+    ///
+    /// 从 game_rules.available_actions 构建 Layer 1 验证闭包，
+    /// 注入到 ImmediateEventHandler 用于 RespondNow 发送前验证。
+    /// 需在初始注册、game_rules 更新、重连后调用。
+    pub(crate) async fn inject_rule_validator(
+        &self,
+        available_actions: &[cyber_jianghu_protocol::AvailableAction],
+    ) {
+        let Some(ref handler) = self.immediate_handler else {
+            return;
+        };
+        let action_names: Vec<String> = available_actions
+            .iter()
+            .map(|a| a.action.clone())
+            .collect();
+        let rule_validator: Arc<crate::component::immediate::RuleValidatorFn> = Arc::new(
+            move |action_type: &str| -> std::result::Result<(), String> {
+                if action_type == "idle" {
+                    return Ok(());
+                }
+                if !action_names.iter().any(|a| a == action_type) {
+                    return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
+                }
+                Ok(())
+            },
+        );
+        handler.set_rule_validator(rule_validator).await;
+        info!(
+            "Rule validator injected ({} actions) for agent '{}'",
+            available_actions.len(),
+            self.character_name()
+        );
+    }
+
     /// 获取记忆上下文字符串（用于 LLM）
     pub async fn get_memory_context(&self) -> String {
         if let Some(ref manager) = self.memory_manager {
