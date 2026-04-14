@@ -772,37 +772,33 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             // 带记忆上下文的决策回调（让记忆真正注入认知流程）
             let cognitive_engine_for_memory = cognitive_engine.clone();
 
-            let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+            let decision: DecisionCallback = Arc::new(move |tick_id: i64, agent_id: Uuid| {
                 let engine = cognitive_engine.clone();
-                let ws = ws.clone();
                 Box::pin(async move {
-                    match engine.think(&ws).await {
+                    match engine.think(tick_id, agent_id).await {
                         Ok(chain) => chain.final_intent,
                         Err(e) => {
                             error!("[cognitive] Decision failed: {}", e);
-                            Intent::new(ws.agent_id.unwrap_or_default(), ws.tick_id, "idle", None)
+                            Intent::new(agent_id, tick_id, "idle", None)
                                 .with_thought(format!("认知失败: {}", e))
                         }
                     }
                 })
             });
             let decision_with_memory: cyber_jianghu_agent::runtime::DecisionWithMemoryCallback =
-                Arc::new(move |ws: &WorldState, memory_context: &str| {
+                Arc::new(move |tick_id: i64, agent_id: Uuid, memory_context: &str| {
                     let engine = cognitive_engine_for_memory.clone();
-                    let ws = ws.clone();
                     let memory_context = memory_context.to_string();
                     Box::pin(async move {
-                        match engine.think_with_memory(&ws, &memory_context).await {
+                        match engine
+                            .think_with_memory(tick_id, agent_id, &memory_context)
+                            .await
+                        {
                             Ok(chain) => chain.final_intent,
                             Err(e) => {
                                 error!("[cognitive] Decision with memory failed: {}", e);
-                                Intent::new(
-                                    ws.agent_id.unwrap_or_default(),
-                                    ws.tick_id,
-                                    "idle",
-                                    None,
-                                )
-                                .with_thought(format!("认知失败: {}", e))
+                                Intent::new(agent_id, tick_id, "idle", None)
+                                    .with_thought(format!("认知失败: {}", e))
                             }
                         }
                     })
@@ -967,15 +963,14 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
                 // 带记忆上下文的决策回调（与 Cognitive 模式统一）
                 let cognitive_engine_for_memory = cognitive_engine.clone();
-                let decision: DecisionCallback = Arc::new(move |ws: &WorldState| {
+                let decision: DecisionCallback = Arc::new(move |tick_id: i64, agent_id: Uuid| {
                     let engine = cognitive_engine.clone();
-                    let ws = ws.clone();
                     Box::pin(async move {
-                        match engine.think(&ws).await {
+                        match engine.think(tick_id, agent_id).await {
                             Ok(chain) => chain.final_intent,
                             Err(e) => {
                                 error!("[claw-cognitive] Decision failed: {}", e);
-                                Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                Intent::new(Uuid::nil(), tick_id, "idle", None)
                                     .with_thought(format!("认知失败: {}", e))
                             }
                         }
@@ -983,16 +978,18 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 });
 
                 let decision_with_memory: cyber_jianghu_agent::runtime::DecisionWithMemoryCallback =
-                    Arc::new(move |ws: &WorldState, memory_context: &str| {
+                    Arc::new(move |tick_id: i64, agent_id: Uuid, memory_context: &str| {
                         let engine = cognitive_engine_for_memory.clone();
-                        let ws = ws.clone();
                         let memory_context = memory_context.to_string();
                         Box::pin(async move {
-                            match engine.think_with_memory(&ws, &memory_context).await {
+                            match engine
+                                .think_with_memory(tick_id, agent_id, &memory_context)
+                                .await
+                            {
                                 Ok(chain) => chain.final_intent,
                                 Err(e) => {
                                     error!("[claw-cognitive] Decision with memory failed: {}", e);
-                                    Intent::new(Uuid::nil(), ws.tick_id, "idle", None)
+                                    Intent::new(Uuid::nil(), tick_id, "idle", None)
                                         .with_thought(format!("认知失败: {}", e))
                                 }
                             }
@@ -1231,9 +1228,11 @@ fn start_claw_server(
     let (reconnect_tx, _) =
         tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
-    let mut ws_state = WsDecisionState::new();
+    let ws_state = WsDecisionState::new();
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
-    ws_state.spawn_validation_task((*shared_state).clone());
+    // 统一认知模式下外部 Intent 已被 server.rs 拦截，无需启动验证任务
+    // CAS 去重逻辑保留在 WsDecisionState 中作为通用安全机制
+    // ws_state.spawn_validation_task((*shared_state).clone());
 
     // Derive HTTP URL from WS URL
     let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);

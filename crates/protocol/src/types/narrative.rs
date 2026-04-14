@@ -352,11 +352,13 @@ pub struct AgentPerception {
 }
 
 /// 上次行动结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActionOutcome {
     /// 结果叙事
+    #[serde(default)]
     pub result_narrative: String,
     /// 是否成功
+    #[serde(default)]
     pub success: bool,
     /// 副作用
     #[serde(default)]

@@ -70,7 +70,6 @@ use crate::component::persona::LifespanCalculator;
 use crate::component::persona::dynamic_persona::ThreadSafePersona;
 use crate::component::social::{DialogueClient, DialogueEventHandler};
 use crate::component::social::{NarrativeGenerator, RelationshipStore};
-use crate::soul::actor::narrative::NarrativeEngine;
 use crate::soul::reflector::{RuleEngineValidator, Validator};
 
 // 重导出 review 模块的公共 API（已迁移至 soul::reflector::store）
@@ -79,7 +78,7 @@ pub type ReviewState = std::sync::Arc<ReviewStore>;
 
 // 重导出 context 模块的公共 API
 pub use context::{
-    AttributesGlimpse, ContextResponse, create_attributes_glimpse, create_narrative_engine,
+    AttributesGlimpse, ContextResponse, create_attributes_glimpse,
     generate_context_markdown_no_relationship,
 };
 
@@ -163,8 +162,6 @@ pub struct HttpApiState {
     pub narrative_generator: Option<Arc<NarrativeGenerator>>,
     /// 动态人设（可选）
     pub dynamic_persona: Option<Arc<ThreadSafePersona>>,
-    /// 叙事引擎，将数值属性转换为叙事化描述
-    pub narrative_engine: Option<Arc<NarrativeEngine>>,
     /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
     pub review_store: Option<Arc<ReviewStore>>,
     /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
@@ -185,8 +182,7 @@ pub struct HttpApiState {
     /// Tick 更新广播通道（用于 SSE 实时推送，仅发送 tick_id）
     pub tick_update_tx: broadcast::Sender<i64>,
     pub runtime_mode: crate::config::RuntimeMode,
-    pub narrative_config:
-        std::sync::Arc<RwLock<Option<crate::soul::actor::narrative::NarrativeConfig>>>,
+    pub narrative_config: std::sync::Arc<RwLock<Option<cyber_jianghu_protocol::NarrativeConfig>>>,
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
@@ -676,9 +672,6 @@ pub fn create_http_state(
     let intent_validator =
         Some(Arc::new(RuleEngineValidator::with_default_config()) as Arc<dyn Validator>);
 
-    // 初始化叙事引擎（用于属性叙事化描述）
-    let narrative_engine = Some(Arc::new(create_narrative_engine()));
-
     let narrative_config = {
         if let Some(home) = dirs::home_dir() {
             let narrative_path = home
@@ -686,7 +679,9 @@ pub fn create_http_state(
                 .join("config")
                 .join("narrative_config.json");
             if narrative_path.exists() {
-                crate::soul::actor::narrative::NarrativeConfig::from_file(&narrative_path).ok()
+                std::fs::read_to_string(&narrative_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
             } else {
                 None
             }
@@ -738,7 +733,6 @@ pub fn create_http_state(
         intent_validator,
         narrative_generator: None,
         dynamic_persona: None,
-        narrative_engine,
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Arc::new(RwLock::new(
             intent_history::IntentHistoryStore::open(
@@ -811,12 +805,6 @@ impl HttpApiState {
     /// 设置动态人设
     pub fn with_dynamic_persona(mut self, persona: Arc<ThreadSafePersona>) -> Self {
         self.dynamic_persona = Some(persona);
-        self
-    }
-
-    /// 设置叙事引擎
-    pub fn with_narrative_engine(mut self, engine: NarrativeEngine) -> Self {
-        self.narrative_engine = Some(Arc::new(engine));
         self
     }
 
