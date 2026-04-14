@@ -601,6 +601,16 @@ impl super::Agent {
                             None
                         };
 
+                        // 将 execution_narrative 持久化到上一轮的 soul_cycle_record
+                        // world_state.tick_id 是当前tick，narrative 是关于上一轮的执行
+                        if let Some(ref narrative) = execution_narrative
+                            && world_state.tick_id > 1
+                            && let Some(recorder) = self.soul_recorder().await
+                        {
+                            let prev_tick = world_state.tick_id - 1;
+                            recorder.update_dihun_narrative(prev_tick, narrative).await;
+                        }
+
                         let last_summary = world_state.last_execution_summary.as_ref();
                         match generator.generate(&world_state, last_summary, &recent, execution_narrative).await {
                             Ok(narrative_ctx) => {
