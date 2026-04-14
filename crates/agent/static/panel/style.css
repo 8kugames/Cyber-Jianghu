@@ -1539,7 +1539,7 @@ button[type="button"]:disabled {
 }
 
 .exp-dihun-narrative::before {
-    content: "narrative: ";
+    content: "上轮经历: ";
     font-weight: 500;
 }
 
