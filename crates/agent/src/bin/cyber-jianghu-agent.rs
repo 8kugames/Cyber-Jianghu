@@ -873,6 +873,22 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
             builder = builder.character_config(character.clone());
 
+            // 即时事件处理：Cognitive 模式启用（规则门控 + 轻量级 LLM）
+            {
+                let persona_info = cyber_jianghu_agent::soul::reflector::PersonaInfo {
+                    gender: character.gender.clone(),
+                    age: character.age,
+                    personality: character.personality.clone(),
+                    values: character.values.clone(),
+                };
+                builder = builder.with_immediate_handler(
+                    llm_container.clone(),
+                    persona_info,
+                    character.name.clone(),
+                );
+                info!("即时事件处理器已创建（CognitiveImmediateDecisionMaker）");
+            }
+
             let agent = builder.build();
 
             // 注入 LLM container 到 HttpApiState（支持热重载重建）

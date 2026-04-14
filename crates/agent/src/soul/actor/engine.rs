@@ -27,6 +27,7 @@ use super::chain::CognitiveChain;
 use super::prompt_cache::PromptCache;
 use super::stages::{
     CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
+    UnifiedCognitiveResponse,
 };
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use crate::component::llm::{LlmClient, LlmClientExt};
@@ -594,6 +595,193 @@ impl CognitiveEngine {
         } else {
             0
         }
+    }
+
+    // ========================================================================
+    // 统一认知方法（单次 LLM 调用）
+    // ========================================================================
+
+    /// 统一认知流程：单次 LLM 调用合并感知→动机→规划→决策
+    ///
+    /// 替代 2-stage 流程（Stage1: Perception+Motivation → Stage2: Planning+Decision）。
+    /// 单次 LLM 调用直接输出叙事意图，省去中间阶段的串行等待。
+    pub async fn think_unified(
+        &self,
+        tick_id: i64,
+        agent_id: Uuid,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+    ) -> Result<CognitiveChain> {
+        let (agent_name, persona) = {
+            let cfg = self.config.read().unwrap();
+            (cfg.agent_name.clone(), cfg.persona.clone())
+        };
+
+        let start_time = std::time::Instant::now();
+        info!("[{}-{}] 统一认知流程开始...", agent_name, tick_id);
+
+        let mut chain = CognitiveChain::from_persona(&persona, tick_id);
+
+        let persona_for_prompt = {
+            let mut cache = self.prompt_cache.write().unwrap();
+            cache.get_persona_simple().to_string()
+        };
+
+        let prompt = self.build_unified_prompt(
+            tick_id,
+            memory_context,
+            validation_feedback,
+            &persona_for_prompt,
+            &agent_name,
+        );
+
+        let response: UnifiedCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
+        let response_json = serde_json::to_string(&response)?;
+
+        // 构建 CognitiveChain 的 4 个 stage（从统一响应中提取）
+        let perception = StageOutput::with_metadata(
+            CognitiveStage::Perception,
+            format!(
+                "自身状态: {}\n环境: {}\n关键观察: {}",
+                response.self_status,
+                response.environment,
+                response.key_observations.join(", ")
+            ),
+            serde_json::json!({
+                "self_status": response.self_status,
+                "environment": response.environment,
+                "key_observations": response.key_observations,
+            }),
+        );
+        chain.add_stage(perception);
+
+        let motivation = StageOutput::with_metadata(
+            CognitiveStage::Motivation,
+            format!(
+                "主要驱动力: {} (强度: {}/10)",
+                response.primary_drive, response.drive_intensity
+            ),
+            serde_json::json!({
+                "primary_drive": response.primary_drive,
+                "drive_intensity": response.drive_intensity,
+            }),
+        );
+        chain.add_stage(motivation);
+
+        // Planning stage（简化：从 thought_process 提取）
+        let planning = StageOutput::with_metadata(
+            CognitiveStage::Planning,
+            response.thought_process.chars().take(100).collect(),
+            serde_json::json!({
+                "thought_process": response.thought_process,
+            }),
+        );
+        chain.add_stage(planning);
+
+        // Decision stage: 叙事意图
+        let intent = Intent::new(
+            agent_id,
+            tick_id,
+            "narrative",
+            Some(serde_json::json!({"narrative": response.narrative_action})),
+        )
+        .with_thought(response.thought_process.clone());
+
+        let decision = StageOutput::with_metadata(
+            CognitiveStage::Decision,
+            format!(
+                "思考: {}\n意图: {}",
+                response.thought_process, response.narrative_action
+            ),
+            serde_json::to_value(&response)?,
+        );
+        chain.add_stage(decision);
+        chain.final_intent = intent.clone();
+
+        thinking_log::log_llm(&agent_name, tick_id, "Unified", &prompt, &response_json);
+
+        chain.duration_ms = start_time.elapsed().as_millis() as u64;
+
+        self.push_summary_to_window(&chain, &intent);
+
+        info!(
+            "[{}-{}] 统一认知完成，耗时 {}ms",
+            agent_name, tick_id, chain.duration_ms
+        );
+
+        thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
+
+        Ok(chain)
+    }
+
+    /// 构建统一认知 prompt（单次 LLM 调用，合并 4 阶段）
+    fn build_unified_prompt(
+        &self,
+        tick_id: i64,
+        memory_context: &str,
+        validation_feedback: Option<&str>,
+        persona_desc: &str,
+        agent_name: &str,
+    ) -> String {
+        let feedback_section = match validation_feedback {
+            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            None => String::new(),
+        };
+
+        let memory_section = if memory_context.is_empty() {
+            String::new()
+        } else {
+            format!("\n### 当前状态与感知\n{memory_context}\n")
+        };
+
+        let summary_context = self.get_summary_context();
+
+        let cache = self.prompt_cache.read().unwrap();
+        let action_list = cache.get_actions_list().to_string();
+        drop(cache);
+
+        format!(
+            r#"# 认知与决策 (Tick {tick_id})
+{feedback_section}
+你是 {agent_name}。
+{persona}
+
+{memory_section}
+{summary_context}
+## 任务
+基于你的性格和当前状态，一步完成：感知 → 动机 → 规划 → 决策。
+
+1. 感知：你注意到什么？
+2. 动机：你最想做什么？
+3. 规划：你打算怎么做？
+4. 决策：用一句话描述你要做的事
+
+## 生存法则
+- 饥饿或口渴严重时，进食/饮水是最高优先级
+- 没有食物时：先拾取地上的食物/水
+- 背包和地面都没有时：移动到可能有资源的地点
+
+## 可做之事（参考）
+{action_list}
+
+## 输出格式
+{{
+  "self_status": "你的状态简述 (30字以内)",
+  "environment": "环境描述 (30字以内)",
+  "key_observations": ["观察1", "观察2"],
+  "primary_drive": "当前主要驱动力",
+  "drive_intensity": 5,
+  "thought_process": "完整思考过程：感知→动机→规划→决策 (200字以内)",
+  "narrative_action": "用自然语言描述你想做的事 (如'吃馒头充饥')"
+}}"#,
+            tick_id = tick_id,
+            agent_name = agent_name,
+            persona = persona_desc,
+            memory_section = memory_section,
+            summary_context = summary_context,
+            feedback_section = feedback_section,
+            action_list = action_list,
+        )
     }
 }
 

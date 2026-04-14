@@ -91,6 +91,8 @@ impl super::Agent {
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
         let immediate_handler_for_rules = self.immediate_handler.clone();
+        let llm_container_for_rules = self.actor_llm_container.clone();
+        let persona_for_rules = self.extract_persona();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
@@ -102,8 +104,42 @@ impl super::Agent {
                     let rule_validator =
                         super::Agent::build_rule_validator(&game_rules.available_actions);
                     let h = handler.clone();
+                    let h2 = handler.clone();
+
+                    // 更新决策规则 + 重建 CognitiveImmediateDecisionMaker
+                    let rules_update = game_rules
+                        .immediate_events
+                        .as_ref()
+                        .and_then(|e| e.decision_rules.clone());
+                    let llm_c = llm_container_for_rules.clone();
+                    let persona = persona_for_rules.clone();
+                    let agent_name = agent_name_for_callback.clone();
+
                     tokio::spawn(async move {
                         h.set_rule_validator(rule_validator).await;
+
+                        // 更新决策规则（数据驱动）
+                        if let Some(ref rules) = rules_update {
+                            h.update_rules(rules.clone()).await;
+                        }
+
+                        // 重建 CognitiveImmediateDecisionMaker（复用 LLM + persona）
+                        if let Some(ref llm_container) = llm_c {
+                            let rules = rules_update.unwrap_or_default();
+                            let new_maker = Arc::new(
+                                crate::component::immediate::CognitiveImmediateDecisionMaker::new(
+                                    llm_container.clone(),
+                                    persona,
+                                    agent_name,
+                                    rules,
+                                ),
+                            )
+                                as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
+                            let new_handler = h2.with_updated_decision_maker(new_maker);
+                            info!("game_rules_callback: 即时事件处理器已热更新");
+                            // Handler 的 Arc 字段通过 clone 共享，内部状态已正确更新
+                            let _ = new_handler;
+                        }
                     });
                 }
             }))
@@ -307,14 +343,29 @@ impl super::Agent {
         if let Some(ref immediate_events) = game_rules.immediate_events
             && let Some(ref handler) = self.immediate_handler
         {
-            use crate::component::immediate::RuleBasedImmediateDecisionMaker;
-            let new_maker = Arc::new(RuleBasedImmediateDecisionMaker::with_config(
-                immediate_events.clone(),
-            ))
-                as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
-            let new_handler = handler.with_updated_decision_maker(new_maker);
-            self.immediate_handler = Some(Arc::new(new_handler));
-            info!("即时事件处理器配置已更新");
+            // 更新决策规则（数据驱动）
+            if let Some(ref rules) = immediate_events.decision_rules {
+                handler.update_rules(rules.clone()).await;
+            }
+
+            // 重建 CognitiveImmediateDecisionMaker（复用 Agent 持有的 LLM + persona）
+            if let Some(ref llm_container) = self.actor_llm_container {
+                let rules = immediate_events.decision_rules.clone().unwrap_or_default();
+                let persona = self.extract_persona();
+                let agent_name = self.character_name().to_string();
+                let new_maker = Arc::new(
+                    crate::component::immediate::CognitiveImmediateDecisionMaker::new(
+                        llm_container.clone(),
+                        persona,
+                        agent_name,
+                        rules,
+                    ),
+                )
+                    as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
+                let new_handler = handler.with_updated_decision_maker(new_maker);
+                self.immediate_handler = Some(Arc::new(new_handler));
+                info!("即时事件处理器配置已更新（CognitiveImmediateDecisionMaker）");
+            }
         }
 
         // 绑定即时意图通道到 WebSocket 的 immediate_msg_tx
@@ -554,7 +605,11 @@ impl super::Agent {
                                     let content = e.metadata.get("content")
                                         .and_then(|v| v.as_str()).unwrap_or("");
                                     if content.is_empty() { None }
-                                    else { Some(format!("[有人对你说: {}]", content)) }
+                                    else {
+                                        let sender = e.metadata.get("from_agent_name")
+                                            .and_then(|v| v.as_str()).unwrap_or("有人");
+                                        Some(format!("[{}对你说: {}]", sender, content))
+                                    }
                                 })
                                 .collect();
                             if !deferred_ctx.is_empty() {

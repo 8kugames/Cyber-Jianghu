@@ -115,6 +115,33 @@ pub struct PlanDecisionResponse {
     pub narrative_action: String,
 }
 
+/// 统一认知响应（单次 LLM 调用合并所有 4 阶段）
+///
+/// 人魂合并为单次 LLM 调用：感知 → 动机 → 规划 → 决策一步到位。
+/// 输出 narrative_action（自然语言意图），天魂负责翻译为结构化 Intent。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnifiedCognitiveResponse {
+    // === 感知 ===
+    /// 自身状态摘要
+    pub self_status: String,
+    /// 环境观察
+    pub environment: String,
+    /// 关键观察
+    pub key_observations: Vec<String>,
+
+    // === 动机 ===
+    /// 当前主要驱动力
+    pub primary_drive: String,
+    /// 驱动强度 (1-10)
+    pub drive_intensity: u8,
+
+    // === 规划+决策 ===
+    /// 思考过程（完整的认知链：感知→动机→规划→决策）
+    pub thought_process: String,
+    /// 叙事意图（自然语言描述想要做的事）
+    pub narrative_action: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
