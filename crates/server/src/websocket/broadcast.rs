@@ -280,6 +280,13 @@ pub async fn broadcast_speak_to_location(
     let connections = state.connection_manager.read().await;
     let mut sent_count = 0;
 
+    // 查找发送者的 agent_name
+    let from_agent_name: String = connections
+        .values()
+        .find(|c| c.agent_id == from_agent_id)
+        .map(|c| c.agent_name.clone())
+        .unwrap_or_else(|| "某人".to_string());
+
     for (agent_id, node_id) in rows {
         if node_id != location {
             continue;
@@ -295,6 +302,7 @@ pub async fn broadcast_speak_to_location(
             description: format!("有人说: {}", content),
             metadata: serde_json::json!({
                 "from_agent_id": from_agent_id,
+                "from_agent_name": from_agent_name,
                 "content": content,
                 "channel": "speak",
                 "location": location,

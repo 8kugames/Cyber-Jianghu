@@ -73,7 +73,9 @@ pub fn build_game_rules_from_config(
 
     tracing::info!(
         "[OOC分级] always={:?}, adaptive={:?}, skip={:?}",
-        always_types, adaptive_types, skip_types
+        always_types,
+        adaptive_types,
+        skip_types
     );
 
     // 构建 intent_batch：ooc_risk 覆盖 types 列表，保留 yaml 中的其他配置
@@ -91,10 +93,7 @@ pub fn build_game_rules_from_config(
             .as_ref()
             .map(|ib| ib.max_intents_per_tick)
             .unwrap_or(5),
-        max_retries: intent_batch
-            .as_ref()
-            .map(|ib| ib.max_retries)
-            .unwrap_or(3),
+        max_retries: intent_batch.as_ref().map(|ib| ib.max_retries).unwrap_or(3),
         pipeline_execution_enabled: intent_batch
             .as_ref()
             .map(|ib| ib.pipeline_execution_enabled)

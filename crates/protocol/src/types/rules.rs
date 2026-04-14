@@ -302,59 +302,52 @@ impl Default for ReflectorNarrativeConfig {
 /// 以及 Agent 发送意图的路由策略
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImmediateEventConfig {
-    /// 冲突动作列表（执行这些动作时不立即回应）
-    #[serde(default = "default_conflict_actions")]
-    pub conflict_actions: Vec<String>,
-
-    /// 呼唤关键词列表（匹配时立即回应）
-    #[serde(default = "default_call_keywords")]
-    pub call_keywords: Vec<String>,
-
-    /// 最大呼唤内容长度（超过此长度不触发立即回应）
-    #[serde(default = "default_max_call_content_length")]
-    pub max_call_content_length: usize,
-
-    /// 默认回应内容
-    #[serde(default = "default_default_response")]
-    pub default_response: String,
-
     /// 即时路由动作列表（这些动作走即时通道，不占 tick 配额）
     ///
     /// Agent 发送这些类型的意图时，会通过 `immediate_msg_tx` 立即发送给服务器，
     /// 而不等待主 tick 周期。适用于说话类动作（speak, whisper）。
     #[serde(default = "default_immediate_routing_actions")]
     pub immediate_routing_actions: Vec<String>,
+
+    /// 即时决策规则（数据驱动，替代硬编码 call_keywords/default_response）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_rules: Option<ImmediateDecisionRules>,
 }
 
-fn default_conflict_actions() -> Vec<String> {
-    // 武侠主题默认值：移动和战斗类动作不立即回应
-    vec![
-        "move".into(),
-        "travel".into(),
-        "gather".into(),
-        "craft".into(),
-        "fight".into(),
-    ]
+/// 即时决策规则（数据驱动）
+///
+/// 控制即时事件的 TTL、LLM 调用超时、队列容量等参数。
+/// 所有参数均可通过 game_rules.yaml 外部配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImmediateDecisionRules {
+    /// 当前执行这些动作时，延迟响应
+    #[serde(default)]
+    pub conflict_actions: Vec<String>,
+    /// 事件 TTL（ms）：超过此时间的事件视为过期
+    #[serde(default = "default_event_ttl_ms")]
+    pub event_ttl_ms: u64,
+    /// LLM 认知调用超时（ms），应 < event_ttl_ms
+    #[serde(default = "default_cognitive_timeout_ms")]
+    pub cognitive_timeout_ms: u64,
+    /// 最大待处理事件队列容量
+    #[serde(default = "default_max_pending_events")]
+    pub max_pending_events: usize,
+    /// LLM 调用前的最大事件内容长度（截断长事件）
+    #[serde(default = "default_max_event_context_chars")]
+    pub max_event_context_chars: usize,
 }
 
-fn default_call_keywords() -> Vec<String> {
-    // 武侠主题默认值：传统呼唤方式
-    vec![
-        "喂".into(),
-        "哎".into(),
-        "这位".into(),
-        "侠客".into(),
-        "朋友".into(),
-    ]
+fn default_event_ttl_ms() -> u64 {
+    5000
 }
-
-fn default_max_call_content_length() -> usize {
-    50
+fn default_cognitive_timeout_ms() -> u64 {
+    4000
 }
-
-fn default_default_response() -> String {
-    // 武侠主题默认回应
-    "何事？".to_string()
+fn default_max_pending_events() -> usize {
+    32
+}
+fn default_max_event_context_chars() -> usize {
+    200
 }
 
 fn default_immediate_routing_actions() -> Vec<String> {
@@ -362,14 +355,23 @@ fn default_immediate_routing_actions() -> Vec<String> {
     vec!["speak".into(), "whisper".into()]
 }
 
+impl Default for ImmediateDecisionRules {
+    fn default() -> Self {
+        Self {
+            conflict_actions: vec![],
+            event_ttl_ms: default_event_ttl_ms(),
+            cognitive_timeout_ms: default_cognitive_timeout_ms(),
+            max_pending_events: default_max_pending_events(),
+            max_event_context_chars: default_max_event_context_chars(),
+        }
+    }
+}
+
 impl Default for ImmediateEventConfig {
     fn default() -> Self {
         Self {
-            conflict_actions: default_conflict_actions(),
-            call_keywords: default_call_keywords(),
-            max_call_content_length: default_max_call_content_length(),
-            default_response: default_default_response(),
             immediate_routing_actions: default_immediate_routing_actions(),
+            decision_rules: None,
         }
     }
 }

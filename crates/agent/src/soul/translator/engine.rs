@@ -370,7 +370,9 @@ impl IntentTranslator {
     ///
     /// 匹配策略：精确ID匹配 → 中文名→ID映射，均不匹配则保留原值（地魂驳回兜底）
     fn correct_action_ids(action_data: &mut serde_json::Value, world_state: &WorldState) {
-        let Some(obj) = action_data.as_object_mut() else { return };
+        let Some(obj) = action_data.as_object_mut() else {
+            return;
+        };
 
         // 构建 name → id 映射（双向查找表）
         let mut name_to_id: HashMap<&str, &str> = HashMap::new();
@@ -413,10 +415,7 @@ impl IntentTranslator {
 
             // 中文名 → 英文 ID
             if let Some(&corrected) = name_to_id.get(s) {
-                debug!(
-                    "[天魂] ID修正: {} \"{}\" → \"{}\"",
-                    key, s, corrected
-                );
+                debug!("[天魂] ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
                 *value = serde_json::Value::String(corrected.to_string());
             }
         }
