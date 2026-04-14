@@ -574,15 +574,21 @@ impl super::Agent {
                         let last_intents = last_intents_for_narrative.lock().unwrap().clone();
 
                         // 地魂生成上一轮叙事
+                        // first_tick: last_execution_summary 为 None 表示首轮（无历史数据）
+                        let first_tick = world_state.last_execution_summary.is_none();
                         let execution_narrative = if let Some(ref validator) = self.validator {
                             match validator
-                                .generate_execution_narrative(&last_intents, world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
-                                    total: 0,
-                                    succeeded: 0,
-                                    partial: 0,
-                                    failed: 0,
-                                    skipped: 0,
-                                }))
+                                .generate_execution_narrative(
+                                    &last_intents,
+                                    world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
+                                        total: 0,
+                                        succeeded: 0,
+                                        partial: 0,
+                                        failed: 0,
+                                        skipped: 0,
+                                    }),
+                                    first_tick,
+                                )
                                 .await
                             {
                                 Ok(n) => n,

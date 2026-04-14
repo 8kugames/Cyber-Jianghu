@@ -36,13 +36,15 @@ pub trait Validator: Send + Sync {
 
     /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
     ///
+    /// `first_tick` 为 true 时表示这是本轮首次生成叙事（无历史数据）。
     /// 默认返回 None（不生成叙事）。
     async fn generate_execution_narrative(
         &self,
         last_intents: &[crate::models::Intent],
         execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+        first_tick: bool,
     ) -> Result<Option<String>> {
-        let _ = (last_intents, execution_summary);
+        let _ = (last_intents, execution_summary, first_tick);
         Ok(None)
     }
 }
@@ -66,8 +68,9 @@ impl Validator for ReflectorSoul {
         &self,
         last_intents: &[crate::models::Intent],
         execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+        first_tick: bool,
     ) -> Result<Option<String>> {
-        self.generate_execution_narrative_impl(last_intents, execution_summary)
+        self.generate_execution_narrative_impl(last_intents, execution_summary, first_tick)
             .await
     }
 }
@@ -220,10 +223,13 @@ impl ReflectorSoul {
     ///
     /// 在收到 server WorldState（包含 last_execution_summary）后、调用 NarrativeGenerator 之前调用。
     /// 生成「上轮你做了什么，结果如何」的第一人称叙事。
+    ///
+    /// `first_tick` 为 true 时表示这是本轮首次生成叙事（无历史数据），应生成「初入江湖」类叙事。
     async fn generate_execution_narrative_impl(
         &self,
         last_intents: &[crate::models::Intent],
         execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
+        first_tick: bool,
     ) -> Result<Option<String>> {
         if last_intents.is_empty() {
             return Ok(None);
@@ -242,8 +248,42 @@ impl ReflectorSoul {
             })
             .collect();
 
-        let prompt = format!(
-            r#"你是叙事生成器。基于以下上轮意图和执行结果，生成一段简短的第一人称叙事，描述「上轮你做了什么，结果如何」。
+        // 根据是否首 tick 选择不同的 prompt
+        let prompt = if first_tick {
+            // 首 tick：生成「初入江湖」类叙事
+            format!(
+                r#"你是叙事生成器。这是本轮首次叙事，生成一段简短的第一人称叙事，描述「你踏入江湖的第一感受」。
+
+## 上轮提交的意图
+{}
+
+## 执行结果
+- 总计: {} 个意图
+- 成功: {}
+- 部分成功: {}
+- 失败: {}
+- 跳过: {}
+
+## 要求
+1. 用武侠风格的第一人称叙事
+2. 不要提及具体数字或百分比
+3. 不要提及「意图」「执行」「成功」等游戏术语
+4. 生成「初入江湖，踌躇满志」类叙事
+5. 简洁，一段话即可
+
+## 输出格式
+直接输出叙事文本，不要加引号或任何格式标记。"#,
+                intents_desc.join("\n"),
+                execution_summary.total,
+                execution_summary.succeeded,
+                execution_summary.partial,
+                execution_summary.failed,
+                execution_summary.skipped
+            )
+        } else {
+            // 非首 tick：生成上轮经历叙事
+            format!(
+                r#"你是叙事生成器。基于以下上轮意图和执行结果，生成一段简短的第一人称叙事，描述「上轮你做了什么，结果如何」。
 
 ## 上轮提交的意图
 {}
@@ -265,13 +305,14 @@ impl ReflectorSoul {
 
 ## 输出格式
 直接输出叙事文本，不要加引号或任何格式标记。"#,
-            intents_desc.join("\n"),
-            execution_summary.total,
-            execution_summary.succeeded,
-            execution_summary.partial,
-            execution_summary.failed,
-            execution_summary.skipped
-        );
+                intents_desc.join("\n"),
+                execution_summary.total,
+                execution_summary.succeeded,
+                execution_summary.partial,
+                execution_summary.failed,
+                execution_summary.skipped
+            )
+        };
 
         // 重试机制：最多 2 次
         let max_retries = 2;
