@@ -250,7 +250,7 @@ impl StateProcessor {
             let action_type = ActionType::new(intent.action_type.as_str());
             let action_type_display =
                 crate::game_data::registry::ActionRegistry::get(intent.action_type.as_str())
-                    .map(|config| config.description.clone());
+                    .map(|config| config.name.clone());
 
             let main_success = pipeline_results
                 .first()
