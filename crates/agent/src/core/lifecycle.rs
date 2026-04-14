@@ -90,13 +90,38 @@ impl super::Agent {
 
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
+        let immediate_handler_for_rules = self.immediate_handler.clone();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
                     "Agent '{}' received game rules update: version {}",
                     agent_name_for_callback, game_rules.version
                 );
-                // 注意：配置持久化由外部配置管理系统处理
+                // 重新注入 rule_validator（available_actions 可能已变更）
+                if let Some(ref handler) = immediate_handler_for_rules {
+                    let action_names: Vec<String> = game_rules
+                        .available_actions
+                        .iter()
+                        .map(|a| a.action.clone())
+                        .collect();
+                    let rule_validator: Arc<crate::component::immediate::RuleValidatorFn> =
+                        Arc::new(move |action_type: &str| -> std::result::Result<(), String> {
+                            if action_type == "idle" {
+                                return Ok(());
+                            }
+                            if !action_names.iter().any(|a| a == action_type) {
+                                return Err(format!(
+                                    "action_type '{}' 不在可用动作列表中",
+                                    action_type
+                                ));
+                            }
+                            Ok(())
+                        });
+                    let h = handler.clone();
+                    tokio::spawn(async move {
+                        h.set_rule_validator(rule_validator).await;
+                    });
+                }
             }))
             .await;
 
@@ -318,25 +343,7 @@ impl super::Agent {
         }
 
         // 注入规则验证回调到即时事件处理器（Layer 1: action_type 合法性）
-        if let Some(ref handler) = self.immediate_handler {
-            let available_actions = game_rules
-                .available_actions
-                .iter()
-                .map(|a| a.action.clone())
-                .collect::<Vec<String>>();
-            let rule_validator: Arc<crate::component::immediate::RuleValidatorFn> = Arc::new(
-                move |action_type: &str| -> std::result::Result<(), String> {
-                    if action_type == "idle" {
-                        return Ok(());
-                    }
-                    if !available_actions.iter().any(|a| a == action_type) {
-                        return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
-                    }
-                    Ok(())
-                },
-            );
-            handler.set_rule_validator(rule_validator).await;
-        }
+        self.inject_rule_validator(&game_rules.available_actions).await;
 
         // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
         // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
