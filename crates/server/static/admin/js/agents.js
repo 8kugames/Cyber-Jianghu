@@ -296,7 +296,7 @@ function renderExperiences(data) {
             return renderTickCard(exp, metadata, time);
         }
 
-        return renderLegacyTickCard(exp, time);
+        return '';
     }).join("");
 
     return '<div class="experience-list">' + expHtml + '</div>';
@@ -352,7 +352,7 @@ function renderTickCard(exp, metadata, time) {
 function renderServerSoulInline(label, data, type) {
     if (!data) return '';
     var html = '<div class="exp-' + type + '"><span class="exp-soul-label">' + label + '</span><div class="exp-soul-content">';
-
+    if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
     if (type === 'renhun') {
         if (data.narrative) html += '<div class="soul-text">' + escapeHtml(data.narrative) + '</div>';
         if (data.thought_log) html += '<div class="soul-thought">' + escapeHtml(data.thought_log) + '</div>';
@@ -378,43 +378,7 @@ function renderServerSoulInline(label, data, type) {
             html += '</div>';
         }
         if (data.reason) html += '<div class="exp-dihun-reason">' + escapeHtml(data.reason) + '</div>';
-        if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
-    }
 
-    html += '</div></div>';
-    return html;
-}
-
-// 渲染旧数据（兜底）
-function renderLegacyTickCard(exp, time) {
-    var html = '<div class="tick-card">' +
-        '<div class="tick-card-header">' +
-        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
-        '<span class="tick-world-time">' + escapeHtml((exp.soul_cycle_metadata && exp.soul_cycle_metadata.world_time) || '-') + '</span>' +
-        '<span class="tick-real-time">' + time + '</span>' +
-        '</div>' +
-        '<div class="tick-section">';
-
-    if (exp.thought_log) {
-        html += '<div class="exp-renhun"><span class="exp-soul-label">人魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(exp.thought_log) + '</span></div>';
-    }
-    if (exp.action_type) {
-        html += '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span>' +
-            '<span class="exp-soul-content">' + escapeHtml(exp.action_type) + '</span></div>';
-    }
-    if (exp.observer_thought) {
-        try {
-            var od = JSON.parse(exp.observer_thought);
-            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-dihun-content">' +
-                '<div class="exp-dihun-result">' + escapeHtml(od.result || '-') + '</div>' +
-                (od.reason ? '<div class="exp-dihun-reason">' + escapeHtml(od.reason) + '</div>' : '') +
-                (od.narrative ? '<div class="exp-dihun-narrative">' + escapeHtml(od.narrative) + '</div>' : '') +
-                '</div></div>';
-        } catch (e) {
-            html += '<div class="exp-dihun"><span class="exp-soul-label">地魂</span>' +
-                '<span class="exp-soul-content">' + escapeHtml(exp.observer_thought) + '</span></div>';
-        }
     }
 
     html += '</div></div>';
