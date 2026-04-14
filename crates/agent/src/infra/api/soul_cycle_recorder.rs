@@ -297,6 +297,42 @@ impl SoulCycleRecorder {
         }
     }
 
+    /// 更新 dihun_narrative（在感知阶段生成后回填）
+    ///
+    /// 在收到 WorldState 后、调用 NarrativeGenerator 之前调用。
+    /// 用于将地魂生成的执行叙事回填到上一轮的 soul_cycle_record。
+    pub async fn update_dihun_narrative(
+        &self,
+        tick_id: i64,
+        narrative: &str,
+    ) {
+        let conn = self
+            .conn
+            .lock()
+            .expect("soul_cycle_recorder lock not poisoned");
+
+        let result = conn.execute(
+            "UPDATE soul_cycle_record SET dihun_narrative = ?1 WHERE tick_id = ?2",
+            params![narrative, tick_id],
+        );
+
+        match result {
+            Ok(n) if n > 0 => tracing::debug!(
+                "[soul_cycle] Updated dihun_narrative for tick {}",
+                tick_id
+            ),
+            Ok(_) => tracing::warn!(
+                "[soul_cycle] No record found for tick {} when updating dihun_narrative",
+                tick_id
+            ),
+            Err(e) => tracing::warn!(
+                "[soul_cycle] Failed to update dihun_narrative for tick {}: {}",
+                tick_id,
+                e
+            ),
+        }
+    }
+
     /// 记录最终 Intent
     pub async fn record_final_intent(
         &self,
