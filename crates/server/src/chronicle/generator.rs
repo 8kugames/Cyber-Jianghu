@@ -315,7 +315,12 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         .build()
         .context("构建 HTTP 客户端失败")?;
 
-    let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
+    let base_url = config.base_url.trim_end_matches('/');
+    let url = if base_url.contains("/chat/completions") {
+        base_url.to_string()
+    } else {
+        format!("{}/chat/completions", base_url)
+    };
 
     tracing::debug!("LLM 请求 URL: {}", url);
     tracing::debug!("LLM 请求体: {}", request_body);
