@@ -99,24 +99,8 @@ impl super::Agent {
                 );
                 // 重新注入 rule_validator（available_actions 可能已变更）
                 if let Some(ref handler) = immediate_handler_for_rules {
-                    let action_names: Vec<String> = game_rules
-                        .available_actions
-                        .iter()
-                        .map(|a| a.action.clone())
-                        .collect();
-                    let rule_validator: Arc<crate::component::immediate::RuleValidatorFn> =
-                        Arc::new(move |action_type: &str| -> std::result::Result<(), String> {
-                            if action_type == "idle" {
-                                return Ok(());
-                            }
-                            if !action_names.iter().any(|a| a == action_type) {
-                                return Err(format!(
-                                    "action_type '{}' 不在可用动作列表中",
-                                    action_type
-                                ));
-                            }
-                            Ok(())
-                        });
+                    let rule_validator =
+                        super::Agent::build_rule_validator(&game_rules.available_actions);
                     let h = handler.clone();
                     tokio::spawn(async move {
                         h.set_rule_validator(rule_validator).await;
