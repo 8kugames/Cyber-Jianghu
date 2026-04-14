@@ -2,10 +2,9 @@
 # OpenClaw Cyber-Jianghu 叙事化状态描述配置
 # ============================================================================
 #
-# [DEPRECATED] 属性映射功能计划由地魂 LLM 叙事管道替代。
 # NarrativeGenerator 通过 LLM 将 WorldState 数值转换为叙事描述。
 # 当前 NarrativeEngine 仍作为 primary 使用于 Stage 1 prompt 构建，
-# 与 NarrativeGenerator (地魂) 是互补关系。待后续重构后此文件可移除。
+# 与 NarrativeGenerator (地魂) 是互补关系。
 #
 # 将数值状态转换为自然语言描述
 # thresholds: 按数值范围定义叙事描述

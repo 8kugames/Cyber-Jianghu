@@ -18,11 +18,6 @@ use uuid::Uuid;
 
 use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldEvent, WorldState};
 
-/// serde default helper: 缺省 true（fail-open，旧 server 不发字段时假定存活）
-fn default_true() -> bool {
-    true
-}
-
 // ============================================================================
 // 对话消息类型
 // ============================================================================
@@ -129,8 +124,6 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         world_building_rules: Option<WorldBuildingRules>,
         /// 角色是否存活（由服务器在连接时立即告知）
-        /// 缺省 true：旧 server 不发此字段时假定存活（fail-open）
-        #[serde(default = "default_true")]
         is_alive: bool,
         /// 角色名称（可选，首次连接时由服务器填充）
         #[serde(default, skip_serializing_if = "Option::is_none")]
