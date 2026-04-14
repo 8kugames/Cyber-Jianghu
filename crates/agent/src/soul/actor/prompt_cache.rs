@@ -11,7 +11,6 @@
 // ============================================================================
 
 use fnv::FnvHasher;
-use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
 use crate::component::persona::DynamicPersona;
@@ -41,9 +40,6 @@ pub struct PromptCache {
     cached_nearby_items: String,
     cached_nearby_items_hash: u64,
     last_update_tick: i64,
-
-    /// 最近执行的 action_type（最多 5 条，用于检测重复行为）
-    recent_actions: VecDeque<String>,
 }
 
 impl PromptCache {
@@ -64,7 +60,6 @@ impl PromptCache {
             cached_nearby_items: String::new(),
             cached_nearby_items_hash: 0,
             last_update_tick: -1,
-            recent_actions: VecDeque::with_capacity(5),
         }
     }
 
@@ -299,50 +294,6 @@ impl PromptCache {
     /// 获取最后更新的 tick_id（用于调试）
     pub fn last_update_tick(&self) -> i64 {
         self.last_update_tick
-    }
-
-    // ========================================================================
-    // 行为多样性追踪 (Q1)
-    // ========================================================================
-
-    /// 记录最近一次提交的 action_type
-    pub fn record_action(&mut self, action_type: &str) {
-        self.recent_actions.push_back(action_type.to_string());
-        if self.recent_actions.len() > 5 {
-            self.recent_actions.pop_front();
-        }
-    }
-
-    /// 检测重复行为并生成多样性提示
-    ///
-    /// 优先级: stealth 专项 (2次) > 通用重复 (3次相同非idle)
-    pub fn get_diversity_nudge(&self) -> Option<String> {
-        // Stealth 专项检测: 连续 2 次 stealth (优先于通用检测)
-        if self.recent_actions.len() >= 2 {
-            let recent_2: Vec<&String> = self.recent_actions.iter().rev().take(2).collect();
-            if recent_2.iter().all(|a| *a == "stealth") {
-                return Some(
-                    "【行为提醒】你已经连续处于潜行状态。潜行消耗体力且无法进食饮水，考虑恢复正常行动。".to_string()
-                );
-            }
-        }
-
-        // 通用重复检测: 连续 3 次相同非 idle 动作
-        if self.recent_actions.len() >= 3 {
-            let actions: Vec<&String> = self.recent_actions.iter().rev().take(3).collect();
-            if actions.iter().all(|a| *a == actions[0]) && actions[0] != "idle" {
-                return Some(format!(
-                    "【行为提醒】你已经连续多次执行'{}'动作。考虑尝试其他行为：\n\
-                     - 探索其他地点（移动到更远的地方）\n\
-                     - 与附近的人交流\n\
-                     - 检查并使用背包物品\n\
-                     - 观察环境或寻找新的目标",
-                    actions[0]
-                ));
-            }
-        }
-
-        None
     }
 }
 

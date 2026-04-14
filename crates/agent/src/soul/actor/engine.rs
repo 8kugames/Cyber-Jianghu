@@ -162,12 +162,6 @@ impl CognitiveEngine {
         );
     }
 
-    /// 记录最近一次 action_type（用于行为多样性检测）
-    pub fn record_action(&self, action_type: &str) {
-        let mut cache = self.prompt_cache.write().unwrap();
-        cache.record_action(action_type);
-    }
-
     pub async fn think(&self, world_state: &WorldState) -> Result<CognitiveChain> {
         self.think_with_feedback(world_state, None).await
     }
@@ -455,7 +449,6 @@ impl CognitiveEngine {
         let adjacent_locations = cache.get_adjacent().to_string();
         let entities_str = cache.get_entities().to_string();
         let items_str = cache.get_nearby_items().to_string();
-        let diversity_nudge = cache.get_diversity_nudge().unwrap_or_default();
         drop(cache); // 释放读锁
 
         // 【Q2: 远端地点提示】独立于缓存逻辑，直接从 WorldState 判断
@@ -572,7 +565,7 @@ impl CognitiveEngine {
 ### 环境
 - 附近的人: {entities}
 - 地上的物品: {items}
-{diversity_nudge}{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
+{memory_section}{recent_speeches_section}{private_dialogue_section}{summary_context}
 ## 任务
 分析你感知到的世界状态，并基于你的性格说明内在驱动力。
 
@@ -595,7 +588,6 @@ impl CognitiveEngine {
             adjacent_locations = adjacent_locations,
             location_constraint = location_constraint,
             distant_destinations = distant_destinations,
-            diversity_nudge = diversity_nudge,
             time_info = time_info,
             entities = entities_str,
             items = items_str,

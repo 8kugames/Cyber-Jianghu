@@ -2,24 +2,21 @@
 // 认知验证器 (Cognitive Validator - Gatekeeper)
 // ============================================================================
 //
-// 验证认知链质量，拒绝"偷懒"行为，强制深度思考
+// 验证认知链结构完整性，确保 LLM 输出了有效的内容。
 //
-// 注意：本验证器是确定性规则引擎（5 条规则），不调用 LLM。
+// 注意：本验证器是确定性规则引擎，不调用 LLM。
 // 与 RuleEngine 的区别：RuleEngine 验证意图合规性（冷却/资源），
-// CognitiveValidator 验证认知链的思考质量（完整性/连贯性）。
+// CognitiveValidator 验证认知链的结构完整性（阶段齐全/内容非空/无重复）。
 //
 // 接入点：decision.rs 的 cognitive_decision_with_retry() 重试循环
 //
-// 5 条验证规则：
+// 验证规则：
 // - R1 完整性：4 个阶段必须齐全
 // - R2 长度：每阶段内容 >= min_thought_length（默认 20 字符）
-// - R3 状态引用：感知阶段必须引用具体 WorldState 关键词
-// - R4 重复检测：相邻阶段内容不得过于相似
-// - R5 连贯性：决策阶段必须引用前面的思考结果（"因为/由于/根据/基于"）
+// - R3 重复检测：相邻阶段内容不得过于相似
 // ============================================================================
 
 use crate::soul::actor::{CognitiveChain, CognitiveStage};
-use anyhow::Result;
 
 /// 认知验证结果
 #[derive(Debug, Clone)]
@@ -54,36 +51,23 @@ impl CognitiveValidationResult {
 
 /// 认知验证器 (Gatekeeper)
 ///
-/// 验证认知链质量，确保 LLM 进行了深度思考
+/// 验证认知链结构完整性
 pub struct CognitiveValidator {
-    /// Agent 人设（预留：基于人设的验证逻辑）
-    #[allow(dead_code)]
-    agent_persona: String,
     /// 最小思考长度阈值
     min_thought_length: usize,
-    /// 是否启用严格模式
-    strict_mode: bool,
 }
 
 impl CognitiveValidator {
     /// 创建新的认知验证器
-    pub fn new(agent_persona: String) -> Self {
+    pub fn new(_agent_persona: String) -> Self {
         Self {
-            agent_persona,
             min_thought_length: 20,
-            strict_mode: true,
         }
     }
 
     /// 设置最小思考长度阈值
     pub fn with_min_thought_length(mut self, length: usize) -> Self {
         self.min_thought_length = length;
-        self
-    }
-
-    /// 设置是否启用严格模式
-    pub fn with_strict_mode(mut self, strict: bool) -> Self {
-        self.strict_mode = strict;
         self
     }
 
@@ -99,18 +83,8 @@ impl CognitiveValidator {
             return result;
         }
 
-        // 规则 3: 检查是否有对 WorldState 的引用
-        if let Some(result) = self.check_state_reference(chain) {
-            return result;
-        }
-
-        // 规则 4: 检测重复模式
+        // 规则 3: 检测重复模式
         if let Some(result) = self.detect_repetition(chain) {
-            return result;
-        }
-
-        // 规则 5: 检查推理连贯性
-        if let Some(result) = self.check_coherence(chain) {
             return result;
         }
 
@@ -173,33 +147,7 @@ impl CognitiveValidator {
         None
     }
 
-    /// 规则 3: 检查是否有对 WorldState 的引用
-    fn check_state_reference(&self, chain: &CognitiveChain) -> Option<CognitiveValidationResult> {
-        // 检查感知阶段是否引用了状态关键词
-        let perception = chain.get_stage(CognitiveStage::Perception)?;
-
-        // 关键词列表：应该出现在感知中的词
-        let state_keywords = [
-            "hp", "HP", "生命", "hunger", "饥饿", "thirst", "口渴", "stamina", "体力", "背包",
-            "物品", "附近", "周围", "位置", "地点",
-        ];
-
-        let perception_lower = perception.content.to_lowercase();
-        let has_state_reference = state_keywords
-            .iter()
-            .any(|keyword| perception_lower.contains(keyword.to_lowercase().as_str()));
-
-        if !has_state_reference {
-            return Some(CognitiveValidationResult::rejected(
-                "感知阶段未引用具体的世界状态".to_string(),
-                "请在感知阶段明确描述你的 HP、饥饿、口渴、体力等状态".to_string(),
-            ));
-        }
-
-        None
-    }
-
-    /// 规则 4: 检测重复模式
+    /// 规则 3: 检测重复模式
     fn detect_repetition(&self, chain: &CognitiveChain) -> Option<CognitiveValidationResult> {
         // 检查相邻阶段的内容是否过于相似（可能的复制粘贴）
         let stages = &chain.stages;
@@ -239,149 +187,6 @@ impl CognitiveValidator {
         }
 
         None
-    }
-
-    /// 规则 5: 检查推理连贯性
-    fn check_coherence(&self, chain: &CognitiveChain) -> Option<CognitiveValidationResult> {
-        // 检查决策阶段是否引用了前面的阶段
-        let decision = chain.get_stage(CognitiveStage::Decision)?;
-
-        // 检查是否引用了动机或规划
-        let motivation = chain.get_stage(CognitiveStage::Motivation);
-        let planning = chain.get_stage(CognitiveStage::Planning);
-
-        let decision_lower = decision.content.to_lowercase();
-
-        // 简单检查：决策是否提到了"因为"或"根据"
-        let has_reasoning = decision_lower.contains("因为")
-            || decision_lower.contains("由于")
-            || decision_lower.contains("根据")
-            || decision_lower.contains("基于");
-
-        if !has_reasoning {
-            // 检查是否在 content 中有对其他阶段的引用
-            let references_previous = motivation
-                .as_ref()
-                .map(|m| {
-                    decision_lower
-                        .contains(&m.content.to_lowercase().chars().take(5).collect::<String>())
-                        || decision_lower.contains(
-                            &m.content
-                                .to_lowercase()
-                                .chars()
-                                .take(10)
-                                .collect::<String>(),
-                        )
-                })
-                .unwrap_or(false)
-                || planning
-                    .as_ref()
-                    .map(|p| {
-                        decision_lower
-                            .contains(&p.content.to_lowercase().chars().take(5).collect::<String>())
-                            || decision_lower.contains(
-                                &p.content
-                                    .to_lowercase()
-                                    .chars()
-                                    .take(10)
-                                    .collect::<String>(),
-                            )
-                    })
-                    .unwrap_or(false);
-
-            if !references_previous {
-                return Some(CognitiveValidationResult::rejected(
-                    "决策阶段未引用前面的思考结果".to_string(),
-                    "请在决策中说明你的选择是如何基于感知、动机和规划的".to_string(),
-                ));
-            }
-        }
-
-        None
-    }
-}
-
-// ============================================================================
-// 带重试的认知引擎
-// ============================================================================
-
-/// 带重试机制的认知引擎包装器
-///
-/// 当验证失败时，自动重试最多指定次数
-pub struct CognitiveEngineWithRetry {
-    max_retries: usize,
-    retry_delay_ms: u64,
-}
-
-impl CognitiveEngineWithRetry {
-    /// 创建新的带重试的认知引擎
-    pub fn new(max_retries: usize) -> Self {
-        Self {
-            max_retries,
-            retry_delay_ms: 500,
-        }
-    }
-
-    /// 设置重试延迟
-    pub fn with_retry_delay(mut self, delay_ms: u64) -> Self {
-        self.retry_delay_ms = delay_ms;
-        self
-    }
-
-    /// 执行带重试的认知流程
-    pub async fn think_with_retry<F, Fut>(
-        &self,
-        mut think_fn: F,
-    ) -> Result<crate::soul::actor::CognitiveChain>
-    where
-        F: FnMut() -> Fut,
-        Fut: std::future::Future<Output = Result<crate::soul::actor::CognitiveChain>>,
-    {
-        let mut last_error = None;
-
-        for attempt in 0..=self.max_retries {
-            let chain = think_fn().await;
-
-            match chain {
-                Ok(c) => {
-                    // 验证认知链
-                    let validator = CognitiveValidator::new(c.persona.clone());
-                    let result = validator.validate(&c);
-
-                    if result.is_valid {
-                        return Ok(c);
-                    }
-
-                    // 验证失败
-                    if attempt < self.max_retries {
-                        let reason = result.reason.clone().unwrap_or_default();
-                        tracing::warn!(
-                            "认知验证失败 (尝试 {}/{}): {}",
-                            attempt + 1,
-                            self.max_retries + 1,
-                            reason
-                        );
-
-                        // 等待一段时间后重试
-                        tokio::time::sleep(std::time::Duration::from_millis(self.retry_delay_ms))
-                            .await;
-                    } else {
-                        let reason = result.reason.clone().unwrap_or_default();
-                        tracing::error!("认知验证失败，已达最大重试次数: {}", reason);
-                        return Err(anyhow::anyhow!("认知验证失败: {}", reason));
-                    }
-                }
-                Err(e) => {
-                    last_error = Some(e);
-                    if attempt < self.max_retries {
-                        tokio::time::sleep(std::time::Duration::from_millis(self.retry_delay_ms))
-                            .await;
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("认知流程失败")))
     }
 }
 
