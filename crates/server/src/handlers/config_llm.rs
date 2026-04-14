@@ -121,10 +121,10 @@ pub async fn get_llm_status() -> Json<serde_json::Value> {
 
     // 尝试连接检测
     let base_url = config_wrapper.data.base_url.trim_end_matches('/');
-    let check_url = if base_url.ends_with("/v1") || base_url.ends_with("/v1/chat") {
-        format!("{}/chat/completions", base_url.trim_end_matches('/'))
+    let check_url = if base_url.contains("/chat/completions") {
+        base_url.to_string()
     } else {
-        format!("{}/v1/chat/completions", base_url)
+        format!("{}/chat/completions", base_url)
     };
 
     let client = reqwest::Client::builder()

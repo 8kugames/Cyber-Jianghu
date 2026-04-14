@@ -407,7 +407,12 @@ impl DirectLlmClient {
     async fn send_request(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
         let client = self.build_http_client()?;
         let base_url = self.config.get_base_url()?;
-        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        let base_url = base_url.trim_end_matches('/');
+        let url = if base_url.contains("/chat/completions") {
+            base_url.to_string()
+        } else {
+            format!("{}/chat/completions", base_url)
+        };
 
         debug!("Calling OpenAI-compatible API: {}", url);
         debug!("Request model: {}", request.model);

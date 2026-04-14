@@ -220,6 +220,17 @@
             color: #4caf50;
         }
 
+        .status-generating {
+            background: rgba(33, 150, 243, 0.2);
+            color: #2196f3;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
         /* Detail Modal */
         .modal {
             display: none;
@@ -485,14 +496,36 @@
 
         async function loadChronicles() {
             try {
-                const res = await fetch(`${API_BASE}/chronicles`, { headers: getHeaders() });
-                if (res.status === 401) {
+                // 并行加载 chronicles 和 pending 任务
+                const [chroniclesRes, pendingRes] = await Promise.all([
+                    fetch(`${API_BASE}/chronicles`, { headers: getHeaders() }),
+                    fetch(`${API_BASE}/chronicles/pending`, { headers: getHeaders() }).catch(() => null)
+                ]);
+
+                if (chroniclesRes.status === 401) {
                     alert('请先登录');
                     window.location.href = '/admin/';
                     return;
                 }
-                const data = await res.json();
-                chronicles = data.chronicles || [];
+
+                const chroniclesData = await chroniclesRes.json();
+                chronicles = chroniclesData.chronicles || [];
+
+                // 构建 pending 任务映射: chronicle_id -> task info
+                let pendingMap = {};
+                if (pendingRes && pendingRes.ok) {
+                    const pendingData = await pendingRes.json();
+                    for (const task of (pendingData.tasks || [])) {
+                        pendingMap[task.chronicle_id] = task;
+                    }
+                }
+
+                // 将 pending 信息注入到 chronicles
+                chronicles = chronicles.map(c => ({
+                    ...c,
+                    _pending: pendingMap[c.chronicle_id] || null
+                }));
+
                 renderChronicles(chronicles);
             } catch (e) {
                 document.getElementById('chronicles-container').innerHTML =
@@ -540,7 +573,7 @@
                         </div>
                     </div>
                     <div class="chronicle-preview">${escapeHtml(c.summary_preview)}</div>
-                    <span class="chronicle-status status-${c.status}">${statusText(c.status)}</span>
+                    <span class="chronicle-status status-${getChronicleStatus(c)}">${getChronicleStatusText(c)}</span>
                 </div>
             `).join('');
         }
@@ -548,10 +581,36 @@
         function statusText(status) {
             switch(status) {
                 case 'template': return '模板生成';
-                case 'llm': return 'LLM 生成中';
+                case 'llm': return 'LLM 版本';
                 case 'both': return '完整版';
                 default: return status;
             }
+        }
+
+        // 获取 chronicle 的实际状态（考虑 pending 任务）
+        function getChronicleStatus(c) {
+            if (c._pending) {
+                const task = c._pending;
+                // 如果有进行中的 supplement 任务，显示 generating
+                if (task.supplement_status === 'generating' || task.supplement_status === 'pending') {
+                    return 'generating';
+                }
+            }
+            return c.status;
+        }
+
+        // 获取 chronicle 状态显示文本
+        function getChronicleStatusText(c) {
+            if (c._pending) {
+                const task = c._pending;
+                if (task.supplement_status === 'generating') {
+                    return 'LLM 生成中';
+                }
+                if (task.supplement_status === 'pending') {
+                    return '等待生成';
+                }
+            }
+            return statusText(c.status);
         }
 
         function escapeHtml(text) {

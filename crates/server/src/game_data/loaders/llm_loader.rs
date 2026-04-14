@@ -8,7 +8,7 @@ use std::sync::RwLock;
 
 use super::config_format::load_config;
 
-/// LLM 配置
+/// LLM 配置（与 LlmConfigWrapper.data 保持一致）
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct LlmConfig {
     /// 是否启用 LLM 生成
@@ -25,6 +25,21 @@ pub struct LlmConfig {
     pub temperature: f64,
     /// 最大 token 数
     pub max_tokens: i32,
+}
+
+/// 完整 LLM 配置包装（与 config_llm.rs 中的 LlmConfigWrapper 保持一致）
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct LlmConfigWrapper {
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub meta: Option<LlmConfigMeta>,
+    pub data: LlmConfig,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct LlmConfigMeta {
+    pub created_at: Option<String>,
+    pub author: Option<String>,
 }
 
 impl Default for LlmConfig {
@@ -45,6 +60,10 @@ impl Default for LlmConfig {
 static LLM_CONFIG_CACHE: RwLock<Option<LlmConfig>> = RwLock::new(None);
 
 /// 加载 LLM 配置（带缓存）
+///
+/// 支持两种格式：
+/// 1. LlmConfigWrapper 格式（含 version/description/meta 包装）
+/// 2. 直接 LlmConfig 格式（向后兼容）
 pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
     // 尝试从缓存读取
     if let Some(cached) = LLM_CONFIG_CACHE.read().unwrap().as_ref() {
@@ -55,10 +74,22 @@ pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
     let json_path = config_dir.join("llm.json");
 
     let config = if config_path.exists() {
-        load_config(&config_path)
-            .context(format!("加载 LLM 配置失败: {}", config_path.display()))?
+        match load_config::<_, LlmConfigWrapper>(&config_path) {
+            Ok(wrapper) => wrapper.data,
+            Err(_) => {
+                // 尝试直接解析 LlmConfig（向后兼容旧格式）
+                load_config::<_, LlmConfig>(&config_path)
+                    .context(format!("加载 LLM 配置失败: {}", config_path.display()))?
+            }
+        }
     } else if json_path.exists() {
-        load_config(&json_path).context(format!("加载 LLM 配置失败: {}", json_path.display()))?
+        match load_config::<_, LlmConfigWrapper>(&json_path) {
+            Ok(wrapper) => wrapper.data,
+            Err(_) => {
+                load_config::<_, LlmConfig>(&json_path)
+                    .context(format!("加载 LLM 配置失败: {}", json_path.display()))?
+            }
+        }
     } else {
         // 返回默认配置
         LlmConfig::default()
