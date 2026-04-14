@@ -13,7 +13,9 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::component::immediate::{ImmediateEventHandler, RuleBasedImmediateDecisionMaker};
+use crate::component::immediate::{
+    CognitiveImmediateDecisionMaker, ImmediateDecisionMaker, ImmediateEventHandler,
+};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::LifespanCalculator;
@@ -23,7 +25,7 @@ use crate::config::{CharacterConfig, Config, DeviceConfig};
 use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::{NarrativeGenerator, ReflectorSoul, Validator};
+use crate::soul::reflector::{NarrativeGenerator, PersonaInfo, ReflectorSoul, Validator};
 use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
@@ -234,32 +236,38 @@ impl AgentBuilder {
         self
     }
 
-    /// 启用即时事件处理
+    /// 启用即时事件处理（认知决策模式）
     ///
-    /// 创建即时事件处理器，用于处理 Server 下发的 ImmediateEvent（speak/whisper 等）
-    pub fn with_immediate_handler(mut self) -> Self {
-        use crate::component::immediate::ImmediateDecisionMaker;
+    /// 创建 CognitiveImmediateDecisionMaker（规则门控 + 轻量级 LLM），
+    /// 用于处理 Server 下发的 ImmediateEvent（speak/whisper 等）。
+    /// 首次激活：此方法在 Part 3 之前从未被调用。
+    pub fn with_immediate_handler(
+        mut self,
+        llm_container: LlmClientContainer,
+        persona: PersonaInfo,
+        agent_name: String,
+    ) -> Self {
         use tokio::sync::mpsc;
 
         // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 immediate_msg_tx）
         let (tx, _rx) = mpsc::channel(32);
 
-        // 从配置中获取即时事件配置，不存在则使用默认值
-        let immediate_config = self
+        // 从配置中获取决策规则
+        let rules = self
             .config
             .game_rules
             .as_ref()
             .and_then(|g| g.immediate_events.as_ref())
-            .cloned()
+            .and_then(|e| e.decision_rules.clone())
             .unwrap_or_default();
 
-        // 创建基于规则的决策器（使用配置）
+        // 创建认知决策器
         let decision_maker: Arc<dyn ImmediateDecisionMaker> = Arc::new(
-            RuleBasedImmediateDecisionMaker::with_config(immediate_config),
+            CognitiveImmediateDecisionMaker::new(llm_container, persona, agent_name, rules.clone()),
         );
 
-        // 创建处理器
-        let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx));
+        // 创建处理器（含数据驱动规则）
+        let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx, rules));
 
         self.immediate_handler = Some(handler);
         self

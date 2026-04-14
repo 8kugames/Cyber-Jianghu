@@ -78,12 +78,7 @@ pub fn cognitive_decision_with_chain(
 
             for attempt in 0..=max_retries {
                 match engine
-                    .think_with_memory_and_feedback(
-                        tick_id,
-                        agent_id,
-                        &memory_context,
-                        feedback.as_deref(),
-                    )
+                    .think_unified(tick_id, agent_id, &memory_context, feedback.as_deref())
                     .await
                 {
                     Ok(chain) => {
