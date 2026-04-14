@@ -80,6 +80,7 @@ impl ActionRegistry {
                         .as_ref()
                         .map(|v| v.required_fields.clone())
                         .unwrap_or_default(),
+                    ooc_risk: config.ooc_risk.clone(),
                 })
             })
             .collect()

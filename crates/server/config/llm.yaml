@@ -4,10 +4,10 @@ meta:
   created_at: 2026-04-11
   author: Cyber-Jianghu
 data:
-  enabled: true
-  provider: ollama
-  base_url: http://host.docker.internal:11434/v1
-  api_key: omlx-hs8nchuqx6eigger
-  model: gemma-4-e4b-it-mxfp8
+  enabled: false
+  provider: openai_compatible
+  base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+  api_key: ***REDACTED_KEY_ARK***
+  model: ark-code-latest
   temperature: 0.8
-  max_tokens: 4096
+  max_tokens: 8196

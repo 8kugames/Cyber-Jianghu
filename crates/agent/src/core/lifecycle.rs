@@ -625,7 +625,7 @@ impl super::Agent {
                         }
 
                         let last_summary = world_state.last_execution_summary.as_ref();
-                        match generator.generate(&world_state, last_summary, &recent, execution_narrative).await {
+                        match generator.generate(&world_state, last_summary, &recent, execution_narrative.clone()).await {
                             Ok(narrative_ctx) => {
                                 // 将 NarrativeContext 的核心内容注入 memory_context
                                 let narrative_section = format!(
@@ -659,8 +659,13 @@ impl super::Agent {
                                     ));
                                 }
 
-                                // 上一轮行动结果（last_outcome）
-                                if let Some(ref outcome) = narrative_ctx.last_outcome {
+                                // 上一轮行动结果（优先使用原始 execution_narrative，不经 LLM 二次加工）
+                                if let Some(ref exec_narr) = execution_narrative {
+                                    memory_context.push_str(&format!(
+                                        "\n### 上一轮行动结果\n{}\n",
+                                        exec_narr
+                                    ));
+                                } else if let Some(ref outcome) = narrative_ctx.last_outcome {
                                     memory_context.push_str(&format!(
                                         "\n### 上一轮行动结果\n{}\n",
                                         outcome.result_narrative
