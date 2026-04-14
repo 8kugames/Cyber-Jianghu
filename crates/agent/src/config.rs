@@ -170,7 +170,7 @@ pub enum CharacterStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CharacterConfig {
     /// 服务器分配的角色 ID（注册后由服务器返回）
-    #[serde(skip_serializing_if = "Option::is_none", alias = "user_id")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<Uuid>,
 
     // === 基本信息 ===
