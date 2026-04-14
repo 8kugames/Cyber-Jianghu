@@ -298,8 +298,8 @@ function renderExperiences(data) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
         var metadata = exp.soul_cycle_metadata;
 
-        // 优先使用三魂完整链路渲染
-        if (metadata && metadata.cycles && metadata.cycles.length > 0) {
+        // 优先使用三魂完整链路渲染（cycles 数组存在且非空）
+        if (metadata?.cycles?.length > 0) {
             return renderTickCard(exp, metadata, time);
         }
 

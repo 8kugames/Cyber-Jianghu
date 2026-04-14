@@ -67,6 +67,7 @@ async function logout() {
     }
     localStorage.removeItem("admin_token");
     authToken = null;
+    authVerified = false;
     window.location.href = '/admin';
 }
 
