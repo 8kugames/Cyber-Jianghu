@@ -18,6 +18,64 @@ use serde::{Deserialize, Serialize};
 // 公共工具函数
 // ============================================================================
 
+/// 从本地文件加载天魂翻译 few-shot 示例
+pub fn load_translator_few_shot_examples() -> String {
+    let examples_path = dirs::home_dir()
+        .map(|h| h.join(".cyber-jianghu").join("config").join("translator_examples.json"))
+        .unwrap_or_else(|| std::path::PathBuf::from(""));
+
+    if !examples_path.exists() {
+        tracing::debug!("本地 translator_examples.json 不存在，返回内置默认示例");
+        return get_default_few_shot_examples().to_string();
+    }
+
+    match std::fs::read_to_string(&examples_path) {
+        Ok(json) => {
+            // JSON 格式: { "examples": "..." } 或直接是字符串
+            match serde_json::from_str::<serde_json::Value>(&json) {
+                Ok(value) => {
+                    if let Some(s) = value.get("examples").and_then(|v| v.as_str()) {
+                        tracing::debug!("从 {:?} 加载了翻译示例", examples_path);
+                        s.to_string()
+                    } else if let Some(s) = value.as_str() {
+                        s.to_string()
+                    } else {
+                        tracing::warn!("translator_examples.json 格式无效，使用默认示例");
+                        get_default_few_shot_examples().to_string()
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("解析 translator_examples.json 失败: {}，使用默认示例", e);
+                    get_default_few_shot_examples().to_string()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("读取 translator_examples.json 失败: {}，使用默认示例", e);
+            get_default_few_shot_examples().to_string()
+        }
+    }
+}
+
+/// 内置默认 few-shot 示例（当外部文件不存在时使用）
+fn get_default_few_shot_examples() -> &'static str {
+    r#"### 示例：多动作拆分
+输入：「捡起馒头和井水，大口吃喝」
+推理：先拾取(pickup)，再吃喝(eat/drink)
+输出：
+[{"action_type": "pickup", "action_data": {"item_id": "mantou", "quantity": 1}},
+ {"action_type": "pickup", "action_data": {"item_id": "water", "quantity": 1}},
+ {"action_type": "eat", "action_data": {"item_id": "mantou"}},
+ {"action_type": "drink", "action_data": {"item_id": "water"}}]
+
+### 示例：多动作拆分
+输入：「走去客栈大堂然后吃点东西」
+推理：先移动(move)，再进食(eat)
+输出：
+[{"action_type": "move", "action_data": {"target_location": "inn_main_hall"}},
+ {"action_type": "eat", "action_data": {"item_id": "mantou"}}]"#
+}
+
 /// 从本地文件加载可用动作列表
 pub fn load_available_actions_from_file() -> Vec<AvailableAction> {
     let actions_path = dirs::home_dir()
