@@ -362,19 +362,19 @@ impl Agent {
     pub(crate) fn build_rule_validator(
         available_actions: &[cyber_jianghu_protocol::AvailableAction],
     ) -> Arc<crate::component::immediate::RuleValidatorFn> {
-        let action_names: Vec<String> = available_actions
-            .iter()
-            .map(|a| a.action.clone())
-            .collect();
-        Arc::new(move |action_type: &str| -> std::result::Result<(), String> {
-            if action_type == "idle" {
-                return Ok(());
-            }
-            if !action_names.iter().any(|a| a == action_type) {
-                return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
-            }
-            Ok(())
-        })
+        let action_names: Vec<String> =
+            available_actions.iter().map(|a| a.action.clone()).collect();
+        Arc::new(
+            move |action_type: &str| -> std::result::Result<(), String> {
+                if action_type == "idle" {
+                    return Ok(());
+                }
+                if !action_names.iter().any(|a| a == action_type) {
+                    return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
+                }
+                Ok(())
+            },
+        )
     }
 
     /// 注入规则验证回调到即时事件处理器

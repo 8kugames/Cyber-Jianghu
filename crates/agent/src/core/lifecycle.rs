@@ -327,7 +327,8 @@ impl super::Agent {
         }
 
         // 注入规则验证回调到即时事件处理器（Layer 1: action_type 合法性）
-        self.inject_rule_validator(&game_rules.available_actions).await;
+        self.inject_rule_validator(&game_rules.available_actions)
+            .await;
 
         // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
         // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
