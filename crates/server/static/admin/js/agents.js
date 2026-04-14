@@ -112,8 +112,9 @@ function renderAgents() {
             Object.keys(attrs).sort().forEach(function (k) {
                 if (k.endsWith("_max")) return;
                 var meta = attributeMeta[k];
+                // 如果指定了 categoryFilter 且 meta 存在，则按 category 过滤
+                // 注意：即使 meta 不存在也继续（fallback 显示原始 key）
                 if (categoryFilter && meta && meta.category !== categoryFilter) return;
-                if (categoryFilter === "status" && (!meta || meta.category !== "status")) return;
                 var name = meta ? meta.display_name : k;
                 var val = attrs[k];
                 var maxVal = attrs[k + "_max"];
@@ -240,6 +241,27 @@ function renderBasicInfo(agent) {
                 '<div style="font-weight: 600; color: #666;">x' + item.count + '</div></div>';
         }).join("") + '</div>';
 
+    // 数据驱动：渲染属性列表
+    // attrs: agent.attributes 对象
+    // category: "primary" | "status" | "derived" | null (显示所有)
+    function renderAttrSection(attrs, category, title) {
+        var items = [];
+        Object.keys(attrs).sort().forEach(function (k) {
+            if (k.endsWith("_max")) return; // 跳过 max 后缀
+            var meta = attributeMeta[k];
+            if (category && meta && meta.category !== category) return;
+            var name = meta ? meta.display_name : k;
+            var val = attrs[k];
+            var maxVal = attrs[k + "_max"];
+            var display = maxVal !== undefined ? val + '/' + maxVal : val;
+            items.push('<div class="detail-item"><span class="detail-label">' + name + ':</span> ' + display + '</div>');
+        });
+        if (items.length === 0) {
+            return '<div class="detail-section"><div class="detail-title">' + title + '</div><div style="color: #999; font-size: 13px;">暂无数据</div></div>';
+        }
+        return '<div class="detail-section"><div class="detail-title">' + title + '</div><div class="detail-grid">' + items.join('') + '</div></div>';
+    }
+
     return '<div class="basic-info-grid">' +
         '<div class="detail-section">' +
         '<div class="detail-title">基本信息 <span class="detail-label">ID:</span> <span style="font-family: monospace; font-size: 12px;">' + agent.id + '</span></div>' +
@@ -250,25 +272,9 @@ function renderBasicInfo(agent) {
         '<div class="detail-item"><span class="detail-label">最后活跃:</span> ' + (agent.last_active ? new Date(agent.last_active).toLocaleString() : "从未") + '</div>' +
         '</div></div>' +
 
-        '<div class="detail-section">' +
-        '<div class="detail-title">生理状态</div>' +
-        '<div class="detail-grid">' +
-        '<div class="detail-item"><span class="detail-label">生命值 (HP):</span> ' + agent.hp + '/' + agent.max_hp + '</div>' +
-        '<div class="detail-item"><span class="detail-label">体力 (Stamina):</span> ' + agent.stamina + '/' + agent.max_stamina + '</div>' +
-        '<div class="detail-item"><span class="detail-label">饱食度 (Hunger):</span> ' + agent.hunger + '/' + agent.max_hunger + '</div>' +
-        '<div class="detail-item"><span class="detail-label">口渴度 (Thirst):</span> ' + agent.thirst + '/' + agent.max_thirst + '</div>' +
-        '</div></div>' +
-
-        '<div class="detail-section">' +
-        '<div class="detail-title">先天属性</div>' +
-        '<div class="detail-grid">' +
-        '<div class="detail-item"><span class="detail-label">力量 (STR):</span> ' + ((agent.attributes || {}).strength || 0) + '/' + ((agent.attributes || {}).strength_max || 100) + '</div>' +
-        '<div class="detail-item"><span class="detail-label">敏捷 (AGI):</span> ' + ((agent.attributes || {}).agility || 0) + '/' + ((agent.attributes || {}).agility_max || 100) + '</div>' +
-        '<div class="detail-item"><span class="detail-label">根骨 (CON):</span> ' + ((agent.attributes || {}).constitution || 0) + '/' + ((agent.attributes || {}).constitution_max || 100) + '</div>' +
-        '<div class="detail-item"><span class="detail-label">悟性 (INT):</span> ' + ((agent.attributes || {}).intelligence || 0) + '/' + ((agent.attributes || {}).intelligence_max || 100) + '</div>' +
-        '<div class="detail-item"><span class="detail-label">魅力 (CHA):</span> ' + ((agent.attributes || {}).charisma || 0) + '</div>' +
-        '<div class="detail-item"><span class="detail-label">福缘 (LUK):</span> ' + ((agent.attributes || {}).luck || 0) + '</div>' +
-        '</div></div>' +
+        renderAttrSection(agent.attributes || {}, "status", "生理状态") +
+        renderAttrSection(agent.attributes || {}, "primary", "先天属性") +
+        renderAttrSection(agent.attributes || {}, "derived", "派生属性") +
 
         '<div class="detail-section">' +
         '<div class="detail-title">背包物品</div>' +
@@ -292,11 +298,33 @@ function renderExperiences(data) {
         var time = exp.created_at ? new Date(exp.created_at).toLocaleString() : "Tick #" + exp.tick_id;
         var metadata = exp.soul_cycle_metadata;
 
+        // 优先使用三魂完整链路渲染
         if (metadata && metadata.cycles && metadata.cycles.length > 0) {
             return renderTickCard(exp, metadata, time);
         }
 
-        return '';
+        // Fallback: 显示基本信息（当 soul_cycle_metadata 为空时）
+        var actionType = getActionTypeDisplay(exp.action_type || '');
+        var resultBadge = exp.result === 'success'
+            ? '<span style="color: #4CAF50;">成功</span>'
+            : (exp.result === 'failed'
+                ? '<span style="color: #f44336;">失败</span>'
+                : (exp.result ? '<span>' + escapeHtml(exp.result) + '</span>' : '-'));
+
+        return '<div class="tick-card">' +
+            '<div class="tick-card-header">' +
+            '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+            '<span class="tick-real-time">' + time + '</span>' +
+            '</div>' +
+            '<div class="tick-section">' +
+            '<div class="tick-section-title">行动</div>' +
+            '<div class="detail-grid" style="padding: 10px;">' +
+            '<div class="detail-item"><span class="detail-label">动作:</span> ' + escapeHtml(actionType) + '</div>' +
+            '<div class="detail-item"><span class="detail-label">结果:</span> ' + resultBadge + '</div>' +
+            '</div>' +
+            (exp.narrative ? '<div style="padding: 10px; color: #666; font-size: 13px;">' + escapeHtml(exp.narrative) + '</div>' : '') +
+            (exp.thought_log ? '<div style="padding: 10px; color: #999; font-size: 12px; font-style: italic;">思考: ' + escapeHtml(exp.thought_log) + '</div>' : '') +
+            '</div></div>';
     }).join("");
 
     return '<div class="experience-list">' + expHtml + '</div>';
