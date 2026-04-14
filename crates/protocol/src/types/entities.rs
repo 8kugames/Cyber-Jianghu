@@ -159,6 +159,15 @@ pub struct AvailableAction {
     /// 必需的 action_data 字段名列表（如 ["content"]、["target_agent_id", "item_id"]）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub required_fields: Vec<String>,
+
+    /// OOC 风险等级（"low" | "medium" | "high"）
+    /// high → 强制 LLM 审核, medium → 抽审, low → 跳过 LLM
+    #[serde(default = "default_ooc_risk")]
+    pub ooc_risk: String,
+}
+
+fn default_ooc_risk() -> String {
+    "low".to_string()
 }
 
 /// 初始物品配置

@@ -47,7 +47,8 @@ pub type IntentManager = Arc<RwLock<HashMap<Uuid, Intent>>>;
 
 /// 构建游戏规则（从配置注册表）
 ///
-/// 从 GameData 缓存中读取配置，包括 immediate_events 和 intent_batch
+/// 从 GameData 缓存中读取配置，包括 immediate_events 和 intent_batch。
+/// llm_validation 的 always/adaptive/skip 分级从 actions.yaml 的 ooc_risk 动态生成。
 pub fn build_game_rules_from_config(
     tick_duration_secs: u64,
     survival_threshold: i32,
@@ -56,6 +57,54 @@ pub fn build_game_rules_from_config(
     intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
 ) -> GameRules {
     let available_actions = ActionRegistry::build_available_actions();
+
+    // 从 ooc_risk 动态构建分级审核列表
+    let mut always_types: Vec<String> = Vec::new();
+    let mut adaptive_types: Vec<String> = Vec::new();
+    let mut skip_types: Vec<String> = Vec::new();
+
+    for action in &available_actions {
+        match action.ooc_risk.as_str() {
+            "high" => always_types.push(action.action.clone()),
+            "medium" => adaptive_types.push(action.action.clone()),
+            _ => skip_types.push(action.action.clone()),
+        }
+    }
+
+    tracing::info!(
+        "[OOC分级] always={:?}, adaptive={:?}, skip={:?}",
+        always_types, adaptive_types, skip_types
+    );
+
+    // 构建 intent_batch：ooc_risk 覆盖 types 列表，保留 yaml 中的其他配置
+    let mut llm_validation = intent_batch
+        .as_ref()
+        .map(|ib| ib.llm_validation.clone())
+        .unwrap_or_default();
+
+    llm_validation.always_types = always_types;
+    llm_validation.adaptive_types = adaptive_types;
+    llm_validation.skip_types = skip_types;
+
+    let intent_batch = cyber_jianghu_protocol::IntentBatchConfig {
+        max_intents_per_tick: intent_batch
+            .as_ref()
+            .map(|ib| ib.max_intents_per_tick)
+            .unwrap_or(5),
+        max_retries: intent_batch
+            .as_ref()
+            .map(|ib| ib.max_retries)
+            .unwrap_or(3),
+        pipeline_execution_enabled: intent_batch
+            .as_ref()
+            .map(|ib| ib.pipeline_execution_enabled)
+            .unwrap_or(true),
+        partial_execution_enabled: intent_batch
+            .as_ref()
+            .map(|ib| ib.partial_execution_enabled)
+            .unwrap_or(true),
+        llm_validation,
+    };
 
     let initial_items = InitialInventoryRegistry::items()
         .into_iter()
@@ -78,7 +127,7 @@ pub fn build_game_rules_from_config(
         survival_threshold,
         version,
         last_updated: Utc::now().to_rfc3339(),
-        intent_batch,
+        intent_batch: Some(intent_batch),
         reflector_narrative: None,
         immediate_events,
     }
