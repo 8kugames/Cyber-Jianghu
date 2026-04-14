@@ -15,8 +15,6 @@ use uuid::Uuid;
 use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
-
-use crate::component::memory::types::MemoryEntry;
 use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
@@ -655,27 +653,6 @@ impl Agent {
         }
     }
 
-    /// 保存观察者叙事到情景记忆
-    pub(crate) async fn save_observer_narrative(
-        &mut self,
-        tick_id: i64,
-        narrative: &str,
-    ) -> Result<()> {
-        if narrative.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(ref mut manager) = self.memory_manager {
-            let entry = MemoryEntry::new(manager.agent_id(), tick_id, narrative.to_string())
-                .with_event_type("observer_narrative".to_string())
-                .with_importance(0.7);
-
-            manager.episodic_mut().add(entry).await?;
-            info!("Observer narrative saved to episodic memory");
-        }
-        Ok(())
-    }
-
     /// 验证人设（注册前调用，客户端本地）
     pub async fn validate_persona(&self) -> Result<PersonaValidationResult> {
         let validator = match &self.validator {
@@ -976,17 +953,10 @@ impl Agent {
         match validation_result {
             crate::soul::reflector::ValidationResult::Approved {
                 reason: _,
-                narrative,
+                narrative: _,
             } => {
                 info!("ReflectorSoul approved");
-                let narrative_opt = if !narrative.is_empty() {
-                    self.save_observer_narrative(world_state.tick_id, &narrative)
-                        .await
-                        .ok();
-                    Some(narrative)
-                } else {
-                    None
-                };
+                // Layer 3 narrative 已停用，改为在感知阶段生成 execution_narrative
                 layers.push(LayerResult {
                     layer: "layer3",
                     passed: true,
@@ -995,7 +965,7 @@ impl Agent {
                 Ok(ReflectorResult::Approved {
                     intent,
                     layers,
-                    narrative: narrative_opt,
+                    narrative: None,
                 })
             }
             crate::soul::reflector::ValidationResult::Rejected {
