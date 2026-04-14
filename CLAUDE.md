@@ -195,10 +195,12 @@ Key agent modules:
 - `cognitive_decision_with_chain()` - **推荐**：返回 `(Intent, CognitiveChain)` 元组，CognitiveChain 传递给天魂辅助指代消解
 - `cognitive_decision_with_retry()` - **已废弃**：仅返回 Intent，请迁移到 `cognitive_decision_with_chain`
 
+**签名**：回调不接收 `WorldState`（人魂信息隔离），采用 `(tick_id: i64, agent_id: Uuid)` 模式。外部信息通过 `memory_context: &str` 注入。
+
 ```rust
 use cyber_jianghu_agent::cognitive_decision_with_chain;
 
-let callback = cognitive_decision_with_chain(agent_id, engine.clone(), 3);
+let callback = cognitive_decision_with_chain(engine.clone(), 3);
 
 Agent::builder(config, base_callback)
     .with_decision_chain(callback)  // 传递 CognitiveChain 给天魂
@@ -228,9 +230,10 @@ loop {
 }
 ```
 
-- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent + CognitiveChain (含 key_observations, primary_drive, thought_process)
+- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent + CognitiveChain (含 key_observations, primary_drive, thought_process). **信息隔离**: 不直接访问 WorldState，所有外部信息通过 memory_context 注入
 - **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON. Receives CognitiveChain from 人魂 to enhance coreference resolution (指代消解) by providing cognitive context (who is "him/her/it"?). Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
-- **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM)
+- **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM). **唯一出入口**: ALL intents 离开 Agent 前必须经过地魂验证
+- **Game Rules Callback**: 服务端热更新 `available_actions` 时，自动通过 `inject_rule_validator()` 更新即时事件处理器的规则验证
 - **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
 - **Deadline timeout**: Tick关单打断循环，超时提交 idle
 - **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
@@ -536,7 +539,7 @@ The `narrative_config` is delivered from server to agent during registration:
 1. Server loads `narrative_config.yaml` on startup via `GameDataLoader`
 2. Agent registration response includes `narrative_config` field
 3. Agent stores config to `~/.cyber-jianghu/config/narrative_config.yaml`
-4. Agent's `NarrativeEngine` loads from local config directory
+4. HTTP API loads `NarrativeConfig` from local file for attribute display name mapping
 
 This ensures agent can function in production without accessing server's development files.
 

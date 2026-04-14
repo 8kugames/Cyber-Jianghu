@@ -432,9 +432,9 @@
     │       │    │   │                                                  │   │
     │       │    │   ├──► 接收 WorldState (ServerMessage::WorldState)    │   │
     │       │    │   │                                                  │   │
-    │       │    │   ├──► ActorSoul::generate_intent()                  │   │
+    │       │    │   ├──► ActorSoul::think(tick_id, agent_id, memory_context)   │   │
     │       │    │   │         │                                        │   │
-    │       │    │   │         ├──► NarrativeEngine::perceive()          │   │
+    │       │    │   │         ├──► NarrativeGenerator::generate() (地魂叙事注入) │   │
     │       │    │   │         ├──► CognitiveChain::run()               │   │
     │       │    │   │         │     ├──► Stage 1: 感知-动机             │   │
     │       │    │   │         │     ├──► Stage 2: 计划-决策             │   │

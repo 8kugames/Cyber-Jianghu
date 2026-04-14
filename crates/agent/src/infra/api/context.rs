@@ -162,8 +162,7 @@ pub fn generate_context_markdown_no_relationship(
 
 /// 内部实现
 ///
-/// 属性叙事描述使用 WorldState.attribute_descriptions（server 数据驱动），
-/// 不依赖本地 NarrativeEngine。
+/// 属性叙事描述使用 WorldState.attribute_descriptions（server 数据驱动）。
 fn generate_impl(
     state: &WorldState,
     relationship_store: Option<&RelationshipStore>,

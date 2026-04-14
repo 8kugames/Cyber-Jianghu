@@ -108,13 +108,14 @@
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         COGNITIVE ENGINE (认知引擎)                              │   │
 │  │  soul/actor/                                                                 │   │
-│  │  ├── engine.rs      - CognitiveEngine (主引擎)                           │   │
+│  │  ├── engine.rs      - CognitiveEngine (主引擎，信息隔离：不接收 WorldState)    │   │
 │  │  ├── chain.rs       - CognitiveChain (认知链)                                   │   │
 │  │  ├── stages.rs      - StageOutput, 各阶段响应类型                               │   │
-│  │  └── narrative.rs   - NarrativeEngine (叙事化)                            │   │
+│  │  ├── prompt_cache.rs - Prompt 缓存（persona + actions）                      │   │
+│  │  └── summary_window.rs - 滑动上下文窗口                                      │   │
 │  │                                                                                  │   │
 │  │  ┌─────────────────────────────────────────────────────────────────────────┐    │   │
-│  │  │                    think(WorldState) -> CognitiveChain                   │    │   │
+│  │  │                    think(tick_id, agent_id, memory_context) -> CognitiveChain │   │
 │  │  │                                                                          │    │   │
 │  │  │  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────┐ │    │   │
 │  │  │  │  Perception  │──▶│  Motivation  │──▶│   Planning   │──▶│ Decision │ │    │   │
@@ -124,7 +125,7 @@
 │  │  │        ▼                  ▼                  ▼                 ▼       │    │   │
 │  │  │  ┌──────────────────────────────────────────────────────────────────┐ │    │   │
 │  │  │  │                    LLM Prompt Building                            │ │    │   │
-│  │  │  │  • NarrativeEngine (叙事化属性描述)                               │ │    │   │
+│  │  │  │  • memory_context (地魂 NarrativeGenerator 注入的叙事化世界状态)      │ │    │   │
 │  │  │  │  • DynamicPersona (人设生成描述)                                  │ │    │   │
 │  │  │  │  • Memory Context (记忆上下文注入)                               │ │    │   │
 │  │  │  └──────────────────────────────────────────────────────────────────┘ │    │   │
@@ -141,18 +142,18 @@
 │                                    AI COMPONENTS                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                         │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐  │
-│  │    LlmClient     │  │  DynamicPersona  │  │  MemoryManager   │  │ NarrativeEngine│  │
-│  │  (component/llm/)       │  │  (component/persona/)   │  │  (component/memory/)    │  │ (soul/actor/)│  │
-│  │                  │  │                  │  │                  │  │                │  │
-│  │ • DirectLlmClient│  │ • traits         │  │ • WorkingMemory  │  │ • Perception   │  │
-│  │ • LlmProvider    │  │ • current_state  │  │ • EpisodicMemory │  │   Narrative    │  │
-│  │   - ollama       │  │ • version        │  │ • SemanticMemory │  │                │  │
-│  │   - openclaw     │  │                  │  │ • ArchiveMemory  │  │                │  │
-│  │   - openai_      │  │ generate_        │  │                  │  │ from_attributes│  │
-│  │     compatible   │  │   description()  │  │ build_llm_       │  │ _with_engine() │  │
-│  │                  │  │                  │  │   context()      │  │                │  │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘  └────────────────┘  │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
+│  │    LlmClient     │  │  DynamicPersona  │  │  MemoryManager   │  │ NarrativeGenerator │  │
+│  │  (component/llm/)       │  │  (component/persona/)   │  │  (component/memory/)    │  │ (soul/reflector/) │  │
+│  │                  │  │                  │  │                  │  │                    │  │
+│  │ • DirectLlmClient│  │ • traits         │  │ • WorkingMemory  │  │ • 地魂叙事生成     │  │
+│  │ • LlmProvider    │  │ • current_state  │  │ • EpisodicMemory │  │ • 属性→叙事描述   │  │
+│  │   - ollama       │  │ • version        │  │ • SemanticMemory │  │ • 环境叙事化      │  │
+│  │   - openclaw     │  │                  │  │ • ArchiveMemory  │  │ • 注入memory_ctx  │  │
+│  │   - openai_      │  │ generate_        │  │                  │  │                    │  │
+│  │     compatible   │  │   description()  │  │ build_llm_       │  │                    │  │
+│  │                  │  │                  │  │   context()      │  │                    │  │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘  └────────────────────┘  │
 │           │                     │                     │                    │           │
 │           └─────────────────────┴─────────────────────┴────────────────────┘           │
 │                                         │                                               │
@@ -210,7 +211,7 @@
 ### 2. 认知处理流 (Cognitive Pipeline)
 
 ```
-WorldState ──┬──▶ NarrativeEngine.from_attributes() ──▶ 叙事化状态描述
+WorldState ──┬──▶ NarrativeGenerator (地魂) ──▶ NarrativeContext (叙事化世界状态)
              │
              ├──▶ DynamicPersona.generate_description() ──▶ 人设描述
              │
@@ -481,13 +482,13 @@ fn should_log_retry(attempt: u32) -> bool {
 
 **路径**: `crates/agent/src/soul/actor/`
 
-| 文件            | 组件                          | 说明          |
-| ------------- | --------------------------- | ----------- |
-| `engine.rs`   | `CognitiveEngine`           | 四阶段认知流程引擎   |
-| `chain.rs`    | `CognitiveChain`            | 存储各阶段输出的认知链 |
-| `stages.rs`   | `StageOutput`, `*Response` | 各阶段响应类型定义   |
-| `narrative.rs`| `NarrativeEngine`           | 叙事化引擎         |
-| `tools.rs`    | `ActorToolExecutor`         | 工具执行器         |
+| 文件               | 组件                          | 说明          |
+| ---------------- | --------------------------- | ----------- |
+| `engine.rs`      | `CognitiveEngine`           | 四阶段认知流程引擎（信息隔离：不接收 WorldState）|
+| `chain.rs`       | `CognitiveChain`            | 存储各阶段输出的认知链 |
+| `stages.rs`      | `StageOutput`, `*Response` | 各阶段响应类型定义   |
+| `prompt_cache.rs`| `PromptCache`              | Prompt 缓存（persona + actions）|
+| `summary_window.rs`| `NarrativeSummaryWindow` | 滑动上下文窗口 |
 
 **四阶段流程**:
 
@@ -498,8 +499,8 @@ fn should_log_retry(attempt: u32) -> bool {
 
 **关键方法**:
 
-- `think(&WorldState) -> CognitiveChain`: 执行完整认知流程
-- `think_with_memory(&WorldState, &str) -> CognitiveChain`: 带记忆上下文
+- `think(tick_id, agent_id) -> CognitiveChain`: 执行完整认知流程（不接收 WorldState）
+- `think_with_memory(tick_id, agent_id, memory_context) -> CognitiveChain`: 带记忆/叙事上下文
 - `create_decision_callback()`: 创建决策回调 (兼容 Agent 接口)
 
 ### 5. 记忆系统 (`component/memory/manager.rs`)
@@ -539,20 +540,21 @@ fn should_log_retry(attempt: u32) -> bool {
 - `set_goal(goal)`: 设置当前目标
 - `apply_all_decay()`: 应用所有特质衰减
 
-### 7. 叙事引擎 (`soul/actor/narrative.rs`)
+### 7. 叙事生成器 (`soul/reflector/narrative_generator.rs`)
 
-**路径**: `crates/agent/src/soul/actor/narrative.rs`
+**路径**: `crates/agent/src/soul/reflector/narrative_generator.rs`
 
 | 组件                     | 说明           |
 | ---------------------- | ------------ |
-| `NarrativeEngine`      | 数据驱动的属性叙事化引擎 |
-| `PerceptionNarrative`  | 感知阶段叙事结构     |
-| `ThresholdDescription` | 阈值描述配置       |
+| `NarrativeGenerator`   | LLM 驱动的叙事上下文生成器（地魂组件） |
+| `NarrativeContext`     | 叙事化世界状态（注入人魂 memory_context）|
 
 **关键方法**:
 
-- `from_attributes_with_engine()`: 将数值属性转换为叙事描述
-- `to_prompt_section()`: 生成 LLM Prompt 片段
+- `generate()`: 从 WorldState 生成 NarrativeContext
+- `generate_execution_narrative()`: 生成上一轮执行叙事
+
+**设计变更**（v0.0.271）：旧的 `NarrativeEngine`（硬编码阈值映射）已删除。属性叙事化现在使用 `WorldState.attribute_descriptions`（server 数据驱动）。
 
 ***
 
