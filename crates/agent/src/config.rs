@@ -814,6 +814,14 @@ impl Config {
         })
     }
 
+    /// 获取生存阈值
+    pub fn survival_threshold(&self) -> i32 {
+        self.game_rules
+            .as_ref()
+            .map(|r| r.survival_threshold)
+            .unwrap_or(30)
+    }
+
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件

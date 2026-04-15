@@ -12,8 +12,7 @@
 //
 // 验证规则：
 // - R1 完整性：4 个阶段必须齐全
-// - R2 长度：每阶段内容 >= min_thought_length（默认 20 字符）
-// - R3 重复检测：相邻阶段内容不得过于相似
+// - R2 长度：每阶段内容 >= min_thought_length（默认 10 字符）
 // ============================================================================
 
 use crate::soul::actor::{CognitiveChain, CognitiveStage};
@@ -61,7 +60,7 @@ impl CognitiveValidator {
     /// 创建新的认知验证器
     pub fn new(_agent_persona: String) -> Self {
         Self {
-            min_thought_length: 20,
+            min_thought_length: 10,
         }
     }
 
@@ -80,11 +79,6 @@ impl CognitiveValidator {
 
         // 规则 2: 检查各阶段内容长度
         if let Some(result) = self.check_content_length(chain) {
-            return result;
-        }
-
-        // 规则 3: 检测重复模式
-        if let Some(result) = self.detect_repetition(chain) {
             return result;
         }
 
@@ -147,47 +141,6 @@ impl CognitiveValidator {
         None
     }
 
-    /// 规则 3: 检测重复模式
-    fn detect_repetition(&self, chain: &CognitiveChain) -> Option<CognitiveValidationResult> {
-        // 检查相邻阶段的内容是否过于相似（可能的复制粘贴）
-        let stages = &chain.stages;
-
-        for i in 0..stages.len().saturating_sub(1) {
-            let current = &stages[i].content;
-            let next = &stages[i + 1].content;
-
-            // 计算相似度（简化版：检查一个是否是另一个的子串）
-            if current.len() > 10
-                && next.len() > 10
-                && (current.contains(next) || next.contains(current))
-            {
-                return Some(CognitiveValidationResult::rejected(
-                    format!(
-                        "{} 阶段和 {} 阶段内容过于相似，存在复制粘贴嫌疑",
-                        stages[i].stage.name(),
-                        stages[i + 1].stage.name()
-                    ),
-                    "请确保每个阶段有独立、独特的思考，避免复制前面的内容".to_string(),
-                ));
-            }
-        }
-
-        // 检查是否使用了通用的"偷懒"短语
-        let lazy_patterns = ["好的", "知道了", "按计划", "直接", "一样", "没问题"];
-
-        for stage_output in stages {
-            for pattern in &lazy_patterns {
-                if stage_output.content.trim() == *pattern {
-                    return Some(CognitiveValidationResult::rejected(
-                        format!("{} 阶段使用了过于简单的回复", stage_output.stage.name()),
-                        format!("请提供更详细、具体的{}内容", stage_output.stage.name()),
-                    ));
-                }
-            }
-        }
-
-        None
-    }
 }
 
 // ============================================================================
