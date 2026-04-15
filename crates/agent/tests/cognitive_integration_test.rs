@@ -165,19 +165,17 @@ mod tests {
         let mut chain = CognitiveChain::new("侠客".to_string(), "人设".to_string(), 1);
 
         for stage in CognitiveStage::all() {
-            chain.add_stage(StageOutput::new(stage, "10个字符的内容".to_string()));
+            chain.add_stage(StageOutput::new(stage, "短的".to_string()));
         }
 
-        // 默认 min_thought_length=20 应拒绝（内容太短）
+        // 默认 min_thought_length=10 应拒绝（"短的" = 6 bytes < 10）
         let strict = make_validator();
         let result = strict.validate(&chain);
-        assert!(!result.is_valid);
+        assert!(!result.is_valid, "Should reject content shorter than 10 bytes");
 
-        // 放宽长度阈值但仍不够长
+        // 放宽长度阈值，内容应通过长度检查
         let relaxed = make_validator().with_min_thought_length(5);
         let result = relaxed.validate(&chain);
-        // 长度通过但可能被其他规则拒绝（如 state_reference 检查）
-        // 这里只验证 min_thought_length 生效：不再报"过短"错误
         if !result.is_valid {
             assert!(
                 result.reason.as_ref().is_some_and(|r| !r.contains("过短")),
