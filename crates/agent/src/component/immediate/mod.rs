@@ -100,6 +100,25 @@ pub trait ImmediateDecisionMaker: Send + Sync {
         current_intent: Option<&str>,
         available_actions: &[AvailableAction],
     ) -> Option<ResponseDecision>;
+
+    /// 批量决策：将多个事件合并为单次 LLM 调用，O(n²) → O(n)
+    ///
+    /// 默认实现退化为逐个调用。CognitiveImmediateDecisionMaker 覆盖为真正的批量 LLM 调用。
+    async fn decide_batch(
+        &self,
+        events: &[PendingImmediateEvent],
+        current_intent: Option<&str>,
+        available_actions: &[AvailableAction],
+    ) -> Vec<(Uuid, Option<ResponseDecision>)> {
+        let mut results = Vec::with_capacity(events.len());
+        for event in events {
+            let decision = self
+                .decide_response(event, current_intent, available_actions)
+                .await;
+            results.push((event.event_id, decision));
+        }
+        results
+    }
 }
 
 // ============================================================================
@@ -131,6 +150,9 @@ pub struct ImmediateEventHandler {
 
     /// HTTP API 状态（用于访问 SoulRecorder 记录即时意图）
     http_api_state: Arc<RwLock<Option<Arc<crate::infra::api::HttpApiState>>>>,
+
+    /// 本 tick 已发送的即时意图计数（tick_id, count）
+    sent_this_tick: Arc<RwLock<(i64, usize)>>,
 }
 
 impl ImmediateEventHandler {
@@ -149,6 +171,7 @@ impl ImmediateEventHandler {
             current_tick_id: Arc::new(RwLock::new(0)),
             current_intent_type: Arc::new(RwLock::new(None)),
             http_api_state: Arc::new(RwLock::new(None)),
+            sent_this_tick: Arc::new(RwLock::new((0, 0))),
         }
     }
 
@@ -190,6 +213,7 @@ impl ImmediateEventHandler {
             current_tick_id: self.current_tick_id.clone(),
             current_intent_type: self.current_intent_type.clone(),
             http_api_state: self.http_api_state.clone(),
+            sent_this_tick: self.sent_this_tick.clone(),
         }
     }
 
@@ -214,6 +238,25 @@ impl ImmediateEventHandler {
     pub async fn set_current_intent(&self, intent_type: Option<String>) {
         let mut guard = self.current_intent_type.write().await;
         *guard = intent_type;
+    }
+
+    /// 检查并递增本 tick 即时意图发送计数
+    ///
+    /// 返回 true 表示允许发送，false 表示已达上限
+    pub async fn check_and_increment_send_count(&self, tick_id: i64) -> bool {
+        let max_per_tick = self.rules.read().await.max_immediate_intents_per_tick;
+        let mut guard = self.sent_this_tick.write().await;
+        let (stored_tick, count) = *guard;
+        if stored_tick != tick_id {
+            // 新 tick，重置计数
+            *guard = (tick_id, 1);
+            true
+        } else if count < max_per_tick {
+            *guard = (tick_id, count + 1);
+            true
+        } else {
+            false
+        }
     }
 
     /// 处理 Server 消息（提取 ImmediateEvent）
@@ -260,9 +303,15 @@ impl ImmediateEventHandler {
         self.process_immediate_decision().await;
     }
 
-    /// 处理即时决策
+    /// 处理即时决策（批量模式）
+    ///
+    /// 流程：
+    /// 1. 规则门控过滤：每个事件独立判断 Ignore/Defer/MaybeRespond
+    /// 2. MaybeRespond 事件批量送入 LLM（单次调用处理多个事件，O(n²) → O(n)）
+    /// 3. per-tick LLM 调用上限保护（max_llm_calls_per_tick）
     async fn process_immediate_decision(&self) {
         let event_ttl_ms = self.rules.read().await.event_ttl_ms;
+        let max_llm = self.rules.read().await.max_llm_calls_per_tick;
 
         let events = {
             let mut queue = self.pending_events.write().await;
@@ -277,17 +326,81 @@ impl ImmediateEventHandler {
             unresponded
         };
 
-        for mut event in events {
-            let current_intent = {
-                let guard = self.current_intent_type.read().await;
-                guard.clone()
-            };
+        if events.is_empty() {
+            return;
+        }
 
-            // 异步决策（支持 LLM 调用）
+        let current_intent = {
+            let guard = self.current_intent_type.read().await;
+            guard.clone()
+        };
+
+        // Phase 1: 规则门控 — 快速分类（无 LLM，<1ms per event）
+        let mut rule_decisions: Vec<(Uuid, Option<ResponseDecision>)> = Vec::new();
+        let mut maybe_respond_events: Vec<PendingImmediateEvent> = Vec::new();
+
+        for event in &events {
+            // 规则门控委托给 decision_maker（CognitiveImmediateDecisionMaker 的 rule_gate）
             let decision = self
                 .decision_maker
-                .decide_response(&event, current_intent.as_deref(), &[])
+                .decide_response(event, current_intent.as_deref(), &[])
                 .await;
+
+            match decision {
+                Some(dec) => {
+                    // 规则门控已决定（Ignore/Defer）— 直接记录
+                    rule_decisions.push((event.event_id, Some(dec)));
+                }
+                None => {
+                    // MaybeRespond — 需要后续 LLM 批量处理
+                    maybe_respond_events.push(event.clone());
+                }
+            }
+        }
+
+        // Phase 2: 批量 LLM 调用（去扇出，单次调用处理多个事件）
+        let mut llm_decisions: Vec<(Uuid, Option<ResponseDecision>)> = Vec::new();
+        if !maybe_respond_events.is_empty() {
+            // per-tick 上限保护：超过 max_llm 的事件直接 Defer
+            if maybe_respond_events.len() > max_llm {
+                debug!(
+                    "即时事件超出 per-tick LLM 上限 ({}/{}), 超出部分延迟到主 tick",
+                    maybe_respond_events.len(),
+                    max_llm
+                );
+                for deferred in maybe_respond_events.drain(max_llm..) {
+                    llm_decisions.push((
+                        deferred.event_id,
+                        Some(ResponseDecision::DeferToMainTick {
+                            reason: format!(
+                                "超出 per-tick LLM 上限 ({})，延迟到主 tick",
+                                max_llm
+                            ),
+                        }),
+                    ));
+                }
+            }
+
+            if !maybe_respond_events.is_empty() {
+                let batch_results = self
+                    .decision_maker
+                    .decide_batch(&maybe_respond_events, current_intent.as_deref(), &[])
+                    .await;
+                llm_decisions.extend(batch_results);
+            }
+        }
+
+        // Phase 3: 执行所有决策（发送 RespondNow / 标记 Ignore/Defer）
+        let all_decisions: Vec<_> = rule_decisions
+            .into_iter()
+            .chain(llm_decisions.into_iter())
+            .collect();
+
+        for mut event in events {
+            let decision = all_decisions
+                .iter()
+                .find(|(id, _)| *id == event.event_id)
+                .and_then(|(_, d)| d.clone());
 
             match decision {
                 Some(ResponseDecision::RespondNow {
@@ -295,6 +408,20 @@ impl ImmediateEventHandler {
                     content,
                     thought,
                 }) => {
+                    // 即时意图 per-tick rate limit
+                    let tick_id = *self.current_tick_id.read().await;
+                    if !self.check_and_increment_send_count(tick_id).await {
+                        debug!(
+                            "RespondNow 降级为 DeferToMainTick: 本 tick 即时意图已达上限 (event {})",
+                            event.event_id
+                        );
+                        event.response_decision = Some(ResponseDecision::DeferToMainTick {
+                            reason: "本 tick 即时意图已达上限".to_string(),
+                        });
+                        self.update_event_in_queue(&event).await;
+                        continue;
+                    }
+
                     {
                         let validator_guard = self.rule_validator.read().await;
                         if let Some(ref validator) = *validator_guard
@@ -305,6 +432,7 @@ impl ImmediateEventHandler {
                                 reason, event.event_id
                             );
                             event.responded = true;
+                            self.update_event_in_queue(&event).await;
                             continue;
                         }
                     }
@@ -378,13 +506,15 @@ impl ImmediateEventHandler {
                 None => {}
             }
 
-            // 更新事件状态
-            {
-                let mut queue = self.pending_events.write().await;
-                if let Some(e) = queue.iter_mut().find(|q| q.event_id == event.event_id) {
-                    *e = event;
-                }
-            }
+            self.update_event_in_queue(&event).await;
+        }
+    }
+
+    /// 更新队列中的事件状态
+    async fn update_event_in_queue(&self, event: &PendingImmediateEvent) {
+        let mut queue = self.pending_events.write().await;
+        if let Some(e) = queue.iter_mut().find(|q| q.event_id == event.event_id) {
+            *e = event.clone();
         }
     }
 
@@ -434,7 +564,7 @@ impl ImmediateEventHandler {
 // 认知即时决策器（规则门控 + 轻量级 LLM）
 // ============================================================================
 
-/// LLM 即时决策的 JSON 输出格式
+/// LLM 即时决策的 JSON 输出格式（单条）
 #[derive(Debug, Clone, Deserialize)]
 struct ImmediateLlmResponse {
     /// 是否应该回应
@@ -445,6 +575,13 @@ struct ImmediateLlmResponse {
     content: Option<String>,
     /// 内心想法
     thought: Option<String>,
+}
+
+/// LLM 批量即时决策的 JSON 输出格式
+#[derive(Debug, Clone, Deserialize)]
+struct BatchImmediateLlmResponse {
+    /// 逐条决策，索引与输入事件顺序一致
+    decisions: Vec<ImmediateLlmResponse>,
 }
 
 /// 认知即时决策器
@@ -593,6 +730,77 @@ action_type 只能是 "speak" 或 "whisper"。
             .cognitive_timeout_ms
             .min(self.rules.event_ttl_ms.saturating_sub(500))
     }
+
+    /// 构建批量 LLM prompt（多条消息合并为单次调用）
+    fn build_batch_prompt(&self, events: &[PendingImmediateEvent]) -> String {
+        let personality = self.personality_str();
+        let max_chars = self.rules.max_event_context_chars;
+
+        let messages: Vec<String> = events
+            .iter()
+            .enumerate()
+            .map(|(i, event)| {
+                let content = event
+                    .metadata
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let sender = event
+                    .metadata
+                    .get("from_agent_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("某人");
+                let truncated = if content.len() > max_chars {
+                    &content[..max_chars]
+                } else {
+                    content
+                };
+                format!("{}. {}：「{}」", i + 1, sender, truncated)
+            })
+            .collect();
+
+        format!(
+            r#"你是{name}，{personality}。
+
+以下 {count} 条消息同时在你附近响起：
+{messages}
+
+逐条判断每条消息是否需要你回应。
+返回 JSON 数组：
+{{"decisions": [{{"respond": bool, "action_type": "speak", "content": "回应内容", "thought": "内心想法"}}]}}
+
+decisions 数组长度必须等于 {count}。
+如果某条与你无关，对应项的 respond 设为 false（content/thought 可省略）。
+action_type 只能是 "speak" 或 "whisper"。
+保持简短，每条回应 1-2 句话。"#,
+            name = self.agent_name,
+            personality = personality,
+            count = events.len(),
+            messages = messages.join("\n"),
+        )
+    }
+
+    /// 从 LLM 响应中提取单条决策（校验 action_type）
+    fn validate_single_response(&self, resp: ImmediateLlmResponse) -> ResponseDecision {
+        if resp.respond {
+            let action_type = resp.action_type.unwrap_or_else(|| "speak".to_string());
+            let valid_action = if action_type == "speak" || action_type == "whisper" {
+                action_type
+            } else {
+                warn!("LLM 返回非法 action_type '{}'，降级为 speak", action_type);
+                "speak".to_string()
+            };
+            ResponseDecision::RespondNow {
+                action_type: valid_action,
+                content: resp.content.unwrap_or_else(|| "...".to_string()),
+                thought: resp.thought.unwrap_or_else(|| "决定回应".to_string()),
+            }
+        } else {
+            ResponseDecision::Ignore {
+                reason: "LLM 判断无需回应".to_string(),
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -669,6 +877,121 @@ impl ImmediateDecisionMaker for CognitiveImmediateDecisionMaker {
                 })
             }
         }
+    }
+
+    /// 批量决策：多条消息合并为单次 LLM 调用（去扇出 O(n²)→O(n)）
+    async fn decide_batch(
+        &self,
+        events: &[PendingImmediateEvent],
+        current_intent: Option<&str>,
+        available_actions: &[AvailableAction],
+    ) -> Vec<(Uuid, Option<ResponseDecision>)> {
+        if events.is_empty() {
+            return Vec::new();
+        }
+
+        // 单条事件直接走 decide_response（避免批量 prompt 开销）
+        if events.len() == 1 {
+            let decision = self
+                .decide_response(&events[0], current_intent, available_actions)
+                .await;
+            return vec![(events[0].event_id, decision)];
+        }
+
+        // 多条事件：规则门控先过滤
+        let mut results: Vec<(Uuid, Option<ResponseDecision>)> = Vec::with_capacity(events.len());
+        let mut need_llm: Vec<(usize, &PendingImmediateEvent)> = Vec::new();
+
+        for (i, event) in events.iter().enumerate() {
+            if let Some(decision) = self.rule_gate(event, current_intent) {
+                results.push((event.event_id, Some(decision)));
+            } else {
+                need_llm.push((i, event));
+                results.push((event.event_id, None)); // placeholder
+            }
+        }
+
+        if need_llm.is_empty() {
+            return results;
+        }
+
+        // 批量 LLM 调用
+        let llm_events: Vec<PendingImmediateEvent> =
+            need_llm.iter().map(|(_, e)| (*e).clone()).collect();
+        let prompt = self.build_batch_prompt(&llm_events);
+        let timeout_ms = self.effective_timeout_ms();
+
+        let llm_result = {
+            let llm = self.llm_container.read().await;
+            let llm_ref = llm.clone();
+            drop(llm);
+            tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                llm_ref.complete_json_with_system::<BatchImmediateLlmResponse>(
+                    "你是一个即时回应决策器，根据角色人设和对话内容快速逐条判断是否回应。只返回 JSON。",
+                    &prompt,
+                ),
+            )
+            .await
+        };
+
+        match llm_result {
+            Ok(Ok(batch_resp)) => {
+                let decisions = batch_resp.decisions;
+                // LLM 返回的决策数与输入不一致时，降级处理
+                if decisions.len() != need_llm.len() {
+                    warn!(
+                        "Batch LLM 返回 {} 条决策，期望 {} 条，全部 DeferToMainTick",
+                        decisions.len(),
+                        need_llm.len()
+                    );
+                    for (idx, event) in &need_llm {
+                        results[*idx] = (
+                            event.event_id,
+                            Some(ResponseDecision::DeferToMainTick {
+                                reason: format!(
+                                    "批量 LLM 返回条数不匹配 ({} vs {})",
+                                    decisions.len(),
+                                    need_llm.len()
+                                ),
+                            }),
+                        );
+                    }
+                } else {
+                    for (i, (idx, event)) in need_llm.iter().enumerate() {
+                        let decision = self.validate_single_response(decisions[i].clone());
+                        results[*idx] = (event.event_id, Some(decision));
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                warn!("Batch immediate LLM call failed: {}，全部延迟到主 tick", e);
+                for (idx, event) in &need_llm {
+                    results[*idx] = (
+                        event.event_id,
+                        Some(ResponseDecision::DeferToMainTick {
+                            reason: format!("批量 LLM 调用失败: {}", e),
+                        }),
+                    );
+                }
+            }
+            Err(_) => {
+                debug!(
+                    "Batch immediate LLM call timed out ({}ms)，全部延迟到主 tick",
+                    timeout_ms
+                );
+                for (idx, event) in &need_llm {
+                    results[*idx] = (
+                        event.event_id,
+                        Some(ResponseDecision::DeferToMainTick {
+                            reason: format!("批量 LLM 调用超时 ({}ms)", timeout_ms),
+                        }),
+                    );
+                }
+            }
+        }
+
+        results
     }
 }
 

@@ -492,9 +492,13 @@ impl super::Agent {
                         }
                     };
 
-                    // 更新即时事件处理器 tick_id
+                    // 更新即时事件处理器 tick_id + 尝试绑定通道
                     if let Some(ref handler) = self.immediate_handler {
                         handler.set_tick_id(world_state.tick_id).await;
+                        // 每个 tick 尝试绑定即时意图通道（幂等，首次成功后不再重复）
+                        if let Some(tx) = self.client.immediate_msg_sender().await {
+                            handler.replace_intent_channel(tx).await;
+                        }
                     }
 
                     // 更新 HTTP API 状态（供 Web Panel 查询）
@@ -596,6 +600,30 @@ impl super::Agent {
 
                     // 4. 构建增强的世界状态（包含记忆上下文 + deferred 对话）
                     let mut memory_context = self.get_memory_context().await;
+
+                    // 4.1 生存压力注入：hunger/thirst 低于阈值时强制注入紧急信号
+                    {
+                        let survival_threshold = self.config.survival_threshold();
+                        let attrs = &world_state.self_state.attributes;
+                        let hunger = attrs.get("hunger").copied().unwrap_or(100);
+                        let thirst = attrs.get("thirst").copied().unwrap_or(100);
+                        let mut survival_warnings = Vec::new();
+                        if hunger > 0 && hunger <= survival_threshold {
+                            survival_warnings.push(
+                                "【生存警告】你正处于极度饥饿状态，必须立即进食！先拾取(pickup)地面上的食物，再吃(eat)。".to_string()
+                            );
+                        }
+                        if thirst > 0 && thirst <= survival_threshold {
+                            survival_warnings.push(
+                                "【生存警告】你正处于极度口渴状态，必须立即饮水！先拾取(pickup)地面上的水，再喝(drink)。".to_string()
+                            );
+                        }
+                        if !survival_warnings.is_empty() {
+                            memory_context.push_str("\n### 紧急\n");
+                            memory_context.push_str(&survival_warnings.join("\n"));
+                        }
+                    }
+
                     // 注入延迟处理的即时对话（DeferToMainTick 事件）
                     if let Some(ref handler) = self.immediate_handler {
                         let deferred = handler.get_deferred_events().await;
@@ -1268,6 +1296,13 @@ impl super::Agent {
     /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
     async fn send_immediate_intent(&self, intent: &Intent) -> std::result::Result<(), String> {
         use cyber_jianghu_protocol::ClientMessage;
+
+        // 即时意图 per-tick rate limit
+        if let Some(handler) = &self.immediate_handler
+            && !handler.check_and_increment_send_count(intent.tick_id).await
+        {
+            return Err("本 tick 即时意图已达上限".to_string());
+        }
 
         let msg = ClientMessage::Intent {
             intent_id: Some(intent.intent_id),

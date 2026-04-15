@@ -335,6 +335,14 @@ pub struct ImmediateDecisionRules {
     /// LLM 调用前的最大事件内容长度（截断长事件）
     #[serde(default = "default_max_event_context_chars")]
     pub max_event_context_chars: usize,
+    /// 每 tick 最大即时 LLM 调用次数（防止 O(n²) 扇出）
+    /// 超限的事件直接 DeferToMainTick
+    #[serde(default = "default_max_llm_calls_per_tick")]
+    pub max_llm_calls_per_tick: usize,
+    /// 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
+    /// 超限的即时意图降级为 DeferToMainTick
+    #[serde(default = "default_max_immediate_intents_per_tick")]
+    pub max_immediate_intents_per_tick: usize,
 }
 
 fn default_event_ttl_ms() -> u64 {
@@ -348,6 +356,12 @@ fn default_max_pending_events() -> usize {
 }
 fn default_max_event_context_chars() -> usize {
     200
+}
+fn default_max_llm_calls_per_tick() -> usize {
+    9
+}
+fn default_max_immediate_intents_per_tick() -> usize {
+    3
 }
 
 fn default_immediate_routing_actions() -> Vec<String> {
@@ -363,6 +377,8 @@ impl Default for ImmediateDecisionRules {
             cognitive_timeout_ms: default_cognitive_timeout_ms(),
             max_pending_events: default_max_pending_events(),
             max_event_context_chars: default_max_event_context_chars(),
+            max_llm_calls_per_tick: default_max_llm_calls_per_tick(),
+            max_immediate_intents_per_tick: default_max_immediate_intents_per_tick(),
         }
     }
 }
