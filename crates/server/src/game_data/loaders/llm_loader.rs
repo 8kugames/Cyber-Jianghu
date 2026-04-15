@@ -85,10 +85,8 @@ pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
     } else if json_path.exists() {
         match load_config::<_, LlmConfigWrapper>(&json_path) {
             Ok(wrapper) => wrapper.data,
-            Err(_) => {
-                load_config::<_, LlmConfig>(&json_path)
-                    .context(format!("加载 LLM 配置失败: {}", json_path.display()))?
-            }
+            Err(_) => load_config::<_, LlmConfig>(&json_path)
+                .context(format!("加载 LLM 配置失败: {}", json_path.display()))?,
         }
     } else {
         // 返回默认配置
