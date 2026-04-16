@@ -86,8 +86,6 @@ fn start_tick_engine(
     db_pool: DbPool,
     connection_manager: websocket::ConnectionManager,
     agent_to_device_map: websocket::AgentToDeviceMap,
-    intent_manager: websocket::IntentManager,
-    dialogue_manager: Arc<dialogue::DialogueManager>,
     worker_tx: tokio::sync::mpsc::Sender<cyber_jianghu_server::tick::WorkerMessage>,
     agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
@@ -98,8 +96,6 @@ fn start_tick_engine(
             db_pool,
             connection_manager,
             agent_to_device_map,
-            intent_manager,
-            dialogue_manager,
             worker_tx,
             agent_state_cache,
             accepting_tick_id,
@@ -179,12 +175,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    // 7. 初始化 WebSocket 连接管理器、Intent 管理器、agent→device 映射器和速率限制器
+    // 7. 初始化 WebSocket 连接管理器、agent→device 映射器和速率限制器
     let connection_manager = websocket::create_connection_manager();
     let agent_to_device_map = websocket::create_agent_to_device_map();
-    let intent_manager = websocket::create_intent_manager();
     let rate_limiter = create_rate_limiter();
-    info!("WebSocket、Intent 管理器和速率限制器初始化成功");
+    info!("WebSocket 和速率限制器初始化成功");
 
     // 7.2 初始化 Agent 状态内存缓存（从 DB 加载）
     let agent_state_cache = create_agent_state_cache();
@@ -274,7 +269,6 @@ async fn main() -> Result<()> {
         db_pool.clone(),
         connection_manager.clone(),
         agent_to_device_map.clone(),
-        intent_manager.clone(),
         agent_state_cache.clone(),
         worker_tx.clone(),
         rate_limiter.clone(),
@@ -292,8 +286,6 @@ async fn main() -> Result<()> {
         db_pool,
         connection_manager.clone(),
         agent_to_device_map.clone(),
-        intent_manager.clone(),
-        dialogue_manager.clone(),
         worker_tx.clone(),
         agent_state_cache.clone(),
         accepting_tick_id,

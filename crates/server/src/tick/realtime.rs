@@ -140,24 +140,46 @@ impl IntentWorker {
         }
 
         // 3. 收集 DashMap 快照（供跨 Agent 校验）
-        let all_states: Vec<AgentState> = self
-            .state_cache
-            .iter()
-            .map(|r| r.value().clone())
-            .collect();
+        let all_states: Vec<AgentState> =
+            self.state_cache.iter().map(|r| r.value().clone()).collect();
 
         // 4. 通过 StateProcessor 执行
         let tick_id = agent_state.tick_id; // 使用当前 tick_id
-        let result = self
+        let result = match self
             .state_processor
             .process_single_intent(tick_id, agent_state, &intent, &all_states)
             .await
-            .context(format!("Intent 执行失败: agent={}", agent_id))?;
+        {
+            Ok(r) => r,
+            Err(e) => {
+                // 执行失败 → 反馈给 Agent
+                self.send_error_to_agent(
+                    agent_id,
+                    intent_id,
+                    "execution_failed",
+                    &format!("Intent 执行失败: {}", e),
+                    tick_id,
+                )
+                .await;
+                return Err(e.context(format!("Intent 执行失败: agent={}", agent_id)));
+            }
+        };
 
         // 5. 持久化到 DB（await 确认）
-        crate::db::upsert_agent_state(&self.db_pool, &result.updated_state)
-            .await
-            .context(format!("Agent {} 状态持久化失败", agent_id))?;
+        if let Err(e) =
+            crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await
+        {
+            // persist 失败 → DashMap 不更新 → 反馈失败给 Agent
+            self.send_error_to_agent(
+                agent_id,
+                intent_id,
+                "persist_failed",
+                "状态持久化失败，Intent 未生效",
+                tick_id,
+            )
+            .await;
+            return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
+        }
 
         // 6. 更新 DashMap（persist 成功后）
         self.state_cache
@@ -227,9 +249,8 @@ impl IntentWorker {
             self.handle_deaths(death_notifications, tick_id).await;
         }
 
-        // 6. 广播周期 WorldState
-        // TODO: 调用 Broadcaster::broadcast_states() 广播给所有 Agent
-        // 当前先跳过，Phase 2 完善
+        // 6. 周期 WorldState 广播由 TickScheduler 在发送 TickBoundary 后独立执行
+        // IntentWorker 仅负责衰减+持久化+死亡处理，不重复广播
 
         debug!(
             "Tick {} 边界处理完成: agents={}, dead={}",
@@ -334,7 +355,10 @@ impl IntentWorker {
                         )
                         .await
                         {
-                            warn!("死亡掉落物品失败: agent={}, item={}, error={}", agent_id, item.item_id, e);
+                            warn!(
+                                "死亡掉落物品失败: agent={}, item={}, error={}",
+                                agent_id, item.item_id, e
+                            );
                         }
                     }
                 }
@@ -367,10 +391,7 @@ impl IntentWorker {
                 let event = WorldEvent {
                     event_type: WorldEventType::DeathNotification,
                     tick_id,
-                    description: format!(
-                        "有人在 {} 亡故：{}",
-                        location, notif.description
-                    ),
+                    description: format!("有人在 {} 亡故：{}", location, notif.description),
                     metadata: serde_json::json!({
                         "agent_id": agent_id.to_string(),
                         "cause": notif.cause,
