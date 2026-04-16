@@ -230,8 +230,13 @@ impl IntentWorker {
         }
 
         // 2. 衰减
-        let (updated_states, dead_agents, _decay_events, death_notifications) =
+        let (mut updated_states, dead_agents, _decay_events, death_notifications) =
             decay::apply_decay_and_environmental_damage(tick_id, states);
+
+        // 2.1 更新 tick_id 到当前 tick（衰减不更新 tick_id，需显式设置）
+        for state in &mut updated_states {
+            state.tick_id = tick_id;
+        }
 
         // 3. 批量持久化衰减结果
         persistence::persist_states(&self.db_pool, tick_id, &updated_states)
