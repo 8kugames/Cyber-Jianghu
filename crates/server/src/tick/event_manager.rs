@@ -35,6 +35,7 @@ impl EventManager {
     }
 
     /// 为指定 Agent 添加事件
+    #[allow(dead_code)]
     pub fn add_event_for_agent(&mut self, agent_id: Uuid, event: WorldEvent) {
         self.events.entry(agent_id).or_default().push(event);
     }

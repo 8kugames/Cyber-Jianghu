@@ -171,7 +171,10 @@ mod tests {
         // 默认 min_thought_length=10 应拒绝（"短的" = 6 bytes < 10）
         let strict = make_validator();
         let result = strict.validate(&chain);
-        assert!(!result.is_valid, "Should reject content shorter than 10 bytes");
+        assert!(
+            !result.is_valid,
+            "Should reject content shorter than 10 bytes"
+        );
 
         // 放宽长度阈值，内容应通过长度检查
         let relaxed = make_validator().with_min_thought_length(5);

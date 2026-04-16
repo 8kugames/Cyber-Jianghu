@@ -372,10 +372,7 @@ impl ImmediateEventHandler {
                     llm_decisions.push((
                         deferred.event_id,
                         Some(ResponseDecision::DeferToMainTick {
-                            reason: format!(
-                                "超出 per-tick LLM 上限 ({})，延迟到主 tick",
-                                max_llm
-                            ),
+                            reason: format!("超出 per-tick LLM 上限 ({})，延迟到主 tick", max_llm),
                         }),
                     ));
                 }
