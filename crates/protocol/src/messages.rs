@@ -218,6 +218,22 @@ pub enum ServerMessage {
         /// 当前 tick 截止时间（Unix ms）
         deadline_ms: u64,
     },
+
+    /// 实时意图执行结果（实时模式下，IntentWorker 处理后立即返回）
+    ExecutionResult {
+        /// 处理时的 tick_id
+        tick_id: i64,
+        /// 原始 Intent ID
+        intent_id: Uuid,
+        /// 是否成功
+        success: bool,
+        /// 失败原因（success=false 时有值）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+        /// 状态变更摘要（如 "吃了馒头, 饱食度+20"）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state_change_summary: Option<String>,
+    },
 }
 
 // ============================================================================

@@ -23,12 +23,13 @@ mod broadcaster;
 mod decay;
 mod engine;
 mod event_manager;
-mod intent_collector;
 mod persistence;
 mod processor;
+mod realtime;
 mod scheduler;
-mod state_processor;
 
 // 导出公共API
 pub use broadcaster::{build_initial_world_state, send_to_agent};
+pub use processor::StateProcessor;
+pub use realtime::{IntentWorker, WorkerMessage, create_worker_channel};
 pub use scheduler::TickScheduler;

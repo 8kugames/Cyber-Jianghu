@@ -668,73 +668,28 @@ async fn handle_intent(
         return Err("Rate limit exceeded. Please wait before sending another intent.".into());
     }
 
-    // Agent 存活检查：死亡的 Agent 不允许提交意图
-    let agent_state = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await?;
-    if !agent_state.is_alive {
-        warn!("Intent rejected: agent {} is dead", agent_id);
-        return Err(
-            Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
-        );
-    }
+    // Agent 存活检查：从 DashMap 内存缓存读取（实时模式，不再查 DB）
+    let is_alive = state
+        .agent_state_cache
+        .get(&agent_id)
+        .map(|r| r.value().is_alive)
+        .unwrap_or(false);
 
-    // 纵深防御：检查 agents.status，拒绝已归隐/已死亡角色的意图
-    let agent_status: Option<String> =
-        sqlx::query_scalar("SELECT status FROM agents WHERE agent_id = $1")
-            .bind(agent_id)
-            .fetch_optional(&state.db_pool)
-            .await
-            .context("查询 Agent 状态失败")?
-            .flatten();
-
-    if agent_status.as_deref() != Some("active") {
+    if !is_alive {
         warn!(
-            "Intent rejected: agent {} status is {:?}, expected 'active'",
-            agent_id, agent_status
+            "Intent rejected: agent {} is dead or not in cache",
+            agent_id
         );
         return Err(
             Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
         );
     }
 
-    // tick_id 校验：从内存读取当前接受意图的 tick_id
-    let current_tick = state
-        .current_accepting_tick_id
-        .load(std::sync::atomic::Ordering::Acquire);
-
-    if current_tick == 0 {
-        return Err(Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>);
-    }
-
-    // 即时动作（speak、whisper、emote 等）允许在当前 tick 重复提交
-    // 这些动作不检查 IntentManager 中是否已有该 agent 的 intent
-    let is_immediate_action = matches!(
+    // 即时动作（speak、whisper、emote 等）允许重复提交
+    let _is_immediate_action = matches!(
         action_type.as_str(),
         "speak" | "whisper" | "emote" | "laugh" | "nod" | "wave" | "bow"
     );
-
-    if tick_id != current_tick && !is_immediate_action {
-        warn!(
-            "Intent tick_id mismatch: agent={}, intent_tick={}, accepting_tick={}",
-            agent_id, tick_id, current_tick
-        );
-        return Err(Box::new(GameError::TickMismatch {
-            intent_tick_id: tick_id,
-            current_tick_id: current_tick,
-        }) as Box<dyn std::error::Error + Send + Sync>);
-    }
-
-    // 即时动作：允许重复提交（覆盖之前的 intent）
-    // 普通动作：已有 intent 时静默忽略（第一个已正确存储，重复提交无副作用）
-    if !is_immediate_action {
-        let intents = state.intent_manager.read().await;
-        if intents.contains_key(&agent_id) {
-            debug!(
-                "Intent duplicate ignored: agent {} already has intent for tick {}",
-                agent_id, tick_id
-            );
-            return Ok(());
-        }
-    }
 
     info!(
         "Intent received from agent {}: tick={}, action={}",
@@ -765,8 +720,11 @@ async fn handle_intent(
         && let Some(content_value) = action_data.as_ref().and_then(|d| d.get("content"))
         && let Some(content_str) = content_value.as_str()
     {
-        let agent_state = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await?;
-        let location = agent_state.node_id.clone();
+        let location = state
+            .agent_state_cache
+            .get(&agent_id)
+            .map(|r| r.value().node_id.clone())
+            .ok_or_else(|| anyhow::anyhow!("Agent {} 不在缓存中", agent_id))?;
 
         // 独立任务：广播，避免阻塞 intent 处理主流程
         let state_clone = state.clone();
@@ -834,16 +792,28 @@ async fn handle_intent(
         }
     }
 
-    // 保存到 IntentManager（临时缓存)
-    {
-        let mut intents = state.intent_manager.write().await;
-        intents.insert(agent_id, intent);
+    // 路由到 IntentWorker（非阻塞 try_send，队列满时返回错误）
+    match state
+        .worker_tx
+        .try_send(crate::tick::WorkerMessage::Intent {
+            intent: Box::new(intent),
+        }) {
+        Ok(()) => {
+            info!(
+                "Intent queued for real-time processing: agent={}, action={}, tick={}",
+                agent_id, action_type, tick_id
+            );
+        }
+        Err(e) => {
+            warn!(
+                "Intent queue full or closed: agent={}, error={}",
+                agent_id, e
+            );
+            return Err(
+                Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>
+            );
+        }
     }
-
-    info!(
-        "Intent saved to cache for agent {} in tick {}",
-        agent_id, tick_id
-    );
 
     Ok(())
 }

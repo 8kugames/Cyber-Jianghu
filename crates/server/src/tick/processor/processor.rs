@@ -18,6 +18,14 @@ use crate::models::{
 };
 use cyber_jianghu_protocol::{ExecutionSummary, IntentExecutionResult, IntentExecutionStatus};
 
+/// 单条 Intent 处理结果
+pub struct SingleProcessingResult {
+    /// 更新后的 Agent 状态
+    pub updated_state: AgentState,
+    /// 生成的事件列表
+    pub events: Vec<(uuid::Uuid, WorldEvent)>,
+}
+
 /// 状态处理器
 ///
 /// 负责协调意图结算和状态变更
@@ -321,6 +329,154 @@ impl StateProcessor {
             validation_errors,
             execution_summaries,
         ))
+    }
+
+    /// 处理单条 Intent（实时模式用）
+    ///
+    /// 与 `process_intents()` 核心逻辑一致，但作用于单个 Agent + 单条 Intent。
+    /// 保留 Sagas 快照/回滚机制。
+    pub async fn process_single_intent(
+        &self,
+        tick_id: i64,
+        mut agent_state: AgentState,
+        intent: &Intent,
+        all_states: &[AgentState],
+    ) -> Result<SingleProcessingResult> {
+        let executor = ActionExecutor::new(self.db_pool.clone());
+        let mut events: Vec<(uuid::Uuid, WorldEvent)> = Vec::new();
+
+        // 更新在线时间
+        if let Err(e) = crate::db::update_agent_online(&self.db_pool, intent.agent_id).await {
+            warn!("更新 Agent {} 在线时间失败: {}", intent.agent_id, e);
+        }
+
+        // 构建 Pipeline
+        let pipeline_intents = intent.as_pipeline();
+        let mut pipeline_failed = false;
+
+        // Sagas: 快照
+        let agent_state_snapshot = agent_state.clone();
+        let events_len_before = events.len();
+
+        for (pipe_idx, pipe_intent) in pipeline_intents.iter().enumerate() {
+            if pipeline_failed {
+                break;
+            }
+
+            // Pipeline 完整性校验
+            if pipe_idx > 0
+                && (pipe_intent.agent_id != intent.agent_id || pipe_intent.tick_id != tick_id)
+            {
+                pipeline_failed = true;
+                continue;
+            }
+
+            // 验证（传入所有 Agent 状态，支持跨 Agent 校验如 attack/trade）
+            if let Err(e) = self
+                .resolver
+                .validate_intent(pipe_intent, &agent_state, all_states)
+                .await
+            {
+                warn!(
+                    "Pipeline intent {} 验证失败: agent={}, error={}",
+                    pipe_idx, pipe_intent.agent_id, e
+                );
+                pipeline_failed = true;
+                continue;
+            }
+
+            // 执行
+            let result = executor.execute(pipe_intent, &mut agent_state);
+
+            if result.success {
+                let mut all_applied = true;
+                for change in &result.state_changes {
+                    let mut ctx =
+                        MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
+
+                    // 构造单 Agent 的 slice 供 mutator 使用
+                    let mut single_states = vec![agent_state.clone()];
+                    let mut applied = false;
+                    for mutator in &self.mutators {
+                        if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
+                        {
+                            applied = true;
+                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                            break;
+                        }
+                    }
+
+                    if !applied {
+                        let mut single_states = vec![agent_state.clone()];
+                        applied = apply_state_change(
+                            &self.db_pool,
+                            tick_id,
+                            change,
+                            result.intent_id,
+                            &mut single_states,
+                            &mut events,
+                        )
+                        .await;
+                        if applied {
+                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                        }
+                    }
+
+                    if !applied {
+                        all_applied = false;
+                    }
+                }
+
+                if !all_applied {
+                    pipeline_failed = true;
+                }
+            } else {
+                pipeline_failed = true;
+            }
+        }
+
+        // Sagas: 回滚
+        if pipeline_failed {
+            agent_state = agent_state_snapshot;
+            events.truncate(events_len_before);
+        }
+
+        // 记录 action log（异步，不阻塞主流程）
+        let action_type = ActionType::new(intent.action_type.as_str());
+        let action_log = AgentAction {
+            id: 0,
+            tick_id,
+            agent_id: intent.agent_id,
+            action_type,
+            action_type_display: crate::game_data::registry::ActionRegistry::get(
+                intent.action_type.as_str(),
+            )
+            .map(|config| config.name.clone()),
+            action_data: intent.action_data.clone(),
+            result: if pipeline_failed {
+                ActionResult::Failed
+            } else {
+                ActionResult::Success
+            },
+            result_message: None,
+            thought_log: intent.thought_log.clone(),
+            observer_thought: intent.observer_thought.clone(),
+            narrative: intent.narrative.clone(),
+            soul_cycle_metadata: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        let pool = self.db_pool.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::db::batch_insert_action_logs(&pool, &[action_log]).await {
+                warn!("Action log 异步写入失败: {}", e);
+            }
+        });
+
+        Ok(SingleProcessingResult {
+            updated_state: agent_state,
+            events,
+        })
     }
 }
 

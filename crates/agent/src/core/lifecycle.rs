@@ -1183,6 +1183,39 @@ impl super::Agent {
                                 "Intent sent successfully: tick={}, action={}, agent={}",
                                 final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                             );
+
+                            // 实时模式：poll ExecutionResult（server 立即处理后的反馈）
+                            // 短暂等待 200ms 后检查，避免 busy-wait
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            match self.client.try_receive_execution_result().await {
+                                Ok(Some(result)) => {
+                                    if result.success {
+                                        debug!(
+                                            "ExecutionResult: tick={}, intent={}, success",
+                                            result.tick_id, result.intent_id
+                                        );
+                                    } else {
+                                        warn!(
+                                            "ExecutionResult: tick={}, intent={}, FAILED: {}",
+                                            result.tick_id,
+                                            result.intent_id,
+                                            result.error.as_deref().unwrap_or("unknown")
+                                        );
+                                        // 注入失败原因到下轮推理上下文
+                                        let reason = result.error.unwrap_or_default();
+                                        self.last_rejection_reason = Some(
+                                            format!("[意图执行失败: {}]", reason)
+                                        );
+                                    }
+                                }
+                                Ok(None) => {
+                                    debug!("No ExecutionResult yet (server may be batching)");
+                                }
+                                Err(e) => {
+                                    debug!("ExecutionResult poll error: {}", e);
+                                }
+                            }
+
                             if final_intent.action_type.as_str() != "idle" {
                                 self.consecutive_idle_count = 0;
                                 if let Some(ref container) = self.actor_llm_container {

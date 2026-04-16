@@ -22,4 +22,5 @@ mod processor;
 mod resolver;
 
 // 导出公共API
-pub use processor::StateProcessor;
+#[allow(unused_imports)]
+pub use processor::{SingleProcessingResult, StateProcessor};

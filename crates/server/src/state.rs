@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tracing::info;
 
@@ -9,6 +9,8 @@ use crate::config::Config;
 use crate::db::DbPool;
 use crate::dialogue;
 use crate::game_data;
+use crate::models::AgentState;
+use crate::tick::WorkerMessage;
 use crate::websocket;
 
 // ============================================================================
@@ -92,6 +94,34 @@ pub fn start_rate_limiter_cleanup(rate_limiter: RateLimiter) -> JoinHandle<()> {
 }
 
 // ============================================================================
+// Agent 状态缓存类型
+// ============================================================================
+
+/// Agent 状态内存缓存
+///
+/// 启动时从 DB 加载，作为实时 Intent 处理的读源。
+/// 每次 mutation 后 persist 到 DB 再更新 cache（write-through）。
+pub type AgentStateCache = Arc<dashmap::DashMap<uuid::Uuid, AgentState>>;
+
+/// 创建空的 Agent 状态缓存
+pub fn create_agent_state_cache() -> AgentStateCache {
+    Arc::new(dashmap::DashMap::new())
+}
+
+/// 从数据库加载所有存活 Agent 状态到缓存
+pub async fn populate_agent_state_cache(
+    cache: &AgentStateCache,
+    db_pool: &DbPool,
+) -> anyhow::Result<usize> {
+    let states = crate::db::get_all_alive_agents_latest_states(db_pool).await?;
+    let count = states.len();
+    for state in states {
+        cache.insert(state.agent_id, state);
+    }
+    Ok(count)
+}
+
+// ============================================================================
 // 应用状态（共享状态）
 // ============================================================================
 
@@ -113,8 +143,14 @@ pub struct AppState {
     /// agent_id → device_id 反向映射
     pub agent_to_device_map: websocket::AgentToDeviceMap,
 
-    /// Intent 管理器（临时缓存）
+    /// Intent 管理器（旧批处理模式，Phase 2 后移除）
     pub intent_manager: websocket::IntentManager,
+
+    /// Agent 状态内存缓存（DashMap，per-key 并发读写）
+    pub agent_state_cache: AgentStateCache,
+
+    /// 实时 Intent 处理队列（发送端，IntentWorker 消费）
+    pub worker_tx: mpsc::Sender<WorkerMessage>,
 
     /// Intent 速率限制器
     pub rate_limiter: RateLimiter,
@@ -150,6 +186,8 @@ impl AppState {
         connection_manager: websocket::ConnectionManager,
         agent_to_device_map: websocket::AgentToDeviceMap,
         intent_manager: websocket::IntentManager,
+        agent_state_cache: AgentStateCache,
+        worker_tx: mpsc::Sender<WorkerMessage>,
         rate_limiter: RateLimiter,
         game_data: Arc<game_data::GameDataCache>,
         dialogue_manager: Arc<dialogue::DialogueManager>,
@@ -164,6 +202,8 @@ impl AppState {
             connection_manager,
             agent_to_device_map,
             intent_manager,
+            agent_state_cache,
+            worker_tx,
             rate_limiter,
             game_data,
             dialogue_manager,
