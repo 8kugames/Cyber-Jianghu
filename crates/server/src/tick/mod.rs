@@ -18,7 +18,6 @@
 
 mod broadcaster;
 mod decay;
-mod engine;
 mod event_manager;
 mod persistence;
 mod processor;
