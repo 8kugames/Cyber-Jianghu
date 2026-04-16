@@ -252,45 +252,33 @@ pub async fn broadcast_speak_to_location(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use crate::models::{WorldEvent, WorldEventType};
 
-    // 阶段 1：读锁内只收集候选 agent_id 列表，然后立即释放锁
-    let candidates: Vec<uuid::Uuid> = {
-        let connections = state.connection_manager.read().await;
-        connections
-            .iter()
-            .filter(|(_, c)| !c.is_dead() && c.agent_id != from_agent_id)
-            .map(|(_, c)| c.agent_id)
-            .collect()
-    };
+    // 阶段 1：从 DashMap 获取同位置的在线 agent（内存读取，无 DB 查询）
+    let same_location_agents: Vec<uuid::Uuid> = state
+        .agent_state_cache
+        .iter()
+        .filter(|r| {
+            r.value().node_id == location
+                && r.value().is_alive
+                && *r.key() != from_agent_id
+        })
+        .map(|r| *r.key())
+        .collect();
 
-    if candidates.is_empty() {
+    if same_location_agents.is_empty() {
         return Ok(());
     }
 
-    // 阶段 2：批量查询 location（一次 SQL 拿到所有候选 agent 的位置）
-    let candidate_set: Vec<uuid::Uuid> = candidates;
-    let rows: Vec<(uuid::Uuid, String)> = sqlx::query_as(
-        "SELECT DISTINCT ON (agent_id) agent_id, node_id FROM agent_states WHERE agent_id = ANY($1) ORDER BY agent_id, tick_id DESC",
-    )
-    .bind(&candidate_set)
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| format!("Failed to query agent locations: {}", e))?;
-
-    // 阶段 3：只给同 location 的 agent 发送
+    // 阶段 2：获取发送者名称 + 向同位置 agent 广播
     let connections = state.connection_manager.read().await;
     let mut sent_count = 0;
 
-    // 查找发送者的 agent_name
     let from_agent_name: String = connections
         .values()
         .find(|c| c.agent_id == from_agent_id)
         .map(|c| c.agent_name.clone())
         .unwrap_or_else(|| "某人".to_string());
 
-    for (agent_id, node_id) in rows {
-        if node_id != location {
-            continue;
-        }
+    for agent_id in same_location_agents {
         let Some(connection) = connections.values().find(|c| c.agent_id == agent_id) else {
             continue;
         };

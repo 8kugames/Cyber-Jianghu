@@ -29,7 +29,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use cyber_jianghu_protocol::{
-    AvailableAction, ClientMessage, ImmediateDecisionRules, ServerMessage, WorldEventType,
+    AvailableAction, ClientMessage, ImmediateDecisionRules, Intent, ServerMessage, WorldEventType,
 };
 
 use crate::component::llm::LlmClientExt;
@@ -133,7 +133,7 @@ pub struct ImmediateEventHandler {
     /// 即时决策器
     decision_maker: Arc<dyn ImmediateDecisionMaker>,
 
-    /// 即时意图发送通道（Handler -> 转发任务 -> WebSocket）
+    /// 意图发送通道（与主 intent 共享同一通道，统一走 WebSocket）
     intent_tx: Arc<RwLock<mpsc::Sender<ClientMessage>>>,
 
     /// 规则验证回调（Layer 1 + Layer 2，不涉及 LLM）
@@ -193,7 +193,7 @@ impl ImmediateEventHandler {
         *guard = tick_id;
     }
 
-    /// 替换意图发送通道（连接建立后，绑定到 WebSocket 的 immediate_msg_tx）
+    /// 替换意图发送通道（连接建立后，绑定到 WebSocket 的主 intent_tx）
     pub async fn replace_intent_channel(&self, new_tx: mpsc::Sender<ClientMessage>) {
         let mut guard = self.intent_tx.write().await;
         *guard = new_tx;
@@ -436,19 +436,25 @@ impl ImmediateEventHandler {
 
                     let tick_id = *self.current_tick_id.read().await;
                     let response_uuid = uuid::Uuid::new_v4();
-                    let intent = ClientMessage::Intent {
-                        intent_id: Some(response_uuid),
+                    let intent = Intent {
+                        intent_id: response_uuid,
+                        agent_id: uuid::Uuid::nil(), // 由 WebSocket 后台任务填充
                         tick_id,
-                        agent_id: None,
                         thought_log: Some(thought.clone()),
-                        action_type: action_type.clone(),
+                        action_type: cyber_jianghu_protocol::ActionType::new(&action_type),
                         action_data: Some(serde_json::json!({
                             "content": content
                         })),
                         priority: IMMEDIATE_INTENT_PRIORITY,
+                        observer_thought: None,
+                        narrative: None,
+                        already_broadcast: false,
+                        session_id: None,
+                        subsequent_intents: vec![],
                     };
+                    let msg = ClientMessage::from_intent(intent);
 
-                    if let Err(e) = self.intent_tx.read().await.send(intent).await {
+                    if let Err(e) = self.intent_tx.read().await.send(msg).await {
                         error!("Failed to send immediate response Intent: {}", e);
                         if let Some(recorder) = self.get_soul_recorder().await {
                             let _ = recorder

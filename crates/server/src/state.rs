@@ -143,9 +143,6 @@ pub struct AppState {
     /// agent_id → device_id 反向映射
     pub agent_to_device_map: websocket::AgentToDeviceMap,
 
-    /// Intent 管理器（旧批处理模式，Phase 2 后移除）
-    pub intent_manager: websocket::IntentManager,
-
     /// Agent 状态内存缓存（DashMap，per-key 并发读写）
     pub agent_state_cache: AgentStateCache,
 
@@ -173,8 +170,8 @@ pub struct AppState {
     /// 配置文件目录路径
     pub config_dir: std::path::PathBuf,
 
-    /// 当前正在接受意图的 tick_id（内存原子变量）
-    /// 0 表示 scheduler 尚未启动，intent 被拒
+    /// 当前 tick_id（原子变量，handler 用于构建重连 WorldState）
+    /// 0 表示 scheduler 尚未启动
     pub current_accepting_tick_id: Arc<AtomicI64>,
 }
 
@@ -185,7 +182,6 @@ impl AppState {
         db_pool: DbPool,
         connection_manager: websocket::ConnectionManager,
         agent_to_device_map: websocket::AgentToDeviceMap,
-        intent_manager: websocket::IntentManager,
         agent_state_cache: AgentStateCache,
         worker_tx: mpsc::Sender<WorkerMessage>,
         rate_limiter: RateLimiter,
@@ -201,7 +197,6 @@ impl AppState {
             db_pool,
             connection_manager,
             agent_to_device_map,
-            intent_manager,
             agent_state_cache,
             worker_tx,
             rate_limiter,
