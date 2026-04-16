@@ -23,14 +23,13 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use crate::db::DbPool;
-use crate::dialogue::DialogueManager;
 use crate::game_data::GameDataCache;
 use crate::state::AgentStateCache;
-use crate::websocket::{AgentToDeviceMap, ConnectionManager, IntentManager};
+use crate::websocket::{AgentToDeviceMap, ConnectionManager};
 
+use super::WorkerMessage;
 use super::broadcaster::Broadcaster;
 use super::event_manager::EventManager;
-use super::WorkerMessage;
 
 use crate::game_data::loaders::load_actions;
 use crate::paths::get_config_dir;
@@ -61,26 +60,11 @@ pub struct TickScheduler {
     /// agent_id → device_id 反向映射
     agent_to_device_map: AgentToDeviceMap,
 
-    /// Intent 管理器（旧批处理模式，Phase 5 移除）
-    #[allow(dead_code)]
-    intent_manager: IntentManager,
-
     /// 事件管理器
     event_manager: EventManager,
 
     /// 广播器
     broadcaster: Broadcaster,
-
-    /// 对话管理器
-    #[allow(dead_code)]
-    dialogue_manager: Arc<DialogueManager>,
-
-    /// 上一轮关闭的对话记录（用于下一轮广播）
-    closed_dialogue_records: Vec<cyber_jianghu_protocol::PrivateDialogueRecord>,
-
-    /// 上一轮 Pipeline 执行汇总（用于下一轮广播）
-    execution_summaries:
-        std::collections::HashMap<uuid::Uuid, cyber_jianghu_protocol::ExecutionSummary>,
 
     /// IntentWorker 发送端（发送 TickBoundary 触发衰减）
     worker_tx: mpsc::Sender<WorkerMessage>,
@@ -88,7 +72,7 @@ pub struct TickScheduler {
     /// Agent 状态内存缓存
     agent_state_cache: AgentStateCache,
 
-    /// 当前接受意图的 tick_id（旧批处理模式，Phase 5 移除）
+    /// 当前 tick_id（原子变量，供外部查询当前 tick）
     accepting_tick_id: Arc<AtomicI64>,
 
     /// 上次加载的 actions.yaml 修改时间
@@ -103,8 +87,6 @@ impl TickScheduler {
         db_pool: DbPool,
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
-        intent_manager: IntentManager,
-        dialogue_manager: Arc<DialogueManager>,
         worker_tx: mpsc::Sender<WorkerMessage>,
         agent_state_cache: AgentStateCache,
         accepting_tick_id: Arc<AtomicI64>,
@@ -116,12 +98,8 @@ impl TickScheduler {
             db_pool,
             connection_manager,
             agent_to_device_map,
-            intent_manager,
             event_manager: EventManager::new(),
             broadcaster: Broadcaster::new(),
-            dialogue_manager,
-            closed_dialogue_records: vec![],
-            execution_summaries: std::collections::HashMap::new(),
             worker_tx,
             agent_state_cache,
             accepting_tick_id,
@@ -326,8 +304,6 @@ impl TickScheduler {
                 &self.event_manager,
                 &self.game_data_cache,
                 deadline_ms,
-                &self.closed_dialogue_records,
-                &self.execution_summaries,
             )
             .await
             .context("广播: 广播状态失败")?;

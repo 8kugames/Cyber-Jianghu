@@ -13,9 +13,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use super::types::IntentManager;
-use crate::models::Intent;
-
 // ============================================================================
 // 连接管理器
 // ============================================================================
@@ -29,9 +26,7 @@ pub type ConnectionManager = Arc<RwLock<HashMap<Uuid, Connection>>>;
 #[derive(Debug, Clone)]
 pub struct Connection {
     pub agent_id: Uuid,
-    #[allow(dead_code)]
     pub device_id: Uuid,
-    #[allow(dead_code)]
     pub agent_name: String,
     pub sender: tokio::sync::mpsc::Sender<Message>,
     is_dead: bool,
@@ -81,11 +76,6 @@ pub fn create_connection_manager() -> ConnectionManager {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
-/// 创建 Intent 管理器
-pub fn create_intent_manager() -> IntentManager {
-    Arc::new(RwLock::new(HashMap::new()))
-}
-
 // ============================================================================
 // agent_id → device_id 反向映射
 // ============================================================================
@@ -99,47 +89,4 @@ pub type AgentToDeviceMap = Arc<RwLock<HashMap<Uuid, Uuid>>>;
 /// 创建 agent_id → device_id 映射表
 pub fn create_agent_to_device_map() -> AgentToDeviceMap {
     Arc::new(RwLock::new(HashMap::new()))
-}
-
-pub async fn take_intents_for_tick(intent_manager: &IntentManager, tick_id: i64) -> Vec<Intent> {
-    let mut intents_map = intent_manager.write().await;
-
-    let mut current_tick_intents = Vec::new();
-    let mut remove_agent_ids = Vec::new();
-
-    for (agent_id, intent) in intents_map.iter() {
-        if intent.tick_id == tick_id {
-            current_tick_intents.push(intent.clone());
-            remove_agent_ids.push(*agent_id);
-        } else if intent.tick_id < tick_id {
-            tracing::debug!(
-                "移除过期意图: agent={}, intent_tick={}, current_tick={}",
-                agent_id,
-                intent.tick_id,
-                tick_id
-            );
-            remove_agent_ids.push(*agent_id);
-        } else {
-            tracing::debug!(
-                "保留未来意图: agent={}, intent_tick={}, current_tick={}",
-                agent_id,
-                intent.tick_id,
-                tick_id
-            );
-        }
-    }
-
-    let removed_count = remove_agent_ids.len();
-    for agent_id in remove_agent_ids {
-        intents_map.remove(&agent_id);
-    }
-
-    tracing::debug!(
-        "🧹 Took {} intents for tick {}, removed {} expired intents",
-        current_tick_intents.len(),
-        tick_id,
-        removed_count
-    );
-
-    current_tick_intents
 }

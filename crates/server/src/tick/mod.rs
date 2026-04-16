@@ -2,21 +2,18 @@
 // OpenClaw Cyber-Jianghu MVP Tick模块
 // ============================================================================
 //
-// 本模块包含Tick引擎相关的所有功能，包括：
-// - Tick循环定时器
-// - 状态收集器
-// - 状态结算器
-// - 状态持久化器
-// - 状态广播器
+// 实时模式架构：
+// - TickScheduler: 纯时钟驱动（衰减 + 周期广播 WorldState）
+// - IntentWorker: 实时处理 Agent 提交的 Intent（验证+执行+持久化+广播）
 //
 // 模块结构：
-// - scheduler: Tick调度器（主循环和阶段协调）
-// - event_manager: 事件管理器（事件创建和管理）
-// - intent_collector: 意图收集器（从IntentManager收集意图）
+// - scheduler: Tick调度器（纯时钟，衰减+广播）
+// - realtime: IntentWorker（实时 Intent 处理引擎）
+// - processor: 状态处理器（验证+执行+Saga回滚）
 // - broadcaster: 广播器（向Agent广播WorldState）
 // - decay: 生理值衰减计算
 // - persistence: 数据库持久化操作
-// - state_processor: 状态处理和意图结算
+// - event_manager: 事件管理器
 // ============================================================================
 
 mod broadcaster;

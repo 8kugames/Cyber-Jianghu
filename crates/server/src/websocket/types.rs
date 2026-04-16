@@ -6,14 +6,10 @@
 // ============================================================================
 
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::game_data::types::UnifiedWorldBuildingRulesConfig;
 use crate::game_data::{ActionRegistry, InitialInventoryRegistry};
-use crate::models::Intent;
 use chrono::Utc;
 use cyber_jianghu_protocol::{GameRules, InitialItem, WorldBuildingRules};
 
@@ -28,18 +24,6 @@ pub struct WebSocketQuery {
     #[serde(default)]
     pub agent_id: Option<Uuid>,
 }
-
-// ============================================================================
-// Intent 管理器类型
-// ============================================================================
-
-/// Intent 管理器
-///
-/// 管理临时的 Intent 缓存
-/// - Agent 通过 WebSocket 发送 Intent → 存储到这里
-/// - Tick Engine 在每个 Tick 开始时从这里读取所有 Intent
-/// - Tick 结束后清空缓存
-pub type IntentManager = Arc<RwLock<HashMap<Uuid, Intent>>>;
 
 // ============================================================================
 // 辅助函数

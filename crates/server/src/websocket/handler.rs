@@ -614,8 +614,8 @@ async fn handle_client_message(
 
 /// 处理意图上报
 ///
-/// 将 Intent 保存到 IntentManager（临时缓存）
-/// 包含速率限制检查、Agent 存活检查和 tick_id 校验
+/// 处理 Agent 提交的 Intent（实时模式：非阻塞入队 IntentWorker）
+/// 包含速率限制检查、Agent 存活检查，speak/whisper 即时广播
 #[allow(clippy::too_many_arguments)]
 async fn handle_intent(
     connection_agent_id: uuid::Uuid,
@@ -684,12 +684,6 @@ async fn handle_intent(
             Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
         );
     }
-
-    // 即时动作（speak、whisper、emote 等）允许重复提交
-    let _is_immediate_action = matches!(
-        action_type.as_str(),
-        "speak" | "whisper" | "emote" | "laugh" | "nod" | "wave" | "bow"
-    );
 
     info!(
         "Intent received from agent {}: tick={}, action={}",

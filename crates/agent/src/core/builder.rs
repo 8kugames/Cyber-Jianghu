@@ -249,7 +249,7 @@ impl AgentBuilder {
     ) -> Self {
         use tokio::sync::mpsc;
 
-        // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 immediate_msg_tx）
+        // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 intent_tx）
         let (tx, _rx) = mpsc::channel(32);
 
         // 从配置中获取决策规则

@@ -198,7 +198,7 @@ impl super::Agent {
 
                             // 重新绑定即时意图通道（WebSocket 重连后创建了新通道）
                             if let Some(ref handler) = self.immediate_handler
-                                && let Some(tx) = self.client.immediate_msg_sender().await
+                                && let Some(tx) = self.client.intent_sender().await
                             {
                                 handler.replace_intent_channel(tx).await;
                                 info!("reconnect: 即时意图通道已重新绑定");

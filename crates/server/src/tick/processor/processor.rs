@@ -59,12 +59,10 @@ impl StateProcessor {
         self
     }
 
-    /// 处理意图列表
+    /// 处理意图列表（已弃用：批处理模式）
     ///
-    /// 这是主入口函数，协调整个处理流程。
-    /// 支持多 Intent Pipeline 执行：主 Intent 成功后依次执行 subsequent_intents。
-    /// 返回值包含 `execution_summaries`：每个 Agent 的 Pipeline 执行汇总，
-    /// 由 scheduler 在下次广播时附加到 WorldState。
+    /// 保留用于参考，实时模式使用 `process_single_intent()`。
+    #[allow(dead_code)]
     pub async fn process_intents(
         &self,
         tick_id: i64,

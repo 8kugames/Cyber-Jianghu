@@ -100,9 +100,7 @@ struct ConnectionState {
     /// 关闭信号（broadcast，支持一次性触发）
     shutdown_tx: Option<tokio::sync::broadcast::Sender<()>>,
     /// Intent 发送通道（主循环 → 后台任务）
-    intent_tx: Option<tokio::sync::mpsc::Sender<Intent>>,
-    /// 即时消息发送通道（立即响应 → 后台任务）
-    immediate_msg_tx: Option<tokio::sync::mpsc::Sender<ClientMessage>>,
+    intent_tx: Option<tokio::sync::mpsc::Sender<ClientMessage>>,
     /// WorldState 通道（后台任务 → 主循环，watch 保留最新值）
     worldstate_tx: Option<tokio::sync::watch::Sender<Option<WorldState>>>,
     /// 注册通知通道（后台任务 → 主循环）
@@ -130,7 +128,6 @@ impl WebSocketClient {
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
-                immediate_msg_tx: None,
                 worldstate_tx: None,
                 registered_tx: None,
                 execution_result_tx: None,
@@ -169,7 +166,6 @@ impl WebSocketClient {
 
                 // 创建通道
                 let (intent_tx, intent_rx) = tokio::sync::mpsc::channel(32);
-                let (immediate_msg_tx, immediate_msg_rx) = tokio::sync::mpsc::channel(32);
                 let (worldstate_tx, _) = tokio::sync::watch::channel(None);
                 let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
                 let (registered_tx, _) = tokio::sync::watch::channel(None);
@@ -178,14 +174,7 @@ impl WebSocketClient {
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
                 let handle = tokio::spawn(async move {
-                    websocket_background_task(
-                        ws,
-                        state_arc,
-                        intent_rx,
-                        immediate_msg_rx,
-                        shutdown_rx,
-                    )
-                    .await;
+                    websocket_background_task(ws, state_arc, intent_rx, shutdown_rx).await;
                 });
 
                 // 更新状态
@@ -196,7 +185,6 @@ impl WebSocketClient {
                 state.reader_task = Some(handle);
                 state.shutdown_tx = Some(shutdown_tx);
                 state.intent_tx = Some(intent_tx);
-                state.immediate_msg_tx = Some(immediate_msg_tx);
                 state.worldstate_tx = Some(worldstate_tx);
                 state.registered_tx = Some(registered_tx);
                 state.execution_result_tx = Some(execution_result_tx);
@@ -421,7 +409,7 @@ impl WebSocketClient {
                 .clone()
         };
 
-        tx.send(intent.clone())
+        tx.send(ClientMessage::from_intent(intent.clone()))
             .await
             .context("Failed to send intent to background task")?;
 
@@ -429,29 +417,13 @@ impl WebSocketClient {
         Ok(())
     }
 
-    /// 发送即时消息（speak/whisper 等，通过独立 channel，不阻塞主 intent）
-    pub async fn send_immediate_message(&self, msg: ClientMessage) -> Result<()> {
-        let tx = {
-            let state = self.state.read().await;
-            state
-                .immediate_msg_tx
-                .as_ref()
-                .context("Not connected to server")?
-                .clone()
-        };
-
-        tx.send(msg)
-            .await
-            .context("Failed to send immediate message to background task")?;
-
-        debug!("Sent immediate message to background task");
-        Ok(())
+    /// 获取 Intent 发送端的 clone（用于绑定到 ImmediateEventHandler）
+    pub async fn intent_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
+        let state = self.state.read().await;
+        state.intent_tx.clone()
     }
 
-    /// 发送三魂循环元数据到服务器
-    ///
-    /// 在 intent 发送后调用，使 server-web 能看到与 agent-web 相同的三魂详情。
-    /// 使用即时消息通道（fire-and-forget，不阻塞主循环）。
+    /// 发送三魂循环元数据到服务器（fire-and-forget，通过统一通道）
     pub async fn send_soul_cycle_report(
         &self,
         tick_id: i64,
@@ -463,16 +435,19 @@ impl WebSocketClient {
             agent_id,
             metadata,
         };
-        self.send_immediate_message(msg).await
+        let tx = {
+            let state = self.state.read().await;
+            state
+                .intent_tx
+                .as_ref()
+                .context("Not connected to server")?
+                .clone()
+        };
+        tx.send(msg)
+            .await
+            .context("Failed to send soul cycle report")?;
+        Ok(())
     }
-
-    /// 获取即时消息发送端的 clone（用于绑定到 ImmediateEventHandler）
-    pub async fn immediate_msg_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
-        let state = self.state.read().await;
-        state.immediate_msg_tx.clone()
-    }
-
-    /// 获取游戏规则
     pub fn game_rules(&self) -> Option<GameRules> {
         self.state.try_read().ok()?.game_rules.clone()
     }
@@ -500,7 +475,6 @@ impl WebSocketClient {
             let handle = state.reader_task.take();
             state.connected = false;
             state.intent_tx = None;
-            state.immediate_msg_tx = None;
             state.worldstate_tx = None;
             state.registered_tx = None;
             state.execution_result_tx = None;
@@ -538,8 +512,7 @@ impl WebSocketClient {
 async fn websocket_background_task(
     mut ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     state: Arc<RwLock<ConnectionState>>,
-    mut intent_rx: tokio::sync::mpsc::Receiver<Intent>,
-    mut immediate_msg_rx: tokio::sync::mpsc::Receiver<ClientMessage>,
+    mut intent_rx: tokio::sync::mpsc::Receiver<ClientMessage>,
     mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) {
     /// 读超时：server 每 30s 发 Ping，120s 无任何消息 = 连接已死
@@ -811,54 +784,23 @@ async fn websocket_background_task(
                     _ => {}
                 }
             }
-
-            // 发送 intent（通过 mpsc channel）
-            Some(intent) = intent_rx.recv() => {
-                let client_msg = ClientMessage::from_intent(intent.clone());
-                let json = match serde_json::to_string(&client_msg) {
+            // 发送 ClientMessage（Intent、SoulCycleReport 等统一通道）
+            Some(msg) = intent_rx.recv() => {
+                let json = match serde_json::to_string(&msg) {
                     Ok(s) => s,
                     Err(e) => {
-                        warn!("Background: Failed to serialize intent: {}", e);
+                        warn!("Background: Failed to serialize message: {}", e);
                         continue;
                     }
                 };
 
                 if let Err(e) = ws.send(Message::Text(json.into())).await {
-                    error!("Background: Failed to send intent: {}", e);
+                    error!("Background: Failed to send message: {}", e);
                     break;
                 }
-                debug!("Background: Sent intent action={}", intent.action_type);
-            }
-
-            // 发送即时消息（ImmediateIntent，通过单独的 channel）
-            Some(immediate_msg) = immediate_msg_rx.recv() => {
-                let json = match serde_json::to_string(&immediate_msg) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        warn!("Background: Failed to serialize immediate message: {}", e);
-                        continue;
-                    }
-                };
-
-                if let Err(e) = ws.send(Message::Text(json.into())).await {
-                    error!("Background: Failed to send immediate message: {}", e);
-                    break;
-                }
-                debug!("Background: Sent immediate message");
+                debug!("Background: Sent message via unified channel");
             }
         }
-    }
-
-    // 清理连接状态：drop 所有 channel 使 receiver 收到 Closed 错误
-    // 注意：此路径与 disconnect() 互斥（disconnect 通过 shutdown_rx 优雅关闭）
-    {
-        let mut guard = state.write().await;
-        guard.connected = false;
-        guard.worldstate_tx = None;
-        guard.registered_tx = None;
-        guard.intent_tx = None;
-        guard.immediate_msg_tx = None;
-        guard.execution_result_tx = None;
     }
 
     info!("WebSocket background task exiting");
@@ -913,14 +855,13 @@ impl AgentClient {
         let client = self.client.read().await;
         client.send_intent(intent).await
     }
-
-    /// 发送即时消息（speak/whisper 等）
-    pub async fn send_immediate_message(&self, msg: ClientMessage) -> Result<()> {
+    /// 获取 Intent 发送端
+    pub async fn intent_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
         let client = self.client.read().await;
-        client.send_immediate_message(msg).await
+        client.intent_sender().await
     }
 
-    /// 发送三魂循环元数据到服务器
+    /// 发送三魂循环元数据
     pub async fn send_soul_cycle_report(
         &self,
         tick_id: i64,
@@ -928,12 +869,6 @@ impl AgentClient {
     ) -> Result<()> {
         let client = self.client.read().await;
         client.send_soul_cycle_report(tick_id, metadata).await
-    }
-
-    /// 获取即时消息发送端
-    pub async fn immediate_msg_sender(&self) -> Option<tokio::sync::mpsc::Sender<ClientMessage>> {
-        let client = self.client.read().await;
-        client.immediate_msg_sender().await
     }
 
     pub async fn is_connected(&self) -> bool {

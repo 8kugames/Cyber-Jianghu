@@ -7,182 +7,94 @@
 
 ## [Unreleased]
 
-### ⚠️ Breaking Changes
+### ⚠️ Breaking Changes — 0.1.0 实时架构改造
 
-- **Protocol**: `ServerMessage::Error` 新增 `code: String` 字段
-  - 旧格式: `{"type":"error","message":"..."}`
-  - 新格式: `{"type":"error","code":"tick_mismatch","message":"..."}`
-  - `code` 字段使用 `#[serde(default)]` 反序列化兼容，但**旧版 Agent 无法利用结构化错误码**
-  - 错误码常量定义在 `cyber_jianghu_protocol::ERROR_CODE_*`（见下方 Added）
-  - 影响：所有依赖 `ServerMessage::Error` 的下游代码需适配 `code` 字段
+Tick 批处理模式全面退役，Intent 实时化。版本 0.0.x → 0.1.0。
 
-- **Protocol**: `AvailableAction` 新增 `required_fields: Vec<String>` 字段
-  - 字段使用 `#[serde(default)]` 反序列化兼容，旧数据自动填充空数组
-  - 影响：所有构造 `AvailableAction` 的代码需提供 `required_fields`
+- **Protocol**: 新增 `ServerMessage::ExecutionResult` 变体
+  - 格式: `{ tick_id, intent_id, success, error?, state_change_summary? }`
+  - Agent **必须**处理此消息以获取实时执行反馈
+  - 旧版 Agent 无法感知 Intent 执行结果
 
-- **Agent**: 删除 `claw/protocol.rs` 中 `infer_error_code()` 文本推断回退
-  - 旧版 Agent 在 server 不发 `code` 时通过中文/英文关键词推断错误类型
-  - 现在要求 server 必须发送 `code` 字段，否则统一回退 `ServerErrorCode::Unknown`
+- **Agent**: 统一 `ClientMessage` 通道替代双通道
+  - 删除 `immediate_msg_tx` / `immediate_msg_rx` 独立通道
+  - speak/whisper/emote 等即时事件统一通过 `intent_tx: Sender<ClientMessage>` 发送
+  - `ClientMessage::SoulCycleReport` 替代旧的 `SoulCycleData` 直接发送
+
+- **Server**: 删除 `IntentManager` 批处理意图缓存
+  - `AppState.intent_manager` 字段移除
+  - `create_intent_manager()` / `take_intents_for_tick()` 函数移除
+  - `websocket::IntentManager` 类型别名移除
+  - handler.rs 不再将 Intent 写入 IntentManager，改为直接入队 IntentWorker
+
+- **Server**: 删除 `accepting_tick_id` 校验
+  - handler.rs 不再检查 `intent.tick_id == accepting_tick_id`
+  - Agent 不再需要同步 tick_id 即可提交 Intent
+
+- **Server**: `TickScheduler` 移除批处理字段
+  - 删除 `closed_dialogue_records`、`execution_summaries`、`dialogue_manager`、`intent_manager` 字段
+  - `broadcast_states()` 不再接收这两个参数
 
 ### Added
 
-#### multi-Intent + 纯LLM叙事隔离架构 (v0.0.104+)
+- **Server**: `IntentWorker` 实时处理引擎 (`tick/realtime.rs`)
+  - 单消费者 MPSC channel(256)，顺序处理 Intent + TickBoundary
+  - Intent 路径：DashMap 读取 → StateProcessor 执行 → DB persist → DashMap 更新 → 广播
+  - TickBoundary 路径：批量衰减 → persist → 死亡处理（物品掉落 + DB标记 + DashMap清理 + WS断连）
+  - `WorkerMessage` 枚举统一 Intent 和 TickBoundary
 
-- **Protocol**: `IntentBatchConfig` 批次配置
-  - `max_intents_per_tick`: 每 tick 最大 Intent 数（默认 5）
-  - `max_retries`: 三魂循环最大重试次数（默认 3）
-  - `pipeline_execution_enabled`: 是否启用 Pipeline 执行
-  - `partial_execution_enabled`: 是否允许部分执行
+- **Server**: `StateProcessor::process_single_intent()` 单条 Intent 处理
+  - 从 `process_intents()` 提取，接受单个 `AgentState` + `&[Intent]`
+  - 保留完整 Saga 快照/回滚机制
+  - 新增 `all_states: &[AgentState]` 参数支持跨 Agent 校验
 
-- **Protocol**: `GradedValidationConfig` 分级审核配置
-  - `always_types`: 强制 LLM 审核的 action_type（speak/shout/whisper）
-  - `adaptive_types`: 动态审核的 action_type（steal/trade/give/move）
-  - `skip_types`: 跳过 LLM 审核的 action_type（idle/wait）
-  - `minimum_per_tick`: 每 tick 至少审核的 Intent 数量
-  - `restricted_area_keywords`: 限制区域关键词（move 审核用）
-  - `high_value_item_keywords`: 高价值物品关键词（trade/steal/give 审核用）
-  - `adaptive_field_mapping`: Adaptive 审核字段映射（数据驱动）
+- **Server**: `AgentStateCache` (DashMap) 内存缓存 (`state.rs`)
+  - `Arc<DashMap<Uuid, AgentState>>`，启动时从 DB 加载
+  - write-through: persist 到 DB 确认后才更新 DashMap
+  - `broadcast_speak_to_location` 从 DashMap 读取位置，不再查 DB
 
-- **Protocol**: `ExecutionSummary` 执行汇总
-  - Server 广播用，包含 total/succeeded/failed/skipped 计数
+- **Server**: `broadcast_speak_to_location` 改用 DashMap
+  - speak 广播路径消除 SQL 查询，纯内存过滤同位置 Agent
 
-- **Protocol**: `Intent.subsequent_intents` Pipeline 嵌套支持
-  - 单 tick 可提交多 Intent，顺序执行，失败回滚
-
-- **Agent**: `NarrativeGenerator` 叙事生成器 (`soul/reflector/narrative_generator.rs`)
-  - LLM 生成叙事上下文，语义缓存，泄露检测
-  - 人魂只接收格式化叙事，完全隔离技术细节
-
-- **Agent**: 分级审核策略
-  - `Skip`: 只做 RuleEngine Layer1+2 确定性校验
-  - `Always`: 完整三层审核（action_type → RuleEngine → LLM）
-  - `Adaptive`: 动态判断是否需要 LLM 审核（限制区域/高价值物品检测）
-
-- **Agent**: `WorldTime.to_chinese()` 武侠格式
-  - 三处统一使用"天道历三二五年元月四日申时"格式
-
-#### 即时事件配置驱动 (v0.0.103+)
-
-- **Protocol**: `ImmediateEventConfig` 即时事件配置
-  - `conflict_actions`: 冲突动作列表（执行时不立即回应）
-  - `call_keywords`: 呼唤关键词列表（匹配时立即回应）
-  - `max_call_content_length`: 最大呼唤内容长度
-  - `default_response`: 默认回应内容
-  - `immediate_routing_actions`: 即时路由动作列表（speak/whisper 不占 tick 配额）
-
-- **Server**: `game_rules.yaml` 即时事件配置段
-  - 移除 `immediate/mod.rs` 硬编码，改为配置驱动
-
-- **Agent**: `ImmediateEventHandler` 运行时更新
-  - 新增 `with_updated_decision_maker` 方法支持运行时更新
-  - 收到 `game_rules` 时自动更新配置
-
-#### 配置透传完整性修复 (v0.0.104)
-
-- **Server**: HTTP 注册路径正确透传 `immediate_events`
-  - `handlers/agent.rs`: 从 `game_data` 读取配置而非硬编码 None
-
-- **Server**: `llm_validation` 配置链完整性
-  - `GameRulesData` 添加 `intent_batch` 字段
-  - `build_game_rules_from_config` 传递 `intent_batch` 参数
-  - WebSocket/HTTP handler 正确透传配置
-
-#### 其他新增
-
-- **Protocol**: `ImmediateEvent` 新增 `event_id: Uuid` 字段
-  - 用于唯一标识即时事件，支持去重和追踪
-  - 使用 `#[serde(default)]` 反序列化兼容
-
-- **Server**: `send_to_agent()` 通用单播函数 (`tick/broadcaster.rs`)
-  - 通过 agent_id → device_id → WebSocket 连接发送消息
-  - 用于 tick processor 的验证错误通知
-
-- **Server**: 即时动作（speak, whisper, emote 等）允许重复提交
-  - 不检查 IntentManager 中是否已有该 agent 的 intent
-  - 支持玩家在同一 tick 内多次说话/交流
-
-- **Server**: 验证错误实时反馈机制
-  - `StateProcessor::process_intents()` 返回 `validation_errors` 列表
-  - `TickScheduler` 在结算后发送 `ServerMessage::Error` 给对应 agent
-  - Agent 可实时感知意图被驳回的原因
-
-- **Agent**: `ImmediateEventHandler` 模块 (`component/immediate/`)
-  - 处理服务器推送的 `ImmediateEvent`
-  - 支持三种响应策略：`RespondNow` / `DeferToMainTick` / `Ignore`
-  - `RespondNow` 通过专用 channel 发送 speak intent（不占 intent 配额）
-
-- **Protocol**: 结构化错误码常量 (`crates/protocol/src/lib.rs`)
-  - `ERROR_CODE_TICK_MISMATCH` = `"tick_mismatch"`
-  - `ERROR_CODE_NOT_ACCEPTING` = `"not_accepting"`
-  - `ERROR_CODE_AGENT_DEAD` = `"agent_dead"`
-  - `ERROR_CODE_RATE_LIMITED` = `"rate_limited"`
-  - `ERROR_CODE_INVALID_MESSAGE` = `"invalid_message"`
-  - `ERROR_CODE_DIALOGUE_FAILED` = `"dialogue_failed"`
-  - `ERROR_CODE_ACTION_FAILED` = `"action_failed"`
-
-- **Protocol**: 事件类型常量 (`crates/protocol/src/lib.rs`)
-  - `EVENT_TYPE_WORLD_STATE` = `"world_state"`
-  - `EVENT_TYPE_ACTION_RESULT` = `"action_result"`
-  - `EVENT_TYPE_PUBLIC_MESSAGE` = `"public_message"`
-  - `EVENT_TYPE_DEATH_NOTIFICATION` = `"death_notification"`
-  - `EVENT_TYPE_SYSTEM_NOTIFICATION` = `"system_notification"`
-  - `EVENT_TYPE_DIALOGUE_START` = `"dialogue_start"`
-  - `EVENT_TYPE_DIALOGUE_MESSAGE` = `"dialogue_message"`
-
-- **Protocol**: `GameError` 新增变体和方法
-  - `GameError::NotAccepting` — 服务端未开始接受意图
-  - `GameError::TickMismatch { intent_tick_id, current_tick_id }` — 携带结构化 tick 数据
-  - `GameError::error_code()` — 从枚举映射到协议常量
-  - `GameError::current_tick_id()` — 提取 tick_id（仅 TickMismatch 有值）
-
-- **Agent**: `TickMismatchError` 结构化错误 (`crates/agent/src/infra/transport/websocket.rs`)
-  - 携带 `current_tick_id` 和 `message`，通过 `anyhow::Error` downcast 传递
-  - 替代 lifecycle.rs 中 `rsplit("tick ")` 文本解析
-
-- **Server**: `ActionRegistry::build_available_actions()` 去重方法
-  - 统一 3 处 `AvailableAction` 内联构造（broadcaster.rs、types.rs、handlers/agent.rs）
-  - 自动填充 `required_fields`（从 `actions.yaml` 的 `validation.required_fields` 读取）
-
-- **Agent**: 动态动作表生成 (`engine.rs:build_dynamic_action_table()`)
-  - 从 `world_state.available_actions` 动态生成 LLM prompt 动作表
-  - 包含 `required_fields` 提示，替代硬编码动作列表
-
-- **Agent**: `FORGETTING_INTERVAL_TICKS` 命名常量 (`crates/agent/src/core/mod.rs`)
-  - 替代 magic number `84`（7 天 * 12 小时/天）
-
-- **Agent**: qwen/qwq/qvq 模型加入 `enable_thinking` disable list
-  - 推理模型不支持 thinking 参数
+- **Protocol**: `ServerMessage::ExecutionResult` 实时执行反馈
+  - Agent 端通过 `receive_execution_result()` 获取（非 watch channel）
 
 ### Changed
 
-- **Server**: 错误响应使用结构化 `GameError` 而非裸字符串
-  - `handler.rs`: agent 死亡返回 `GameError::AgentDead`，tick 校验返回 `GameError::TickMismatch/NotAccepting`
-  - 错误 handler 通过 `downcast_ref::<GameError>()` 提取 `error_code()` 发送结构化 `code`
+- **Server**: Tick 退化为纯时钟
+  - 每周期：发送 TickBoundary（触发衰减）→ 广播 WorldState（deadline_ms=0）
+  - 不再收集/结算 Intent
 
-- **Server**: broadcaster.rs / types.rs 事件类型使用协议常量
-  - `"world_state"` → `EVENT_TYPE_WORLD_STATE`
-  - `"system_notification"` → `EVENT_TYPE_SYSTEM_NOTIFICATION`
-  - `"death_notification"` → `EVENT_TYPE_DEATH_NOTIFICATION`
+- **Server**: handler.rs Intent 路由改造
+  - 删除 accepting_tick_id 检查、IntentManager 写入
+  - 非阻塞 `try_send` 入队 IntentWorker
 
-- **Agent**: event_mapper.rs 事件类型使用协议常量
-- **Agent**: engine.rs 事件分类使用协议常量（`EVENT_TYPE_PUBLIC_MESSAGE`、`EVENT_TYPE_ACTION_RESULT`）
-- **Agent**: claw/protocol.rs `resolve_error_code()` 使用协议常量映射
+- **Agent**: lifecycle.rs 主循环统一发送路径
+  - `send_immediate_intent()` 走 `send_intent()`（统一 `Sender<ClientMessage>`）
+  - 即时事件 binding 使用 `intent_sender()` 替代 `immediate_msg_sender()`
+
+- **Agent**: websocket.rs 后台任务单一 recv 循环
+  - `intent_rx.recv()` 统一处理 `ClientMessage::Intent` 和 `ClientMessage::SoulCycleReport`
 
 ### Removed
 
-- **Agent**: `infer_error_code()` 函数及其 4 个测试
-  - 通过中文/英文关键词推断错误类型的向后兼容代码，server 已全面支持 `code` 字段
+- **Agent**: 双通道系统（`immediate_msg_tx` / `immediate_msg_rx`）
+  - `send_immediate_message()` 方法
+  - `immediate_msg_sender()` 方法
+  - `immediate_msg_tx` / `immediate_msg_rx` channel
 
-- **Agent**: lifecycle.rs 中 tick mismatch 文本解析
-  - 删除 `rsplit("tick ")` + `rfind()` 数字提取逻辑
-  - 替代为 `TickMismatchError` 结构化 downcast
+- **Server**: IntentManager 整条链路
+  - `IntentManager` type alias
+  - `create_intent_manager()` 函数
+  - `take_intents_for_tick()` 函数
+  - `AppState.intent_manager` 字段
 
-- **Protocol**: 移除死类型
-  - `AgentExecutionResult`, `NarrativeSource`, `IsolatedNarrate`
+- **Server**: TickScheduler 批处理字段
+  - `closed_dialogue_records`、`execution_summaries`、`dialogue_manager`
 
-- **Agent**: 移除死代码
-  - `translate()`, `build_prompt()`, `route_intents()` 等
-  - `TranslationResult` 单 Intent 版本
+---
+
+## [0.0.104] - 2026-04-10
 
 ---
 

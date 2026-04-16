@@ -368,12 +368,12 @@ impl super::Agent {
             }
         }
 
-        // 绑定即时意图通道到 WebSocket 的 immediate_msg_tx
+        // 绑定即时意图通道到 WebSocket 的统一 intent_tx
         if let Some(ref handler) = self.immediate_handler {
-            if let Some(tx) = self.client.immediate_msg_sender().await {
+            if let Some(tx) = self.client.intent_sender().await {
                 handler.replace_intent_channel(tx).await;
             } else {
-                warn!("WebSocket immediate_msg_tx 不可用，即时回应将使用临时 channel");
+                warn!("WebSocket intent_tx 不可用，即时回应将使用临时 channel");
             }
         }
 
@@ -496,7 +496,7 @@ impl super::Agent {
                     if let Some(ref handler) = self.immediate_handler {
                         handler.set_tick_id(world_state.tick_id).await;
                         // 每个 tick 尝试绑定即时意图通道（幂等，首次成功后不再重复）
-                        if let Some(tx) = self.client.immediate_msg_sender().await {
+                        if let Some(tx) = self.client.intent_sender().await {
                             handler.replace_intent_channel(tx).await;
                         }
                     }
@@ -1323,13 +1323,11 @@ impl super::Agent {
         }
     }
 
-    /// 发送即时 Intent（通过 immediate_msg_tx，不走 intent 配额）
+    /// 发送即时 Intent（统一走主 intent 通道）
     ///
     /// 天魂路由出的 speak/whisper 或混合说话走此通道，
     /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
     async fn send_immediate_intent(&self, intent: &Intent) -> std::result::Result<(), String> {
-        use cyber_jianghu_protocol::ClientMessage;
-
         // 即时意图 per-tick rate limit
         if let Some(handler) = &self.immediate_handler
             && !handler.check_and_increment_send_count(intent.tick_id).await
@@ -1337,17 +1335,7 @@ impl super::Agent {
             return Err("本 tick 即时意图已达上限".to_string());
         }
 
-        let msg = ClientMessage::Intent {
-            intent_id: Some(intent.intent_id),
-            tick_id: intent.tick_id,
-            agent_id: Some(intent.agent_id),
-            thought_log: intent.thought_log.clone(),
-            action_type: intent.action_type.to_string(),
-            action_data: intent.action_data.clone(),
-            priority: crate::component::immediate::IMMEDIATE_INTENT_PRIORITY,
-        };
-
-        if let Err(e) = self.client.send_immediate_message(msg).await {
+        if let Err(e) = self.client.send_intent(intent).await {
             warn!(
                 "[天魂] 即时 intent 发送失败 ({}): {}",
                 intent.action_type, e
@@ -1361,8 +1349,6 @@ impl super::Agent {
             Ok(())
         }
     }
-
-    /// 关闭连接
     pub async fn close(&mut self) -> Result<()> {
         self.client.close().await;
         info!("Agent '{}' stopped", self.character_name());
