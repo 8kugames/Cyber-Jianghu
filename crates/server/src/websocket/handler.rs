@@ -271,6 +271,20 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil() {
         match crate::db::get_latest_agent_state(&state.db_pool, agent_id).await {
             Ok(agent_state) => {
+                // 将 agent 状态加入 DashMap（实时模式：广播从 DashMap 读取 agent 列表）
+                if agent_state.is_alive {
+                    let current_tick = state
+                        .current_accepting_tick_id
+                        .load(std::sync::atomic::Ordering::Acquire);
+                    let mut state_for_cache = agent_state.clone();
+                    state_for_cache.tick_id = current_tick;
+                    state.agent_state_cache.insert(agent_id, state_for_cache);
+                    info!(
+                        "Agent '{}' ({}) loaded into DashMap (tick={})",
+                        agent_name, agent_id, current_tick
+                    );
+                }
+
                 // 加载初始背包物品
                 let initial_inventory =
                     match InventoryManager::get_all_items(&state.db_pool, agent_id).await {
