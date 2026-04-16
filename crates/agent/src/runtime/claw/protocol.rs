@@ -5,7 +5,7 @@
 // Agent 与外部调度器（OpenClaw）之间的通信协议
 //
 // 下行（Agent → 外部调度器）：
-// - tick: 推送 WorldState + 截止时间
+// - tick: 推送 WorldState
 // - tick_closed: 超时通知
 //
 // 上行（外部调度器 → Agent）：
@@ -55,8 +55,6 @@ pub enum DownstreamMessage {
     Tick {
         /// 当前 Tick ID
         tick_id: i64,
-        /// Tick 截止时间（Unix timestamp, 毫秒）
-        deadline_ms: u64,
         /// 世界状态
         state: WorldState,
         /// 叙事化上下文（Markdown 格式，供 LLM 推理使用）
@@ -88,8 +86,6 @@ pub enum DownstreamMessage {
         persona_summary: PersonaSummary,
         /// 世界上下文
         world_context: String,
-        /// 审核截止时间（Unix timestamp, 毫秒）
-        deadline_ms: u64,
     },
 
     // === Server 消息透传 ===
@@ -437,7 +433,6 @@ impl DownstreamMessage {
             ServerMessage::ImmediateEvent {
                 event_id: _,
                 event,
-                deadline_ms: _,
             } => Some(DownstreamMessage::ServerImmediateEvent {
                 event_type: event.event_type.to_string(),
                 tick_id: event.tick_id,
@@ -609,7 +604,6 @@ mod tests {
 
         let msg = DownstreamMessage::Tick {
             tick_id: 105,
-            deadline_ms: 1710937800000,
             state,
             context: None,
             cognitive_context: None,
@@ -654,7 +648,6 @@ mod tests {
 
         let msg = DownstreamMessage::Tick {
             tick_id: 105,
-            deadline_ms: 1710937800000,
             state,
             context: Some("## 游戏状态上下文\n\n测试上下文".to_string()),
             cognitive_context: Some(cognitive_context),

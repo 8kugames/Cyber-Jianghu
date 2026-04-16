@@ -263,11 +263,6 @@ pub struct WorldState {
     #[serde(default)]
     pub private_dialogue_log: Vec<PrivateDialogueRecord>,
 
-    /// 关单时刻的 Unix 毫秒时间戳（绝对时间）
-    /// Agent 应在此时刻之前提交意图
-    #[serde(default)]
-    pub deadline_ms: u64,
-
     /// 上一次 Pipeline 执行汇总（无数值泄露风险）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_execution_summary: Option<ExecutionSummary>,
