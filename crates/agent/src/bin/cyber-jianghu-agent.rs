@@ -646,15 +646,28 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Ensure device identity
     let device = ensure_device(&config, ws_url).await?;
-    let device_id_value = device.device_id;
-    info!("Device ID: {}", device_id_value);
+    info!("Device ID: {}", device.device_id);
 
     // Select character from filesystem
     let server_dir = config.server_dir(ws_url);
     let initial_character = select_character(&server_dir);
 
-    // Start HTTP API FIRST (before character check) so web panel is accessible
-    let device_id = Arc::new(RwLock::new(device_id_value));
+    // Determine the runtime agent_id:
+    // - If an alive character with a valid agent_id exists, use it (so the web panel
+    //   correctly marks is_current in list_characters_handler).
+    // - Otherwise fall back to the device UUID (agent not registered yet).
+    let runtime_agent_id = if let Some(ref character) = initial_character
+        && let Some(agent_uuid) = character.agent_id
+    {
+        info!("使用已有角色 UUID 作为运行时 agent_id: {}", agent_uuid);
+        agent_uuid
+    } else {
+        device.device_id
+    };
+
+    // Arc-wrapped so HTTP handlers can read the current agent_id at any time.
+    // This IS the state.agent_id that list_characters_handler compares against.
+    let runtime_agent_id = Arc::new(RwLock::new(runtime_agent_id));
     let (reconnect_tx, _reconnect_rx) =
         tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
@@ -667,7 +680,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         RuntimeMode::Cognitive => {
             let (api_state, actual_port) = start_http_api_server(
                 port,
-                device_id.clone(),
+                runtime_agent_id.clone(),
                 &config,
                 ws_url,
                 &device,
@@ -685,7 +698,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         RuntimeMode::Claw => {
             let setup = start_claw_server(
                 port,
-                device_id.clone(),
+                runtime_agent_id.clone(),
                 &config,
                 ws_url,
                 &device,
@@ -911,7 +924,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 shared_state: setup.shared_state.clone(),
                 api_state: setup.api_state.clone(),
                 server_msg_tx: setup.server_msg_tx.clone(),
-                device_id: device_id.clone(),
+                runtime_agent_id: runtime_agent_id.clone(),
                 persona_info: persona_info.clone(),
             });
 
@@ -1079,13 +1092,13 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         let api_state_clone = setup.api_state.clone();
         let api_state_for_callback = api_state_clone.clone();
         let server_msg_tx_clone = setup.server_msg_tx.clone();
-        let device_id_clone = setup.device_id.clone();
+        let runtime_agent_id_clone = setup.runtime_agent_id.clone();
         let persona_clone = setup.persona_info.clone();
 
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
-            let old_id = *device_id_clone.blocking_read();
-            info!("更新 Claw API device_id: {} -> {}", old_id, server_agent_id);
-            *device_id_clone.blocking_write() = server_agent_id;
+            let old_id = *runtime_agent_id_clone.blocking_read();
+            info!("更新 runtime agent_id: {} -> {}", old_id, server_agent_id);
+            *runtime_agent_id_clone.blocking_write() = server_agent_id;
 
             if let Some(ref validator) = api_state_clone.intent_validator {
                 let mut validator_guard = shared_state_clone.intent_validator.blocking_write();
@@ -1178,7 +1191,10 @@ struct ClawCallbackSetup {
     shared_state: Arc<WsSharedState>,
     api_state: Arc<cyber_jianghu_agent::infra::api::HttpApiState>,
     server_msg_tx: tokio::sync::broadcast::Sender<DownstreamMessage>,
-    device_id: Arc<RwLock<Uuid>>,
+    /// Runtime agent_id Arc — MUST be kept in sync with HttpApiState.agent_id.
+    /// The struct field is named `runtime_agent_id` (not `device_id`) to clarify
+    /// that this holds the character UUID, not the device UUID.
+    runtime_agent_id: Arc<RwLock<Uuid>>,
     persona_info: Option<cyber_jianghu_agent::soul::reflector::PersonaInfo>,
 }
 
@@ -1220,7 +1236,7 @@ async fn pick_auto_port() -> u16 {
 
 fn start_claw_server(
     port: u16,
-    device_id: Arc<RwLock<Uuid>>,
+    runtime_agent_id: Arc<RwLock<Uuid>>,
     config: &Config,
     ws_url: &str,
     device: &DeviceConfig,
@@ -1255,7 +1271,7 @@ fn start_claw_server(
 
     let character_dir = server_dir.join("characters");
     let (_http_decision_state, api_state) = create_http_state(
-        device_id,
+        runtime_agent_id,
         http_url.to_string(),
         ws_url.to_string(),
         Some(device.clone()),
@@ -1289,7 +1305,7 @@ fn start_claw_server(
 #[allow(clippy::too_many_arguments)]
 async fn start_http_api_server(
     port: u16,
-    device_id: Arc<RwLock<Uuid>>,
+    runtime_agent_id: Arc<RwLock<Uuid>>,
     config: &Config,
     ws_url: &str,
     device: &DeviceConfig,
@@ -1317,7 +1333,7 @@ async fn start_http_api_server(
 
     let character_dir = server_dir.join("characters");
     let (_http_decision_state, api_state) = cyber_jianghu_agent::runtime::create_http_state(
-        device_id,
+        runtime_agent_id,
         http_url.to_string(),
         ws_url.to_string(),
         Some(device.clone()),
