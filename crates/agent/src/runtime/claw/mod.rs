@@ -13,8 +13,5 @@ mod validation;
 pub use bridge::{BridgeConfig, LlmClientContainer, OpenClawBridge};
 pub use protocol::{DownstreamMessage, UpstreamMessage, WsIntent};
 pub use server::{run_ws_server, ws_router};
-pub use state::{
-    DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState,
-    ws_intent_to_intent,
-};
+pub use state::{DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState, ws_intent_to_intent};
 pub use validation::{ValidationTaskParams, WsValidationRequest, spawn_validation_task};
