@@ -215,8 +215,6 @@ pub enum ServerMessage {
         event_id: Uuid,
         /// 事件内容
         event: WorldEvent,
-        /// 当前 tick 截止时间（Unix ms）
-        deadline_ms: u64,
     },
 
     /// 实时意图执行结果（实时模式下，IntentWorker 处理后立即返回）
@@ -551,7 +549,6 @@ mod tests {
             nearby_items: vec![],
             events_log: vec![],
             private_dialogue_log: vec![],
-            deadline_ms: 0,
             last_execution_summary: None,
         };
 

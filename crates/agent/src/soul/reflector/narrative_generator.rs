@@ -406,7 +406,6 @@ mod tests {
             nearby_items: vec![],
             events_log: vec![],
             private_dialogue_log: vec![],
-            deadline_ms: 0,
             last_execution_summary: None,
         }
     }

@@ -22,7 +22,6 @@ use futures_util::SinkExt;
 use futures_util::stream::StreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use crate::dialogue::DialogueResponse;
@@ -272,19 +271,6 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil() {
         match crate::db::get_latest_agent_state(&state.db_pool, agent_id).await {
             Ok(agent_state) => {
-                // 计算 deadline：绝对时间戳（当前时间 + 一个 tick 周期）
-                let deadline_ms = {
-                    let gd = state.game_data.get();
-                    let tick_secs =
-                        gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
-                    drop(gd);
-                    let now_ms = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    now_ms + tick_secs * 1000
-                };
-
                 // 加载初始背包物品
                 let initial_inventory =
                     match InventoryManager::get_all_items(&state.db_pool, agent_id).await {
@@ -341,7 +327,6 @@ async fn handle_websocket(
                 let world_state = crate::tick::build_initial_world_state(
                     &agent_state,
                     &state.game_data,
-                    deadline_ms,
                     initial_inventory,
                     nearby_items,
                     Some(current_tick),
