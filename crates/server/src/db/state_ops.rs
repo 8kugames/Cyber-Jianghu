@@ -201,6 +201,39 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
     Ok(())
 }
 
+/// 单条 Agent 状态持久化（实时模式用）
+///
+/// UPSERT 语义：同 (agent_id, tick_id) 时更新，否则插入。
+/// 用于 IntentWorker 的 per-intent 状态持久化。
+pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<()> {
+    let attributes_json =
+        serde_json::to_value(state.get_attributes_for_protocol()).map_err(|e| {
+            error!("序列化 Agent {} 属性失败: {}", state.agent_id, e);
+            anyhow::anyhow!("Agent {} 属性序列化失败: {}", state.agent_id, e)
+        })?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (agent_id, tick_id) DO UPDATE SET
+            attributes = EXCLUDED.attributes,
+            node_id = EXCLUDED.node_id,
+            is_alive = EXCLUDED.is_alive
+        "#,
+    )
+    .bind(state.agent_id)
+    .bind(state.tick_id)
+    .bind(attributes_json)
+    .bind(&state.node_id)
+    .bind(state.is_alive)
+    .execute(pool)
+    .await
+    .context(format!("单条 UPSERT Agent {} 状态失败", state.agent_id))?;
+
+    Ok(())
+}
+
 // ============================================================================
 // Tick日志相关操作
 // ============================================================================

@@ -16,21 +16,6 @@ use tracing::debug;
 use crate::db::DbPool;
 use crate::models::{AgentState, TickLog};
 
-/// 从数据库加载所有Agent的当前状态
-///
-/// 查询所有存活的Agent的最新状态
-pub async fn load_agent_states(db_pool: &DbPool) -> Result<Vec<AgentState>> {
-    debug!("查询所有存活Agent的最新状态");
-
-    // 调用数据库操作函数
-    let states = crate::db::get_all_alive_agents_latest_states(db_pool)
-        .await
-        .context("从数据库加载Agent状态失败")?;
-
-    debug!("加载了 {} 个Agent状态", states.len());
-    Ok(states)
-}
-
 /// 持久化状态到数据库
 ///
 /// 批量插入Agent状态到数据库
@@ -73,6 +58,7 @@ pub async fn persist_states(
 ///
 /// 注意：Tick日志详情已通过 `create_tick_log` / `update_tick_log` 写入数据库。
 /// 此函数仅将日志信息打印到标准日志（用于日志文件收集和监控）。
+#[allow(dead_code)]
 pub async fn save_tick_log(tick_log: &TickLog) -> Result<()> {
     tracing::info!(
         "Tick日志: id={}, status={:?}, agents={}, actions={}, duration={}ms",

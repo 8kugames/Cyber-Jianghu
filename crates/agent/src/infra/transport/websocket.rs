@@ -64,6 +64,16 @@ struct RegistrationData {
     is_alive: bool,
 }
 
+/// 实时意图执行结果
+#[derive(Clone)]
+pub struct ExecutionResultData {
+    pub tick_id: i64,
+    pub intent_id: Uuid,
+    pub success: bool,
+    pub error: Option<String>,
+    pub state_change_summary: Option<String>,
+}
+
 /// 连接状态
 struct ConnectionState {
     connected: bool,
@@ -97,6 +107,8 @@ struct ConnectionState {
     worldstate_tx: Option<tokio::sync::watch::Sender<Option<WorldState>>>,
     /// 注册通知通道（后台任务 → 主循环）
     registered_tx: Option<tokio::sync::watch::Sender<Option<RegistrationData>>>,
+    /// ExecutionResult 通道（后台任务 → 主循环）
+    execution_result_tx: Option<tokio::sync::watch::Sender<Option<ExecutionResultData>>>,
 }
 
 impl WebSocketClient {
@@ -121,6 +133,7 @@ impl WebSocketClient {
                 immediate_msg_tx: None,
                 worldstate_tx: None,
                 registered_tx: None,
+                execution_result_tx: None,
             })),
         }
     }
@@ -160,6 +173,7 @@ impl WebSocketClient {
                 let (worldstate_tx, _) = tokio::sync::watch::channel(None);
                 let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
                 let (registered_tx, _) = tokio::sync::watch::channel(None);
+                let (execution_result_tx, _) = tokio::sync::watch::channel(None);
 
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
@@ -185,6 +199,7 @@ impl WebSocketClient {
                 state.immediate_msg_tx = Some(immediate_msg_tx);
                 state.worldstate_tx = Some(worldstate_tx);
                 state.registered_tx = Some(registered_tx);
+                state.execution_result_tx = Some(execution_result_tx);
 
                 info!("Connected to server (background task started)");
                 Ok(())
@@ -371,6 +386,30 @@ impl WebSocketClient {
             .context("WorldState channel produced None")
     }
 
+    /// 接收 ExecutionResult（非阻塞，返回最新未读结果）
+    ///
+    /// watch channel 保留最新值，连续多次调用不会阻塞。
+    /// 返回 None 表示没有新结果。
+    pub async fn try_receive_execution_result(&self) -> Result<Option<ExecutionResultData>> {
+        let rx = {
+            let state = self.state.read().await;
+            state
+                .execution_result_tx
+                .as_ref()
+                .context("Not connected to server")?
+                .subscribe()
+        };
+
+        // 非阻塞：只检查是否有新值
+        match rx.has_changed() {
+            Ok(true) => Ok(rx.borrow().as_ref().cloned()),
+            Ok(false) => Ok(None),
+            Err(_) => {
+                anyhow::bail!("ExecutionResult channel closed")
+            }
+        }
+    }
+
     /// 发送 Intent（通过 mpsc channel → 后台任务）
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
         let tx = {
@@ -464,6 +503,7 @@ impl WebSocketClient {
             state.immediate_msg_tx = None;
             state.worldstate_tx = None;
             state.registered_tx = None;
+            state.execution_result_tx = None;
 
             handle
         };
@@ -551,7 +591,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, server_msg_cb, ws_tx, reg_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -561,6 +601,7 @@ async fn websocket_background_task(
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
+                                state_guard.execution_result_tx.clone(),
                             )
                         };
 
@@ -638,6 +679,27 @@ async fn websocket_background_task(
                                 debug!("Background: ImmediateEvent received");
                                 if let Some(ref cb) = server_msg_cb {
                                     cb(msg);
+                                }
+                            }
+                            Ok(ServerMessage::ExecutionResult {
+                                tick_id,
+                                intent_id,
+                                success,
+                                error,
+                                state_change_summary,
+                            }) => {
+                                debug!(
+                                    "Background: ExecutionResult tick={}, intent={}, success={}",
+                                    tick_id, intent_id, success
+                                );
+                                if let Some(ref tx) = exec_result_tx {
+                                    let _ = tx.send(Some(ExecutionResultData {
+                                        tick_id,
+                                        intent_id,
+                                        success,
+                                        error: error.clone(),
+                                        state_change_summary: state_change_summary.clone(),
+                                    }));
                                 }
                             }
                             Ok(ServerMessage::Error {
@@ -796,6 +858,7 @@ async fn websocket_background_task(
         guard.registered_tx = None;
         guard.intent_tx = None;
         guard.immediate_msg_tx = None;
+        guard.execution_result_tx = None;
     }
 
     info!("WebSocket background task exiting");
@@ -839,6 +902,11 @@ impl AgentClient {
     pub async fn receive_world_state(&self) -> Result<WorldState> {
         let client = self.client.read().await;
         client.receive_world_state().await
+    }
+
+    pub async fn try_receive_execution_result(&self) -> Result<Option<ExecutionResultData>> {
+        let client = self.client.read().await;
+        client.try_receive_execution_result().await
     }
 
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {

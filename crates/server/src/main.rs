@@ -19,6 +19,8 @@
 // ============================================================================
 
 // 引入 library crate
+use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state_cache};
+use cyber_jianghu_server::tick::{IntentWorker, StateProcessor, create_worker_channel};
 use cyber_jianghu_server::*;
 
 use anyhow::Result;
@@ -78,6 +80,7 @@ use axum::http::StatusCode;
 /// 启动Tick引擎（后台任务）
 ///
 /// Tick引擎在独立的tokio任务中运行，负责驱动游戏世界
+#[allow(clippy::too_many_arguments)]
 fn start_tick_engine(
     game_data_cache: Arc<game_data::GameDataCache>,
     db_pool: DbPool,
@@ -85,6 +88,8 @@ fn start_tick_engine(
     agent_to_device_map: websocket::AgentToDeviceMap,
     intent_manager: websocket::IntentManager,
     dialogue_manager: Arc<dialogue::DialogueManager>,
+    worker_tx: tokio::sync::mpsc::Sender<cyber_jianghu_server::tick::WorkerMessage>,
+    agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -95,6 +100,8 @@ fn start_tick_engine(
             agent_to_device_map,
             intent_manager,
             dialogue_manager,
+            worker_tx,
+            agent_state_cache,
             accepting_tick_id,
         );
 
@@ -179,6 +186,11 @@ async fn main() -> Result<()> {
     let rate_limiter = create_rate_limiter();
     info!("WebSocket、Intent 管理器和速率限制器初始化成功");
 
+    // 7.2 初始化 Agent 状态内存缓存（从 DB 加载）
+    let agent_state_cache = create_agent_state_cache();
+    let cached_count = populate_agent_state_cache(&agent_state_cache, &db_pool).await?;
+    info!("Agent 状态缓存初始化完成，加载 {} 个 Agent", cached_count);
+
     // 7.1 初始化对话管理器（从配置读取最大消息数）
     let gd_guard = game_data_cache.get();
     let dialogue_manager = Arc::new(dialogue::DialogueManager::new(
@@ -186,6 +198,21 @@ async fn main() -> Result<()> {
     ));
     drop(gd_guard); // 释放锁
     info!("对话管理器初始化成功");
+
+    // 7.3 创建 IntentWorker channel 并启动 Worker
+    let (worker_tx, worker_rx) = create_worker_channel();
+    let state_processor = Arc::new(StateProcessor::new(db_pool.clone()));
+    let intent_worker = IntentWorker::new(
+        db_pool.clone(),
+        agent_state_cache.clone(),
+        state_processor,
+        connection_manager.clone(),
+        agent_to_device_map.clone(),
+    );
+    tokio::spawn(async move {
+        intent_worker.run(worker_rx).await;
+    });
+    info!("IntentWorker 启动");
 
     // 8. 获取或生成管理 Token
     let admin_read_token = config
@@ -248,6 +275,8 @@ async fn main() -> Result<()> {
         connection_manager.clone(),
         agent_to_device_map.clone(),
         intent_manager.clone(),
+        agent_state_cache.clone(),
+        worker_tx.clone(),
         rate_limiter.clone(),
         game_data_cache.clone(),
         dialogue_manager.clone(),
@@ -265,6 +294,8 @@ async fn main() -> Result<()> {
         agent_to_device_map.clone(),
         intent_manager.clone(),
         dialogue_manager.clone(),
+        worker_tx.clone(),
+        agent_state_cache.clone(),
         accepting_tick_id,
     );
 
