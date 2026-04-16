@@ -45,7 +45,7 @@ pub use agent_ops::{
 // 导出公共API - AgentState操作
 pub use state_ops::{
     batch_insert_agent_states, get_all_alive_agents_latest_states, get_current_world_tick_id,
-    get_last_tick_time, get_latest_agent_state, get_latest_state_tick_id,
+    get_last_tick_time, get_latest_agent_state, get_latest_state_tick_id, upsert_agent_state,
 };
 
 // 导出公共API - Tick日志操作
