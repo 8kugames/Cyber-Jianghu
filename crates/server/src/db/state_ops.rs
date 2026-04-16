@@ -356,6 +356,19 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
             .push_bind(&action.soul_cycle_metadata);
     });
 
+    // UPSERT: SoulCycleReport 可能先到达创建占位行，此处覆盖
+    query_builder.push(
+        " ON CONFLICT (agent_id, tick_id) DO UPDATE SET \
+         action_type = EXCLUDED.action_type, \
+         action_type_display = EXCLUDED.action_type_display, \
+         action_data = EXCLUDED.action_data, \
+         result = EXCLUDED.result, \
+         result_message = EXCLUDED.result_message, \
+         thought_log = EXCLUDED.thought_log, \
+         observer_thought = EXCLUDED.observer_thought, \
+         narrative = EXCLUDED.narrative",
+    );
+
     query_builder
         .build()
         .execute(pool)
@@ -393,9 +406,10 @@ pub async fn update_soul_cycle_metadata(
             agent_id, tick_id
         );
         // Upsert：SoulCycleReport 可能先于 tick processor 到达
+        // 提供默认值以满足 NOT NULL 约束（action_type, tick_id FK 已移除）
         sqlx::query(
-            "INSERT INTO agent_action_logs (agent_id, tick_id, soul_cycle_metadata)
-             VALUES ($1, $2, $3)
+            "INSERT INTO agent_action_logs (agent_id, tick_id, action_type, result, soul_cycle_metadata)
+             VALUES ($1, $2, 'idle', 'success', $3)
              ON CONFLICT (agent_id, tick_id) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
         )
         .bind(agent_id)

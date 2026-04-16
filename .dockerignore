@@ -10,6 +10,8 @@
 
 # Rust build artifacts (not needed in build context)
 target/
+!target/release/cyber-jianghu-agent
+!target/release/cyber-jianghu-server
 
 # Documentation
 docs/

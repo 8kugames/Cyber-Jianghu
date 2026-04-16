@@ -261,11 +261,7 @@ impl ImmediateEventHandler {
 
     /// 处理 Server 消息（提取 ImmediateEvent）
     pub async fn handle_server_message(&self, msg: ServerMessage) {
-        if let ServerMessage::ImmediateEvent {
-            event_id,
-            event,
-        } = msg
-        {
+        if let ServerMessage::ImmediateEvent { event_id, event } = msg {
             let pending = PendingImmediateEvent {
                 event_id,
                 event_type: event.event_type,
