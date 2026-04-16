@@ -776,7 +776,7 @@ impl super::Agent {
                     }
 
                     // 5. 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试
-                    // 循环直到审查通过或 deadline 到期
+                    // 循环直到审查通过或达到最大重试次数
                     let max_retries = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
@@ -790,26 +790,7 @@ impl super::Agent {
                     let agent_id = world_state.agent_id.unwrap_or_default();
                     let mut final_intent = None;
 
-                    // 计算总 deadline（留 3s 缓冲给网络发送）
-                    let deadline_at = if world_state.deadline_ms > 0 {
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let remaining = world_state.deadline_ms.saturating_sub(now_ms);
-                        Some(std::time::Instant::now() + std::time::Duration::from_millis(remaining.saturating_sub(3_000)))
-                    } else {
-                        None
-                    };
-
                     for attempt in 0..=max_retries {
-                        // 检查 deadline（Tick 关单）
-                        if let Some(dl) = deadline_at
-                            && std::time::Instant::now() >= dl {
-                                warn!("Tick {} 三魂循环被 Tick 关单打断，第 {} 次尝试", world_state.tick_id, attempt);
-                                // 不发送 intent（server 已关单），保留 rejection reason 供下个 tick
-                                break;
-                            }
 
                         // 5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
                         // 优先使用 decision_with_chain_callback（返回 CognitiveChain 供天魂使用）
@@ -852,22 +833,10 @@ impl super::Agent {
                                 }
                             };
 
-                            if let Some(dl) = deadline_at {
-                                let remaining = dl.saturating_duration_since(std::time::Instant::now());
-                                match tokio::time::timeout(remaining, decision_future).await {
-                                    Ok(result) => result,
-                                    Err(_) => {
-                                        warn!("Tick {} 第 {} 次人魂推理超时，放弃本轮", world_state.tick_id, attempt);
-                                        // 不发送 intent（server 可能已关单）
-                                        break;
-                                    }
-                                }
-                            } else {
-                                decision_future.await
-                            }
+                            decision_future.await
                         };
 
-                        // 如果 final_intent 已被设为超时 idle，退出
+                        // 如果 final_intent 已被设置（如 speak 即时通道），退出
                         if final_intent.is_some() { break; }
 
                         // 记录人魂输出

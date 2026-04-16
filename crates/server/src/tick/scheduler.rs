@@ -248,8 +248,8 @@ impl TickScheduler {
                 );
             }
 
-            // 2. 广播 WorldState（deadline_ms=0，实时模式无 deadline）
-            if let Err(e) = self.broadcast_new_tick(self.current_tick_id, 0).await {
+            // 2. 广播 WorldState
+            if let Err(e) = self.broadcast_new_tick(self.current_tick_id).await {
                 error!("Tick {} 广播失败: {}", self.current_tick_id, e);
             }
 
@@ -285,7 +285,7 @@ impl TickScheduler {
     }
 
     /// 广播新 tick 的 WorldState（从 DashMap 读取最新状态）
-    async fn broadcast_new_tick(&mut self, tick_id: i64, deadline_ms: u64) -> Result<()> {
+    async fn broadcast_new_tick(&mut self, tick_id: i64) -> Result<()> {
         let agent_states: Vec<crate::models::AgentState> = self
             .agent_state_cache
             .iter()
@@ -303,16 +303,14 @@ impl TickScheduler {
                 &self.agent_to_device_map,
                 &self.event_manager,
                 &self.game_data_cache,
-                deadline_ms,
             )
             .await
             .context("广播: 广播状态失败")?;
 
         info!(
-            "Tick {} 广播完成: {}个Agent, deadline={}ms",
+            "Tick {} 广播完成: {}个Agent",
             tick_id,
             agent_states.len(),
-            deadline_ms
         );
         Ok(())
     }
