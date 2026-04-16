@@ -43,7 +43,6 @@ impl Broadcaster {
     /// 广播新状态给所有Agent
     ///
     /// 为每个Agent构建个性化WorldState并通过WebSocket发送
-    /// deadline_ms: 关单时刻的 Unix 毫秒时间戳（绝对时间）
     #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_states(
         &self,
@@ -54,7 +53,6 @@ impl Broadcaster {
         agent_to_device_map: &AgentToDeviceMap,
         event_manager: &EventManager,
         game_data_cache: &Arc<GameDataCache>,
-        deadline_ms: u64,
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 
@@ -158,7 +156,6 @@ impl Broadcaster {
             let world_state = self.build_world_state_for_agent(
                 agent_state,
                 tick_id,
-                deadline_ms,
                 events,
                 agent_states,
                 &agent_names,
@@ -196,7 +193,6 @@ impl Broadcaster {
         &self,
         agent_state: &AgentState,
         tick_id: i64,
-        deadline_ms: u64,
         mut events: Vec<WorldEvent>,
         all_agent_states: &[AgentState],
         agent_names: &HashMap<Uuid, String>,
@@ -401,7 +397,6 @@ impl Broadcaster {
             nearby_items,
             events_log: events,
             private_dialogue_log: vec![], // 实时模式：密语记录由 IntentWorker 即时处理
-            deadline_ms,
             last_execution_summary: None, // 实时模式：ExecutionResult 通过独立通道反馈
         }
     }
@@ -501,7 +496,6 @@ impl Default for Broadcaster {
 pub fn build_initial_world_state(
     agent_state: &AgentState,
     game_data_cache: &Arc<GameDataCache>,
-    deadline_ms: u64,
     initial_inventory: Vec<crate::models::InventoryItem>,
     nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
     override_tick_id: Option<i64>,
@@ -603,7 +597,6 @@ pub fn build_initial_world_state(
         nearby_items,
         events_log: events,
         private_dialogue_log: vec![],
-        deadline_ms,
         last_execution_summary: None,
     }
 }

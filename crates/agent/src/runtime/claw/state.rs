@@ -27,9 +27,6 @@ use super::protocol::{DownstreamMessage, WsIntent};
 /// 默认 Tick 持续时间（秒）
 pub const DEFAULT_TICK_DURATION_SECS: u64 = 60;
 
-/// Tick 超时缓冲比例（实际截止时间 = tick_duration * 0.9）
-pub const TICK_TIMEOUT_RATIO: f64 = 0.9;
-
 // ============================================================================
 // 重导出验证模块
 // ============================================================================
@@ -68,9 +65,6 @@ pub struct WsDecisionState {
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
-    /// Tick 截止时间（Unix timestamp, 毫秒）
-    pub deadline_ms: Arc<AtomicU64>,
-
     /// Tick 持续时间（毫秒）
     pub tick_duration_ms: Arc<AtomicU64>,
 
@@ -96,7 +90,6 @@ impl WsDecisionState {
             validation_rx,
             validation_tx,
             current_tick: Arc::new(AtomicI64::new(0)),
-            deadline_ms: Arc::new(AtomicU64::new(0)),
             tick_duration_ms: Arc::new(AtomicU64::new(DEFAULT_TICK_DURATION_SECS * 1000)),
             agent_id: Arc::new(AtomicI64::new(0)),
         }
@@ -110,35 +103,6 @@ impl WsDecisionState {
     /// 设置当前 Tick ID
     pub fn set_current_tick(&self, tick_id: i64) {
         self.current_tick.store(tick_id, Ordering::Relaxed);
-    }
-
-    /// 获取 Tick 截止时间
-    pub fn get_deadline(&self) -> Instant {
-        let deadline_ms = self.deadline_ms.load(Ordering::Relaxed);
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-
-        if deadline_ms > now_ms {
-            Instant::now() + Duration::from_millis(deadline_ms - now_ms)
-        } else {
-            Instant::now()
-        }
-    }
-
-    /// 设置 Tick 截止时间
-    pub fn set_deadline(&self, deadline: Instant) {
-        let now = Instant::now();
-        if deadline > now {
-            let duration_ms = (deadline - now).as_millis() as u64;
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            self.deadline_ms
-                .store(now_ms + duration_ms, Ordering::Relaxed);
-        }
     }
 
     /// 设置 Tick 持续时间
@@ -173,9 +137,8 @@ impl WsDecisionState {
     }
 
     /// 广播 Tick 消息
-    pub fn broadcast_tick(&self, world_state: &WorldState, deadline: Instant) {
+    pub fn broadcast_tick(&self, world_state: &WorldState) {
         self.set_current_tick(world_state.tick_id);
-        self.set_deadline(deadline);
 
         let state = Arc::new(world_state.clone());
 
@@ -305,9 +268,6 @@ pub struct WsSharedState {
     /// 当前 Tick ID
     pub current_tick: Arc<AtomicI64>,
 
-    /// Tick 截止时间（Unix timestamp, 毫秒）
-    pub deadline_ms: Arc<AtomicU64>,
-
     /// Tick 持续时间（毫秒）
     pub tick_duration_ms: Arc<AtomicU64>,
 
@@ -375,23 +335,12 @@ pub struct WsSharedState {
 }
 
 impl WsSharedState {
-    pub fn broadcast_tick(&self, world_state: &WorldState, deadline: Instant) {
+    pub fn broadcast_tick(&self, world_state: &WorldState) {
         // 新 tick 开始，重置 submitted_tick 允许新提交
         self.submitted_tick.store(-1, Ordering::Release);
 
         self.current_tick
             .store(world_state.tick_id, Ordering::Relaxed);
-
-        let now = Instant::now();
-        if deadline > now {
-            let duration_ms = (deadline - now).as_millis() as u64;
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            self.deadline_ms
-                .store(now_ms + duration_ms, Ordering::Relaxed);
-        }
 
         let state = Arc::new(world_state.clone());
 
@@ -419,7 +368,6 @@ impl From<&WsDecisionState> for WsSharedState {
             server_msg_tx: state.server_msg_tx.clone(),
             intent_tx: state.intent_tx.clone(),
             current_tick: state.current_tick.clone(),
-            deadline_ms: state.deadline_ms.clone(),
             tick_duration_ms: state.tick_duration_ms.clone(),
             agent_id: state.agent_id.clone(),
             cognitive_context_builder: None,
@@ -442,11 +390,6 @@ impl WsSharedState {
     /// 获取当前 Tick ID
     pub fn get_current_tick(&self) -> i64 {
         self.current_tick.load(Ordering::Relaxed)
-    }
-
-    /// 获取 Tick 截止时间（Unix timestamp, 毫秒）
-    pub fn get_deadline_ms(&self) -> u64 {
-        self.deadline_ms.load(Ordering::Relaxed)
     }
 
     /// 获取 Tick 持续时间（毫秒）

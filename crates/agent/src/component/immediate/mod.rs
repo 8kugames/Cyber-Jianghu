@@ -264,7 +264,6 @@ impl ImmediateEventHandler {
         if let ServerMessage::ImmediateEvent {
             event_id,
             event,
-            deadline_ms: _,
         } = msg
         {
             let pending = PendingImmediateEvent {

@@ -24,7 +24,7 @@ pub use crate::infra::api::{
 };
 // 重导出 ws（已迁移至 claw/）
 pub use claw::{
-    DEFAULT_TICK_DURATION_SECS, TICK_TIMEOUT_RATIO, WsDecisionState, WsSharedState, ws_router,
+    DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState, ws_router,
 };
 
 use cyber_jianghu_protocol::Intent;

@@ -48,7 +48,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -270,17 +270,7 @@ pub fn http_decision(
             let _ = state.api_state.tick_update_tx.send(world_state.tick_id);
 
             if let Some(ref ws_state) = state.ws_shared_state {
-                let deadline_abs_ms = world_state.deadline_ms;
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
-                let deadline = if deadline_abs_ms > now_ms {
-                    Instant::now() + Duration::from_millis(deadline_abs_ms - now_ms)
-                } else {
-                    Instant::now() + Duration::from_secs(5)
-                };
-                ws_state.broadcast_tick(&world_state, deadline);
+                ws_state.broadcast_tick(&world_state);
             }
 
             // 等待外部决策

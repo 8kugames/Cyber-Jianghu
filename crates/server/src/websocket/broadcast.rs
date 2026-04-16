@@ -300,7 +300,6 @@ pub async fn broadcast_speak_to_location(
         let msg = ServerMessage::ImmediateEvent {
             event_id,
             event,
-            deadline_ms: u64::MAX,
         };
         let json = serde_json::to_string(&msg)?;
 

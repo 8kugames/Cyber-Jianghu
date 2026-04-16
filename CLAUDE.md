@@ -134,7 +134,7 @@ Agent 提交 Intent ──> handler.rs (try_send) ──> IntentWorker (MPSC cha
 
 TickScheduler (每 N 秒):
                         │ 1. Send TickBoundary → IntentWorker (decay + death handling)
-                        │ 2. Broadcast WorldState (deadline_ms=0)
+                        │ 2. Broadcast WorldState
                         │ 3. Chronicle generation (每 7 游戏日)
 ```
 
@@ -298,8 +298,8 @@ The `protocol` crate defines all shared types:
 
 **OpenClaw WebSocket Message Format** (Agent <-> OpenClaw):
 ```json
-// Downstream: Tick notification (deadline_ms is absolute Unix timestamp in ms)
-{"type": "tick", "tick_id": 123, "deadline_ms": 1710937800000, "state": {...}, "context": "..."}
+// Downstream: Tick notification
+{"type": "tick", "tick_id": 123, "state": {...}, "context": "..."}
 
 // Upstream: Intent submission (MUST match current tick_id)
 {"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "..."}

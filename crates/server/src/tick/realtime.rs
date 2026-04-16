@@ -323,7 +323,6 @@ impl IntentWorker {
         let msg = cyber_jianghu_protocol::ServerMessage::ImmediateEvent {
             event_id: uuid::Uuid::new_v4(),
             event,
-            deadline_ms: 0,
         };
         super::send_to_agent(
             target_id,
