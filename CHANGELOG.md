@@ -57,12 +57,12 @@ Tick 批处理模式全面退役，Intent 实时化。版本 0.0.x → 0.1.0。
   - speak 广播路径消除 SQL 查询，纯内存过滤同位置 Agent
 
 - **Protocol**: `ServerMessage::ExecutionResult` 实时执行反馈
-  - Agent 端通过 `receive_execution_result()` 获取（非 watch channel）
+  - Agent 端通过 `try_receive_execution_result()` 获取（watch channel，非阻塞）
 
 ### Changed
 
 - **Server**: Tick 退化为纯时钟
-  - 每周期：发送 TickBoundary（触发衰减）→ 广播 WorldState（deadline_ms=0）
+  - 每周期：发送 TickBoundary（触发衰减）→ 广播 WorldState
   - 不再收集/结算 Intent
 
 - **Server**: handler.rs Intent 路由改造
