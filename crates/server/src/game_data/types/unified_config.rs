@@ -271,12 +271,6 @@ fn default_survival_threshold() -> i32 {
 pub struct TickRulesData {
     /// 服务器每多少秒执行一个 tick
     pub real_seconds_per_tick: i32,
-
-    /// 收集窗口时长（秒）：每个 tick 周期开始后，等待此时间再执行 tick
-    /// 用于收集 Agent 意图，避免意图因时序错位而丢失
-    /// 设为 0 可禁用收集窗口
-    #[serde(default = "default_collection_window_secs")]
-    pub collection_window_secs: u32,
 }
 
 /// 位置规则数据
@@ -299,9 +293,6 @@ pub struct GameTimeRulesData {
 
 fn default_timezone_offset() -> i32 {
     8 // 默认使用 UTC+8（北京时间）
-}
-fn default_collection_window_secs() -> u32 {
-    5
 }
 
 /// 验证规则数据
