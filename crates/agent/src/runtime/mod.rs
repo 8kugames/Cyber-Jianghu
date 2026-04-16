@@ -23,9 +23,7 @@ pub use crate::infra::api::{
     http_decision, run_http_server,
 };
 // 重导出 ws（已迁移至 claw/）
-pub use claw::{
-    DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState, ws_router,
-};
+pub use claw::{DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState, ws_router};
 
 use cyber_jianghu_protocol::Intent;
 use futures_util::future::BoxFuture;
