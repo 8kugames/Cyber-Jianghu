@@ -83,7 +83,7 @@ pub async fn apply_state_change(
                 false
             } else {
                 let event = WorldEvent {
-                    event_type: WorldEventType::ActionResult,
+                    event_type: WorldEventType::SocialInteraction,
                     tick_id,
                     description: format!("你给 {} 转移了 {} 个 {}", to, quantity, item_id),
                     metadata: serde_json::json!({
@@ -96,7 +96,7 @@ pub async fn apply_state_change(
                 events.push((*from, event));
 
                 let event = WorldEvent {
-                    event_type: WorldEventType::ActionResult,
+                    event_type: WorldEventType::SocialInteraction,
                     tick_id,
                     description: format!("{} 给你转移了 {} 个 {}", from, quantity, item_id),
                     metadata: serde_json::json!({
@@ -821,14 +821,14 @@ pub async fn apply_state_change(
             match result {
                 Ok(()) => {
                     let initiator_event = WorldEvent {
-                        event_type: WorldEventType::ActionResult,
+                        event_type: WorldEventType::SocialInteraction,
                         tick_id,
                         description: format!(
                             "你以 {} 两银子出售了 {} 个 {}",
                             price, item_quantity, item_id
                         ),
                         metadata: serde_json::json!({
-                            "action": "trade",
+                            "action": "trade_sell",
                             "target": target.to_string(),
                             "item_id": item_id,
                             "quantity": item_quantity,
@@ -838,14 +838,14 @@ pub async fn apply_state_change(
                     events.push((*initiator, initiator_event));
 
                     let target_event = WorldEvent {
-                        event_type: WorldEventType::ActionResult,
+                        event_type: WorldEventType::SocialInteraction,
                         tick_id,
                         description: format!(
                             "你以 {} 两银子购买了 {} 个 {}",
                             price, item_quantity, item_id
                         ),
                         metadata: serde_json::json!({
-                            "action": "trade",
+                            "action": "trade_buy",
                             "from": initiator.to_string(),
                             "item_id": item_id,
                             "quantity": item_quantity,
