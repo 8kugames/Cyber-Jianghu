@@ -1,5 +1,5 @@
 // ============================================================================
-// 天魂 — IntentTranslator 实现
+// 地魂（能力之魂）— IntentTranslator 实现
 // ============================================================================
 //
 // 单次 LLM 调用，将叙事意图翻译为结构化 Intent JSON。
@@ -47,7 +47,7 @@ pub struct MultiTranslationResult {
     pub original_thought_log: String,
 }
 
-/// 天魂 — 意图翻译器
+/// 地魂 — 意图翻译器（旧职责，Phase 4 清理）
 ///
 /// 将 ActorSoul 的自然语言意图翻译为服务端格式化 Intent。
 /// 不参与推理，只做数据映射。
@@ -65,7 +65,7 @@ impl IntentTranslator {
     /// 多 Intent 翻译（Pipeline 模式）
     ///
     /// 将叙事意图拆分为多个结构化 Intent，支持 Pipeline 顺序执行。
-    /// 用于天魂 translate_multi 场景：一个叙事意图可能包含多个步骤。
+    /// 用于地魂 translate_multi 场景：一个叙事意图可能包含多个步骤。
     ///
     /// # 参数
     ///
@@ -87,14 +87,14 @@ impl IntentTranslator {
             max_intents,
         );
 
-        debug!("[天魂] 多Intent翻译: {}", narrative);
+        debug!("[地魂] 多Intent翻译: {}", narrative);
 
         let response: Vec<TranslationResponse> =
             tokio::time::timeout(std::time::Duration::from_secs(30), async {
                 self.llm_client.complete_json(&prompt).await
             })
             .await
-            .map_err(|_| anyhow::anyhow!("[天魂] 多Intent翻译超时"))??;
+            .map_err(|_| anyhow::anyhow!("[地魂] 多Intent翻译超时"))??;
 
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
@@ -326,7 +326,7 @@ impl IntentTranslator {
     /// - Motivation.primary_drive: 主要驱动力（揭示 agent 当前关注什么）
     /// - Decision.thought_process: 完整思考链（包含指代消解线索）
     ///
-    /// 这些信息帮助天魂理解叙事中的指代词（如"他"、"她"、"那个"）指向谁/什么。
+    /// 这些信息帮助地魂理解叙事中的指代词（如"他"、"她"、"那个"）指向谁/什么。
     fn extract_cognitive_context(chain: Option<&CognitiveChain>) -> String {
         let Some(chain) = chain else {
             return String::new();
@@ -435,14 +435,14 @@ impl IntentTranslator {
 
             // 中文名 → 英文 ID（物品/位置）
             if let Some(&corrected) = name_to_id.get(s.as_str()) {
-                debug!("[天魂] ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
+                debug!("[地魂] ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
                 *value = serde_json::Value::String(corrected.to_string());
                 continue;
             }
 
             // 中文名/pinyin → Agent UUID
             if let Some(corrected) = entity_name_to_id.get(s.as_str()) {
-                debug!("[天魂] Agent ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
+                debug!("[地魂] Agent ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
                 *value = serde_json::Value::String(corrected.clone());
                 continue;
             }
@@ -453,7 +453,7 @@ impl IntentTranslator {
             for (name, id) in &entity_name_to_id {
                 let name_lower = name.to_lowercase().replace(' ', "_");
                 if s_lower == name_lower || s.contains(name) || name.contains(&s) {
-                    debug!("[天魂] Agent ID模糊修正: {} \"{}\" → \"{}\"", key, s, id);
+                    debug!("[地魂] Agent ID模糊修正: {} \"{}\" → \"{}\"", key, s, id);
                     *value = serde_json::Value::String(id.clone());
                     matched = true;
                     break;
@@ -463,8 +463,9 @@ impl IntentTranslator {
             // 未匹配且是 item_id / node_id → 标记为空（触发后续验证拒绝）
             if !matched && (key.contains("item_id") || key.contains("node_id")) {
                 tracing::warn!(
-                    "[天魂] 无法识别的 ID: {}=\"{}\" — 可能是 LLM 编造，将清除",
-                    key, s
+                    "[地魂] 无法识别的 ID: {}=\"{}\" — 可能是 LLM 编造，将清除",
+                    key,
+                    s
                 );
                 *value = serde_json::Value::String(String::new());
             }

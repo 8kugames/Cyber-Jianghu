@@ -65,7 +65,7 @@ pub struct ActionConfigEntry {
     pub effects: Vec<ActionEffect>,
 
     /// OOC 风险等级（"low" | "medium" | "high"）
-    /// 用于地魂分级审核：high → 强制 LLM, medium → 抽审, low → 跳过 LLM
+    /// 用于天魂分级审核：high → 强制 LLM, medium → 抽审, low → 跳过 LLM
     #[serde(default = "default_ooc_risk")]
     pub ooc_risk: String,
 }

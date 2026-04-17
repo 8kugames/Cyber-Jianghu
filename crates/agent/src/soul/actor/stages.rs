@@ -100,7 +100,7 @@ pub struct PerceptionMotivationResponse {
 /// 同时输出行动计划和最终决策。
 ///
 /// ActorSoul（人魂）只输出叙事意图，不输出结构化 action_data。
-/// 结构化翻译由天魂（IntentTranslator）负责。
+/// 结构化翻译已消除（人魂直连 WorldState，直接输出精确 ID）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanDecisionResponse {
     /// 计划步骤
@@ -118,7 +118,7 @@ pub struct PlanDecisionResponse {
 /// 统一认知响应（单次 LLM 调用合并所有 4 阶段）
 ///
 /// 人魂合并为单次 LLM 调用：感知 → 动机 → 规划 → 决策一步到位。
-/// 输出 narrative_action（自然语言意图），天魂负责翻译为结构化 Intent。
+/// 输出 narrative_action（自然语言意图）。人魂直连 WorldState 后，此类型仅用于兼容旧路径。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedCognitiveResponse {
     // === 感知 ===

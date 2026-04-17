@@ -66,9 +66,9 @@ pub struct AgentBuilder {
     data_dir: PathBuf,
     /// 即时事件处理器
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
-    /// 天魂 — 意图翻译器（Cognitive 模式）
+    /// 地魂 — 意图翻译器（旧职责，Phase 4 将移除）
     intent_translator: Option<Arc<IntentTranslator>>,
-    /// 地魂叙事生成器（Cognitive 模式，可选）
+    /// 天魂叙事生成器（Phase 4 将移除）
     narrative_generator: Option<Arc<NarrativeGenerator>>,
 }
 
@@ -130,7 +130,7 @@ impl AgentBuilder {
     /// 设置带 CognitiveChain 的决策回调
     ///
     /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
-    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    /// 用于三魂架构中传递 WorldState 给人魂，人魂直连输出结构化 Intent。
     ///
     /// 当设置了此回调时，将优先于 `with_decision_memory` 和 `with_decision_feedback` 使用。
     pub fn with_decision_chain(mut self, callback: DecisionWithChainCallback) -> Self {
@@ -170,7 +170,7 @@ impl AgentBuilder {
             .unwrap_or_else(|| Arc::new(RwLock::new(llm_client.clone())));
         let validator = Arc::new(ReflectorSoul::new(rules, container.clone()));
 
-        // 地魂叙事生成器（使用 game_rules 中的 reflector_narrative 配置）
+        // 天魂叙事生成器（Phase 4 将移除）
         let narrative_config = self
             .config
             .game_rules
@@ -279,10 +279,10 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置天魂（IntentTranslator）— Cognitive 模式专用
+    /// 设置地魂（IntentTranslator）— 旧职责，Phase 4 将移除
     ///
-    /// 天魂将人魂的叙事意图翻译为服务端格式化 Intent。
-    /// Claw 模式不需要（外部系统直接提供格式化数据）。
+    /// 地魂（旧天魂）将人魂的叙事意图翻译为服务端格式化 Intent。
+    /// 人魂直连 WorldState 后此步骤已旁路。
     pub fn with_intent_translator(mut self, translator: Arc<IntentTranslator>) -> Self {
         self.intent_translator = Some(translator);
         self

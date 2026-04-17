@@ -2,11 +2,11 @@
 // 三魂系统
 // ============================================================================
 //
-// ActorSoul（人魂/行动之魂）：认知引擎，生成叙事意图（信息隔离，不直接访问 WorldState）
-// IntentTranslator（天魂）：将叙事意图翻译为服务端格式化 Intent
-// ReflectorSoul（地魂）：Agent 与世界 server 感知和交互的唯一出入口
-//   入向：WorldState → NarrativeGenerator → 感知叙事 → 人魂
-//   出向：三层审查 Intent（action_type → 规则 → 人设/世界观）→ 提交 server
+// ActorSoul（人魂/行动之魂）：认知引擎，直连 WorldState，输出结构化 Intent
+// ReflectorSoul（天魂/守护之魂）：三层审核 Intent → 提交 server
+// IntentTranslator（地魂/能力之魂）：tool calling 能力池（Phase 3 激活）
+//
+// 人魂直连 WorldState 后，天魂翻译步骤已消除。
 // ============================================================================
 
 pub mod actor;

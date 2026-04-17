@@ -4,8 +4,8 @@
 //
 // 记录每个 Tick 的三魂循环完整中间状态：
 // - 人魂输出（原始叙事意图）
-// - 天魂翻译结果（action_type + action_data）
-// - 地魂三层审查结果（layer1/2/3 各独立结果）
+// - 地魂翻译结果（action_type + action_data）
+// - 天魂三层审查结果（layer1/2/3 各独立结果）
 // - 即时通道说话意图
 //
 // 数据驱动：按 tick_id + attempt 隔离，同一 tick 重提交时覆盖。
@@ -186,7 +186,7 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 记录天魂翻译结果
+    /// 记录地魂翻译结果
     #[allow(clippy::too_many_arguments)]
     pub async fn record_tianhun(
         &self,
@@ -244,7 +244,7 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 记录地魂审查结果
+    /// 记录天魂审查结果
     #[allow(clippy::too_many_arguments)]
     pub async fn record_dihun(
         &self,
@@ -301,7 +301,7 @@ impl SoulCycleRecorder {
     /// 更新 previous_round_narrative（在感知阶段生成后回填）
     ///
     /// 在收到 WorldState 后、调用 NarrativeGenerator 之前调用。
-    /// 用于将地魂生成的执行叙事回填到上一轮的 soul_cycle_record。
+    /// 用于将天魂生成的执行叙事回填到上一轮的 soul_cycle_record。
     pub async fn update_previous_round_narrative(&self, tick_id: i64, narrative: &str) {
         let conn = self
             .conn

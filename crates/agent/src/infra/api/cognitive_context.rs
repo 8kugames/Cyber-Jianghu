@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // 公共工具函数
 // ============================================================================
 
-/// 从本地文件加载天魂翻译 few-shot 示例
+/// 从本地文件加载地魂翻译 few-shot 示例
 pub fn load_translator_few_shot_examples() -> String {
     let examples_path = dirs::home_dir()
         .map(|h| {
