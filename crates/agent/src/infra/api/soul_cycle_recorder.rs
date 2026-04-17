@@ -3,8 +3,7 @@
 // ============================================================================
 //
 // 记录每个 Tick 的三魂循环完整中间状态：
-// - 人魂输出（原始叙事意图）
-// - 地魂翻译结果（action_type + action_data）
+// - 人魂输出（结构化 Intent）
 // - 天魂三层审查结果（layer1/2/3 各独立结果）
 // - 即时通道说话意图
 //
@@ -26,16 +25,11 @@ pub struct SoulCycleRecord {
     pub attempt: i32,
     pub renhun_narrative: Option<String>,
     pub renhun_thought_log: Option<String>,
-    pub tianhun_action_type: Option<String>,
-    pub tianhun_action_data: Option<String>,
-    pub tianhun_speech_content: Option<String>,
-    pub tianhun_success: bool,
-    pub tianhun_error: Option<String>,
-    pub dihun_result: Option<String>,
-    pub dihun_layer1_result: Option<String>,
-    pub dihun_layer2_result: Option<String>,
-    pub dihun_layer3_result: Option<String>,
-    pub dihun_reason: Option<String>,
+    pub tianhun_result: Option<String>,
+    pub tianhun_layer1_result: Option<String>,
+    pub tianhun_layer2_result: Option<String>,
+    pub tianhun_layer3_result: Option<String>,
+    pub tianhun_reason: Option<String>,
     pub previous_round_narrative: Option<String>,
     pub final_intent_id: Option<String>,
     pub final_action_type: Option<String>,
@@ -100,16 +94,11 @@ impl SoulCycleRecorder {
                 attempt INTEGER NOT NULL DEFAULT 0,
                 renhun_narrative TEXT,
                 renhun_thought_log TEXT,
-                tianhun_action_type TEXT,
-                tianhun_action_data TEXT,
-                tianhun_speech_content TEXT,
-                tianhun_success INTEGER NOT NULL DEFAULT 1,
-                tianhun_error TEXT,
-                dihun_result TEXT,
-                dihun_layer1_result TEXT,
-                dihun_layer2_result TEXT,
-                dihun_layer3_result TEXT,
-                dihun_reason TEXT,
+                tianhun_result TEXT,
+                tianhun_layer1_result TEXT,
+                tianhun_layer2_result TEXT,
+                tianhun_layer3_result TEXT,
+                tianhun_reason TEXT,
                 previous_round_narrative TEXT,
                 final_intent_id TEXT,
                 final_action_type TEXT,
@@ -186,17 +175,18 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 记录地魂翻译结果
+    /// 记录天魂审查结果
     #[allow(clippy::too_many_arguments)]
     pub async fn record_tianhun(
         &self,
         tick_id: i64,
         attempt: i32,
-        action_type: Option<&str>,
-        action_data: Option<&str>,
-        speech_content: Option<&str>,
-        success: bool,
-        error: Option<&str>,
+        result: &str,
+        layer1: Option<&str>,
+        layer2: Option<&str>,
+        layer3: Option<&str>,
+        reason: Option<&str>,
+        _narrative: Option<&str>,
     ) {
         let conn = self
             .conn
@@ -204,24 +194,19 @@ impl SoulCycleRecorder {
             .expect("soul_cycle_recorder lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
+        // 注意: previous_round_narrative 由 update_previous_round_narrative() 独占管理
+        // 此处不再写入该列，避免当轮审批叙事覆盖上轮执行叙事
         let result = conn.execute(
             "UPDATE soul_cycle_record SET
-                tianhun_action_type = ?1,
-                tianhun_action_data = ?2,
-                tianhun_speech_content = ?3,
-                tianhun_success = ?4,
-                tianhun_error = ?5,
+                tianhun_result = ?1,
+                tianhun_layer1_result = ?2,
+                tianhun_layer2_result = ?3,
+                tianhun_layer3_result = ?4,
+                tianhun_reason = ?5,
                 created_at = ?6
              WHERE tick_id = ?7 AND attempt = ?8",
             params![
-                action_type,
-                action_data,
-                speech_content,
-                success as i32,
-                error,
-                created_at,
-                tick_id,
-                attempt
+                result, layer1, layer2, layer3, reason, created_at, tick_id, attempt
             ],
         );
 
@@ -244,63 +229,8 @@ impl SoulCycleRecorder {
         }
     }
 
-    /// 记录天魂审查结果
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_dihun(
-        &self,
-        tick_id: i64,
-        attempt: i32,
-        result: &str,
-        layer1: Option<&str>,
-        layer2: Option<&str>,
-        layer3: Option<&str>,
-        reason: Option<&str>,
-        _narrative: Option<&str>,
-    ) {
-        let conn = self
-            .conn
-            .lock()
-            .expect("soul_cycle_recorder lock not poisoned");
-        let created_at = Utc::now().to_rfc3339();
-
-        // 注意: previous_round_narrative 由 update_previous_round_narrative() 独占管理
-        // 此处不再写入该列，避免当轮审批叙事覆盖上轮执行叙事
-        let result = conn.execute(
-            "UPDATE soul_cycle_record SET
-                dihun_result = ?1,
-                dihun_layer1_result = ?2,
-                dihun_layer2_result = ?3,
-                dihun_layer3_result = ?4,
-                dihun_reason = ?5,
-                created_at = ?6
-             WHERE tick_id = ?7 AND attempt = ?8",
-            params![
-                result, layer1, layer2, layer3, reason, created_at, tick_id, attempt
-            ],
-        );
-
-        match result {
-            Ok(n) if n > 0 => tracing::debug!(
-                "[soul_cycle] Recorded dihun for tick {} attempt {}",
-                tick_id,
-                attempt
-            ),
-            Ok(_) => tracing::warn!(
-                "[soul_cycle] No record found for tick {} attempt {} when recording dihun",
-                tick_id,
-                attempt
-            ),
-            Err(e) => tracing::warn!(
-                "[soul_cycle] Failed to record dihun for tick {}: {}",
-                tick_id,
-                e
-            ),
-        }
-    }
-
     /// 更新 previous_round_narrative（在感知阶段生成后回填）
     ///
-    /// 在收到 WorldState 后、调用 NarrativeGenerator 之前调用。
     /// 用于将天魂生成的执行叙事回填到上一轮的 soul_cycle_record。
     pub async fn update_previous_round_narrative(&self, tick_id: i64, narrative: &str) {
         let conn = self
@@ -497,9 +427,8 @@ impl SoulCycleRecorder {
 
         let mut stmt = match conn.prepare(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
-                    tianhun_action_type, tianhun_action_data, tianhun_speech_content,
-                    tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
-                    dihun_layer2_result, dihun_layer3_result, dihun_reason, previous_round_narrative,
+                    tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
+                    tianhun_layer3_result, tianhun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
                     world_time, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
@@ -557,9 +486,8 @@ impl SoulCycleRecorder {
 
         let sql = format!(
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
-                    tianhun_action_type, tianhun_action_data, tianhun_speech_content,
-                    tianhun_success, tianhun_error, dihun_result, dihun_layer1_result,
-                    dihun_layer2_result, dihun_layer3_result, dihun_reason, previous_round_narrative,
+                    tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
+                    tianhun_layer3_result, tianhun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
                     world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
@@ -638,7 +566,7 @@ impl SoulCycleRecorder {
     }
 
     fn row_to_record(row: &rusqlite::Row<'_>) -> SoulCycleRecord {
-        let created_at_str: String = row.get(21).unwrap_or_default();
+        let created_at_str: String = row.get(16).unwrap_or_default();
         let created_at = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -649,22 +577,17 @@ impl SoulCycleRecorder {
             attempt: row.get(2).unwrap_or(0),
             renhun_narrative: row.get(3).ok(),
             renhun_thought_log: row.get(4).ok(),
-            tianhun_action_type: row.get(5).ok(),
-            tianhun_action_data: row.get(6).ok(),
-            tianhun_speech_content: row.get(7).ok(),
-            tianhun_success: row.get::<_, i32>(8).unwrap_or(1) == 1,
-            tianhun_error: row.get(9).ok(),
-            dihun_result: row.get(10).ok(),
-            dihun_layer1_result: row.get(11).ok(),
-            dihun_layer2_result: row.get(12).ok(),
-            dihun_layer3_result: row.get(13).ok(),
-            dihun_reason: row.get(14).ok(),
-            previous_round_narrative: row.get(15).ok(),
-            final_intent_id: row.get(16).ok(),
-            final_action_type: row.get(17).ok(),
-            final_action_data: row.get(18).ok(),
-            route_type: row.get(19).unwrap_or_else(|_| "main".to_string()),
-            world_time: row.get(20).ok(),
+            tianhun_result: row.get(5).ok(),
+            tianhun_layer1_result: row.get(6).ok(),
+            tianhun_layer2_result: row.get(7).ok(),
+            tianhun_layer3_result: row.get(8).ok(),
+            tianhun_reason: row.get(9).ok(),
+            previous_round_narrative: row.get(10).ok(),
+            final_intent_id: row.get(11).ok(),
+            final_action_type: row.get(12).ok(),
+            final_action_data: row.get(13).ok(),
+            route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
+            world_time: row.get(15).ok(),
             created_at,
         }
     }
@@ -716,109 +639,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_record_tianhun_success() {
+    async fn test_record_tianhun_approved() {
         let (_dir, recorder) = make_recorder();
         recorder.record_renhun(1, 0, "吃馒头", "...").await;
         recorder
             .record_tianhun(
                 1,
                 0,
-                Some("eat"),
-                Some(r#"{"item_id":"mantou"}"#),
+                "approved",
+                Some("action_type合法"),
+                Some("物品存在"),
                 None,
-                true,
+                None,
                 None,
             )
             .await;
         let records = recorder.get_by_tick(1).await;
-        assert!(records[0].tianhun_success);
-        assert_eq!(records[0].tianhun_action_type.as_deref(), Some("eat"));
+        assert_eq!(records[0].tianhun_result.as_deref(), Some("approved"));
+        assert_eq!(records[0].tianhun_layer1_result.as_deref(), Some("action_type合法"));
     }
 
     #[tokio::test]
-    async fn test_record_tianhun_error() {
+    async fn test_record_tianhun_rejected() {
         let (_dir, recorder) = make_recorder();
         recorder.record_renhun(1, 0, "无效", "...").await;
         recorder
-            .record_tianhun(1, 0, None, None, None, false, Some("翻译超时"))
-            .await;
-        let records = recorder.get_by_tick(1).await;
-        assert!(!records[0].tianhun_success);
-        assert_eq!(records[0].tianhun_error.as_deref(), Some("翻译超时"));
-    }
-
-    #[tokio::test]
-    async fn test_record_dihun_approved() {
-        let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "移动", "...").await;
-        recorder
             .record_tianhun(
-                1,
-                0,
-                Some("move"),
-                Some(r#"{"target_location":"market"}"#),
-                None,
-                true,
-                None,
-            )
-            .await;
-        recorder
-            .record_dihun(
-                1,
-                0,
-                "approved",
-                Some("action_type合法"),
-                Some("目标可达"),
-                Some("符合人设"),
-                None,
-                None,
-            )
-            .await;
-        recorder
-            .record_final_intent(
-                1,
-                0,
-                Some("uuid"),
-                Some("move"),
-                Some(r#"{"target_location":"market"}"#),
-            )
-            .await;
-        let records = recorder.get_by_tick(1).await;
-        assert_eq!(records[0].dihun_result.as_deref(), Some("approved"));
-        assert_eq!(records[0].final_action_type.as_deref(), Some("move"));
-    }
-
-    #[tokio::test]
-    async fn test_record_dihun_rejected() {
-        let (_dir, recorder) = make_recorder();
-        recorder.record_renhun(1, 0, "吃空气", "...").await;
-        recorder
-            .record_tianhun(
-                1,
-                0,
-                Some("eat"),
-                Some(r#"{"item_id":"none"}"#),
-                None,
-                true,
-                None,
-            )
-            .await;
-        recorder
-            .record_dihun(
                 1,
                 0,
                 "rejected",
                 Some("action_type合法"),
-                Some("物品不存在"),
                 None,
-                Some("物品不可食用"),
+                None,
+                Some("意图不合理"),
                 None,
             )
             .await;
         let records = recorder.get_by_tick(1).await;
-        assert_eq!(records[0].dihun_result.as_deref(), Some("rejected"));
-        assert_eq!(records[0].dihun_reason.as_deref(), Some("物品不可食用"));
-        assert!(records[0].final_intent_id.is_none());
+        assert_eq!(records[0].tianhun_result.as_deref(), Some("rejected"));
+        assert_eq!(records[0].tianhun_reason.as_deref(), Some("意图不合理"));
     }
 
     #[tokio::test]

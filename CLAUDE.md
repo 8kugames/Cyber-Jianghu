@@ -177,9 +177,9 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - 人魂 ActorSoul: cognitive engine, narrative engine
-- `src/soul/translator/` - 天魂 IntentTranslator: LLM-based narrative→structured intent translation
-- `src/soul/reflector/` - 地魂 ReflectorSoul: Three-layer validation (唯一出入口)
+- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent
+- `src/soul/translator/` - 地魂 IntentTranslator: 叙事→格式化翻译（人魂直连后已旁路）
+- `src/soul/reflector/` - 天魂 ReflectorSoul: Three-layer validation (唯一出入口)
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution
 - `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient`)
@@ -188,13 +188,14 @@ Key agent modules:
 
 **Three-Soul Architecture** (Cognitive mode):
 ```
-ActorSoul (人魂) → IntentTranslator (天魂) → ReflectorSoul (地魂)
-  叙事意图           格式翻译              三层审查
+ActorSoul (人魂) → ReflectorSoul (天魂)
+  直连 WorldState    三层审查
+  输出结构化 Intent
 ```
 
-- **ActorSoul**: 2-stage LLM (Perception+Motivation → Planning+Decision), outputs narrative intent + CognitiveChain
-- **IntentTranslator**: Maps narrative to structured Intent JSON with coreference resolution
+- **ActorSoul**: 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain
 - **ReflectorSoul**: Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
+- **IntentTranslator** (地魂): 叙事→格式化翻译（人魂直连后已旁路）
 
 **Runtime modes**: `cognitive` (default, built-in LLM) or `claw` (OpenClaw integration)
 

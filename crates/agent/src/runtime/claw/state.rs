@@ -274,7 +274,7 @@ pub struct WsSharedState {
     /// Agent ID
     pub agent_id: Arc<AtomicI64>,
 
-    /// 叙事引擎（已移除：统一模式下上下文由 NarrativeGenerator 生成）
+    /// 叙事引擎（已移除：人魂直连 WorldState）
 
     /// 认知上下文构建器（可选，用于生成结构化认知上下文）
     pub cognitive_context_builder:
@@ -399,9 +399,8 @@ impl WsSharedState {
 
     /// 生成叙事化上下文
     ///
-    /// 统一认知模式下，上下文由 Agent 内部 NarrativeGenerator 生成，
+    /// 统一认知模式下，人魂直连 WorldState，
     /// 此方法返回 None（OpenClaw 仅接收原始 WorldState）。
-    /// 保留接口兼容性，Phase 4 将完整清理。
     pub fn generate_context(&self, _world_state: &WorldState) -> Option<String> {
         None
     }

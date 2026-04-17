@@ -117,7 +117,7 @@ data:
       # 每 tick 最大即时 LLM 调用次数（防止 O(n²) 扇出）
       # 超限的事件直接 DeferToMainTick
       max_llm_calls_per_tick: 9
-      # 每 tick 最大即时意图发送次数（含 RespondNow + 地魂 speech routing）
+      # 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
       max_immediate_intents_per_tick: 3
 
   # Agent 状态定义（数据驱动）

@@ -11,7 +11,7 @@ ALTER TABLE agent_action_logs
 ADD COLUMN IF NOT EXISTS soul_cycle_metadata JSONB;
 
 COMMENT ON COLUMN agent_action_logs.soul_cycle_metadata
-    IS '三魂循环完整元数据 JSONB，含人魂叙事、天魂翻译结果、地魂三层审查结果、即时通道意图';
+    IS '三魂循环完整元数据 JSONB，含人魂结构化 Intent、天魂三层审查结果、即时通道意图';
 
 -- 创建索引加速按 tick_id 查询
 CREATE INDEX IF NOT EXISTS idx_agent_action_logs_soul_cycle_metadata
