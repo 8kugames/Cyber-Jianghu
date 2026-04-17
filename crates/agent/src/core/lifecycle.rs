@@ -454,7 +454,7 @@ impl super::Agent {
         self.client.set_server_msg_callback(callback).await;
         info!("Server 消息回调已注册（即时事件 + 验证错误 + 链式透传）");
 
-        // 暂存上轮提交的 intents，供地魂生成上一轮叙事用
+        // 暂存上轮提交的 intents，供天魂生成上一轮叙事用
         let last_intents_for_narrative =
             Arc::new(std::sync::Mutex::new(Vec::<crate::models::Intent>::new()));
 
@@ -704,7 +704,7 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
-                    // 4.5 地魂叙事生成（将 WorldState 转化为 NarrativeContext 注入人魂）
+                    // 4.5 天魂叙事生成（将 WorldState 转化为 NarrativeContext 注入人魂）
                     if let Some(ref generator) = self.narrative_generator {
                         let recent = self.memory_manager.as_ref()
                             .map(|m| {
@@ -734,7 +734,7 @@ impl super::Agent {
                             None
                         };
 
-                        // 地魂生成上一轮叙事（用于 soul_cycle_record 回填）
+                        // 天魂生成上一轮叙事（用于 soul_cycle_record 回填）
                         // first_tick: last_execution_summary 为 None 表示首轮（无历史数据）
                         let first_tick = world_state.last_execution_summary.is_none();
                         let execution_narrative = if let Some(ref validator) = self.validator {
@@ -754,7 +754,7 @@ impl super::Agent {
                             {
                                 Ok(n) => n,
                                 Err(e) => {
-                                    warn!("地魂生成执行叙事错误: {}", e);
+                                    warn!("天魂生成执行叙事错误: {}", e);
                                     None
                                 }
                             }
@@ -893,7 +893,7 @@ impl super::Agent {
                                 debug!("NarrativeContext 注入成功");
                             }
                             Err(e) => {
-                                warn!("地魂叙事生成失败，使用原始 memory_context: {}", e);
+                                warn!("天魂叙事生成失败，使用原始 memory_context: {}", e);
                             }
                         }
                     }
@@ -904,14 +904,14 @@ impl super::Agent {
                         memory_context.push_str(&survival_warnings.join("\n"));
                     }
 
-                    // 5. 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试
+                    // 5. 三魂循环：人魂决策 → 天魂审核 → 驳回则重试
                     // 循环直到审查通过或达到最大重试次数
                     let max_retries = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
                         .map(|b| b.max_retries)
                         .unwrap_or(3);
-                    let max_intents = self.config.game_rules
+                    let _max_intents = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
                         .map(|b| b.max_intents_per_tick)
@@ -921,27 +921,24 @@ impl super::Agent {
 
                     for attempt in 0..=max_retries {
 
-                        // 5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
-                        // 优先使用 decision_with_chain_callback（返回 CognitiveChain 供天魂使用）
-                        let (raw_intent, cognitive_chain) = {
+                        // 5a. 人魂 (ActorSoul) 决策 — 直连 WorldState，输出结构化 Intent
+                        // 优先使用 decision_with_chain_callback（人魂直连 WorldState）
+                        let (raw_intent, _cognitive_chain) = {
                             let tick_id = world_state.tick_id;
                             let agent_id = world_state.agent_id.unwrap_or_default();
                             let decision_future = async {
-                                // 最高优先级：decision_with_chain_callback（支持天魂翻译）
+                                // 最高优先级：decision_with_chain_callback（人魂直连 WorldState）
                                 if let Some(ref chain_callback) = self.decision_with_chain_callback {
-                                    // 有 rejection reason 时传递 feedback
                                     let fb = self.last_rejection_reason.as_deref();
-                                    return chain_callback(tick_id, agent_id, &memory_context, fb).await;
+                                    return chain_callback(&world_state, &memory_context, fb).await;
                                 }
 
-                                // 有 rejection reason 时走 feedback callback（使用 [验证反馈] section）
-                                // feedback callback 内部有 CognitiveValidator 重试
+                                // 降级路径：旧式回调（不接收 WorldState）
                                 if let Some(ref reason) = self.last_rejection_reason {
                                     if let Some(ref callback) = self.decision_with_feedback_callback {
                                         let intent = callback(tick_id, agent_id, &memory_context, Some(reason.as_str())).await;
                                         (intent, None)
                                     } else if let Some(ref memory_callback) = self.decision_with_memory_callback {
-                                        // fallback: 将 rejection 混入 memory context
                                         let combined = if memory_context.is_empty() {
                                             format!("[意图被驳回: {}，请重新决策]", reason)
                                         } else {
@@ -968,18 +965,18 @@ impl super::Agent {
                         // 如果 final_intent 已被设置（如 speak 即时通道），退出
                         if final_intent.is_some() { break; }
 
-                        // 记录人魂输出
-                        let renhun_narrative = raw_intent.action_data
+                        // 记录人魂输出（结构化 Intent）
+                        let renhun_action = raw_intent.action_type.as_str();
+                        let renhun_action_data = raw_intent.action_data
                             .as_ref()
-                            .and_then(|d| d.get("narrative"))
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("");
+                            .map(|d| serde_json::to_string(d).unwrap_or_default())
+                            .unwrap_or_default();
                         let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
                         if let Some(recorder) = self.soul_recorder().await {
                             recorder.record_renhun(
                                 world_state.tick_id,
                                 attempt,
-                                renhun_narrative,
+                                &format!("{} {}", renhun_action, renhun_action_data),
                                 renhun_thought_log,
                             ).await;
                             // 记录游戏内时间和现实时间
@@ -987,85 +984,31 @@ impl super::Agent {
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         }
 
-                        // 5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化（多 Intent Pipeline）
-                        let multi_translation = self.translate_multi_intent(
-                            raw_intent,
-                            &world_state,
-                            cognitive_chain.as_ref(),
-                            max_intents,
-                        ).await;
-
-                        // 记录天魂翻译结果（取 primary intent）
-                        if let Some(recorder) = self.soul_recorder().await
-                            && let Some(primary) = multi_translation.intents.first()
-                        {
-                                let action_data_str = primary.action_data.as_ref()
-                                    .map(|d| serde_json::to_string(d).unwrap_or_default());
-                                recorder.record_tianhun(
-                                    world_state.tick_id,
-                                    attempt,
-                                    Some(primary.action_type.as_str()),
-                                    action_data_str.as_deref(),
-                                    multi_translation.speech_intent.as_ref().and_then(|s| {
-                                        s.action_data.as_ref()?.get("content")?.as_str()
-                                    }),
-                                    true,
-                                    None,
-                                ).await;
+                        // 5b. 地魂翻译步骤已消除 — 人魂直接输出结构化 Intent
+                        // 记录地魂为空（兼容 soul_cycle_recorder）
+                        if let Some(recorder) = self.soul_recorder().await {
+                            recorder.record_tianhun(
+                                world_state.tick_id,
+                                attempt,
+                                None, // 地魂已消除
+                                None,
+                                None,
+                                false,
+                                Some("人魂直连 WorldState，地魂翻译已消除"),
+                            ).await;
                         }
 
-                        // 5b'. 如果天魂拆分出说话 intent，走地魂分级验证后再发即时通道
-                        if let Some(speech) = &multi_translation.speech_intent {
-                            // 分级审核：speech 走 GradedValidationConfig（默认 skip LLM）
-                            let graded_config = self.config.game_rules
-                                .as_ref()
-                                .and_then(|g| g.intent_batch.as_ref())
-                                .map(|b| b.llm_validation.clone());
-                            let skip_llm = Self::should_skip_llm_validation(
-                                speech, graded_config.as_ref(),
-                            );
+                        // 5b'. speak 即时通道检测
+                        // 人魂直连后，speak intent 直接从 raw_intent 提取（不再依赖地魂拆分）
+                        let multi_translation = crate::soul::translator::MultiTranslationResult {
+                            intents: vec![raw_intent.clone()],
+                            speech_intent: None,
+                            original_narrative: String::new(),
+                            original_thought_log: raw_intent.thought_log.as_deref().unwrap_or("").to_string(),
+                        };
 
-                            let speech_result = if skip_llm {
-                                self.validate_rules_only(speech, &world_state).await
-                            } else {
-                                match self.validate_with_reflector(speech.clone(), &world_state).await {
-                                    Ok(r) => match r {
-                                        super::agent::ReflectorResult::Approved { .. } => Ok(()),
-                                        super::agent::ReflectorResult::Rejected { reason, .. } => Err(reason),
-                                    },
-                                    Err(e) => {
-                                        warn!("Speech reflector error, auto-approving: {}", e);
-                                        Ok(())
-                                    }
-                                }
-                            };
-
-                            match speech_result {
-                                Ok(()) => {
-                                    let status = self.send_immediate_intent(speech).await;
-                                    if let Some(recorder) = self.soul_recorder().await {
-                                        recorder.record_immediate(
-                                            world_state.tick_id,
-                                            &speech.intent_id.to_string(),
-                                            Some(&multi_translation.original_narrative),
-                                            "extracted",
-                                            speech.action_type.as_str(),
-                                            speech.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
-                                            speech.action_data.as_ref().and_then(|d| d.get("content")?.as_str()),
-                                            if status.is_ok() { "sent" } else { "failed" },
-                                            status.err().map(|e| e.to_string()).as_deref(),
-                                        ).await;
-                                    }
-                                }
-                                Err(reason) => {
-                                    warn!("Tick {} speech intent rejected by dihun: {}", world_state.tick_id, reason);
-                                }
-                            }
-                        }
-
-                        // 5c. 地魂 (ReflectorSoul) 批次审核 — 逐个审查翻译后的 Intent
+                        // 5c. 天魂 (ReflectorSoul) 审核 — 直接审查人魂输出的结构化 Intent
                         // 分级审核策略：根据 action_type 决定审核级别（Always/Adaptive/Skip）
-                        // 通过的 intent 组装 Pipeline，被驳回的丢弃
                         let graded_config = self.config.game_rules
                             .as_ref()
                             .and_then(|g| g.intent_batch.as_ref())
@@ -1130,7 +1073,7 @@ impl super::Agent {
                                         // 叙事化驳回原因
                                         let narrated = super::Agent::narrativize_rejection(&reason);
                                         self.last_rejection_reason = Some(narrated.clone());
-                                        warn!("Tick {} 第 {} 次地魂审查驳回: {}", world_state.tick_id, attempt, reason);
+                                        warn!("Tick {} 第 {} 次天魂审查驳回: {}", world_state.tick_id, attempt, reason);
                                     }
                                 }
                             }
@@ -1142,7 +1085,7 @@ impl super::Agent {
                         }
 
                         if !approved_intents.is_empty() {
-                            // 记录地魂审查结果
+                            // 记录天魂审查结果
                             if let Some(recorder) = self.soul_recorder().await {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
@@ -1170,7 +1113,7 @@ impl super::Agent {
                                 let pipeline = Self::assemble_pipeline(approved_intents.clone());
                                 final_intent = Some(pipeline);
                             }
-                            // 暂存 approved intents，供下一轮地魂生成叙事用
+                            // 暂存 approved intents，供下一轮天魂生成叙事用
                             if let Ok(mut saved) = last_intents_for_narrative.lock() {
                                 saved.clone_from(&approved_intents);
                             } else {
@@ -1239,7 +1182,7 @@ impl super::Agent {
                                 self.character_name(),
                                 status.age()
                             );
-                            // 发送最后一个 idle 意图后退出（通过地魂规则验证保持不变量）
+                            // 发送最后一个 idle 意图后退出（通过天魂规则验证保持不变量）
                             let agent_id = self.client.agent_id().await.unwrap_or_default();
                             let death_idle = Intent::new(
                                 agent_id,
@@ -1254,11 +1197,11 @@ impl super::Agent {
                         }
                     }
 
-                    // 7. 地魂验证 + 发送意图
-                    // 地魂唯一出入口：ALL intents 离开 Agent 前必须经过地魂验证
+                    // 7. 天魂验证 + 发送意图
+                    // 天魂唯一出入口：ALL intents 离开 Agent 前必须经过天魂验证
                     // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
                     if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {
-                        warn!("Tick {} 最终 intent 被地魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
+                        warn!("Tick {} 最终 intent 被天魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
                         if let Some(ref handler) = self.immediate_handler {
                             handler.set_current_intent(None).await;
                         }
@@ -1423,8 +1366,9 @@ impl super::Agent {
 
     /// 发送即时 Intent（统一走主 intent 通道）
     ///
-    /// 天魂路由出的 speak/whisper 或混合说话走此通道，
+    /// 天魂（旧地魂）路由出的 speak/whisper 或混合说话走此通道，
     /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
+    #[allow(dead_code)]
     async fn send_immediate_intent(&self, intent: &Intent) -> std::result::Result<(), String> {
         // 即时意图 per-tick rate limit
         if let Some(handler) = &self.immediate_handler
@@ -1435,13 +1379,13 @@ impl super::Agent {
 
         if let Err(e) = self.client.send_intent(intent).await {
             warn!(
-                "[天魂] 即时 intent 发送失败 ({}): {}",
+                "[天魂/即时] intent 发送失败 ({}): {}",
                 intent.action_type, e
             );
             Err(e.to_string())
         } else {
             info!(
-                "[天魂] 即时 intent 已发送: {} {:?}",
+                "[天魂/即时] intent 已发送: {} {:?}",
                 intent.action_type, intent.action_data
             );
             Ok(())

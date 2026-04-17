@@ -2111,7 +2111,7 @@ struct RenhunEntry {
     thought_log: Option<String>,
 }
 
-/// 天魂记录
+/// 地魂记录
 #[derive(Debug, Serialize)]
 struct TianhunEntry {
     action_type: Option<String>,
@@ -2121,7 +2121,7 @@ struct TianhunEntry {
     error: Option<String>,
 }
 
-/// 地魂记录
+/// 天魂记录
 #[derive(Debug, Serialize)]
 struct DihunEntry {
     result: Option<String>,

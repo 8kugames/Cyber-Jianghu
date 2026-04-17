@@ -175,7 +175,7 @@ impl ImmediateEventHandler {
         }
     }
 
-    /// 注入规则验证回调（地魂 Layer 1 + Layer 2）
+    /// 注入规则验证回调（天魂 Layer 1 + Layer 2）
     pub async fn set_rule_validator(&self, validator: Arc<RuleValidatorFn>) {
         let mut guard = self.rule_validator.write().await;
         *guard = Some(validator);

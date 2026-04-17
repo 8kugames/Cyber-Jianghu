@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Agent ("众生" / Consciousness)**: Subjective AI decision-making with memory, persona, and cognitive capabilities
 - **"天道无为，万物自化"**: The server provides objective physics; agents create emergent behavior through autonomous decisions
 
+See [Readme.md](Readme.md) for full project description and architecture diagrams.
+
 ## Common Commands
 
 ### Development
@@ -164,172 +166,53 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 >
 > OpenClaw **must** use WebSocket (`ws://localhost:23340/ws`) to submit intents.
 > HTTP API `POST /api/v1/intent` is for debugging only and has timing issues.
->
-> **Why**: Server only accepts intents with the *current* tick_id. HTTP polling
-> cannot guarantee real-time tick synchronization. WebSocket provides immediate
-> tick notifications.
 
-1. **WebSocket (Required)**:
-   - OpenClaw **must** connect via WebSocket to ensure Tick synchronization
-   - Agent provides WebSocket server at `ws://localhost:23340/ws`
-   - Real-time Tick notifications and Intent submission
-
-2. **HTTP API (Auxiliary)**:
-   - Runs with HTTP API on port 23340-23999
-   - Used for data queries, Web panel, debugging
-   - **NOT** a replacement for WebSocket
+1. **WebSocket (Required)**: OpenClaw **must** connect via WebSocket to ensure Tick synchronization
+2. **HTTP API (Auxiliary)**: Used for data queries, Web panel, debugging only
 
 **Memory System** (Three-Tier Architecture):
 - **Working Memory**: Short-term context, recent events
 - **Episodic Memory**: Event-based memories with timestamps
 - **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance)
-- All tiers use SQLite backends with Ebbinghaus forgetting curve implementation
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - 人魂 ActorSoul: cognitive engine, narrative engine, narrative intent generation
+- `src/soul/actor/` - 人魂 ActorSoul: cognitive engine, narrative engine
 - `src/soul/translator/` - 天魂 IntentTranslator: LLM-based narrative→structured intent translation
-- `src/soul/reflector/` - 地魂 ReflectorSoul: intent validation, rule engine, review store
+- `src/soul/reflector/` - 地魂 ReflectorSoul: Three-layer validation (唯一出入口)
 - `src/component/memory/` - Three-tier memory system with SQLite backends
-- `src/component/persona/` - Dynamic persona, lifespan, trait evolution, presets
-- `src/component/social/` - Relationship store, dialogue client
-- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` auto-downgrade)
+- `src/component/persona/` - Dynamic persona, lifespan, trait evolution
+- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient`)
 - `src/infra/transport/` - WebSocket communication layer
 - `src/infra/api/` - HTTP API server, handlers, services
-- `src/runtime/` - Decision modes (cognitive + claw)
 
-**Runtime modes** (decision module):
-- `cognitive` (default) - Multi-stage cognitive engine with built-in LLM for autonomous decision-making
-- `claw` - WebSocket server for OpenClaw/external scheduler integration
-
-**Decision Callbacks** (SDK API):
-- `cognitive_decision_with_chain()` - **推荐**：返回 `(Intent, CognitiveChain)` 元组，CognitiveChain 传递给天魂辅助指代消解
-- `cognitive_decision_with_retry()` - **已废弃**：仅返回 Intent，请迁移到 `cognitive_decision_with_chain`
-
-**签名**：回调不接收 `WorldState`（人魂信息隔离），采用 `(tick_id: i64, agent_id: Uuid)` 模式。外部信息通过 `memory_context: &str` 注入。
-
-```rust
-use cyber_jianghu_agent::cognitive_decision_with_chain;
-
-let callback = cognitive_decision_with_chain(engine.clone(), 3);
-
-Agent::builder(config, base_callback)
-    .with_decision_chain(callback)  // 传递 CognitiveChain 给天魂
-    .with_intent_translator(translator)
-    .build();
+**Three-Soul Architecture** (Cognitive mode):
+```
+ActorSoul (人魂) → IntentTranslator (天魂) → ReflectorSoul (地魂)
+  叙事意图           格式翻译              三层审查
 ```
 
-**Three-Soul Architecture** (三魂, Cognitive mode):
-The agent uses a three-stage pipeline: 人魂 (narrative) → 天魂 (translation) → 地魂 (validation)
+- **ActorSoul**: 2-stage LLM (Perception+Motivation → Planning+Decision), outputs narrative intent + CognitiveChain
+- **IntentTranslator**: Maps narrative to structured Intent JSON with coreference resolution
+- **ReflectorSoul**: Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
 
-```
-loop {
-    人魂 ActorSoul (行动之魂)     天魂 IntentTranslator          地魂 ReflectorSoul (反思之魂)
-      叙事意图                      格式化翻译                      三层审查
-      + CognitiveChain ────────────────────────────────────────────────────────
-           │                              │                              │
-           │  "吃馒头充饥"               │  action_type=eat             │  Layer 1: action_type 合法性
-           │  + key_observations          │  action_data={item_id:       │  Layer 2: RuleEngine 规则校验
-           │  + primary_drive      ─────> │    "mantou"}                 │  Layer 3: LLM 人设/世界观审查
-           │  + thought_process           │  (含指代消解上下文)          │
-           │                              │  ──────────────────────>     │
-           │                              │                              │
-           │<─────── Approved: send intent ───────────────────────────── │
-           │<─────── Rejected: retry with reason ────────────────────── │
-           │                                                              │
-           │  (max 3 retries, deadline timeout → idle)                   │
-}
-```
-
-- **ActorSoul** (人魂): 2-stage LLM cognitive engine (Perception+Motivation → Planning+Decision), outputs natural language narrative intent + CognitiveChain (含 key_observations, primary_drive, thought_process). **信息隔离**: 不直接访问 WorldState，所有外部信息通过 memory_context 注入
-- **IntentTranslator** (天魂): LLM-based translator that maps narrative intent to structured Intent JSON. Receives CognitiveChain from 人魂 to enhance coreference resolution (指代消解) by providing cognitive context (who is "him/her/it"?). Returns `TranslationResult { intent, speech_intent }` — when narrative contains both speech and action, splits into separate intents
-- **ReflectorSoul** (地魂): Three-layer validation on translated Intent (action_type → RuleEngine → LLM). **唯一出入口**: ALL intents 离开 Agent 前必须经过地魂验证
-- **Game Rules Callback**: 服务端热更新 `available_actions` 时，自动通过 `inject_rule_validator()` 更新即时事件处理器的规则验证
-- **Retry loop**: Rejected intents trigger 人魂 re-inference with rejection reason within same tick
-- **Deadline timeout**: Tick关单打断循环，超时提交 idle
-- **Rule-based layers** (1+2) are deterministic and run before LLM to save tokens
-
-**Speech Routing** (天魂 → 即时通道):
-天魂翻译后通过 `route_intents()` 决定 intent 路由：
-- **speak/whisper** → 主 intent 降级 idle，说话走 `immediate_msg_tx`（priority=10，不占 tick 配额）
-- **shout** → 保持主 intent（喊叫需要占据本 tick 的行动位）
-- **混合**（说话+行动）→ 行动走主流程，说话提取后走即时通道
-- **纯行动** → 无 `speech_intent`，正常走主流程
-
-**Immediate Event System**:
-- Server broadcasts `ImmediateEvent` (speak) to co-located agents mid-tick
-- Agent's `ImmediateEventHandler` decides: RespondNow / DeferToMainTick / Ignore
-- RespondNow sends speak intent via dedicated `immediate_msg_tx` channel (不占 intent 配额)
-- Deferred events injected into next tick's LLM context as "待回应的对话"
-- All ImmediateEvents immediately stored in working memory (即时感知)
-
-**Server Error Feedback**:
-- Server sends `ServerMessage::Error` with `ERROR_CODE_ACTION_FAILED` on validation failure
-- Agent consumes via `server_error_feedback` channel → `last_rejection_reason`
-- Injected into next tick's ActorSoul context as `[意图被驳回: {reason}]`
-
-**Intent Duplicate Policy**:
-- Immediate actions (speak/whisper/emote etc.): allowed to resubmit (overwrite previous intent)
-- Normal actions: duplicate submission silently ignored (first intent already stored, no side effect)
-- Agent does not need to handle duplicate rejection separately
-
-**WebSocket Auto-Reconnect**:
-- **Read timeout**: 120s no message (server sends Ping every 30s) = connection dead
-- **Reconnect strategy**: initial delay 1s, max delay = tick_duration / 2, exponential backoff
-- **Reconnect triggers**: WebSocket disconnect, read timeout, auth failure (400)
-- **Post-reconnect**: auto re-register identity, reload character.yaml persona, update PromptCache
-- **Token refresh**: on auth failure (HTTP 400), auto-refreshes device token via HTTP API before retrying
-
-**LLM Fallback** (Cognitive mode):
-- `FallbackLlmClient` wraps multiple LLM models sharing the same provider/api_key
-- Auto-downgrade on 403 (quota), 429 (rate limit), connection failure
-- Sticky fallback: stays on working model until it also fails
-- Config: `fallback_models: ["model-b", "model-c"]` in `agent.yaml`
-- Final fallback: idle intent with wuxia-style thought_log
+**Runtime modes**: `cognitive` (default, built-in LLM) or `claw` (OpenClaw integration)
 
 ### Protocol Layer
 
 The `protocol` crate defines all shared types:
-- `ServerMessage` - Messages from server to agents (registered, world_state, game_rules_update, dialogue)
-- `ClientMessage` - Messages from agents to server (intent, dialogue)
+- `ServerMessage` - Server → Agents (registered, world_state, game_rules_update)
+- `ClientMessage` - Agents → Server (intent, dialogue)
 - `WorldState` - Complete world snapshot sent each tick
 - `Intent` - Agent decision structure
-- `NarrativeConfig` - Attribute threshold descriptions (shared between server and agent)
-
-**OpenClaw WebSocket Message Format** (Agent <-> OpenClaw):
-```json
-// Downstream: Tick notification
-{"type": "tick", "tick_id": 123, "state": {...}, "context": "..."}
-
-// Upstream: Intent submission (MUST match current tick_id)
-{"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "..."}
-
-// Downstream: Server error
-{"type": "server_error", "code": "agent_dead", "message": "...", "tick_id": 123}
-```
 
 ### Data-Driven Design
 
-All game mechanics are configured via YAML files in `crates/server/config/` (JSON fallback supported):
-- `actions.yaml` - Action definitions with parameters and validation rules
-- `attributes.yaml` - Attribute definitions (primary, status, derived)
-- `items.yaml` - Item definitions with properties
-- `locations.yaml` - Location graph with nodes and edges
-- `narrative_config.yaml` - Threshold-based attribute descriptions
-- `recipes.yaml` - Crafting recipes
-- `game_rules.yaml` - Core game rules (real time → tick conversion)
-- `time.yaml` - Time system (tick → game time conversion)
-- `inventory.yaml` - Inventory limits
-- `initial_inventory.yaml` - Starting items for new agents
-- `network.yaml` - WebSocket and network settings
-- `world-building-rules.yaml` - World setting constraints
-- `display_messages.yaml` - UI display message templates
+All game mechanics configured via YAML in `crates/server/config/` (JSON fallback):
+- `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
+- `game_rules.yaml`, `time.yaml`, `inventory.yaml`, `recipes.yaml`
 
-**Formula Engine**: Dynamic calculations use `evalexpr` syntax:
-```yaml
-# Example: damage calculation formula
-damage: "base_damage + strength * 0.5 + weapon_bonus"
-```
+**Formula Engine**: Dynamic calculations use `evalexpr` syntax.
 
 ## Code Style Conventions
 
@@ -361,7 +244,7 @@ use super::builder::AgentBuilder;
 ### Error Handling
 
 - Application code: Use `anyhow::Result` with `.context("中文错误信息")?`
-- Library code: Use `thiserror::Error` with `#[error("...")]` attributes
+- Library code: Use `thiserror::Error` with `#[error("...")]`
 
 ### Async Patterns
 
@@ -381,7 +264,6 @@ use super::builder::AgentBuilder;
 - **No panic in library code**: Use explicit error handling with `Result`
 - **Iterators over loops**: Use iterator methods instead of manual loops
 - **Follow clippy**: Run `cargo clippy` before commits
-- **Doc comments**: Include examples in documentation comments
 
 ### Testing Conventions
 
@@ -389,17 +271,6 @@ use super::builder::AgentBuilder;
 - Shared test fixtures in `crates/*/tests/common/fixtures.rs`
 - Unit tests in `#[cfg(test)] mod tests` within source files
 - CI uses `cargo-nextest` for faster parallel test execution
-
-**Test Fixture Pattern**:
-```rust
-// crates/server/tests/common/fixtures.rs
-pub fn make_test_agent(agent_id: Uuid, location: &str) -> AgentState { ... }
-pub fn make_test_intent(agent_id: Uuid, tick_id: i64, action: ActionType) -> Intent { ... }
-
-// Usage in tests
-let agent = make_test_agent(uuid, "village_center");
-let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
-```
 
 ## Important Rules
 
@@ -409,8 +280,7 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 4. **Bugfix Rule**: Fix minimally, NEVER refactor while fixing bugs
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
-7. **No backwards compatibility**: This project does not need to maintain backwards compatibility - make breaking changes freely
-
+7. **No backwards compatibility**: Make breaking changes freely
 
 ## Key Dependencies
 
@@ -422,7 +292,6 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 | `evalexpr` | Formula/expression evaluation |
 | `tokio-tungstenite` | WebSocket client (agent) |
 | `rusqlite` | Local SQLite storage (agent memory) |
-| `candle-*` | Local ML/embeddings (agent) |
 | `instant-distance` | HNSW vector index (agent semantic memory) |
 
 ## Key Configuration Files
@@ -433,143 +302,36 @@ let intent = make_test_intent(agent.agent_id, tick_id, ActionType::Idle);
 | Server configuration | `crates/server/config/*.yaml` |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
-| OpenClaw integration | [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw) |
-
-## Chronicle (群像传记)
-
-Every 7 game days, the server auto-generates a **Chronicle** summarizing world events:
-
-- **Auto-generation**: Triggers every 7 game days (period calculated from `time.yaml` config)
-- **Generation strategy**: LLM version (if available) stored in `summary_llm`, template always stored in `summary`
-- **Async supplement**: If LLM fails, auto-retry asynchronously with progress tracking
-- **LLM mode**: Enabled via `config/llm.yaml` (provider, model, api_key required)
-
-### Deployment
-
-```bash
-# Run database migration
-docker compose exec db psql -U cyberjianghu -d cyberjianghu -f /migrations/009_chronicles.sql
-
-# (Optional) Configure LLM in config/llm.yaml
-# Restart server to apply changes
-```
 
 ## API Endpoints
 
 ### Server (port 23333)
-
 - `GET /health` - Health check
-- `POST /api/v1/agent/connect` - Connect device (register/get auth token)
+- `POST /api/v1/agent/connect` - Connect device
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
-- `POST /api/v1/agent/rebirth` - Delete agent (CASCADE delete states/inventory)
-- `GET /api/dashboard/stats` - Dashboard statistics (requires admin token)
-- `GET /api/dashboard/chronicles` - List chronicles (paginated, requires admin token)
-- `GET /api/dashboard/chronicles/{id}` - Get chronicle detail (requires admin token)
-- `POST /api/dashboard/chronicles/generate` - Manually generate a chronicle (requires admin token)
-- `GET /api/dashboard/chronicles/llm-stats` - Get LLM token usage statistics (requires admin token)
-- `GET /api/dashboard/chronicles/pending` - Get pending async generation tasks with progress (requires admin token)
-- `GET /api/config` - List configurations
+- `POST /api/v1/agent/rebirth` - Delete agent
 - `WS /ws?token={auth_token}` - WebSocket connection
 
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
-
-> ⚠️ **重要**: OpenClaw **必须**通过 WebSocket (`ws://localhost:23340/ws` 或指定端口) 提交意图，HTTP API 仅用于调试和数据查询。
-
-- `GET /api/v1` - API discovery endpoint (returns all available APIs with examples)
-- `GET /api/v1/health` - Health check
 - `GET /api/v1/state` - Get current WorldState
-- `GET /api/v1/context` - Get narrative context (Markdown format, recommended for LLM)
-- `GET /api/v1/attributes` - Dream glimpse: get attribute values (forbidden to store in memory)
-- `POST /api/v1/intent` - ⚠️ Submit intent (debugging only, use WebSocket for production)
-- `POST /api/v1/validate` - Validate action before submission
+- `GET /api/v1/context` - Get narrative context (Markdown, for LLM)
+- `POST /api/v1/intent` - Submit intent (debugging only, use WebSocket)
+- `GET /api/v1/character` - Get character info
+- `GET /api/v1/character/soul-cycles` - Get soul cycle records (paginated)
+- `POST /api/v1/character/dream` - Inject dream (1 per game day)
+- `POST /api/v1/character/rebirth` - Rebirth character
 - `GET /api/v1/relationship/list` - Get all relationships
-- `GET /api/v1/relationship/{id}` - Get specific relationship
-- `POST /api/v1/relationship` - Update relationship
-- `GET /api/v1/lifespan` - Get lifespan status
 - `GET /api/v1/memory/recent` - Get recent memories
 - `POST /api/v1/memory/search` - Search memories
-- `POST /api/v1/memory` - Store memory
-- `GET /api/v1/tick` - Get tick status (for polling, returns tick_id, tick_duration_secs, last_update)
 
-#### Character Management (Web Panel)
-
-- `GET /api/v1/character` - Get character info (name, age, gender, status, registered_at, birth_attributes, attributes, inventory)
-- `GET /api/v1/character/soul-cycles?page=1&limit=20` - Get soul cycle records grouped by tick (paginated, full three-soul data with immediate intents)
-- `GET /api/v1/character/soul-cycles?tick_id=123` - Get soul cycle records for a specific tick
-- `GET /api/v1/character/dream` - Get dream status (thought, remaining_ticks, can_use_today)
-- `POST /api/v1/character/dream` - Inject dream (limited to 1 per game day)
-- `POST /api/v1/character/rebirth` - Rebirth (delete character, redirect to creation)
-- `POST /api/v1/character/register` - Register new character (forward to server)
-
-#### Review System (Observer Agent)
-
-- `GET /api/v1/review/pending` - Get pending reviews (Observer Agent polls this endpoint)
-- `POST /api/v1/review/{intent_id}` - Submit review result (approved/rejected with reason)
-- `GET /api/v1/review/{intent_id}/status` - Get review status
-
-#### Configuration Management
-
-- `GET /api/v1/config` - Get current configuration (server URLs, runtime mode, port)
-- `POST /api/v1/config/reload` - Hot reload configuration from file
-- `POST /api/v1/config/server` - Set server address (triggers WebSocket reconnection)
-- `GET /api/v1/metrics` - LLM performance metrics (calls, failures, token usage)
-
-### Admin Web Panel (Server Dashboard)
-
+### Admin Web Panel
 - `GET /admin/` - Main dashboard
-- `GET /admin/chronicles` - Chronicles page (群像传记)
-- `GET /welcome.html` - Home page (shows status-based cards)
-- `GET /create.html` - Character creation page
-- `GET /character.html` - Character info page (dream injection, rebirth, intent_history)
-- `GET /settings.html` - Server/LLM configuration page
-
-## Narrative Config Delivery
-
-The `narrative_config` is delivered from server to agent during registration:
-
-1. Server loads `narrative_config.yaml` on startup via `GameDataLoader`
-2. Agent registration response includes `narrative_config` field
-3. Agent stores config to `~/.cyber-jianghu/config/narrative_config.yaml`
-4. HTTP API loads `NarrativeConfig` from local file for attribute display name mapping
-
-This ensures agent can function in production without accessing server's development files.
-
-## Development Notes
-
-- The project uses PostgreSQL for persistence
-- All game mechanics are configurable via YAML files (JSON fallback)
-- WebSocket is used for real-time communication (use WSS in production)
-- The tick system drives game time forward
-- Server Admin dashboard is available at `http://localhost:23333/admin` (requires token from logs or .env)
-- Agent config stored at `~/.cyber-jianghu/agent.yaml` (or `$CYBER_JIANGHU_CONFIG_DIR/agent.yaml`)
-- Agent auto-detects server URL changes and re-registers identity
+- `GET /welcome.html` - Home page
+- `GET /create.html` - Character creation
+- `GET /character.html` - Character info
 
 ## Quick Start Guides
 
-- Server: `crates/server/QuickStart-Server.md`
-- Agent: `crates/agent/QuickStart-Agent.md`
-- Architecture docs: `crates/server/docs/architecture/` and `crates/agent/docs/architecture/`
-
-## RULES
-====================▼ RULES ▼====================
-
-### 核心人设与沟通铁律 (Communication Protocol)
-*   **直入主题 (No Bullshit)**：跳过所有客套话。禁用“好问题”、“很高兴为您解答”、“绝对没问题”。直接给答案。
-*   **字字珠玑 (Brevity)**：一句话能说完，绝不说第二句。
-*   **拒绝骑墙 (Take a Stand)**：封杀“看情况 (It depends)”、“各有优劣”。你必须有明确的技术站位，给我一个你认为物理极限下最优的方案。
-*   **直言不讳 (Call Me Out)**：如果我提出了愚蠢的设计或做法，直接指出来。用聪明人的机智点醒我，不要刻意搞笑，不要人身攻击，但也绝不粉饰太平。
-
-### 技术绝对底线 (Technical Absolutes)
-*   **第一性原理 (First Principles)**：撕碎一切流行语（Buzzwords）、设计模式崇拜和盲从的“大厂最佳实践”。把问题暴力拆解到计算科学的物理极值（CPU时钟周期、内存带宽、网络I/O）。拒绝类比，拒绝“大家都是这么做的”（Cargo Cult）。只基于不可证伪的公理，从零推演架构的唯一解。
-*   **YAGNI & KISS**：坚决砍掉为“虚无的未来”买单的架构。组合优于继承。极简不等于简陋，严禁为了少敲键盘而写出丧失健壮性的烂代码。
-*   **Fail Fast**：零信任，悲观预期。Catch-all 且吞掉异常不处理，是不可饶恕的死罪。
-*   **数据驱动 (Data-Driven)**：消灭一切硬编码的魔法字符。热点路径直接上 DOD（数据导向设计）。
-
-### 触发器：何时必须闭嘴并反问 (Hard Interrupts)
-如果你在编码前或推演中遇到以下情况，**立即中断，先向我发问**：
-1.  **形容词当指标 (Vague Metrics)**：我说了“要求快”、“高并发”、“海量数据”、“高可用”，却没有给具体的吞吐量、延迟 P99 或 SLA 数字。
-2.  **范围蔓延 (Scope Creep)**：你发现需求在无限膨胀，偏离核心链路。—— *停下来，建议我砍掉边缘需求。*
-3.  **妥协企图 (Compromise/Shortcuts)**：你为了省事或绕过当前困难，想用妥协性的“临时方案”。—— *停下来，告诉我利弊和技术债成本，等我点头。*
-4.  **无头烂账 (Untracked Tech Debt)**：绝不在主干代码里留下没有任何追踪标记（如 Ticket/Issue ID）的 Hack 代码或 TODO。
-
-====================▲ RULES ▲====================
+- [QuickStart-Server.md](crates/server/QuickStart-Server.md) - Server development
+- [QuickStart-Agent.md](crates/agent/QuickStart-Agent.md) - Agent development
+- [Architecture docs](crates/server/docs/architecture/) and [Agent docs](crates/agent/docs/architecture/)

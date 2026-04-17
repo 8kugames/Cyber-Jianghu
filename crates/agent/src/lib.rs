@@ -8,10 +8,10 @@
 // ```
 // crates/agent/src/
 // ├── core/         # Agent 结构 + 生命周期（编排者）
-// ├── soul/         # 三魂系统（天魂 + 地魂 + 人魂）
-// │   ├── actor/    #   人魂：认知引擎 + 叙事意图生成
-// │   ├── translator/#  天魂：叙事意图→格式化 Intent 翻译
-// │   └── reflector/#   地魂：意图验证 + 审查存储
+// ├── soul/         # 三魂系统（人魂 + 天魂 + 地魂）
+// │   ├── actor/    #   人魂：直连 WorldState，输出结构化 Intent
+// │   ├── reflector/#   天魂：三层审核（action_type → 规则 → 人设）
+// │   └── translator/#  地魂：tool calling 能力池（Phase 3 激活）
 // ├── component/    # 共享能力组件
 // │   ├── memory/   #   三级记忆系统
 // │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化 + 预设）
@@ -33,16 +33,16 @@
 // Server ─[WebSocket]→ Transport ─[WorldState]→ Runtime ─[Intent]→ Transport ─[WebSocket]→ Server
 // ```
 //
-// ## 三魂架构（人魂→天魂→地魂）
+// ## 三魂架构（人魂→天魂）
 // ```
-// 人魂 (ActorSoul)           天魂 (IntentTranslator)      地魂 (ReflectorSoul)
-//   叙事意图                    格式化翻译                    三层审查
-//   "吃馒头充饥"    ──→     action_type=eat             ──→  action_type 合法性
-//                           action_data={item_id:            RuleEngine 规则校验
-//                             "mantou"}                       LLM 人设/世界观审查
+// 人魂 (ActorSoul)           天魂 (ReflectorSoul)
+//   直连 WorldState            三层审核
+//   action_type=eat         ──→  action_type 合法性
+//   action_data={item_id:       RuleEngine 规则校验
+//     "mantou"}                  LLM 人设/世界观审查
 // ```
-// 人魂输出自然语言意图，天魂用 LLM 翻译为含精确 ID 的结构化数据，
-// 地魂对格式化 Intent 进行三层审查。驳回原因通过 last_rejection_reason
+// 人魂直连 WorldState，直接输出含精确 ID 的结构化 Intent，
+// 天魂对格式化 Intent 进行三层审查。驳回原因通过 last_rejection_reason
 // 跨 tick 反馈给人魂，使下一 tick 的决策能参考上一次的驳回理由。
 
 // ============================================================================

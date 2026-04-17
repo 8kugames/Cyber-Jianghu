@@ -1,4 +1,4 @@
-//! 地魂叙事生成器
+//! 天魂叙事生成器
 //!
 //! 从 WorldState 生成叙事化 NarrativeContext，供人魂决策使用。
 //! 核心：LLM 生成 + 语义缓存 + 数值泄露检测。
@@ -27,7 +27,7 @@ struct SemanticFingerprint {
     agents_hash: u64,
 }
 
-/// 地魂叙事生成器
+/// 天魂叙事生成器
 pub struct NarrativeGenerator {
     /// LLM 客户端容器
     llm_container: LlmClientContainer,
@@ -98,7 +98,7 @@ impl NarrativeGenerator {
             {
                 Ok(ctx) => ctx,
                 Err(e) => {
-                    warn!("地魂 LLM 叙事生成失败 (attempt {}): {}", attempt, e);
+                    warn!("天魂 LLM 叙事生成失败 (attempt {}): {}", attempt, e);
                     if attempt == max_attempts {
                         return Ok(self.fallback_context(world_state));
                     }
@@ -222,7 +222,7 @@ impl NarrativeGenerator {
             }
         }
 
-        // 上轮经历（优先使用地魂生成的叙事化描述）
+        // 上轮经历（优先使用天魂生成的叙事化描述）
         if let Some(narrative) = execution_narrative {
             parts.push(format!("\n## 上一轮经历\n{}", narrative));
         } else if let Some(summary) = last_summary {
@@ -292,7 +292,7 @@ impl NarrativeGenerator {
 }
 
 /// System Prompt
-const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的地魂（Earth Soul），负责将客观世界状态转化为Agent的主观感知叙事。
+const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的天魂（Heaven Soul），负责将客观世界状态转化为Agent的主观感知叙事。
 
 ## 核心规则
 1. 你必须将所有数值转换为模糊的、符合武侠风格的叙事描述

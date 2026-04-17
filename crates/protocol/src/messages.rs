@@ -329,9 +329,9 @@ pub struct SoulCycleAttempt {
     pub attempt: i32,
     /// 人魂输出
     pub renhun: RenhunReport,
-    /// 天魂翻译结果
+    /// 地魂翻译结果（旧职责，Phase 4 清理）
     pub tianhun: TianhunReport,
-    /// 地魂审查结果
+    /// 天魂审查结果
     pub dihun: DihunReport,
     /// 最终 Intent
     pub final_intent: Option<FinalIntentReport>,

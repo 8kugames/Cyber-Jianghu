@@ -2,22 +2,16 @@
 // Cognitive Decision - 认知引擎决策
 // ============================================================================
 //
-// 5 阶段认知管线（非线性管道）：
-//   1. 感知 (Perception)   ─┐
-//   2. 动机 (Motivation)   ─┘ LLM Call 1（合并）
-//   3. 规划 (Planning)     ─┐
-//   4. 决策 (Decision)     ─┘ LLM Call 2（合并）
-//   5. 验证 (Validation)
-//      5a. CognitiveValidator 认知链质量审查（本文件，重试循环内）
-//      5b. ReflectorSoul 规则/世界观审查（lifecycle.rs，外部）
+// 人魂直连 WorldState，单次 LLM 调用输出结构化 Intent。
+// CognitiveValidator 在内部重试循环中执行质量审查。
+// 天魂翻译步骤已消除。
 
 use crate::soul::actor::{CognitiveChain, CognitiveEngine};
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;
-use cyber_jianghu_protocol::Intent;
+use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 /// Cognitive 决策配置
 pub struct CognitiveDecisionConfig {
@@ -33,12 +27,12 @@ impl Default for CognitiveDecisionConfig {
 
 /// 创建认知决策函数
 ///
-/// 使用认知引擎进行决策（5 阶段管线，2 次合并 LLM 调用）
+/// 使用认知引擎进行决策（旧式回调，不接收 WorldState）
 pub fn cognitive_decision(
     engine: Arc<CognitiveEngine>,
     _config: CognitiveDecisionConfig,
-) -> impl Fn(i64, Uuid) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
-    move |tick_id: i64, agent_id: Uuid| {
+) -> impl Fn(i64, uuid::Uuid) -> BoxFuture<'static, Intent> + Send + Sync + 'static {
+    move |tick_id: i64, agent_id: uuid::Uuid| {
         let engine = engine.clone();
 
         Box::pin(async move {
@@ -55,20 +49,21 @@ pub fn cognitive_decision(
     }
 }
 
-/// 创建带 CognitiveChain 返回的认知决策函数
+/// 创建带 CognitiveChain 返回的认知决策函数（人魂直连 WorldState）
 ///
-/// 使用认知引擎进行决策，返回 (Intent, Option<CognitiveChain>) 元组。
-/// CognitiveChain 供天魂翻译时获取认知上下文辅助指代消解。
+/// 人魂直接接收 WorldState，输出结构化 Intent（action_type + action_data 精确 ID）。
+/// CognitiveChain 供 soul_cycle_recorder 记录用。
 #[allow(clippy::type_complexity)]
 pub fn cognitive_decision_with_chain(
     engine: Arc<CognitiveEngine>,
     max_retries: usize,
-) -> impl Fn(i64, Uuid, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+) -> impl Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
 + Send
 + Sync
 + 'static {
-    move |tick_id: i64, agent_id: Uuid, memory_context: &str, feedback: Option<&str>| {
+    move |world_state: &WorldState, memory_context: &str, feedback: Option<&str>| {
         let engine = engine.clone();
+        let world_state = world_state.clone();
         let memory_context = memory_context.to_string();
         let feedback = feedback.map(|s| s.to_string());
 
@@ -78,7 +73,7 @@ pub fn cognitive_decision_with_chain(
 
             for attempt in 0..=max_retries {
                 match engine
-                    .think_unified(tick_id, agent_id, &memory_context, feedback.as_deref())
+                    .think_direct(&world_state, &memory_context, feedback.as_deref())
                     .await
                 {
                     Ok(chain) => {
@@ -115,8 +110,13 @@ pub fn cognitive_decision_with_chain(
                 }
             }
 
-            let idle_intent = Intent::new(agent_id, tick_id, "idle", None)
-                .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
+            let idle_intent = Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "idle",
+                None,
+            )
+            .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
             (idle_intent, last_chain)
         })
     }
