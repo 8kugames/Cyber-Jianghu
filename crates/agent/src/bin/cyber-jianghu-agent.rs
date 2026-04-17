@@ -48,7 +48,6 @@ use cyber_jianghu_agent::{
         cognitive_decision_with_chain,
     },
     soul::actor::{CognitiveEngine, CognitiveEngineConfig},
-    soul::translator::IntentTranslator,
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
 
@@ -873,11 +872,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
 
-            // 地魂 (IntentTranslator): Cognitive 模式专用，将人魂叙事翻译为格式化 Intent
-            let intent_translator = Arc::new(IntentTranslator::new(llm_arc.clone()));
-            builder = builder.with_intent_translator(intent_translator);
-            info!("地魂 (IntentTranslator) 已创建");
-
             if let Some(store) = relationship_store {
                 builder = builder.with_relationship_store(store);
             }
@@ -992,8 +986,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
                 // 带记忆上下文的决策回调（与 Cognitive 模式统一）
                 let cognitive_engine_for_memory = cognitive_engine.clone();
+                let cognitive_engine_for_decision = cognitive_engine.clone();
                 let decision: DecisionCallback = Arc::new(move |tick_id: i64, agent_id: Uuid| {
-                    let engine = cognitive_engine.clone();
+                    let engine = cognitive_engine_for_decision.clone();
                     Box::pin(async move {
                         match engine.think(tick_id, agent_id).await {
                             Ok(chain) => chain.final_intent,
@@ -1044,6 +1039,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     };
 
                 // 使用 AgentBuilder（与 Cognitive 模式完全统一）
+                let reconnect_rx_for_claw = setup.api_state
+                    .reconnect_tx
+                    .as_ref()
+                    .map(|tx| tx.subscribe())
+                    .unwrap();
+
                 let mut builder = AgentBuilder::new(config_for_builder.clone(), decision)
                     .device_config(device.clone())
                     .data_dir(data_dir.clone())
@@ -1051,17 +1052,30 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .with_decision_memory(decision_with_memory)
                     .with_llm_container(llm_container.clone())
                     .with_llm_client(llm_client.clone(), None)
-                    .with_http_api_state(setup.api_state.clone());
-
-                // 地魂（与 Cognitive 模式统一）
-                let intent_translator = Arc::new(IntentTranslator::new(llm_client.clone()));
-                builder = builder.with_intent_translator(intent_translator);
+                    .with_http_api_state(setup.api_state.clone())
+                    .with_reconnect_rx(reconnect_rx_for_claw)
+                    .cognitive_engine(cognitive_engine.clone());
 
                 if let Some(store) = relationship_store {
                     builder = builder.with_relationship_store(store);
                 }
 
                 builder = builder.character_config(character.clone());
+
+                // 即时事件处理：Claw 统一认知架构（与 Cognitive 模式一致）
+                {
+                    let persona_info = cyber_jianghu_agent::soul::reflector::PersonaInfo {
+                        gender: character.gender.clone(),
+                        age: character.age,
+                        personality: character.personality.clone(),
+                        values: character.values.clone(),
+                    };
+                    builder = builder.with_immediate_handler(
+                        llm_container.clone(),
+                        persona_info,
+                        character.name.clone(),
+                    );
+                }
 
                 builder.build()
             } else {

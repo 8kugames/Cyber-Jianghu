@@ -255,7 +255,7 @@ impl NarrativeConfig {
 // 叙事化感知上下文 - 人魂数值隔离
 // ============================================================================
 //
-// 地魂 LLM 生成，人魂只接收这个类型，不接触原始 WorldState。
+// 人魂直连 WorldState 后，叙事感知层已旁路。此类型仅用于兼容旧路径。
 
 /// 自身感知
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -368,10 +368,7 @@ pub struct ActionOutcome {
     pub unexpected_events: Vec<String>,
 }
 
-/// 叙事化感知上下文（人魂唯一输入）
-///
-/// 地魂 LLM 从 WorldState 生成，人魂只看到这个类型。
-/// 设计目标：人魂不接触任何原始数值，只通过叙事感知世界。
+/// 叙事化感知上下文（旧路径，人魂直连 WorldState 后已旁路）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NarrativeContext {
     /// Tick ID

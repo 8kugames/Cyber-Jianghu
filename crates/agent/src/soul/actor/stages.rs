@@ -94,53 +94,6 @@ pub struct PerceptionMotivationResponse {
     pub reasoning: String,
 }
 
-/// 规划+决策合并阶段响应
-///
-/// Planning 和 Decision 合并为单次 LLM 调用，
-/// 同时输出行动计划和最终决策。
-///
-/// ActorSoul（人魂）只输出叙事意图，不输出结构化 action_data。
-/// 结构化翻译已消除（人魂直连 WorldState，直接输出精确 ID）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanDecisionResponse {
-    /// 计划步骤
-    pub steps: Vec<String>,
-    /// 优先级 (1-10)
-    pub priority: u8,
-    /// 预期结果
-    pub expected_outcome: String,
-    /// 思考过程（必须引用前面的感知和动机）
-    pub thought_process: String,
-    /// 叙事意图（自然语言描述想要做的事，如"吃一个馒头来充饥"）
-    pub narrative_action: String,
-}
-
-/// 统一认知响应（单次 LLM 调用合并所有 4 阶段）
-///
-/// 人魂合并为单次 LLM 调用：感知 → 动机 → 规划 → 决策一步到位。
-/// 输出 narrative_action（自然语言意图）。人魂直连 WorldState 后，此类型仅用于兼容旧路径。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UnifiedCognitiveResponse {
-    // === 感知 ===
-    /// 自身状态摘要
-    pub self_status: String,
-    /// 环境观察
-    pub environment: String,
-    /// 关键观察
-    pub key_observations: Vec<String>,
-
-    // === 动机 ===
-    /// 当前主要驱动力
-    pub primary_drive: String,
-    /// 驱动强度 (1-10)
-    pub drive_intensity: u8,
-
-    // === 规划+决策 ===
-    /// 思考过程（完整的认知链：感知→动机→规划→决策）
-    pub thought_process: String,
-    /// 叙事意图（自然语言描述想要做的事）
-    pub narrative_action: String,
-}
 
 #[cfg(test)]
 mod tests {

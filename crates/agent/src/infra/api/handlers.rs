@@ -2111,19 +2111,9 @@ struct RenhunEntry {
     thought_log: Option<String>,
 }
 
-/// 地魂记录
+/// 天魂审查记录
 #[derive(Debug, Serialize)]
 struct TianhunEntry {
-    action_type: Option<String>,
-    action_data: Option<serde_json::Value>,
-    speech_content: Option<String>,
-    success: bool,
-    error: Option<String>,
-}
-
-/// 天魂记录
-#[derive(Debug, Serialize)]
-struct DihunEntry {
     result: Option<String>,
     layers: Vec<LayerResultEntry>,
     reason: Option<String>,
@@ -2147,7 +2137,6 @@ struct SoulCycleAttemptEntry {
     attempt: i32,
     renhun: RenhunEntry,
     tianhun: TianhunEntry,
-    dihun: DihunEntry,
     final_intent: Option<FinalIntentEntry>,
 }
 
@@ -2187,17 +2176,13 @@ fn record_to_attempt_entry(
     r: super::soul_cycle_recorder::SoulCycleRecord,
 ) -> SoulCycleAttemptEntry {
     let action_data: Option<serde_json::Value> = r
-        .tianhun_action_data
-        .as_ref()
-        .and_then(|s| serde_json::from_str(s).ok());
-    let final_action_data: Option<serde_json::Value> = r
         .final_action_data
         .as_ref()
         .and_then(|s| serde_json::from_str(s).ok());
     let layers = [
-        (r.dihun_layer1_result.as_deref(), "layer1"),
-        (r.dihun_layer2_result.as_deref(), "layer2"),
-        (r.dihun_layer3_result.as_deref(), "layer3"),
+        (r.tianhun_layer1_result.as_deref(), "layer1"),
+        (r.tianhun_layer2_result.as_deref(), "layer2"),
+        (r.tianhun_layer3_result.as_deref(), "layer3"),
     ]
     .iter()
     .map(|(detail, layer)| {
@@ -2229,22 +2214,15 @@ fn record_to_attempt_entry(
             thought_log: r.renhun_thought_log,
         },
         tianhun: TianhunEntry {
-            action_type: r.tianhun_action_type,
-            action_data,
-            speech_content: r.tianhun_speech_content,
-            success: r.tianhun_success,
-            error: r.tianhun_error,
-        },
-        dihun: DihunEntry {
-            result: r.dihun_result,
+            result: r.tianhun_result,
             layers,
-            reason: r.dihun_reason,
+            reason: r.tianhun_reason,
             narrative: r.previous_round_narrative,
         },
         final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
             intent_id: Some(id),
             action_type: r.final_action_type,
-            action_data: final_action_data,
+            action_data,
         }),
     }
 }

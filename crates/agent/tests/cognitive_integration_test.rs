@@ -7,7 +7,7 @@ use std::sync::Arc;
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
 use cyber_jianghu_agent::models::WorldState;
 use cyber_jianghu_agent::soul::actor::stages::{
-    CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput,
+    CognitiveStage, PerceptionMotivationResponse, StageOutput,
 };
 use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
@@ -38,16 +38,13 @@ fn make_mock_client() -> MockLlmClient {
     })
     .unwrap();
 
-    let plan_decision = serde_json::to_string(&PlanDecisionResponse {
-        steps: vec!["走向包子摊".to_string(), "购买包子".to_string()],
-        priority: 7,
-        expected_outcome: "获得食物，恢复体力".to_string(),
-        thought_process:
-            "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作"
-                .to_string(),
-        narrative_action: "去包子摊买包子充饥".to_string(),
-    })
-    .unwrap();
+    let plan_decision = serde_json::json!({
+        "steps": ["走向包子摊", "购买包子"],
+        "priority": 7,
+        "expected_outcome": "获得食物，恢复体力",
+        "thought_process": "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作",
+        "narrative_action": "去包子摊买包子充饥"
+    }).to_string();
 
     let all_responses = format!("{}\n---\n{}", perception_motivation, plan_decision);
     MockLlmClient::with_response(&all_responses)

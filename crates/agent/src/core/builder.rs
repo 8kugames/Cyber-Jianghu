@@ -26,7 +26,6 @@ use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{PersonaInfo, ReflectorSoul, Validator};
-use crate::soul::translator::IntentTranslator;
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::{
@@ -66,8 +65,6 @@ pub struct AgentBuilder {
     data_dir: PathBuf,
     /// 即时事件处理器
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
-    /// 地魂 — 意图翻译器（旧职责，Phase 4 将移除）
-    intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl AgentBuilder {
@@ -94,7 +91,6 @@ impl AgentBuilder {
             cognitive_engine: None,
             data_dir: PathBuf::from("."),
             immediate_handler: None,
-            intent_translator: None,
         }
     }
 
@@ -265,15 +261,6 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置地魂（IntentTranslator）— 旧职责，Phase 4 将移除
-    ///
-    /// 地魂（旧天魂）将人魂的叙事意图翻译为服务端格式化 Intent。
-    /// 人魂直连 WorldState 后此步骤已旁路。
-    pub fn with_intent_translator(mut self, translator: Arc<IntentTranslator>) -> Self {
-        self.intent_translator = Some(translator);
-        self
-    }
-
     /// 构建 Agent
     pub fn build(self) -> Agent {
         let client = AgentClient::new(self.config.server.clone());
@@ -358,7 +345,6 @@ impl AgentBuilder {
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
-            intent_translator: self.intent_translator,
         }
     }
 }

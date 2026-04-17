@@ -9,7 +9,7 @@
 
 ### 核心结论
 
-- **三魂架构已落地**：ActorSoul（人魂，生成叙事意图）+ IntentTranslator（天魂，翻译为格式化 Intent）+ ReflectorSoul（地魂，三层审查），单进程内同步串联。
+- **三魂架构已落地**：ActorSoul（人魂，直连 WorldState 输出结构化 Intent）+ ReflectorSoul（天魂，三层审查），单进程内同步串联。翻译步骤已旁路。
 - **远程 Observer 模式已移除**：只保留进程内三魂，减少部署复杂度与一致性风险。
 - **主通道明确**：Intent 提交 **只能** 走 WebSocket；HTTP API 仅做辅助查询/管理/审查/面板。
 - **硬约束**：`POST /api/v1/intent` **已禁用**（强制 WebSocket，避免 tick 同步问题）。
@@ -91,14 +91,13 @@
 │  │  │  2.  process_events() ───────▶ MemoryManager.process_events()           │    │   │
 │  │  │  3.  run_forgetting() ───────▶ MemoryManager.run_forgetting() [每84tick]│    │   │
 │  │  │  4.  get_memory_context() ───▶ MemoryManager.build_llm_context()        │    │   │
-│  │  │  5.  三魂循环 (人魂→天魂→地魂) ──────────────────────────────┐          │    │   │
+│  │  │  5.  三魂循环 (人魂→天魂) ──────────────────────────────┐          │    │   │
 │  │  │  │                                                           ▼          │    │   │
 │  │  │  │                                            ┌───────────────────┐   │    │   │
 │  │  │  │                                            │ decision_callback │   │    │   │
 │  │  │  │                                            │ (人魂 ActorSoul)   │   │    │   │
 │  │  │  │                                            └───────────────────┘   │    │   │
-│  │  │  5b. translate_intent() ──▶ IntentTranslator (天魂)                 │    │   │
-│  │  │  5c. validate_with_reflector() ──▶ ReflectorSoul (地魂)             │    │   │
+│  │  │  5b. validate_with_reflector() ──▶ ReflectorSoul (天魂)             │    │   │
 │  │  │  6.  send_intent() ───────────────────────────────────────────▶ Intent │    │   │
 │  │  │  6.5 [寿命] LifespanCalculator.process_tick() 检查寿命状态              │    │   │
 │  │  └─────────────────────────────────────────────────────────────────────────┘    │   │
@@ -108,7 +107,7 @@
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         COGNITIVE ENGINE (认知引擎)                              │   │
 │  │  soul/actor/                                                                 │   │
-│  │  ├── engine.rs      - CognitiveEngine (主引擎，信息隔离：不接收 WorldState)    │   │
+│  │  ├── engine.rs      - CognitiveEngine (主引擎，直连 WorldState 输出结构化 Intent)│   │
 │  │  ├── chain.rs       - CognitiveChain (认知链)                                   │   │
 │  │  ├── stages.rs      - StageOutput, 各阶段响应类型                               │   │
 │  │  ├── prompt_cache.rs - Prompt 缓存（persona + actions）                      │   │
@@ -125,7 +124,7 @@
 │  │  │        ▼                  ▼                  ▼                 ▼       │    │   │
 │  │  │  ┌──────────────────────────────────────────────────────────────────┐ │    │   │
 │  │  │  │                    LLM Prompt Building                            │ │    │   │
-│  │  │  │  • memory_context (地魂 NarrativeGenerator 注入的叙事化世界状态)      │ │    │   │
+│  │  │  │  • memory_context (记忆上下文)      │ │    │   │
 │  │  │  │  • DynamicPersona (人设生成描述)                                  │ │    │   │
 │  │  │  │  • Memory Context (记忆上下文注入)                               │ │    │   │
 │  │  │  └──────────────────────────────────────────────────────────────────┘ │    │   │
@@ -142,20 +141,20 @@
 │                                    AI COMPONENTS                                        │
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                         │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────┐  │
-│  │    LlmClient     │  │  DynamicPersona  │  │  MemoryManager   │  │ NarrativeGenerator │  │
-│  │  (component/llm/)       │  │  (component/persona/)   │  │  (component/memory/)    │  │ (soul/reflector/) │  │
-│  │                  │  │                  │  │                  │  │                    │  │
-│  │ • DirectLlmClient│  │ • traits         │  │ • WorkingMemory  │  │ • 地魂叙事生成     │  │
-│  │ • LlmProvider    │  │ • current_state  │  │ • EpisodicMemory │  │ • 属性→叙事描述   │  │
-│  │   - ollama       │  │ • version        │  │ • SemanticMemory │  │ • 环境叙事化      │  │
-│  │   - openclaw     │  │                  │  │ • ArchiveMemory  │  │ • 注入memory_ctx  │  │
-│  │   - openai_      │  │ generate_        │  │                  │  │                    │  │
-│  │     compatible   │  │   description()  │  │ build_llm_       │  │                    │  │
-│  │                  │  │                  │  │   context()      │  │                    │  │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘  └────────────────────┘  │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
+│  │    LlmClient     │  │  DynamicPersona  │  │  MemoryManager   │  │
+│  │  (component/llm/)       │  │  (component/persona/)   │  │  (component/memory/)    │  │
+│  │                  │  │                  │  │                  │  │
+│  │ • DirectLlmClient│  │ • traits         │  │ • WorkingMemory  │  │
+│  │ • LlmProvider    │  │ • current_state  │  │ • EpisodicMemory │  │
+│  │   - ollama       │  │ • version        │  │ • SemanticMemory │  │
+│  │   - openclaw     │  │                  │  │ • ArchiveMemory  │  │
+│  │   - openai_      │  │ generate_        │  │                  │  │
+│  │     compatible   │  │   description()  │  │ build_llm_       │  │
+│  │                  │  │                  │  │   context()      │  │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘  │
 │           │                     │                     │                    │           │
-│           └─────────────────────┴─────────────────────┴────────────────────┘           │
+│           └─────────────────────┴─────────────────────┘           │
 │                                         │                                               │
 │                                         ▼                                               │
 │  ┌─────────────────────────────────────────────────────────────────────────────────┐   │
@@ -211,11 +210,11 @@
 ### 2. 认知处理流 (Cognitive Pipeline)
 
 ```
-WorldState ──┬──▶ NarrativeGenerator (地魂) ──▶ NarrativeContext (叙事化世界状态)
+WorldState ──┬──▶ DynamicPersona.generate_description() ──▶ 人设描述
              │
-             ├──▶ DynamicPersona.generate_description() ──▶ 人设描述
+             ├──▶ MemoryManager.build_llm_context() ──▶ 记忆上下文
              │
-             └──▶ MemoryManager.build_llm_context() ──▶ 记忆上下文
+             └──▶ CognitiveEngine.think_direct(WorldState) ──▶ 结构化 Intent
                               │
                               ▼
                     ┌─────────────────────┐
@@ -283,12 +282,11 @@ loop {
             3.  每 84 tick 运行遗忘机制: run_forgetting(tick_id)
             4.  构建记忆上下文: get_memory_context() + 注入 deferred 对话
             5.  三魂循环 (最多 3 次重试):
-                5a. 人魂 (ActorSoul) 决策 — 输出叙事意图
+                5a. 人魂 (ActorSoul) 决策 — 输出结构化 Intent（含精确 ID）
+                    - 若有 chain_callback: decision_with_chain_callback(WorldState)
                     - 若有 memory_callback: decision_with_memory_callback()
                     - 否则: decision_callback() / decision_with_feedback_callback()
-                5b. 天魂 (IntentTranslator) 翻译 — 叙事→格式化 Intent
-                    - narrative action_type="narrative" → 精确 action_type + action_data
-                5c. 地魂 (ReflectorSoul) 审查: validate_with_reflector()
+                5b. 天魂 (ReflectorSoul) 审查: validate_with_reflector()
                     - Approved: 跳出循环
                     - Rejected: 设置 last_rejection_reason，循环继续
                     - deadline 超时: 退出循环（不发送 intent）
@@ -312,7 +310,7 @@ loop {
 | 2     | 事件处理并更新记忆                 | 已实现         |
 | 3     | 遗忘机制 (每 84 tick)          | 已实现         |
 | 4     | 构建记忆上下文 (+ deferred 对话)  | 已实现         |
-| 5     | 三魂循环 (人魂→天魂→地魂)         | 已实现         |
+| 5     | 三魂循环 (人魂→天魂)         | 已实现         |
 | 5.5   | 超时 idle                    | 已实现         |
 | 6     | 发送 Intent                 | 已实现         |
 | 6.5   | 寿命处理                      | 已实现         |
@@ -484,7 +482,7 @@ fn should_log_retry(attempt: u32) -> bool {
 
 | 文件               | 组件                          | 说明          |
 | ---------------- | --------------------------- | ----------- |
-| `engine.rs`      | `CognitiveEngine`           | 四阶段认知流程引擎（信息隔离：不接收 WorldState）|
+| `engine.rs`      | `CognitiveEngine`           | 直连 WorldState 输出结构化 Intent |
 | `chain.rs`       | `CognitiveChain`            | 存储各阶段输出的认知链 |
 | `stages.rs`      | `StageOutput`, `*Response` | 各阶段响应类型定义   |
 | `prompt_cache.rs`| `PromptCache`              | Prompt 缓存（persona + actions）|
@@ -499,8 +497,9 @@ fn should_log_retry(attempt: u32) -> bool {
 
 **关键方法**:
 
-- `think(tick_id, agent_id) -> CognitiveChain`: 执行完整认知流程（不接收 WorldState）
-- `think_with_memory(tick_id, agent_id, memory_context) -> CognitiveChain`: 带记忆/叙事上下文
+- `think(tick_id, agent_id) -> CognitiveChain`: 执行完整认知流程（旧路径）
+- `think_with_memory(tick_id, agent_id, memory_context) -> CognitiveChain`: 带记忆/叙事上下文（旧路径）
+- `think_direct(world_state, memory_context, feedback) -> (Intent, CognitiveChain)`: 直连 WorldState，输出结构化 Intent（主路径）
 - `create_decision_callback()`: 创建决策回调 (兼容 Agent 接口)
 
 ### 5. 记忆系统 (`component/memory/manager.rs`)
@@ -540,21 +539,10 @@ fn should_log_retry(attempt: u32) -> bool {
 - `set_goal(goal)`: 设置当前目标
 - `apply_all_decay()`: 应用所有特质衰减
 
-### 7. 叙事生成器 (`soul/reflector/narrative_generator.rs`)
+### 7. 叙事生成器 (`soul/reflector/narrative_generator.rs`) — 已移除
 
-**路径**: `crates/agent/src/soul/reflector/narrative_generator.rs`
-
-| 组件                     | 说明           |
-| ---------------------- | ------------ |
-| `NarrativeGenerator`   | LLM 驱动的叙事上下文生成器（地魂组件） |
-| `NarrativeContext`     | 叙事化世界状态（注入人魂 memory_context）|
-
-**关键方法**:
-
-- `generate()`: 从 WorldState 生成 NarrativeContext
-- `generate_execution_narrative()`: 生成上一轮执行叙事
-
-**设计变更**（v0.0.271）：旧的 `NarrativeEngine`（硬编码阈值映射）已删除。属性叙事化现在使用 `WorldState.attribute_descriptions`（server 数据驱动）。
+**设计变更**（v0.0.271+）：`NarrativeGenerator` 已移除。人魂直连 WorldState 后不再需要 LLM 叙事生成层。
+属性叙事化使用 `WorldState.attribute_descriptions`（server 数据驱动）。
 
 ***
 

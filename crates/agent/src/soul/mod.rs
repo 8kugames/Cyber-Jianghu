@@ -4,11 +4,9 @@
 //
 // ActorSoul（人魂/行动之魂）：认知引擎，直连 WorldState，输出结构化 Intent
 // ReflectorSoul（天魂/守护之魂）：三层审核 Intent → 提交 server
-// IntentTranslator（地魂/能力之魂）：tool calling 能力池（Phase 3 激活）
 //
-// 人魂直连 WorldState 后，天魂翻译步骤已消除。
+// 人魂直连 WorldState 后，翻译步骤已消除。
 // ============================================================================
 
 pub mod actor;
 pub mod reflector;
-pub mod translator;

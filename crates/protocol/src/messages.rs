@@ -329,10 +329,8 @@ pub struct SoulCycleAttempt {
     pub attempt: i32,
     /// 人魂输出
     pub renhun: RenhunReport,
-    /// 地魂翻译结果（旧职责，Phase 4 清理）
+    /// 天魂三层审查结果
     pub tianhun: TianhunReport,
-    /// 天魂审查结果
-    pub dihun: DihunReport,
     /// 最终 Intent
     pub final_intent: Option<FinalIntentReport>,
 }
@@ -345,15 +343,6 @@ pub struct RenhunReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TianhunReport {
-    pub action_type: Option<String>,
-    pub action_data: Option<serde_json::Value>,
-    pub speech_content: Option<String>,
-    pub success: bool,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DihunReport {
     pub result: Option<String>,
     pub layers: Vec<LayerReport>,
     pub reason: Option<String>,

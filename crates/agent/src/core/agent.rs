@@ -25,7 +25,6 @@ use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{PersonaInfo, Validator};
-use crate::soul::translator::IntentTranslator;
 
 use super::builder::AgentBuilder;
 use super::{
@@ -129,10 +128,6 @@ pub struct Agent {
 
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
-
-    /// 地魂 — 意图翻译器（旧职责，Phase 4 将移除）
-    #[allow(dead_code)]
-    pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
 }
 
 impl Agent {
@@ -193,7 +188,6 @@ impl Agent {
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
-            intent_translator: None,
         }
     }
 
@@ -649,103 +643,6 @@ impl Agent {
                 );
                 // 切换后重置计数器，给新模型机会
                 self.consecutive_idle_count = 0;
-            }
-        }
-    }
-
-    /// 地魂多 Intent 翻译（旧职责，Phase 4 将移除）
-    ///
-    /// 将叙事意图拆分为多个结构化 Intent，用于 Pipeline 执行。
-    /// 返回 MultiTranslationResult，包含按顺序执行的 Intent 列表。
-    #[allow(dead_code)]
-    pub(crate) async fn translate_multi_intent(
-        &self,
-        intent: Intent,
-        world_state: &WorldState,
-        cognitive_chain: Option<&crate::soul::actor::CognitiveChain>,
-        max_intents: usize,
-    ) -> crate::soul::translator::MultiTranslationResult {
-        use crate::soul::translator::MultiTranslationResult;
-
-        // 非 narrative 直接包装
-        if intent.action_type.as_str() != "narrative" {
-            return MultiTranslationResult {
-                intents: vec![intent],
-                speech_intent: None,
-                original_narrative: String::new(),
-                original_thought_log: String::new(),
-            };
-        }
-
-        let narrative = intent
-            .action_data
-            .as_ref()
-            .and_then(|d| d.get("narrative"))
-            .and_then(|n| n.as_str())
-            .unwrap_or("");
-        let thought_log = intent.thought_log.as_deref().unwrap_or("");
-
-        let translator = match &self.intent_translator {
-            Some(t) => t,
-            None => {
-                tracing::error!("未配置地魂翻译器，降级单 Intent idle");
-                return MultiTranslationResult {
-                    intents: vec![
-                        Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                            .with_thought(thought_log.to_string()),
-                    ],
-                    speech_intent: None,
-                    original_narrative: narrative.to_string(),
-                    original_thought_log: thought_log.to_string(),
-                };
-            }
-        };
-
-        if narrative.is_empty() {
-            return MultiTranslationResult {
-                intents: vec![
-                    Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                        .with_thought(thought_log.to_string()),
-                ],
-                speech_intent: None,
-                original_narrative: String::new(),
-                original_thought_log: thought_log.to_string(),
-            };
-        }
-
-        // 获取即时路由配置（默认 speak, whisper）
-        let default_routing: Vec<String> = vec!["speak".into(), "whisper".into()];
-        let immediate_routing_actions = self
-            .config
-            .game_rules
-            .as_ref()
-            .and_then(|g| g.immediate_events.as_ref())
-            .map(|e| e.immediate_routing_actions.as_slice())
-            .unwrap_or(default_routing.as_slice());
-
-        match translator
-            .translate_multi(
-                narrative,
-                thought_log,
-                world_state,
-                cognitive_chain,
-                max_intents,
-                immediate_routing_actions,
-            )
-            .await
-        {
-            Ok(result) => result,
-            Err(e) => {
-                warn!("[地魂] 多Intent翻译失败: {}, 降级为 idle", e);
-                MultiTranslationResult {
-                    intents: vec![
-                        Intent::new(intent.agent_id, intent.tick_id, "idle", None)
-                            .with_thought(format!("意图翻译失败: {}", e)),
-                    ],
-                    speech_intent: None,
-                    original_narrative: narrative.to_string(),
-                    original_thought_log: thought_log.to_string(),
-                }
             }
         }
     }

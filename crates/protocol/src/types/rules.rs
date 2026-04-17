@@ -65,7 +65,7 @@ pub struct GameRules {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent_batch: Option<IntentBatchConfig>,
 
-    /// 地魂叙事生成配置
+    /// 天魂（ReflectorSoul）叙事生成配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflector_narrative: Option<ReflectorNarrativeConfig>,
 
@@ -185,7 +185,7 @@ fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String>
     .into()
 }
 
-/// 地魂叙事生成配置
+/// 天魂（ReflectorSoul）叙事生成配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReflectorNarrativeConfig {
     /// 是否启用 LLM 生成（false 时使用空 NarrativeContext）
@@ -339,7 +339,7 @@ pub struct ImmediateDecisionRules {
     /// 超限的事件直接 DeferToMainTick
     #[serde(default = "default_max_llm_calls_per_tick")]
     pub max_llm_calls_per_tick: usize,
-    /// 每 tick 最大即时意图发送次数（含 RespondNow + 地魂 speech routing）
+    /// 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
     /// 超限的即时意图降级为 DeferToMainTick
     #[serde(default = "default_max_immediate_intents_per_tick")]
     pub max_immediate_intents_per_tick: usize,
