@@ -39,7 +39,7 @@ pub mod sqlx_types;
 
 // 重导出常用类型
 pub use messages::{
-    ClientMessage, DialogueMessage, DialogueSession, DihunReport, FinalIntentReport,
+    ClientMessage, DialogueMessage, DialogueSession, FinalIntentReport,
     ImmediateIntentReport, LayerReport, RenhunReport, ServerMessage, SoulCycleAttempt,
     SoulCycleMetadata, TianhunReport,
 };

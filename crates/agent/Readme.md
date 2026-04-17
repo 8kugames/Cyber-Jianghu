@@ -22,10 +22,9 @@ let agent = AgentBuilder::new(config, decision)
 
 ### ActorSoul + ReflectorSoul 架构
 
-- **ActorSoul (行动之魂)**：生成意图，执行行动，纯叙事输出
-- **IntentTranslator (天魂)**：LLM 翻译叙事为格式化 Intent（精确 ID 映射）
-- **ReflectorSoul (反思之魂)**：分级审查，世界观一致性审查
-- **NarrativeGenerator (叙事生成器)**：LLM 生成叙事上下文，语义缓存，泄露检测
+- **ActorSoul (人魂/行动之魂)**：直连 WorldState，输出含精确 ID 的结构化 Intent
+- **ReflectorSoul (天魂/守护之魂)**：分级审查，世界观一致性审查
+- **IntentTranslator (地魂/能力之魂)**：叙事→格式化翻译（人魂直连后已旁路）
 - **共享内存通信**：通过 `ReviewStore` 进行进程内通信
 
 ### 分级审核策略

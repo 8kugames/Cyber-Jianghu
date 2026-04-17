@@ -8,10 +8,9 @@
 // ```
 // crates/agent/src/
 // ├── core/         # Agent 结构 + 生命周期（编排者）
-// ├── soul/         # 三魂系统（人魂 + 天魂 + 地魂）
+// ├── soul/         # 三魂系统（人魂 + 天魂）
 // │   ├── actor/    #   人魂：直连 WorldState，输出结构化 Intent
-// │   ├── reflector/#   天魂：三层审核（action_type → 规则 → 人设）
-// │   └── translator/#  地魂：tool calling 能力池（Phase 3 激活）
+// │   └── reflector/#   天魂：三层审核（action_type → 规则 → 人设）
 // ├── component/    # 共享能力组件
 // │   ├── memory/   #   三级记忆系统
 // │   ├── persona/  #   身份系统（人设 + 寿命 + 事件演化 + 预设）
@@ -94,8 +93,6 @@ pub use soul::reflector::{
     ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest, ValidationResult, Validator,
     sanitize_for_prompt,
 };
-pub use soul::translator::IntentTranslator;
-
 // 运行模式
 pub use runtime::{
     CognitiveDecisionConfig, DecisionCallback, DecisionWithFeedbackCallback,

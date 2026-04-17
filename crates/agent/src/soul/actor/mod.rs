@@ -15,5 +15,5 @@ pub mod summary_window; // 滑动上下文窗口 - 叙事冗余优化
 pub use chain::CognitiveChain;
 pub use engine::{CognitiveEngine, CognitiveEngineConfig};
 pub use prompt_cache::PromptCache;
-pub use stages::{CognitiveStage, PerceptionMotivationResponse, PlanDecisionResponse, StageOutput};
+pub use stages::{CognitiveStage, PerceptionMotivationResponse, StageOutput};
 pub use summary_window::{NarrativeSummary, NarrativeSummaryWindow};
