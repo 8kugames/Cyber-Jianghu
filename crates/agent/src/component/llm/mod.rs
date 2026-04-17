@@ -6,6 +6,7 @@ mod client;
 pub mod direct_client;
 mod openai_types;
 pub mod token_tracking;
+pub mod tool_registry;
 pub mod tool_types;
 
 pub use client::mock;
@@ -15,6 +16,7 @@ pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider, Ope
 pub use token_tracking::{
     ModelTokenStats, persist_and_reset, record_failure, record_token_usage, snapshot_all_stats,
 };
+pub use tool_registry::{RegistryExecutor, SoulRole, ToolRegistry};
 pub use tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 
 use anyhow::Result;

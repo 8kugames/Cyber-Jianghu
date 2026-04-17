@@ -6,6 +6,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+// ============================================================================
+// 物品类型常量（数据驱动，禁止硬编码魔法字符串）
+// ============================================================================
+
+/// 可消耗品（食物/水/药品等）
+pub const ITEM_TYPE_CONSUMABLE: &str = "consumable";
+/// 武器
+pub const ITEM_TYPE_WEAPON: &str = "weapon";
+/// 材料
+pub const ITEM_TYPE_MATERIAL: &str = "material";
+/// 货币
+pub const ITEM_TYPE_CURRENCY: &str = "currency";
+
 /// Agent 自身状态（完全动态架构）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSelfState {
@@ -76,6 +89,10 @@ pub struct InventoryItem {
     /// 是否已装备
     #[serde(default)]
     pub is_equipped: bool,
+
+    /// 物品类型（consumable/weapon/material 等）
+    #[serde(default)]
+    pub item_type: String,
 }
 
 /// 周围实体（其他 Agent）
