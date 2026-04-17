@@ -454,7 +454,7 @@ impl super::Agent {
         self.client.set_server_msg_callback(callback).await;
         info!("Server 消息回调已注册（即时事件 + 验证错误 + 链式透传）");
 
-        // 暂存上轮提交的 intents，供天魂生成上一轮叙事用
+        // 暂存上轮提交的 intents，供天魂生成上一轮执行叙事用
         let last_intents_for_narrative =
             Arc::new(std::sync::Mutex::new(Vec::<crate::models::Intent>::new()));
 
@@ -704,22 +704,11 @@ impl super::Agent {
                         debug!("Memory context:\n{}", memory_context);
                     }
 
-                    // 4.5 天魂叙事生成（将 WorldState 转化为 NarrativeContext 注入人魂）
-                    if let Some(ref generator) = self.narrative_generator {
-                        let recent = self.memory_manager.as_ref()
-                            .map(|m| {
-                                m.working().get_top_n(5)
-                                    .into_iter()
-                                    .map(|e| e.content.clone())
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-
-                        // 读取上轮提交的 intents
+                    // 4.5 天魂执行叙事生成（上一轮行动结果，用于 memory_context 和 soul_cycle_record 回填）
+                    {
                         let last_intents = last_intents_for_narrative.lock().unwrap().clone();
 
                         // 数据驱动的上轮行动摘要：从 soul_cycle_recorder 读取上轮人魂叙事
-                        // 人魂叙事是中文自然语言（如"拾起桌上两个馒头"），精确且无 ID 泄漏
                         let last_action_summary = if !last_intents.is_empty() {
                             if let Some(recorder) = self.soul_recorder().await {
                                 recorder.get_last_renhun_narrative(world_state.tick_id).await
@@ -734,8 +723,7 @@ impl super::Agent {
                             None
                         };
 
-                        // 天魂生成上一轮叙事（用于 soul_cycle_record 回填）
-                        // first_tick: last_execution_summary 为 None 表示首轮（无历史数据）
+                        // 天魂生成上一轮执行叙事
                         let first_tick = world_state.last_execution_summary.is_none();
                         let execution_narrative = if let Some(ref validator) = self.validator {
                             match validator
@@ -763,138 +751,25 @@ impl super::Agent {
                         };
 
                         // 将 execution_narrative 持久化到上一轮的 soul_cycle_record
-                        // world_state.tick_id 是当前tick，narrative 是关于上一轮的执行
                         if let Some(ref narrative) = execution_narrative
                             && world_state.tick_id > 1
                             && let Some(recorder) = self.soul_recorder().await
+                            && let Some(prev_tick) = recorder.get_last_recorded_tick(world_state.tick_id).await
                         {
-                            // Agent 推理频率低于 tick 推进频率，tick_id 不连续
-                            // 需要找到实际上一轮有记录的 tick，而非 tick_id - 1
-                            if let Some(prev_tick) = recorder.get_last_recorded_tick(world_state.tick_id).await {
-                                recorder.update_previous_round_narrative(prev_tick, narrative).await;
-                            }
+                            recorder.update_previous_round_narrative(prev_tick, narrative).await;
                         }
 
-                        let last_summary = world_state.last_execution_summary.as_ref();
-                        match generator.generate(&world_state, last_summary, &recent, execution_narrative.clone()).await {
-                            Ok(narrative_ctx) => {
-                                // 将 NarrativeContext 的核心内容注入 memory_context
-                                let narrative_section = format!(
-                                    "\n### 当前感知\n{}\n{}\n{}\n{}",
-                                    narrative_ctx.self_perception.status_summary,
-                                    narrative_ctx.environment.location_description,
-                                    narrative_ctx.self_perception.inventory_narrative,
-                                    narrative_ctx.environment.ambient_features,
-                                );
-                                memory_context.push_str(&narrative_section);
-
-                                // 附近的人
-                                if !narrative_ctx.nearby_agents.is_empty() {
-                                    let agents: Vec<String> = narrative_ctx.nearby_agents.iter()
-                                        .take(5)
-                                        .map(|a| format!(
-                                            "- {} ({})",
-                                            a.appearance, a.current_activity
-                                        ))
-                                        .collect();
-                                    memory_context.push_str(&format!(
-                                        "\n附近的人:\n{}", agents.join("\n")
-                                    ));
-                                }
-
-                                // 结构化物品可用性注入（按来源 + 类型分组，强信号）
-                                // 替代旧的 interactive_elements（信息重叠且非结构化）
-                                {
-                                    let mut sections: Vec<String> = Vec::new();
-
-                                    // 辅助：格式化物品列表
-                                    let format_items = |items: &[(&str, &str, i32)]| -> String {
-                                        items.iter()
-                                            .map(|(name, itype, qty)| {
-                                                let type_tag = match *itype {
-                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE => "(食物/水)",
-                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_WEAPON => "(武器)",
-                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_MATERIAL => "(材料)",
-                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_CURRENCY => "(货币)",
-                                                    _ => "",
-                                                };
-                                                if *qty > 1 {
-                                                    format!("{}x{} {}", name, qty, type_tag)
-                                                } else {
-                                                    format!("{} {}", name, type_tag)
-                                                }
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("、")
-                                    };
-
-                                    // 背包物品
-                                    if !world_state.self_state.inventory.is_empty() {
-                                        let items: Vec<(&str, &str, i32)> = world_state.self_state.inventory.iter()
-                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), i.quantity))
-                                            .collect();
-                                        sections.push(format!("**背包**: {}", format_items(&items)));
-                                    }
-
-                                    // 地上物品
-                                    if !world_state.nearby_items.is_empty() {
-                                        let items: Vec<(&str, &str, i32)> = world_state.nearby_items.iter()
-                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), i.quantity))
-                                            .collect();
-                                        sections.push(format!("**地上**: {}", format_items(&items)));
-                                    }
-
-                                    // 可采集资源
-                                    if !world_state.location.gatherable_items.is_empty() {
-                                        let items: Vec<(&str, &str, i32)> = world_state.location.gatherable_items.iter()
-                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), 1))
-                                            .collect();
-                                        sections.push(format!("**可采集**: {}", format_items(&items)));
-                                    }
-
-                                    if !sections.is_empty() {
-                                        memory_context.push_str(&format!(
-                                            "\n\n### 可用资源\n{}\n> 你只能使用以上实际存在的物品。禁止编造不存在的物品。",
-                                            sections.join("\n")
-                                        ));
-                                    }
-                                }
-
-                                // 上一轮行动结果（数据驱动优先，避免 LLM 幻觉）
-                                if let Some(ref summary) = last_action_summary {
-                                    memory_context.push_str(&format!(
-                                        "\n### 上一轮行动结果\n{}\n",
-                                        summary
-                                    ));
-                                } else if let Some(ref exec_narr) = execution_narrative {
-                                    memory_context.push_str(&format!(
-                                        "\n### 上一轮行动结果\n{}\n",
-                                        exec_narr
-                                    ));
-                                } else if let Some(ref outcome) = narrative_ctx.last_outcome {
-                                    memory_context.push_str(&format!(
-                                        "\n### 上一轮行动结果\n{}\n",
-                                        outcome.result_narrative
-                                    ));
-                                    if !outcome.side_effects.is_empty() {
-                                        memory_context.push_str(&format!(
-                                            "附带效果: {}\n",
-                                            outcome.side_effects.join("；")
-                                        ));
-                                    }
-                                    if !outcome.unexpected_events.is_empty() {
-                                        memory_context.push_str(&format!(
-                                            "意外事件: {}\n",
-                                            outcome.unexpected_events.join("；")
-                                        ));
-                                    }
-                                }
-
-                                debug!("NarrativeContext 注入成功");
-                            }
-                            Err(e) => {
-                                warn!("天魂叙事生成失败，使用原始 memory_context: {}", e);
-                            }
+                        // 上一轮行动结果注入 memory_context
+                        if let Some(ref summary) = last_action_summary {
+                            memory_context.push_str(&format!(
+                                "\n### 上一轮行动结果\n{}\n",
+                                summary
+                            ));
+                        } else if let Some(ref exec_narr) = execution_narrative {
+                            memory_context.push_str(&format!(
+                                "\n### 上一轮行动结果\n{}\n",
+                                exec_narr
+                            ));
                         }
                     }
 

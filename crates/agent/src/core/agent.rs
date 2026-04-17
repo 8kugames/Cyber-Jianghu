@@ -24,7 +24,7 @@ use crate::infra::api::ReconnectRequest;
 use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::{NarrativeGenerator, PersonaInfo, Validator};
+use crate::soul::reflector::{PersonaInfo, Validator};
 use crate::soul::translator::IntentTranslator;
 
 use super::builder::AgentBuilder;
@@ -133,9 +133,6 @@ pub struct Agent {
     /// 地魂 — 意图翻译器（旧职责，Phase 4 将移除）
     #[allow(dead_code)]
     pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
-
-    /// 天魂叙事生成器（可选，从 WorldState 生成 NarrativeContext 供人魂使用，Phase 4 将移除）
-    pub(crate) narrative_generator: Option<Arc<NarrativeGenerator>>,
 }
 
 impl Agent {
@@ -197,7 +194,6 @@ impl Agent {
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             intent_translator: None,
-            narrative_generator: None,
         }
     }
 
