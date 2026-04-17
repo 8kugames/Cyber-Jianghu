@@ -13,6 +13,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::component::immediate::ImmediateEventHandler;
+use crate::component::llm::LlmClientExt;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
 use crate::component::persona::LifespanCalculator;
@@ -22,7 +23,6 @@ use crate::config::{CharacterConfig, Config, DeviceConfig};
 use crate::infra::api::ReconnectRequest;
 use crate::infra::transport::websocket::AgentClient;
 use crate::models::{Intent, WorldState};
-use crate::component::llm::LlmClientExt;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::{NarrativeGenerator, PersonaInfo, Validator};
 use crate::soul::translator::IntentTranslator;
@@ -56,10 +56,10 @@ pub struct Agent {
     /// 带反馈的决策回调（可选，用于验证器集成）
     pub(crate) decision_with_feedback_callback: Option<DecisionWithFeedbackCallback>,
 
-    /// 带 CognitiveChain 的决策回调（可选，用于天魂翻译时获取人魂认知上下文）
+    /// 带 CognitiveChain 的决策回调（人魂直连 WorldState）
     ///
-    /// 此回调返回 (Intent, Option<CognitiveChain>) 元组，
-    /// 用于三魂架构中传递人魂的完整认知链给天魂辅助指代消解。
+    /// 此回调接收 WorldState，人魂直接输出结构化 Intent。
+    /// CognitiveChain 供 soul_cycle_recorder 记录用。
     pub(crate) decision_with_chain_callback: Option<DecisionWithChainCallback>,
 
     /// 记忆管理器（可选）
@@ -130,11 +130,11 @@ pub struct Agent {
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
 
-    /// 天魂 — 意图翻译器（Cognitive 模式，将叙事意图翻译为格式化 Intent）
-    /// Claw 模式下为 None（外部系统直接提供格式化 Intent）
+    /// 地魂 — 意图翻译器（旧职责，Phase 4 将移除）
+    #[allow(dead_code)]
     pub(crate) intent_translator: Option<Arc<IntentTranslator>>,
 
-    /// 地魂叙事生成器（可选，从 WorldState 生成 NarrativeContext 供人魂使用）
+    /// 天魂叙事生成器（可选，从 WorldState 生成 NarrativeContext 供人魂使用，Phase 4 将移除）
     pub(crate) narrative_generator: Option<Arc<NarrativeGenerator>>,
 }
 
@@ -522,7 +522,8 @@ impl Agent {
         };
 
         // 收集所有社交事件
-        let social_events: Vec<crate::models::WorldEvent> = events.iter()
+        let social_events: Vec<crate::models::WorldEvent> = events
+            .iter()
             .filter(|e| e.event_type == crate::models::WorldEventType::SocialInteraction)
             .cloned()
             .collect();
@@ -532,7 +533,8 @@ impl Agent {
         }
 
         // 构建名称查找表（UUID → 名称）
-        let name_map: std::collections::HashMap<String, String> = entities.iter()
+        let name_map: std::collections::HashMap<String, String> = entities
+            .iter()
             .map(|e| (e.id.to_string(), e.name.clone()))
             .collect();
 
@@ -542,9 +544,11 @@ impl Agent {
         // 非阻塞：spawn 独立任务处理 LLM 调用和关系更新
         tokio::spawn(async move {
             // 构建 LLM 评估 prompt
-            let event_descriptions: Vec<String> = social_events.iter().enumerate().map(|(i, e)| {
-                format!("{}. {}", i + 1, e.description)
-            }).collect();
+            let event_descriptions: Vec<String> = social_events
+                .iter()
+                .enumerate()
+                .map(|(i, e)| format!("{}. {}", i + 1, e.description))
+                .collect();
 
             let prompt = format!(
                 r#"你是一个武侠世界角色的内心评估器。根据以下社交事件，评估每件事对你对这个人的好感度变化。
@@ -567,16 +571,20 @@ impl Agent {
                 return;
             };
 
-            let deltas: std::collections::HashMap<usize, i32> = match container.read().await.complete_json::<Vec<serde_json::Value>>(&prompt).await {
-                Ok(results) => {
-                    results.into_iter()
-                        .filter_map(|v| {
-                            let idx = v.get("index")?.as_u64()? as usize;
-                            let delta = v.get("delta")?.as_i64()? as i32;
-                            Some((idx, delta.clamp(-10, 10)))
-                        })
-                        .collect()
-                }
+            let deltas: std::collections::HashMap<usize, i32> = match container
+                .read()
+                .await
+                .complete_json::<Vec<serde_json::Value>>(&prompt)
+                .await
+            {
+                Ok(results) => results
+                    .into_iter()
+                    .filter_map(|v| {
+                        let idx = v.get("index")?.as_u64()? as usize;
+                        let delta = v.get("delta")?.as_i64()? as i32;
+                        Some((idx, delta.clamp(-10, 10)))
+                    })
+                    .collect(),
                 Err(e) => {
                     tracing::warn!("社交事件 LLM 评估失败: {}", e);
                     return;
@@ -592,7 +600,9 @@ impl Agent {
                 let action = meta.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 let other_id_str = match action {
                     "give" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
-                    "receive" | "trade_buy" | "stolen_from" => meta.get("from").and_then(|v| v.as_str()),
+                    "receive" | "trade_buy" | "stolen_from" => {
+                        meta.get("from").and_then(|v| v.as_str())
+                    }
                     _ => None,
                 };
 
@@ -605,9 +615,7 @@ impl Agent {
                 };
 
                 let delta = deltas.get(&(i + 1)).copied().unwrap_or(0);
-                let other_name = name_map.get(id_str)
-                    .map(|s| s.as_str())
-                    .unwrap_or("陌生人");
+                let other_name = name_map.get(id_str).map(|s| s.as_str()).unwrap_or("陌生人");
 
                 if let Err(e) = store.record_social_event(
                     other_id,
@@ -649,10 +657,11 @@ impl Agent {
         }
     }
 
-    /// 天魂多 Intent 翻译（Pipeline 模式）
+    /// 地魂多 Intent 翻译（旧职责，Phase 4 将移除）
     ///
     /// 将叙事意图拆分为多个结构化 Intent，用于 Pipeline 执行。
     /// 返回 MultiTranslationResult，包含按顺序执行的 Intent 列表。
+    #[allow(dead_code)]
     pub(crate) async fn translate_multi_intent(
         &self,
         intent: Intent,
@@ -683,7 +692,7 @@ impl Agent {
         let translator = match &self.intent_translator {
             Some(t) => t,
             None => {
-                tracing::error!("未配置天魂翻译器，降级单 Intent idle");
+                tracing::error!("未配置地魂翻译器，降级单 Intent idle");
                 return MultiTranslationResult {
                     intents: vec![
                         Intent::new(intent.agent_id, intent.tick_id, "idle", None)
@@ -731,7 +740,7 @@ impl Agent {
         {
             Ok(result) => result,
             Err(e) => {
-                warn!("[天魂] 多Intent翻译失败: {}, 降级为 idle", e);
+                warn!("[地魂] 多Intent翻译失败: {}, 降级为 idle", e);
                 MultiTranslationResult {
                     intents: vec![
                         Intent::new(intent.agent_id, intent.tick_id, "idle", None)
@@ -792,7 +801,7 @@ impl Agent {
         super::utils::build_world_context(world_state, self.lifespan_calculator.as_ref())
     }
 
-    /// 将地魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈
+    /// 将天魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈
     ///
     /// 人魂不应看到 "item_id 无效" 这样的 meta 信息，
     /// 只需要知道"想做的事没做成"以及"为什么"的叙事化描述。
@@ -979,11 +988,11 @@ impl Agent {
             return Ok(());
         }
 
-        // Fail-safe: "narrative" sentinel 绝不应到达此处（天魂应已翻译）
-        // 如果到达，说明 translate_intent 路径有 bug
+        // Fail-safe: "narrative" sentinel 来自旧地魂翻译架构
+        // 人魂直连后不应出现此情况
         if intent.action_type.as_str() == "narrative" {
             tracing::error!(
-                "narrative sentinel 泄漏到 validate_action_type（天魂翻译未执行？），强制拒绝"
+                "narrative sentinel 泄漏到 validate_action_type（人魂直连后不应出现），强制拒绝"
             );
             return Err("意图格式异常：narrative 未被翻译".to_string());
         }
@@ -1158,7 +1167,7 @@ impl Agent {
     }
 }
 
-/// 地魂单层审查结果
+/// 天魂单层审查结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LayerResult {
     /// 层标识

@@ -873,10 +873,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
 
-            // 天魂 (IntentTranslator): Cognitive 模式专用，将人魂叙事翻译为格式化 Intent
+            // 地魂 (IntentTranslator): Cognitive 模式专用，将人魂叙事翻译为格式化 Intent
             let intent_translator = Arc::new(IntentTranslator::new(llm_arc.clone()));
             builder = builder.with_intent_translator(intent_translator);
-            info!("天魂 (IntentTranslator) 已创建");
+            info!("地魂 (IntentTranslator) 已创建");
 
             if let Some(store) = relationship_store {
                 builder = builder.with_relationship_store(store);
@@ -1053,7 +1053,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     .with_llm_client(llm_client.clone(), None)
                     .with_http_api_state(setup.api_state.clone());
 
-                // 天魂（与 Cognitive 模式统一）
+                // 地魂（与 Cognitive 模式统一）
                 let intent_translator = Arc::new(IntentTranslator::new(llm_client.clone()));
                 builder = builder.with_intent_translator(intent_translator);
 

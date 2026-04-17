@@ -25,7 +25,7 @@ pub use crate::infra::api::{
 // 重导出 ws（已迁移至 claw/）
 pub use claw::{DEFAULT_TICK_DURATION_SECS, WsDecisionState, WsSharedState, ws_router};
 
-use cyber_jianghu_protocol::Intent;
+use cyber_jianghu_protocol::{Intent, WorldState};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,30 +37,32 @@ use uuid::Uuid;
 /// 决策回调类型
 ///
 /// 纯函数: (tick_id, agent_id) -> Intent
-/// 人魂信息隔离：不传递 WorldState，外部信息由 memory_context 承载
+/// 旧式回调（Claw 模式等），不接收 WorldState
 pub type DecisionCallback = Arc<dyn Fn(i64, Uuid) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带反馈和记忆上下文的决策回调类型
 ///
 /// 接收 tick_id、agent_id、记忆上下文和验证反馈（驳回原因），返回异步 Future
+/// 旧式回调（Cognitive 模式降级路径）
 pub type DecisionWithFeedbackCallback =
     Arc<dyn Fn(i64, Uuid, &str, Option<&str>) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 /// 带记忆上下文的决策回调类型
 ///
 /// 接收 tick_id、agent_id 和记忆上下文字符串，返回异步 Future
+/// 旧式回调（Cognitive 模式降级路径）
 pub type DecisionWithMemoryCallback =
     Arc<dyn Fn(i64, Uuid, &str) -> BoxFuture<'static, Intent> + Send + Sync>;
 
 // 从 soul::actor 重新导出 CognitiveChain
 pub use crate::soul::actor::CognitiveChain;
 
-/// 带 CognitiveChain 的决策回调类型
+/// 带 CognitiveChain 的决策回调类型（人魂直连 WorldState）
 ///
-/// 返回 (Intent, CognitiveChain) 元组，
-/// 用于三魂架构中天魂翻译时获取人魂的认知上下文辅助指代消解。
+/// 接收 WorldState、记忆上下文、验证反馈，返回 (Intent, CognitiveChain) 元组。
+/// 人魂直接访问 WorldState，输出结构化 Intent（不再走天魂翻译）。
 pub type DecisionWithChainCallback = Arc<
-    dyn Fn(i64, Uuid, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
+    dyn Fn(&WorldState, &str, Option<&str>) -> BoxFuture<'static, (Intent, Option<CognitiveChain>)>
         + Send
         + Sync,
 >;
