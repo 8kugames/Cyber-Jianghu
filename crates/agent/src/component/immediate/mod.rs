@@ -674,9 +674,13 @@ impl CognitiveImmediateDecisionMaker {
             .and_then(|v| v.as_str())
             .unwrap_or("某人");
 
-        // 截断长事件
+        // 截断长事件（按字符边界截断，避免 UTF-8 panic）
         let truncated = if content.len() > self.rules.max_event_context_chars {
-            &content[..self.rules.max_event_context_chars]
+            let mut end = self.rules.max_event_context_chars;
+            while !content.is_char_boundary(end) && end > 0 {
+                end -= 1;
+            }
+            &content[..end]
         } else {
             content
         };
@@ -749,7 +753,11 @@ action_type 只能是 "speak" 或 "whisper"。
                     .and_then(|v| v.as_str())
                     .unwrap_or("某人");
                 let truncated = if content.len() > max_chars {
-                    &content[..max_chars]
+                    let mut end = max_chars;
+                    while !content.is_char_boundary(end) && end > 0 {
+                        end -= 1;
+                    }
+                    &content[..end]
                 } else {
                     content
                 };
