@@ -451,6 +451,101 @@ impl RelationshipStore {
         Ok(())
     }
 
+    /// 记录社交事件并更新好感度
+    ///
+    /// delta 由外部（LLM 评估）决定，此处只负责持久化。
+    pub fn record_social_event(
+        &self,
+        target_agent_id: Uuid,
+        target_name: &str,
+        tick_id: i64,
+        action: &str,
+        description: &str,
+        delta: i32,
+    ) -> Result<()> {
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
+
+        let transaction = conn.unchecked_transaction()?;
+
+        // 读取现有好感度（不存在则为 0）
+        let existing_favorability: i32 = transaction
+            .query_row(
+                "SELECT favorability FROM relationships WHERE target_agent_id = ?",
+                params![target_agent_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let new_favorability = (existing_favorability + delta).clamp(-100, 100);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // 使用 UPDATE 而非 INSERT OR REPLACE，避免 CASCADE 删除 key_events
+        let updated = transaction.execute(
+            "UPDATE relationships
+             SET target_name = ?2, favorability = ?3, last_interaction_tick = ?4, updated_at = ?5
+             WHERE target_agent_id = ?1",
+            params![
+                target_agent_id.to_string(),
+                target_name,
+                new_favorability,
+                tick_id,
+                now,
+            ],
+        )?;
+
+        // 如果不存在则 INSERT（不会触发 CASCADE）
+        if updated == 0 {
+            transaction.execute(
+                "INSERT INTO relationships
+                 (target_agent_id, target_name, favorability, last_interaction_tick, updated_at,
+                  self_description, description_tick)
+                 VALUES (?1, ?2, ?3, ?4, ?5, '', 0)",
+                params![
+                    target_agent_id.to_string(),
+                    target_name,
+                    new_favorability,
+                    tick_id,
+                    now,
+                ],
+            )?;
+        }
+
+        // 插入 key event
+        transaction.execute(
+            "INSERT INTO key_events
+             (target_agent_id, tick_id, event_type, description, favorability_delta, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                target_agent_id.to_string(),
+                tick_id,
+                action,
+                description,
+                delta,
+                now,
+            ],
+        )?;
+
+        // 清理：只保留最近 max_events 条事件
+        transaction.execute(
+            "DELETE FROM key_events WHERE target_agent_id = ?1 AND id NOT IN \
+             (SELECT id FROM key_events WHERE target_agent_id = ?1 ORDER BY tick_id DESC LIMIT ?2)",
+            params![target_agent_id.to_string(), self.max_events as i64],
+        )?;
+
+        transaction.commit()?;
+
+        tracing::debug!(
+            "社交事件记录: {} -> {} (action={}, delta={}, new_fav={})",
+            self.agent_id, target_name, action, delta, new_favorability
+        );
+
+        Ok(())
+    }
+
     /// 清空所有关系记忆
     pub fn clear_all(&self) -> Result<()> {
         let conn = self
@@ -562,5 +657,88 @@ mod tests {
         // 验证删除
         let retrieved = store.get_relationship(target_id).unwrap();
         assert!(retrieved.is_none());
+    }
+
+    #[test]
+    fn test_record_social_event_new_target() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("relationships.db");
+        let agent_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        let store = RelationshipStore::open(agent_id, &db_path).unwrap();
+
+        // 记录社交事件（新目标）
+        store.record_social_event(
+            target_id,
+            "李四",
+            10,
+            "give",
+            "李四给了你一个馒头",
+            5,
+        ).unwrap();
+
+        // 验证关系自动创建
+        let rel = store.get_relationship(target_id).unwrap().unwrap();
+        assert_eq!(rel.target_name, "李四");
+        assert_eq!(rel.favorability, 5);
+        assert_eq!(rel.key_events.len(), 1);
+        assert_eq!(rel.key_events[0].event_type, "give");
+    }
+
+    #[test]
+    fn test_record_social_event_accumulates_favorability() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("relationships.db");
+        let agent_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        let store = RelationshipStore::open(agent_id, &db_path).unwrap();
+
+        // 多次事件
+        store.record_social_event(target_id, "王五", 5, "give", "送了馒头", 5).unwrap();
+        store.record_social_event(target_id, "王五", 10, "trade", "公平交易", 3).unwrap();
+        store.record_social_event(target_id, "王五", 15, "steal", "偷了银子", -15).unwrap();
+
+        let rel = store.get_relationship(target_id).unwrap().unwrap();
+        assert_eq!(rel.favorability, -7); // 5 + 3 - 15 = -7
+        assert_eq!(rel.key_events.len(), 3);
+    }
+
+    #[test]
+    fn test_record_social_event_favorability_clamped() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("relationships.db");
+        let agent_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        let store = RelationshipStore::open(agent_id, &db_path).unwrap();
+
+        // 超过上限
+        store.record_social_event(target_id, "赵六", 1, "give", "大礼", 80).unwrap();
+        store.record_social_event(target_id, "赵六", 2, "give", "再送礼", 50).unwrap();
+
+        let rel = store.get_relationship(target_id).unwrap().unwrap();
+        assert_eq!(rel.favorability, 100); // clamped at 100
+    }
+
+    #[test]
+    fn test_record_social_event_max_events_cleanup() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("relationships.db");
+        let agent_id = Uuid::new_v4();
+        let target_id = Uuid::new_v4();
+
+        let store = RelationshipStore::open(agent_id, &db_path).unwrap();
+
+        // 插入 25 个事件（超过 max_events=20）
+        for i in 0..25 {
+            store.record_social_event(target_id, "测试", i, "talk", "对话", 1).unwrap();
+        }
+
+        let rel = store.get_relationship(target_id).unwrap().unwrap();
+        assert_eq!(rel.key_events.len(), 20);
+        // 最老的事件被清理，保留最新的
+        assert_eq!(rel.key_events[0].tick_id, 24); // 最新的排第一
     }
 }
