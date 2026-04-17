@@ -7,7 +7,7 @@
 // - Layer 2: actions_list（进程生命周期内不变）
 //
 // 半静态缓存（inventory/locations/entities/nearby_items）已移除，
-// 这些数据由地魂 NarrativeGenerator 生成后注入 memory_context。
+// 这些数据由人魂直接从 WorldState 获取（直连模式）。
 // ============================================================================
 
 use crate::component::persona::DynamicPersona;

@@ -339,7 +339,7 @@ pub struct ImmediateDecisionRules {
     /// 超限的事件直接 DeferToMainTick
     #[serde(default = "default_max_llm_calls_per_tick")]
     pub max_llm_calls_per_tick: usize,
-    /// 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
+    /// 每 tick 最大即时意图发送次数（含 RespondNow + 地魂 speech routing）
     /// 超限的即时意图降级为 DeferToMainTick
     #[serde(default = "default_max_immediate_intents_per_tick")]
     pub max_immediate_intents_per_tick: usize,

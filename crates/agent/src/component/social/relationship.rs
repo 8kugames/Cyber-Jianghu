@@ -463,7 +463,6 @@ impl RelationshipStore {
         description: &str,
         delta: i32,
     ) -> Result<()> {
-
         let conn = self
             .conn
             .lock()
@@ -540,7 +539,11 @@ impl RelationshipStore {
 
         tracing::debug!(
             "社交事件记录: {} -> {} (action={}, delta={}, new_fav={})",
-            self.agent_id, target_name, action, delta, new_favorability
+            self.agent_id,
+            target_name,
+            action,
+            delta,
+            new_favorability
         );
 
         Ok(())
@@ -669,14 +672,9 @@ mod tests {
         let store = RelationshipStore::open(agent_id, &db_path).unwrap();
 
         // 记录社交事件（新目标）
-        store.record_social_event(
-            target_id,
-            "李四",
-            10,
-            "give",
-            "李四给了你一个馒头",
-            5,
-        ).unwrap();
+        store
+            .record_social_event(target_id, "李四", 10, "give", "李四给了你一个馒头", 5)
+            .unwrap();
 
         // 验证关系自动创建
         let rel = store.get_relationship(target_id).unwrap().unwrap();
@@ -696,9 +694,15 @@ mod tests {
         let store = RelationshipStore::open(agent_id, &db_path).unwrap();
 
         // 多次事件
-        store.record_social_event(target_id, "王五", 5, "give", "送了馒头", 5).unwrap();
-        store.record_social_event(target_id, "王五", 10, "trade", "公平交易", 3).unwrap();
-        store.record_social_event(target_id, "王五", 15, "steal", "偷了银子", -15).unwrap();
+        store
+            .record_social_event(target_id, "王五", 5, "give", "送了馒头", 5)
+            .unwrap();
+        store
+            .record_social_event(target_id, "王五", 10, "trade", "公平交易", 3)
+            .unwrap();
+        store
+            .record_social_event(target_id, "王五", 15, "steal", "偷了银子", -15)
+            .unwrap();
 
         let rel = store.get_relationship(target_id).unwrap().unwrap();
         assert_eq!(rel.favorability, -7); // 5 + 3 - 15 = -7
@@ -715,8 +719,12 @@ mod tests {
         let store = RelationshipStore::open(agent_id, &db_path).unwrap();
 
         // 超过上限
-        store.record_social_event(target_id, "赵六", 1, "give", "大礼", 80).unwrap();
-        store.record_social_event(target_id, "赵六", 2, "give", "再送礼", 50).unwrap();
+        store
+            .record_social_event(target_id, "赵六", 1, "give", "大礼", 80)
+            .unwrap();
+        store
+            .record_social_event(target_id, "赵六", 2, "give", "再送礼", 50)
+            .unwrap();
 
         let rel = store.get_relationship(target_id).unwrap().unwrap();
         assert_eq!(rel.favorability, 100); // clamped at 100
@@ -733,7 +741,9 @@ mod tests {
 
         // 插入 25 个事件（超过 max_events=20）
         for i in 0..25 {
-            store.record_social_event(target_id, "测试", i, "talk", "对话", 1).unwrap();
+            store
+                .record_social_event(target_id, "测试", i, "talk", "对话", 1)
+                .unwrap();
         }
 
         let rel = store.get_relationship(target_id).unwrap().unwrap();

@@ -141,7 +141,7 @@ pub struct AdjacentNode {
 /// 可采集资源信息（用于 WorldState）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatherableItem {
-    /// 物品 ID（天魂/地魂用于结构化翻译，不暴露给人魂）
+    /// 物品 ID（地魂/天魂用于结构化翻译，人魂直连后可见）
     pub item_id: String,
     /// 物品名称（人魂可见的显示名称）
     pub name: String,
