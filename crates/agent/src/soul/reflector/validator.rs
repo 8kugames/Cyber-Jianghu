@@ -224,7 +224,7 @@ impl ReflectorSoul {
 
     /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
     ///
-    /// 在收到 server WorldState（包含 last_execution_summary）后、调用 NarrativeGenerator 之前调用。
+    /// 在收到 server WorldState（包含 last_execution_summary）后调用。
     /// 生成「上轮你做了什么，结果如何」的第一人称叙事。
     ///
     /// `first_tick` 为 true 时表示这是本轮首次生成叙事（无历史数据），应生成「初入江湖」类叙事。
@@ -324,13 +324,13 @@ impl ReflectorSoul {
                         return Ok(Some(narrative));
                     }
                     warn!(
-                        "地魂生成执行叙事返回空 (attempt {}/{})",
+                        "天魂生成执行叙事返回空 (attempt {}/{})",
                         attempt, max_retries
                     );
                 }
                 Err(e) => {
                     warn!(
-                        "地魂生成执行叙事失败 (attempt {}/{}): {}",
+                        "天魂生成执行叙事失败 (attempt {}/{}): {}",
                         attempt, max_retries, e
                     );
                 }
@@ -339,7 +339,7 @@ impl ReflectorSoul {
         }
 
         // 所有重试都失败
-        warn!("地魂生成执行叙事重试耗尽，跳过本轮叙事");
+        warn!("天魂生成执行叙事重试耗尽，跳过本轮叙事");
         Ok(None)
     }
 }

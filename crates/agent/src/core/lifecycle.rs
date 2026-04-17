@@ -859,28 +859,11 @@ impl super::Agent {
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         }
 
-                        // 5b. 地魂翻译步骤已消除 — 人魂直接输出结构化 Intent
-                        // 记录地魂为空（兼容 soul_cycle_recorder）
-                        if let Some(recorder) = self.soul_recorder().await {
-                            recorder.record_tianhun(
-                                world_state.tick_id,
-                                attempt,
-                                None, // 地魂已消除
-                                None,
-                                None,
-                                false,
-                                Some("人魂直连 WorldState，地魂翻译已消除"),
-                            ).await;
-                        }
+                        // 5b. 翻译步骤已消除 — 人魂直接输出结构化 Intent
 
                         // 5b'. speak 即时通道检测
-                        // 人魂直连后，speak intent 直接从 raw_intent 提取（不再依赖地魂拆分）
-                        let multi_translation = crate::soul::translator::MultiTranslationResult {
-                            intents: vec![raw_intent.clone()],
-                            speech_intent: None,
-                            original_narrative: String::new(),
-                            original_thought_log: raw_intent.thought_log.as_deref().unwrap_or("").to_string(),
-                        };
+                        // 人魂直连后，speak intent 直接从 raw_intent 提取（不再依赖翻译层拆分）
+                        // 翻译层已消除，直接使用 raw_intent
 
                         // 5c. 天魂 (ReflectorSoul) 审核 — 直接审查人魂输出的结构化 Intent
                         // 分级审核策略：根据 action_type 决定审核级别（Always/Adaptive/Skip）
@@ -894,7 +877,7 @@ impl super::Agent {
                         let mut batch_layers: Vec<super::agent::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
-                        for intent in multi_translation.intents {
+                        for intent in std::iter::once(raw_intent.clone()) {
                             // 分级决策：Skip 类型只做 RuleEngine（跳过 LLM）
                             let skip_llm = Self::should_skip_llm_validation(
                                 &intent, graded_config.as_ref(),
@@ -965,7 +948,7 @@ impl super::Agent {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                                 let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
-                                recorder.record_dihun(
+                                recorder.record_tianhun(
                                     world_state.tick_id,
                                     attempt,
                                     "approved",
@@ -1002,7 +985,7 @@ impl super::Agent {
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                                 let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
                                 let narrated = super::Agent::narrativize_rejection(&reason);
-                                recorder.record_dihun(
+                                recorder.record_tianhun(
                                     world_state.tick_id,
                                     attempt,
                                     "rejected",
@@ -1156,9 +1139,9 @@ impl super::Agent {
 
                                 let cycles: Vec<cyber_jianghu_protocol::SoulCycleAttempt> = records.into_iter().map(|r| {
                                     let layers: Vec<cyber_jianghu_protocol::LayerReport> = vec![
-                                        (r.dihun_layer1_result.as_deref(), "layer1"),
-                                        (r.dihun_layer2_result.as_deref(), "layer2"),
-                                        (r.dihun_layer3_result.as_deref(), "layer3"),
+                                        (r.tianhun_layer1_result.as_deref(), "layer1"),
+                                        (r.tianhun_layer2_result.as_deref(), "layer2"),
+                                        (r.tianhun_layer3_result.as_deref(), "layer3"),
                                     ].into_iter().filter_map(|(detail, layer)| {
                                         detail.map(|d| cyber_jianghu_protocol::LayerReport {
                                             layer: layer.to_string(),
@@ -1174,16 +1157,9 @@ impl super::Agent {
                                             thought_log: r.renhun_thought_log,
                                         },
                                         tianhun: cyber_jianghu_protocol::TianhunReport {
-                                            action_type: r.tianhun_action_type,
-                                            action_data: r.tianhun_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                                            speech_content: r.tianhun_speech_content,
-                                            success: r.tianhun_success,
-                                            error: r.tianhun_error,
-                                        },
-                                        dihun: cyber_jianghu_protocol::DihunReport {
-                                            result: r.dihun_result,
+                                            result: r.tianhun_result,
                                             layers,
-                                            reason: r.dihun_reason,
+                                            reason: r.tianhun_reason,
                                             narrative: r.previous_round_narrative,
                                         },
                                         final_intent: r.final_intent_id.map(|id| cyber_jianghu_protocol::FinalIntentReport {
@@ -1241,7 +1217,7 @@ impl super::Agent {
 
     /// 发送即时 Intent（统一走主 intent 通道）
     ///
-    /// 天魂（旧地魂）路由出的 speak/whisper 或混合说话走此通道，
+    /// 天魂路由出的 speak/whisper 或混合说话走此通道，
     /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
     #[allow(dead_code)]
     async fn send_immediate_intent(&self, intent: &Intent) -> std::result::Result<(), String> {
