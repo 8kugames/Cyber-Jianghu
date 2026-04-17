@@ -222,6 +222,7 @@ impl IntentWorker {
         debug!("Tick {} 边界处理开始", tick_id);
 
         // 1. 从 DashMap 读取所有 Agent 状态
+        let mut ghost_ids: Vec<uuid::Uuid> = Vec::new();
         let states: Vec<AgentState> = self.state_cache.iter().map(|r| r.value().clone()).collect();
 
         if states.is_empty() {
@@ -238,14 +239,32 @@ impl IntentWorker {
             state.tick_id = tick_id;
         }
 
-        // 3. 批量持久化衰减结果
-        persistence::persist_states(&self.db_pool, tick_id, &updated_states)
-            .await
-            .context("衰减状态持久化失败")?;
+        // 3. 批量持久化衰减结果（失败时回退到逐条 persist 并清除 ghost agent）
+        if let Err(e) =
+            persistence::persist_states(&self.db_pool, tick_id, &updated_states).await
+        {
+            warn!("Tick {} 批量衰减持久化失败，回退到逐条 persist: {}", tick_id, e);
+            for state in &updated_states {
+                if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, state).await {
+                    // FK 约束失败 → ghost agent，从 DashMap 清除
+                    warn!(
+                        "Tick {}: ghost agent {} 持久化失败，从 DashMap 移除: {}",
+                        tick_id, state.agent_id, e
+                    );
+                    ghost_ids.push(state.agent_id);
+                }
+            }
+        }
 
-        // 4. 更新 DashMap（persist 成功后）
+        // 4. 更新 DashMap（persist 成功后），清除 ghost agent
+        for id in &ghost_ids {
+            self.state_cache.remove(id);
+            info!("Tick {}: 已从 DashMap 清除 ghost agent {}", tick_id, id);
+        }
         for state in &updated_states {
-            self.state_cache.insert(state.agent_id, state.clone());
+            if !ghost_ids.contains(&state.agent_id) {
+                self.state_cache.insert(state.agent_id, state.clone());
+            }
         }
 
         // 5. 处理死亡

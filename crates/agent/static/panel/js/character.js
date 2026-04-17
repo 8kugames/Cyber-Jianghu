@@ -823,9 +823,7 @@ async function loadExperiences(page = 1) {
 function renderSoulInline(label, data, type) {
     if (!data) return '';
     let html = `<div class="exp-${type}"><span class="exp-soul-label">${label}</span><div class="exp-soul-content">`;
-    if (data.narrative) {
-        html += `<div class="exp-dihun-narrative">${escapeHtml(data.narrative)}</div>`;
-    }
+
     if (type === 'renhun') {
         if (data.narrative) {
             html += `<div class="soul-text">${escapeHtml(data.narrative)}</div>`;
@@ -860,8 +858,9 @@ function renderSoulInline(label, data, type) {
         if (data.reason) {
             html += `<div class="exp-dihun-reason">${escapeHtml(data.reason)}</div>`;
         }
+        if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
     }
-
+    // html += '<div>'+escapeHtml(JSON.stringify(data)) + '</div>';
     html += `</div></div>`;
     return html;
 }

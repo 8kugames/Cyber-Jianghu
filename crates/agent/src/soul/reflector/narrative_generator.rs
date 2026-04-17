@@ -206,6 +206,14 @@ impl NarrativeGenerator {
             }
         }
 
+        // 可采集资源（名称，不暴露 ID）
+        if !world_state.location.gatherable_items.is_empty() {
+            parts.push("\n## 当前位置可采集的资源".to_string());
+            for item in &world_state.location.gatherable_items {
+                parts.push(format!("- {}", item.name));
+            }
+        }
+
         // 事件日志
         if !world_state.events_log.is_empty() {
             parts.push("\n## 近期事件".to_string());
@@ -306,7 +314,6 @@ const SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的地魂（Earth Soul）
   "environment": {
     "location_description": "你对所处位置的感知",
     "ambient_features": "环境氛围描述",
-    "interactive_elements": ["可互动物品1", "可互动物品2"],
     "reachable_locations": ["可前往地点1", "可前往地点2"]
   },
   "nearby_agents": [
@@ -359,7 +366,6 @@ mod tests {
                 "environment": {
                     "location_description": "你身处龙门客栈大堂",
                     "ambient_features": "空气中弥漫着酒香和饭菜的气息",
-                    "interactive_elements": ["桌上的茶壶"],
                     "reachable_locations": ["后院", "厨房"]
                 },
                 "nearby_agents": [],
@@ -389,6 +395,7 @@ mod tests {
                 name: "龙门客栈".to_string(),
                 node_type: "inn".to_string(),
                 adjacent_nodes: vec![],
+                gatherable_items: vec![],
             },
             self_state: crate::models::AgentSelfState {
                 attributes: std::collections::HashMap::new(),

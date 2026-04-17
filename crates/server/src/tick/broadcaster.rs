@@ -87,14 +87,19 @@ impl Broadcaster {
                     let proto_items: Vec<crate::models::InventoryItem> = items
                         .into_iter()
                         .map(|item| {
-                            let name = ItemRegistry::get(&item.item_id)
-                                .map(|config| config.name)
+                            let config = ItemRegistry::get(&item.item_id);
+                            let name = config.as_ref()
+                                .map(|c| c.name.clone())
                                 .unwrap_or_else(|| item.item_id.clone());
+                            let item_type = config.as_ref()
+                                .map(|c| c.item_type.clone())
+                                .unwrap_or_default();
                             crate::models::InventoryItem {
                                 item_id: item.item_id.clone(),
                                 name,
                                 quantity: item.quantity,
                                 is_equipped: item.is_equipped,
+                                item_type,
                             }
                         })
                         .collect();
@@ -139,14 +144,18 @@ impl Broadcaster {
                     items
                         .iter()
                         .map(|gi| {
-                            let name = ItemRegistry::get(&gi.item_id)
+                            let config = ItemRegistry::get(&gi.item_id);
+                            let name = config.as_ref()
                                 .map(|c| c.name.clone())
                                 .unwrap_or_else(|| gi.item_id.clone());
+                            let item_type = config.as_ref()
+                                .map(|c| c.item_type.clone())
+                                .unwrap_or_default();
                             cyber_jianghu_protocol::SceneItem {
                                 item_id: gi.item_id.clone(),
                                 name,
                                 quantity: gi.quantity,
-                                item_type: String::new(),
+                                item_type,
                             }
                         })
                         .collect()
@@ -363,6 +372,22 @@ impl Broadcaster {
                 name: location_name,
                 node_type: location_type,
                 adjacent_nodes,
+                gatherable_items: location_node
+                    .map(|n| {
+                        n.gatherable_items
+                            .iter()
+                            .filter_map(|id| {
+                                crate::game_data::ItemRegistry::get(id).map(|entry| {
+                                    crate::models::GatherableItem {
+                                        item_id: id.clone(),
+                                        name: entry.name.clone(),
+                                        item_type: entry.item_type.clone(),
+                                    }
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             },
             self_state: {
                 // 获取属性数值
@@ -529,6 +554,22 @@ pub fn build_initial_world_state(
                 })
         })
         .collect();
+    let gatherable_items: Vec<crate::models::GatherableItem> = location_node
+        .map(|n| {
+            n.gatherable_items
+                .iter()
+                .filter_map(|id| {
+                    crate::game_data::ItemRegistry::get(id).map(|entry| {
+                        crate::models::GatherableItem {
+                            item_id: id.clone(),
+                            name: entry.name.clone(),
+                            item_type: entry.item_type.clone(),
+                        }
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     drop(location_registry);
 
     // 死亡状态事件
@@ -585,6 +626,7 @@ pub fn build_initial_world_state(
             name: location_name,
             node_type: location_type,
             adjacent_nodes,
+            gatherable_items,
         },
         self_state: crate::models::AgentSelfState {
             attributes,

@@ -55,6 +55,7 @@ use cyber_jianghu_protocol as protocol;
 pub use protocol::AgentSelfState;
 pub use protocol::AvailableAction;
 pub use protocol::Entity;
+pub use protocol::GatherableItem;
 pub use protocol::InitialItem;
 pub use protocol::Intent;
 pub use protocol::InventoryItem;

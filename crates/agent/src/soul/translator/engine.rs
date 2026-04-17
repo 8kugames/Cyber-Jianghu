@@ -227,6 +227,18 @@ impl IntentTranslator {
                 .join(", ")
         };
 
+        let gatherable = if world_state.location.gatherable_items.is_empty() {
+            "无".to_string()
+        } else {
+            world_state
+                .location
+                .gatherable_items
+                .iter()
+                .map(|g| format!("{} ({})", g.item_id, g.name))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
         let action_table = Self::build_action_table(&load_available_actions_from_file());
         let cognitive_context = Self::extract_cognitive_context(cognitive_chain);
         let cognitive_section = if cognitive_context.is_empty() {
@@ -253,16 +265,20 @@ impl IntentTranslator {
 - 可达位置: {adjacent}
 - 附近的人: {entities}
 - 地面物品: {nearby_items}
+- 可采集资源: {gatherable}
 
 ## 可用动作
 {action_table}
 
 ## 规则
-1. 拆分为按执行顺序排列的动作列表
+1. 拆分为按执行顺序排列的动作列表（例如"捡起地上的馒头然后吃掉"拆为 pickup + eat 两个动作）
 2. 每个动作独立可执行，action_type 必须在可用动作表中
-3. ID 必须使用精确英文 ID（从「当前精确数据」区域的物品列表中逐字复制，禁止自行编造或使用中文名/泛称）
-4. 如果只有一个动作，输出单元素数组
-5. 无法拆分时输出单个动作
+3. **禁止编造物品**：item_id 只能从「背包物品」「地面物品」「可采集资源」的精确英文 ID 中逐字复制。如果列表为"无"或所需物品不在列表中，该动作不可执行，必须用 idle 替代或省略
+4. **采集动作用 gather**：当角色要取水、采药等采集行为时，使用 gather 动作，target_id 从「可采集资源」列表中逐字复制
+5. 位置 node_id 只能从「可达位置」的精确 ID 中逐字复制
+6. 人物 ID 必须使用「附近的人」中方括号内的 UUID，禁止使用中文名/拼音/泛称
+7. 如果意图引用了不存在的物品/位置/人物，输出 idle（无法执行）
+8. 如果只有一个动作，输出单元素数组
 
 ## 输出格式
 [{{"action_type": "动作名", "action_data": {{}}, "speech_content": ""}}]{cognitive_section}"#,
@@ -390,12 +406,15 @@ impl IntentTranslator {
             name_to_id.insert(node.name.as_str(), node.node_id.as_str());
             known_ids.push(node.node_id.as_str());
         }
+        // Entity name → UUID 映射（用于 target_agent_id 修正）
+        let mut entity_names: Vec<&str> = Vec::new();
+        let mut entity_ids: Vec<String> = Vec::new();
+        let mut entity_name_to_id: HashMap<&str, String> = HashMap::new();
         for entity in &world_state.entities {
-            // Entity.id 是 Uuid，转为字符串注册到映射表
+            entity_names.push(entity.name.as_str());
             let id_str = entity.id.to_string();
-            // Uuid 是临时值，不能用引用。跳过 entity ID 映射，
-            // 仅保留 name 查找（后续按需扩展）
-            let _ = id_str;
+            entity_ids.push(id_str.clone());
+            entity_name_to_id.insert(entity.name.as_str(), id_str);
         }
 
         for (key, value) in obj.iter_mut() {
@@ -404,19 +423,50 @@ impl IntentTranslator {
                 continue;
             }
 
-            let Some(s) = value.as_str() else {
-                continue;
+            let s = match value.as_str() {
+                Some(s) => s.to_string(),
+                None => continue,
             };
 
             // 精确匹配 → 无需修正
-            if known_ids.contains(&s) {
+            if known_ids.contains(&s.as_str()) || entity_ids.iter().any(|id| id == &s) {
                 continue;
             }
 
-            // 中文名 → 英文 ID
-            if let Some(&corrected) = name_to_id.get(s) {
+            // 中文名 → 英文 ID（物品/位置）
+            if let Some(&corrected) = name_to_id.get(s.as_str()) {
                 debug!("[天魂] ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
                 *value = serde_json::Value::String(corrected.to_string());
+                continue;
+            }
+
+            // 中文名/pinyin → Agent UUID
+            if let Some(corrected) = entity_name_to_id.get(s.as_str()) {
+                debug!("[天魂] Agent ID修正: {} \"{}\" → \"{}\"", key, s, corrected);
+                *value = serde_json::Value::String(corrected.clone());
+                continue;
+            }
+
+            // 模糊匹配：LLM 可能输出拼音或部分名称
+            let s_lower = s.to_lowercase().replace(' ', "_");
+            let mut matched = false;
+            for (name, id) in &entity_name_to_id {
+                let name_lower = name.to_lowercase().replace(' ', "_");
+                if s_lower == name_lower || s.contains(name) || name.contains(&s) {
+                    debug!("[天魂] Agent ID模糊修正: {} \"{}\" → \"{}\"", key, s, id);
+                    *value = serde_json::Value::String(id.clone());
+                    matched = true;
+                    break;
+                }
+            }
+
+            // 未匹配且是 item_id / node_id → 标记为空（触发后续验证拒绝）
+            if !matched && (key.contains("item_id") || key.contains("node_id")) {
+                tracing::warn!(
+                    "[天魂] 无法识别的 ID: {}=\"{}\" — 可能是 LLM 编造，将清除",
+                    key, s
+                );
+                *value = serde_json::Value::String(String::new());
             }
         }
     }

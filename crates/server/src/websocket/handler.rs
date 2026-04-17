@@ -291,14 +291,19 @@ async fn handle_websocket(
                         Ok(items) => items
                             .into_iter()
                             .map(|item| {
-                                let name = ItemRegistry::get(&item.item_id)
-                                    .map(|config| config.name.clone())
+                                let config = ItemRegistry::get(&item.item_id);
+                                let name = config.as_ref()
+                                    .map(|c| c.name.clone())
                                     .unwrap_or_else(|| item.item_id.clone());
+                                let item_type = config.as_ref()
+                                    .map(|c| c.item_type.clone())
+                                    .unwrap_or_default();
                                 crate::models::InventoryItem {
                                     item_id: item.item_id,
                                     name,
                                     quantity: item.quantity,
                                     is_equipped: item.is_equipped,
+                                    item_type,
                                 }
                             })
                             .collect(),
@@ -316,14 +321,18 @@ async fn handle_websocket(
                         Ok(items) => items
                             .into_iter()
                             .map(|gi| {
-                                let name = ItemRegistry::get(&gi.item_id)
+                                let config = ItemRegistry::get(&gi.item_id);
+                                let name = config.as_ref()
                                     .map(|c| c.name.clone())
                                     .unwrap_or_else(|| gi.item_id.clone());
+                                let item_type = config.as_ref()
+                                    .map(|c| c.item_type.clone())
+                                    .unwrap_or_default();
                                 cyber_jianghu_protocol::SceneItem {
                                     item_id: gi.item_id,
                                     name,
                                     quantity: gi.quantity,
-                                    item_type: String::new(),
+                                    item_type,
                                 }
                             })
                             .collect(),
@@ -631,7 +640,7 @@ async fn handle_intent(
     // 确定最终的 agent_id
     // 如果客户端指定了 agent_id，验证其属于该 device
     let agent_id = match msg_agent_id {
-        Some(id) => {
+        Some(id) if id != uuid::Uuid::nil() => {
             // 使用 query_scalar 只查询 device_id，避免 SELECT *
             let owner_device_id: Option<uuid::Uuid> =
                 sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
@@ -658,7 +667,8 @@ async fn handle_intent(
                 }
             }
         }
-        None => connection_agent_id,
+        // nil / None → 使用连接绑定的 agent_id（即时 intent 由 WebSocket 后台填充）
+        _ => connection_agent_id,
     };
 
     // 速率限制检查
@@ -994,7 +1004,7 @@ async fn handle_soul_cycle_report(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 确定最终的 agent_id（与 handle_intent 相同逻辑：比较 device_id）
     let agent_id = match msg_agent_id {
-        Some(id) => {
+        Some(id) if id != uuid::Uuid::nil() => {
             let owner_device_id: Option<uuid::Uuid> =
                 sqlx::query_scalar("SELECT device_id FROM agents WHERE agent_id = $1")
                     .bind(id)
@@ -1014,8 +1024,8 @@ async fn handle_soul_cycle_report(
                 None => return Err("Agent 不存在".into()),
             }
         }
-        None => {
-            // 无 msg_agent_id 时，通过 device_id 查找当前 agent
+        _ => {
+            // nil / None → 通过 device_id 查找当前 agent
             match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
                 Ok(Some(agent)) => agent.agent_id,
                 Ok(None) => return Err("无关联角色".into()),

@@ -592,6 +592,9 @@ impl super::Agent {
                         warn!("Failed to process events into memory: {}", e);
                     }
 
+                    // 2.5 社交事件 → 自动更新关系（非阻塞，spawn 后台任务）
+                    self.process_social_events(&world_state.events_log, &world_state.entities);
+
                     // 3. 每 FORGETTING_INTERVAL_TICKS tick 运行遗忘机制
                     if world_state.tick_id % super::FORGETTING_INTERVAL_TICKS == 0
                         && let Err(e) = self.run_forgetting(world_state.tick_id).await {
@@ -602,27 +605,73 @@ impl super::Agent {
                     let mut memory_context = self.get_memory_context().await;
 
                     // 4.1 生存压力注入：hunger/thirst 低于阈值时强制注入紧急信号
-                    {
+                    // （在物品注入之后补充具体食物/水名称）
+                    let survival_warnings = {
                         let survival_threshold = self.config.survival_threshold();
                         let attrs = &world_state.self_state.attributes;
                         let hunger = attrs.get("hunger").copied().unwrap_or(100);
                         let thirst = attrs.get("thirst").copied().unwrap_or(100);
-                        let mut survival_warnings = Vec::new();
+                        let mut warnings = Vec::new();
+
                         if hunger > 0 && hunger <= survival_threshold {
-                            survival_warnings.push(
-                                "【生存警告】你正处于极度饥饿状态，必须立即进食！先拾取(pickup)地面上的食物，再吃(eat)。".to_string()
-                            );
+                            // 查找背包中的食物
+                            let foods: Vec<String> = world_state.self_state.inventory.iter()
+                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                .map(|i| i.name.clone())
+                                .collect();
+                            if !foods.is_empty() {
+                                warnings.push(format!(
+                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！背包中有：{}。使用 eat 命令吃掉其中一个。",
+                                    foods.join("、")
+                                ));
+                            } else {
+                                // 查找地上的食物
+                                let ground_foods: Vec<String> = world_state.nearby_items.iter()
+                                    .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                    .map(|i| i.name.clone())
+                                    .collect();
+                                if !ground_foods.is_empty() {
+                                    warnings.push(format!(
+                                        "【生存警告】你正处于极度饥饿状态，必须立即进食！地上有：{}。先 pickup 再 eat。",
+                                        ground_foods.join("、")
+                                    ));
+                                } else {
+                                    warnings.push(
+                                        "【生存警告】你正处于极度饥饿状态，必须立即进食！背包和地上都没有食物，移动到有资源的地点。".to_string()
+                                    );
+                                }
+                            }
                         }
+
                         if thirst > 0 && thirst <= survival_threshold {
-                            survival_warnings.push(
-                                "【生存警告】你正处于极度口渴状态，必须立即饮水！先拾取(pickup)地面上的水，再喝(drink)。".to_string()
-                            );
+                            // 数据驱动：通过 item_type=consumable 识别饮品，背包优先
+                            let backpack_drinks: Vec<String> = world_state.self_state.inventory.iter()
+                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                .map(|i| i.name.clone())
+                                .collect();
+                            let ground_drinks: Vec<String> = world_state.nearby_items.iter()
+                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                .map(|i| i.name.clone())
+                                .collect();
+
+                            if !backpack_drinks.is_empty() {
+                                warnings.push(format!(
+                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！背包中有：{}。使用 drink 命令饮用。",
+                                    backpack_drinks.join("、")
+                                ));
+                            } else if !ground_drinks.is_empty() {
+                                warnings.push(format!(
+                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！地上有：{}。先 pickup 再 drink。",
+                                    ground_drinks.join("、")
+                                ));
+                            } else {
+                                warnings.push(
+                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！附近没有水源，移动到有水的地点。".to_string()
+                                );
+                            }
                         }
-                        if !survival_warnings.is_empty() {
-                            memory_context.push_str("\n### 紧急\n");
-                            memory_context.push_str(&survival_warnings.join("\n"));
-                        }
-                    }
+                        warnings
+                    };
 
                     // 注入延迟处理的即时对话（DeferToMainTick 事件）
                     if let Some(ref handler) = self.immediate_handler {
@@ -669,7 +718,23 @@ impl super::Agent {
                         // 读取上轮提交的 intents
                         let last_intents = last_intents_for_narrative.lock().unwrap().clone();
 
-                        // 地魂生成上一轮叙事
+                        // 数据驱动的上轮行动摘要：从 soul_cycle_recorder 读取上轮人魂叙事
+                        // 人魂叙事是中文自然语言（如"拾起桌上两个馒头"），精确且无 ID 泄漏
+                        let last_action_summary = if !last_intents.is_empty() {
+                            if let Some(recorder) = self.soul_recorder().await {
+                                recorder.get_last_renhun_narrative(world_state.tick_id).await
+                                    .map(|narrative| format!(
+                                        "【重要】你上一轮的行动：{}。不要进行无谓的重复。",
+                                        narrative
+                                    ))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        // 地魂生成上一轮叙事（用于 soul_cycle_record 回填）
                         // first_tick: last_execution_summary 为 None 表示首轮（无历史数据）
                         let first_tick = world_state.last_execution_summary.is_none();
                         let execution_narrative = if let Some(ref validator) = self.validator {
@@ -703,8 +768,11 @@ impl super::Agent {
                             && world_state.tick_id > 1
                             && let Some(recorder) = self.soul_recorder().await
                         {
-                            let prev_tick = world_state.tick_id - 1;
-                            recorder.update_previous_round_narrative(prev_tick, narrative).await;
+                            // Agent 推理频率低于 tick 推进频率，tick_id 不连续
+                            // 需要找到实际上一轮有记录的 tick，而非 tick_id - 1
+                            if let Some(prev_tick) = recorder.get_last_recorded_tick(world_state.tick_id).await {
+                                recorder.update_previous_round_narrative(prev_tick, narrative).await;
+                            }
                         }
 
                         let last_summary = world_state.last_execution_summary.as_ref();
@@ -734,16 +802,71 @@ impl super::Agent {
                                     ));
                                 }
 
-                                // 可互动物品/元素
-                                if !narrative_ctx.environment.interactive_elements.is_empty() {
-                                    memory_context.push_str(&format!(
-                                        "\n可交互: {}",
-                                        narrative_ctx.environment.interactive_elements.join("、")
-                                    ));
+                                // 结构化物品可用性注入（按来源 + 类型分组，强信号）
+                                // 替代旧的 interactive_elements（信息重叠且非结构化）
+                                {
+                                    let mut sections: Vec<String> = Vec::new();
+
+                                    // 辅助：格式化物品列表
+                                    let format_items = |items: &[(&str, &str, i32)]| -> String {
+                                        items.iter()
+                                            .map(|(name, itype, qty)| {
+                                                let type_tag = match *itype {
+                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE => "(食物/水)",
+                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_WEAPON => "(武器)",
+                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_MATERIAL => "(材料)",
+                                                    t if t == cyber_jianghu_protocol::ITEM_TYPE_CURRENCY => "(货币)",
+                                                    _ => "",
+                                                };
+                                                if *qty > 1 {
+                                                    format!("{}x{} {}", name, qty, type_tag)
+                                                } else {
+                                                    format!("{} {}", name, type_tag)
+                                                }
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("、")
+                                    };
+
+                                    // 背包物品
+                                    if !world_state.self_state.inventory.is_empty() {
+                                        let items: Vec<(&str, &str, i32)> = world_state.self_state.inventory.iter()
+                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), i.quantity))
+                                            .collect();
+                                        sections.push(format!("**背包**: {}", format_items(&items)));
+                                    }
+
+                                    // 地上物品
+                                    if !world_state.nearby_items.is_empty() {
+                                        let items: Vec<(&str, &str, i32)> = world_state.nearby_items.iter()
+                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), i.quantity))
+                                            .collect();
+                                        sections.push(format!("**地上**: {}", format_items(&items)));
+                                    }
+
+                                    // 可采集资源
+                                    if !world_state.location.gatherable_items.is_empty() {
+                                        let items: Vec<(&str, &str, i32)> = world_state.location.gatherable_items.iter()
+                                            .map(|i| (i.name.as_str(), i.item_type.as_str(), 1))
+                                            .collect();
+                                        sections.push(format!("**可采集**: {}", format_items(&items)));
+                                    }
+
+                                    if !sections.is_empty() {
+                                        memory_context.push_str(&format!(
+                                            "\n\n### 可用资源\n{}\n> 你只能使用以上实际存在的物品。禁止编造不存在的物品。",
+                                            sections.join("\n")
+                                        ));
+                                    }
                                 }
 
-                                // 上一轮行动结果（优先使用原始 execution_narrative，不经 LLM 二次加工）
-                                if let Some(ref exec_narr) = execution_narrative {
+                                // 上一轮行动结果（数据驱动优先，避免 LLM 幻觉）
+                                if let Some(ref summary) = last_action_summary {
+                                    memory_context.push_str(&format!(
+                                        "\n### 上一轮行动结果\n{}\n",
+                                        summary
+                                    ));
+                                } else if let Some(ref exec_narr) = execution_narrative {
                                     memory_context.push_str(&format!(
                                         "\n### 上一轮行动结果\n{}\n",
                                         exec_narr
@@ -773,6 +896,12 @@ impl super::Agent {
                                 warn!("地魂叙事生成失败，使用原始 memory_context: {}", e);
                             }
                         }
+                    }
+
+                    // 4.2 生存压力注入（延迟到物品信息之后，可引用具体物品名）
+                    if !survival_warnings.is_empty() {
+                        memory_context.push_str("\n### 紧急\n");
+                        memory_context.push_str(&survival_warnings.join("\n"));
                     }
 
                     // 5. 三魂循环：人魂决策 → 天魂翻译 → 地魂审查 → 驳回则重试

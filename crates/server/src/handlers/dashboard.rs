@@ -76,8 +76,8 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         .unwrap_or(0);
 
     let alive_agents: Vec<Uuid> = sqlx::query(
-        "SELECT agent_id FROM agent_states 
-         WHERE is_alive = true 
+        "SELECT agent_id FROM agent_states
+         WHERE is_alive = true
          AND tick_id = $1",
     )
     .bind(latest_state_tick_id)
@@ -96,7 +96,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
     // 3. DAU (Active in last 24h)
     // Active means: submitted an intent (last_tick_online) OR created in the last 24h
     let dau: i64 = sqlx::query(
-        "SELECT COUNT(DISTINCT agent_id) FROM agents 
+        "SELECT COUNT(DISTINCT agent_id) FROM agents
          WHERE last_tick_online > NOW() - INTERVAL '1 day'
          OR created_at > NOW() - INTERVAL '1 day'",
     )
@@ -107,7 +107,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
 
     // 4. 3-Day Active
     let active_3d: i64 = sqlx::query(
-        "SELECT COUNT(DISTINCT agent_id) FROM agents 
+        "SELECT COUNT(DISTINCT agent_id) FROM agents
          WHERE last_tick_online > NOW() - INTERVAL '3 days'
          OR created_at > NOW() - INTERVAL '3 days'",
     )
@@ -118,7 +118,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
 
     // 5. 7-Day Active
     let active_7d: i64 = sqlx::query(
-        "SELECT COUNT(DISTINCT agent_id) FROM agents 
+        "SELECT COUNT(DISTINCT agent_id) FROM agents
          WHERE last_tick_online > NOW() - INTERVAL '7 days'
          OR created_at > NOW() - INTERVAL '7 days'",
     )
@@ -129,7 +129,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
 
     // 6. MAU (30 days)
     let mau: i64 = sqlx::query(
-        "SELECT COUNT(DISTINCT agent_id) FROM agents 
+        "SELECT COUNT(DISTINCT agent_id) FROM agents
          WHERE last_tick_online > NOW() - INTERVAL '30 days'
          OR created_at > NOW() - INTERVAL '30 days'",
     )
@@ -140,7 +140,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
 
     // 7. YAU (1 year)
     let yau: i64 = sqlx::query(
-        "SELECT COUNT(DISTINCT agent_id) FROM agents 
+        "SELECT COUNT(DISTINCT agent_id) FROM agents
          WHERE last_tick_online > NOW() - INTERVAL '1 year'
          OR created_at > NOW() - INTERVAL '1 year'",
     )
@@ -694,7 +694,7 @@ pub async fn get_agent_details(
 
     // 3. Get inventory
     let inventory_rows = sqlx::query(
-        "SELECT ai.item_id, i.name, ai.quantity, ai.is_equipped 
+        "SELECT ai.item_id, i.name, ai.quantity, ai.is_equipped
          FROM agent_inventory ai
          JOIN items i ON ai.item_id = i.item_id
          WHERE ai.agent_id = $1",
@@ -1023,7 +1023,7 @@ pub async fn get_actions_map() -> Json<std::collections::HashMap<String, String>
     let map: std::collections::HashMap<String, String> =
         crate::game_data::ActionRegistry::build_available_actions()
             .into_iter()
-            .map(|a| (a.action, a.description))
+            .map(|a| (a.action, a.name))
             .collect();
     Json(map)
 }

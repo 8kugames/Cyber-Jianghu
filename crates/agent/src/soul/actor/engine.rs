@@ -30,7 +30,7 @@ use super::stages::{
     UnifiedCognitiveResponse,
 };
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
-use crate::component::llm::{LlmClient, LlmClientExt};
+use crate::component::llm::{LlmClient, LlmClientExt, ToolRegistry};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
@@ -90,6 +90,8 @@ pub struct CognitiveEngine {
     prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
+    /// 工具注册中心（可选，Phase 1 仅地魂使用，人魂 Phase 2 启用）
+    tool_registry: Option<Arc<tokio::sync::RwLock<ToolRegistry>>>,
 }
 
 impl CognitiveEngine {
@@ -106,6 +108,7 @@ impl CognitiveEngine {
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             // 默认窗口大小为 3
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
+            tool_registry: None,
         }
     }
 
@@ -124,6 +127,7 @@ impl CognitiveEngine {
             config: std::sync::RwLock::new(config),
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
+            tool_registry: None,
         }
     }
 
@@ -163,6 +167,11 @@ impl CognitiveEngine {
             name,
             system_prompt.len()
         );
+    }
+
+    /// 设置工具注册中心（Phase 2 启用时调用）
+    pub fn set_tool_registry(&mut self, registry: Arc<tokio::sync::RwLock<ToolRegistry>>) {
+        self.tool_registry = Some(registry);
     }
 
     pub async fn think(&self, tick_id: i64, agent_id: Uuid) -> Result<CognitiveChain> {

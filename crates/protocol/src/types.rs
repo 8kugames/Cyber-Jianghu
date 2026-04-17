@@ -129,6 +129,7 @@ mod tests {
                 name: "Test".to_string(),
                 node_type: "客栈".to_string(),
                 adjacent_nodes: vec![],
+                gatherable_items: vec![],
             },
             self_state: AgentSelfState {
                 attributes: {

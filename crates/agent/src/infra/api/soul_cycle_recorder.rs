@@ -452,6 +452,42 @@ impl SoulCycleRecorder {
         }
     }
 
+    /// 获取小于指定 tick_id 的最近一个有记录的 tick_id
+    ///
+    /// Agent 推理频率低于 tick 推进频率，tick_id 不连续。
+    /// 用于 `update_previous_round_narrative` 找到真正需要回填的上一轮 tick。
+    pub async fn get_last_recorded_tick(&self, before_tick_id: i64) -> Option<i64> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+
+        conn.query_row(
+            "SELECT MAX(tick_id) FROM soul_cycle_record WHERE tick_id < ?1",
+            params![before_tick_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten()
+    }
+
+    /// 获取上轮人魂叙事（最近一条 tick_id < before_tick_id 的记录）
+    pub async fn get_last_renhun_narrative(&self, before_tick_id: i64) -> Option<String> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+
+        // 取最近一条成功的记录（attempt 最大的，通常是最终通过的）
+        conn.query_row(
+            "SELECT renhun_narrative FROM soul_cycle_record WHERE tick_id < ?1 AND renhun_narrative IS NOT NULL ORDER BY tick_id DESC, attempt DESC LIMIT 1",
+            params![before_tick_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten()
+    }
+
     /// 按 tick_id 获取所有 attempt 的记录
     pub async fn get_by_tick(&self, tick_id: i64) -> Vec<SoulCycleRecord> {
         let conn = match self.conn.lock() {

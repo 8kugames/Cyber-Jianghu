@@ -138,6 +138,18 @@ pub struct AdjacentNode {
     pub travel_cost: u32,
 }
 
+/// 可采集资源信息（用于 WorldState）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatherableItem {
+    /// 物品 ID（天魂/地魂用于结构化翻译，不暴露给人魂）
+    pub item_id: String,
+    /// 物品名称（人魂可见的显示名称）
+    pub name: String,
+    /// 物品类型（consumable/weapon/material 等）
+    #[serde(default)]
+    pub item_type: String,
+}
+
 /// 节点信息（简化版，用于 WorldState）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Location {
@@ -154,4 +166,8 @@ pub struct Location {
     /// 可到达的相邻节点
     #[serde(default)]
     pub adjacent_nodes: Vec<AdjacentNode>,
+
+    /// 当前位置可采集的资源（含名称，数据驱动）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gatherable_items: Vec<GatherableItem>,
 }

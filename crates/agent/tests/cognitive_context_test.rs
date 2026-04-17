@@ -46,6 +46,7 @@ fn create_test_world_state() -> WorldState {
                     travel_cost: 1,
                 },
             ],
+            gatherable_items: vec![],
         },
         self_state: AgentSelfState {
             attributes,
