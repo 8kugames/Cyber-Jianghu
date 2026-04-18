@@ -1315,7 +1315,7 @@ button[type="button"]:disabled {
 
 .tick-card .exp-renhun,
 .tick-card .exp-tianhun,
-.tick-card .exp-dihun {
+.tick-card .exp-action {
     margin-top: 6px;
     padding: 6px 10px;
 }
@@ -1367,6 +1367,7 @@ button[type="button"]:disabled {
     border-radius: 4px;
     font-style: italic;
     font-size: 12px;
+    display: none;
 }
 
 .soul-layers {
@@ -1394,11 +1395,11 @@ button[type="button"]:disabled {
     color: #e74c3c;
 }
 
-.exp-dihun-result.approved {
+.soul-result.approved {
     color: #27ae60;
 }
 
-.exp-dihun-result.rejected {
+.soul-result.rejected {
     color: #e74c3c;
 }
 
@@ -1504,42 +1505,34 @@ button[type="button"]:disabled {
     color: #0984e3;
 }
 
-/* 地魂 - 橙色 */
-.exp-dihun {
-    border-left: 3px solid #e17055;
+/* 行动 - 绿色 */
+.exp-action {
+    border-left: 3px solid #00b894;
     flex-direction: column;
     gap: 6px;
 }
-.exp-dihun .exp-soul-label {
-    background: rgba(225, 112, 85, 0.15);
-    color: #e17055;
+.exp-action .exp-soul-label {
+    background: rgba(0, 184, 148, 0.15);
+    color: #00b894;
     align-self: flex-start;
 }
 
-.exp-dihun-content {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-}
-
-.exp-dihun-result {
+.soul-result {
     font-weight: 600;
 }
 
-.exp-dihun-reason,
-.exp-dihun-narrative {
+.soul-reason,
+.soul-narrative {
     font-size: 11px;
     color: var(--text-secondary);
 }
 
-.exp-dihun-reason::before {
+.soul-reason::before {
     content: "reason: ";
     font-weight: 500;
 }
 
-.exp-dihun-narrative::before {
-    /*content: "上轮经历: ";*/
+.soul-narrative::before {
     font-weight: 500;
 }
 
@@ -2396,7 +2389,7 @@ button[type="button"]:disabled {
 
 .drawer-section .exp-renhun,
 .drawer-section .exp-tianhun,
-.drawer-section .exp-dihun {
+.drawer-section .exp-action {
     padding: 6px 8px;
     margin-bottom: 4px;
 }
@@ -2409,11 +2402,9 @@ button[type="button"]:disabled {
 
 .drawer-section .soul-text,
 .drawer-section .soul-thought,
-.drawer-section .soul-speech,
-.drawer-section .soul-error,
-.drawer-section .exp-dihun-result,
-.drawer-section .exp-dihun-reason,
-.drawer-section .exp-dihun-narrative {
+.drawer-section .soul-result,
+.drawer-section .soul-reason,
+.drawer-section .soul-narrative {
     font-size: 12px;
 }
 
@@ -2879,11 +2870,19 @@ button[type="button"]:disabled {
     font-style: italic;
 }
 
-.soul-error {
+.soul-result {
     font-size: 12px;
-    color: #e74c3c;
-    padding: 4px 8px;
-    background: rgba(231, 76, 60, 0.1);
+    font-weight: 600;
+    padding: 2px 8px;
     border-radius: 4px;
     margin-bottom: 4px;
+    display: inline-block;
+}
+.soul-result.approved {
+    color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+.soul-result.rejected {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
 }
