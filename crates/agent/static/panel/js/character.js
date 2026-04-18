@@ -202,7 +202,7 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
             html += '<div class="tick-section-title">即时</div>';
             immIntents.forEach(imm => {
                 html += `<div class="imm-item">
-                    <div class="exp-tianhun"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                    <div class="exp-immediate"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
                     <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
                     ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
                 </div>`;
@@ -801,7 +801,7 @@ async function loadExperiences(page = 1) {
                         <div class="tick-section-title">即时</div>`;
                     immIntents.forEach(imm => {
                         html += `<div class="imm-item">
-                            <div class="exp-tianhun"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                            <div class="exp-immediate"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
                             <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
                             ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
                         </div>`;
@@ -822,6 +822,9 @@ async function loadExperiences(page = 1) {
         expEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
     }
 }
+
+// 天魂三层审查标签中文映射
+const LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 
 // 渲染单魂/行动内联区块
 function renderSoulInline(label, data, type) {
@@ -846,8 +849,7 @@ function renderSoulInline(label, data, type) {
             html += `<div class="soul-layers">`;
             data.layers.forEach(l => {
                 const cls = l.passed ? 'passed' : 'failed';
-                const layerNames = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
-                const name = layerNames[l.layer] || l.layer;
+                const name = LAYER_NAMES[l.layer] || l.layer;
                 html += `<span class="soul-layer-tag ${cls}">${name}${l.passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
             });
             html += `</div>`;
@@ -862,7 +864,7 @@ function renderSoulInline(label, data, type) {
         // 最终行动：action_type + action_data
         if (data.action_type) {
             html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(data.action_type))}`;
-            if (data.action_data && Object.keys(data.action_data).length > 0) {
+            if (data.action_data && typeof data.action_data === 'object' && Object.keys(data.action_data).length > 0) {
                 html += ` <span class="soul-params">${escapeHtml(JSON.stringify(data.action_data))}</span>`;
             }
             html += `</div>`;
