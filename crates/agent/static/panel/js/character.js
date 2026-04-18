@@ -190,7 +190,7 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
             html += renderSoulInline('人魂', a.renhun, 'renhun');
             html += renderSoulInline('天魂', a.tianhun, 'tianhun');
             if (a.final_intent) {
-                html += renderSoulInline('行动', a.final_intent, 'action');
+                html += renderSoulInline('地魂', a.final_intent, 'action');
             }
         });
         html += '</div>';
@@ -788,7 +788,7 @@ async function loadExperiences(page = 1) {
                     html += renderSoulInline('天魂', a.tianhun, 'tianhun');
                     // 最终行动
                     if (a.final_intent) {
-                        html += renderSoulInline('行动', a.final_intent, 'action');
+                        html += renderSoulInline('地魂', a.final_intent, 'action');
                     }
                 });
 
