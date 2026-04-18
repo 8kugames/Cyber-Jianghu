@@ -52,6 +52,9 @@ use serde::{Deserialize, Serialize};
 pub struct SpeakData {
     /// 对话内容
     pub content: String,
+    /// 目标 Agent ID（None 表示向在场所有人说）
+    #[serde(default)]
+    pub target_agent_id: Option<uuid::Uuid>,
 }
 
 /// move 动作数据

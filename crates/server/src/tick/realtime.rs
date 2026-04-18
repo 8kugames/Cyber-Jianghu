@@ -166,9 +166,7 @@ impl IntentWorker {
         };
 
         // 5. 持久化到 DB（await 确认）
-        if let Err(e) =
-            crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await
-        {
+        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
             // persist 失败 → DashMap 不更新 → 反馈失败给 Agent
             self.send_error_to_agent(
                 agent_id,
@@ -240,10 +238,11 @@ impl IntentWorker {
         }
 
         // 3. 批量持久化衰减结果（失败时回退到逐条 persist 并清除 ghost agent）
-        if let Err(e) =
-            persistence::persist_states(&self.db_pool, tick_id, &updated_states).await
-        {
-            warn!("Tick {} 批量衰减持久化失败，回退到逐条 persist: {}", tick_id, e);
+        if let Err(e) = persistence::persist_states(&self.db_pool, tick_id, &updated_states).await {
+            warn!(
+                "Tick {} 批量衰减持久化失败，回退到逐条 persist: {}",
+                tick_id, e
+            );
             for state in &updated_states {
                 if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, state).await {
                     // FK 约束失败 → ghost agent，从 DashMap 清除

@@ -124,9 +124,13 @@ impl BasicActionExecutor {
             Some(intent.intent_id),
         );
 
+        // 从 SpeakData 提取 target_agent_id
+        let target_agent_id = data.target_agent_id;
+
         result.add_change(StateChange::MessageSpoken {
             agent_id: intent.agent_id,
             content: data.content,
+            target_agent_id,
             already_broadcast: intent.already_broadcast,
         });
 
@@ -208,6 +212,17 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         current_location: &str,
     ) -> ActionExecutionResult {
+        // 容错映射：LLM 常误用 item_id，自动修正为 target_id
+        let action_data = action_data.map(|mut v| {
+            if let Some(obj) = v.as_object_mut()
+                && !obj.contains_key("target_id")
+                && obj.contains_key("item_id")
+                && let Some(val) = obj.remove("item_id")
+            {
+                obj.insert("target_id".to_string(), val);
+            }
+            v
+        });
         let data: GatherData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
             Some(d) => d,
             None => {
