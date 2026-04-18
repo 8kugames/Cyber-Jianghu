@@ -257,9 +257,7 @@ pub async fn broadcast_speak_to_location(
         .agent_state_cache
         .iter()
         .filter(|r| {
-            r.value().node_id == location
-                && r.value().is_alive
-                && *r.key() != from_agent_id
+            r.value().node_id == location && r.value().is_alive && *r.key() != from_agent_id
         })
         .map(|r| *r.key())
         .collect();
@@ -297,10 +295,7 @@ pub async fn broadcast_speak_to_location(
             }),
         };
 
-        let msg = ServerMessage::ImmediateEvent {
-            event_id,
-            event,
-        };
+        let msg = ServerMessage::ImmediateEvent { event_id, event };
         let json = serde_json::to_string(&msg)?;
 
         if connection.send(Message::Text(json.into())).await.is_err() {

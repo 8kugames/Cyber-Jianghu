@@ -840,18 +840,18 @@ impl super::Agent {
                         // 如果 final_intent 已被设置（如 speak 即时通道），退出
                         if final_intent.is_some() { break; }
 
-                        // 记录人魂输出（结构化 Intent）
-                        let renhun_action = raw_intent.action_type.as_str();
-                        let renhun_action_data = raw_intent.action_data
-                            .as_ref()
-                            .map(|d| serde_json::to_string(d).unwrap_or_default())
-                            .unwrap_or_default();
+                        // 记录人魂输出（可读简述）
+                        let renhun_narrative = Self::summarize_intent(
+                            raw_intent.action_type.as_str(),
+                            raw_intent.action_data.as_ref(),
+                            &world_state.location.name,
+                        );
                         let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
                         if let Some(recorder) = self.soul_recorder().await {
                             recorder.record_renhun(
                                 world_state.tick_id,
                                 attempt,
-                                &format!("{} {}", renhun_action, renhun_action_data),
+                                &renhun_narrative,
                                 renhun_thought_log,
                             ).await;
                             // 记录游戏内时间和现实时间
@@ -1258,5 +1258,75 @@ impl super::Agent {
     /// 格式化游戏内时间（WorldTime → 中文武侠风格字符串）
     fn format_world_time(wt: &WorldTime) -> String {
         wt.to_chinese()
+    }
+
+    /// 将 action_type + action_data 生成可读简述
+    fn summarize_intent(
+        action_type: &str,
+        action_data: Option<&serde_json::Value>,
+        location: &str,
+    ) -> String {
+        let data = action_data.cloned().unwrap_or(serde_json::Value::Null);
+
+        match action_type {
+            "speak" => {
+                let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                let target = data.get("target_agent_id").and_then(|v| v.as_str());
+                match target {
+                    Some(_) => format!("对某人说话：{}", content),
+                    None => format!("向在场众人说话：{}", content),
+                }
+            }
+            "whisper" => {
+                let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                format!("向某人密语：{}", content)
+            }
+            "shout" => {
+                let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                format!("大声喊道：{}", content)
+            }
+            "move" => {
+                let target = data
+                    .get("target_location")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("未知地点");
+                format!("从{}移动到{}", location, target)
+            }
+            "eat" => {
+                let item = data
+                    .get("item_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("食物");
+                format!("吃了{}", item)
+            }
+            "drink" => {
+                let item = data.get("item_id").and_then(|v| v.as_str()).unwrap_or("水");
+                format!("喝了{}", item)
+            }
+            "gather" => {
+                let resource = data
+                    .get("target_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("资源");
+                format!("采集{}", resource)
+            }
+            "pickup" => {
+                let item = data
+                    .get("item_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("物品");
+                format!("拾起{}", item)
+            }
+            "give" => {
+                let item = data
+                    .get("item_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("物品");
+                format!("赠送{}", item)
+            }
+            "idle" => "原地休息".to_string(),
+            "wait" => "原地等待".to_string(),
+            other => format!("执行{}", other),
+        }
     }
 }

@@ -94,7 +94,6 @@ pub struct PerceptionMotivationResponse {
     pub reasoning: String,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

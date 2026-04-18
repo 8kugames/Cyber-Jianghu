@@ -12,9 +12,7 @@ use super::{
 };
 use crate::actions::ActionExecutor;
 use crate::db::DbPool;
-use crate::models::{
-    ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent,
-};
+use crate::models::{ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent};
 
 /// 单条 Intent 处理结果
 pub struct SingleProcessingResult {
