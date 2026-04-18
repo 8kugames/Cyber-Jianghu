@@ -1458,7 +1458,7 @@ button[type="button"]:disabled {
 /* 三魂架构样式 */
 .exp-renhun,
 .exp-tianhun,
-.exp-dihun {
+.exp-action {
     margin-top: 8px;
     padding: 8px 12px;
     background: var(--bg-secondary);
