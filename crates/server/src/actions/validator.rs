@@ -73,7 +73,11 @@ fn validate_by_rules(
 ) -> Result<(), GameError> {
     // 验证必需的字段
     for field in &validation.required_fields {
+        // 字段名容错：target_id 缺失但 item_id 存在时视为通过（gather 常见误用）
         if !has_field(&intent.action_data, field) {
+            if field == "target_id" && has_field(&intent.action_data, "item_id") {
+                continue; // 容错通过，后续 executor 会做 item_id → target_id 映射
+            }
             return Err(GameError::InvalidActionData {
                 reason: format!("缺少必需字段: {}", field),
             });

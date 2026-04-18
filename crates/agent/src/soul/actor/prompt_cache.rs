@@ -19,17 +19,31 @@ use crate::component::persona::DynamicPersona;
 pub struct PromptCache {
     persona_desc: String,
     persona_summary: String,
+    /// 动作描述列表（用于"可做之事"部分）
+    action_descriptions: String,
+    /// 动作字段 schema（用于"action_data 字段要求"部分）
+    action_field_hints: String,
+    /// 兼容旧 prompt 的合并列表
     actions_list: String,
     persona_initialized: bool,
 }
 
 impl PromptCache {
     /// 创建新的 PromptCache
-    pub fn new(persona_desc: String, actions_list: String, persona: &DynamicPersona) -> Self {
+    pub fn new(
+        persona_desc: String,
+        action_descriptions: String,
+        action_field_hints: String,
+        persona: &DynamicPersona,
+    ) -> Self {
         let persona_summary = Self::build_structured_summary(persona);
+        // 兼容旧 prompt：合并两个列表
+        let actions_list = format!("{}\n\n{}", action_descriptions, action_field_hints);
         Self {
             persona_desc,
             persona_summary,
+            action_descriptions,
+            action_field_hints,
             actions_list,
             persona_initialized: false,
         }
@@ -100,9 +114,19 @@ impl PromptCache {
         self.persona_initialized = false;
     }
 
-    /// 获取 actions_list
+    /// 获取 actions_list（兼容旧 prompt）
     pub fn get_actions_list(&self) -> &str {
         &self.actions_list
+    }
+
+    /// 获取动作描述列表（"可做之事"部分）
+    pub fn get_action_descriptions(&self) -> &str {
+        &self.action_descriptions
+    }
+
+    /// 获取动作字段 schema（"action_data 字段要求"部分）
+    pub fn get_action_field_hints(&self) -> &str {
+        &self.action_field_hints
     }
 
     /// 获取 persona_initialized 状态（调试用）
@@ -130,6 +154,7 @@ mod tests {
         let mut cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
             "- idle: 休息".to_string(),
+            "- idle: (action_data: null)".to_string(),
             &persona,
         );
 
@@ -147,6 +172,7 @@ mod tests {
         let mut cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
             "- idle: 休息".to_string(),
+            "- idle: (action_data: null)".to_string(),
             &persona,
         );
 
@@ -158,8 +184,12 @@ mod tests {
     #[test]
     fn test_invalidate_resets_to_full() {
         let persona = create_test_persona();
-        let mut cache =
-            PromptCache::new("旧描述".to_string(), "- idle: 休息".to_string(), &persona);
+        let mut cache = PromptCache::new(
+            "旧描述".to_string(),
+            "- idle: 休息".to_string(),
+            "- idle: (action_data: null)".to_string(),
+            &persona,
+        );
 
         cache.get_persona_simple(); // initialize
         assert!(cache.is_initialized());

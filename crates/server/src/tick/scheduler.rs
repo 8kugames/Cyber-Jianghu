@@ -307,11 +307,7 @@ impl TickScheduler {
             .await
             .context("广播: 广播状态失败")?;
 
-        info!(
-            "Tick {} 广播完成: {}个Agent",
-            tick_id,
-            agent_states.len(),
-        );
+        info!("Tick {} 广播完成: {}个Agent", tick_id, agent_states.len(),);
         Ok(())
     }
 

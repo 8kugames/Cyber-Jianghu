@@ -861,13 +861,27 @@ function renderSoulInline(label, data, type) {
             html += `<div class="soul-narrative">${escapeHtml(data.narrative)}</div>`;
         }
     } else if (type === 'action') {
-        // 最终行动：action_type + action_data
+        // 地魂：最终行动，speak/whisper 特殊展示
         if (data.action_type) {
-            html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(data.action_type))}`;
-            if (data.action_data && typeof data.action_data === 'object' && Object.keys(data.action_data).length > 0) {
-                html += ` <span class="soul-params">${escapeHtml(JSON.stringify(data.action_data))}</span>`;
+            const at = data.action_type;
+            const ad = data.action_data && typeof data.action_data === 'object' ? data.action_data : {};
+            const content = ad.content || '';
+            const targetId = ad.target_agent_id;
+
+            if (at === 'speak') {
+                const label = targetId ? `对某人说话` : `向众人说话`;
+                html += `<div class="soul-text">${escapeHtml(label)}："${escapeHtml(content)}"</div>`;
+            } else if (at === 'whisper') {
+                html += `<div class="soul-text">向某人密语："${escapeHtml(content)}"</div>`;
+            } else if (at === 'shout') {
+                html += `<div class="soul-text">大声喊道："${escapeHtml(content)}"</div>`;
+            } else {
+                html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(at))}`;
+                if (Object.keys(ad).length > 0) {
+                    html += ` <span class="soul-params">${escapeHtml(JSON.stringify(ad))}</span>`;
+                }
+                html += `</div>`;
             }
-            html += `</div>`;
         }
     }
     html += `</div></div>`;

@@ -1039,7 +1039,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                     };
 
                 // 使用 AgentBuilder（与 Cognitive 模式完全统一）
-                let reconnect_rx_for_claw = setup.api_state
+                let reconnect_rx_for_claw = setup
+                    .api_state
                     .reconnect_tx
                     .as_ref()
                     .map(|tx| tx.subscribe())

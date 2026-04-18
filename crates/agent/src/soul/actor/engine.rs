@@ -96,8 +96,13 @@ impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         let persona_desc = config.persona.generate_description();
-        let actions_list = Self::load_actions_list();
-        let prompt_cache = PromptCache::new(persona_desc, actions_list, &config.persona);
+        let (action_descriptions, action_field_hints) = Self::load_actions_list();
+        let prompt_cache = PromptCache::new(
+            persona_desc,
+            action_descriptions,
+            action_field_hints,
+            &config.persona,
+        );
 
         Self {
             llm_client,
@@ -114,8 +119,13 @@ impl CognitiveEngine {
         window_size: usize,
     ) -> Self {
         let persona_desc = config.persona.generate_description();
-        let actions_list = Self::load_actions_list();
-        let prompt_cache = PromptCache::new(persona_desc, actions_list, &config.persona);
+        let (action_descriptions, action_field_hints) = Self::load_actions_list();
+        let prompt_cache = PromptCache::new(
+            persona_desc,
+            action_descriptions,
+            action_field_hints,
+            &config.persona,
+        );
 
         Self {
             llm_client,
@@ -126,9 +136,11 @@ impl CognitiveEngine {
     }
 
     /// 加载动作列表（用于缓存）
-    fn load_actions_list() -> String {
+    fn load_actions_list() -> (String, String) {
         let available_actions = load_available_actions_from_file();
-        Self::build_action_list(&available_actions)
+        let descriptions = Self::build_action_descriptions(&available_actions);
+        let field_hints = Self::build_action_field_hints(&available_actions);
+        (descriptions, field_hints)
     }
 
     /// 使用默认配置创建
@@ -438,7 +450,8 @@ impl CognitiveEngine {
         let summary_context = self.get_summary_context();
 
         let cache = self.prompt_cache.read().unwrap();
-        let action_list = cache.get_actions_list().to_string();
+        let action_descriptions = cache.get_action_descriptions().to_string();
+        let action_field_hints = cache.get_action_field_hints().to_string();
         drop(cache);
 
         // 从 WorldState 构建精确数据段
@@ -539,7 +552,7 @@ impl CognitiveEngine {
 - idle（原地休息）是合法行为，不必强求每个 tick 都行动
 
 ## 可做之事（参考）
-{action_list}
+{action_descriptions}
 
 ## 输出格式
 严格输出以下 JSON（不要添加任何额外文本）：
@@ -554,14 +567,8 @@ impl CognitiveEngine {
   "action_data": {{}}
 }}
 
-### action_type 与 action_data 对应关系：
-- idle: {{"action_data": null}}
-- eat: {{"action_data": {{"item_id": "背包中的食物item_id"}}}}
-- drink: {{"action_data": {{"item_id": "背包中的饮品item_id"}}}}
-- pickup: {{"action_data": {{"item_id": "地上物品的item_id"}}}}
-- move: {{"action_data": {{"target_location": "目标地点的node_id"}}}}
-- speak: {{"action_data": {{"content": "你想说的话", "target_agent_id": "对方UUID（可选）"}}}}
-- give: {{"action_data": {{"item_id": "物品ID", "target_agent_id": "对方UUID"}}}}
+### action_data 字段要求：
+{action_field_hints}
 
 注意：action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造。"#,
             agent_name = agent_name,
@@ -570,7 +577,8 @@ impl CognitiveEngine {
             memory_section = memory_section,
             summary_context = summary_context,
             feedback_section = feedback_section,
-            action_list = action_list,
+            action_descriptions = action_descriptions,
+            action_field_hints = action_field_hints,
         )
     }
 
@@ -640,8 +648,8 @@ impl CognitiveEngine {
         )
     }
 
-    /// 从动作列表构建简要动作说明
-    fn build_action_list(actions: &[AvailableAction]) -> String {
+    /// 从动作列表构建动作描述（"可做之事"部分，含语义说明）
+    fn build_action_descriptions(actions: &[AvailableAction]) -> String {
         if actions.is_empty() {
             return "- idle: 休息".to_string();
         }
@@ -650,11 +658,37 @@ impl CognitiveEngine {
             .iter()
             .map(|a| {
                 let desc = if a.description.is_empty() {
-                    &a.action
+                    a.name.clone()
                 } else {
-                    &a.description
+                    a.description.clone()
                 };
                 format!("- {}: {}", a.action, desc)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// 从动作列表构建字段 schema（"action_data 字段要求"部分）
+    fn build_action_field_hints(actions: &[AvailableAction]) -> String {
+        if actions.is_empty() {
+            return "- idle: (action_data: null)".to_string();
+        }
+
+        actions
+            .iter()
+            .map(|a| {
+                let fields_hint = if a.required_fields.is_empty() {
+                    "(action_data: null)".to_string()
+                } else {
+                    let fields_str = a
+                        .required_fields
+                        .iter()
+                        .map(|f| format!("\"{}\": ...", f))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("(action_data: {{ {} }})", fields_str)
+                };
+                format!("- {}: {}", a.action, fields_hint)
             })
             .collect::<Vec<_>>()
             .join("\n")

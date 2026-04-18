@@ -505,6 +505,7 @@ pub async fn apply_state_change(
         StateChange::MessageSpoken {
             agent_id,
             content,
+            target_agent_id,
             already_broadcast,
         } => {
             tracing::info!("Agent {}: {}", agent_id, content);
@@ -522,18 +523,26 @@ pub async fn apply_state_change(
                     .map(|s| s.node_id.clone());
 
                 if let Some(node_id) = location {
+                    // 构建 metadata，保留 target_agent_id
+                    let mut meta = serde_json::json!({
+                        "from_agent_id": agent_id,
+                        "content": content,
+                        "channel": "local",
+                        "location": node_id,
+                    });
+                    if let Some(target) = target_agent_id {
+                        meta.as_object_mut()
+                            .unwrap()
+                            .insert("target_agent_id".to_string(), serde_json::json!(target));
+                    }
+
                     for state in agent_states.iter() {
                         if state.node_id == node_id && state.is_alive {
                             let event = WorldEvent {
                                 event_type: WorldEventType::PublicMessage,
                                 tick_id,
-                                description: format!("有人说: {}", content),
-                                metadata: serde_json::json!({
-                                    "from_agent_id": agent_id,
-                                    "content": content,
-                                    "channel": "local",
-                                    "location": node_id,
-                                }),
+                                description: content.clone(),
+                                metadata: meta.clone(),
                             };
                             events.push((state.agent_id, event));
                         }

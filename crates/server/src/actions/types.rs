@@ -183,6 +183,8 @@ pub enum StateChange {
         agent_id: Uuid,
         /// 对话内容
         content: String,
+        /// 目标 Agent ID（None 表示向在场所有人说）
+        target_agent_id: Option<Uuid>,
         already_broadcast: bool,
     },
 

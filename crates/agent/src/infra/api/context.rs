@@ -207,7 +207,7 @@ fn generate_impl(
     let descriptions = &state.self_state.attribute_descriptions;
     let standard = ["hp", "hunger", "thirst", "stamina"];
 
-    // 标准属性用叙事描述
+    // 标准属性用叙事描述 + 数值注入
     for attr in &standard {
         if let Some(desc) = descriptions.get(*attr) {
             let label = match *attr {
@@ -217,14 +217,26 @@ fn generate_impl(
                 "stamina" => "体力",
                 _ => *attr,
             };
-            sections.push(format!("- {}: {}", label, desc));
+            let raw = state
+                .self_state
+                .attributes
+                .get(*attr)
+                .map(|v| format!(" [当前值: {}]", v))
+                .unwrap_or_default();
+            sections.push(format!("- {}: {}{}", label, desc, raw));
         }
     }
 
     // 非标准属性
     for (name, desc) in descriptions {
         if !standard.contains(&name.as_str()) {
-            sections.push(format!("- {}: {}", name, desc));
+            let raw = state
+                .self_state
+                .attributes
+                .get(name)
+                .map(|v| format!(" [当前值: {}]", v))
+                .unwrap_or_default();
+            sections.push(format!("- {}: {}{}", name, desc, raw));
         }
     }
 

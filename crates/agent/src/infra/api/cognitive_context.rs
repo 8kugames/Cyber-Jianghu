@@ -286,9 +286,35 @@ impl CognitiveContextBuilder {
             .map(|s| s.as_str())
             .unwrap_or("未知");
 
+        // 数值注入：附加原始数值帮助判断紧迫程度
+        let attrs = &self_state.attributes;
+        let hp_raw = attrs
+            .get("hp")
+            .map(|v| format!("[{}]", v))
+            .unwrap_or_default();
+        let hunger_raw = attrs
+            .get("hunger")
+            .map(|v| format!("[{}]", v))
+            .unwrap_or_default();
+        let thirst_raw = attrs
+            .get("thirst")
+            .map(|v| format!("[{}]", v))
+            .unwrap_or_default();
+        let stamina_raw = attrs
+            .get("stamina")
+            .map(|v| format!("[{}]", v))
+            .unwrap_or_default();
+
         let self_status = format!(
-            "{}, {}, {}, {}",
-            hp_desc, hunger_desc, thirst_desc, stamina_desc
+            "{} {}, {} {}, {} {}, {} {}",
+            hp_desc,
+            hp_raw,
+            hunger_desc,
+            hunger_raw,
+            thirst_desc,
+            thirst_raw,
+            stamina_desc,
+            stamina_raw
         );
 
         let environment = format!(
