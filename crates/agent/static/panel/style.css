@@ -1360,16 +1360,6 @@ button[type="button"]:disabled {
     color: var(--text-muted);
 }
 
-.soul-speech {
-    margin-top: 4px;
-    padding: 4px 8px;
-    background: rgba(9, 132, 227, 0.08);
-    border-radius: 4px;
-    font-style: italic;
-    font-size: 12px;
-    display: none;
-}
-
 .soul-layers {
     display: flex;
     flex-wrap: wrap;
@@ -1517,8 +1507,30 @@ button[type="button"]:disabled {
     align-self: flex-start;
 }
 
+/* 即时意图 - 橙色 */
+.exp-immediate {
+    border-left: 3px solid #e17055;
+}
+.exp-immediate .exp-soul-label {
+    background: rgba(225, 112, 85, 0.15);
+    color: #e17055;
+}
+
 .soul-result {
+    font-size: 12px;
     font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    display: inline-block;
+}
+.soul-result.approved {
+    color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+.soul-result.rejected {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
 }
 
 .soul-reason,
@@ -2868,21 +2880,4 @@ button[type="button"]:disabled {
     font-size: 11px;
     color: var(--text-secondary);
     font-style: italic;
-}
-
-.soul-result {
-    font-size: 12px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 4px;
-    margin-bottom: 4px;
-    display: inline-block;
-}
-.soul-result.approved {
-    color: #27ae60;
-    background: rgba(39, 174, 96, 0.1);
-}
-.soul-result.rejected {
-    color: #e74c3c;
-    background: rgba(231, 76, 60, 0.1);
 }
