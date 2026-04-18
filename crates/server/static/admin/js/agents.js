@@ -352,7 +352,7 @@ function renderTickCard(exp, metadata, time) {
         html += renderServerSoulInline('人魂', attempt.renhun, 'renhun');
         html += renderServerSoulInline('天魂', attempt.tianhun, 'tianhun');
         if (attempt.final_intent) {
-            html += renderServerSoulInline('行动', attempt.final_intent, 'action');
+            html += renderServerSoulInline('地魂', attempt.final_intent, 'action');
         }
     });
     html += '</div>';

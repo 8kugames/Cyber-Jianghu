@@ -177,8 +177,7 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent
-- `src/soul/translator/` - 地魂 IntentTranslator: 叙事→格式化翻译（人魂直连后已旁路）
+- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent + tool calling 工具池（地魂能力层）
 - `src/soul/reflector/` - 天魂 ReflectorSoul: Three-layer validation (唯一出入口)
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution
@@ -190,12 +189,12 @@ Key agent modules:
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
   直连 WorldState    三层审查
-  输出结构化 Intent
+  地魂 tool calling 工具池
 ```
 
-- **ActorSoul**: 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain
-- **ReflectorSoul**: Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
-- **IntentTranslator** (地魂): 叙事→格式化翻译（人魂直连后已旁路）
+- **ActorSoul** (人魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain
+- **地魂**: tool calling 工具池，行动落地层 (embedded in ActorSoul)
+- **ReflectorSoul** (天魂): Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
 
 **Runtime modes**: `cognitive` (default, built-in LLM) or `claw` (OpenClaw integration)
 
