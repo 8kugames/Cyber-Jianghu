@@ -3,19 +3,21 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>天道 | Cyber-Jianghu Dashboard</title>
+        <title>天道 | Cyber-Jianghu</title>
         <link rel="stylesheet" href="css/dashboard.css" />
     </head>
     <body>
         <header>
-            <div style="display: flex; align-items: center; gap: 15px">
+            <div style="display: flex; align-items: center; gap: 12px">
                 <h1>天道 | Cyber-Jianghu</h1>
                 <span
                     style="
-                        font-size: 12px;
-                        background: rgba(255, 255, 255, 0.2);
+                        font-size: 11px;
+                        background: var(--bg-level-2);
+                        color: var(--text-secondary);
                         padding: 2px 8px;
                         border-radius: 10px;
+                        border: 1px solid var(--border-color);
                     "
                     ><span id="server-version">v--</span></span
                 >
@@ -44,8 +46,8 @@
                     <div class="dashboard-left">
                         <div class="dashboard-controls">
                             <h2>系统状态</h2>
-                            <div style="display: flex; align-items: center">
-                                <span style="font-size: 14px; color: #666">自动刷新</span>
+                            <div style="display: flex; align-items: center; gap: 10px">
+                                <span style="font-size: 12px; color: var(--text-secondary)">自动刷新</span>
                                 <label class="switch">
                                     <input
                                         type="checkbox"
@@ -58,14 +60,12 @@
                                 <button
                                     class="btn btn-primary"
                                     onclick="loadStats()"
-                                    style="margin-left: 15px"
                                 >
                                     刷新
                                 </button>
                                 <button
                                     class="btn btn-secondary"
                                     onclick="cleanupOfflineAgents()"
-                                    style="margin-left: 10px"
                                 >
                                     清理离线
                                 </button>
@@ -76,63 +76,32 @@
                             <!-- Stats injected by JS -->
                         </div>
 
-                        <div
-                            style="
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                                margin-top: 20px;
-                                margin-bottom: 15px;
-                            "
-                        >
-                            <div
-                                style="
-                                    display: flex;
-                                    gap: 15px;
-                                    align-items: baseline;
-                                "
-                            >
-                                <h2
-                                    id="agents-total-title"
-                                    style="
-                                        margin: 0;
-                                        color: var(--primary-color);
-                                        font-weight: 600;
-                                    "
-                                >
-                                    所有角色 (0)
-                                </h2>
-                                <span style="color: #999; font-size: 14px">
-                                    | 在线: <span id="online-count">0</span>
-                                </span>
-                                <span style="color: #999; font-size: 14px">
-                                    | 离线: <span id="offline-count">0</span>
-                                </span>
-                                <span style="color: #999; font-size: 14px">
-                                    | 已死亡: <span id="dead-count">0</span>
-                                </span>
+                        <div class="agents-title-bar">
+                            <h2 id="agents-total-title" style="margin: 0">
+                                所有角色 (0)
+                            </h2>
+                            <div style="display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--text-secondary)">
+                                <span>在线: <span id="online-count" style="color: var(--success); font-weight: 600">0</span></span>
+                                <span>离线: <span id="offline-count" style="color: var(--warning); font-weight: 600">0</span></span>
+                                <span>已死亡: <span id="dead-count" style="color: var(--error); font-weight: 600">0</span></span>
                             </div>
-                            <input
-                                type="text"
-                                id="agent-filter"
-                                placeholder="搜索名称或位置..."
-                                oninput="renderAgents()"
-                                style="
-                                    padding: 6px 12px;
-                                    border-radius: 4px;
-                                    border: 1px solid #ccc;
-                                    width: 200px;
-                                    font-size: 14px;
-                                "
-                            />
                         </div>
+                        <input
+                            type="text"
+                            id="agent-filter"
+                            class="form-input"
+                            placeholder="搜索名称或位置..."
+                            oninput="renderAgents()"
+                            style="width: 200px; margin-bottom: 10px"
+                        />
                         <div id="agents-list" class="agent-list">
                             <div
                                 style="
                                     grid-column: 1/-1;
-                                    color: #999;
+                                    color: var(--text-secondary);
                                     text-align: center;
-                                    padding: 20px;
+                                    padding: 24px;
+                                    font-size: 13px;
                                 "
                             >
                                 加载中...
@@ -196,7 +165,7 @@
                         <div class="editor-toolbar">
                             <div
                                 id="current-file-name"
-                                style="font-weight: 600"
+                                style="font-weight: 600; font-size: 13px; color: var(--text-primary)"
                             >
                                 选择文件
                             </div>
@@ -224,51 +193,19 @@
 
         <div
             id="auth-modal"
-            style="
-                display: none;
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 2000;
-                align-items: center;
-                justify-content: center;
-            "
         >
-            <div
-                style="
-                    background: white;
-                    padding: 30px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-                    width: 300px;
-                "
-            >
-                <h3 style="margin-top: 0; color: var(--primary-color)">
-                    需要授权
-                </h3>
-                <p style="color: #666; font-size: 14px">
-                    请输入管理 Token 以继续访问。
-                </p>
+            <div>
+                <h3>需要授权</h3>
+                <p>请输入管理 Token 以继续访问。</p>
                 <input
                     type="text"
                     id="auth-token-input"
                     placeholder="输入 Token..."
-                    style="
-                        width: 100%;
-                        padding: 10px;
-                        border: 1px solid #ddd;
-                        border-radius: 4px;
-                        margin-bottom: 15px;
-                        box-sizing: border-box;
-                    "
                 />
                 <div
-                    style="display: flex; justify-content: flex-end; gap: 10px"
+                    style="display: flex; justify-content: flex-end; gap: 8px"
                 >
-                    <button class="btn btn-primary" onclick="submitAuthToken()">
+                    <button class="btn btn-secondary" onclick="submitAuthToken()">
                         确定
                     </button>
                 </div>

@@ -202,7 +202,7 @@ async function openAgentModal(agentId) {
         var expRes = await fetch("/api/dashboard/agent/" + agentId + "/experiences?page=1&limit=20", { headers: getAuthHeaders() });
         if (handleAuthError(expRes)) {
             document.getElementById("modal-tab-experiences").innerHTML =
-                '<div style="text-align: center; padding: 20px; color: #999;">无法加载经历日志</div>';
+                '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">无法加载经历日志</div>';
         } else {
             var expData = await expRes.json();
             document.getElementById("modal-tab-experiences").innerHTML = renderExperiences(expData);
@@ -210,7 +210,7 @@ async function openAgentModal(agentId) {
     } catch (e) {
         console.error("Failed to load agent details", e);
         document.getElementById("modal-agent-body").innerHTML =
-            '<div style="text-align: center; padding: 20px; color: #999;">加载失败</div>';
+            '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">加载失败</div>';
     }
 }
 
@@ -233,12 +233,12 @@ window.onclick = function (event) {
 
 function renderBasicInfo(agent) {
     var inventoryHtml = (agent.inventory || []).length === 0
-        ? '<div style="color: #999; font-size: 13px; text-align: center; padding: 10px;">空空如也</div>'
+        ? '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">空空如也</div>'
         : '<div class="inventory-grid">' +
         agent.inventory.map(function (item) {
             return '<div class="inventory-item ' + (item.is_equipped ? "equipped" : "") + '">' +
                 '<div style="margin-bottom: 2px;">' + escapeHtml(item.name) + '</div>' +
-                '<div style="font-weight: 600; color: #666;">x' + item.count + '</div></div>';
+                '<div style="font-weight: 600; color: var(--text-secondary);">x' + item.count + '</div></div>';
         }).join("") + '</div>';
 
     // 数据驱动：渲染属性列表
@@ -257,7 +257,7 @@ function renderBasicInfo(agent) {
             items.push('<div class="detail-item"><span class="detail-label">' + name + ':</span> ' + display + '</div>');
         });
         if (items.length === 0) {
-            return '<div class="detail-section"><div class="detail-title">' + title + '</div><div style="color: #999; font-size: 13px;">暂无数据</div></div>';
+            return '<div class="detail-section"><div class="detail-title">' + title + '</div><div style="color: var(--text-subtle); font-size: 13px;">暂无数据</div></div>';
         }
         return '<div class="detail-section"><div class="detail-title">' + title + '</div><div class="detail-grid">' + items.join('') + '</div></div>';
     }
@@ -283,7 +283,7 @@ function renderBasicInfo(agent) {
 
         '<div class="detail-section">' +
         '<div class="detail-title">人设 Prompt</div>' +
-        '<div style="font-size: 12px; color: #555; background: #f8f9fa; padding: 10px; border-radius: 4px; line-height: 1.4; max-height: 150px; overflow-y: auto;">' +
+        '<div style="font-size: 12px; color: var(--text-secondary); background: var(--bg-level-1); padding: 10px; border-radius: var(--radius-sm); line-height: 1.4; max-height: 150px; overflow-y: auto;">' +
         escapeHtml(agent.system_prompt || "") +
         '</div></div>' +
         '</div>';
@@ -291,7 +291,7 @@ function renderBasicInfo(agent) {
 
 function renderExperiences(data) {
     if (!data.experiences || data.experiences.length === 0) {
-        return '<div style="text-align: center; padding: 40px; color: #999;">暂无经历记录</div>';
+        return '<div style="text-align: center; padding: 40px; color: var(--text-subtle);">暂无经历记录</div>';
     }
 
     var expHtml = data.experiences.map(function (exp) {
@@ -306,9 +306,9 @@ function renderExperiences(data) {
         // Fallback: 显示基本信息（当 soul_cycle_metadata 为空时）
         var actionType = getActionTypeDisplay(exp.action_type || '');
         var resultBadge = exp.result === 'success'
-            ? '<span style="color: #4CAF50;">成功</span>'
+            ? '<span style="color: var(--success);">成功</span>'
             : (exp.result === 'failed'
-                ? '<span style="color: #f44336;">失败</span>'
+                ? '<span style="color: var(--error);">失败</span>'
                 : (exp.result ? '<span>' + escapeHtml(exp.result) + '</span>' : '-'));
 
         return '<div class="tick-card">' +
@@ -322,8 +322,8 @@ function renderExperiences(data) {
             '<div class="detail-item"><span class="detail-label">动作:</span> ' + escapeHtml(actionType) + '</div>' +
             '<div class="detail-item"><span class="detail-label">结果:</span> ' + resultBadge + '</div>' +
             '</div>' +
-            (exp.narrative ? '<div style="padding: 10px; color: #666; font-size: 13px;">' + escapeHtml(exp.narrative) + '</div>' : '') +
-            (exp.thought_log ? '<div style="padding: 10px; color: #999; font-size: 12px; font-style: italic;">思考: ' + escapeHtml(exp.thought_log) + '</div>' : '') +
+            (exp.narrative ? '<div style="padding: 10px; color: var(--text-secondary); font-size: 13px;">' + escapeHtml(exp.narrative) + '</div>' : '') +
+            (exp.thought_log ? '<div style="padding: 10px; color: var(--text-subtle); font-size: 12px; font-style: italic;">思考: ' + escapeHtml(exp.thought_log) + '</div>' : '') +
             '</div></div>';
     }).join("");
 
@@ -410,13 +410,27 @@ function renderServerSoulInline(label, data, type) {
         if (data.reason) html += '<div class="soul-reason">' + escapeHtml(data.reason) + '</div>';
         if (data.narrative) html += '<div class="soul-narrative">' + escapeHtml(data.narrative) + '</div>';
     } else if (type === 'action') {
-        // 最终行动：action_type + action_data
+        // 地魂：最终行动，speak/whisper 特殊展示
         if (data.action_type) {
-            html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(data.action_type));
-            if (data.action_data && typeof data.action_data === 'object' && Object.keys(data.action_data).length > 0) {
-                html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(data.action_data)) + '</span>';
+            var at = data.action_type;
+            var ad = (data.action_data && typeof data.action_data === 'object') ? data.action_data : {};
+            var content = ad.content || '';
+            var targetId = ad.target_agent_id;
+
+            if (at === 'speak') {
+                var speakLabel = targetId ? '对某人说话' : '向众人说话';
+                html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
+            } else if (at === 'whisper') {
+                html += '<div class="soul-text">向某人密语："' + escapeHtml(content) + '"</div>';
+            } else if (at === 'shout') {
+                html += '<div class="soul-text">大声喊道："' + escapeHtml(content) + '"</div>';
+            } else {
+                html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
+                if (Object.keys(ad).length > 0) {
+                    html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(ad)) + '</span>';
+                }
+                html += '</div>';
             }
-            html += '</div>';
         }
     }
     html += '</div></div>';
