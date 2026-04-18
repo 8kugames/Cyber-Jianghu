@@ -433,7 +433,7 @@
     │       │    │   │                                                  │   │
     │       │    │   ├──► ActorSoul::think(tick_id, agent_id, memory_context)   │   │
     │       │    │   │         │                                        │   │
-    │       │    │   │         ├──► NarrativeGenerator::generate() (地魂叙事注入) │   │
+    │       │    │   │         ├──► tool calling 工具池 (地魂行动落地)           │   │
     │       │    │   │         ├──► CognitiveChain::run()               │   │
     │       │    │   │         │     ├──► Stage 1: 感知-动机             │   │
     │       │    │   │         │     ├──► Stage 2: 计划-决策             │   │
