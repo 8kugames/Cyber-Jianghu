@@ -362,7 +362,7 @@ function renderTickCard(exp, metadata, time) {
         html += '<div class="tick-section tick-section-immediate"><div class="tick-section-title">即时</div>';
         immediate.forEach(function(imm) {
             html += '<div class="imm-item">' +
-                '<div class="exp-tianhun"><span class="exp-soul-label">即时</span>' +
+                '<div class="exp-immediate"><span class="exp-soul-label">即时</span>' +
                 '<span class="exp-soul-content">' + escapeHtml(getActionTypeDisplay(imm.action_type)) +
                 (imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : '') +
                 '</span></div>' +
@@ -377,6 +377,9 @@ function renderTickCard(exp, metadata, time) {
     html += '</div>';
     return html;
 }
+
+// 天魂三层审查标签中文映射
+var LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
 function renderServerSoulInline(label, data, type) {
@@ -396,10 +399,9 @@ function renderServerSoulInline(label, data, type) {
         }
         if (data.layers && data.layers.length > 0) {
             html += '<div class="soul-layers">';
-            var layerNames = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
             data.layers.forEach(function(l) {
                 var cls = l.passed ? 'passed' : 'failed';
-                var name = layerNames[l.layer] || l.layer;
+                var name = LAYER_NAMES[l.layer] || l.layer;
                 html += '<span class="soul-layer-tag ' + cls + '">' + name +
                     (l.passed ? '' : ': ' + escapeHtml(l.detail || '')) + '</span>';
             });
@@ -411,7 +413,7 @@ function renderServerSoulInline(label, data, type) {
         // 最终行动：action_type + action_data
         if (data.action_type) {
             html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(data.action_type));
-            if (data.action_data && Object.keys(data.action_data).length > 0) {
+            if (data.action_data && typeof data.action_data === 'object' && Object.keys(data.action_data).length > 0) {
                 html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(data.action_data)) + '</span>';
             }
             html += '</div>';
