@@ -128,6 +128,9 @@ pub struct Agent {
 
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
+
+    /// 连续 follow 计数（社交死循环防护）
+    pub(crate) consecutive_follow_count: u32,
 }
 
 impl Agent {
@@ -188,6 +191,7 @@ impl Agent {
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
+            consecutive_follow_count: 0,
         }
     }
 
@@ -751,6 +755,17 @@ impl Agent {
         intent: &Intent,
         world_state: &WorldState,
     ) -> Result<(), String> {
+        // 连续 follow 限制（社交死循环防护）
+        if intent.action_type.as_str() == "follow" {
+            let max_consecutive = self.config.llm.max_consecutive_follow;
+            if (self.consecutive_follow_count as usize) >= max_consecutive {
+                return Err(format!(
+                    "已连续跟随 {} 次，请尝试其他行为（如 speak、gather、idle）",
+                    max_consecutive
+                ));
+            }
+        }
+
         use crate::soul::reflector::rule_engine::{
             RuleValidationContext, types::extract_ids_from_world_state,
         };

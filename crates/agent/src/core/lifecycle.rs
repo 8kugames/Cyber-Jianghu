@@ -1011,6 +1011,7 @@ impl super::Agent {
                         None => {
                             warn!("Tick {} 无有效 intent（超时或被驳回耗尽），发送 idle", world_state.tick_id);
                             self.consecutive_idle_count += 1;
+                            self.consecutive_follow_count = 0;
                             self.maybe_rotate_model().await;
                             // 构造 idle intent 并继续发送+上报（保证 server-web 经历日志完整）
                             Intent::new(agent_id, world_state.tick_id, "idle", None)
@@ -1117,6 +1118,12 @@ impl super::Agent {
 
                             if final_intent.action_type.as_str() != "idle" {
                                 self.consecutive_idle_count = 0;
+                                // 连续 follow 计数（社交死循环防护）
+                                if final_intent.action_type.as_str() == "follow" {
+                                    self.consecutive_follow_count += 1;
+                                } else {
+                                    self.consecutive_follow_count = 0;
+                                }
                                 if let Some(ref container) = self.actor_llm_container {
                                     let llm = container.read().await;
                                     llm.reset_idle_count();

@@ -421,6 +421,7 @@ const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
+const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -442,10 +443,17 @@ pub struct LlmConfig {
     /// 连续 idle tick 数达到此阈值后主动切换到下一个模型
     #[serde(default = "default_idle_rotate_threshold")]
     pub idle_rotate_threshold: u32,
+    /// 连续 follow 次数达到此阈值后驳回（社交死循环防护）
+    #[serde(default = "default_max_consecutive_follow")]
+    pub max_consecutive_follow: usize,
 }
 
 fn default_idle_rotate_threshold() -> u32 {
     DEFAULT_IDLE_ROTATE_THRESHOLD
+}
+
+fn default_max_consecutive_follow() -> usize {
+    DEFAULT_MAX_CONSECUTIVE_FOLLOW
 }
 
 fn default_llm_provider() -> String {
@@ -471,6 +479,7 @@ impl Default for LlmConfig {
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             fallback_models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
+            max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
         }
     }
 }
@@ -501,6 +510,7 @@ impl LlmConfig {
                 })
                 .unwrap_or_default(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
+            max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
         }
     }
 

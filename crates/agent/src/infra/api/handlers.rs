@@ -4010,6 +4010,7 @@ pub(super) async fn update_llm_config_handler(
         max_tokens: config.llm.max_tokens,
         fallback_models: config.llm.fallback_models.clone(),
         idle_rotate_threshold: config.llm.idle_rotate_threshold,
+        max_consecutive_follow: config.llm.max_consecutive_follow,
     };
 
     // 更新 reflector 配置
@@ -4029,6 +4030,7 @@ pub(super) async fn update_llm_config_handler(
             max_tokens: config.llm.max_tokens,
             fallback_models: Vec::new(),
             idle_rotate_threshold: config.llm.idle_rotate_threshold,
+            max_consecutive_follow: config.llm.max_consecutive_follow,
         });
     }
 

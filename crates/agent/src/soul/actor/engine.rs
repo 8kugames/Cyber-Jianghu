@@ -455,7 +455,13 @@ impl CognitiveEngine {
         if !world_state.self_state.attribute_descriptions.is_empty() {
             ws_parts.push("\n## 自身状态".to_string());
             for (attr, desc) in &world_state.self_state.attribute_descriptions {
-                ws_parts.push(format!("- {}: {}", attr, desc));
+                let raw = world_state
+                    .self_state
+                    .attributes
+                    .get(attr)
+                    .map(|v| format!(" [当前值: {}]", v))
+                    .unwrap_or_default();
+                ws_parts.push(format!("- {}: {}{}", attr, desc, raw));
             }
         }
 
@@ -527,9 +533,9 @@ impl CognitiveEngine {
 基于你的性格和当前状态，做出决策。你直接输出结构化 Intent，包含精确的 ID。
 
 ## 生存法则
-- 饥饿或口渴严重时，进食/饮水是最高优先级
+- 当饥饿或口渴描述中出现紧迫措辞时（如"饥肠辘辘/饥饿难耐/急需"等），进食/饮水是最高优先级
 - 没有食物时：先拾取地上的食物/水（pickup），再进食/饮水（eat/drink）
-- 背包和地面都没有时：移动到可能有资源的地点（move）
+- 背包和地面都没有时：采集（gather）或移动到可能有资源的地点（move）
 - idle（原地休息）是合法行为，不必强求每个 tick 都行动
 
 ## 可做之事（参考）
