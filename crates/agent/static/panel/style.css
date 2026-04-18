@@ -1385,14 +1385,6 @@ button[type="button"]:disabled {
     color: #e74c3c;
 }
 
-.soul-result.approved {
-    color: #27ae60;
-}
-
-.soul-result.rejected {
-    color: #e74c3c;
-}
-
 .exp-item:last-child {
     margin-bottom: 0;
 }
@@ -1495,7 +1487,7 @@ button[type="button"]:disabled {
     color: #0984e3;
 }
 
-/* 行动 - 绿色 */
+/* 地魂 - 绿色 */
 .exp-action {
     border-left: 3px solid #00b894;
     flex-direction: column;

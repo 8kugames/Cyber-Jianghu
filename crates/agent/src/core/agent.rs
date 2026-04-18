@@ -896,7 +896,7 @@ impl Agent {
             return Ok(());
         }
 
-        // Fail-safe: "narrative" sentinel 来自旧地魂翻译架构
+        // Fail-safe: "narrative" sentinel 来自旧翻译架构
         // 人魂直连后不应出现此情况
         if intent.action_type.as_str() == "narrative" {
             tracing::error!(

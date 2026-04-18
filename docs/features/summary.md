@@ -111,7 +111,7 @@ attack:
  **三魂架构**:
  - ActorSoul (人魂/行动之魂): 直连 WorldState，输出含精确 ID 的结构化 Intent
  - ReflectorSoul (天魂/守护之魂): 分级审查（Always/Adaptive/Skip）
- - IntentTranslator (地魂/能力之魂): 叙事→格式化翻译（人魂直连后已旁路）
+ - 地魂 (能力之魂): 提供 tool calling 工具池，行动落地层（嵌入 ActorSoul）
  - `ReviewStore` 共享内存用于进程内审查通信
 
 ### 3. 意图控制（分级审核 + multi-Intent Pipeline）
@@ -138,7 +138,7 @@ attack:
  - [x] Cognitive 路径: 人魂决策 → 天魂验证 → 驳回 → `think_with_feedback(feedback)` 重试（天魂与人魂共用 `llm_arc`）
 
 **天魂审查**（三魂架构）:
- - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，翻译后的 intent 经审查后再发送
+ - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，结构化 intent 经审查后再发送
  - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
  - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
  - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`

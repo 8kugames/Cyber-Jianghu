@@ -751,7 +751,7 @@ input:checked + .slider:before {
     color: #0984e3;
 }
 
-/* 行动 - 绿色 */
+/* 地魂 - 绿色 */
 .exp-action {
     border-left: 3px solid #00b894;
     flex-direction: column;

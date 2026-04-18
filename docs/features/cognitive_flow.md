@@ -9,7 +9,7 @@
 
 ### 核心结论
 
-- **三魂架构已落地**：ActorSoul（人魂，直连 WorldState 输出结构化 Intent）+ ReflectorSoul（天魂，三层审查），单进程内同步串联。翻译步骤已旁路。
+- **三魂架构已落地**：ActorSoul（人魂，直连 WorldState 输出结构化 Intent）+ 地魂（tool calling 工具池，行动落地层）+ ReflectorSoul（天魂，三层审查），单进程内同步串联。
 - **远程 Observer 模式已移除**：只保留进程内三魂，减少部署复杂度与一致性风险。
 - **主通道明确**：Intent 提交 **只能** 走 WebSocket；HTTP API 仅做辅助查询/管理/审查/面板。
 - **硬约束**：`POST /api/v1/intent` **已禁用**（强制 WebSocket，避免 tick 同步问题）。
@@ -421,7 +421,7 @@ fn should_log_retry(attempt: u32) -> bool {
 
 | 结果                | 处理                    |
 | ----------------- | --------------------- |
-| `Approved`        | 发送翻译后的 Intent          |
+| `Approved`        | 发送结构化 Intent              |
 | `Rejected`        | 叙事化驳回原因，循环重试（最多 3 次） |
 | deadline 超时     | 不发送 intent，等待下个 tick  |
 | 达到最大重试      | 提交 idle intent           |
