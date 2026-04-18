@@ -292,10 +292,12 @@ async fn handle_websocket(
                             .into_iter()
                             .map(|item| {
                                 let config = ItemRegistry::get(&item.item_id);
-                                let name = config.as_ref()
+                                let name = config
+                                    .as_ref()
                                     .map(|c| c.name.clone())
                                     .unwrap_or_else(|| item.item_id.clone());
-                                let item_type = config.as_ref()
+                                let item_type = config
+                                    .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default();
                                 crate::models::InventoryItem {
@@ -322,10 +324,12 @@ async fn handle_websocket(
                             .into_iter()
                             .map(|gi| {
                                 let config = ItemRegistry::get(&gi.item_id);
-                                let name = config.as_ref()
+                                let name = config
+                                    .as_ref()
                                     .map(|c| c.name.clone())
                                     .unwrap_or_else(|| gi.item_id.clone());
-                                let item_type = config.as_ref()
+                                let item_type = config
+                                    .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default();
                                 cyber_jianghu_protocol::SceneItem {

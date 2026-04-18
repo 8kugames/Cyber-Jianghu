@@ -656,7 +656,10 @@ mod tests {
             .await;
         let records = recorder.get_by_tick(1).await;
         assert_eq!(records[0].tianhun_result.as_deref(), Some("approved"));
-        assert_eq!(records[0].tianhun_layer1_result.as_deref(), Some("action_type合法"));
+        assert_eq!(
+            records[0].tianhun_layer1_result.as_deref(),
+            Some("action_type合法")
+        );
     }
 
     #[tokio::test]
