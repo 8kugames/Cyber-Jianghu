@@ -345,6 +345,7 @@ impl AgentBuilder {
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
+            consecutive_follow_count: 0,
         }
     }
 }

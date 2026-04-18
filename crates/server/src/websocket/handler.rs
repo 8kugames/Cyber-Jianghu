@@ -564,9 +564,17 @@ async fn handle_websocket(
     }
 
     // 清理 agent_to_device_map（避免死亡通知发送到已断连设备）
+    // 交叉验证：如果 connection_manager 中该 device_id 仍有活跃连接，
+    // 说明新连接已接管，跳过删除以避免竞态
     if agent_id != uuid::Uuid::nil() {
-        let mut agent_to_device = state.agent_to_device_map.write().await;
-        agent_to_device.remove(&agent_id);
+        let has_active_connection = {
+            let connections = state.connection_manager.read().await;
+            connections.get(&device_id).is_some()
+        };
+        if !has_active_connection {
+            let mut agent_to_device = state.agent_to_device_map.write().await;
+            agent_to_device.remove(&agent_id);
+        }
     }
 
     info!("WebSocket handler finished for agent '{}'", agent_name);
