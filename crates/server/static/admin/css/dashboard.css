@@ -704,7 +704,7 @@ input:checked + .slider:before {
 /* 三魂架构样式 - tick-card 内使用 */
 .exp-renhun,
 .exp-tianhun,
-.exp-dihun {
+.exp-action {
     margin-top: 8px;
     padding: 8px 12px;
     background: #f5f6fa;
@@ -751,37 +751,47 @@ input:checked + .slider:before {
     color: #0984e3;
 }
 
-/* 地魂 - 橙色 */
-.exp-dihun {
-    border-left: 3px solid #e17055;
+/* 行动 - 绿色 */
+.exp-action {
+    border-left: 3px solid #00b894;
     flex-direction: column;
     gap: 6px;
 }
-.exp-dihun .exp-soul-label {
-    background: rgba(225, 112, 85, 0.15);
-    color: #e17055;
+.exp-action .exp-soul-label {
+    background: rgba(0, 184, 148, 0.15);
+    color: #00b894;
     align-self: flex-start;
 }
 
-.exp-dihun-content {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-}
-
-.exp-dihun-result {
+.soul-result {
+    font-size: 12px;
     font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    display: inline-block;
+}
+.soul-result.approved {
+    color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+.soul-result.rejected {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
 }
 
-.exp-dihun-reason,
-.exp-dihun-narrative {
+.soul-reason,
+.soul-narrative {
     font-size: 11px;
     color: #666;
 }
 
-.exp-dihun-narrative::before {
-    /*content: "";*/
+.soul-reason::before {
+    content: "reason: ";
+    font-weight: 500;
+}
+
+.soul-narrative::before {
     font-weight: 500;
 }
 
@@ -873,7 +883,7 @@ input:checked + .slider:before {
 
 .tick-card .exp-renhun,
 .tick-card .exp-tianhun,
-.tick-card .exp-dihun {
+.tick-card .exp-action {
     margin-top: 6px;
     padding: 6px 10px;
 }
@@ -925,6 +935,7 @@ input:checked + .slider:before {
     border-radius: 4px;
     font-style: italic;
     font-size: 12px;
+    display: none;
 }
 
 .soul-layers {
@@ -952,11 +963,11 @@ input:checked + .slider:before {
     color: #e74c3c;
 }
 
-.exp-dihun-result.approved {
+.soul-result.approved {
     color: #27ae60;
 }
 
-.exp-dihun-result.rejected {
+.soul-result.rejected {
     color: #e74c3c;
 }
 
@@ -1012,4 +1023,5 @@ input:checked + .slider:before {
     background: rgba(231, 76, 60, 0.1);
     border-radius: 4px;
     margin-bottom: 4px;
+    display: none;
 }

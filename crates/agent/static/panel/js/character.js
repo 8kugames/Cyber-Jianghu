@@ -189,7 +189,9 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
             }
             html += renderSoulInline('人魂', a.renhun, 'renhun');
             html += renderSoulInline('天魂', a.tianhun, 'tianhun');
-            html += renderSoulInline('地魂', a.dihun, 'dihun');
+            if (a.final_intent) {
+                html += renderSoulInline('行动', a.final_intent, 'action');
+            }
         });
         html += '</div>';
 
@@ -200,7 +202,7 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
             html += '<div class="tick-section-title">即时</div>';
             immIntents.forEach(imm => {
                 html += `<div class="imm-item">
-                    <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                    <div class="exp-tianhun"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
                     <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
                     ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
                 </div>`;
@@ -780,12 +782,14 @@ async function loadExperiences(page = 1) {
                         html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
                     }
 
-                    // 人魂
+                    // 人魂：感知与思考
                     html += renderSoulInline('人魂', a.renhun, 'renhun');
-                    // 天魂
+                    // 天魂：三层审查
                     html += renderSoulInline('天魂', a.tianhun, 'tianhun');
-                    // 地魂
-                    html += renderSoulInline('地魂', a.dihun, 'dihun');
+                    // 最终行动
+                    if (a.final_intent) {
+                        html += renderSoulInline('行动', a.final_intent, 'action');
+                    }
                 });
 
                 html += `</div>`;
@@ -797,7 +801,7 @@ async function loadExperiences(page = 1) {
                         <div class="tick-section-title">即时</div>`;
                     immIntents.forEach(imm => {
                         html += `<div class="imm-item">
-                            <div class="exp-tianhun"><span class="exp-soul-label">天魂</span><span class="exp-soul-content">${escapeHtml(imm.action_type)}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
+                            <div class="exp-tianhun"><span class="exp-soul-label">即时</span><span class="exp-soul-content">${escapeHtml(getActionTypeDisplay(imm.action_type))}${imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : ''}</span></div>
                             <span class="imm-status ${imm.send_status === 'sent' ? 'sent' : 'failed'}">${imm.send_status === 'sent' ? '已发送' : '失败'}</span>
                             ${imm.send_error ? `<span class="imm-error">${escapeHtml(imm.send_error)}</span>` : ''}
                         </div>`;
@@ -819,12 +823,13 @@ async function loadExperiences(page = 1) {
     }
 }
 
-// 渲染单魂内联区块
+// 渲染单魂/行动内联区块
 function renderSoulInline(label, data, type) {
     if (!data) return '';
     let html = `<div class="exp-${type}"><span class="exp-soul-label">${label}</span><div class="exp-soul-content">`;
 
     if (type === 'renhun') {
+        // 人魂：叙事 + 思考过程
         if (data.narrative) {
             html += `<div class="soul-text">${escapeHtml(data.narrative)}</div>`;
         }
@@ -832,9 +837,29 @@ function renderSoulInline(label, data, type) {
             html += `<div class="soul-thought">${escapeHtml(data.thought_log)}</div>`;
         }
     } else if (type === 'tianhun') {
-        if (!data.success) {
-            html += `<div class="soul-error">翻译失败: ${escapeHtml(data.error || '未知错误')}</div>`;
+        // 天魂：审查结果 + 三层详情 + 理由
+        if (data.result) {
+            const isApproved = data.result === 'approved';
+            html += `<div class="soul-result ${isApproved ? 'approved' : 'rejected'}">${isApproved ? '通过' : '驳回'}</div>`;
         }
+        if (data.layers && data.layers.length > 0) {
+            html += `<div class="soul-layers">`;
+            data.layers.forEach(l => {
+                const cls = l.passed ? 'passed' : 'failed';
+                const layerNames = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
+                const name = layerNames[l.layer] || l.layer;
+                html += `<span class="soul-layer-tag ${cls}">${name}${l.passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
+            });
+            html += `</div>`;
+        }
+        if (data.reason) {
+            html += `<div class="soul-reason">${escapeHtml(data.reason)}</div>`;
+        }
+        if (data.narrative) {
+            html += `<div class="soul-narrative">${escapeHtml(data.narrative)}</div>`;
+        }
+    } else if (type === 'action') {
+        // 最终行动：action_type + action_data
         if (data.action_type) {
             html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(data.action_type))}`;
             if (data.action_data && Object.keys(data.action_data).length > 0) {
@@ -842,25 +867,7 @@ function renderSoulInline(label, data, type) {
             }
             html += `</div>`;
         }
-        if (data.speech_content) {
-            html += `<div class="soul-speech">${escapeHtml(data.speech_content)}</div>`;
-        }
-    } else if (type === 'dihun') {
-        html += `<div class="exp-dihun-result ${data.result || ''}">${escapeHtml(data.result || '-')}</div>`;
-        if (data.layers && data.layers.length > 0) {
-            html += `<div class="soul-layers">`;
-            data.layers.forEach(l => {
-                const cls = l.passed ? 'passed' : 'failed';
-                html += `<span class="soul-layer-tag ${cls}">${l.layer}${l.passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
-            });
-            html += `</div>`;
-        }
-        if (data.reason) {
-            html += `<div class="exp-dihun-reason">${escapeHtml(data.reason)}</div>`;
-        }
-        if (data.narrative) html += '<div class="exp-dihun-narrative">' + escapeHtml(data.narrative) + '</div>';
     }
-    // html += '<div>'+escapeHtml(JSON.stringify(data)) + '</div>';
     html += `</div></div>`;
     return html;
 }
