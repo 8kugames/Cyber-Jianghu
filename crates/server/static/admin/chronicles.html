@@ -1,228 +1,202 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>群像传记 | Cyber-Jianghu</title>
+    <link rel="stylesheet" href="css/dashboard.css" />
     <style>
-        :root {
-            --primary-color: #8b5cf6;
-            --bg-dark: #0f0f0f;
-            --bg-card: #1a1a1a;
-            --text-primary: #f5f5f5;
-            --text-secondary: #a0a0a0;
-            --border-color: #2a2a2a;
-            --accent-gold: #d4af37;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        /* chronicles-specific overrides — using One Light tokens */
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
+            background: var(--bg-base);
             min-height: 100vh;
-            padding: 20px;
+            padding: 24px;
         }
 
-        header {
+        .chr-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
             padding-bottom: 20px;
             border-bottom: 1px solid var(--border-color);
         }
 
-        h1 {
-            font-size: 28px;
+        .chr-header h1 {
+            font-size: 20px;
             font-weight: 600;
-            background: linear-gradient(135deg, var(--accent-gold), #fff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: var(--text-primary);
+        }
+
+        .chr-header h1 span {
+            color: var(--accent);
         }
 
         .back-btn {
-            padding: 8px 16px;
-            background: var(--bg-card);
+            padding: 6px 14px;
+            background: var(--card-bg);
             border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            border-radius: 6px;
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
+            font-size: 13px;
+            transition: all 0.15s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
         }
-
         .back-btn:hover {
-            border-color: var(--primary-color);
-            background: rgba(139, 92, 246, 0.1);
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-muted);
         }
 
-        .controls {
+        .chr-controls {
             display: flex;
-            gap: 15px;
-            margin-bottom: 25px;
+            gap: 12px;
+            margin-bottom: 20px;
             flex-wrap: wrap;
             align-items: center;
         }
 
         .search-input {
-            padding: 10px 15px;
-            background: var(--bg-card);
+            padding: 8px 14px;
+            background: var(--card-bg);
             border: 1px solid var(--border-color);
             color: var(--text-primary);
-            border-radius: 6px;
-            font-size: 14px;
-            min-width: 250px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            min-width: 240px;
+            outline: none;
+            transition: border-color 0.15s;
+            font-family: var(--font-family);
         }
 
         .search-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-muted);
         }
 
-        .btn {
-            padding: 10px 20px;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: none;
-        }
-
-        .btn-primary {
-            background: var(--primary-color);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #7c3aed;
-        }
-
-        .btn-secondary {
-            background: var(--bg-card);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
-
-        .btn-secondary:hover {
-            border-color: var(--primary-color);
+        .search-input::placeholder {
+            color: var(--text-subtle);
         }
 
         .chronicles-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            gap: 16px;
         }
 
         .chronicle-card {
-            background: var(--bg-card);
+            background: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
+            border-radius: var(--radius-md);
+            padding: 18px;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: all 0.15s;
+            box-shadow: var(--card-shadow);
         }
 
         .chronicle-card:hover {
-            border-color: var(--primary-color);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(139, 92, 246, 0.15);
+            border-color: var(--accent);
+            box-shadow: var(--card-shadow-hover);
+            transform: translateY(-1px);
         }
 
         .chronicle-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
 
         .chronicle-id {
-            font-size: 18px;
+            font-size: 15px;
             font-weight: 600;
-            color: var(--accent-gold);
+            color: var(--accent);
         }
 
         .chronicle-season {
-            padding: 4px 10px;
-            background: rgba(139, 92, 246, 0.2);
-            color: var(--primary-color);
-            border-radius: 20px;
-            font-size: 12px;
+            padding: 3px 9px;
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
         }
 
         .chronicle-period {
             color: var(--text-secondary);
-            font-size: 13px;
+            font-size: 12px;
             margin-bottom: 12px;
         }
 
         .chronicle-stats {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-            margin-bottom: 15px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 8px;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: var(--bg-level-1);
+            border-radius: var(--radius-sm);
         }
 
-        .stat-item {
+        .chr-stat-item {
             text-align: center;
         }
 
-        .stat-value {
-            font-size: 20px;
+        .chr-stat-value {
+            font-size: 18px;
             font-weight: 600;
             color: var(--text-primary);
         }
 
-        .stat-label {
-            font-size: 11px;
+        .chr-stat-label {
+            font-size: 10px;
             color: var(--text-secondary);
             margin-top: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
 
         .chronicle-preview {
             color: var(--text-secondary);
-            font-size: 13px;
+            font-size: 12px;
             line-height: 1.6;
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
+            margin-bottom: 10px;
         }
 
         .chronicle-status {
             display: inline-block;
-            padding: 3px 8px;
-            border-radius: 4px;
+            padding: 2px 8px;
+            border-radius: 10px;
             font-size: 11px;
-            margin-top: 12px;
+            font-weight: 600;
         }
 
         .status-template {
-            background: rgba(255, 193, 7, 0.2);
-            color: #ffc107;
+            background: var(--warning-muted);
+            color: var(--warning);
         }
 
         .status-llm {
-            background: rgba(139, 92, 246, 0.2);
-            color: var(--primary-color);
+            background: var(--accent-muted);
+            color: var(--accent);
         }
 
         .status-both {
-            background: rgba(76, 175, 80, 0.2);
-            color: #4caf50;
+            background: var(--success-muted);
+            color: var(--success);
         }
 
         .status-generating {
-            background: rgba(33, 150, 243, 0.2);
-            color: #2196f3;
+            background: var(--accent-muted);
+            color: var(--accent);
             animation: pulse 1.5s ease-in-out infinite;
         }
 
@@ -235,13 +209,10 @@
         .modal {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.4);
             z-index: 1000;
-            padding: 40px;
+            padding: 32px;
             overflow-y: auto;
         }
 
@@ -252,171 +223,199 @@
         }
 
         .modal-content {
-            background: var(--bg-card);
+            background: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 16px;
+            border-radius: var(--radius-lg);
             width: 100%;
-            max-width: 900px;
-            padding: 30px;
+            max-width: 860px;
+            padding: 24px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.12);
         }
 
         .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 25px;
-            padding-bottom: 20px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
             border-bottom: 1px solid var(--border-color);
         }
 
         .modal-header h2 {
-            font-size: 24px;
-            color: var(--accent-gold);
+            font-size: 18px;
+            color: var(--accent);
+            font-weight: 600;
         }
 
         .close-btn {
-            font-size: 28px;
-            color: var(--text-secondary);
+            font-size: 22px;
+            color: var(--text-subtle);
             cursor: pointer;
-            line-height: 1;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
         }
 
         .close-btn:hover {
             color: var(--text-primary);
+            background: var(--bg-level-2);
         }
 
         .detail-section {
-            margin-bottom: 25px;
+            margin-bottom: 20px;
         }
 
         .detail-section h3 {
-            font-size: 16px;
-            color: var(--primary-color);
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--border-color);
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 6px;
         }
 
         .detail-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
         }
 
         .detail-item {
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 8px;
+            padding: 10px 12px;
+            background: var(--bg-level-1);
+            border-radius: var(--radius-sm);
         }
 
         .detail-item .label {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--text-secondary);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.4px;
+            margin-bottom: 3px;
         }
 
         .detail-item .value {
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 600;
-            margin-top: 4px;
+            color: var(--text-primary);
+            margin-top: 2px;
         }
 
         .narrative {
-            background: rgba(212, 175, 55, 0.05);
-            border: 1px solid rgba(212, 175, 55, 0.2);
-            border-radius: 8px;
-            padding: 20px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px;
             white-space: pre-wrap;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.8;
-            max-height: 400px;
+            max-height: 380px;
             overflow-y: auto;
+            color: var(--text-primary);
         }
+
+        .narrative::-webkit-scrollbar { width: 5px; }
+        .narrative::-webkit-scrollbar-track { background: var(--bg-level-1); border-radius: 3px; }
+        .narrative::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
         .highlight-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
 
         .highlight-item {
             display: flex;
-            gap: 12px;
-            padding: 12px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 8px;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--bg-level-1);
+            border-radius: var(--radius-sm);
+            align-items: flex-start;
         }
 
         .highlight-type {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            font-weight: 700;
             text-transform: uppercase;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
         }
 
-        .type-death { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-        .type-dialogue { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
-        .type-combat { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-        .type-social { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .type-death    { background: var(--error-muted);   color: var(--error); }
+        .type-dialogue { background: var(--accent-muted);   color: var(--accent); }
+        .type-combat   { background: var(--warning-muted); color: var(--warning); }
+        .type-social   { background: var(--success-muted); color: var(--success); }
 
         .highlight-desc {
             flex: 1;
             font-size: 13px;
             color: var(--text-primary);
+            line-height: 1.5;
         }
 
         .agents-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 15px;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px;
         }
 
         .agent-card {
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.02);
-            border-radius: 8px;
+            padding: 12px;
+            background: var(--bg-level-1);
+            border-radius: var(--radius-sm);
         }
 
         .agent-name {
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 8px;
+            margin-bottom: 6px;
+            font-size: 13px;
         }
 
         .agent-info {
             font-size: 12px;
             color: var(--text-secondary);
+            line-height: 1.5;
         }
 
         .agent-died {
-            color: #ef4444;
+            color: var(--error);
             font-weight: 500;
         }
 
         .tab-nav {
             display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
+            gap: 8px;
+            margin-bottom: 16px;
             border-bottom: 1px solid var(--border-color);
-            padding-bottom: 10px;
+            padding-bottom: 8px;
         }
 
         .tab-btn {
-            padding: 8px 16px;
+            padding: 6px 14px;
             background: transparent;
-            border: none;
+            border: 1px solid transparent;
             color: var(--text-secondary);
-            font-size: 14px;
+            font-size: 13px;
             cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.2s;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+            font-family: var(--font-family);
         }
 
-        .tab-btn.active {
-            background: rgba(139, 92, 246, 0.2);
-            color: var(--primary-color);
+        .tab-btn.active,
+        .tab-btn:hover {
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-color: transparent;
         }
 
         .tab-content {
@@ -427,23 +426,19 @@
             display: block;
         }
 
-        .loading {
-            text-align: center;
-            padding: 60px;
-            color: var(--text-secondary);
-        }
-
+        .loading,
         .empty-state {
             text-align: center;
             padding: 60px;
             color: var(--text-secondary);
+            font-size: 14px;
         }
 
         .empty-state svg {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 20px;
-            opacity: 0.3;
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.25;
         }
 
         @media (max-width: 768px) {
@@ -454,12 +449,12 @@
     </style>
 </head>
 <body>
-    <header>
-        <h1>群像传记</h1>
-        <button class="back-btn" onclick="window.location.href='index.html'">返回仪表盘</button>
-    </header>
+    <div class="chr-header">
+        <h1>群像<span>传记</span></h1>
+        <a href="index.html" class="back-btn">← 返回仪表盘</a>
+    </div>
 
-    <div class="controls">
+    <div class="chr-controls">
         <input type="text" class="search-input" placeholder="搜索传记内容..." id="search-input" oninput="filterChronicles()">
         <button class="btn btn-primary" onclick="generateChronicle()">手动生成</button>
         <button class="btn btn-secondary" onclick="loadChronicles()">刷新</button>
@@ -496,7 +491,6 @@
 
         async function loadChronicles() {
             try {
-                // 并行加载 chronicles 和 pending 任务
                 const [chroniclesRes, pendingRes] = await Promise.all([
                     fetch(`${API_BASE}/chronicles`, { headers: getHeaders() }),
                     fetch(`${API_BASE}/chronicles/pending`, { headers: getHeaders() }).catch(() => null)
@@ -511,7 +505,6 @@
                 const chroniclesData = await chroniclesRes.json();
                 chronicles = chroniclesData.chronicles || [];
 
-                // 构建 pending 任务映射: chronicle_id -> task info
                 let pendingMap = {};
                 if (pendingRes && pendingRes.ok) {
                     const pendingData = await pendingRes.json();
@@ -520,7 +513,6 @@
                     }
                 }
 
-                // 将 pending 信息注入到 chronicles
                 chronicles = chronicles.map(c => ({
                     ...c,
                     _pending: pendingMap[c.chronicle_id] || null
@@ -542,7 +534,7 @@
                             <path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
                         </svg>
                         <p>暂无群像传记</p>
-                        <p style="font-size: 13px; margin-top: 8px;">每7个游戏日会自动生成</p>
+                        <p style="font-size: 12px; margin-top: 8px; color: var(--text-subtle)">每7个游戏日会自动生成</p>
                     </div>`;
                 return;
             }
@@ -555,21 +547,21 @@
                     </div>
                     <div class="chronicle-period">第${c.game_day_start}日 - 第${c.game_day_end}日</div>
                     <div class="chronicle-stats">
-                        <div class="stat-item">
-                            <div class="stat-value">${c.agent_count}</div>
-                            <div class="stat-label">江湖儿女</div>
+                        <div class="chr-stat-item">
+                            <div class="chr-stat-value">${c.agent_count}</div>
+                            <div class="chr-stat-label">江湖儿女</div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${c.actions_count}</div>
-                            <div class="stat-label">行动次数</div>
+                        <div class="chr-stat-item">
+                            <div class="chr-stat-value">${c.actions_count}</div>
+                            <div class="chr-stat-label">行动次数</div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${c.deaths}</div>
-                            <div class="stat-label">陨落</div>
+                        <div class="chr-stat-item">
+                            <div class="chr-stat-value">${c.deaths}</div>
+                            <div class="chr-stat-label">陨落</div>
                         </div>
-                        <div class="stat-item">
-                            <div class="stat-value">${c.births}</div>
-                            <div class="stat-label">新生</div>
+                        <div class="chr-stat-item">
+                            <div class="chr-stat-value">${c.births}</div>
+                            <div class="chr-stat-label">新生</div>
                         </div>
                     </div>
                     <div class="chronicle-preview">${escapeHtml(c.summary_preview)}</div>
@@ -587,11 +579,9 @@
             }
         }
 
-        // 获取 chronicle 的实际状态（考虑 pending 任务）
         function getChronicleStatus(c) {
             if (c._pending) {
                 const task = c._pending;
-                // 如果有进行中的 supplement 任务，显示 generating
                 if (task.supplement_status === 'generating' || task.supplement_status === 'pending') {
                     return 'generating';
                 }
@@ -599,7 +589,6 @@
             return c.status;
         }
 
-        // 获取 chronicle 状态显示文本
         function getChronicleStatusText(c) {
             if (c._pending) {
                 const task = c._pending;
@@ -691,7 +680,7 @@
                 ` : ''}
 
                 ${c.highlights && c.highlights.length > 0 ? `
-                <div class="detail-section" style="margin-top: 25px;">
+                <div class="detail-section" style="margin-top: 20px;">
                     <h3>关键事件</h3>
                     <div class="highlight-list">
                         ${c.highlights.map(h => `
@@ -705,7 +694,7 @@
                 ` : ''}
 
                 ${c.agent_summaries && c.agent_summaries.length > 0 ? `
-                <div class="detail-section" style="margin-top: 25px;">
+                <div class="detail-section" style="margin-top: 20px;">
                     <h3>江湖群像</h3>
                     <div class="agents-grid">
                         ${c.agent_summaries.map(a => `
@@ -777,12 +766,10 @@
             }
         }
 
-        // Close modal on escape
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') closeModal();
         });
 
-        // Load on mount
         loadChronicles();
     </script>
 </body>
