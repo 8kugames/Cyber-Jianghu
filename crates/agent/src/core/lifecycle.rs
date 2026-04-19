@@ -785,7 +785,7 @@ impl super::Agent {
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
                         .map(|b| b.max_retries)
-                        .unwrap_or(3);
+                        .unwrap_or(33);
                     let _max_intents = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
