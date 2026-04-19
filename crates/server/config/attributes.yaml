@@ -236,7 +236,7 @@ data:
         min_value: 0
         max_value_formula: "100 + intelligence * 0.5"
         decay_per_tick: 1
-        # recovery_formula: "4 + intelligence * 0.1"
+        recovery_formula: "4 + intelligence * 0.1"
         primary_attribute_deps:
           - intelligence
 

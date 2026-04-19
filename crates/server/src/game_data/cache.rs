@@ -271,6 +271,7 @@ mod tests {
                         offline_cleanup_days: 30,
                     },
                     death_defaults: None,
+                    emergence: None,
                 },
             },
             items: UnifiedItemsConfig {

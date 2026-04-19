@@ -203,6 +203,7 @@ async fn main() -> Result<()> {
         state_processor,
         connection_manager.clone(),
         agent_to_device_map.clone(),
+        dialogue_manager.clone(),
     );
     tokio::spawn(async move {
         intent_worker.run(worker_rx).await;

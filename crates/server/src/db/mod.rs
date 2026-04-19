@@ -54,6 +54,9 @@ pub use state_ops::{create_tick_log, update_tick_log};
 // 导出公共API - Agent动作日志操作
 pub use state_ops::{batch_insert_action_logs, update_soul_cycle_metadata};
 
+// 导出公共API - 涌现：跨 tick 动作观察
+pub use state_ops::get_recent_actions_batch;
+
 // 导出公共API - 地面物品操作
 pub use ground_item_ops::{
     add_ground_item, get_ground_items_by_node, get_ground_items_by_nodes, remove_ground_item,
