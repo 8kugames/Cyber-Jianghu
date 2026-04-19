@@ -21,7 +21,7 @@ pub struct CognitiveDecisionConfig {
 
 impl Default for CognitiveDecisionConfig {
     fn default() -> Self {
-        Self { max_retries: 3 }
+        Self { max_retries: 33 }
     }
 }
 
