@@ -187,6 +187,39 @@ pub struct GameRulesData {
     /// Intent批次配置（multi-Intent Pipeline执行）
     #[serde(default)]
     pub intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
+
+    /// 涌现配置（跨 tick 动作观察）
+    #[serde(default)]
+    pub emergence: Option<EmergenceConfig>,
+}
+
+/// 涌现配置：控制 Agent 能观察到的其他 Agent 行为历史
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmergenceConfig {
+    /// 回溯多少个 tick 的动作历史
+    #[serde(default = "default_recent_action_ticks")]
+    pub recent_action_ticks: i64,
+
+    /// 每个实体最多展示多少条最近动作
+    #[serde(default = "default_max_recent_actions_per_entity")]
+    pub max_recent_actions_per_entity: usize,
+}
+
+fn default_recent_action_ticks() -> i64 {
+    5
+}
+
+fn default_max_recent_actions_per_entity() -> usize {
+    5
+}
+
+impl Default for EmergenceConfig {
+    fn default() -> Self {
+        Self {
+            recent_action_ticks: default_recent_action_ticks(),
+            max_recent_actions_per_entity: default_max_recent_actions_per_entity(),
+        }
+    }
 }
 
 /// Agent 状态配置（数据驱动）
@@ -336,6 +369,10 @@ pub struct SeasonData {
     /// 例如：{"hunger": 1.5, "thirst": 1.5} 表示冬季饥饿/口渴消耗增加 50%
     #[serde(default)]
     pub attribute_modifiers: std::collections::HashMap<String, f32>,
+    /// 天气池：该季节可能出现的天气类型列表
+    /// 数组长度决定概率权重（如 ["sunny", "sunny", "stormy"] 中 sunny 概率 2/3）
+    #[serde(default)]
+    pub weather_pool: Vec<String>,
 }
 
 /// 位置配置数据

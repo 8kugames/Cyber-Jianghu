@@ -500,19 +500,38 @@ impl CognitiveEngine {
             }
         }
 
-        // 附近 Agent（精确 UUID）
+        // 附近 Agent（精确 UUID + 近期动作）
         if !world_state.entities.is_empty() {
             ws_parts.push("\n## 附近的人".to_string());
             for entity in &world_state.entities {
                 ws_parts.push(format!("- {} (UUID: {})", entity.name, entity.id));
+                for action in &entity.recent_actions {
+                    let content_hint = action.content.as_ref()
+                        .map(|c| {
+                            let truncated: String = c.chars().take(30).collect();
+                            format!("「{}」", truncated)
+                        })
+                        .unwrap_or_default();
+                    ws_parts.push(format!(
+                        "  [Tick {}] {} {}{}",
+                        action.tick_id, action.action_type, action.result, content_hint
+                    ));
+                }
             }
         }
 
-        // 相邻地点（精确 node_id）
+        // 当前位置 + 可前往地点（强化地点约束）
+        ws_parts.push(format!(
+            "\n## 当前位置：{} ({})",
+            world_state.location.name, world_state.location.node_id
+        ));
         if !world_state.location.adjacent_nodes.is_empty() {
-            ws_parts.push("\n## 可前往的地点".to_string());
+            ws_parts.push("## 可前往的地点（仅这些地点存在）".to_string());
             for node in &world_state.location.adjacent_nodes {
-                ws_parts.push(format!("- {} ({})", node.name, node.node_id));
+                ws_parts.push(format!(
+                    "- {} ({})，移动消耗：{} tick",
+                    node.name, node.node_id, node.travel_cost
+                ));
             }
         }
 
@@ -550,6 +569,15 @@ impl CognitiveEngine {
 - 没有食物时：先拾取地上的食物/水（pickup），再进食/饮水（eat/drink）
 - 背包和地面都没有时：采集（gather）或移动到可能有资源的地点（move）
 - idle（原地休息）是合法行为，不必强求每个 tick 都行动
+- eat/drink 的 action_data 必须使用"背包物品"或"附近物品"中列出的精确 item_id，禁止使用物品名称或自创 ID
+
+## 叙事限制
+- 叙事只能引用"背包物品"或"附近可见物品"中确实存在的物品
+- 不得描述其他角色的行为，除非"附近的人"中有该角色的近期动作记录
+- 不得与不在"附近的人"列表中的角色互动
+- **世界地图仅由"可前往的地点"定义。不存在其他地点。不得在 thought_process 或 environment 中提及未列出的地点**
+- 不得编造未发生的事件（如劫镖、打斗、天灾），除非"近期事件"中有记录
+- 如果对某事没有观察证据，thought_process 中应标注[未确认]
 
 ## 可做之事（参考）
 {action_descriptions}

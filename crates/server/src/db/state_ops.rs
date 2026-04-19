@@ -427,3 +427,57 @@ pub async fn update_soul_cycle_metadata(
 
     Ok(())
 }
+
+// ============================================================================
+// 涌现：跨 tick 动作观察
+// ============================================================================
+
+/// 批量获取多个 Agent 的近期动作记录
+///
+/// 从 agent_action_logs 表中查询指定 Agent 在 `since_tick` 之后的动作，
+/// 按 tick 降序排列，每个 Agent 最多返回 `limit_per_agent` 条。
+#[allow(clippy::type_complexity)]
+pub async fn get_recent_actions_batch(
+    pool: &PgPool,
+    agent_ids: &[uuid::Uuid],
+    since_tick: i64,
+    limit_per_agent: usize,
+) -> Result<std::collections::HashMap<uuid::Uuid, Vec<cyber_jianghu_protocol::RecentAction>>> {
+    if agent_ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let agent_id_vec: Vec<uuid::Uuid> = agent_ids.to_vec();
+
+    let rows: Vec<(uuid::Uuid, i64, String, Option<String>, Option<String>)> =
+        sqlx::query_as::<Postgres, (uuid::Uuid, i64, String, Option<String>, Option<String>)>(
+            "SELECT agent_id, tick_id, action_type,
+                    action_data->>'content' as content,
+                    result
+             FROM agent_action_logs
+             WHERE agent_id = ANY($1) AND tick_id >= $2
+             ORDER BY agent_id, tick_id DESC",
+        )
+        .bind(&agent_id_vec)
+        .bind(since_tick)
+        .fetch_all(pool)
+        .await
+        .context("批量获取近期动作失败")?;
+
+    let mut map: std::collections::HashMap<uuid::Uuid, Vec<cyber_jianghu_protocol::RecentAction>> =
+        std::collections::HashMap::new();
+
+    for (agent_id, tick_id, action_type, content, result) in rows {
+        let actions = map.entry(agent_id).or_default();
+        if actions.len() < limit_per_agent {
+            actions.push(cyber_jianghu_protocol::RecentAction {
+                tick_id,
+                action_type,
+                content,
+                result: result.unwrap_or_else(|| "unknown".to_string()),
+            });
+        }
+    }
+
+    Ok(map)
+}

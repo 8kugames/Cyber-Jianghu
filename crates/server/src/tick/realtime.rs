@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::db::DbPool;
+use crate::dialogue::DialogueManager;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 use crate::state::AgentStateCache;
 use crate::tick::decay;
@@ -60,6 +61,8 @@ pub struct IntentWorker {
     connection_manager: ConnectionManager,
     /// agent_id → device_id 映射（广播用）
     agent_to_device_map: AgentToDeviceMap,
+    /// 对话管理器（whisper session 生命周期管理）
+    dialogue_manager: Arc<DialogueManager>,
 }
 
 impl IntentWorker {
@@ -69,6 +72,7 @@ impl IntentWorker {
         state_processor: Arc<StateProcessor>,
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
+        dialogue_manager: Arc<DialogueManager>,
     ) -> Self {
         Self {
             db_pool,
@@ -76,6 +80,7 @@ impl IntentWorker {
             state_processor,
             connection_manager,
             agent_to_device_map,
+            dialogue_manager,
         }
     }
 
@@ -272,7 +277,17 @@ impl IntentWorker {
             self.handle_deaths(death_notifications, tick_id).await;
         }
 
-        // 6. 周期 WorldState 广播由 TickScheduler 在发送 TickBoundary 后独立执行
+        // 6. 关闭所有对话会话（防止 whisper session 泄漏）
+        let closed_sessions = self.dialogue_manager.close_all_sessions().await;
+        if !closed_sessions.is_empty() {
+            debug!(
+                "Tick {}: 关闭 {} 个对话会话",
+                tick_id,
+                closed_sessions.len()
+            );
+        }
+
+        // 7. 周期 WorldState 广播由 TickScheduler 在发送 TickBoundary 后独立执行
         // IntentWorker 仅负责衰减+持久化+死亡处理，不重复广播
 
         debug!(

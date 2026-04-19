@@ -70,7 +70,7 @@ data:
     # 每 tick 最大 Intent 数
     max_intents_per_tick: 5
     # 三魂循环最大重试次数
-    max_retries: 3
+    max_retries: 33
     # 分级审核辅助配置
     llm_validation:
       # 每 tick 至少审核的 Intent 数量
@@ -90,6 +90,13 @@ data:
         trade: item_id
         steal: item_id
         give: item_id
+
+  # 涌现配置：跨 tick 动作观察（Agent 能看到其他 Agent 做了什么）
+  emergence:
+    # 回溯多少个 tick 的动作历史
+    recent_action_ticks: 9
+    # 每个实体最多展示多少条最近动作
+    max_recent_actions_per_entity: 9
 
   # 即时事件处理配置
   immediate_events:

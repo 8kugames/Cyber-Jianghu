@@ -131,6 +131,43 @@ impl Broadcaster {
             }
         };
 
+        // 涌现：批量加载近期动作历史
+        let emergence_config = game_data_cache
+            .get()
+            .game_rules
+            .data
+            .emergence
+            .clone()
+            .unwrap_or_default();
+        let recent_actions_map = if emergence_config.recent_action_ticks > 0 {
+            // tick_id 按 tick_duration_secs 递增，需要乘以 tick 间隔来计算 since_tick
+            let tick_duration = game_data_cache.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+            let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration;
+            info!(
+                "涌现加载: tick={}, since_tick={}, agent_count={}, max_per_entity={}",
+                tick_id, since_tick, agent_ids.len(), emergence_config.max_recent_actions_per_entity
+            );
+            match crate::db::get_recent_actions_batch(
+                db_pool,
+                &agent_ids,
+                since_tick,
+                emergence_config.max_recent_actions_per_entity,
+            )
+            .await
+            {
+                Ok(map) => {
+                    info!("涌现加载完成: {} 个 agent 有动作记录", map.len());
+                    map
+                }
+                Err(e) => {
+                    warn!("批量加载近期动作失败: {}", e);
+                    HashMap::new()
+                }
+            }
+        } else {
+            HashMap::new()
+        };
+
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
         for agent_state in agent_states {
@@ -176,6 +213,8 @@ impl Broadcaster {
                 nearby_items,
                 &online_agent_ids,
                 game_data_cache,
+                &recent_actions_map,
+                &emergence_config,
             );
 
             // 向该Agent发送其专属的WorldState
@@ -213,6 +252,8 @@ impl Broadcaster {
         nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
         game_data_cache: &Arc<GameDataCache>,
+        recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
+        emergence_config: &crate::game_data::types::unified_config::EmergenceConfig,
     ) -> WorldState {
         // 游戏时间计算（数据驱动）
         let (year, month, day, hour) = compute_game_time(tick_id);
@@ -289,6 +330,28 @@ impl Broadcaster {
             }
         }
 
+        // 注入环境事件（天气 + 季节描述，全部数据驱动）
+        let weather_key = crate::game_data::registry::time_registry::TimeRegistry::get_weather_key(tick_id);
+        {
+            let config = game_data_cache.get();
+            if let Some(desc) = config.display_messages.weather_events.get(&weather_key) {
+                events.push(WorldEvent {
+                    event_type: WorldEventType::EnvironmentalChange,
+                    tick_id,
+                    description: desc.clone(),
+                    metadata: serde_json::json!({"weather": weather_key}),
+                });
+            }
+        }
+        if let Some(season) = crate::game_data::registry::time_registry::TimeRegistry::get_current_season(tick_id) {
+            events.push(WorldEvent {
+                event_type: WorldEventType::EnvironmentalChange,
+                tick_id,
+                description: format!("{}：{}", season.name, season.description),
+                metadata: serde_json::json!({"season": season.id}),
+            });
+        }
+
         // 获取显示消息配置（数据驱动）
         let (entity_state_alive, entity_state_dead) = {
             let gd = game_data_cache.get();
@@ -331,31 +394,22 @@ impl Broadcaster {
                         entity_state_alive.clone()
                     },
                     hostile: false, // MVP阶段：无敌对关系
-                    recent_actions: events
-                        .iter()
-                        .filter(|e| {
-                            e.metadata
-                                .get("from_agent_id")
-                                .and_then(|v| v.as_str())
-                                .map(|id| id == other.agent_id.to_string())
-                                .unwrap_or(false)
+                    recent_actions: recent_actions_map
+                        .get(&other.agent_id)
+                        .map(|actions| {
+                            actions.iter()
+                                .take(emergence_config.max_recent_actions_per_entity)
+                                .cloned()
+                                .collect()
                         })
-                        .map(|e| crate::models::RecentAction {
-                            tick_id: e.tick_id,
-                            action_type: e.event_type.as_str().to_string(),
-                            content: e
-                                .metadata
-                                .get("content")
-                                .and_then(|v| v.as_str().map(String::from)),
-                            result: e.description.clone(),
-                        })
-                        .collect(),
+                        .unwrap_or_default(),
                 }
             })
             .collect();
 
-        // 获取天气描述（数据驱动，目前固定晴天）
-        let weather = game_data_cache.get().display_messages.weather.sunny.clone();
+        // 获取天气描述（数据驱动：季节 → weather_pool → display_messages）
+        let weather = crate::game_data::registry::time_registry::TimeRegistry::get_weather(tick_id)
+            .unwrap_or_else(|| game_data_cache.get().display_messages.weather.sunny.clone());
 
         // 构建WorldState
         WorldState {
@@ -596,7 +650,8 @@ pub fn build_initial_world_state(
         });
     }
 
-    let weather = game_data_cache.get().display_messages.weather.sunny.clone();
+    let weather = crate::game_data::registry::time_registry::TimeRegistry::get_weather(tick_id)
+        .unwrap_or_else(|| game_data_cache.get().display_messages.weather.sunny.clone());
 
     // 属性
     let attributes = agent_state.get_attributes_for_protocol();

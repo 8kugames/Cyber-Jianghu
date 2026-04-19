@@ -22,6 +22,10 @@ pub struct DisplayMessagesConfig {
     /// 天气描述
     pub weather: WeatherConfig,
 
+    /// 天气环境事件描述（key = 天气类型, value = 事件描述文本）
+    #[serde(default)]
+    pub weather_events: std::collections::HashMap<String, String>,
+
     /// 系统通知
     pub notifications: NotificationsConfig,
 }
@@ -89,6 +93,12 @@ impl Default for DisplayMessagesConfig {
 impl DisplayMessagesConfig {
     /// 创建内置默认配置
     pub fn builtin() -> Self {
+        let mut weather_events = std::collections::HashMap::new();
+        weather_events.insert("sunny".to_string(), "天朗气清".to_string());
+        weather_events.insert("cloudy".to_string(), "阴云密布".to_string());
+        weather_events.insert("rainy".to_string(), "细雨绵绵".to_string());
+        weather_events.insert("stormy".to_string(), "雷暴来袭".to_string());
+
         Self {
             version: "0.0.1-builtin".to_string(),
             description: "内置默认显示消息配置".to_string(),
@@ -102,6 +112,7 @@ impl DisplayMessagesConfig {
                 rainy: "雨".to_string(),
                 stormy: "暴风雨".to_string(),
             },
+            weather_events,
             notifications: NotificationsConfig {
                 death: "你已经死亡。".to_string(),
                 rebirth: "大侠已转世重生。".to_string(),

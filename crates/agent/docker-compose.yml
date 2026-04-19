@@ -67,7 +67,13 @@ services:
       - agent_data:/app/data
     command: ["sh", "-c", "./agent run --port $${PORT:-23340}"]
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f --max-time 10 http://localhost:$${PORT:-23340}/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "curl -f --max-time 10 http://localhost:$${PORT:-23340}/api/v1/health",
+        ]
       interval: 30s
       timeout: 30s
       retries: 3
