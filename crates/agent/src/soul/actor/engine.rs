@@ -7,7 +7,6 @@
 // 天魂翻译步骤已消除。
 
 use anyhow::Result;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
@@ -17,13 +16,14 @@ use super::prompt_cache::PromptCache;
 use super::prompt_template::PromptTemplateConfig;
 use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
+use super::translation::{ActionAliasMap, FieldAliasMap};
 use crate::component::llm::{LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
 use crate::models::Intent;
 
-use cyber_jianghu_protocol::{AvailableAction, WorldState};
+use cyber_jianghu_protocol::WorldState;
 
 /// 认知引擎配置
 #[derive(Clone, Debug)]
@@ -130,20 +130,25 @@ pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: std::sync::RwLock<CognitiveEngineConfig>,
     /// Prompt 缓存（分层缓存优化）
-    prompt_cache: std::sync::RwLock<PromptCache>,
+    pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
     /// Prompt 模板配置（从 YAML 加载，None 时 fail-fast）
-    prompt_template: Option<PromptTemplateConfig>,
+    pub(super) prompt_template: Option<PromptTemplateConfig>,
     /// 行动结果记忆（Hermes 模式）
-    outcome_memory: Option<crate::component::memory::OutcomeMemory>,
+    pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
+    /// action_type 别名映射（中文/别名 → 英文 canonical）
+    pub(super) action_alias_map: ActionAliasMap,
+    /// action_data 字段别名映射（中文/别名 → 英文 canonical）
+    pub(super) field_alias_map: FieldAliasMap,
 }
 
 impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints) = Self::load_actions_list();
+        let (action_descriptions, action_field_hints, alias_map, field_map) =
+            Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
@@ -160,6 +165,8 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             prompt_template,
             outcome_memory: None,
+            action_alias_map: alias_map,
+            field_alias_map: field_map,
         }
     }
 
@@ -170,7 +177,8 @@ impl CognitiveEngine {
         window_size: usize,
     ) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints) = Self::load_actions_list();
+        let (action_descriptions, action_field_hints, alias_map, field_map) =
+            Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
@@ -187,6 +195,8 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             prompt_template,
             outcome_memory: None,
+            action_alias_map: alias_map,
+            field_alias_map: field_map,
         }
     }
 
@@ -244,12 +254,14 @@ impl CognitiveEngine {
             .unwrap_or(default)
     }
 
-    /// 加载动作列表（用于缓存）
-    fn load_actions_list() -> (String, String) {
+    /// 加载动作列表（用于缓存 + 别名映射）
+    fn load_actions_list() -> (String, String, ActionAliasMap, FieldAliasMap) {
         let available_actions = load_available_actions_from_file();
         let descriptions = Self::build_action_descriptions(&available_actions);
         let field_hints = Self::build_action_field_hints(&available_actions);
-        (descriptions, field_hints)
+        let alias_map = ActionAliasMap::from_actions(&available_actions);
+        let field_map = FieldAliasMap::from_actions(&available_actions);
+        (descriptions, field_hints, alias_map, field_map)
     }
 
     /// 使用默认配置创建
@@ -271,7 +283,7 @@ impl CognitiveEngine {
     }
 
     /// 获取 Outcome Memory 经验教训 prompt 段
-    fn get_outcome_context(&self) -> String {
+    pub(super) fn get_outcome_context(&self) -> String {
         self.outcome_memory
             .as_ref()
             .map(|m| m.to_prompt_context())
@@ -383,8 +395,28 @@ impl CognitiveEngine {
         chain.add_stage(planning);
 
         // 构建结构化 Intents（从 actions 数组，向后兼容旧格式）
+        // 翻译硬边界：中文/别名 → 英文 canonical，ReflectorSoul 只看到英文
         let actions = response.get_actions();
-        let intents: Vec<Intent> = actions
+        let translated_actions: Vec<DirectCognitiveAction> = actions
+            .iter()
+            .map(|a| {
+                let action_type = self
+                    .action_alias_map
+                    .translate(&a.action_type)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("未识别的动作类型: {}", a.action_type)
+                    })?;
+                let mut action_data = a.action_data.clone();
+                if let Some(ref mut data) = action_data {
+                    self.field_alias_map.translate_data(&action_type, data);
+                }
+                Ok(DirectCognitiveAction {
+                    action_type,
+                    action_data,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let intents: Vec<Intent> = translated_actions
             .iter()
             .map(|a| {
                 Intent::new(agent_id, tick_id, a.action_type.clone(), a.action_data.clone())
@@ -392,7 +424,7 @@ impl CognitiveEngine {
             })
             .collect();
 
-        let primary_action = &actions[0];
+        let primary_action = &translated_actions[0];
         let decision = super::stages::StageOutput::with_metadata(
             CognitiveStage::Decision,
             format!(
@@ -400,8 +432,8 @@ impl CognitiveEngine {
                 response.thought_process,
                 primary_action.action_type,
                 primary_action.action_data,
-                if actions.len() > 1 {
-                    format!(" (+{} 后续)", actions.len() - 1)
+                if translated_actions.len() > 1 {
+                    format!(" (+{} 后续)", translated_actions.len() - 1)
                 } else {
                     String::new()
                 }
@@ -419,7 +451,7 @@ impl CognitiveEngine {
 
         info!(
             "[{}-{}] 人魂直连认知完成，耗时 {}ms，决策: {} ({} 个 action)",
-            agent_name, tick_id, chain.duration_ms, primary_action.action_type, intents.len()
+            agent_name, tick_id, chain.duration_ms, primary_action.action_type, translated_actions.len()
         );
 
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
@@ -535,12 +567,21 @@ impl CognitiveEngine {
         chain.add_stage(planning);
 
         // 旧式路径也支持多 action 格式
+        // 翻译硬边界：中文/别名 → 英文 canonical
         let actions = response.get_actions();
+        let translated_type = self
+            .action_alias_map
+            .translate(&actions[0].action_type)
+            .unwrap_or_else(|| actions[0].action_type.clone());
+        let mut action_data = actions[0].action_data.clone();
+        if let Some(ref mut data) = action_data {
+            self.field_alias_map.translate_data(&translated_type, data);
+        }
         let intent = Intent::new(
             agent_id,
             tick_id,
-            actions[0].action_type.clone(),
-            actions[0].action_data.clone(),
+            translated_type,
+            action_data,
         )
         .with_thought(response.thought_process.clone());
 
@@ -569,376 +610,6 @@ impl CognitiveEngine {
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
 
         Ok(chain)
-    }
-
-    // ========================================================================
-    // Prompt 构建方法
-    // ========================================================================
-
-    /// 构建直连 WorldState 的 prompt（包含精确数据）
-    fn build_direct_prompt(
-        &self,
-        world_state: &WorldState,
-        memory_context: &str,
-        validation_feedback: Option<&str>,
-        persona_desc: &str,
-        agent_name: &str,
-    ) -> String {
-        let feedback_section = match validation_feedback {
-            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
-            None => String::new(),
-        };
-
-        let memory_section = if memory_context.is_empty() {
-            String::new()
-        } else {
-            format!("\n### 记忆上下文\n{memory_context}\n")
-        };
-
-        let summary_context = self.get_summary_context();
-        let outcome_section = self.get_outcome_context();
-
-        let cache = self.prompt_cache.read().unwrap();
-        let action_descriptions = cache.get_action_descriptions().to_string();
-        let action_field_hints = cache.get_action_field_hints().to_string();
-        drop(cache);
-
-        // 从 WorldState 构建精确数据段
-        let world_state_section = self.build_world_state_section(world_state);
-
-        // 尝试使用模板配置
-        if let Some(ref template_config) = self.prompt_template
-            && let Some(tmpl) = template_config.get_template("actor_direct")
-        {
-            let mut vars = HashMap::new();
-            vars.insert("feedback_section".to_string(), feedback_section);
-            vars.insert("agent_name".to_string(), agent_name.to_string());
-            vars.insert("persona".to_string(), persona_desc.to_string());
-            vars.insert("world_state_section".to_string(), world_state_section);
-            vars.insert("memory_section".to_string(), memory_section);
-            vars.insert("summary_context".to_string(), summary_context);
-            vars.insert("action_descriptions".to_string(), action_descriptions);
-            vars.insert("action_field_hints".to_string(), action_field_hints);
-            vars.insert("outcome_section".to_string(), outcome_section);
-
-            return tmpl.render_all(&vars);
-        }
-
-        // 模板不可用时的内置模板（向后兼容旧部署）
-        self.build_hardcoded_prompt(
-            &feedback_section,
-            agent_name,
-            persona_desc,
-            &world_state_section,
-            &memory_section,
-            &summary_context,
-            &outcome_section,
-            &action_descriptions,
-            &action_field_hints,
-        )
-    }
-
-    /// 构建 WorldState 数据段（共享逻辑，模板和硬编码路径共用）
-    fn build_world_state_section(&self, world_state: &WorldState) -> String {
-        let content_hint_len = self
-            .prompt_template
-            .as_ref()
-            .and_then(|t| t.templates.get("actor_direct"))
-            .and_then(|t| t.truncation.get("content_hint"))
-            .copied()
-            .unwrap_or(30);
-
-        let mut ws_parts = Vec::new();
-
-        ws_parts.push(format!("- Tick: {}", world_state.tick_id));
-        ws_parts.push(format!(
-            "- 位置: {} ({})",
-            world_state.location.name, world_state.location.node_id
-        ));
-        ws_parts.push(format!("- 时间: {}", world_state.world_time.to_chinese()));
-
-        // 自身属性描述（叙事化）
-        if !world_state.self_state.attribute_descriptions.is_empty() {
-            ws_parts.push("\n## 自身状态".to_string());
-            for (attr, desc) in &world_state.self_state.attribute_descriptions {
-                let raw = world_state
-                    .self_state
-                    .attributes
-                    .get(attr)
-                    .map(|v| format!(" [当前值: {}]", v))
-                    .unwrap_or_default();
-                ws_parts.push(format!("- {}: {}{}", attr, desc, raw));
-            }
-        }
-
-        // 背包物品（精确 item_id）
-        if !world_state.self_state.inventory.is_empty() {
-            ws_parts.push("\n## 背包物品".to_string());
-            for item in &world_state.self_state.inventory {
-                ws_parts.push(format!(
-                    "- {} ({}) x{}",
-                    item.item_id, item.name, item.quantity
-                ));
-            }
-        }
-
-        // 附近物品（精确 item_id）
-        if !world_state.nearby_items.is_empty() {
-            ws_parts.push("\n## 附近可见物品".to_string());
-            for item in &world_state.nearby_items {
-                ws_parts.push(format!(
-                    "- {} ({}) x{}",
-                    item.item_id, item.name, item.quantity
-                ));
-            }
-        }
-
-        // 附近 Agent（精确 UUID + 近期动作）
-        if !world_state.entities.is_empty() {
-            ws_parts.push("\n## 附近的人".to_string());
-            for entity in &world_state.entities {
-                ws_parts.push(format!("- {} (UUID: {})", entity.name, entity.id));
-                for action in &entity.recent_actions {
-                    let content_hint = action
-                        .content
-                        .as_ref()
-                        .map(|c| {
-                            let truncated: String = c.chars().take(content_hint_len).collect();
-                            format!("「{}」", truncated)
-                        })
-                        .unwrap_or_default();
-                    ws_parts.push(format!(
-                        "  [Tick {}] {} {}{}",
-                        action.tick_id, action.action_type, action.result, content_hint
-                    ));
-                }
-            }
-        }
-
-        // 当前位置 + 可前往地点（强化地点约束）
-        ws_parts.push(format!(
-            "\n## 当前位置：{} ({})",
-            world_state.location.name, world_state.location.node_id
-        ));
-        if !world_state.location.adjacent_nodes.is_empty() {
-            ws_parts.push("## 可前往的地点（仅这些地点存在）".to_string());
-            for node in &world_state.location.adjacent_nodes {
-                ws_parts.push(format!(
-                    "- {} ({})，移动消耗：{} tick",
-                    node.name, node.node_id, node.travel_cost
-                ));
-            }
-        }
-
-        // 可采集资源
-        if !world_state.location.gatherable_items.is_empty() {
-            ws_parts.push("\n## 当前位置可采集的资源".to_string());
-            for item in &world_state.location.gatherable_items {
-                ws_parts.push(format!("- {} ({})", item.name, item.item_id));
-            }
-        }
-
-        // 事件日志
-        if !world_state.events_log.is_empty() {
-            ws_parts.push("\n## 近期事件".to_string());
-            for event in &world_state.events_log {
-                ws_parts.push(format!("- {}", event.description));
-            }
-        }
-
-        ws_parts.join("\n")
-    }
-
-    /// 内置硬编码 prompt（向后兼容旧部署）
-    #[allow(clippy::too_many_arguments)]
-    fn build_hardcoded_prompt(
-        &self,
-        feedback_section: &str,
-        agent_name: &str,
-        persona_desc: &str,
-        world_state_section: &str,
-        memory_section: &str,
-        summary_context: &str,
-        outcome_section: &str,
-        action_descriptions: &str,
-        action_field_hints: &str,
-    ) -> String {
-        format!(
-            r#"{feedback_section}你是 {agent_name}。
-{persona}
-
-## 当前世界状态
-{world_state_section}
-{memory_section}
-{summary_context}
-{outcome_section}
-## 任务
-基于你的性格和当前状态，做出决策。你直接输出结构化 Intent，包含精确的 ID。
-
-## 生存法则
-- 当饥饿或口渴描述中出现紧迫措辞时（如"饥肠辘辘/饥饿难耐/急需"等），进食/饮水是最高优先级
-- 没有食物时：先拾取地上的食物/水（pickup），再进食/饮水（eat/drink）
-- 背包和地面都没有时：采集（gather）或移动到可能有资源的地点（move）
-- idle（原地休息）是合法行为，不必强求每个 tick 都行动
-- eat/drink 的 action_data 必须使用"背包物品"或"附近物品"中列出的精确 item_id，禁止使用物品名称或自创 ID
-
-## 叙事限制
-- 叙事只能引用"背包物品"或"附近可见物品"中确实存在的物品
-- 不得描述其他角色的行为，除非"附近的人"中有该角色的近期动作记录
-- 不得与不在"附近的人"列表中的角色互动
-- **世界地图仅由"可前往的地点"定义。不存在其他地点。不得在 thought_process 或 environment 中提及未列出的地点**
-- 不得编造未发生的事件（如劫镖、打斗、天灾），除非"近期事件"中有记录
-- 如果对某事没有观察证据，thought_process 中应标注[未确认]
-
-## 可做之事（参考）
-{action_descriptions}
-
-## 输出格式
-严格输出以下 JSON（不要添加任何额外文本）：
-{{
-  "self_status": "你的状态简述 (30字以内)",
-  "environment": "环境描述 (30字以内)",
-  "key_observations": ["观察1", "观察2"],
-  "primary_drive": "当前主要驱动力",
-  "drive_intensity": 5,
-  "thought_process": "完整思考过程 (200字以内)",
-  "actions": [
-    {{"action_type": "动作类型", "action_data": {{}}}}
-  ]
-}}
-
-### actions 规则：
-- actions 数组包含 1-3 个按顺序执行的动作
-- 大多数情况只需要 1 个动作
-- 只有需要连续操作时才输出多个（如：先 pickup 再 eat，先 move 再 gather）
-- 后续动作依赖前一个动作的成功（如 pickup 失败则 eat 不会执行）
-- 每个动作的 action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造
-
-### action_data 字段要求：
-{action_field_hints}"#,
-            agent_name = agent_name,
-            persona = persona_desc,
-            world_state_section = world_state_section,
-            memory_section = memory_section,
-            summary_context = summary_context,
-            feedback_section = feedback_section,
-            action_descriptions = action_descriptions,
-            action_field_hints = action_field_hints,
-        )
-    }
-
-    /// 构建旧式 prompt（不接收 WorldState，降级路径）
-    fn build_legacy_prompt(
-        &self,
-        tick_id: i64,
-        memory_context: &str,
-        validation_feedback: Option<&str>,
-        persona_desc: &str,
-        agent_name: &str,
-    ) -> String {
-        let feedback_section = match validation_feedback {
-            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
-            None => String::new(),
-        };
-
-        let memory_section = if memory_context.is_empty() {
-            String::new()
-        } else {
-            format!("\n### 当前状态与感知\n{memory_context}\n")
-        };
-
-        let summary_context = self.get_summary_context();
-
-        let cache = self.prompt_cache.read().unwrap();
-        let action_list = cache.get_actions_list().to_string();
-        drop(cache);
-
-        format!(
-            r#"{feedback_section}你是 {agent_name}。
-{persona}
-
-## 当前游戏状态 (Tick {tick_id})
-{memory_section}
-{summary_context}
-## 任务
-基于你的性格和当前状态，做出决策。
-
-## 生存法则
-- 饥饿或口渴严重时，进食/饮水是最高优先级
-- 没有食物时：先拾取地上的食物/水
-- idle（原地休息）是合法行为
-
-## 可做之事（参考）
-{action_list}
-
-## 输出格式
-严格输出以下 JSON：
-{{
-  "self_status": "你的状态简述 (30字以内)",
-  "environment": "环境描述 (30字以内)",
-  "key_observations": ["观察1", "观察2"],
-  "primary_drive": "当前主要驱动力",
-  "drive_intensity": 5,
-  "thought_process": "完整思考过程 (200字以内)",
-  "actions": [
-    {{"action_type": "动作类型", "action_data": {{}}}}
-  ]
-}}
-- actions 数组 1-3 个，按顺序执行，后续依赖前一个成功"#,
-            tick_id = tick_id,
-            agent_name = agent_name,
-            persona = persona_desc,
-            memory_section = memory_section,
-            summary_context = summary_context,
-            feedback_section = feedback_section,
-            action_list = action_list,
-        )
-    }
-
-    /// 从动作列表构建动作描述（"可做之事"部分，含语义说明）
-    fn build_action_descriptions(actions: &[AvailableAction]) -> String {
-        if actions.is_empty() {
-            return "- idle: 休息".to_string();
-        }
-
-        actions
-            .iter()
-            .map(|a| {
-                let desc = if a.description.is_empty() {
-                    a.name.clone()
-                } else {
-                    a.description.clone()
-                };
-                format!("- {}: {}", a.action, desc)
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    /// 从动作列表构建字段 schema（"action_data 字段要求"部分）
-    fn build_action_field_hints(actions: &[AvailableAction]) -> String {
-        if actions.is_empty() {
-            return "- idle: (action_data: null)".to_string();
-        }
-
-        actions
-            .iter()
-            .map(|a| {
-                let fields_hint = if a.required_fields.is_empty() {
-                    "(action_data: null)".to_string()
-                } else {
-                    let fields_str = a
-                        .required_fields
-                        .iter()
-                        .map(|f| format!("\"{}\": ...", f))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("(action_data: {{ {} }})", fields_str)
-                };
-                format!("- {}: {}", a.action, fields_hint)
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
     }
 
     // ========================================================================
