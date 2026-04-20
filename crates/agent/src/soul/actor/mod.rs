@@ -9,6 +9,7 @@
 pub mod chain;
 pub mod engine;
 pub mod prompt_cache; // Prompt 缓存模块 - 叙事冗余优化
+pub mod prompt_template; // Prompt 模板配置加载器
 pub mod stages;
 pub mod summary_window; // 滑动上下文窗口 - 叙事冗余优化
 

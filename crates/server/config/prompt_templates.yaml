@@ -1,0 +1,144 @@
+# ============================================================================
+# Agent Prompt 模板配置
+# ============================================================================
+#
+# ActorSoul 的 prompt 模板，数据驱动替代硬编码。
+# 占位符格式：{variable_name}
+#
+# 必须包含 required_sections 中列出的所有 section，否则启动时 fail-fast。
+#
+# truncation 段：控制各处文本截断长度，消除 .take(N) 魔法数字。
+# ============================================================================
+
+version: "0.0.1"
+description: "Agent prompt 模板配置"
+
+templates:
+  actor_direct:
+    required_sections:
+      - header
+      - world_state
+      - task
+      - survival_rules
+      - narrative_limits
+      - action_reference
+      - output_format
+
+    sections:
+      header: |
+        {feedback_section}你是 {agent_name}。
+        {persona}
+
+      world_state: |
+        ## 当前世界状态
+        {world_state_section}
+        {memory_section}
+        {summary_context}
+
+      task: |
+        ## 任务
+        基于你的性格和当前状态，做出决策。你直接输出结构化 Intent，包含精确的 ID。
+
+      survival_rules: |
+        ## 生存法则
+        - 当饥饿或口渴描述中出现紧迫措辞时（如"饥肠辘辘/饥饿难耐/急需"等），进食/饮水是最高优先级
+        - 没有食物时：先拾取地上的食物/水（pickup），再进食/饮水（eat/drink）
+        - 背包和地面都没有时：采集（gather）或移动到可能有资源的地点（move）
+        - idle（原地休息）是合法行为，不必强求每个 tick 都行动
+        - eat/drink 的 action_data 必须使用"背包物品"或"附近物品"中列出的精确 item_id，禁止使用物品名称或自创 ID
+
+      narrative_limits: |
+        ## 叙事限制
+        - 叙事只能引用"背包物品"或"附近可见物品"中确实存在的物品
+        - 不得描述其他角色的行为，除非"附近的人"中有该角色的近期动作记录
+        - 不得与不在"附近的人"列表中的角色互动
+        - **世界地图仅由"可前往的地点"定义。不存在其他地点。不得在 thought_process 或 environment 中提及未列出的地点**
+        - 不得编造未发生的事件（如劫镖、打斗、天灾），除非"近期事件"中有记录
+        - 如果对某事没有观察证据，thought_process 中应标注[未确认]
+
+      action_reference: |
+        ## 可做之事（参考）
+        {action_descriptions}
+
+      output_format: |
+        ## 输出格式
+        严格输出以下 JSON（不要添加任何额外文本）：
+        {{
+          "self_status": "你的状态简述 (30字以内)",
+          "environment": "环境描述 (30字以内)",
+          "key_observations": ["观察1", "观察2"],
+          "primary_drive": "当前主要驱动力",
+          "drive_intensity": 5,
+          "thought_process": "完整思考过程 (200字以内)",
+          "action_type": "动作类型（如 eat, drink, pickup, move, idle, speak 等）",
+          "action_data": {{}}
+        }}
+
+        ### action_data 字段要求：
+        {action_field_hints}
+
+        注意：action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造。
+
+    # 截断长度配置（消除 .take(N) 魔法数字）
+    truncation:
+      planning_description: 100
+      content_hint: 30
+      summary_window: 50
+
+  # RuleEngine reject 反馈模板
+  # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正
+  reject_feedback:
+    required_sections:
+      - eat
+      - drink
+      - move
+    sections:
+      eat: |
+        吃东西失败：物品ID无效。背包可用物品：[{available_items}]。请使用 eat 命令，item_id 必须是上述之一。
+      drink: |
+        喝水失败：物品ID无效。背包可用物品：[{available_items}]。请使用 drink 命令，item_id 必须是上述之一。
+      move: |
+        移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 move 命令，target_location 必须是上述之一。
+    truncation:
+      max_items: 5
+
+  # 生存压力注入模板
+  # hunger/thirst 低于阈值时，向 prompt 注入紧急信号引导 LLM 优先处理生存
+  # 注意：item_type 不区分食物/饮品，列出所有可用物品由 LLM 自行判断
+  survival_warnings:
+    required_sections:
+      - hunger_with_items
+      - hunger_with_ground
+      - hunger_nothing
+      - thirst_with_items
+      - thirst_with_ground
+      - thirst_nothing
+    sections:
+      hunger_with_items: |
+        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！背包可用物品：{items}。执行 eat，item_id 必须是列表中的精确 ID。选择能恢复饥饿值的物品。
+      hunger_with_ground: |
+        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！地上有：{items}。先 pickup 再 eat。选择能恢复饥饿值的物品。
+      hunger_nothing: |
+        【紧急】你极度饥饿（当前 {value}/{max}），附近无食物！移动到有资源的地点或采集。
+      thirst_with_items: |
+        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！背包可用物品：{items}。执行 drink，item_id 必须是列表中的精确 ID。选择能恢复口渴值的物品。
+      thirst_with_ground: |
+        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先 pickup 再 drink。选择能恢复口渴值的物品。
+      thirst_nothing: |
+        【紧急】你极度口渴（当前 {value}/{max}），附近无水源！移动到有水的地点或采集。
+    truncation: {}
+
+  # Sanity 注入模板
+  # 理智值降低时，向 prompt 注入精神状态描述，引导 LLM 产生混乱行为
+  sanity_warnings:
+    required_sections:
+      - mild
+      - critical
+    sections:
+      mild: |
+        【心神不宁】你的精神状态有些恍惚（理智 {value}/{max}），思绪开始混乱，可能做出不合常理的决定。
+      critical: |
+        【精神崩溃】你已失去理智控制（理智 {value}/{max}）！你的行为可能变得疯狂、混乱、不可理喻。可以做出攻击他人、丢弃物品、胡乱吃喝、无目的移动等行为。这不完全受你控制。
+    truncation:
+      warning_threshold: 50
+      critical_threshold: 30

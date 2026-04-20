@@ -700,27 +700,27 @@ impl Agent {
 
     /// 将天魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈
     ///
-    /// 人魂不应看到 "item_id 无效" 这样的 meta 信息，
-    /// 只需要知道"想做的事没做成"以及"为什么"的叙事化描述。
-    ///
-    /// 使用 RuleEngine 常量前缀匹配，避免 string.contains 紧耦合。
+    /// F2 增强：eat/drink/move 驳回已包含可用选项上下文，直接透传给 LLM。
+    /// 其他类型驳回仍叙事化处理。
     pub(crate) fn narrativize_rejection(reason: &str) -> String {
         use crate::soul::reflector::rule_engine::engine::{
             ERR_DRINK_INVALID_ITEM, ERR_EAT_INVALID_ITEM, ERR_MOVE_INVALID_TARGET,
         };
 
-        // RuleEngine 技术性驳回 → 叙事化（用常量前缀匹配）
-        if reason.starts_with(ERR_EAT_INVALID_ITEM) || reason.starts_with(ERR_DRINK_INVALID_ITEM) {
-            "你想吃喝点东西，但发现手边没有合适的物品。也许该换个方式，或者先看看周围有什么。"
-                .to_string()
-        } else if reason.starts_with(ERR_MOVE_INVALID_TARGET) {
-            "你想要移动到别处，但发现那条路走不通。也许该重新考虑目的地。".to_string()
-        } else if reason.contains("不在合法列表") {
-            "你想做一件事，但似乎无法如愿。也许该换个行动方式。".to_string()
-        } else {
-            // LLM 驳回（人设/世界观）已经是自然语言，直接使用
-            reason.to_string()
+        // F2: RuleEngine 增强驳回（含上下文选项）直接透传
+        if reason.starts_with(ERR_EAT_INVALID_ITEM)
+            || reason.starts_with(ERR_DRINK_INVALID_ITEM)
+            || reason.starts_with(ERR_MOVE_INVALID_TARGET)
+        {
+            return reason.to_string();
         }
+
+        if reason.contains("不在合法列表") {
+            return "你想做一件事，但似乎无法如愿。也许该换个行动方式。".to_string();
+        }
+
+        // LLM 驳回（人设/世界观）已经是自然语言，直接使用
+        reason.to_string()
     }
 
     /// 验证人设（注册前调用，客户端本地）
