@@ -21,10 +21,13 @@ pub struct CognitiveChain {
     pub tick_id: i64,
     /// 各阶段输出
     pub stages: Vec<StageOutput>,
-    /// 最终意图
+    /// 最终意图（primary intent）
     pub final_intent: Intent,
     /// 认知耗时（毫秒）
     pub duration_ms: u64,
+    /// multi-intent 后续 actions（由 engine 填充，供 lifecycle 读取）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_intents: Option<Vec<Intent>>,
 }
 
 impl CognitiveChain {
@@ -42,6 +45,7 @@ impl CognitiveChain {
                 None,
             ),
             duration_ms: 0,
+            multi_intents: None,
         }
     }
 
@@ -59,6 +63,7 @@ impl CognitiveChain {
                 None,
             ),
             duration_ms: 0,
+            multi_intents: None,
         }
     }
 

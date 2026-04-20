@@ -52,7 +52,20 @@ impl Default for CognitiveEngineConfig {
     }
 }
 
+/// 单个结构化 action
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DirectCognitiveAction {
+    /// 结构化 action_type（如 "eat", "move", "idle"）
+    pub action_type: String,
+    /// 结构化 action_data（精确 ID）
+    pub action_data: Option<serde_json::Value>,
+}
+
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
+///
+/// 支持两种 LLM 输出格式（向后兼容）：
+/// - 新格式: `actions: [{action_type, action_data}, ...]` — 1-3 个 sequential actions
+/// - 旧格式: `action_type + action_data` — 单个 action（自动转换为 actions 数组）
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct DirectCognitiveResponse {
     /// 状态感知
@@ -67,10 +80,38 @@ struct DirectCognitiveResponse {
     drive_intensity: u8,
     /// 思考过程
     thought_process: String,
-    /// 结构化 action_type（如 "eat", "move", "idle"）
-    action_type: String,
-    /// 结构化 action_data（精确 ID）
+    /// 多 action 格式（新）
+    #[serde(default)]
+    actions: Vec<DirectCognitiveAction>,
+    /// 单 action 格式（旧，向后兼容）
+    #[serde(default)]
+    action_type: Option<String>,
+    /// 单 action_data 格式（旧，向后兼容）
+    #[serde(default)]
     action_data: Option<serde_json::Value>,
+}
+
+impl DirectCognitiveResponse {
+    /// 统一获取 actions 列表
+    ///
+    /// 优先使用 `actions` 字段（新格式），fallback 到 `action_type` + `action_data`（旧格式）。
+    fn get_actions(&self) -> Vec<DirectCognitiveAction> {
+        if !self.actions.is_empty() {
+            return self.actions.clone();
+        }
+        // 旧格式 fallback
+        if let Some(ref at) = self.action_type {
+            vec![DirectCognitiveAction {
+                action_type: at.clone(),
+                action_data: self.action_data.clone(),
+            }]
+        } else {
+            vec![DirectCognitiveAction {
+                action_type: "idle".to_string(),
+                action_data: None,
+            }]
+        }
+    }
 }
 
 /// 认知引擎（人魂直连 WorldState）
@@ -324,38 +365,54 @@ impl CognitiveEngine {
         );
         chain.add_stage(planning);
 
-        // 构建结构化 Intent（直接使用 LLM 输出的 action_type + action_data）
-        let intent = Intent::new(
-            agent_id,
-            tick_id,
-            response.action_type.clone(),
-            response.action_data.clone(),
-        )
-        .with_thought(response.thought_process.clone());
+        // 构建结构化 Intents（从 actions 数组，向后兼容旧格式）
+        let actions = response.get_actions();
+        let intents: Vec<Intent> = actions
+            .iter()
+            .map(|a| {
+                Intent::new(agent_id, tick_id, a.action_type.clone(), a.action_data.clone())
+                    .with_thought(response.thought_process.clone())
+            })
+            .collect();
 
+        let primary_action = &actions[0];
         let decision = super::stages::StageOutput::with_metadata(
             CognitiveStage::Decision,
             format!(
-                "思考: {}\n决策: {} {:?}",
-                response.thought_process, response.action_type, response.action_data
+                "思考: {}\n决策: {} {:?}{}",
+                response.thought_process,
+                primary_action.action_type,
+                primary_action.action_data,
+                if actions.len() > 1 {
+                    format!(" (+{} 后续)", actions.len() - 1)
+                } else {
+                    String::new()
+                }
             ),
             serde_json::to_value(&response)?,
         );
         chain.add_stage(decision);
-        chain.final_intent = intent.clone();
+        chain.final_intent = intents[0].clone();
 
         thinking_log::log_llm(&agent_name, tick_id, "Direct", &prompt, &response_json);
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
-        self.push_summary_to_window(&chain, &intent);
+        self.push_summary_to_window(&chain, &intents[0]);
 
         info!(
-            "[{}-{}] 人魂直连认知完成，耗时 {}ms，决策: {}",
-            agent_name, tick_id, chain.duration_ms, response.action_type
+            "[{}-{}] 人魂直连认知完成，耗时 {}ms，决策: {} ({} 个 action)",
+            agent_name, tick_id, chain.duration_ms, primary_action.action_type, intents.len()
         );
 
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
+
+        // 将 multi-intent 存入 chain metadata 供 lifecycle 读取
+        chain.multi_intents = if intents.len() > 1 {
+            Some(intents[1..].to_vec())
+        } else {
+            None
+        };
 
         Ok(chain)
     }
@@ -460,11 +517,13 @@ impl CognitiveEngine {
         );
         chain.add_stage(planning);
 
+        // 旧式路径也支持多 action 格式
+        let actions = response.get_actions();
         let intent = Intent::new(
             agent_id,
             tick_id,
-            response.action_type.clone(),
-            response.action_data.clone(),
+            actions[0].action_type.clone(),
+            actions[0].action_data.clone(),
         )
         .with_thought(response.thought_process.clone());
 
@@ -472,7 +531,7 @@ impl CognitiveEngine {
             CognitiveStage::Decision,
             format!(
                 "思考: {}\n决策: {} {:?}",
-                response.thought_process, response.action_type, response.action_data
+                response.thought_process, actions[0].action_type, actions[0].action_data
             ),
             serde_json::to_value(&response)?,
         );

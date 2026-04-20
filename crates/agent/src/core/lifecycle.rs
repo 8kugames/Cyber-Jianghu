@@ -975,7 +975,21 @@ impl super::Agent {
                         let mut batch_layers: Vec<super::agent::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
-                        for intent in std::iter::once(raw_intent.clone()) {
+                        // multi-intent pipeline: primary + subsequent intents
+                        let max_per_tick = _max_intents;
+                        let all_raw_intents: Vec<Intent> = {
+                            let mut intents = vec![raw_intent.clone()];
+                            if let Some(ref chain) = _cognitive_chain
+                                && let Some(ref multi) = chain.multi_intents
+                            {
+                                for i in multi.iter().take(max_per_tick.saturating_sub(1)) {
+                                    intents.push(i.clone());
+                                }
+                            }
+                            intents
+                        };
+
+                        for intent in all_raw_intents {
                             // 分级决策：Skip 类型只做 RuleEngine（跳过 LLM）
                             let skip_llm = Self::should_skip_llm_validation(
                                 &intent, graded_config.as_ref(),
