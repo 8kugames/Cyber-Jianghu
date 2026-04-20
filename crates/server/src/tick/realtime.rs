@@ -11,14 +11,18 @@
 // - write-through: persist 到 DB 确认后才更新 DashMap
 // - 非阻塞: handler.rs 用 try_send，队列满时返回错误而非 block
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::db::DbPool;
 use crate::dialogue::DialogueManager;
+use crate::game_data::GameDataCache;
+use crate::game_data::registry::ItemRegistry;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 use crate::state::AgentStateCache;
 use crate::tick::decay;
@@ -63,6 +67,8 @@ pub struct IntentWorker {
     agent_to_device_map: AgentToDeviceMap,
     /// 对话管理器（whisper session 生命周期管理）
     dialogue_manager: Arc<DialogueManager>,
+    /// 游戏数据缓存（构建 WorldState 用）
+    game_data_cache: Arc<GameDataCache>,
 }
 
 impl IntentWorker {
@@ -73,6 +79,7 @@ impl IntentWorker {
         connection_manager: ConnectionManager,
         agent_to_device_map: AgentToDeviceMap,
         dialogue_manager: Arc<DialogueManager>,
+        game_data_cache: Arc<GameDataCache>,
     ) -> Self {
         Self {
             db_pool,
@@ -81,6 +88,7 @@ impl IntentWorker {
             connection_manager,
             agent_to_device_map,
             dialogue_manager,
+            game_data_cache,
         }
     }
 
@@ -199,7 +207,10 @@ impl IntentWorker {
         )
         .await;
 
-        // 8. 广播事件给同位置 Agent
+        // 8. 交互驱动即时推送 WorldState（提交 Agent + 同位置 Agent）
+        self.send_reactive_world_state(agent_id, tick_id).await;
+
+        // 9. 广播事件给同位置 Agent
         for (target_id, event) in &result.events {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
                 warn!("事件广播失败: target={}, error={}", target_id, e);
@@ -354,6 +365,157 @@ impl IntentWorker {
             None,
         )
         .await;
+    }
+
+    /// 交互驱动即时推送 WorldState
+    ///
+    /// Intent 执行后，为提交 Agent 及同位置在线 Agent 构建并发送最新 WorldState。
+    /// 确保 Agent 在下一次认知决策前拥有最新的世界状态。
+    async fn send_reactive_world_state(&self, agent_id: Uuid, tick_id: i64) {
+        // 1. 从 DashMap 读取更新后的状态
+        let updated_state = match self.state_cache.get(&agent_id) {
+            Some(r) => r.value().clone(),
+            None => {
+                debug!("Agent {} 不在缓存中，跳过 reactive WorldState", agent_id);
+                return;
+            }
+        };
+
+        // 2. 收集同位置 Agent（含自身）
+        let location = updated_state.node_id.clone();
+        let co_located: Vec<AgentState> = self
+            .state_cache
+            .iter()
+            .filter(|r| r.value().node_id == location && r.value().is_alive)
+            .map(|r| r.value().clone())
+            .collect();
+
+        let co_located_ids: Vec<Uuid> = co_located.iter().map(|s| s.agent_id).collect();
+
+        // 3. 批量加载所需数据
+        let agent_names = match crate::db::get_all_agents(&self.db_pool).await {
+            Ok(agents) => agents
+                .into_iter()
+                .map(|a| (a.agent_id, a.name))
+                .collect::<HashMap<Uuid, String>>(),
+            Err(e) => {
+                warn!("reactive WorldState: 加载 agent 名称失败: {}", e);
+                return;
+            }
+        };
+
+        let inventories =
+            match crate::inventory::InventoryManager::get_all_items_batch(&self.db_pool, &co_located_ids)
+                .await
+            {
+                Ok(batch) => batch,
+                Err(e) => {
+                    warn!("reactive WorldState: 加载背包失败: {}", e);
+                    HashMap::new()
+                }
+            };
+
+        let ground_items =
+            match crate::db::get_ground_items_by_nodes(&self.db_pool, std::slice::from_ref(&location)).await {
+                Ok(map) => map,
+                Err(e) => {
+                    warn!("reactive WorldState: 加载地面物品失败: {}", e);
+                    HashMap::new()
+                }
+            };
+
+        // 在线状态
+        let online_ids: HashSet<Uuid> = {
+            let connections = self.connection_manager.read().await;
+            connections.values().map(|c| c.agent_id).collect()
+        };
+
+        // 4. 为每个同位置 Agent 构建个性化 WorldState 并发送
+        for state in &co_located {
+            let target_id = state.agent_id;
+            let inventory = inventories
+                .get(&target_id)
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|item| {
+                            let config = ItemRegistry::get(&item.item_id);
+                            crate::models::InventoryItem {
+                                item_id: item.item_id.clone(),
+                                name: config
+                                    .as_ref()
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| item.item_id.clone()),
+                                quantity: item.quantity,
+                                is_equipped: item.is_equipped,
+                                item_type: config
+                                    .as_ref()
+                                    .map(|c| c.item_type.clone())
+                                    .unwrap_or_default(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let nearby = ground_items
+                .get(&location)
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|gi| {
+                            let config = ItemRegistry::get(&gi.item_id);
+                            cyber_jianghu_protocol::SceneItem {
+                                item_id: gi.item_id.clone(),
+                                name: config
+                                    .as_ref()
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| gi.item_id.clone()),
+                                quantity: gi.quantity,
+                                item_type: config
+                                    .as_ref()
+                                    .map(|c| c.item_type.clone())
+                                    .unwrap_or_default(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let world_state = super::broadcaster::build_reactive_world_state(
+                state,
+                &co_located,
+                tick_id,
+                &inventory,
+                &nearby,
+                &agent_names,
+                &online_ids,
+                &self.game_data_cache,
+            );
+
+            if let Err(e) = super::send_to_agent(
+                target_id,
+                &cyber_jianghu_protocol::ServerMessage::WorldState {
+                    data: world_state,
+                },
+                &self.connection_manager,
+                &self.agent_to_device_map,
+            )
+            .await
+            {
+                debug!(
+                    "reactive WorldState 发送失败: agent={}, error={}",
+                    target_id, e
+                );
+            }
+        }
+
+        debug!(
+            "reactive WorldState: agent={}, location={}, 推送 {} 个 Agent",
+            agent_id,
+            location,
+            co_located.len()
+        );
     }
 
     /// 广播事件给指定 Agent

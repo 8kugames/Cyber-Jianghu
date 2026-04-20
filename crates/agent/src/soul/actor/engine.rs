@@ -7,12 +7,14 @@
 // 天魂翻译步骤已消除。
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
 use super::chain::CognitiveChain;
 use super::prompt_cache::PromptCache;
+use super::prompt_template::PromptTemplateConfig;
 use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use crate::component::llm::{LlmClient, LlmClientExt};
@@ -90,6 +92,8 @@ pub struct CognitiveEngine {
     prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
+    /// Prompt 模板配置（从 YAML 加载，None 时 fail-fast）
+    prompt_template: Option<PromptTemplateConfig>,
 }
 
 impl CognitiveEngine {
@@ -104,11 +108,14 @@ impl CognitiveEngine {
             &config.persona,
         );
 
+        let prompt_template = Self::load_prompt_template();
+
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
+            prompt_template,
         }
     }
 
@@ -127,12 +134,69 @@ impl CognitiveEngine {
             &config.persona,
         );
 
+        let prompt_template = Self::load_prompt_template();
+
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
+            prompt_template,
         }
+    }
+
+    /// 加载 prompt 模板配置
+    ///
+    /// 查找路径：
+    /// 1. $CYBER_JIANGHU_CONFIG_DIR/prompt_templates.yaml
+    /// 2. ~/.cyber-jianghu/config/prompt_templates.yaml
+    /// 3. 内置默认路径（编译时嵌入或同级 config/）
+    ///
+    /// Fail-fast: 配置文件存在但格式错误时 panic。
+    /// 不存在时使用硬编码模板（向后兼容旧部署）。
+    fn load_prompt_template() -> Option<PromptTemplateConfig> {
+        let search_paths = [
+            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
+            dirs::home_dir().map(|h| {
+                h.join(".cyber-jianghu")
+                    .join("config")
+                    .join("prompt_templates.yaml")
+            }),
+            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
+        ];
+
+        for path_opt in &search_paths {
+            if let Some(path) = path_opt
+                && path.exists()
+            {
+                match PromptTemplateConfig::load_from_file(path) {
+                    Ok(config) => {
+                        info!("已加载 prompt 模板: {:?}", path);
+                        return Some(config);
+                    }
+                    Err(e) => {
+                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                    }
+                }
+            }
+        }
+        info!("未找到 prompt_templates.yaml，使用内置模板");
+        None
+    }
+
+    /// 获取 Prompt 模板配置的引用
+    pub fn prompt_template(&self) -> Option<&PromptTemplateConfig> {
+        self.prompt_template.as_ref()
+    }
+
+    /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
+    fn truncation(&self, key: &str, default: usize) -> usize {
+        self.prompt_template
+            .as_ref()
+            .map(|c| c.truncation("actor_direct", key, default))
+            .unwrap_or(default)
     }
 
     /// 加载动作列表（用于缓存）
@@ -249,7 +313,11 @@ impl CognitiveEngine {
 
         let planning = super::stages::StageOutput::with_metadata(
             CognitiveStage::Planning,
-            response.thought_process.chars().take(100).collect(),
+            response
+                .thought_process
+                .chars()
+                .take(self.truncation("planning_description", 100))
+                .collect(),
             serde_json::json!({
                 "thought_process": response.thought_process,
             }),
@@ -383,7 +451,11 @@ impl CognitiveEngine {
 
         let planning = super::stages::StageOutput::with_metadata(
             CognitiveStage::Planning,
-            response.thought_process.chars().take(100).collect(),
+            response
+                .thought_process
+                .chars()
+                .take(self.truncation("planning_description", 100))
+                .collect(),
             serde_json::json!({ "thought_process": response.thought_process }),
         );
         chain.add_stage(planning);
@@ -455,6 +527,48 @@ impl CognitiveEngine {
         drop(cache);
 
         // 从 WorldState 构建精确数据段
+        let world_state_section = self.build_world_state_section(world_state);
+
+        // 尝试使用模板配置
+        if let Some(ref template_config) = self.prompt_template
+            && let Some(tmpl) = template_config.get_template("actor_direct")
+        {
+            let mut vars = HashMap::new();
+            vars.insert("feedback_section".to_string(), feedback_section);
+            vars.insert("agent_name".to_string(), agent_name.to_string());
+            vars.insert("persona".to_string(), persona_desc.to_string());
+            vars.insert("world_state_section".to_string(), world_state_section);
+            vars.insert("memory_section".to_string(), memory_section);
+            vars.insert("summary_context".to_string(), summary_context);
+            vars.insert("action_descriptions".to_string(), action_descriptions);
+            vars.insert("action_field_hints".to_string(), action_field_hints);
+
+            return tmpl.render_all(&vars);
+        }
+
+        // 模板不可用时的内置模板（向后兼容旧部署）
+        self.build_hardcoded_prompt(
+            &feedback_section,
+            agent_name,
+            persona_desc,
+            &world_state_section,
+            &memory_section,
+            &summary_context,
+            &action_descriptions,
+            &action_field_hints,
+        )
+    }
+
+    /// 构建 WorldState 数据段（共享逻辑，模板和硬编码路径共用）
+    fn build_world_state_section(&self, world_state: &WorldState) -> String {
+        let content_hint_len = self
+            .prompt_template
+            .as_ref()
+            .and_then(|t| t.templates.get("actor_direct"))
+            .and_then(|t| t.truncation.get("content_hint"))
+            .copied()
+            .unwrap_or(30);
+
         let mut ws_parts = Vec::new();
 
         ws_parts.push(format!("- Tick: {}", world_state.tick_id));
@@ -506,9 +620,11 @@ impl CognitiveEngine {
             for entity in &world_state.entities {
                 ws_parts.push(format!("- {} (UUID: {})", entity.name, entity.id));
                 for action in &entity.recent_actions {
-                    let content_hint = action.content.as_ref()
+                    let content_hint = action
+                        .content
+                        .as_ref()
                         .map(|c| {
-                            let truncated: String = c.chars().take(30).collect();
+                            let truncated: String = c.chars().take(content_hint_len).collect();
                             format!("「{}」", truncated)
                         })
                         .unwrap_or_default();
@@ -551,8 +667,22 @@ impl CognitiveEngine {
             }
         }
 
-        let world_state_section = ws_parts.join("\n");
+        ws_parts.join("\n")
+    }
 
+    /// 内置硬编码 prompt（向后兼容旧部署）
+    #[allow(clippy::too_many_arguments)]
+    fn build_hardcoded_prompt(
+        &self,
+        feedback_section: &str,
+        agent_name: &str,
+        persona_desc: &str,
+        world_state_section: &str,
+        memory_section: &str,
+        summary_context: &str,
+        action_descriptions: &str,
+        action_field_hints: &str,
+    ) -> String {
         format!(
             r#"{feedback_section}你是 {agent_name}。
 {persona}
@@ -732,12 +862,22 @@ impl CognitiveEngine {
 
         let perception = chain
             .get_stage(CognitiveStage::Perception)
-            .map(|s| s.content.chars().take(50).collect())
+            .map(|s| {
+                s.content
+                    .chars()
+                    .take(self.truncation("summary_window", 50))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let motivation = chain
             .get_stage(CognitiveStage::Motivation)
-            .map(|s| s.content.chars().take(50).collect())
+            .map(|s| {
+                s.content
+                    .chars()
+                    .take(self.truncation("summary_window", 50))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let summary = NarrativeSummary {
@@ -745,7 +885,7 @@ impl CognitiveEngine {
             perception,
             motivation,
             decision,
-            outcome: "待执行".to_string(),
+            outcome: "执行中".to_string(),
         };
 
         self.push_summary(summary);
@@ -755,6 +895,13 @@ impl CognitiveEngine {
     pub fn push_summary(&self, summary: NarrativeSummary) {
         if let Ok(mut window) = self.summary_window.write() {
             window.push(summary);
+        }
+    }
+
+    /// 更新最近一条摘要的 outcome（Intent 执行结果写回）
+    pub fn update_summary_outcome(&self, outcome: String) {
+        if let Ok(mut window) = self.summary_window.write() {
+            window.update_last_outcome(outcome);
         }
     }
 

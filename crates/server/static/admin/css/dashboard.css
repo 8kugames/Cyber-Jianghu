@@ -1,6 +1,6 @@
 /* ============================================================================
-   Cyber-Jianghu Dashboard CSS — One Light UI Theme
-   Based on Atom One Light UI design system
+   Cyber-Jianghu Dashboard CSS — Atom One Light UI Theme
+   Based on Atom One Light UI design system, with ink-wash animations
    ============================================================================ */
 
 /* One Light UI Design Tokens -------------------------------------------- */
@@ -68,6 +68,47 @@
     --radius-sm: 3px;
     --radius-md: 6px;
     --radius-lg: 10px;
+
+    /* Animation */
+    --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Animations -------------------------------------------------------- */
+@keyframes ink-fade-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ink-expand {
+    0%   { opacity: 0; transform: scale(0.92); }
+    60%  { opacity: 1; transform: scale(1.02); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ink-dot {
+    0%   { transform: scale(0); opacity: 0.8; }
+    100% { transform: scale(3); opacity: 0; }
+}
+
+@keyframes brush-stroke {
+    from { stroke-dashoffset: 100%; opacity: 0; }
+    to   { stroke-dashoffset: 0; opacity: 1; }
+}
+
+@keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 var(--accent-muted); }
+    50%       { box-shadow: 0 0 12px 4px var(--accent-muted); }
+}
+
+@keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(12px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes typewriter-scroll {
+    from { opacity: 0.4; }
+    to   { opacity: 1; }
 }
 
 /* Reset & Base -------------------------------------------------------- */
@@ -122,8 +163,9 @@ header h1 {
     font-size: 13px;
     color: var(--text-secondary);
     border-bottom: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
+    transition: color 0.2s var(--ease-out), border-color 0.2s, background 0.2s;
     user-select: none;
+    position: relative;
 }
 
 .nav-tab:hover {
@@ -134,6 +176,18 @@ header h1 {
 .nav-tab.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
+}
+
+.nav-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px;
 }
 
 /* Main Content */
@@ -147,6 +201,7 @@ main {
 .view-section {
     display: none;
     height: 100%;
+    animation: ink-fade-in 0.35s var(--ease-out) both;
 }
 
 .view-section.active {
@@ -208,7 +263,7 @@ main {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s;
+    transition: all 0.2s var(--ease-out);
 }
 
 .panel-toggle:hover {
@@ -243,12 +298,13 @@ main {
     border-radius: var(--radius-md);
     padding: 14px 16px;
     box-shadow: var(--card-shadow);
-    transition: box-shadow 0.15s, transform 0.15s;
+    transition: box-shadow 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+    animation: ink-fade-in 0.4s var(--ease-out) both;
 }
 
 .stat-card:hover {
     box-shadow: var(--card-shadow-hover);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
 }
 
 .stat-label {
@@ -280,10 +336,11 @@ main {
     overflow-y: auto;
     font-family: var(--font-mono);
     font-size: 11px;
-    line-height: 1.5;
+    line-height: 1.6;
     white-space: pre-wrap;
     color: var(--text-secondary);
     border: 1px solid var(--border-subtle);
+    animation: ink-fade-in 0.5s var(--ease-out) 0.15s both;
 }
 
 .dashboard-layout.world-overview-collapsed .dashboard-right {
@@ -331,18 +388,19 @@ main {
     font-size: 13px;
     color: var(--text-secondary);
     border-bottom: 1px solid var(--border-subtle);
-    transition: background 0.1s, color 0.1s;
+    transition: background 0.18s var(--ease-out), color 0.18s, border-left 0.18s;
+    border-left: 3px solid transparent;
 }
 
 .file-item:hover {
-    background: var(--bg-level-2);
+    background: rgba(139, 115, 85, 0.06);
     color: var(--text-primary);
 }
 
 .file-item.active {
     background: var(--accent-muted);
     color: var(--accent);
-    border-left: 3px solid var(--accent);
+    border-left-color: var(--accent);
 }
 
 .editor-area {
@@ -378,7 +436,7 @@ textarea.code-editor {
     color: var(--text-primary);
 }
 
-/* Buttons — One Light style */
+/* Buttons — Ink-Wash Brush style */
 .btn {
     display: inline-flex;
     align-items: center;
@@ -388,7 +446,7 @@ textarea.code-editor {
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.12s;
+    transition: all 0.2s var(--ease-out);
     border: 1px solid transparent;
     font-family: var(--font-family);
     line-height: 1.4;
@@ -494,6 +552,7 @@ input:checked + .slider {
 
 input:checked + .slider:before {
     transform: translateX(16px);
+    background: var(--accent-text);
 }
 
 .agent-list-empty {
@@ -559,18 +618,20 @@ input:checked + .slider:before {
     background: var(--card-bg);
     padding: 10px 14px;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: background 0.18s var(--ease-out), border-color 0.18s, box-shadow 0.18s;
     border: 1px solid transparent;
     border-top: 1px solid var(--border-subtle);
     display: grid;
     grid-template-columns: 80px 80px 130px 120px 80px 110px 80px 100px auto auto 60px;
     gap: 8px;
     align-items: center;
+    animation: ink-fade-in 0.3s var(--ease-out) both;
 }
 
 .agent-item:hover {
-    background: var(--bg-level-1);
+    background: rgba(139, 115, 85, 0.04);
     border-color: var(--border-color);
+    box-shadow: 0 2px 8px rgba(44, 36, 22, 0.06);
 }
 
 .agent-item * {
@@ -661,7 +722,7 @@ input:checked + .slider:before {
 }
 
 /* ============================================================================
-   Modal — One Light style
+   Modal — Ink-Wash style with brush stroke animation
    ============================================================================ */
 
 .modal {
@@ -727,7 +788,7 @@ input:checked + .slider:before {
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
-    transition: all 0.15s;
+    transition: all 0.18s var(--ease-out);
 }
 
 .close-btn:hover {
@@ -759,13 +820,13 @@ input:checked + .slider:before {
     font-size: 13px;
     color: var(--text-secondary);
     border-bottom: 2px solid transparent;
-    transition: all 0.15s;
+    transition: all 0.18s var(--ease-out);
     margin-bottom: -1px;
 }
 
 .modal-tab:hover {
     color: var(--text-primary);
-    background: var(--bg-level-2);
+    background: rgba(139, 115, 85, 0.06);
 }
 
 .modal-tab.active {
@@ -854,20 +915,6 @@ input:checked + .slider:before {
    Tick Card — server-web agent detail
    ============================================================================ */
 
-.tick-card {
-    position: relative;
-    padding: 14px;
-    background: var(--card-bg);
-    border-radius: var(--radius-md);
-    margin-bottom: 10px;
-    border: 1px solid var(--border-subtle);
-    box-shadow: var(--card-shadow);
-}
-
-.tick-card:last-child {
-    margin-bottom: 0;
-}
-
 .tick-card-header {
     display: flex;
     align-items: center;
@@ -955,6 +1002,7 @@ input:checked + .slider:before {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     box-shadow: var(--card-shadow);
+    animation: ink-fade-in 0.4s var(--ease-out) 0.2s both;
 }
 
 .experience-list::-webkit-scrollbar {
@@ -975,7 +1023,7 @@ input:checked + .slider:before {
     background: var(--text-subtle);
 }
 
-/* 三魂架构样式 */
+/* 三魂架构样式 — 水墨晕染 */
 .exp-renhun,
 .exp-tianhun,
 .exp-action {
@@ -991,6 +1039,13 @@ input:checked + .slider:before {
     align-items: flex-start;
     gap: 8px;
     border-left: 3px solid transparent;
+    transition: box-shadow 0.18s;
+}
+
+.exp-renhun:hover,
+.exp-tianhun:hover,
+.exp-action:hover {
+    box-shadow: 0 2px 8px rgba(44, 36, 22, 0.06);
 }
 
 .exp-soul-label {
@@ -1116,6 +1171,28 @@ input:checked + .slider:before {
     color: var(--error);
 }
 
+/* Tick Card — Ink-wash feel */
+.tick-card {
+    position: relative;
+    padding: 14px;
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--card-shadow);
+    transition: box-shadow 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+    animation: ink-fade-in 0.35s var(--ease-out) both;
+}
+
+.tick-card:hover {
+    box-shadow: var(--card-shadow-hover);
+    transform: translateY(-1px);
+}
+
+.tick-card:last-child {
+    margin-bottom: 0;
+}
+
 .imm-item {
     display: flex;
     flex-wrap: wrap;
@@ -1151,37 +1228,37 @@ input:checked + .slider:before {
 }
 
 /* ============================================================================
-   Toast — One Light
+   Toast — Ink-Wash style
    ============================================================================ */
 
 .toast {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
+    bottom: 24px;
+    right: 24px;
     padding: 10px 20px;
     border-radius: var(--radius-md);
     font-size: 13px;
     font-weight: 500;
     opacity: 0;
-    transform: translateY(8px);
-    transition: all 0.2s;
+    transform: translateY(12px) scale(0.96);
+    transition: all 0.25s var(--ease-spring);
     z-index: 3000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    box-shadow: 0 6px 20px rgba(44, 36, 22, 0.15);
 }
 
 .toast.show {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
 }
 
 .toast-success {
     background: var(--text-primary);
-    color: #fff;
+    color: #FDFBF7;
 }
 
 .toast-error {
     background: var(--error);
-    color: #fff;
+    color: #FDFBF7;
 }
 
 /* ============================================================================
@@ -1254,12 +1331,12 @@ input:checked + .slider:before {
     background: var(--card-bg);
     color: var(--text-primary);
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.18s, box-shadow 0.18s;
 }
 
 .form-input:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-muted);
+    box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 .form-input::placeholder {

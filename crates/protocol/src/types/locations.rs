@@ -56,6 +56,11 @@ pub struct LocationNode {
     /// 格式：["item_id1", "item_id2"]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gatherable_items: Vec<String>,
+
+    /// 隐式 parent-child 连接的 travel_cost 覆盖
+    /// None 时使用全局 default_implicit_travel_cost
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implicit_travel_cost: Option<u32>,
 }
 
 /// 节点连接（边）
@@ -113,11 +118,102 @@ impl LocationGraph {
     /// 检查两个节点是否直接相连
     ///
     /// 自环（from == to）视为有效：原地不动是合法的"移动"。
+    /// 支持隐式 parent-child 连接：sub_scene 与 parent 之间自动可达。
     pub fn is_connected(&self, from: &str, to: &str) -> bool {
         if from == to {
             return true;
         }
-        self.get_neighbors(from).iter().any(|e| e.to_node_id == to)
+        // 显式边
+        if self.get_neighbors(from).iter().any(|e| e.to_node_id == to) {
+            return true;
+        }
+        // 隐式 parent-child：from 是 to 的 parent，或 to 是 from 的 parent
+        if let Some(from_node) = self.nodes.get(from)
+            && from_node.parent_id.as_deref() == Some(to)
+        {
+            return true;
+        }
+        if let Some(to_node) = self.nodes.get(to)
+            && to_node.parent_id.as_deref() == Some(from)
+        {
+            return true;
+        }
+        false
+    }
+
+    /// 获取隐式 parent-child 邻居
+    ///
+    /// 返回通过 parent_id 关系隐式连接的相邻节点。
+    /// `default_travel_cost` 在节点未配置 `implicit_travel_cost` 时使用。
+    pub fn get_implicit_neighbors(
+        &self,
+        node_id: &str,
+        default_travel_cost: u32,
+    ) -> Vec<AdjacentNode> {
+        let mut implicit = Vec::new();
+
+        // 当前节点的 parent_id → parent 是邻居
+        if let Some(node) = self.nodes.get(node_id)
+            && let Some(parent_id) = &node.parent_id
+            && let Some(parent) = self.nodes.get(parent_id)
+        {
+            let cost = node.implicit_travel_cost.unwrap_or(default_travel_cost);
+            implicit.push(AdjacentNode {
+                node_id: parent_id.clone(),
+                name: parent.name.clone(),
+                travel_cost: cost,
+            });
+        }
+
+        // 其他节点的 parent_id == node_id → children 是邻居
+        for (child_id, child_node) in &self.nodes {
+            if child_node.parent_id.as_deref() == Some(node_id) {
+                let cost = child_node
+                    .implicit_travel_cost
+                    .unwrap_or(default_travel_cost);
+                implicit.push(AdjacentNode {
+                    node_id: child_id.clone(),
+                    name: child_node.name.clone(),
+                    travel_cost: cost,
+                });
+            }
+        }
+
+        implicit
+    }
+
+    /// 获取所有邻居（显式 + 隐式 parent-child），自动去重
+    ///
+    /// 隐式连接中，显式边已存在时优先使用显式边的 travel_cost。
+    pub fn get_all_neighbors(
+        &self,
+        node_id: &str,
+        default_implicit_travel_cost: u32,
+    ) -> Vec<AdjacentNode> {
+        let mut result = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // 显式邻居
+        for edge in self.get_neighbors(node_id) {
+            if seen.insert(edge.to_node_id.clone())
+                && let Some(node) = self.nodes.get(&edge.to_node_id)
+            {
+                result.push(AdjacentNode {
+                    node_id: edge.to_node_id.clone(),
+                    name: node.name.clone(),
+                    travel_cost: edge.travel_cost,
+                });
+            }
+        }
+
+        // 隐式邻居（去重：已通过显式边添加的跳过）
+        for adj in self.get_implicit_neighbors(node_id, default_implicit_travel_cost) {
+            if seen.insert(adj.node_id.clone()) {
+                result.push(adj);
+            }
+        }
+
+        result
     }
 }
 

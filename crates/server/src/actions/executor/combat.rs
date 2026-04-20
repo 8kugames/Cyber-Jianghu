@@ -6,7 +6,7 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{AttackData, UseData};
+use super::super::{AttackData, FleeData, UseData};
 use crate::game_data::{ActionField, ActionRegistry};
 use crate::items::get_item_definition;
 use crate::models::{AgentState, Intent};
@@ -220,6 +220,114 @@ impl CombatActionExecutor {
         });
 
         // 注意：死亡检测由 apply_state_change 在应用 HP 变化后处理
+
+        result
+    }
+
+    /// 执行 flee 动作
+    ///
+    /// 逃跑：验证相邻位置 + 公式计算成功率 + RNG 判定
+    pub(super) fn execute_flee(
+        intent: &Intent,
+        action_data: Option<serde_json::Value>,
+        current_location: &str,
+        agent_state: &AgentState,
+    ) -> ActionExecutionResult {
+        let data: FleeData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
+            Some(d) => d,
+            None => {
+                return ActionExecutionResult::failure(
+                    "缺少逃跑目标位置".to_string(),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+
+        // 获取位置注册表
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(e) => {
+                return ActionExecutionResult::failure(
+                    format!("注册表未初始化: {}", e),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+
+        // 验证目标位置存在
+        if !registry
+            .location_registry
+            .read()
+            .unwrap()
+            .node_exists(&data.target_location)
+        {
+            return ActionExecutionResult::failure(
+                format!("目标位置不存在: {}", data.target_location),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
+        // 验证目标位置与当前位置相邻
+        if !registry
+            .location_registry
+            .read()
+            .unwrap()
+            .is_connected(current_location, &data.target_location)
+        {
+            return ActionExecutionResult::failure(
+                format!(
+                    "无法从 {} 逃跑至 {}（位置不相邻）",
+                    current_location, data.target_location
+                ),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
+        // 公式计算成功率
+        let success = if let Some(formula) =
+            ActionRegistry::get_string("flee", ActionField::FleeSuccessFormula)
+        {
+            let context = agent_state.get_formula_context();
+            let f64_context: std::collections::HashMap<String, f64> = context
+                .iter()
+                .map(|(k, v)| (k.clone(), *v as f64))
+                .collect();
+
+            let engine = crate::game_data::formula_engine::FormulaEngine::new();
+            match engine.evaluate(&formula, &f64_context) {
+                Ok(chance) => rand::random::<f64>() < chance.clamp(0.0, 1.0),
+                Err(_) => rand::random::<f64>() < 0.5,
+            }
+        } else {
+            rand::random::<f64>() < 0.5
+        };
+
+        if !success {
+            return ActionExecutionResult::failure(
+                "逃跑失败，未能脱离当前位置".to_string(),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
+        let mut result = ActionExecutionResult::success(
+            format!(
+                "Agent {} 从 {} 逃跑至 {}",
+                intent.agent_id, current_location, data.target_location
+            ),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
+        );
+
+        result.add_change(StateChange::LocationChanged {
+            agent_id: intent.agent_id,
+            old_location: current_location.to_string(),
+            new_location: data.target_location.clone(),
+        });
 
         result
     }

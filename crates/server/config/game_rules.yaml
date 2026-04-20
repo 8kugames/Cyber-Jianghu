@@ -45,6 +45,9 @@ data:
     # 出生点配置
     location:
       spawn_location: "longmen_lobby"
+      # parent-child 隐式连接的默认 travel_cost
+      # 节点可在 locations.yaml 中通过 implicit_travel_cost 覆盖
+      default_implicit_travel_cost: 1
 
     # 游戏纪元（用于计算 tick_id）
     game_time:

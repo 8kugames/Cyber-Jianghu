@@ -166,6 +166,7 @@ mod tests {
             parent_id: Some("longmen_inn".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            implicit_travel_cost: None,
         };
 
         let json = serde_json::to_string(&node).unwrap();
@@ -180,12 +181,23 @@ mod tests {
         let mut graph = LocationGraph::new();
 
         graph.add_node(LocationNode {
+            node_id: "longmen_inn".to_string(),
+            name: "龙门客栈".to_string(),
+            node_type: LocationNodeType::Map,
+            parent_id: None,
+            environmental_damage: None,
+            gatherable_items: vec![],
+            implicit_travel_cost: None,
+        });
+
+        graph.add_node(LocationNode {
             node_id: "longmen_lobby".to_string(),
             name: "大堂".to_string(),
             node_type: LocationNodeType::SubScene,
             parent_id: Some("longmen_inn".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            implicit_travel_cost: None,
         });
 
         graph.add_node(LocationNode {
@@ -195,6 +207,7 @@ mod tests {
             parent_id: Some("longmen_inn".to_string()),
             environmental_damage: None,
             gatherable_items: vec![],
+            implicit_travel_cost: None,
         });
 
         graph.add_edge(LocationEdge {
@@ -203,12 +216,27 @@ mod tests {
             travel_cost: 1,
         });
 
+        // 显式边
         assert!(graph.is_connected("longmen_lobby", "longmen_backyard"));
-        assert!(!graph.is_connected("longmen_backyard", "longmen_lobby"));
+        // 隐式 parent-child 连接
+        assert!(graph.is_connected("longmen_lobby", "longmen_inn"));
+        assert!(graph.is_connected("longmen_inn", "longmen_lobby"));
+        assert!(graph.is_connected("longmen_inn", "longmen_backyard"));
+        // 无连接
+        assert!(!graph.is_connected("longmen_backyard", "longmen_lobby")); // 无显式反向边
 
         let neighbors = graph.get_neighbors("longmen_lobby");
         assert_eq!(neighbors.len(), 1);
         assert_eq!(neighbors[0].to_node_id, "longmen_backyard");
+
+        // 隐式邻居
+        let implicit = graph.get_implicit_neighbors("longmen_lobby", 1);
+        assert_eq!(implicit.len(), 1); // parent: longmen_inn
+        assert_eq!(implicit[0].node_id, "longmen_inn");
+
+        // 全部邻居（显式+隐式）
+        let all = graph.get_all_neighbors("longmen_lobby", 1);
+        assert_eq!(all.len(), 2); // longmen_backyard (explicit) + longmen_inn (implicit)
     }
 
     #[test]

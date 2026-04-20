@@ -204,6 +204,7 @@ async fn main() -> Result<()> {
         connection_manager.clone(),
         agent_to_device_map.clone(),
         dialogue_manager.clone(),
+        game_data_cache.clone(),
     );
     tokio::spawn(async move {
         intent_worker.run(worker_rx).await;

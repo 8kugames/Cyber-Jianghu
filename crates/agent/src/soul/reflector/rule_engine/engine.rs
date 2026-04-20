@@ -5,6 +5,7 @@
 use super::evaluator::{ConditionEvaluator, DefaultEvaluator};
 use super::registry::{RuleRegistry, RuleSet};
 use super::types::{Rule, RuleValidationContext, extract_ids_from_world_state};
+use crate::soul::actor::prompt_template::PromptTemplateConfig;
 use crate::soul::reflector::{
     PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
 };
@@ -12,6 +13,7 @@ use async_trait::async_trait;
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::info;
 
 // ============================================================================
 // RuleEngine 错误消息常量
@@ -33,6 +35,8 @@ pub struct RuleEngine {
     registry: Arc<RuleRegistry>,
     /// 条件评估器
     evaluator: Box<dyn ConditionEvaluator>,
+    /// reject 反馈模板配置
+    prompt_config: Option<Arc<PromptTemplateConfig>>,
 }
 
 #[async_trait]
@@ -81,6 +85,7 @@ impl RuleEngine {
         Self {
             registry: Arc::new(RuleRegistry::new()),
             evaluator: Box::new(DefaultEvaluator),
+            prompt_config: None,
         }
     }
 
@@ -150,6 +155,7 @@ impl RuleEngine {
         Self {
             registry: Arc::new(RuleRegistry::from_rule_set(rule_set)),
             evaluator: Box::new(DefaultEvaluator),
+            prompt_config: Self::load_prompt_config(),
         }
     }
 
@@ -162,9 +168,109 @@ impl RuleEngine {
         self
     }
 
+    /// 加载 reject 反馈模板配置
+    fn load_prompt_config() -> Option<Arc<PromptTemplateConfig>> {
+        let search_paths: Vec<Option<std::path::PathBuf>> = vec![
+            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
+            dirs::home_dir().map(|h| {
+                h.join(".cyber-jianghu")
+                    .join("config")
+                    .join("prompt_templates.yaml")
+            }),
+            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
+        ];
+
+        for path_opt in &search_paths {
+            if let Some(path) = path_opt
+                && path.exists()
+            {
+                match PromptTemplateConfig::load_from_file(path) {
+                    Ok(config) => {
+                        info!("RuleEngine 已加载 reject 反馈模板: {:?}", path);
+                        return Some(Arc::new(config));
+                    }
+                    Err(e) => {
+                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// 获取规则注册表的引用
     pub fn registry(&self) -> Arc<RuleRegistry> {
         Arc::clone(&self.registry)
+    }
+
+    /// 增强 reject 消息：附加上下文数据帮助 LLM 自纠正
+    ///
+    /// 有模板配置时使用数据驱动模板，否则 fallback 到基础增强。
+    fn enhance_rejection(
+        &self,
+        rule_id: &str,
+        base_reason: &str,
+        context: &RuleValidationContext,
+    ) -> String {
+        let action_type = match rule_id {
+            "valid_item_id_eat" => "eat",
+            "valid_item_id_drink" => "drink",
+            "valid_target_node_move" => "move",
+            _ => return base_reason.to_string(),
+        };
+
+        // 尝试使用模板配置
+        if let Some(config) = &self.prompt_config
+            && let Some(tmpl) = config.get_template("reject_feedback")
+        {
+            let max_items = config.truncation("reject_feedback", "max_items", 5);
+            let mut vars = HashMap::new();
+
+            match action_type {
+                "eat" | "drink" => {
+                    let items: Vec<&str> = context
+                        .available_item_ids
+                        .iter()
+                        .take(max_items)
+                        .map(|s| s.as_str())
+                        .collect();
+                    vars.insert(
+                        "available_items".to_string(),
+                        if items.is_empty() {
+                            "（背包为空，请先 pickup 或 gather）".to_string()
+                        } else {
+                            items.join(", ")
+                        },
+                    );
+                }
+                "move" => {
+                    let nodes: Vec<&str> = context
+                        .reachable_node_ids
+                        .iter()
+                        .take(max_items)
+                        .map(|s| s.as_str())
+                        .collect();
+                    vars.insert(
+                        "reachable_nodes".to_string(),
+                        if nodes.is_empty() {
+                            "（当前无可达地点）".to_string()
+                        } else {
+                            nodes.join(", ")
+                        },
+                    );
+                }
+                _ => {}
+            }
+
+            if let Some(rendered) = tmpl.render_section(action_type, &vars) {
+                return rendered.trim().to_string();
+            }
+        }
+
+        // Fallback：基础增强（无模板时）
+        base_reason.to_string()
     }
 
     /// 验证意图（内部方法）
@@ -193,20 +299,17 @@ impl RuleEngine {
             let rule_result = self.evaluate_rule(rule, context).await?;
 
             if !rule_result.passed {
-                tracing::warn!(
-                    "规则验证失败: {} - {}",
-                    rule.id,
-                    rule_result
-                        .error_message
-                        .as_ref()
-                        .unwrap_or(&"未知错误".to_string())
-                );
+                let base_reason = rule_result
+                    .error_message
+                    .unwrap_or_else(|| format!("规则 {} 验证失败", rule.name));
+
+                let enhanced_reason = self.enhance_rejection(&rule.id, &base_reason, context);
+
+                tracing::warn!("规则验证失败: {} - {}", rule.id, enhanced_reason);
 
                 // 规则失败，返回 Rejected
                 return Ok(ValidationResult::Rejected {
-                    reason: rule_result
-                        .error_message
-                        .unwrap_or_else(|| format!("规则 {} 验证失败", rule.name)),
+                    reason: enhanced_reason,
                     rejection_type: RejectionType::Other,
                 });
             }

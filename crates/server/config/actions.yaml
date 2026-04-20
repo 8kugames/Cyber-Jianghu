@@ -200,7 +200,7 @@ data:
   #   - dodge: 需 StateChange::DodgeAttempt + 闪避率判定
   #   - parry: 需 StateChange::ParryCounter + 反弹伤害计算
   #   - heavy_strike: 需 CombatActionExecutor::execute_heavy_strike
-  #   - flee: 需 StateChange::FleeAttempt + 逃跑率判定
+  #   - flee: 需 StateChange::FleeAttempt + 逃跑率判定 [已实装]
   #
   # defend:
   #   name: "防御"
@@ -265,18 +265,20 @@ data:
   #       min: 20
   #       cost: 20
   #
-  # flee:
-  #   name: "逃跑"
-  #   description: "尝试脱离战斗或危险情境。"
-  #   category: combat
-  #   ooc_risk: low
-  #   flee_success_formula: "agility * 0.03"
-  #   validation: {}
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 15
-  #       cost: 10
+  flee:
+    name: "逃跑"
+    description: "尝试脱离战斗或危险情境，移动到相邻位置。必须指定逃跑目标位置（target_location）。成功率由敏捷属性决定的公式计算，失败则留在原地但仍消耗体力。"
+    category: combat
+    ooc_risk: low
+    flee_success_formula: "agility * 0.03"
+    validation:
+      required_fields:
+        - target_location
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 15
+        cost: 10
 
   # ==========================================================================
   # 江湖技能
@@ -304,7 +306,6 @@ data:
   # 取消注释前需实现对应 executor：
   #   - stealth: 需 AgentState.stealth_status + 发现概率判定
   #   - poison: 需 StateChange::PoisonApplied + 多 tick 持续伤害
-  #   - meditate: 需 effects: attribute_change qi add (由 recovery_formula 替代)
   #   - practice: 需 AgentState.skills + 技能进度系统
   #
   # stealth:
@@ -341,33 +342,37 @@ data:
   #       min: 10
   #       cost: 8
   #
-  # meditate:
-  #   name: "打坐"
-  #   description: "通过打坐恢复内力。"
-  #   category: martial
-  #   ooc_risk: low
-  #   inner_power_recovery: 15
-  #   validation: {}
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 5
-  #       cost: 0
-  #
-  # practice:
-  #   name: "修炼武功"
-  #   description: "通过练习提升武功技能进度。"
-  #   category: martial
-  #   ooc_risk: low
-  #   skill_progress: 5
-  #   validation:
-  #     required_fields:
-  #       - skill_id
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 15
-  #       cost: 10
+  meditate:
+    name: "打坐"
+    description: "通过打坐恢复内力。不消耗体力，但需要一定体力才能执行。注意区分：meditate 恢复内力，idle 恢复体力和心神。"
+    category: martial
+    ooc_risk: low
+    validation: {}
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 0
+    effects:
+      - effect_type: attribute_change
+        attribute: qi
+        operation: add
+        value: 15
+
+  practice:
+    name: "修炼"
+    description: "通过练习提升武功技能进度。必须指定技能 ID（skill_id）。消耗体力，当前无实际技能系统，修炼仅验证 skill_id 有效后返回成功。"
+    category: martial
+    ooc_risk: low
+    skill_progress: 5
+    validation:
+      required_fields:
+        - skill_id
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 15
+        cost: 10
 
   # ==========================================================================
   # 社交
@@ -407,25 +412,26 @@ data:
         min: 0
         cost: 1
 
-  # NOTE: 以下社交/经济动作仅有 generic fallback，无实际效果
-  #   - shout: 需 broadcast_radius 实现 + 位置范围广播
+  # NOTE: 以下社交动作仅有 generic fallback，无实际效果
   #   - follow: 需 AgentState.following + 移动同步逻辑
   #
-  # shout:
-  #   name: "大喊"
-  #   description: "向当前位置大声喊叫，内容可被所有在场 Agent 听到。"
-  #   category: social
-  #   ooc_risk: high
-  #   max_content_length: 300
-  #   broadcast_radius: 3
-  #   validation:
-  #     required_fields:
-  #       - content
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 5
-  #       cost: 3
+  shout:
+    name: "大喊"
+    description: "向当前位置大声喊叫，内容可被所有在场 Agent 听到。必须指定内容（content）。消耗较多体力。注意区分：shout 是大喊，speak 是普通说话，whisper 是私聊（仅双方可见）。"
+    category: social
+    ooc_risk: high
+    max_content_length: 300
+    validation:
+      required_fields:
+        - content
+      field_validations:
+        - field: content
+          validation_type: not_empty
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 5
+        cost: 3
   #
   # follow:
   #   name: "跟随"

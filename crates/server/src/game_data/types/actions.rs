@@ -46,6 +46,9 @@ pub struct ActionConfigEntry {
     /// 成功率（steal）
     pub success_rate: Option<f32>,
 
+    /// 逃跑成功率公式（flee）
+    pub flee_success_formula: Option<String>,
+
     /// 最大内容长度（speak）
     pub max_content_length: Option<i32>,
 

@@ -6,7 +6,7 @@
 // ============================================================================
 
 use super::types::{GameData, UnifiedActionsConfig};
-use cyber_jianghu_protocol::{DeathInfo, LocationEdge, LocationGraph, LocationNode};
+use cyber_jianghu_protocol::{AdjacentNode, DeathInfo, LocationEdge, LocationGraph, LocationNode};
 use std::sync::Arc;
 
 /// 配置缓存
@@ -176,6 +176,7 @@ impl LocationRegistry {
                 },
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone().unwrap_or_default(),
+                implicit_travel_cost: None, // 从 locations.yaml 读取（暂不支持 per-node 覆盖）
             };
             graph.add_node(location_node);
         }
@@ -222,6 +223,16 @@ impl LocationRegistry {
     pub fn get_neighbors(&self, node_id: &str) -> Vec<&LocationEdge> {
         self.graph.get_neighbors(node_id)
     }
+
+    /// 获取所有邻居（显式边 + 隐式 parent-child），自动去重
+    pub fn get_all_neighbors(
+        &self,
+        node_id: &str,
+        default_implicit_travel_cost: u32,
+    ) -> Vec<AdjacentNode> {
+        self.graph
+            .get_all_neighbors(node_id, default_implicit_travel_cost)
+    }
 }
 
 // ============================================================================
@@ -249,6 +260,7 @@ mod tests {
                         },
                         location: LocationRulesData {
                             spawn_location: "longmen_inn".to_string(),
+                            default_implicit_travel_cost: 1,
                         },
                         game_time: GameTimeRulesData {
                             start_date: "2024-01-01".to_string(),

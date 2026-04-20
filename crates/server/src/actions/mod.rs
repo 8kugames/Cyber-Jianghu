@@ -158,6 +158,24 @@ pub struct TradeData {
     pub price: i32,
 }
 
+/// shout 动作数据
+///
+/// 大喊，内容对当前位置所有人可见
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShoutData {
+    /// 喊叫内容
+    pub content: String,
+}
+
+/// flee 动作数据
+///
+/// 逃跑，移动到相邻位置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleeData {
+    /// 逃跑目标位置 ID
+    pub target_location: String,
+}
+
 // ============================================================================
 // 配置访问说明
 // ============================================================================

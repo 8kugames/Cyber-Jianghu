@@ -20,6 +20,8 @@ use super::types::StateChange;
 use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
 
+use super::validator::normalize_action_data;
+
 use basic::BasicActionExecutor;
 use combat::CombatActionExecutor;
 use interaction::InteractionActionExecutor;
@@ -58,13 +60,16 @@ impl ActionExecutor {
             }
         };
 
-        // 2. 执行特定逻辑（数据驱动：字符串匹配）
+        // 2. 规范化 action_data（LLM 字段名容错）
+        let action_data = normalize_action_data(&intent.action_data);
+
+        // 3. 执行特定逻辑（数据驱动：字符串匹配）
         let mut result = match intent.action_type.as_str() {
             "idle" => BasicActionExecutor::execute_idle(intent),
-            "speak" => BasicActionExecutor::execute_speak(intent, intent.action_data.clone()),
+            "speak" => BasicActionExecutor::execute_speak(intent, action_data.clone()),
             "move" => BasicActionExecutor::execute_move(
                 intent,
-                intent.action_data.clone(),
+                action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
             "give" => InteractionActionExecutor::execute_give(intent, agent_state),
@@ -72,24 +77,30 @@ impl ActionExecutor {
             "use" | "eat" | "drink" => CombatActionExecutor::execute_use(intent, agent_state),
             "pickup" => BasicActionExecutor::execute_pickup(
                 intent,
-                intent.action_data.clone(),
+                action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
             "drop" => BasicActionExecutor::execute_drop(
                 intent,
-                intent.action_data.clone(),
+                action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
             "gather" => BasicActionExecutor::execute_gather(
                 intent,
-                intent.action_data.clone(),
+                action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "craft" => BasicActionExecutor::execute_craft(intent, intent.action_data.clone()),
-            "attack" => {
-                CombatActionExecutor::execute_attack(intent, &intent.action_data, agent_state)
-            }
-            "trade" => InteractionActionExecutor::execute_trade(intent, intent.action_data.clone()),
+            "craft" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
+            "attack" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
+            "trade" => InteractionActionExecutor::execute_trade(intent, action_data.clone()),
+            "shout" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
+            "practice" => BasicActionExecutor::execute_practice(intent, action_data.clone()),
+            "flee" => CombatActionExecutor::execute_flee(
+                intent,
+                action_data.clone(),
+                &agent_state.node_id.clone(),
+                agent_state,
+            ),
             _ => {
                 // 未知动作类型：尝试从 ActionRegistry 获取配置
                 if let Some(config) = ActionRegistry::get(intent.action_type.as_str()) {

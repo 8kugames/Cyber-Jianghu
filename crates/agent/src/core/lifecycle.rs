@@ -605,7 +605,7 @@ impl super::Agent {
                     let mut memory_context = self.get_memory_context().await;
 
                     // 4.1 生存压力注入：hunger/thirst 低于阈值时强制注入紧急信号
-                    // （在物品注入之后补充具体食物/水名称）
+                    // 数据驱动：模板从 prompt_templates.yaml 加载，无模板时 fallback 到硬编码
                     let survival_warnings = {
                         let survival_threshold = self.config.survival_threshold();
                         let attrs = &world_state.self_state.attributes;
@@ -613,38 +613,15 @@ impl super::Agent {
                         let thirst = attrs.get("thirst").copied().unwrap_or(100);
                         let mut warnings = Vec::new();
 
-                        if hunger > 0 && hunger <= survival_threshold {
-                            // 查找背包中的食物
-                            let foods: Vec<String> = world_state.self_state.inventory.iter()
-                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                .map(|i| i.name.clone())
-                                .collect();
-                            if !foods.is_empty() {
-                                warnings.push(format!(
-                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！背包中有：{}。使用 eat 命令吃掉其中一个。",
-                                    foods.join("、")
-                                ));
-                            } else {
-                                // 查找地上的食物
-                                let ground_foods: Vec<String> = world_state.nearby_items.iter()
-                                    .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                    .map(|i| i.name.clone())
-                                    .collect();
-                                if !ground_foods.is_empty() {
-                                    warnings.push(format!(
-                                        "【生存警告】你正处于极度饥饿状态，必须立即进食！地上有：{}。先 pickup 再 eat。",
-                                        ground_foods.join("、")
-                                    ));
-                                } else {
-                                    warnings.push(
-                                        "【生存警告】你正处于极度饥饿状态，必须立即进食！背包和地上都没有食物，移动到有资源的地点。".to_string()
-                                    );
-                                }
-                            }
-                        }
+                        // 尝试获取模板配置
+                        let tmpl_config = self.cognitive_engine
+                            .as_ref()
+                            .and_then(|e| e.prompt_template());
+                        let tmpl = tmpl_config
+                            .and_then(|c| c.get_template("survival_warnings"));
 
+                        // 口渴优先（更致命）
                         if thirst > 0 && thirst <= survival_threshold {
-                            // 数据驱动：通过 item_type=consumable 识别饮品，背包优先
                             let backpack_drinks: Vec<String> = world_state.self_state.inventory.iter()
                                 .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
                                 .map(|i| i.name.clone())
@@ -654,26 +631,141 @@ impl super::Agent {
                                 .map(|i| i.name.clone())
                                 .collect();
 
-                            if !backpack_drinks.is_empty() {
-                                warnings.push(format!(
+                            let warning = if let Some(t) = tmpl {
+                                let (section, items) = if !backpack_drinks.is_empty() {
+                                    ("thirst_with_items", backpack_drinks.join("、"))
+                                } else if !ground_drinks.is_empty() {
+                                    ("thirst_with_ground", ground_drinks.join("、"))
+                                } else {
+                                    ("thirst_nothing", String::new())
+                                };
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), thirst.to_string());
+                                vars.insert("max".to_string(), "100".to_string());
+                                vars.insert("items".to_string(), items);
+                                t.render_section(section, &vars)
+                                    .unwrap_or_else(|| "【紧急】极度口渴，必须立即饮水！".to_string())
+                            } else if !backpack_drinks.is_empty() {
+                                format!(
                                     "【生存警告】你正处于极度口渴状态，必须立即饮水！背包中有：{}。使用 drink 命令饮用。",
                                     backpack_drinks.join("、")
-                                ));
+                                )
                             } else if !ground_drinks.is_empty() {
-                                warnings.push(format!(
+                                format!(
                                     "【生存警告】你正处于极度口渴状态，必须立即饮水！地上有：{}。先 pickup 再 drink。",
                                     ground_drinks.join("、")
-                                ));
+                                )
                             } else {
-                                warnings.push(
-                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！附近没有水源，移动到有水的地点。".to_string()
-                                );
-                            }
+                                "【生存警告】你正处于极度口渴状态，必须立即饮水！附近没有水源，移动到有水的地点。".to_string()
+                            };
+                            warnings.push(warning);
+                        }
+
+                        if hunger > 0 && hunger <= survival_threshold {
+                            let foods: Vec<String> = world_state.self_state.inventory.iter()
+                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                .map(|i| i.name.clone())
+                                .collect();
+                            let ground_foods: Vec<String> = world_state.nearby_items.iter()
+                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
+                                .map(|i| i.name.clone())
+                                .collect();
+
+                            let warning = if let Some(t) = tmpl {
+                                let (section, items) = if !foods.is_empty() {
+                                    ("hunger_with_items", foods.join("、"))
+                                } else if !ground_foods.is_empty() {
+                                    ("hunger_with_ground", ground_foods.join("、"))
+                                } else {
+                                    ("hunger_nothing", String::new())
+                                };
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), hunger.to_string());
+                                vars.insert("max".to_string(), "100".to_string());
+                                vars.insert("items".to_string(), items);
+                                t.render_section(section, &vars)
+                                    .unwrap_or_else(|| "【紧急】极度饥饿，必须立即进食！".to_string())
+                            } else if !foods.is_empty() {
+                                format!(
+                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！背包中有：{}。使用 eat 命令吃掉其中一个。",
+                                    foods.join("、")
+                                )
+                            } else if !ground_foods.is_empty() {
+                                format!(
+                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！地上有：{}。先 pickup 再 eat。",
+                                    ground_foods.join("、")
+                                )
+                            } else {
+                                "【生存警告】你正处于极度饥饿状态，必须立即进食！背包和地上都没有食物，移动到有资源的地点。".to_string()
+                            };
+                            warnings.push(warning);
                         }
                         warnings
                     };
 
-                    // 注入延迟处理的即时对话（DeferToMainTick 事件）
+                    // 4.2 Sanity 注入：理智值降低时注入精神状态描述
+                    let sanity_warning = {
+                        let attrs = &world_state.self_state.attributes;
+                        let sanity = attrs.get("sanity").copied().unwrap_or(100);
+
+                        // 模板阈值（数据驱动）
+                        let (warning_threshold, critical_threshold) = {
+                            let tmpl_config = self.cognitive_engine
+                                .as_ref()
+                                .and_then(|e| e.prompt_template());
+                            let trunc = tmpl_config
+                                .and_then(|c| c.get_template("sanity_warnings"));
+                            let wt = trunc
+                                .and_then(|t| t.truncation.get("warning_threshold"))
+                                .copied()
+                                .unwrap_or(50) as i32;
+                            let ct = trunc
+                                .and_then(|t| t.truncation.get("critical_threshold"))
+                                .copied()
+                                .unwrap_or(30) as i32;
+                            (wt, ct)
+                        };
+
+                        if sanity <= critical_threshold {
+                            // 临界：精神崩溃
+                            let tmpl_config = self.cognitive_engine
+                                .as_ref()
+                                .and_then(|e| e.prompt_template());
+                            if let Some(tmpl) = tmpl_config
+                                .and_then(|c| c.get_template("sanity_warnings"))
+                            {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), sanity.to_string());
+                                vars.insert("max".to_string(), "100".to_string());
+                                tmpl.render_section("critical", &vars)
+                            } else {
+                                Some(format!(
+                                    "【精神崩溃】你已失去理智控制（理智 {}/100）！你的行为变得疯狂、混乱、不可理喻。",
+                                    sanity
+                                ))
+                            }
+                        } else if sanity <= warning_threshold {
+                            // 轻度：心神不宁
+                            let tmpl_config = self.cognitive_engine
+                                .as_ref()
+                                .and_then(|e| e.prompt_template());
+                            if let Some(tmpl) = tmpl_config
+                                .and_then(|c| c.get_template("sanity_warnings"))
+                            {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), sanity.to_string());
+                                vars.insert("max".to_string(), "100".to_string());
+                                tmpl.render_section("mild", &vars)
+                            } else {
+                                Some(format!(
+                                    "【心神不宁】你的精神状态有些恍惚（理智 {}/100），可能做出不合常理的决定。",
+                                    sanity
+                                ))
+                            }
+                        } else {
+                            None
+                        }
+                    };
                     if let Some(ref handler) = self.immediate_handler {
                         let deferred = handler.get_deferred_events().await;
                         if !deferred.is_empty() {
@@ -777,6 +869,12 @@ impl super::Agent {
                     if !survival_warnings.is_empty() {
                         memory_context.push_str("\n### 紧急\n");
                         memory_context.push_str(&survival_warnings.join("\n"));
+                    }
+
+                    // 4.3 Sanity 精神状态注入
+                    if let Some(ref sw) = sanity_warning {
+                        memory_context.push_str("\n### 精神状态\n");
+                        memory_context.push_str(sw);
                     }
 
                     // 5. 三魂循环：人魂决策 → 天魂审核 → 驳回则重试
@@ -1085,6 +1183,8 @@ impl super::Agent {
                             );
 
                             // 实时模式：poll ExecutionResult（server 立即处理后的反馈）
+                            // Server 同时会发送 reactive WorldState（交互驱动即时推送），
+                            // 下一次 select 循环的 receive_world_state() 会立即收到（无需等 tick 广播）。
                             // 短暂等待 200ms 后检查，避免 busy-wait
                             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                             match self.client.try_receive_execution_result().await {
@@ -1094,6 +1194,10 @@ impl super::Agent {
                                             "ExecutionResult: tick={}, intent={}, success",
                                             result.tick_id, result.intent_id
                                         );
+                                        // Outcome 写回：更新 summary window
+                                        if let Some(ref engine) = self.cognitive_engine {
+                                            engine.update_summary_outcome(format!("成功: {}", final_intent.action_type));
+                                        }
                                     } else {
                                         warn!(
                                             "ExecutionResult: tick={}, intent={}, FAILED: {}",
@@ -1106,6 +1210,10 @@ impl super::Agent {
                                         self.last_rejection_reason = Some(
                                             format!("[意图执行失败: {}]", reason)
                                         );
+                                        // Outcome 写回：更新 summary window
+                                        if let Some(ref engine) = self.cognitive_engine {
+                                            engine.update_summary_outcome(format!("失败: {}", reason));
+                                        }
                                     }
                                 }
                                 Ok(None) => {
