@@ -82,7 +82,14 @@ impl TimeRegistry {
             let registry = registry_or_error();
             let real_seconds_per_tick = registry
                 .ok()
-                .map(|r| r.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64)
+                .map(|r| {
+                    r.get()
+                        .game_rules
+                        .data
+                        .agent_state
+                        .tick
+                        .real_seconds_per_tick as i64
+                })
                 .unwrap_or(60);
             let real_seconds_per_game_hour = real_seconds_per_tick * config.ticks_per_hour as i64;
             let game_hours = if real_seconds_per_game_hour > 0 {

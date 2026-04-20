@@ -40,6 +40,7 @@ impl ActionRegistry {
     pub fn get_string(action_name: &str, field: ActionField) -> Option<String> {
         Self::get(action_name).and_then(|config| match field {
             ActionField::DamageFormula => config.damage_formula,
+            ActionField::FleeSuccessFormula => config.flee_success_formula,
             _ => None,
         })
     }
@@ -92,6 +93,7 @@ impl ActionRegistry {
 pub enum ActionField {
     BaseDamage,
     DamageFormula,
+    FleeSuccessFormula,
     WeaponBonus,
     WeaponBonusMultiplier,
     SuccessRate,

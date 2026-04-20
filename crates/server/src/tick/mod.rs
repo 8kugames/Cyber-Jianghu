@@ -25,7 +25,7 @@ mod realtime;
 mod scheduler;
 
 // 导出公共API
-pub use broadcaster::{build_initial_world_state, send_to_agent};
+pub use broadcaster::{build_initial_world_state, build_reactive_world_state, send_to_agent};
 pub use processor::StateProcessor;
 pub use realtime::{IntentWorker, WorkerMessage, create_worker_channel};
 pub use scheduler::TickScheduler;
