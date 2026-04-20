@@ -6,7 +6,7 @@
         <title>LLM 配置 | Cyber-Jianghu</title>
         <link rel="stylesheet" href="css/dashboard.css" />
         <style>
-            /* settings-specific — One Light UI */
+            /* settings-specific — Cyberpunk Ink theme */
 
             body {
                 background: var(--bg-base);
@@ -21,21 +21,34 @@
                 margin-bottom: 28px;
                 padding-bottom: 20px;
                 border-bottom: 1px solid var(--border-color);
+                position: relative;
+            }
+
+            .settings-header::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, var(--accent), transparent);
+                opacity: 0.3;
             }
 
             .settings-header h1 {
-                font-size: 20px;
-                font-weight: 600;
+                font-size: 22px;
+                font-weight: 700;
                 color: var(--text-primary);
             }
 
             .settings-header h1 span {
                 color: var(--accent);
+                text-shadow: 0 0 20px rgba(20, 184, 166, 0.5);
             }
 
             .back-btn {
                 padding: 6px 14px;
-                background: var(--card-bg);
+                background: var(--bg-level-2);
                 border: 1px solid var(--border-color);
                 color: var(--text-secondary);
                 border-radius: var(--radius-sm);
@@ -59,11 +72,12 @@
 
             .settings-card {
                 background: var(--card-bg);
-                border: 1px solid var(--border-color);
+                border: 1px solid var(--card-border);
                 border-radius: var(--radius-lg);
                 padding: 24px;
                 margin-bottom: 16px;
                 box-shadow: var(--card-shadow);
+                backdrop-filter: blur(12px);
             }
 
             .settings-card-title {
@@ -123,14 +137,15 @@
             .connection-dot.connected {
                 background: var(--success);
                 border-color: var(--success);
-                box-shadow: 0 0 0 2px var(--success-muted);
+                box-shadow: 0 0 0 2px var(--success-muted), 0 0 8px rgba(52, 211, 153, 0.4);
             }
             .connection-dot.disconnected {
                 background: var(--error);
                 border-color: var(--error);
+                box-shadow: 0 0 0 2px var(--error-muted);
             }
 
-            /* Toggle — One Light */
+            /* Toggle */
             .toggle {
                 position: relative;
                 display: inline-block;
@@ -158,17 +173,19 @@
                 width: 16px;
                 left: 2px;
                 bottom: 2px;
-                background-color: #fff;
+                background-color: var(--text-secondary);
                 transition: 0.2s;
                 border-radius: 50%;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
             }
             .toggle input:checked + .toggle-slider {
                 background-color: var(--accent);
                 border-color: var(--accent);
+                box-shadow: 0 0 8px rgba(20, 184, 166, 0.4);
             }
             .toggle input:checked + .toggle-slider:before {
                 transform: translateX(18px);
+                background-color: #fff;
             }
 
             /* Form */
@@ -194,14 +211,14 @@
             .form-input, .form-select {
                 width: 100%;
                 padding: 9px 13px;
-                background: var(--card-bg);
+                background: var(--bg-level-1);
                 border: 1px solid var(--border-color);
                 border-radius: var(--radius-sm);
                 color: var(--text-primary);
                 font-size: 13px;
                 font-family: var(--font-family);
                 outline: none;
-                transition: border-color 0.15s, box-shadow 0.15s;
+                transition: all 0.15s;
             }
 
             .form-input:focus, .form-select:focus {
@@ -215,7 +232,7 @@
 
             .form-select {
                 appearance: none;
-                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239DA5B4' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238B92A8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
                 background-repeat: no-repeat;
                 background-position: right 12px center;
                 padding-right: 32px;
@@ -231,7 +248,7 @@
             /* Info box */
             .info-box {
                 background: var(--accent-muted);
-                border: 1px solid rgba(64, 130, 230, 0.2);
+                border: 1px solid rgba(20, 184, 166, 0.2);
                 border-radius: var(--radius-md);
                 padding: 12px 16px;
                 margin-bottom: 20px;
@@ -250,7 +267,7 @@
             /* Provider hint */
             .provider-hint {
                 background: var(--accent-muted);
-                border: 1px solid rgba(64, 130, 230, 0.2);
+                border: 1px solid rgba(20, 184, 166, 0.2);
                 border-radius: var(--radius-sm);
                 padding: 8px 12px;
                 font-size: 12px;
@@ -262,7 +279,7 @@
             .provider-hint code {
                 font-family: var(--font-mono);
                 font-size: 11px;
-                background: rgba(64,130,230,0.1);
+                background: rgba(20, 184, 166, 0.1);
                 padding: 1px 5px;
                 border-radius: 3px;
                 color: var(--accent);
@@ -284,7 +301,7 @@
             }
             .stat-value {
                 font-size: 22px;
-                font-weight: 600;
+                font-weight: 700;
                 color: var(--accent);
             }
             .stat-label {
@@ -306,14 +323,14 @@
 
             .result.success {
                 background: var(--success-muted);
-                border: 1px solid rgba(76, 182, 71, 0.3);
+                border: 1px solid rgba(52, 211, 153, 0.3);
                 color: var(--success);
                 display: block;
             }
 
             .result.error {
                 background: var(--error-muted);
-                border: 1px solid rgba(224, 64, 64, 0.3);
+                border: 1px solid rgba(248, 113, 113, 0.3);
                 color: var(--error);
                 display: block;
             }
