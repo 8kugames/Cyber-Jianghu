@@ -771,8 +771,26 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 temperature: config.llm.temperature,
                 max_tokens_per_stage: config.llm.max_tokens,
             };
+            let mut engine = CognitiveEngine::new(llm_arc.clone(), cognitive_config);
+
+            // 初始化 Outcome Memory（Hermes 模式）
+            let data_dir = std::path::PathBuf::from(
+                std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+                    .unwrap_or_else(|_| format!("{}/.cyber-jianghu/config", dirs::home_dir().unwrap_or_default().display()))
+            );
+            let outcome_db_path = data_dir.join("outcome_memory.db");
+            match cyber_jianghu_agent::component::memory::OutcomeMemory::new(&outcome_db_path, 10) {
+                Ok(mem) => {
+                    info!("Outcome memory initialized at {}", outcome_db_path.display());
+                    engine.set_outcome_memory(mem);
+                }
+                Err(e) => {
+                    warn!("Failed to initialize outcome memory: {}. Running without it.", e);
+                }
+            }
+
             let cognitive_engine =
-                Arc::new(CognitiveEngine::new(llm_arc.clone(), cognitive_config));
+                Arc::new(engine);
             let cognitive_engine_for_builder = cognitive_engine.clone();
 
             let cognitive_decision_with_chain_cb: DecisionWithChainCallback =
@@ -871,6 +889,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .with_llm_client(llm_arc.clone(), None)
                 .with_http_api_state(api_state.clone())
                 .with_reconnect_rx(reconnect_rx_for_builder);
+
+            // Sanity 混沌生成器
+            let chaos_config = cyber_jianghu_agent::soul::actor::ChaosConfig::default();
+            builder = builder.with_chaos_generator(
+                cyber_jianghu_agent::soul::actor::ChaosGenerator::new(chaos_config),
+            );
 
             if let Some(store) = relationship_store {
                 builder = builder.with_relationship_store(store);

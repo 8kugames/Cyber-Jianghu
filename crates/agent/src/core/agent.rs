@@ -131,6 +131,9 @@ pub struct Agent {
 
     /// 连续 follow 计数（社交死循环防护）
     pub(crate) consecutive_follow_count: u32,
+
+    /// 混沌意图生成器（Sanity 混沌硬逻辑）
+    pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
 }
 
 impl Agent {
@@ -192,6 +195,7 @@ impl Agent {
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
+            chaos_generator: None,
         }
     }
 

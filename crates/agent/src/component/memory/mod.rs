@@ -8,6 +8,7 @@ pub mod embedder;
 pub mod forgetting;
 pub mod local_embedder;
 pub mod manager;
+pub mod outcome;
 pub mod registry;
 pub mod scorer;
 pub mod store;
@@ -30,4 +31,5 @@ pub use tools::{
     MemorySearchResult, MemoryToolDefinition, MemoryToolResult, RECALL_ARCHIVED_TOOL,
     RecallArchivedParams, SEARCH_MEMORY_TOOL, SearchMemoryParams,
 };
+pub use outcome::{compute_context_hash, OutcomeMemory, OutcomeRecord, OutcomeResult};
 pub use types::{EbbinghausConfig, EmbedderStatus, ForgettingReport, MemoryEntry};

@@ -135,6 +135,8 @@ pub struct CognitiveEngine {
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
     /// Prompt 模板配置（从 YAML 加载，None 时 fail-fast）
     prompt_template: Option<PromptTemplateConfig>,
+    /// 行动结果记忆（Hermes 模式）
+    outcome_memory: Option<crate::component::memory::OutcomeMemory>,
 }
 
 impl CognitiveEngine {
@@ -157,6 +159,7 @@ impl CognitiveEngine {
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             prompt_template,
+            outcome_memory: None,
         }
     }
 
@@ -183,6 +186,7 @@ impl CognitiveEngine {
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             prompt_template,
+            outcome_memory: None,
         }
     }
 
@@ -259,6 +263,19 @@ impl CognitiveEngine {
         config.agent_name = new_name.to_string();
         config.persona.name = new_name.to_string();
         info!("认知引擎 agent_name 已更新: {}", new_name);
+    }
+
+    /// 设置 Outcome Memory（由 builder 在构建后注入）
+    pub fn set_outcome_memory(&mut self, mem: crate::component::memory::OutcomeMemory) {
+        self.outcome_memory = Some(mem);
+    }
+
+    /// 获取 Outcome Memory 经验教训 prompt 段
+    fn get_outcome_context(&self) -> String {
+        self.outcome_memory
+            .as_ref()
+            .map(|m| m.to_prompt_context())
+            .unwrap_or_default()
     }
 
     /// 更新 Agent 人设（rebirth 后调用）
@@ -579,6 +596,7 @@ impl CognitiveEngine {
         };
 
         let summary_context = self.get_summary_context();
+        let outcome_section = self.get_outcome_context();
 
         let cache = self.prompt_cache.read().unwrap();
         let action_descriptions = cache.get_action_descriptions().to_string();
@@ -601,6 +619,7 @@ impl CognitiveEngine {
             vars.insert("summary_context".to_string(), summary_context);
             vars.insert("action_descriptions".to_string(), action_descriptions);
             vars.insert("action_field_hints".to_string(), action_field_hints);
+            vars.insert("outcome_section".to_string(), outcome_section);
 
             return tmpl.render_all(&vars);
         }
@@ -613,6 +632,7 @@ impl CognitiveEngine {
             &world_state_section,
             &memory_section,
             &summary_context,
+            &outcome_section,
             &action_descriptions,
             &action_field_hints,
         )
@@ -739,6 +759,7 @@ impl CognitiveEngine {
         world_state_section: &str,
         memory_section: &str,
         summary_context: &str,
+        outcome_section: &str,
         action_descriptions: &str,
         action_field_hints: &str,
     ) -> String {
@@ -750,6 +771,7 @@ impl CognitiveEngine {
 {world_state_section}
 {memory_section}
 {summary_context}
+{outcome_section}
 ## 任务
 基于你的性格和当前状态，做出决策。你直接输出结构化 Intent，包含精确的 ID。
 
@@ -961,6 +983,16 @@ impl CognitiveEngine {
     pub fn update_summary_outcome(&self, outcome: String) {
         if let Ok(mut window) = self.summary_window.write() {
             window.update_last_outcome(outcome);
+        }
+    }
+
+    /// 记录行动结果到 Outcome Memory
+    pub fn record_outcome(
+        &self,
+        record: crate::component::memory::OutcomeRecord,
+    ) {
+        if let Some(ref mem) = self.outcome_memory {
+            mem.record(record);
         }
     }
 

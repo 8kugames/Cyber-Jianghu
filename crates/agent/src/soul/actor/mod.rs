@@ -7,6 +7,7 @@
 // ============================================================================
 
 pub mod chain;
+pub mod chaos;
 pub mod engine;
 pub mod prompt_cache; // Prompt 缓存模块 - 叙事冗余优化
 pub mod prompt_template; // Prompt 模板配置加载器
@@ -14,6 +15,7 @@ pub mod stages;
 pub mod summary_window; // 滑动上下文窗口 - 叙事冗余优化
 
 pub use chain::CognitiveChain;
+pub use chaos::{ChaosConfig, ChaosGenerator};
 pub use engine::{CognitiveEngine, CognitiveEngineConfig};
 pub use prompt_cache::PromptCache;
 pub use stages::{CognitiveStage, PerceptionMotivationResponse, StageOutput};

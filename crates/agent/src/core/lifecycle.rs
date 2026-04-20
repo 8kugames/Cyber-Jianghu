@@ -975,7 +975,7 @@ impl super::Agent {
                         let mut batch_layers: Vec<super::agent::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
-                        // multi-intent pipeline: primary + subsequent intents
+                        // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
                         let all_raw_intents: Vec<Intent> = {
                             let mut intents = vec![raw_intent.clone()];
@@ -984,6 +984,14 @@ impl super::Agent {
                             {
                                 for i in multi.iter().take(max_per_tick.saturating_sub(1)) {
                                     intents.push(i.clone());
+                                }
+                            }
+                            // Sanity 混沌：低理智时注入随机 intents
+                            if let Some(ref mut generator) = self.chaos_generator {
+                                let remaining = max_per_tick.saturating_sub(intents.len());
+                                if remaining > 0 {
+                                    let chaos_intents = generator.generate_chaos_intents(&world_state, remaining);
+                                    intents.extend(chaos_intents);
                                 }
                             }
                             intents
@@ -1212,6 +1220,16 @@ impl super::Agent {
                                         if let Some(ref engine) = self.cognitive_engine {
                                             engine.update_summary_outcome(format!("成功: {}", final_intent.action_type));
                                         }
+                                        // Outcome Memory 记录成功经验
+                                        if let Some(ref engine) = self.cognitive_engine {
+                                            engine.record_outcome(crate::component::memory::OutcomeRecord {
+                                                action_type: final_intent.action_type.to_string(),
+                                                action_data: final_intent.action_data.clone(),
+                                                result: crate::component::memory::OutcomeResult::Success,
+                                                context_hash: crate::component::memory::compute_context_hash(&world_state),
+                                                tick_id: final_intent.tick_id,
+                                            });
+                                        }
                                     } else {
                                         warn!(
                                             "ExecutionResult: tick={}, intent={}, FAILED: {}",
@@ -1227,6 +1245,16 @@ impl super::Agent {
                                         // Outcome 写回：更新 summary window
                                         if let Some(ref engine) = self.cognitive_engine {
                                             engine.update_summary_outcome(format!("失败: {}", reason));
+                                        }
+                                        // Outcome Memory 记录失败经验
+                                        if let Some(ref engine) = self.cognitive_engine {
+                                            engine.record_outcome(crate::component::memory::OutcomeRecord {
+                                                action_type: final_intent.action_type.to_string(),
+                                                action_data: final_intent.action_data.clone(),
+                                                result: crate::component::memory::OutcomeResult::Failed(reason.clone()),
+                                                context_hash: crate::component::memory::compute_context_hash(&world_state),
+                                                tick_id: final_intent.tick_id,
+                                            });
                                         }
                                     }
                                 }
