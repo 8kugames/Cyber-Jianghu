@@ -65,6 +65,8 @@ pub struct AgentBuilder {
     data_dir: PathBuf,
     /// 即时事件处理器
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
+    /// 混沌意图生成器（Sanity 混沌硬逻辑）
+    chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
 }
 
 impl AgentBuilder {
@@ -91,6 +93,7 @@ impl AgentBuilder {
             cognitive_engine: None,
             data_dir: PathBuf::from("."),
             immediate_handler: None,
+            chaos_generator: None,
         }
     }
 
@@ -215,6 +218,15 @@ impl AgentBuilder {
         engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>,
     ) -> Self {
         self.cognitive_engine = Some(engine);
+        self
+    }
+
+    /// 设置混沌意图生成器（Sanity 混沌硬逻辑）
+    pub fn with_chaos_generator(
+        mut self,
+        generator: crate::soul::actor::ChaosGenerator,
+    ) -> Self {
+        self.chaos_generator = Some(generator);
         self
     }
 
@@ -346,6 +358,7 @@ impl AgentBuilder {
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
+            chaos_generator: self.chaos_generator,
         }
     }
 }
