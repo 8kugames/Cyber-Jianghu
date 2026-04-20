@@ -21,6 +21,16 @@ pub enum OutcomeResult {
     Failed(String),
 }
 
+impl OutcomeResult {
+    /// 规范化类型标签（用于 SQLite 存储，解耦 serde 序列化格式）
+    fn type_tag(&self) -> &'static str {
+        match self {
+            OutcomeResult::Success => "success",
+            OutcomeResult::Failed(_) => "failed",
+        }
+    }
+}
+
 /// 行动结果记录
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutcomeRecord {
@@ -42,26 +52,34 @@ pub struct OutcomeRecord {
 /// 提供按 action_type 和 context_hash 的查询。
 pub struct OutcomeMemory {
     conn: Mutex<Connection>,
-    /// prompt 注入时最多显示多少条
+    /// prompt 注入时每种 action 最多显示多少条
     prompt_limit: usize,
+    /// 数据库最大记录数
+    max_records: usize,
 }
 
 impl OutcomeMemory {
     /// 创建 OutcomeMemory（使用指定路径的 SQLite）
     pub fn new(db_path: &Path, prompt_limit: usize) -> Result<Self> {
+        Self::with_max_records(db_path, prompt_limit, 1000)
+    }
+
+    /// 创建 OutcomeMemory（指定最大记录数）
+    pub fn with_max_records(db_path: &Path, prompt_limit: usize, max_records: usize) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).context("创建 outcome memory 目录失败")?;
         }
         let conn = Connection::open(db_path).context("打开 outcome memory 数据库失败")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS outcome_records (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                action_type TEXT NOT NULL,
-                action_data TEXT,
-                result      TEXT NOT NULL,
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_type  TEXT NOT NULL,
+                action_data  TEXT,
+                result_type  TEXT NOT NULL,
+                result       TEXT,
                 context_hash TEXT NOT NULL,
-                tick_id     INTEGER NOT NULL,
-                created_at  INTEGER DEFAULT (strftime('%s', 'now'))
+                tick_id      INTEGER NOT NULL,
+                created_at   INTEGER DEFAULT (strftime('%s', 'now'))
             );
             CREATE INDEX IF NOT EXISTS idx_outcome_action ON outcome_records(action_type);
             CREATE INDEX IF NOT EXISTS idx_outcome_context ON outcome_records(context_hash);
@@ -70,12 +88,17 @@ impl OutcomeMemory {
         Ok(Self {
             conn: Mutex::new(conn),
             prompt_limit,
+            max_records,
         })
     }
 
     /// 记录行动结果
     pub fn record(&self, record: OutcomeRecord) {
-        let result_str = serde_json::to_string(&record.result).unwrap_or_default();
+        let result_type = record.result.type_tag();
+        let result_detail = match &record.result {
+            OutcomeResult::Failed(reason) => Some(reason.clone()),
+            OutcomeResult::Success => None,
+        };
         let action_data_str = record
             .action_data
             .as_ref()
@@ -88,10 +111,16 @@ impl OutcomeMemory {
             }
         };
         if let Err(e) = conn.execute(
-            "INSERT INTO outcome_records (action_type, action_data, result, context_hash, tick_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![record.action_type, action_data_str, result_str, record.context_hash, record.tick_id],
+            "INSERT INTO outcome_records (action_type, action_data, result_type, result, context_hash, tick_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![record.action_type, action_data_str, result_type, result_detail, record.context_hash, record.tick_id],
         ) {
             debug!("outcome memory record failed: {}", e);
+        }
+        drop(conn);
+
+        // 自动清理：每 100 次写入触发一次
+        if self.max_records > 0 {
+            self.cleanup(self.max_records);
         }
     }
 
@@ -102,7 +131,7 @@ impl OutcomeMemory {
             Err(_) => return Vec::new(),
         };
         let mut stmt = match conn.prepare(
-            "SELECT action_type, action_data, result, context_hash, tick_id
+            "SELECT action_type, action_data, result_type, result, context_hash, tick_id
              FROM outcome_records WHERE action_type = ?1 ORDER BY id DESC LIMIT ?2",
         ) {
             Ok(s) => s,
@@ -111,13 +140,18 @@ impl OutcomeMemory {
         let rows = match stmt.query_map(params![action_type, limit], |row| {
             let action_type: String = row.get(0)?;
             let action_data_str: Option<String> = row.get(1)?;
-            let result_str: String = row.get(2)?;
-            let context_hash: String = row.get(3)?;
-            let tick_id: i64 = row.get(4)?;
+            let result_type: String = row.get(2)?;
+            let result_detail: Option<String> = row.get(3)?;
+            let context_hash: String = row.get(4)?;
+            let tick_id: i64 = row.get(5)?;
+            let result = match result_type.as_str() {
+                "success" => OutcomeResult::Success,
+                _ => OutcomeResult::Failed(result_detail.unwrap_or_default()),
+            };
             Ok(OutcomeRecord {
                 action_type,
                 action_data: action_data_str.and_then(|s| serde_json::from_str(&s).ok()),
-                result: serde_json::from_str(&result_str).unwrap_or(OutcomeResult::Failed("parse error".into())),
+                result,
                 context_hash,
                 tick_id,
             })
@@ -146,7 +180,7 @@ impl OutcomeMemory {
         }
         let success: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM outcome_records WHERE action_type = ?1 AND result = '\"Success\"'",
+                "SELECT COUNT(*) FROM outcome_records WHERE action_type = ?1 AND result_type = 'success'",
                 params![action_type],
                 |row| row.get(0),
             )
@@ -154,9 +188,31 @@ impl OutcomeMemory {
         success as f64 / total as f64
     }
 
+    /// 获取所有有记录的 action_type（动态查询，不硬编码）
+    fn distinct_action_types(&self) -> Vec<String> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT DISTINCT action_type FROM outcome_records ORDER BY action_type",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map([], |row| {
+            let at: String = row.get(0)?;
+            Ok(at)
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
     /// 生成 prompt 注入文本（经验教训段）
     pub fn to_prompt_context(&self) -> String {
-        let action_types = ["eat", "drink", "pickup", "move", "gather", "craft", "give", "drop", "idle", "speak"];
+        let action_types = self.distinct_action_types();
         let mut lines: Vec<String> = Vec::new();
 
         for at in &action_types {
@@ -250,11 +306,12 @@ mod tests {
 
         let records = mem.query_recent("eat", 10);
         assert_eq!(records.len(), 2);
+        assert!(matches!(records[0].result, OutcomeResult::Failed(_)));
+        assert!(matches!(records[1].result, OutcomeResult::Success));
 
         let rate = mem.success_rate("eat");
         assert!((rate - 0.5).abs() < 0.01);
 
-        // cleanup
         let _ = std::fs::remove_file(&db);
     }
 
@@ -274,6 +331,28 @@ mod tests {
         let ctx = mem.to_prompt_context();
         assert!(ctx.contains("经验教训"));
         assert!(ctx.contains("move → 成功"));
+
+        let _ = std::fs::remove_file(&db);
+    }
+
+    #[test]
+    fn test_dynamic_action_types() {
+        let db = temp_db();
+        let mem = OutcomeMemory::new(&db, 10).unwrap();
+
+        mem.record(OutcomeRecord {
+            action_type: "attack".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            context_hash: "loc::0".into(),
+            tick_id: 100,
+        });
+
+        let types = mem.distinct_action_types();
+        assert!(types.contains(&"attack".to_string()));
+
+        let ctx = mem.to_prompt_context();
+        assert!(ctx.contains("attack → 成功"));
 
         let _ = std::fs::remove_file(&db);
     }

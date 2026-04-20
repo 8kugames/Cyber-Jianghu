@@ -128,8 +128,8 @@ impl IntentWorker {
         let intent_id = intent.intent_id;
 
         debug!(
-            "处理 Intent: agent={}, action={}, intent={}",
-            agent_id, action_type, intent_id
+            "处理 Intent: agent={}, action={}, intent={}, subsequent={}",
+            agent_id, action_type, intent_id, intent.subsequent_intents.len()
         );
 
         // 1. 从 DashMap 读取 Agent 状态
@@ -223,6 +223,75 @@ impl IntentWorker {
             action_type,
             result.events.len()
         );
+
+        // 10. 处理 subsequent_intents（按顺序，任一失败则中断）
+        for subsequent in &intent.subsequent_intents {
+            debug!(
+                "处理 subsequent Intent: agent={}, action={}",
+                agent_id, subsequent.action_type
+            );
+            if let Err(e) = self.process_single_subsequent(subsequent, agent_id, tick_id).await {
+                warn!(
+                    "Subsequent intent 失败，中断 pipeline: agent={}, action={}, error={}",
+                    agent_id, subsequent.action_type, e
+                );
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 处理 subsequent intent（从 pipeline 中的后续动作）
+    async fn process_single_subsequent(
+        &self,
+        intent: &cyber_jianghu_protocol::Intent,
+        agent_id: uuid::Uuid,
+        tick_id: i64,
+    ) -> Result<()> {
+        // 从 DashMap 读取最新状态（前一个 intent 已更新）
+        let agent_state = self
+            .state_cache
+            .get(&agent_id)
+            .map(|r| r.value().clone())
+            .ok_or_else(|| anyhow::anyhow!("Agent {} 不在缓存中", agent_id))?;
+
+        if !agent_state.is_alive {
+            return Err(anyhow::anyhow!("Agent 已死亡"));
+        }
+
+        let all_states: Vec<AgentState> =
+            self.state_cache.iter().map(|r| r.value().clone()).collect();
+
+        let result = self
+            .state_processor
+            .process_single_intent(tick_id, agent_state, intent, &all_states)
+            .await?;
+
+        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
+            return Err(e).context("Subsequent intent 持久化失败");
+        }
+
+        self.state_cache
+            .insert(agent_id, result.updated_state.clone());
+
+        self.send_execution_result(
+            agent_id,
+            intent.intent_id,
+            tick_id,
+            true,
+            None,
+            Some(intent.action_type.to_string()),
+        )
+        .await;
+
+        self.send_reactive_world_state(agent_id, tick_id).await;
+
+        for (target_id, event) in &result.events {
+            if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
+                warn!("事件广播失败: target={}, error={}", target_id, e);
+            }
+        }
 
         Ok(())
     }
