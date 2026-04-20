@@ -774,10 +774,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let mut engine = CognitiveEngine::new(llm_arc.clone(), cognitive_config);
 
             // 初始化 Outcome Memory（Hermes 模式）
-            let data_dir = std::path::PathBuf::from(
-                std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-                    .unwrap_or_else(|_| format!("{}/.cyber-jianghu/config", dirs::home_dir().unwrap_or_default().display()))
-            );
             let outcome_db_path = data_dir.join("outcome_memory.db");
             match cyber_jianghu_agent::component::memory::OutcomeMemory::new(&outcome_db_path, 10) {
                 Ok(mem) => {
