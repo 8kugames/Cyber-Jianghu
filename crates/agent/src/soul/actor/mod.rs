@@ -9,10 +9,12 @@
 pub mod chain;
 pub mod chaos;
 pub mod engine;
+mod engine_prompts; // Prompt 构建方法拆分
 pub mod prompt_cache; // Prompt 缓存模块 - 叙事冗余优化
 pub mod prompt_template; // Prompt 模板配置加载器
 pub mod stages;
 pub mod summary_window; // 滑动上下文窗口 - 叙事冗余优化
+pub mod translation; // 中文 LLM 边界翻译层
 
 pub use chain::CognitiveChain;
 pub use chaos::{ChaosConfig, ChaosGenerator};

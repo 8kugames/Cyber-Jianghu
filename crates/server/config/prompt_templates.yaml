@@ -43,10 +43,10 @@ templates:
       survival_rules: |
         ## 生存法则
         - 当饥饿或口渴描述中出现紧迫措辞时（如"饥肠辘辘/饥饿难耐/急需"等），进食/饮水是最高优先级
-        - 没有食物时：先拾取地上的食物/水（pickup），再进食/饮水（eat/drink）
-        - 背包和地面都没有时：采集（gather）或移动到可能有资源的地点（move）
-        - idle（原地休息）是合法行为，不必强求每个 tick 都行动
-        - eat/drink 的 action_data 必须使用"背包物品"或"附近物品"中列出的精确 item_id，禁止使用物品名称或自创 ID
+        - 没有食物时：先拾取地上的食物/水（拾取），再进食/饮水（进食/饮水）
+        - 背包和地面都没有时：采集（采集）或移动到可能有资源的地点（移动）
+        - 休息（原地休息）是合法行为，不必强求每个 tick 都行动
+        - 进食/饮水 的 动作数据 中必须使用"背包物品"或"附近物品"中列出的精确物品ID，禁止使用物品名称或自创 ID
 
       narrative_limits: |
         ## 叙事限制
@@ -72,16 +72,32 @@ templates:
           "drive_intensity": 5,
           "thought_process": "完整思考过程 (200字以内)",
           "actions": [
-            {{"action_type": "动作类型", "action_data": {{}}}}
+            {{"action_type": "动作类型（中文）", "action_data": {{}}}}
           ]
         }}
 
         ### actions 规则：
         - actions 数组包含 1-3 个按顺序执行的动作
         - 大多数情况只需要 1 个动作
-        - 只有需要连续操作时才输出多个（如：先 pickup 再 eat，先 move 再 gather）
-        - 后续动作依赖前一个动作的成功（如 pickup 失败则 eat 不会执行）
-        - 每个动作的 action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造
+        - 只有需要连续操作时才输出多个（如：先拾取再进食，先移动再采集）
+        - 后续动作依赖前一个动作的成功（如拾取失败则进食不会执行）
+        - 每个动作的 动作数据 中的 ID 必须从上面的世界状态数据中直接复制，不要编造
+
+        ### 示例（请严格参考格式）：
+        单动作 - 说话：
+        {{"actions": [{{"action_type": "说话", "action_data": {{"内容": "各位好汉，在下有礼了。"}}}}]}}
+
+        单动作 - 移动：
+        {{"actions": [{{"action_type": "移动", "action_data": {{"目标地点": "longmen_kitchen"}}}}]}}
+
+        单动作 - 进食：
+        {{"actions": [{{"action_type": "进食", "action_data": {{"物品ID": "mantou"}}}}]}}
+
+        多动作 - 拾取后进食：
+        {{"actions": [
+          {{"action_type": "拾取", "action_data": {{"物品ID": "mantou"}}}},
+          {{"action_type": "进食", "action_data": {{"物品ID": "mantou"}}}}
+        ]}}
 
         ### action_data 字段要求：
         {action_field_hints}
@@ -101,11 +117,11 @@ templates:
       - move
     sections:
       eat: |
-        吃东西失败：物品ID无效。背包可用物品：[{available_items}]。请使用 eat 命令，item_id 必须是上述之一。
+        进食失败：物品ID无效。背包可用物品：[{available_items}]。请使用 进食，物品ID 必须是上述之一。
       drink: |
-        喝水失败：物品ID无效。背包可用物品：[{available_items}]。请使用 drink 命令，item_id 必须是上述之一。
+        饮水失败：物品ID无效。背包可用物品：[{available_items}]。请使用 饮水，物品ID 必须是上述之一。
       move: |
-        移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 move 命令，target_location 必须是上述之一。
+        移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 移动，目标地点 必须是上述之一。
     truncation:
       max_items: 5
 
@@ -122,15 +138,15 @@ templates:
       - thirst_nothing
     sections:
       hunger_with_items: |
-        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！背包可用物品：{items}。执行 eat，item_id 必须是列表中的精确 ID。选择能恢复饥饿值的物品。
+        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！背包可用物品：{items}。执行 进食，物品ID 必须是列表中的精确 ID。选择能恢复饥饿值的物品。
       hunger_with_ground: |
-        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！地上有：{items}。先 pickup 再 eat。选择能恢复饥饿值的物品。
+        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！地上有：{items}。先拾取再进食。选择能恢复饥饿值的物品。
       hunger_nothing: |
         【紧急】你极度饥饿（当前 {value}/{max}），附近无食物！移动到有资源的地点或采集。
       thirst_with_items: |
-        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！背包可用物品：{items}。执行 drink，item_id 必须是列表中的精确 ID。选择能恢复口渴值的物品。
+        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！背包可用物品：{items}。执行 饮水，物品ID 必须是列表中的精确 ID。选择能恢复口渴值的物品。
       thirst_with_ground: |
-        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先 pickup 再 drink。选择能恢复口渴值的物品。
+        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先拾取再饮水。选择能恢复口渴值的物品。
       thirst_nothing: |
         【紧急】你极度口渴（当前 {value}/{max}），附近无水源！移动到有水的地点或采集。
     truncation: {}

@@ -39,7 +39,7 @@ pub struct WorldTime {
 }
 
 /// 数字转中文大写（0-9）
-fn digit_to_chinese(n: i32) -> String {
+pub fn digit_to_chinese(n: i32) -> String {
     let digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
     n.to_string()
         .chars()
@@ -48,7 +48,7 @@ fn digit_to_chinese(n: i32) -> String {
 }
 
 /// 数字转中文大写
-fn number_to_chinese(n: i32) -> String {
+pub fn number_to_chinese(n: i32) -> String {
     if n == 0 {
         return "零".to_string();
     }
@@ -56,7 +56,7 @@ fn number_to_chinese(n: i32) -> String {
 }
 
 /// 时辰名称（十二时辰制，每时辰两小时）
-fn shichen_name(hour: i32) -> &'static str {
+pub fn shichen_name(hour: i32) -> &'static str {
     match hour {
         0..=1 => "子时",
         2..=3 => "丑时",

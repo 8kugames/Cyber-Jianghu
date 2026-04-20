@@ -181,6 +181,14 @@ pub struct AvailableAction {
     /// high → 强制 LLM 审核, medium → 抽审, low → 跳过 LLM
     #[serde(default = "default_ooc_risk")]
     pub ooc_risk: String,
+
+    /// 动作类型别名（中文变体 + 常见英文错误）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+
+    /// 字段别名映射 { canonical_field_name: [aliases...] }
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub field_aliases: std::collections::HashMap<String, Vec<String>>,
 }
 
 fn default_ooc_risk() -> String {

@@ -100,6 +100,8 @@ fn test_build_with_world_state() {
             valid_targets: None,
             required_fields: vec![],
             ooc_risk: "high".to_string(),
+            aliases: vec![],
+            field_aliases: std::collections::HashMap::new(),
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "move".to_string(),
@@ -109,6 +111,8 @@ fn test_build_with_world_state() {
             valid_targets: Some(vec!["market".to_string(), "dojo".to_string()]),
             required_fields: vec!["target_location".to_string()],
             ooc_risk: "low".to_string(),
+            aliases: vec![],
+            field_aliases: std::collections::HashMap::new(),
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "use".to_string(),
@@ -118,6 +122,8 @@ fn test_build_with_world_state() {
             valid_targets: Some(vec!["wine_bottle".to_string()]),
             required_fields: vec!["item_id".to_string()],
             ooc_risk: "low".to_string(),
+            aliases: vec![],
+            field_aliases: std::collections::HashMap::new(),
         },
     ];
 

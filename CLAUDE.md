@@ -177,7 +177,14 @@ The agent crate provides WebSocket + HTTP API for OpenClaw integration:
 
 Key agent modules:
 - `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent + tool calling 工具池（地魂能力层）
+- `src/core/social.rs` - 社交事件处理 + LLM 好感度评估
+- `src/core/reflector_ext.rs` - ReflectorSoul 三层审查 + 分级审核策略
+- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent
+- `src/soul/actor/translation.rs` - 中文 LLM 边界翻译层 (别名 → 英文 canonical)
+- `src/soul/actor/chaos.rs` - Sanity 混沌意图生成器 (低理智随机行为)
+- `src/soul/actor/engine_prompts.rs` - Prompt 构建方法 (模板 + 硬编码向后兼容)
+- `src/soul/actor/prompt_template.rs` - YAML 驱动的 Prompt 模板配置加载器
+- `src/component/memory/outcome.rs` - Outcome Memory (Hermes): SQLite 行动结果记忆
 - `src/soul/reflector/` - 天魂 ReflectorSoul: Three-layer validation (唯一出入口)
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/persona/` - Dynamic persona, lifespan, trait evolution
@@ -281,6 +288,7 @@ use super::builder::AgentBuilder;
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: Make breaking changes freely
+8. 鉴于你频繁的使用错误的目录进行文件写入，现在你被禁止使用绝对路径进行写操作，你仅能在相对路径 ./ 下进行写操作活动，即使是 tmp 逻辑也强制要求在./tmp下完成。
 
 ## Key Dependencies
 
@@ -300,6 +308,8 @@ use super::builder::AgentBuilder;
 |---------|------|
 | Environment variables | `.env` |
 | Server configuration | `crates/server/config/*.yaml` |
+| World-building rules | `crates/server/config/world-building-rules.yaml` |
+| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 
@@ -329,6 +339,10 @@ use super::builder::AgentBuilder;
 - `GET /welcome.html` - Home page
 - `GET /create.html` - Character creation
 - `GET /character.html` - Character info
+
+## Slash Commands
+
+- `/create-character [概念]` - Generate new AI agent persona following world-building constraints
 
 ## Quick Start Guides
 

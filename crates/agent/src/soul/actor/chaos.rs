@@ -13,7 +13,7 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-/// 混沌配置（从 prompt_templates.yaml sanity_chaos 段加载）
+/// 混沌配置（使用硬编码默认值，未来可从 YAML 配置加载）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosConfig {
     /// 触发阈值（sanity <= 此值时激活）

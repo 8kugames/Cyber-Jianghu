@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::state::AppState;
+use cyber_jianghu_protocol::types::world::{number_to_chinese, shichen_name};
 
 #[derive(Serialize)]
 pub struct DashboardStats {
@@ -56,6 +57,8 @@ pub struct WorldTime {
     pub second: i32,
     /// 当前季节名称
     pub season: String,
+    /// 天道历格式文本
+    pub text: String,
 }
 
 pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<DashboardStats> {
@@ -191,6 +194,29 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
             .map(|s| s.name)
             .unwrap_or_else(|| "未知".to_string());
 
+    let month_text = match month {
+        1 => "元月",
+        2 => "二月",
+        3 => "三月",
+        4 => "四月",
+        5 => "五月",
+        6 => "六月",
+        7 => "七月",
+        8 => "八月",
+        9 => "九月",
+        10 => "十月",
+        11 => "十一月",
+        12 => "腊月",
+        _ => unreachable!(),
+    };
+    let text = format!(
+        "天道历{}年{}{}日{}",
+        number_to_chinese(year),
+        month_text,
+        number_to_chinese(day),
+        shichen_name(hour)
+    );
+
     let game_time = WorldTime {
         year,
         month,
@@ -199,6 +225,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         minute: 0, // 前端会自行计算平滑值
         second: 0, // 前端会自行计算平滑值
         season,
+        text,
     };
 
     let game_flow_total_hours = total_game_hours;

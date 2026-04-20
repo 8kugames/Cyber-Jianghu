@@ -972,7 +972,7 @@ impl super::Agent {
 
                         let mut approved_intents = Vec::new();
                         let mut batch_rejection: Option<String> = None;
-                        let mut batch_layers: Vec<super::agent::LayerResult> = Vec::new();
+                        let mut batch_layers: Vec<super::reflector_ext::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
                         // multi-intent pipeline: primary + subsequent intents + chaos
@@ -1009,12 +1009,12 @@ impl super::Agent {
                                     Ok(()) => {
                                         // 记录通过的两个 layer
                                         if batch_layers.is_empty() {
-                                            batch_layers.push(super::agent::LayerResult {
+                                            batch_layers.push(super::reflector_ext::LayerResult {
                                                 layer: "layer1",
                                                 passed: true,
                                                 detail: None,
                                             });
-                                            batch_layers.push(super::agent::LayerResult {
+                                            batch_layers.push(super::reflector_ext::LayerResult {
                                                 layer: "layer2",
                                                 passed: true,
                                                 detail: None,
@@ -1025,12 +1025,12 @@ impl super::Agent {
                                     Err(reason) => {
                                         warn!("Tick {} 分级审核（Skip）驳回: {}", world_state.tick_id, reason);
                                         batch_rejection = Some(reason.clone());
-                                        batch_layers.push(super::agent::LayerResult {
+                                        batch_layers.push(super::reflector_ext::LayerResult {
                                             layer: "layer1",
                                             passed: true,
                                             detail: None,
                                         });
-                                        batch_layers.push(super::agent::LayerResult {
+                                        batch_layers.push(super::reflector_ext::LayerResult {
                                             layer: "layer2",
                                             passed: false,
                                             detail: Some(reason),
@@ -1040,12 +1040,12 @@ impl super::Agent {
                             } else {
                                 // 完整三层审查（含 LLM）
                                 match self.validate_with_reflector(intent, &world_state).await? {
-                                    super::agent::ReflectorResult::Approved { intent: approved, layers, narrative } => {
+                                    super::reflector_ext::ReflectorResult::Approved { intent: approved, layers, narrative } => {
                                         batch_layers = layers;
                                         batch_narrative = narrative;
                                         approved_intents.push(approved);
                                     }
-                                    super::agent::ReflectorResult::Rejected { reason, layers } => {
+                                    super::reflector_ext::ReflectorResult::Rejected { reason, layers } => {
                                         batch_layers = layers;
                                         batch_rejection = Some(reason.clone());
                                         // 叙事化驳回原因

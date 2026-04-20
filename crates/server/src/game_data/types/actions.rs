@@ -19,6 +19,10 @@ pub struct ActionConfigEntry {
     #[serde(default)]
     pub name: String,
 
+    /// 动作类型别名（中文变体 + 常见英文错误）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
+
     /// 动作描述（详细说明行为和效果，避免 LLM 理解歧义）
     #[serde(default)]
     pub description: String,
@@ -99,6 +103,11 @@ pub struct ActionValidation {
 
     /// 字段验证规则
     pub field_validations: Vec<FieldValidation>,
+
+    /// 字段别名映射 { canonical_field_name: [aliases...] }
+    /// 用于 LLM 输出的中文/变体字段名 → 英文 canonical 字段名翻译
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub field_aliases: HashMap<String, Vec<String>>,
 }
 
 /// 字段验证规则
