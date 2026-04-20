@@ -6,7 +6,7 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, SpeakData};
+use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData};
 use crate::models::Intent;
 
 /// 基础动作执行器
@@ -135,6 +135,76 @@ impl BasicActionExecutor {
         });
 
         result
+    }
+
+    /// 执行 shout 动作
+    ///
+    /// 大喊，内容对当前位置所有 Agent 可见。复用 MessageSpoken StateChange。
+    pub(super) fn execute_shout(
+        intent: &Intent,
+        action_data: Option<serde_json::Value>,
+    ) -> ActionExecutionResult {
+        let data: ShoutData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
+            Some(d) => d,
+            None => {
+                return ActionExecutionResult::failure(
+                    "缺少喊叫内容".to_string(),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+
+        if data.content.trim().is_empty() {
+            return ActionExecutionResult::failure(
+                "喊叫内容不能为空".to_string(),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
+        let mut result = ActionExecutionResult::success(
+            format!("{} 大喊: {}", intent.agent_id, data.content),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
+        );
+
+        result.add_change(StateChange::MessageSpoken {
+            agent_id: intent.agent_id,
+            content: data.content,
+            target_agent_id: None,
+            already_broadcast: intent.already_broadcast,
+        });
+
+        result
+    }
+
+    /// 执行 practice 动作
+    ///
+    /// 修炼武功。验证 skill_id 存在后返回成功，具体效果由 generic effects 处理。
+    pub(super) fn execute_practice(
+        intent: &Intent,
+        action_data: Option<serde_json::Value>,
+    ) -> ActionExecutionResult {
+        let skill_id = action_data
+            .as_ref()
+            .and_then(|d| d.get("skill_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if skill_id.is_empty() {
+            return ActionExecutionResult::failure(
+                "缺少技能 ID (skill_id)".to_string(),
+                intent.action_type.to_string(),
+                Some(intent.intent_id),
+            );
+        }
+
+        ActionExecutionResult::success(
+            format!("{} 修炼了 {}", intent.agent_id, skill_id),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
+        )
     }
 
     /// 执行 pickup 动作

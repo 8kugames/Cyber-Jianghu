@@ -310,6 +310,14 @@ pub struct TickRulesData {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LocationRulesData {
     pub spawn_location: String,
+
+    /// parent-child 隐式连接的默认 travel_cost
+    #[serde(default = "default_implicit_travel_cost")]
+    pub default_implicit_travel_cost: u32,
+}
+
+fn default_implicit_travel_cost() -> u32 {
+    1
 }
 
 /// 游戏时间规则数据（用于计算 tick_id）

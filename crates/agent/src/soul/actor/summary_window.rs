@@ -73,6 +73,15 @@ impl NarrativeSummaryWindow {
         self.summaries.clear();
     }
 
+    /// 更新最近一条摘要的 outcome
+    ///
+    /// Intent 执行后由 lifecycle 调用，将 "执行中" 替换为实际结果。
+    pub fn update_last_outcome(&mut self, outcome: String) {
+        if let Some(summary) = self.summaries.back_mut() {
+            summary.outcome = outcome;
+        }
+    }
+
     /// 生成窗口摘要（用于 prompt 注入）
     ///
     /// 格式化为简洁的近期行动轨迹，帮助 LLM 理解连续决策上下文。
