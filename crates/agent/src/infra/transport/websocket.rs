@@ -398,6 +398,41 @@ impl WebSocketClient {
         }
     }
 
+    /// 等待 ExecutionResult（阻塞等待，带超时）
+    ///
+    /// 使用 watch channel 的 changed() 方法等待 server 回传结果，
+    /// 超时后返回 None（不等同于失败，可能 server 正在处理）。
+    pub async fn wait_for_execution_result(
+        &self,
+        timeout_ms: u64,
+    ) -> Result<Option<ExecutionResultData>> {
+        let mut rx = {
+            let state = self.state.read().await;
+            state
+                .execution_result_tx
+                .as_ref()
+                .context("Not connected to server")?
+                .subscribe()
+        };
+
+        // 如果已有新值，直接返回
+        if rx.has_changed().unwrap_or(false) {
+            return Ok(rx.borrow().as_ref().cloned());
+        }
+
+        // 阻塞等待，带超时
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            rx.changed(),
+        )
+        .await
+        {
+            Ok(Ok(())) => Ok(rx.borrow().as_ref().cloned()),
+            Ok(Err(_)) => anyhow::bail!("ExecutionResult channel closed"),
+            Err(_) => Ok(None), // timeout
+        }
+    }
+
     /// 发送 Intent（通过 mpsc channel → 后台任务）
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {
         let tx = {
@@ -849,6 +884,11 @@ impl AgentClient {
     pub async fn try_receive_execution_result(&self) -> Result<Option<ExecutionResultData>> {
         let client = self.client.read().await;
         client.try_receive_execution_result().await
+    }
+
+    pub async fn wait_for_execution_result(&self, timeout_ms: u64) -> Result<Option<ExecutionResultData>> {
+        let client = self.client.read().await;
+        client.wait_for_execution_result(timeout_ms).await
     }
 
     pub async fn send_intent(&self, intent: &Intent) -> Result<()> {

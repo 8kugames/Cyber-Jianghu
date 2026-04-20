@@ -152,29 +152,6 @@ pub struct NarrativeSummary {
 }
 
 impl NarrativeSummary {
-    /// 从 CognitiveChain 创建摘要
-    ///
-    /// 压缩各阶段输出为简短摘要。
-    #[allow(dead_code)]
-    pub fn from_chain(chain: &crate::soul::actor::CognitiveChain) -> Self {
-        Self {
-            tick_id: chain.tick_id,
-            perception: chain
-                .get_stage(crate::soul::actor::CognitiveStage::Perception)
-                .map(|s| s.content.chars().take(50).collect())
-                .unwrap_or_default(),
-            motivation: chain
-                .get_stage(crate::soul::actor::CognitiveStage::Motivation)
-                .map(|s| s.content.chars().take(50).collect())
-                .unwrap_or_default(),
-            decision: chain
-                .get_stage(crate::soul::actor::CognitiveStage::Decision)
-                .map(|s| s.content.chars().take(50).collect())
-                .unwrap_or_default(),
-            outcome: String::new(), // 结果需要外部填充
-        }
-    }
-
     /// 创建简化的摘要
     pub fn simple(tick_id: i64, decision: &str, outcome: &str) -> Self {
         Self {
@@ -184,20 +161,6 @@ impl NarrativeSummary {
             decision: decision.to_string(),
             outcome: outcome.to_string(),
         }
-    }
-
-    /// 截断文本到指定长度（保留供将来使用）
-    #[allow(dead_code)]
-    fn truncate(text: &str, max_len: usize) -> String {
-        if text.len() <= max_len {
-            return text.to_string();
-        }
-        let end = text
-            .char_indices()
-            .nth(max_len.saturating_sub(3))
-            .map(|(idx, _)| idx)
-            .unwrap_or(text.len());
-        format!("{}...", &text[..end])
     }
 }
 

@@ -1204,12 +1204,11 @@ impl super::Agent {
                                 final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                             );
 
-                            // 实时模式：poll ExecutionResult（server 立即处理后的反馈）
+                            // 实时模式：等待 ExecutionResult（server 立即处理后的反馈）
                             // Server 同时会发送 reactive WorldState（交互驱动即时推送），
                             // 下一次 select 循环的 receive_world_state() 会立即收到（无需等 tick 广播）。
-                            // 短暂等待 200ms 后检查，避免 busy-wait
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                            match self.client.try_receive_execution_result().await {
+                            // 使用 watch channel 阻塞等待，3s 超时（替代固定 sleep + 非阻塞 poll）
+                            match self.client.wait_for_execution_result(3000).await {
                                 Ok(Some(result)) => {
                                     if result.success {
                                         debug!(
@@ -1259,7 +1258,7 @@ impl super::Agent {
                                     }
                                 }
                                 Ok(None) => {
-                                    debug!("No ExecutionResult yet (server may be batching)");
+                                    debug!("ExecutionResult timeout (3s), server may be slow");
                                 }
                                 Err(e) => {
                                     debug!("ExecutionResult poll error: {}", e);

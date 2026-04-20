@@ -802,14 +802,20 @@ impl CognitiveEngine {
   "primary_drive": "当前主要驱动力",
   "drive_intensity": 5,
   "thought_process": "完整思考过程 (200字以内)",
-  "action_type": "动作类型（如 eat, drink, pickup, move, idle, speak 等）",
-  "action_data": {{}}
+  "actions": [
+    {{"action_type": "动作类型", "action_data": {{}}}}
+  ]
 }}
 
-### action_data 字段要求：
-{action_field_hints}
+### actions 规则：
+- actions 数组包含 1-3 个按顺序执行的动作
+- 大多数情况只需要 1 个动作
+- 只有需要连续操作时才输出多个（如：先 pickup 再 eat，先 move 再 gather）
+- 后续动作依赖前一个动作的成功（如 pickup 失败则 eat 不会执行）
+- 每个动作的 action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造
 
-注意：action_data 中的 ID 必须从上面的世界状态数据中直接复制，不要编造。"#,
+### action_data 字段要求：
+{action_field_hints}"#,
             agent_name = agent_name,
             persona = persona_desc,
             world_state_section = world_state_section,
@@ -874,9 +880,11 @@ impl CognitiveEngine {
   "primary_drive": "当前主要驱动力",
   "drive_intensity": 5,
   "thought_process": "完整思考过程 (200字以内)",
-  "action_type": "动作类型",
-  "action_data": {{}}
-}}"#,
+  "actions": [
+    {{"action_type": "动作类型", "action_data": {{}}}}
+  ]
+}}
+- actions 数组 1-3 个，按顺序执行，后续依赖前一个成功"#,
             tick_id = tick_id,
             agent_name = agent_name,
             persona = persona_desc,
