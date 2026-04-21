@@ -49,10 +49,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 # Run clippy with auto-fix
 cargo clippy --workspace --all-targets --fix --allow-dirty
 
-# Run agent in Cognitive mode (default, uses built-in LLM)
+# Run agent in Cognitive mode (default, built-in LLM)
 cyber-jianghu-agent run
 
-# Run agent in Claw mode (for OpenClaw integration)
+# Run agent in Claw mode (external LLM via OpenClaw)
 cyber-jianghu-agent run --mode claw --port 0
 
 # Run with debug logging
@@ -103,7 +103,7 @@ Docker images published to `ghcr.io/8kugames/cyber-jianghu-server`.
 crates/
 ├── protocol/        # Communication protocol (ServerMessage, ClientMessage, WorldState)
 ├── server/          # Game server ("天道" - physics engine)
-└── agent/           # Agent SDK (WebSocket + HTTP API for OpenClaw integration)
+└── agent/           # Agent SDK (unified cognitive architecture, two runtime modes)
 
 docs/                # Architecture docs and whitepapers
 scripts/             # Utility scripts
@@ -160,39 +160,26 @@ Key server modules:
 
 ### Agent Architecture
 
-The agent crate provides WebSocket + HTTP API for OpenClaw integration:
+The agent crate implements a **unified Agent SDK** with cognitive engine, memory, persona, and two runtime modes. Both modes share identical initialization and core architecture — the **only difference** is the LLM client implementation.
 
-> ⚠️ **CRITICAL: WebSocket is REQUIRED for intent submission**
+> **CRITICAL: WebSocket is REQUIRED for intent submission**
 >
-> OpenClaw **must** use WebSocket (`ws://localhost:23340/ws`) to submit intents.
-> HTTP API `POST /api/v1/intent` is for debugging only and has timing issues.
+> `POST /api/v1/intent` is **disabled**. All intent submission goes through WebSocket.
 
-1. **WebSocket (Required)**: OpenClaw **must** connect via WebSocket to ensure Tick synchronization
-2. **HTTP API (Auxiliary)**: Used for data queries, Web panel, debugging only
+#### Runtime Modes
 
-**Memory System** (Three-Tier Architecture):
-- **Working Memory**: Short-term context, recent events
-- **Episodic Memory**: Event-based memories with timestamps
-- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance)
+| | Cognitive (default) | Claw |
+|---|---|---|
+| LLM Client | `FallbackLlmClient` (built-in) | `OpenClawBridge` (external OpenClaw) |
+| CognitiveEngine | DirectLlmClient | OpenClawBridge |
+| Init | Unified (Phase 1: LLM, Phase 2: shared) | Same |
+| OutcomeMemory | Yes | Yes |
+| ChaosGenerator | Yes | Yes |
+| Three-Soul | Yes | Yes |
+| Callbacks | Yes | Yes (+ downstream forwarding) |
 
-Key agent modules:
-- `src/core/` - Agent struct, builder, lifecycle (orchestrator)
-- `src/core/social.rs` - 社交事件处理 + LLM 好感度评估
-- `src/core/reflector_ext.rs` - ReflectorSoul 三层审查 + 分级审核策略
-- `src/soul/actor/` - 人魂 ActorSoul: 直连 WorldState，输出结构化 Intent
-- `src/soul/actor/translation.rs` - 中文 LLM 边界翻译层 (别名 → 英文 canonical)
-- `src/soul/actor/chaos.rs` - Sanity 混沌意图生成器 (低理智随机行为)
-- `src/soul/actor/engine_prompts.rs` - Prompt 构建方法 (模板 + 硬编码向后兼容)
-- `src/soul/actor/prompt_template.rs` - YAML 驱动的 Prompt 模板配置加载器
-- `src/component/memory/outcome.rs` - Outcome Memory (Hermes): SQLite 行动结果记忆
-- `src/soul/reflector/` - 天魂 ReflectorSoul: Three-layer validation (唯一出入口)
-- `src/component/memory/` - Three-tier memory system with SQLite backends
-- `src/component/persona/` - Dynamic persona, lifespan, trait evolution
-- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient`)
-- `src/infra/transport/` - WebSocket communication layer
-- `src/infra/api/` - HTTP API server, handlers, services
+#### Three-Soul Architecture (shared by both modes)
 
-**Three-Soul Architecture** (Cognitive mode):
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
   直连 WorldState    三层审查
@@ -203,12 +190,52 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
 - **地魂**: tool calling 工具池，行动落地层 (embedded in ActorSoul)
 - **ReflectorSoul** (天魂): Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
 
-**Runtime modes**: `cognitive` (default, built-in LLM) or `claw` (OpenClaw integration)
+#### Decision Context Pipeline
+
+`lifecycle.rs` assembles complete decision context each tick:
+
+1. Memory context (three-tier memory + survival warnings + sanity + deferred dialogue + dream)
+2. Summary context (action history sliding window)
+3. Outcome context (action result learning from OutcomeMemory)
+4. Action context (descriptions + field schema from prompt cache)
+
+This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/context` enrichment for both modes.
+
+#### Memory System (Three-Tier Architecture)
+
+- **Working Memory**: Short-term context, recent events
+- **Episodic Memory**: Event-based memories with timestamps (SQLite)
+- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance)
+- **Outcome Memory (Hermes)**: SQLite action result learning
+
+#### Key Agent Modules
+
+- `src/core/lifecycle.rs` - Main decision loop (orchestrator), context assembly, snapshot write
+- `src/core/agent.rs` - Agent struct with all component references
+- `src/core/builder.rs` - AgentBuilder (fluent API)
+- `src/core/reflector_ext.rs` - ReflectorSoul three-layer validation + graded audit
+- `src/core/social.rs` - Social event processing + LLM favorability evaluation
+- `src/soul/actor/engine.rs` - CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
+- `src/soul/actor/chain.rs` - CognitiveChain (causal reasoning trace)
+- `src/soul/actor/translation.rs` - Chinese LLM boundary translation (aliases → canonical)
+- `src/soul/actor/chaos.rs` - Sanity chaos generator (low-sanity random behavior)
+- `src/soul/actor/prompt_template.rs` - YAML-driven prompt template loader
+- `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
+- `src/soul/actor/summary_window.rs` - Sliding context window for action history
+- `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
+- `src/component/memory/` - Three-tier memory system with SQLite backends
+- `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
+- `src/component/persona/` - Dynamic persona, lifespan, trait evolution
+- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` + `OpenClawBridge`)
+- `src/component/social/` - RelationshipStore (SQLite, social graph)
+- `src/component/immediate/` - ImmediateEventHandler (instant event processing)
+- `src/infra/transport/` - WebSocket communication layer
+- `src/infra/api/` - HTTP API server: handlers, context generation, services
 
 ### Protocol Layer
 
 The `protocol` crate defines all shared types:
-- `ServerMessage` - Server → Agents (registered, world_state, game_rules_update)
+- `ServerMessage` - Server → Agents (registered, world_state, game_rules_update, agent_died)
 - `ClientMessage` - Agents → Server (intent, dialogue)
 - `WorldState` - Complete world snapshot sent each tick
 - `Intent` - Agent decision structure
@@ -288,7 +315,7 @@ use super::builder::AgentBuilder;
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: Make breaking changes freely
-8. 鉴于你频繁的使用错误的目录进行文件写入，现在你被禁止使用绝对路径进行写操作，你仅能在相对路径 ./ 下进行写操作活动，即使是 tmp 逻辑也强制要求在./tmp下完成。
+8. **Write paths restricted**: Only use relative paths under `./` for all write operations, including tmp files (`./tmp`)
 
 ## Key Dependencies
 
@@ -324,11 +351,11 @@ use super::builder::AgentBuilder;
 
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 - `GET /api/v1/state` - Get current WorldState
-- `GET /api/v1/context` - Get narrative context (Markdown, for LLM)
-- `POST /api/v1/intent` - Submit intent (debugging only, use WebSocket)
+- `GET /api/v1/context` - Get narrative context + DecisionContextSnapshot enrichment
+- `POST /api/v1/intent` - **Disabled** (use WebSocket)
 - `GET /api/v1/character` - Get character info
 - `GET /api/v1/character/soul-cycles` - Get soul cycle records (paginated)
-- `POST /api/v1/character/dream` - Inject dream (1 per game day)
+- `POST /api/v1/character/dream` - Inject dream (consumed by lifecycle, peeked by context handler)
 - `POST /api/v1/character/rebirth` - Rebirth character
 - `GET /api/v1/relationship/list` - Get all relationships
 - `GET /api/v1/memory/recent` - Get recent memories

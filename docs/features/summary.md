@@ -78,7 +78,9 @@ attack:
 ### 1. 运行模式
  - [x] **Cognitive 模式**（默认）: 内置多阶段认知引擎，Agent 完全自主。
  - [x] **Claw 模式**: WebSocket + HTTP API 供 OpenClaw 接入，内置认知能力作为 API。
- - [x] **默认 LLM**: 默认改为 openclaw，支持 ollama 自定义端口配置。
+ - [x] **统一初始化**: 两模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator、DecisionContextSnapshot。
+ - [x] **唯一差异**: 仅 LLM 客户端创建位置不同（Cognitive 直连 vs Claw 通过 OpenClawBridge）。
+ - [x] **默认 LLM**: 默认使用 ollama，支持 openclaw 及 openai_compatible 等多种 provider。
  - [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
  - [x] **WebSocket 心跳**: 内置 Ping/Pong 消息机制，保持连接活跃。
  - [x] **LLM 开关闸**: 停止 token 消耗的控制机制，Web 面板可操作。
@@ -95,7 +97,7 @@ attack:
   - [ ] `ensure_embeddings_for_priority()` 未实现
   - [ ] `ensure_embedding(memory_id)` 未实现
 
-**四阶段认知流水线**（Cognitive 模式内置运行，Claw 模式通过 WebSocket Tick 消息下发）:
+**四阶段认知流水线**（两种模式均使用 CognitiveEngine，仅 LLM 客户端不同）:
  - **Perception**: 数值状态 → 叙事化自然语言
  - **Motivation**: 基于人设推断内在驱动力
  - **Planning**: 制定行动计划与可用动作
