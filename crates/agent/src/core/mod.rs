@@ -25,7 +25,7 @@ pub mod utils;
 ///
 /// 基于艾宾浩斯遗忘曲线，每隔一定 tick 运行遗忘检查。
 ///
-/// NOTE: 当前 84 tick 是基于默认 tick_duration=180s 的经验值。
+/// NOTE: 当前 84 tick 是基于默认 tick_duration=60s 的经验值。
 /// 理想情况下应基于游戏时间（而非 tick 数）配置，例如每 7 个游戏日运行一次。
 /// 这样在不同 tick_duration 设置下都能保持一致的游戏体验。
 ///

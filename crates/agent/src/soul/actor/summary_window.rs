@@ -107,7 +107,10 @@ impl NarrativeSummaryWindow {
             })
             .collect();
 
-        format!("\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n", lines.join("\n"))
+        format!(
+            "\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n",
+            lines.join("\n")
+        )
     }
 
     /// 生成详细摘要（用于调试）
@@ -130,7 +133,10 @@ impl NarrativeSummaryWindow {
             })
             .collect();
 
-        format!("\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n", lines.join("\n"))
+        format!(
+            "\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n",
+            lines.join("\n")
+        )
     }
 }
 
