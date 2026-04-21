@@ -383,7 +383,7 @@ mod tests {
 
         episodic_conn.execute(
             "INSERT INTO client_memories (agent_id, tick_id, event_type, content, importance_score) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![agent_id.to_string(), 2, "trade", "购买物品成功", 0.5],
+            params![agent_id.to_string(), 2, "交易", "购买物品成功", 0.5],
         ).unwrap();
 
         let fts = FtsFallback::new(agent_id, &fts_path, &episodic_path).unwrap();

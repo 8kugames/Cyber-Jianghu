@@ -345,7 +345,7 @@ async fn collect_highlights(
         let agent_name: String = row.get("name");
 
         let highlight = match action_type.as_str() {
-            "speak" => {
+            "说话" => {
                 let narrative: String = row.get("narrative");
                 Highlight {
                     tick_id,
@@ -355,7 +355,7 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            "attack" => {
+            "攻击" => {
                 let result_message: Option<String> = row.get("result_message");
                 Highlight {
                     tick_id,
@@ -367,7 +367,7 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            "give" => {
+            "赠送" => {
                 let result_message: Option<String> = row.get("result_message");
                 Highlight {
                     tick_id,
@@ -383,9 +383,9 @@ async fn collect_highlights(
         };
 
         match action_type.as_str() {
-            "speak" => dialogues.push(highlight),
-            "attack" => combats.push(highlight),
-            "give" => socials.push(highlight),
+            "说话" => dialogues.push(highlight),
+            "攻击" => combats.push(highlight),
+            "赠送" => socials.push(highlight),
             _ => {}
         }
     }

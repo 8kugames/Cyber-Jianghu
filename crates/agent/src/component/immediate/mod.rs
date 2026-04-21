@@ -696,10 +696,10 @@ impl CognitiveImmediateDecisionMaker {
 2. 如果需要，你想说什么？
 
 返回 JSON：
-{{"respond": bool, "action_type": "speak", "content": "回应内容", "thought": "内心想法"}}
+{{"respond": bool, "action_type": "说话", "content": "回应内容", "thought": "内心想法"}}
 
 如果与你无关或不需要回应，respond 设为 false。
-action_type 只能是 "speak" 或 "whisper"。
+action_type 只能是 "说话" 或 "私语"。
 保持简短，1-2句话。"#,
             name = self.agent_name,
             personality = personality,
@@ -773,11 +773,11 @@ action_type 只能是 "speak" 或 "whisper"。
 
 逐条判断每条消息是否需要你回应。
 返回 JSON 数组：
-{{"decisions": [{{"respond": bool, "action_type": "speak", "content": "回应内容", "thought": "内心想法"}}]}}
+{{"decisions": [{{"respond": bool, "action_type": "说话", "content": "回应内容", "thought": "内心想法"}}]}}
 
 decisions 数组长度必须等于 {count}。
 如果某条与你无关，对应项的 respond 设为 false（content/thought 可省略）。
-action_type 只能是 "speak" 或 "whisper"。
+action_type 只能是 "说话" 或 "私语"。
 保持简短，每条回应 1-2 句话。"#,
             name = self.agent_name,
             personality = personality,
@@ -789,12 +789,12 @@ action_type 只能是 "speak" 或 "whisper"。
     /// 从 LLM 响应中提取单条决策（校验 action_type）
     fn validate_single_response(&self, resp: ImmediateLlmResponse) -> ResponseDecision {
         if resp.respond {
-            let action_type = resp.action_type.unwrap_or_else(|| "speak".to_string());
-            let valid_action = if action_type == "speak" || action_type == "whisper" {
+            let action_type = resp.action_type.unwrap_or_else(|| "说话".to_string());
+            let valid_action = if action_type == "说话" || action_type == "私语" {
                 action_type
             } else {
-                warn!("LLM 返回非法 action_type '{}'，降级为 speak", action_type);
-                "speak".to_string()
+                warn!("LLM 返回非法 action_type '{}'，降级为 说话", action_type);
+                "说话".to_string()
             };
             ResponseDecision::RespondNow {
                 action_type: valid_action,
@@ -844,15 +844,15 @@ impl ImmediateDecisionMaker for CognitiveImmediateDecisionMaker {
         match llm_result {
             Ok(Ok(response)) => {
                 if response.respond {
-                    let action_type = response.action_type.unwrap_or_else(|| "speak".to_string());
+                    let action_type = response.action_type.unwrap_or_else(|| "说话".to_string());
                     // 验证 action_type 合法性
-                    if action_type != "speak" && action_type != "whisper" {
-                        warn!("LLM 返回非法 action_type '{}'，降级为 speak", action_type);
+                    if action_type != "说话" && action_type != "私语" {
+                        warn!("LLM 返回非法 action_type '{}'，降级为 说话", action_type);
                     }
-                    let valid_action = if action_type == "speak" || action_type == "whisper" {
+                    let valid_action = if action_type == "说话" || action_type == "私语" {
                         action_type
                     } else {
-                        "speak".to_string()
+                        "说话".to_string()
                     };
                     Some(ResponseDecision::RespondNow {
                         action_type: valid_action,
@@ -1029,7 +1029,7 @@ mod tests {
     async fn test_rule_gate_conflict_detection() {
         let persona = PersonaInfo::default();
         let rules = ImmediateDecisionRules {
-            conflict_actions: vec!["move".into(), "fight".into()],
+            conflict_actions: vec!["移动".into(), "战斗".into()],
             ..ImmediateDecisionRules::default()
         };
         let llm: LlmClientContainer = Arc::new(tokio::sync::RwLock::new(Arc::new(
@@ -1040,7 +1040,7 @@ mod tests {
             CognitiveImmediateDecisionMaker::new(llm, persona, "测试角色".to_string(), rules);
 
         let event = create_test_event("喂！");
-        let decision = maker.rule_gate(&event, Some("move"));
+        let decision = maker.rule_gate(&event, Some("移动"));
         assert!(
             matches!(decision, Some(ResponseDecision::DeferToMainTick { .. })),
             "conflict action should defer"

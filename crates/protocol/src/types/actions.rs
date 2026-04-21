@@ -28,19 +28,26 @@ impl ActionType {
         &self.0
     }
 
-    /// 常用动作类型常量（便捷访问）
-    pub const IDLE: &'static str = "idle";
-    pub const SPEAK: &'static str = "speak";
-    pub const MOVE: &'static str = "move";
-    pub const GIVE: &'static str = "give";
-    pub const STEAL: &'static str = "steal";
-    pub const USE: &'static str = "use";
-    pub const PICKUP: &'static str = "pickup";
-    pub const ATTACK: &'static str = "attack";
-    pub const TRADE: &'static str = "trade";
-    pub const DROP: &'static str = "drop";
-    pub const GATHER: &'static str = "gather";
-    pub const CRAFT: &'static str = "craft";
+    /// 常用动作类型常量（全程中文）
+    pub const IDLE: &'static str = "休息";
+    pub const SPEAK: &'static str = "说话";
+    pub const MOVE: &'static str = "移动";
+    pub const GIVE: &'static str = "赠送";
+    pub const STEAL: &'static str = "偷窃";
+    pub const USE: &'static str = "使用";
+    pub const PICKUP: &'static str = "拾取";
+    pub const ATTACK: &'static str = "攻击";
+    pub const TRADE: &'static str = "交易";
+    pub const DROP: &'static str = "丢弃";
+    pub const GATHER: &'static str = "采集";
+    pub const CRAFT: &'static str = "制造";
+    pub const EAT: &'static str = "进食";
+    pub const DRINK: &'static str = "饮水";
+    pub const WHISPER: &'static str = "私语";
+    pub const SHOUT: &'static str = "大喊";
+    pub const MEDITATE: &'static str = "打坐";
+    pub const PRACTICE: &'static str = "修炼";
+    pub const FLEE: &'static str = "逃跑";
 }
 
 impl Default for ActionType {
@@ -323,22 +330,22 @@ mod tests {
 
     #[test]
     fn test_action_type_serde() {
-        let action = ActionType::new("idle");
+        let action = ActionType::new("休息");
         let json = serde_json::to_string(&action).unwrap();
-        assert_eq!(json, "\"idle\"");
+        assert_eq!(json, "\"休息\"");
 
         let parsed: ActionType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.as_str(), "idle");
+        assert_eq!(parsed.as_str(), "休息");
     }
 
     #[test]
     fn test_action_type_custom() {
-        let action = ActionType::new("meditate");
+        let action = ActionType::new("打坐");
         let json = serde_json::to_string(&action).unwrap();
-        assert_eq!(json, "\"meditate\"");
+        assert_eq!(json, "\"打坐\"");
 
         let parsed: ActionType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.as_str(), "meditate");
+        assert_eq!(parsed.as_str(), "打坐");
     }
 
     #[test]
@@ -357,8 +364,8 @@ mod tests {
     #[test]
     fn test_intent_idle() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "idle", None);
-        assert_eq!(intent.action_type.as_str(), "idle");
+        let intent = Intent::new(agent_id, 1, "休息", None);
+        assert_eq!(intent.action_type.as_str(), "休息");
         assert_eq!(intent.tick_id, 1);
     }
 
@@ -368,17 +375,17 @@ mod tests {
         let intent = Intent::new(
             agent_id,
             2,
-            "speak",
+            "说话",
             Some(serde_json::json!({"content": "Hello"})),
         );
-        assert_eq!(intent.action_type.as_str(), "speak");
+        assert_eq!(intent.action_type.as_str(), "说话");
         assert!(intent.action_data.is_some());
     }
 
     #[test]
     fn test_intent_with_thought() {
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "idle", None).with_thought("Thinking...".to_string());
+        let intent = Intent::new(agent_id, 1, "休息", None).with_thought("Thinking...".to_string());
         assert_eq!(intent.thought_log, Some("Thinking...".to_string()));
     }
 }

@@ -93,7 +93,7 @@ fn test_build_with_world_state() {
     // Inject available_actions directly since WorldState no longer has this field
     let injected_actions = vec![
         cyber_jianghu_protocol::AvailableAction {
-            action: "speak".to_string(),
+            action: "说话".to_string(),
             name: "交谈".to_string(),
             description: "与周围的人交谈".to_string(),
             category: "social".to_string(),
@@ -104,7 +104,7 @@ fn test_build_with_world_state() {
             field_aliases: std::collections::HashMap::new(),
         },
         cyber_jianghu_protocol::AvailableAction {
-            action: "move".to_string(),
+            action: "移动".to_string(),
             name: "移动".to_string(),
             description: "移动到其他地点".to_string(),
             category: "movement".to_string(),
@@ -115,7 +115,7 @@ fn test_build_with_world_state() {
             field_aliases: std::collections::HashMap::new(),
         },
         cyber_jianghu_protocol::AvailableAction {
-            action: "use".to_string(),
+            action: "使用".to_string(),
             name: "使用".to_string(),
             description: "使用物品".to_string(),
             category: "interaction".to_string(),

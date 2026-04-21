@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn test_build_validation_prompt() {
         let prompt = ObserverPrompt::new();
-        let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "idle", None);
+        let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "休息", None);
         let persona = crate::soul::reflector::PersonaInfo::default();
         let world_rules = cyber_jianghu_protocol::WorldBuildingRules::default();
         let world_context = "测试世界状态";
@@ -155,6 +155,6 @@ mod tests {
         assert!(validation_prompt.contains("世界观规则"));
         assert!(validation_prompt.contains("玩家人设"));
         assert!(validation_prompt.contains("玩家意图"));
-        assert!(validation_prompt.contains("idle"));
+        assert!(validation_prompt.contains("休息"));
     }
 }

@@ -71,7 +71,7 @@ mod tests {
         let builder = EventBuilder::new();
         let agent_id = Uuid::new_v4();
 
-        let event = builder.build_action_event(agent_id, 1, "speak", true);
+        let event = builder.build_action_event(agent_id, 1, "说话", true);
 
         assert_eq!(event.event_type, WorldEventType::ActionResult);
         assert!(event.description.contains("成功"));

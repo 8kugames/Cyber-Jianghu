@@ -293,13 +293,13 @@ mod tests {
         let generator = NarrativeGenerator::new(Arc::new(client));
         let mut memory = create_test_memory(50);
         memory.add_event(crate::component::social::relationship_types::KeyEvent::new(
-            1, "attack", "攻击", -10,
+            1, "攻击", "攻击", -10,
         ));
         memory.add_event(crate::component::social::relationship_types::KeyEvent::new(
             2, "insult", "侮辱", -5,
         ));
         memory.add_event(crate::component::social::relationship_types::KeyEvent::new(
-            3, "attack", "攻击", -5,
+            3, "攻击", "攻击", -5,
         ));
         let summary = generator.summarize_events(&memory);
         assert_eq!(summary, "最近3次互动多为负面");
@@ -314,7 +314,7 @@ mod tests {
             1, "help", "帮助", 10,
         ));
         memory.add_event(crate::component::social::relationship_types::KeyEvent::new(
-            2, "attack", "攻击", -10,
+            2, "攻击", "攻击", -10,
         ));
         let summary = generator.summarize_events(&memory);
         assert_eq!(summary, "最近2次互动喜忧参半");

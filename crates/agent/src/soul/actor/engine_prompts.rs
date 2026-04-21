@@ -147,7 +147,7 @@ impl super::CognitiveEngine {
                             format!("「{}」", truncated)
                         })
                         .unwrap_or_default();
-                    let display_name = self.action_alias_map.read().unwrap().chinese_name(&action.action_type);
+                    let display_name = &action.action_type;
                     ws_parts.push(format!(
                         "  [Tick {}] {} {}{}",
                         action.tick_id, display_name, action.result, content_hint

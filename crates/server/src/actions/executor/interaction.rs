@@ -122,7 +122,7 @@ impl InteractionActionExecutor {
         };
 
         // 从配置读取成功率
-        let success_rate = match ActionRegistry::get_f32("steal", ActionField::SuccessRate) {
+        let success_rate = match ActionRegistry::get_f32("偷窃", ActionField::SuccessRate) {
             Some(rate) => rate,
             None => {
                 // 配置缺失，返回失败

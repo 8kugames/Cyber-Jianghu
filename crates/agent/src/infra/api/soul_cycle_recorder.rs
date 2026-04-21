@@ -702,7 +702,7 @@ mod tests {
                 "uuid123",
                 Some("和人打招呼"),
                 "extracted",
-                "speak",
+                "说话",
                 Some(r#"{"content":"你好"}"#),
                 Some("你好"),
                 "sent",
@@ -711,7 +711,7 @@ mod tests {
             .await;
         let records = recorder.get_immediate_by_tick(1).await;
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].action_type, "speak");
+        assert_eq!(records[0].action_type, "说话");
         assert_eq!(records[0].send_status, "sent");
     }
 
@@ -724,7 +724,7 @@ mod tests {
                 "uuid456",
                 Some("喊话"),
                 "pure",
-                "speak",
+                "说话",
                 Some(r#"{"content":"救命"}"#),
                 Some("救命"),
                 "failed",
@@ -814,7 +814,7 @@ mod tests {
                 "id1",
                 None,
                 "extracted",
-                "speak",
+                "说话",
                 None,
                 Some("hi"),
                 "sent",
@@ -827,7 +827,7 @@ mod tests {
                 "id2",
                 None,
                 "pure",
-                "speak",
+                "说话",
                 None,
                 Some("bye"),
                 "sent",
@@ -840,7 +840,7 @@ mod tests {
                 "id3",
                 None,
                 "pure",
-                "speak",
+                "说话",
                 None,
                 Some("yo"),
                 "failed",
