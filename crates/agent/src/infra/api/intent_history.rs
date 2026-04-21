@@ -321,7 +321,7 @@ mod tests {
             .record_intent(
                 1,
                 intent_id,
-                "idle".to_string(),
+                "休息".to_string(),
                 Some("思考中...".to_string()),
             )
             .await;
@@ -330,7 +330,7 @@ mod tests {
         assert!(entry.is_some());
         let entry = entry.unwrap();
         assert_eq!(entry.tick_id, 1);
-        assert_eq!(entry.action_type, "idle");
+        assert_eq!(entry.action_type, "休息");
         assert_eq!(entry.thought_log, Some("思考中...".to_string()));
         assert!(entry.observer_thought.is_none());
     }
@@ -341,7 +341,7 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(1, intent_id, "idle".to_string(), None)
+            .record_intent(1, intent_id, "休息".to_string(), None)
             .await;
 
         store
@@ -361,7 +361,7 @@ mod tests {
             .record_intent(
                 5,
                 intent_id,
-                "speak".to_string(),
+                "说话".to_string(),
                 Some("想说点什么".to_string()),
             )
             .await;
@@ -395,7 +395,7 @@ mod tests {
                 .record_intent(
                     i,
                     Uuid::new_v4(),
-                    "idle".to_string(),
+                    "休息".to_string(),
                     Some(format!("thought {}", i)),
                 )
                 .await;
@@ -426,7 +426,7 @@ mod tests {
             .record_intent(
                 42,
                 intent_id,
-                "move".to_string(),
+                "移动".to_string(),
                 Some("去集市".to_string()),
             )
             .await;
@@ -435,7 +435,7 @@ mod tests {
         // 重新打开，数据应保留
         let store2 = IntentHistoryStore::open(agent_id, &db_path).unwrap();
         let entry = store2.get_by_tick(42).await.unwrap();
-        assert_eq!(entry.action_type, "move");
+        assert_eq!(entry.action_type, "移动");
         assert_eq!(entry.thought_log, Some("去集市".to_string()));
     }
 }

@@ -810,7 +810,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                         Ok(chain) => chain.final_intent,
                         Err(e) => {
                             error!("[cognitive] Decision failed: {}", e);
-                            Intent::new(agent_id, tick_id, "idle", None)
+                            Intent::new(agent_id, tick_id, "休息", None)
                                 .with_thought(format!("认知失败: {}", e))
                         }
                     }
@@ -828,7 +828,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                             Ok(chain) => chain.final_intent,
                             Err(e) => {
                                 error!("[cognitive] Decision with memory failed: {}", e);
-                                Intent::new(agent_id, tick_id, "idle", None)
+                                Intent::new(agent_id, tick_id, "休息", None)
                                     .with_thought(format!("认知失败: {}", e))
                             }
                         }
@@ -1019,7 +1019,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                             Ok(chain) => chain.final_intent,
                             Err(e) => {
                                 error!("[claw-cognitive] Decision failed: {}", e);
-                                Intent::new(Uuid::nil(), tick_id, "idle", None)
+                                Intent::new(Uuid::nil(), tick_id, "休息", None)
                                     .with_thought(format!("认知失败: {}", e))
                             }
                         }
@@ -1038,7 +1038,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                                 Ok(chain) => chain.final_intent,
                                 Err(e) => {
                                     error!("[claw-cognitive] Decision with memory failed: {}", e);
-                                    Intent::new(Uuid::nil(), tick_id, "idle", None)
+                                    Intent::new(Uuid::nil(), tick_id, "休息", None)
                                         .with_thought(format!("认知失败: {}", e))
                                 }
                             }

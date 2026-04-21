@@ -188,11 +188,11 @@ pub struct FleeData {
 // use crate::game_data::{ActionRegistry, ActionField};
 //
 // // 获取基础伤害值
-// let damage = ActionRegistry::get_i32("attack", ActionField::BaseDamage)
+// let damage = ActionRegistry::get_i32("攻击", ActionField::BaseDamage)
 //     .unwrap_or(0);  // 配置缺失时返回 0
 //
 // // 获取成功率
-// let success_rate = ActionRegistry::get_f32("steal", ActionField::SuccessRate)
+// let success_rate = ActionRegistry::get_f32("偷窃", ActionField::SuccessRate)
 //     .unwrap_or(0.0);  // 配置缺失时返回 0.0
 // ```
 //

@@ -89,8 +89,8 @@ pub fn create_test_config_dir() -> TempDir {
         r#"{
             "version": "0.0.1",
             "actions": {
-                "attack": { "base_damage": 10 },
-                "steal": { "success_rate": 0.5 }
+                "攻击": { "base_damage": 10 },
+                "偷窃": { "success_rate": 0.5 }
             }
         }"#,
     )

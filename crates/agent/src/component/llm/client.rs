@@ -698,10 +698,10 @@ mod tests {
         let input = r#"<think.../>
 思考过程...
 
-{"action_type": "eat", "action_data": {"item_id": "mantou"}, "speech_content": ""}"#;
+{"action_type": "进食", "action_data": {"item_id": "mantou"}, "speech_content": ""}"#;
         let result = strip_thinking_tags(input);
         assert!(
-            result.contains(r#"{"action_type": "eat"#),
+            result.contains(r#"{"action_type": "进食"#),
             "应保留 JSON，实际: {}",
             result
         );

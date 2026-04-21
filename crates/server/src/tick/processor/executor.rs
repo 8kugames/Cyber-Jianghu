@@ -87,7 +87,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你给 {} 转移了 {} 个 {}", to, quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "give",
+                        "action": "赠送",
                         "target": to.to_string(),
                         "item_id": item_id,
                         "quantity": quantity,
@@ -129,7 +129,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("使用失败，你没有 {}", item_id),
                     metadata: serde_json::json!({
-                        "action": "use",
+                        "action": "使用",
                         "item_id": item_id,
                         "intent_id": intent_id,
                         "result": "failed",
@@ -199,7 +199,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你使用了 {}", item_id),
                     metadata: serde_json::json!({
-                        "action": "use",
+                        "action": "使用",
                         "item_id": item_id,
                         "intent_id": intent_id,
                         "result": "success",
@@ -253,7 +253,7 @@ pub async fn apply_state_change(
                                 tick_id,
                                 description: format!("你拾取了 {} 个 {}", quantity, item_id),
                                 metadata: serde_json::json!({
-                                    "action": "pickup",
+                                    "action": "拾取",
                                     "item_id": item_id,
                                     "quantity": quantity,
                                 }),
@@ -298,7 +298,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你采集了 {} 个 {}", quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "gather",
+                        "action": "采集",
                         "item_id": item_id,
                         "quantity": quantity,
                     }),
@@ -454,7 +454,7 @@ pub async fn apply_state_change(
                             tick_id,
                             description: format!("你制造了 {} 个 {}", quantity, item_id),
                             metadata: serde_json::json!({
-                                "action": "craft",
+                                "action": "制造",
                                 "item_id": item_id,
                                 "quantity": quantity,
                             }),
@@ -644,7 +644,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你掉落了 {} 个 {}", quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "drop",
+                        "action": "丢弃",
                         "item_id": item_id,
                         "quantity": quantity,
                         "location": location,
@@ -899,7 +899,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你从 {} 移动到了 {}", old_location, new_location),
                     metadata: serde_json::json!({
-                        "action": "move",
+                        "action": "移动",
                         "old_location": old_location,
                         "new_location": new_location,
                     }),

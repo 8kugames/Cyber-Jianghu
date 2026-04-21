@@ -52,12 +52,12 @@ mod tests {
                 "description": "行动配置文件",
                 "meta": {},
                 "data": {
-                    "attack": {
+                    "攻击": {
                         "description": "攻击目标",
                         "base_damage": 10,
                         "requirements": []
                     },
-                    "steal": {
+                    "偷窃": {
                         "description": "偷取物品",
                         "success_rate": 0.5,
                         "requirements": []
@@ -69,8 +69,8 @@ mod tests {
 
         let actions = load_actions(dir.path()).unwrap();
         assert_eq!(actions.version, "2.0.0");
-        assert!(actions.data.contains_key("attack"));
-        assert!(actions.data.contains_key("steal"));
+        assert!(actions.data.contains_key("攻击"));
+        assert!(actions.data.contains_key("偷窃"));
     }
 
     #[test]
@@ -80,11 +80,11 @@ version: "2.0.0"
 description: "行动配置文件"
 meta: {}
 data:
-  attack:
+  攻击:
     description: "攻击目标"
     base_damage: 10
     requirements: []
-  steal:
+  偷窃:
     description: "偷取物品"
     success_rate: 0.5
     requirements: []
@@ -92,7 +92,7 @@ data:
 
         let config: UnifiedActionsConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
         assert_eq!(config.version, "2.0.0");
-        assert!(config.data.contains_key("attack"));
-        assert!(config.data.contains_key("steal"));
+        assert!(config.data.contains_key("攻击"));
+        assert!(config.data.contains_key("偷窃"));
     }
 }
