@@ -361,9 +361,10 @@ function renderTickCard(exp, metadata, time) {
     if (immediate.length > 0) {
         html += '<div class="tick-section tick-section-immediate"><div class="tick-section-title">即时</div>';
         immediate.forEach(function(imm) {
+            var speakerLabel = imm.from_agent_name ? escapeHtml(imm.from_agent_name) + ' ' : '';
             html += '<div class="imm-item">' +
                 '<div class="exp-immediate"><span class="exp-soul-label">即时</span>' +
-                '<span class="exp-soul-content">' + escapeHtml(getActionTypeDisplay(imm.action_type)) +
+                '<span class="exp-soul-content">' + speakerLabel + escapeHtml(getActionTypeDisplay(imm.action_type)) +
                 (imm.speech_content ? ': ' + escapeHtml(imm.speech_content) : '') +
                 '</span></div>' +
                 '<span class="imm-status ' + (imm.send_status === 'sent' ? 'sent' : 'failed') + '">' +
