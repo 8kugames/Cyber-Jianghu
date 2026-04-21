@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>经历日志流水 | Cyber-Jianghu</title>
+    <link rel="stylesheet" href="css/dashboard.css" />
+    <style>
+        body {
+            background: var(--bg-base);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .exp-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .exp-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
+        }
+
+        .exp-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .exp-header h1 span {
+            color: var(--accent);
+        }
+
+        .back-btn {
+            padding: 6px 14px;
+            background: var(--bg-level-2);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+        }
+        .back-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-muted);
+        }
+
+        .exp-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-select {
+            padding: 8px 12px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            min-width: 140px;
+            outline: none;
+            transition: all 0.15s;
+            font-family: var(--font-family);
+        }
+
+        .filter-select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-muted);
+        }
+
+        .filter-input {
+            padding: 8px 12px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            min-width: 100px;
+            outline: none;
+            transition: all 0.15s;
+            font-family: var(--font-family);
+        }
+
+        .filter-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-muted);
+        }
+
+        .filter-input::placeholder {
+            color: var(--text-subtle);
+        }
+
+        .filter-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-right: 4px;
+        }
+
+        .tick-range {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tick-range-sep {
+            color: var(--text-subtle);
+        }
+
+        .exp-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .exp-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s var(--ease-out);
+            box-shadow: var(--card-shadow);
+        }
+
+        .exp-card:hover {
+            border-color: var(--accent);
+            box-shadow: var(--card-shadow-hover);
+        }
+
+        .exp-card-header {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        .tick-badge {
+            padding: 3px 8px;
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .exp-agent {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .exp-location {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .exp-action {
+            padding: 2px 8px;
+            background: var(--bg-level-2);
+            color: var(--text-secondary);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+        }
+
+        .expand-icon {
+            margin-left: auto;
+            color: var(--text-subtle);
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+
+        .exp-card.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .exp-narrative-preview {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .exp-card-detail {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .exp-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            margin-top: 24px;
+            padding: 16px;
+            background: var(--bg-level-2);
+            border-radius: var(--radius-md);
+        }
+
+        .page-size-select {
+            padding: 6px 10px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .page-info {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .loading, .empty-state, .error-state {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .loading .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 复用 agents.js 中的 tick-card 样式 */
+        .tick-card {
+            background: var(--bg-level-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            margin-top: 8px;
+        }
+
+        .tick-card-header {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .tick-world-time {
+            color: var(--text-secondary);
+        }
+
+        .tick-real-time {
+            color: var(--text-subtle);
+            margin-left: auto;
+        }
+
+        .tick-section {
+            margin-bottom: 8px;
+        }
+
+        .tick-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .tick-section-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .tick-attempt-label {
+            font-size: 11px;
+            color: var(--text-subtle);
+            margin-bottom: 4px;
+        }
+
+        .exp-renhun, .exp-tianhun, .exp-action {
+            margin-bottom: 6px;
+        }
+
+        .exp-soul-label {
+            display: inline-block;
+            padding: 1px 6px;
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+
+        .exp-soul-content {
+            font-size: 12px;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .soul-text {
+            margin-bottom: 4px;
+        }
+
+        .soul-thought {
+            font-style: italic;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+
+        .soul-result {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .soul-result.approved {
+            background: var(--success-muted);
+            color: var(--success);
+        }
+
+        .soul-result.rejected {
+            background: var(--error-muted);
+            color: var(--error);
+        }
+
+        .soul-layers {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+
+        .soul-layer-tag {
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        .soul-layer-tag.passed {
+            background: var(--success-muted);
+            color: var(--success);
+        }
+
+        .soul-layer-tag.failed {
+            background: var(--error-muted);
+            color: var(--error);
+        }
+
+        .soul-reason {
+            font-size: 11px;
+            color: var(--text-subtle);
+            margin-bottom: 4px;
+        }
+
+        .soul-narrative {
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+
+        .tick-section-immediate {
+            background: var(--bg-level-1);
+            padding: 8px;
+            border-radius: var(--radius-sm);
+            margin-top: 8px;
+        }
+
+        .imm-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+
+        .imm-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .imm-status {
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .imm-status.sent {
+            background: var(--success-muted);
+            color: var(--success);
+        }
+
+        .imm-status.failed {
+            background: var(--error-muted);
+            color: var(--error);
+        }
+
+        .imm-error {
+            font-size: 10px;
+            color: var(--error);
+        }
+
+        .exp-immediate {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="exp-header">
+        <h1>经历<span>日志流水</span></h1>
+        <a href="index.html" class="back-btn">← 返回仪表盘</a>
+    </div>
+
+    <div class="exp-controls">
+        <div class="filter-group">
+            <select id="filter-agent" class="filter-select">
+                <option value="">所有角色</option>
+            </select>
+            <select id="filter-location" class="filter-select">
+                <option value="">所有位置</option>
+            </select>
+            <select id="filter-action" class="filter-select">
+                <option value="">所有动作</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <span class="filter-label">Tick:</span>
+            <div class="tick-range">
+                <input type="number" id="filter-from-tick" class="filter-input" placeholder="from">
+                <span class="tick-range-sep">-</span>
+                <input type="number" id="filter-to-tick" class="filter-input" placeholder="to">
+            </div>
+        </div>
+        <button class="btn btn-secondary" onclick="resetFilters()">重置</button>
+        <button class="btn btn-primary" onclick="loadExperiences()">刷新</button>
+    </div>
+
+    <div id="experiences-container" class="exp-list">
+        <div class="loading"><div class="spinner"></div>加载中...</div>
+    </div>
+
+    <div id="pagination-container" class="exp-pagination" style="display: none;">
+        <button id="prev-btn" class="btn btn-secondary" onclick="changePage(-1)">上一页</button>
+        <select id="page-size" class="page-size-select" onchange="changePageSize()">
+            <option value="20">20条/页</option>
+            <option value="50">50条/页</option>
+            <option value="100">100条/页</option>
+        </select>
+        <span id="page-info" class="page-info"></span>
+        <button id="next-btn" class="btn btn-secondary" onclick="changePage(1)">下一页</button>
+    </div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/agents.js"></script>
+    <script>
+        const API_BASE = '/api/dashboard';
+        let experiences = [];
+        let total = 0;
+        let currentPage = 1;
+        let pageSize = 20;
+        let authToken = localStorage.getItem('admin_token') || '';
+
+        function getHeaders() {
+            return {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            };
+        }
+
+        async function loadExperiences() {
+            const container = document.getElementById('experiences-container');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>加载中...</div>';
+
+            const agentId = document.getElementById('filter-agent').value;
+            const location = document.getElementById('filter-location').value;
+            const actionType = document.getElementById('filter-action').value;
+            const fromTick = document.getElementById('filter-from-tick').value;
+            const toTick = document.getElementById('filter-to-tick').value;
+
+            const params = new URLSearchParams();
+            params.set('page', currentPage);
+            params.set('limit', pageSize);
+            if (agentId) params.set('agent_id', agentId);
+            if (location) params.set('location', location);
+            if (actionType) params.set('action_type', actionType);
+            if (fromTick) params.set('from_tick', fromTick);
+            if (toTick) params.set('to_tick', toTick);
+
+            try {
+                const res = await fetch(`${API_BASE}/experiences?${params}`, {
+                    headers: getHeaders()
+                });
+
+                if (res.status === 401) {
+                    alert('请先登录');
+                    window.location.href = '/admin/';
+                    return;
+                }
+
+                if (!res.ok) {
+                    throw new Error('加载失败');
+                }
+
+                const data = await res.json();
+                experiences = data.entries || [];
+                total = data.total || 0;
+
+                renderExperiences();
+                updatePagination();
+            } catch (e) {
+                container.innerHTML = `<div class="error-state">加载失败: ${e.message}</div>`;
+            }
+        }
+
+        function renderExperiences() {
+            const container = document.getElementById('experiences-container');
+
+            if (experiences.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无符合条件的经历记录</div>';
+                return;
+            }
+
+            container.innerHTML = experiences.map(entry => {
+                const narrativePreview = entry.narrative
+                    ? entry.narrative.substring(0, 100) + (entry.narrative.length > 100 ? '...' : '')
+                    : '';
+                const locationDisplay = entry.location || '-';
+                const actionDisplay = entry.action_type_display || entry.action_type;
+
+                return `<div class="exp-card" data-entry='${escapeHtml(JSON.stringify(entry))}'>
+                    <div class="exp-card-header">
+                        <span class="tick-badge">T${entry.tick_id}</span>
+                        <span class="exp-agent">${escapeHtml(entry.agent_name)}</span>
+                        <span class="exp-location">(${escapeHtml(locationDisplay)})</span>
+                        <span class="exp-action">${escapeHtml(actionDisplay)}</span>
+                        <span class="expand-icon">▼</span>
+                    </div>
+                    <div class="exp-narrative-preview">${escapeHtml(narrativePreview)}</div>
+                    <div class="exp-card-detail"></div>
+                </div>`;
+            }).join('');
+
+            // 添加点击事件
+            container.querySelectorAll('.exp-card').forEach(card => {
+                card.addEventListener('click', () => toggleExperienceCard(card));
+            });
+        }
+
+        function toggleExperienceCard(card) {
+            const detail = card.querySelector('.exp-card-detail');
+            const icon = card.querySelector('.expand-icon');
+
+            if (detail.style.display === 'none' || !detail.style.display) {
+                // 首次展开：懒加载完整内容
+                if (!detail.innerHTML || detail.innerHTML === '') {
+                    const entry = JSON.parse(card.dataset.entry);
+                    detail.innerHTML = renderTickCard(entry, entry.soul_cycle_metadata, '');
+                }
+                detail.style.display = 'block';
+                icon.textContent = '▲';
+                card.classList.add('expanded');
+            } else {
+                detail.style.display = 'none';
+                icon.textContent = '▼';
+                card.classList.remove('expanded');
+            }
+        }
+
+        function updatePagination() {
+            const totalPages = Math.ceil(total / pageSize);
+            const pageInfo = document.getElementById('page-info');
+            const prevBtn = document.getElementById('prev-btn');
+            const nextBtn = document.getElementById('next-btn');
+            const paginationContainer = document.getElementById('pagination-container');
+
+            if (total === 0) {
+                paginationContainer.style.display = 'none';
+                return;
+            }
+
+            paginationContainer.style.display = 'flex';
+            pageInfo.textContent = `第 ${currentPage} / ${totalPages} 页，共 ${total} 条`;
+            prevBtn.disabled = currentPage <= 1;
+            nextBtn.disabled = currentPage >= totalPages;
+
+            // 设置当前页大小
+            document.getElementById('page-size').value = pageSize;
+        }
+
+        function changePage(delta) {
+            currentPage += delta;
+            currentPage = Math.max(1, currentPage);
+            loadExperiences();
+        }
+
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('page-size').value);
+            currentPage = 1;
+            loadExperiences();
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-agent').value = '';
+            document.getElementById('filter-location').value = '';
+            document.getElementById('filter-action').value = '';
+            document.getElementById('filter-from-tick').value = '';
+            document.getElementById('filter-to-tick').value = '';
+            currentPage = 1;
+            loadExperiences();
+        }
+
+        // 初始化：加载过滤器选项
+        async function initFilters() {
+            try {
+                // 加载 agent 列表
+                const agentsRes = await fetch(`${API_BASE}/agents`, { headers: getHeaders() });
+                if (agentsRes.ok) {
+                    const agents = await agentsRes.json();
+                    const agentSelect = document.getElementById('filter-agent');
+                    agents.forEach(agent => {
+                        const option = document.createElement('option');
+                        option.value = agent.id;
+                        option.textContent = agent.name;
+                        agentSelect.appendChild(option);
+                    });
+                }
+
+                // 加载 action type 映射
+                const actionMapRes = await fetch(`${API_BASE}/actions-map`);
+                if (actionMapRes.ok) {
+                    const actionMap = await actionMapRes.json();
+                    const actionSelect = document.getElementById('filter-action');
+                    Object.entries(actionMap).forEach(([key, value]) => {
+                        const option = document.createElement('option');
+                        option.value = key;
+                        option.textContent = value;
+                        actionSelect.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.warn('加载过滤器选项失败:', e);
+            }
+        }
+
+        // 页面加载时初始化
+        initFilters().then(() => loadExperiences());
+    </script>
+</body>
+</html>
