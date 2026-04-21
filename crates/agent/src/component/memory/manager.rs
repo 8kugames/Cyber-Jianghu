@@ -236,10 +236,19 @@ impl MemoryManager {
                 .iter()
                 .enumerate()
                 .map(|(i, m)| {
+                    // event_type 标注来源，帮助 LLM 区分"听闻" vs "直接观察"
+                    let source_tag = match m.event_type.as_str() {
+                        "public_message" | "social_interaction" => "[听闻]",
+                        "action_result" | "state_change" => "[观察]",
+                        "environmental_change" => "[环境]",
+                        "death_notification" => "[系统]",
+                        _ => "",
+                    };
                     format!(
-                        "{}. [Tick {}] {} (重要性: {:.1})",
+                        "{}. [Tick {}] {} {} (重要性: {:.1})",
                         i + 1,
                         m.tick_id,
+                        source_tag,
                         m.content,
                         m.importance_score
                     )

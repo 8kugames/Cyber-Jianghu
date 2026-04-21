@@ -2,7 +2,7 @@
 // 叙事摘要窗口 - 滑动上下文优化
 // ============================================================================
 //
-// 保留最近 N 轮的认知结果摘要，用于在 prompt 中注入近期行动轨迹。
+// 保留最近 N 轮的认知结果摘要，用于在 prompt 中注入近期认知轨迹。
 // 帮助 LLM 理解连续决策的上下文，避免"失忆"。
 //
 // 窗口大小可配置，默认 3 轮（可覆盖大多数短期决策模式）
@@ -84,7 +84,7 @@ impl NarrativeSummaryWindow {
 
     /// 生成窗口摘要（用于 prompt 注入）
     ///
-    /// 格式化为简洁的近期行动轨迹，帮助 LLM 理解连续决策上下文。
+    /// 格式化为简洁的近期认知轨迹，帮助 LLM 理解连续决策上下文。
     pub fn to_context(&self) -> String {
         if self.summaries.is_empty() {
             return String::new();
@@ -107,7 +107,7 @@ impl NarrativeSummaryWindow {
             })
             .collect();
 
-        format!("\n### 近期行动轨迹\n{}\n", lines.join("\n"))
+        format!("\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n", lines.join("\n"))
     }
 
     /// 生成详细摘要（用于调试）
@@ -130,7 +130,7 @@ impl NarrativeSummaryWindow {
             })
             .collect();
 
-        format!("\n### 近期行动轨迹\n{}\n", lines.join("\n"))
+        format!("\n### 近期认知轨迹（主观回忆，非客观事实）\n{}\n", lines.join("\n"))
     }
 }
 
@@ -202,7 +202,7 @@ mod tests {
         window.push(NarrativeSummary::simple(2, "找水源", "失败"));
 
         let context = window.to_context();
-        assert!(context.contains("近期行动轨迹"));
+        assert!(context.contains("近期认知轨迹"));
         assert!(context.contains("吃馒头"));
         assert!(context.contains("找水源"));
     }
