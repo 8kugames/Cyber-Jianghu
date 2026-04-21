@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_intent_message() {
-        let json = r#"{"type":"intent","tick_id":105,"action_type":"move","action_data":{"target":"kitchen"}}"#;
+        let json = r#"{"type":"intent","tick_id":105,"action_type":"移动","action_data":{"target":"kitchen"}}"#;
         let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
 
         match msg {
@@ -689,7 +689,7 @@ mod tests {
                 thought_log,
             } => {
                 assert_eq!(tick_id, 105);
-                assert_eq!(action_type, "move");
+                assert_eq!(action_type, "移动");
                 assert!(action_data.is_some());
                 assert!(thought_log.is_none());
             }
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_intent_with_thought() {
-        let json = r#"{"type":"intent","tick_id":105,"action_type":"speak","thought_log":"I should greet them"}"#;
+        let json = r#"{"type":"intent","tick_id":105,"action_type":"说话","thought_log":"I should greet them"}"#;
         let msg: UpstreamMessage = serde_json::from_str(json).unwrap();
 
         match msg {
@@ -710,7 +710,7 @@ mod tests {
                 thought_log,
             } => {
                 assert_eq!(tick_id, 105);
-                assert_eq!(action_type, "speak");
+                assert_eq!(action_type, "说话");
                 assert!(action_data.is_none());
                 assert_eq!(thought_log, Some("I should greet them".to_string()));
             }

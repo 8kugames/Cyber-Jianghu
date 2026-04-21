@@ -39,24 +39,17 @@ pub fn record_llm_error() {
     LLM_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
-/// 动作类型中文映射
+/// 动作类型中文映射（action_type 已是中文，此处仅做显示名美化）
 fn action_type_display(action_type: &str) -> String {
     match action_type {
-        "idle" => "静修".to_string(),
-        "speak" => "交谈".to_string(),
-        "move" => "行走".to_string(),
-        "attack" => "战斗".to_string(),
-        "gather" => "采集".to_string(),
-        "use" => "使用".to_string(),
-        "give" => "赠送".to_string(),
-        "steal" => "偷窃".to_string(),
-        "craft" => "锻造".to_string(),
-        "rest" => "休息".to_string(),
-        "eat" => "进食".to_string(),
-        "drink" => "饮水".to_string(),
-        "sleep" => "睡眠".to_string(),
-        "whisper" => "私语".to_string(),
-        "shout" => "呼喊".to_string(),
+        "休息" => "静修".to_string(),
+        "说话" => "交谈".to_string(),
+        "移动" => "行走".to_string(),
+        "攻击" => "战斗".to_string(),
+        "赠送" => "赠送".to_string(),
+        "偷窃" => "偷窃".to_string(),
+        "制造" => "锻造".to_string(),
+        "大喊" => "呼喊".to_string(),
         _ => action_type.to_string(),
     }
 }
@@ -476,10 +469,10 @@ mod tests {
 
     #[test]
     fn test_action_type_display() {
-        assert_eq!(action_type_display("idle"), "静修");
-        assert_eq!(action_type_display("speak"), "交谈");
-        assert_eq!(action_type_display("move"), "行走");
-        assert_eq!(action_type_display("attack"), "战斗");
+        assert_eq!(action_type_display("休息"), "静修");
+        assert_eq!(action_type_display("说话"), "交谈");
+        assert_eq!(action_type_display("移动"), "行走");
+        assert_eq!(action_type_display("攻击"), "战斗");
         assert_eq!(action_type_display("unknown"), "unknown");
     }
 
@@ -496,7 +489,7 @@ mod tests {
                 name: "张三".to_string(),
                 location: " village_center".to_string(),
                 actions_count: 50,
-                top_actions: vec![("move".to_string(), 20), ("gather".to_string(), 15)],
+                top_actions: vec![("移动".to_string(), 20), ("采集".to_string(), 15)],
                 narratives: vec!["在江湖中行走，感受春风".to_string()],
                 died_this_period: false,
             }],
@@ -504,9 +497,9 @@ mod tests {
             action_stats: ActionStats {
                 total: 100,
                 by_type: HashMap::from([
-                    ("move".to_string(), 40),
-                    ("idle".to_string(), 30),
-                    ("gather".to_string(), 30),
+                    ("移动".to_string(), 40),
+                    ("休息".to_string(), 30),
+                    ("采集".to_string(), 30),
                 ]),
                 success_rate: 0.85,
             },

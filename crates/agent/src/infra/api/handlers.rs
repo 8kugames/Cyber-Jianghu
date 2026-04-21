@@ -210,7 +210,7 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
             method: "POST".to_string(),
             description: "提交决策意图".to_string(),
             request_example: Some(serde_json::json!({
-                "action_type": "speak",
+                "action_type": "说话",
                 "action_data": "大家好！",
                 "thought_log": "想和大家打个招呼"
             })),
@@ -304,7 +304,7 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
             method: "POST".to_string(),
             description: "验证意图是否符合人设".to_string(),
             request_example: Some(serde_json::json!({
-                "action_type": "attack",
+                "action_type": "攻击",
                 "action_data": null,
                 "persona_gender": "女",
                 "persona_age": 25,
@@ -350,7 +350,7 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
             response_example: Some(serde_json::json!({
                 "intent_id": "uuid-...",
                 "agent_id": "uuid-...",
-                "intent": {"action_type": "attack", "action_data": null},
+                "intent": {"action_type": "攻击", "action_data": null},
                 "persona_summary": {
                     "name": "张三",
                     "gender": "男",

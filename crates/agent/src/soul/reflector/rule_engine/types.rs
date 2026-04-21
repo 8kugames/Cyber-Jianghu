@@ -264,7 +264,7 @@ mod tests {
         let intent = Intent::new(
             agent_id,
             1,
-            "move",
+            "移动",
             Some(serde_json::json!({"target_location": "location_1"})),
         );
 
@@ -279,7 +279,7 @@ mod tests {
             reachable_node_ids: vec![],
         };
 
-        assert_eq!(context.action_type().as_str(), "move");
+        assert_eq!(context.action_type().as_str(), "移动");
     }
 
     #[test]
@@ -288,7 +288,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "idle", None);
+        let intent = Intent::new(agent_id, 1, "休息", None);
 
         let mut attributes = HashMap::new();
         attributes.insert("health".to_string(), serde_json::json!(100));
@@ -319,7 +319,7 @@ mod tests {
         use uuid::Uuid;
 
         let agent_id = Uuid::new_v4();
-        let intent = Intent::new(agent_id, 1, "idle", None);
+        let intent = Intent::new(agent_id, 1, "休息", None);
 
         let request = ValidationRequest {
             intent,

@@ -257,7 +257,7 @@ pub enum ServerMessage {
 ///     tick_id: 1,
 ///     agent_id: None,
 ///     thought_log: Some("思考过程".to_string()),
-///     action_type: "speak".to_string(),
+///     action_type: "说话".to_string(),
 ///     action_data: Some(json!({"content": "你好"})),
 ///     priority: 5,
 /// };
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn test_client_message_serialization() {
         let agent_id = Uuid::nil();
-        let intent = Intent::new(agent_id, 1, "idle", None);
+        let intent = Intent::new(agent_id, 1, "休息", None);
         let msg = ClientMessage::from_intent(intent);
 
         let json = msg.to_json().unwrap();
@@ -442,13 +442,13 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "intent");
         assert_eq!(parsed["tick_id"], 1);
-        assert_eq!(parsed["action_type"], "idle");
+        assert_eq!(parsed["action_type"], "休息");
     }
 
     #[test]
     fn test_client_message_deserialization() {
         // 使用扁平化格式
-        let json = r#"{"type":"intent","tick_id":1,"action_type":"speak","action_data":{"content":"hello"},"priority":5}"#;
+        let json = r#"{"type":"intent","tick_id":1,"action_type":"说话","action_data":{"content":"hello"},"priority":5}"#;
 
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
         match msg {
@@ -460,7 +460,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(tick_id, 1);
-                assert_eq!(action_type, "speak");
+                assert_eq!(action_type, "说话");
                 assert_eq!(priority, 5);
             }
             _ => panic!("Unexpected message type"),

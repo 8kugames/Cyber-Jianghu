@@ -41,7 +41,7 @@ pub fn cognitive_decision(
                 Ok(chain) => chain.final_intent,
                 Err(e) => {
                     error!("[cognitive] Decision failed: {}", e);
-                    Intent::new(agent_id, tick_id, "idle", None)
+                    Intent::new(agent_id, tick_id, "休息", None)
                         .with_thought(format!("认知失败: {}", e))
                 }
             }
@@ -113,7 +113,7 @@ pub fn cognitive_decision_with_chain(
             let idle_intent = Intent::new(
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
-                "idle",
+                "休息",
                 None,
             )
             .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));

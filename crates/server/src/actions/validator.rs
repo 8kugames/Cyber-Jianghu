@@ -467,7 +467,7 @@ mod tests {
     async fn test_validate_idle() {
         init_test_registry();
         let agent_id = Uuid::new_v4();
-        let intent = create_test_intent(ActionType::new("idle"), None);
+        let intent = create_test_intent(ActionType::new("休息"), None);
         let state = create_test_state(agent_id, true);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
@@ -480,7 +480,7 @@ mod tests {
         init_test_registry();
         let agent_id = Uuid::new_v4();
         let data = serde_json::json!({ "content": "大家好！" });
-        let intent = create_test_intent(ActionType::new("speak"), Some(data));
+        let intent = create_test_intent(ActionType::new("说话"), Some(data));
         let state = create_test_state(agent_id, true);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
@@ -493,7 +493,7 @@ mod tests {
         init_test_registry();
         let agent_id = Uuid::new_v4();
         let data = serde_json::json!({ "content": "" });
-        let intent = create_test_intent(ActionType::new("speak"), Some(data));
+        let intent = create_test_intent(ActionType::new("说话"), Some(data));
         let state = create_test_state(agent_id, true);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
@@ -511,7 +511,7 @@ mod tests {
             "item_id": "mantou",
             "quantity": 1
         });
-        let intent = create_test_intent(ActionType::new("give"), Some(data));
+        let intent = create_test_intent(ActionType::new("赠送"), Some(data));
         let state = create_test_state(agent_id, true);
         let target_state = create_test_state(target_id, false);
 
@@ -531,7 +531,7 @@ mod tests {
             "item_id": "mantou",
             "quantity": 0
         });
-        let intent = create_test_intent(ActionType::new("give"), Some(data));
+        let intent = create_test_intent(ActionType::new("赠送"), Some(data));
         let state = create_test_state(agent_id, true);
         let target_state = create_test_state(target_id, true);
 
@@ -545,7 +545,7 @@ mod tests {
     async fn test_validate_agent_dead() {
         init_test_registry();
         let agent_id = Uuid::new_v4();
-        let intent = create_test_intent(ActionType::new("idle"), None);
+        let intent = create_test_intent(ActionType::new("休息"), None);
         let state = create_test_state(agent_id, false);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
@@ -573,7 +573,7 @@ mod tests {
         let data = serde_json::json!({
             "target_agent_id": target_id.to_string()
         });
-        let intent = create_test_intent(ActionType::new("attack"), Some(data));
+        let intent = create_test_intent(ActionType::new("攻击"), Some(data));
         let state = create_test_state(agent_id, true);
         let target_state = create_test_state(target_id, true);
 
@@ -590,7 +590,7 @@ mod tests {
         let data = serde_json::json!({
             "target_location": "inn"
         });
-        let intent = create_test_intent(ActionType::new("move"), Some(data));
+        let intent = create_test_intent(ActionType::new("移动"), Some(data));
         let state = create_test_state(agent_id, true);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
@@ -605,7 +605,7 @@ mod tests {
         let data = serde_json::json!({
             "target_location": ""
         });
-        let intent = create_test_intent(ActionType::new("move"), Some(data));
+        let intent = create_test_intent(ActionType::new("移动"), Some(data));
         let state = create_test_state(agent_id, true);
 
         let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();

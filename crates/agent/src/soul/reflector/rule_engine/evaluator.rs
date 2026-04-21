@@ -340,12 +340,12 @@ mod tests {
 
         // 测试匹配的动作类型
         let condition =
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("speak"));
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("说话"));
         assert!(evaluator.evaluate(&condition, &context).await);
 
         // 测试不匹配的动作类型
         let condition =
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("move"));
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("移动"));
         assert!(!evaluator.evaluate(&condition, &context).await);
     }
 
@@ -420,29 +420,29 @@ mod tests {
 
         // 测试 AND 条件（通过）
         let condition = RuleCondition::And(vec![
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("speak")),
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("说话")),
             RuleCondition::GreaterThan("attributes.health".to_string(), 50.0),
         ]);
         assert!(evaluator.evaluate(&condition, &context).await);
 
         // 测试 AND 条件（不通过）
         let condition = RuleCondition::And(vec![
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("move")),
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("移动")),
             RuleCondition::GreaterThan("attributes.health".to_string(), 50.0),
         ]);
         assert!(!evaluator.evaluate(&condition, &context).await);
 
         // 测试 OR 条件（通过）
         let condition = RuleCondition::Or(vec![
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("move")),
-            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("speak")),
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("移动")),
+            RuleCondition::Equals("intent.action_type".to_string(), serde_json::json!("说话")),
         ]);
         assert!(evaluator.evaluate(&condition, &context).await);
 
         // 测试 NOT 条件
         let condition = RuleCondition::Not(Box::new(RuleCondition::Equals(
             "intent.action_type".to_string(),
-            serde_json::json!("move"),
+            serde_json::json!("移动"),
         )));
         assert!(evaluator.evaluate(&condition, &context).await);
     }

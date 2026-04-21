@@ -1124,7 +1124,7 @@ impl super::Agent {
 
                             if attempt >= max_retries {
                                 warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
-                                final_intent = Some(Intent::new(agent_id, world_state.tick_id, "idle", None)
+                                final_intent = Some(Intent::new(agent_id, world_state.tick_id, "休息", None)
                                     .with_thought(format!("意图多次被驳回: {}", reason)));
                                 break;
                             }
@@ -1139,7 +1139,7 @@ impl super::Agent {
                             self.consecutive_follow_count = 0;
                             self.maybe_rotate_model().await;
                             // 构造 idle intent 并继续发送+上报（保证 server-web 经历日志完整）
-                            Intent::new(agent_id, world_state.tick_id, "idle", None)
+                            Intent::new(agent_id, world_state.tick_id, "休息", None)
                                 .with_thought("三魂循环未产出有效意图".to_string())
                         }
                     };
@@ -1171,7 +1171,7 @@ impl super::Agent {
                             let death_idle = Intent::new(
                                 agent_id,
                                 world_state.tick_id,
-                                "idle",
+                                "休息",
                                 None,
                             );
                             if self.validate_rules_only(&death_idle, &world_state).await.is_ok() {
@@ -1270,7 +1270,7 @@ impl super::Agent {
                                 }
                             }
 
-                            if final_intent.action_type.as_str() != "idle" {
+                            if final_intent.action_type.as_str() != "休息" {
                                 self.consecutive_idle_count = 0;
                                 // 连续 follow 计数（社交死循环防护）
                                 if final_intent.action_type.as_str() == "follow" {
@@ -1283,7 +1283,7 @@ impl super::Agent {
                                     llm.reset_idle_count();
                                 }
                             }
-                            if final_intent.action_type.as_str() == "idle" {
+                            if final_intent.action_type.as_str() == "休息" {
                                 self.maybe_rotate_model().await;
                             }
                             if let Some(ref handler) = self.immediate_handler {
@@ -1423,7 +1423,7 @@ impl super::Agent {
         let data = action_data.cloned().unwrap_or(serde_json::Value::Null);
 
         match action_type {
-            "speak" => {
+            "说话" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let target = data.get("target_agent_id").and_then(|v| v.as_str());
                 match target {
@@ -1431,55 +1431,54 @@ impl super::Agent {
                     None => format!("向在场众人说话：{}", content),
                 }
             }
-            "whisper" => {
+            "私语" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 format!("向某人密语：{}", content)
             }
-            "shout" => {
+            "大喊" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 format!("大声喊道：{}", content)
             }
-            "move" => {
+            "移动" => {
                 let target = data
                     .get("target_location")
                     .and_then(|v| v.as_str())
                     .unwrap_or("未知地点");
                 format!("从{}移动到{}", location, target)
             }
-            "eat" => {
+            "进食" => {
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("食物");
                 format!("吃了{}", item)
             }
-            "drink" => {
+            "饮水" => {
                 let item = data.get("item_id").and_then(|v| v.as_str()).unwrap_or("水");
                 format!("喝了{}", item)
             }
-            "gather" => {
+            "采集" => {
                 let resource = data
                     .get("target_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("资源");
                 format!("采集{}", resource)
             }
-            "pickup" => {
+            "拾取" => {
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("物品");
                 format!("拾起{}", item)
             }
-            "give" => {
+            "赠送" => {
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("物品");
                 format!("赠送{}", item)
             }
-            "idle" => "原地休息".to_string(),
-            "wait" => "原地等待".to_string(),
+            "休息" => "原地休息".to_string(),
             other => format!("执行{}", other),
         }
     }

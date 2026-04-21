@@ -106,7 +106,7 @@ impl RuleEngine {
             super::types::RuleCondition::Or(vec![
                 super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
-                    serde_json::json!("eat"),
+                    serde_json::json!("进食"),
                 ),
                 super::types::RuleCondition::In(
                     "intent.action_data.item_id".to_string(),
@@ -124,7 +124,7 @@ impl RuleEngine {
             super::types::RuleCondition::Or(vec![
                 super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
-                    serde_json::json!("drink"),
+                    serde_json::json!("饮水"),
                 ),
                 super::types::RuleCondition::In(
                     "intent.action_data.item_id".to_string(),
@@ -142,7 +142,7 @@ impl RuleEngine {
             super::types::RuleCondition::Or(vec![
                 super::types::RuleCondition::NotEquals(
                     "intent.action_type".to_string(),
-                    serde_json::json!("move"),
+                    serde_json::json!("移动"),
                 ),
                 super::types::RuleCondition::In(
                     "intent.action_data.target_location".to_string(),
@@ -215,9 +215,9 @@ impl RuleEngine {
         context: &RuleValidationContext,
     ) -> String {
         let action_type = match rule_id {
-            "valid_item_id_eat" => "eat",
-            "valid_item_id_drink" => "drink",
-            "valid_target_node_move" => "move",
+            "valid_item_id_eat" => "进食",
+            "valid_item_id_drink" => "饮水",
+            "valid_target_node_move" => "移动",
             _ => return base_reason.to_string(),
         };
 
@@ -229,7 +229,7 @@ impl RuleEngine {
             let mut vars = HashMap::new();
 
             match action_type {
-                "eat" | "drink" => {
+                "进食" | "饮水" => {
                     let items: Vec<&str> = context
                         .available_item_ids
                         .iter()
@@ -245,7 +245,7 @@ impl RuleEngine {
                         },
                     );
                 }
-                "move" => {
+                "移动" => {
                     let nodes: Vec<&str> = context
                         .reachable_node_ids
                         .iter()
@@ -413,16 +413,16 @@ mod tests {
         let engine = RuleEngine::new();
         let registry = engine.registry();
 
-        // 注册一个会失败的规则（动作类型不是 "move"）
+        // 注册一个会失败的规则（动作类型不是 "移动"）
         let rule = Rule::new(
             "test_rule_1".to_string(),
-            "动作必须是 move".to_string(),
+            "动作必须是 移动".to_string(),
             super::super::types::RuleType::ActionCooldown,
             super::super::types::RuleCondition::Equals(
                 "intent.action_type".to_string(),
-                serde_json::json!("move"),
+                serde_json::json!("移动"),
             ),
-            "动作类型必须是 move".to_string(),
+            "动作类型必须是 移动".to_string(),
         );
 
         registry.register(rule).await;
@@ -435,7 +435,7 @@ mod tests {
                 panic!("应该被拒绝，但通过了验证");
             }
             ValidationResult::Rejected { reason, .. } => {
-                assert!(reason.contains("move") || reason.contains("动作类型"));
+                assert!(reason.contains("移动") || reason.contains("动作类型"));
             }
         }
     }
@@ -445,16 +445,16 @@ mod tests {
         let engine = RuleEngine::new();
         let registry = engine.registry();
 
-        // 注册一个会通过的规则（动作类型是 "speak"）
+        // 注册一个会通过的规则（动作类型是 "说话"）
         let rule = Rule::new(
             "test_rule_2".to_string(),
-            "动作必须是 speak".to_string(),
+            "动作必须是 说话".to_string(),
             super::super::types::RuleType::ActionCooldown,
             super::super::types::RuleCondition::Equals(
                 "intent.action_type".to_string(),
-                serde_json::json!("speak"),
+                serde_json::json!("说话"),
             ),
-            "动作类型必须是 speak".to_string(),
+            "动作类型必须是 说话".to_string(),
         );
 
         registry.register(rule).await;

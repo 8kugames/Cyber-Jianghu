@@ -177,7 +177,7 @@ pub fn init_test_registry() {
                 "version": "0.0.1",
                 "description": "测试用动作配置",
                 "data": {
-                    "attack": {
+                    "攻击": {
                         "description": "攻击目标，造成伤害",
                         "base_damage": 10,
                         "weapon_bonus": 5,
@@ -191,7 +191,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "steal": {
+                    "偷窃": {
                         "description": "从目标身上偷取物品",
                         "success_rate": 0.5,
                         "stamina_cost": 5,
@@ -202,7 +202,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "speak": {
+                    "说话": {
                         "description": "公开说话",
                         "max_content_length": 500,
                         "stamina_cost": 0,
@@ -216,7 +216,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "move": {
+                    "移动": {
                         "description": "移动到指定位置",
                         "stamina_cost": 10,
                         "validation": {
@@ -228,7 +228,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "give": {
+                    "赠送": {
                         "description": "将物品给予目标",
                         "stamina_cost": 2,
                         "validation": {
@@ -242,7 +242,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "use": {
+                    "使用": {
                         "description": "使用物品",
                         "stamina_cost": 1,
                         "validation": {
@@ -251,7 +251,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "pickup": {
+                    "拾取": {
                         "description": "从场景中拾取物品",
                         "stamina_cost": 2,
                         "validation": {
@@ -260,7 +260,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "trade": {
+                    "交易": {
                         "description": "与目标进行交易",
                         "stamina_cost": 3,
                         "validation": {
@@ -270,7 +270,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "idle": {
+                    "休息": {
                         "description": "休息",
                         "stamina_cost": 0,
                         "validation": {},

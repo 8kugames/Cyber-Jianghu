@@ -2,7 +2,7 @@
 // 中文 LLM 边界翻译层
 // ============================================================================
 //
-// 薄翻译层：LLM 输出中文 action_type 和 action_data key → 英文 canonical
+// 薄翻译层：LLM 输出的中文 action_type 别名 → canonical 中文名
 // 翻译硬边界：必须在 ReflectorSoul 之前完成
 // 数据驱动：映射来自 AvailableAction 的 aliases/field_aliases，零硬编码
 // ============================================================================
@@ -10,14 +10,12 @@
 use cyber_jianghu_protocol::AvailableAction;
 use std::collections::HashMap;
 
-/// action_type 别名映射: alias (lowercase) → canonical english key
+/// action_type 别名映射: alias (lowercase) → canonical chinese name
 ///
-/// 包含 action_type 自身（英文 canonical 也可查到自身）
+/// action_type 全链路已为中文，此映射仅做别名归一化
 pub struct ActionAliasMap {
-    /// alias (lowercase) → canonical english key
+    /// alias (lowercase) → canonical chinese name
     forward: HashMap<String, String>,
-    /// canonical english key → chinese name (用于 prompt 展示)
-    chinese_names: HashMap<String, String>,
 }
 
 /// action_data 字段别名映射: (action_type, field_alias) → canonical field
@@ -29,49 +27,36 @@ impl ActionAliasMap {
     /// 从 AvailableAction list 构建
     ///
     /// 构建 alias → canonical 映射：
-    /// - 每个动作的 `action` (英文 canonical) 映射到自身
+    /// - 每个动作的 `action` (canonical chinese) 映射到自身
     /// - 每个动作的 `name` (中文名) 映射到 canonical
     /// - 每个别名映射到 canonical
     /// - 所有 key 统一转小写以支持大小写不敏感匹配
     pub fn from_actions(actions: &[AvailableAction]) -> Self {
         let mut forward = HashMap::new();
-        let mut chinese_names = HashMap::new();
         for a in actions {
-            let canonical = a.action.to_lowercase();
-            // canonical english key → self
-            forward.entry(canonical.clone())
-                .or_insert_with(|| a.action.clone());
-            // chinese name → canonical
+            let canonical = a.action.clone();
+            // canonical → self
+            forward.entry(canonical.to_lowercase())
+                .or_insert_with(|| canonical.clone());
+            // name → canonical (name 和 action 可能相同，也可能不同)
             if !a.name.is_empty() {
-                forward.insert(a.name.to_lowercase(), a.action.clone());
+                forward.insert(a.name.to_lowercase(), canonical.clone());
             }
             // aliases → canonical
             for alias in &a.aliases {
-                forward.insert(alias.to_lowercase(), a.action.clone());
-            }
-            // english canonical → chinese name
-            if !a.name.is_empty() {
-                chinese_names.insert(a.action.to_lowercase(), a.name.clone());
+                forward.insert(alias.to_lowercase(), canonical.clone());
             }
         }
-        Self { forward, chinese_names }
+        Self { forward }
     }
 
-    /// 翻译 action_type（中文/别名 → 英文 canonical）
+    /// 翻译 action_type（别名 → canonical chinese）
     ///
     /// 查找顺序:
     /// 1. 精确匹配（lowercase）
     /// 2. 未匹配时返回 None（fail-fast，由调用方决定处理）
     pub fn translate(&self, input: &str) -> Option<String> {
         self.forward.get(&input.to_lowercase()).cloned()
-    }
-
-    /// 反向查找：英文 canonical → 中文名（用于 prompt 展示）
-    pub fn chinese_name(&self, action_type: &str) -> String {
-        self.chinese_names
-            .get(&action_type.to_lowercase())
-            .cloned()
-            .unwrap_or_else(|| action_type.to_string())
     }
 }
 
@@ -107,7 +92,7 @@ impl FieldAliasMap {
         Self(map)
     }
 
-    /// 翻译 action_data 的 key（中文/别名 → 英文 canonical）
+    /// 翻译 action_data 的 key（中文/别名 → canonical）
     ///
     /// 白名单模式：仅翻译该 action_type 的 required_fields 对应的 key
     /// 未识别的 key 原样保留（不误翻译内容值）
@@ -177,7 +162,7 @@ mod tests {
 
         vec![
             AvailableAction {
-                action: "idle".to_string(),
+                action: "休息".to_string(),
                 name: "休息".to_string(),
                 description: String::new(),
                 category: String::new(),
@@ -188,7 +173,7 @@ mod tests {
                 field_aliases: HashMap::new(),
             },
             AvailableAction {
-                action: "speak".to_string(),
+                action: "说话".to_string(),
                 name: "说话".to_string(),
                 description: String::new(),
                 category: String::new(),
@@ -204,7 +189,7 @@ mod tests {
                 field_aliases: fa_speak,
             },
             AvailableAction {
-                action: "move".to_string(),
+                action: "移动".to_string(),
                 name: "移动".to_string(),
                 description: String::new(),
                 category: String::new(),
@@ -219,7 +204,7 @@ mod tests {
                 field_aliases: fa_move,
             },
             AvailableAction {
-                action: "eat".to_string(),
+                action: "进食".to_string(),
                 name: "进食".to_string(),
                 description: String::new(),
                 category: String::new(),
@@ -233,41 +218,42 @@ mod tests {
     }
 
     #[test]
-    fn test_action_alias_chinese_name() {
+    fn test_action_alias_canonical_chinese() {
         let actions = make_test_actions();
         let map = ActionAliasMap::from_actions(&actions);
-        assert_eq!(map.translate("说话"), Some("speak".to_string()));
-        assert_eq!(map.translate("休息"), Some("idle".to_string()));
-        assert_eq!(map.translate("移动"), Some("move".to_string()));
-        assert_eq!(map.translate("进食"), Some("eat".to_string()));
+        assert_eq!(map.translate("说话"), Some("说话".to_string()));
+        assert_eq!(map.translate("休息"), Some("休息".to_string()));
+        assert_eq!(map.translate("移动"), Some("移动".to_string()));
+        assert_eq!(map.translate("进食"), Some("进食".to_string()));
     }
 
     #[test]
     fn test_action_alias_chinese_variant() {
         let actions = make_test_actions();
         let map = ActionAliasMap::from_actions(&actions);
-        assert_eq!(map.translate("交谈"), Some("speak".to_string()));
-        assert_eq!(map.translate("静修"), Some("idle".to_string()));
-        assert_eq!(map.translate("行走"), Some("move".to_string()));
-        assert_eq!(map.translate("吃"), Some("eat".to_string()));
+        assert_eq!(map.translate("交谈"), Some("说话".to_string()));
+        assert_eq!(map.translate("静修"), Some("休息".to_string()));
+        assert_eq!(map.translate("行走"), Some("移动".to_string()));
+        assert_eq!(map.translate("吃"), Some("进食".to_string()));
     }
 
     #[test]
-    fn test_action_alias_english_typo() {
+    fn test_action_alias_case_insensitive() {
         let actions = make_test_actions();
         let map = ActionAliasMap::from_actions(&actions);
-        assert_eq!(map.translate("say"), Some("speak".to_string()));
-        assert_eq!(map.translate("Speak"), Some("speak".to_string())); // case insensitive
+        // 大小写不敏感（对英文别名有效）
+        assert_eq!(map.translate("Say"), Some("说话".to_string()));
+        assert_eq!(map.translate("SAY"), Some("说话".to_string()));
     }
 
     #[test]
     fn test_action_alias_canonical_pass_through() {
         let actions = make_test_actions();
         let map = ActionAliasMap::from_actions(&actions);
-        // 英文 canonical 也应查到自身
-        assert_eq!(map.translate("speak"), Some("speak".to_string()));
-        assert_eq!(map.translate("move"), Some("move".to_string()));
-        assert_eq!(map.translate("idle"), Some("idle".to_string()));
+        // canonical 中文名也应查到自身
+        assert_eq!(map.translate("说话"), Some("说话".to_string()));
+        assert_eq!(map.translate("移动"), Some("移动".to_string()));
+        assert_eq!(map.translate("休息"), Some("休息".to_string()));
     }
 
     #[test]
@@ -284,7 +270,7 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"内容": "各位好汉，在下有礼了。"});
-        map.translate_data("speak", &mut data);
+        map.translate_data("说话", &mut data);
         assert_eq!(data["content"], "各位好汉，在下有礼了。");
         assert!(data.get("内容").is_none());
     }
@@ -295,7 +281,7 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"目标地点": "longmen_kitchen"});
-        map.translate_data("move", &mut data);
+        map.translate_data("移动", &mut data);
         assert_eq!(data["target_location"], "longmen_kitchen");
         assert!(data.get("目标地点").is_none());
     }
@@ -306,7 +292,7 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"destination": "longmen_kitchen"});
-        map.translate_data("move", &mut data);
+        map.translate_data("移动", &mut data);
         assert_eq!(data["target_location"], "longmen_kitchen");
     }
 
@@ -316,7 +302,7 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"物品ID": "mantou"});
-        map.translate_data("eat", &mut data);
+        map.translate_data("进食", &mut data);
         assert_eq!(data["item_id"], "mantou");
     }
 
@@ -326,7 +312,7 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"内容": "hello"});
-        map.translate_data("unknown_action", &mut data);
+        map.translate_data("未知动作", &mut data);
         // 未知 action_type 不翻译，原样保留
         assert_eq!(data["内容"], "hello");
     }
@@ -337,8 +323,8 @@ mod tests {
         let map = FieldAliasMap::from_actions(&actions);
 
         let mut data = serde_json::json!({"foo": "bar"});
-        map.translate_data("idle", &mut data);
-        // idle 没有 required_fields，不翻译
+        map.translate_data("休息", &mut data);
+        // 休息 没有 required_fields，不翻译
         assert_eq!(data["foo"], "bar");
     }
 
@@ -349,11 +335,11 @@ mod tests {
 
         // 已是 canonical key，不应被修改
         let mut data = serde_json::json!({"content": "hello", "target_location": "inn"});
-        map.translate_data("speak", &mut data);
+        map.translate_data("说话", &mut data);
         assert_eq!(data["content"], "hello");
 
         let mut data2 = serde_json::json!({"target_location": "inn"});
-        map.translate_data("move", &mut data2);
+        map.translate_data("移动", &mut data2);
         assert_eq!(data2["target_location"], "inn");
     }
 
@@ -362,9 +348,9 @@ mod tests {
         let actions = make_test_actions();
         let map = FieldAliasMap::from_actions(&actions);
 
-        // "thought" 不是 speak 的 required_field，即使碰巧和某个别名同名也不翻译
+        // "thought" 不是 说话 的 required_field，即使碰巧和某个别名同名也不翻译
         let mut data = serde_json::json!({"thought": "我要说话"});
-        map.translate_data("speak", &mut data);
+        map.translate_data("说话", &mut data);
         assert_eq!(data["thought"], "我要说话");
     }
 }

@@ -41,12 +41,12 @@ fn default_max() -> usize {
 }
 fn default_action_weights() -> std::collections::HashMap<String, f64> {
     let mut m = std::collections::HashMap::new();
-    m.insert("attack".into(), 0.25);
-    m.insert("drop".into(), 0.20);
-    m.insert("give".into(), 0.15);
-    m.insert("move".into(), 0.20);
-    m.insert("eat".into(), 0.10);
-    m.insert("drink".into(), 0.10);
+    m.insert("攻击".into(), 0.25);
+    m.insert("丢弃".into(), 0.20);
+    m.insert("赠送".into(), 0.15);
+    m.insert("移动".into(), 0.20);
+    m.insert("进食".into(), 0.10);
+    m.insert("饮水".into(), 0.10);
     m
 }
 
@@ -147,7 +147,7 @@ impl ChaosGenerator {
         rng: &mut impl rand::RngExt,
     ) -> Option<serde_json::Value> {
         match action_type {
-            "attack" => {
+            "攻击" => {
                 // 攻击附近的随机实体
                 if world_state.entities.is_empty() {
                     return None;
@@ -157,7 +157,7 @@ impl ChaosGenerator {
                     "target_id": target.id.to_string(),
                 }))
             }
-            "drop" => {
+            "丢弃" => {
                 // 丢弃背包中的随机物品
                 if world_state.self_state.inventory.is_empty() {
                     return None;
@@ -169,7 +169,7 @@ impl ChaosGenerator {
                     "quantity": 1,
                 }))
             }
-            "give" => {
+            "赠送" => {
                 // 给附近随机实体随机物品
                 if world_state.entities.is_empty() || world_state.self_state.inventory.is_empty() {
                     return None;
@@ -183,7 +183,7 @@ impl ChaosGenerator {
                     "quantity": 1,
                 }))
             }
-            "move" => {
+            "移动" => {
                 // 移动到随机可达地点
                 if world_state.location.adjacent_nodes.is_empty() {
                     return None;
@@ -194,7 +194,7 @@ impl ChaosGenerator {
                     "target_location": node.node_id,
                 }))
             }
-            "eat" | "drink" => {
+            "进食" | "饮水" => {
                 // 随机吃/喝背包中的物品
                 if world_state.self_state.inventory.is_empty() {
                     return None;

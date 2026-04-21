@@ -63,8 +63,8 @@ impl CombatActionExecutor {
 
         // eat/drink 语义过滤：检查物品效果是否匹配动作类型
         let action_str = intent.action_type.as_str();
-        if action_str == "eat" || action_str == "drink" {
-            let target_attr = if action_str == "eat" {
+        if action_str == "进食" || action_str == "饮水" {
+            let target_attr = if action_str == "进食" {
                 "hunger"
             } else {
                 "thirst"
@@ -159,7 +159,7 @@ impl CombatActionExecutor {
 
         // 计算伤害（优先使用公式，否则使用旧版逻辑）
         let total_damage = if let Some(formula) =
-            ActionRegistry::get_string("attack", ActionField::DamageFormula)
+            ActionRegistry::get_string("攻击", ActionField::DamageFormula)
         {
             let context = agent_state.get_formula_context();
             let i64_context: std::collections::HashMap<String, i64> = context
@@ -169,9 +169,9 @@ impl CombatActionExecutor {
 
             // 武器加成作为额外变量
             let weapon_bonus =
-                ActionRegistry::get_i32("attack", ActionField::WeaponBonus).unwrap_or(0);
+                ActionRegistry::get_i32("攻击", ActionField::WeaponBonus).unwrap_or(0);
             let weapon_multiplier =
-                ActionRegistry::get_f32("attack", ActionField::WeaponBonusMultiplier)
+                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier)
                     .unwrap_or(1.0);
             let mut float_extras = std::collections::HashMap::new();
             float_extras.insert("weapon_bonus".to_string(), weapon_bonus as f64);
@@ -189,7 +189,7 @@ impl CombatActionExecutor {
                 }
             }
         } else {
-            let base_damage = match ActionRegistry::get_i32("attack", ActionField::BaseDamage) {
+            let base_damage = match ActionRegistry::get_i32("攻击", ActionField::BaseDamage) {
                 Some(damage) => damage,
                 None => {
                     return ActionExecutionResult::failure(
@@ -200,9 +200,9 @@ impl CombatActionExecutor {
                 }
             };
             let weapon_bonus =
-                ActionRegistry::get_i32("attack", ActionField::WeaponBonus).unwrap_or(0);
+                ActionRegistry::get_i32("攻击", ActionField::WeaponBonus).unwrap_or(0);
             let weapon_multiplier =
-                ActionRegistry::get_f32("attack", ActionField::WeaponBonusMultiplier)
+                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier)
                     .unwrap_or(1.0);
             let weapon_damage = (weapon_bonus as f32) * weapon_multiplier;
             base_damage + weapon_damage as i32
@@ -289,7 +289,7 @@ impl CombatActionExecutor {
 
         // 公式计算成功率
         let success = if let Some(formula) =
-            ActionRegistry::get_string("flee", ActionField::FleeSuccessFormula)
+            ActionRegistry::get_string("逃跑", ActionField::FleeSuccessFormula)
         {
             let context = agent_state.get_formula_context();
             let f64_context: std::collections::HashMap<String, f64> = context

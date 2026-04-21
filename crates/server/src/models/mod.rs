@@ -194,17 +194,17 @@ mod tests {
     #[test]
     fn test_action_type_conversion() {
         // 数据驱动：ActionType 是字符串包装，所有字符串都有效
-        let idle = ActionType::new("idle");
-        assert_eq!(idle.as_str(), "idle");
+        let idle = ActionType::new("休息");
+        assert_eq!(idle.as_str(), "休息");
 
-        let speak = ActionType::new("speak");
-        assert_eq!(speak.as_str(), "speak");
+        let speak = ActionType::new("说话");
+        assert_eq!(speak.as_str(), "说话");
 
         let custom = ActionType::new("custom_action");
         assert_eq!(custom.as_str(), "custom_action");
 
-        assert_eq!(idle.to_string(), "idle");
-        assert_eq!(speak.to_string(), "speak");
+        assert_eq!(idle.to_string(), "休息");
+        assert_eq!(speak.to_string(), "说话");
     }
 
     #[test]

@@ -364,7 +364,7 @@ impl Agent {
             available_actions.iter().map(|a| a.action.clone()).collect();
         Arc::new(
             move |action_type: &str| -> std::result::Result<(), String> {
-                if action_type == "idle" {
+                if action_type == "休息" {
                     return Ok(());
                 }
                 if !action_names.iter().any(|a| a == action_type) {
@@ -535,7 +535,7 @@ impl Agent {
     /// 将多个 Intent 组装为 primary + subsequent_intents 的 Pipeline 结构
     pub(crate) fn assemble_pipeline(intents: Vec<Intent>) -> Intent {
         if intents.is_empty() {
-            return Intent::new(uuid::Uuid::nil(), 0, "idle", None);
+            return Intent::new(uuid::Uuid::nil(), 0, "休息", None);
         }
         if intents.len() == 1 {
             return intents.into_iter().next().unwrap();

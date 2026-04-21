@@ -134,8 +134,8 @@ fn generate_suggestion(action_type: &ActionType, error: &str) -> Option<String> 
         Some("目标 Agent 已死亡".to_string())
     } else if error.contains("属性") || error.contains("不足") {
         match action_type.as_str() {
-            "attack" => Some("HP 太低，无法攻击，建议先休息".to_string()),
-            "move" => Some("体力不足，无法移动，建议先休息".to_string()),
+            "攻击" => Some("HP 太低，无法攻击，建议先休息".to_string()),
+            "移动" => Some("体力不足，无法移动，建议先休息".to_string()),
             _ => Some("属性不足，无法执行此动作".to_string()),
         }
     } else if error.contains("对话内容") {

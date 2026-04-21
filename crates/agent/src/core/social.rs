@@ -101,7 +101,7 @@ impl super::Agent {
 
                 let action = meta.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 let other_id_str = match action {
-                    "give" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
+                    "赠送" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
                     "receive" | "trade_buy" | "stolen_from" => {
                         meta.get("from").and_then(|v| v.as_str())
                     }

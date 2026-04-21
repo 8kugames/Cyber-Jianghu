@@ -290,7 +290,7 @@ pub async fn broadcast_speak_to_location(
                 "from_agent_id": from_agent_id,
                 "from_agent_name": from_agent_name,
                 "content": content,
-                "channel": "speak",
+                "channel": "说话",
                 "location": location,
             }),
         };
