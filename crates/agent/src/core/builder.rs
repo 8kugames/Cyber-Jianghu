@@ -222,10 +222,7 @@ impl AgentBuilder {
     }
 
     /// 设置混沌意图生成器（Sanity 混沌硬逻辑）
-    pub fn with_chaos_generator(
-        mut self,
-        generator: crate::soul::actor::ChaosGenerator,
-    ) -> Self {
+    pub fn with_chaos_generator(mut self, generator: crate::soul::actor::ChaosGenerator) -> Self {
         self.chaos_generator = Some(generator);
         self
     }

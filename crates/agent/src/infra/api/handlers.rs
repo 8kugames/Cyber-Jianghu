@@ -1133,6 +1133,92 @@ fn default_gender() -> String {
     "男".to_string()
 }
 
+/// 角色注册验证错误
+#[derive(Debug)]
+enum CharacterRegisterValidationError {
+    NameEmpty,
+    NameTooLong(usize),
+    AgeOutOfRange(u8),
+    InvalidGender(String),
+    IdentityTooLong(usize),
+    ShortTermGoalTooLong(usize),
+    LongTermGoalTooLong(usize),
+}
+
+impl std::fmt::Display for CharacterRegisterValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NameEmpty => write!(f, "角色姓名不能为空"),
+            Self::NameTooLong(len) => write!(f, "角色姓名不能超过20字符（当前{}字符）", len),
+            Self::AgeOutOfRange(age) => write!(f, "年龄必须在1-100之间（当前{}）", age),
+            Self::InvalidGender(g) => write!(f, "性别仅允许“男”或“女”（当前：“{}”）", g),
+            Self::IdentityTooLong(len) => write!(f, "身份背景不能超过300字符（当前{}字符）", len),
+            Self::ShortTermGoalTooLong(len) => {
+                write!(f, "短期目标不能超过100字符（当前{}字符）", len)
+            }
+            Self::LongTermGoalTooLong(len) => {
+                write!(f, "长远目标不能超过100字符（当前{}字符）", len)
+            }
+        }
+    }
+}
+
+impl CharacterRegisterRequest {
+    /// 验证请求参数是否符合前端输入框约束
+    fn validate(&self) -> Result<(), CharacterRegisterValidationError> {
+        // 姓名：必填，最大20字符
+        if self.name.trim().is_empty() {
+            return Err(CharacterRegisterValidationError::NameEmpty);
+        }
+        if self.name.chars().count() > 20 {
+            return Err(CharacterRegisterValidationError::NameTooLong(
+                self.name.chars().count(),
+            ));
+        }
+
+        // 年龄：1-100
+        if self.age < 1 || self.age > 100 {
+            return Err(CharacterRegisterValidationError::AgeOutOfRange(self.age));
+        }
+
+        // 性别：仅允许"男"或"女"
+        if self.gender != "男" && self.gender != "女" {
+            return Err(CharacterRegisterValidationError::InvalidGender(
+                self.gender.clone(),
+            ));
+        }
+
+        // 身份背景：最大300字符
+        if let Some(ref identity) = self.identity
+            && identity.chars().count() > 300
+        {
+            return Err(CharacterRegisterValidationError::IdentityTooLong(
+                identity.chars().count(),
+            ));
+        }
+
+        // 短期目标：最大100字符
+        if let Some(ref short_term) = self.goals.short_term
+            && short_term.chars().count() > 100
+        {
+            return Err(CharacterRegisterValidationError::ShortTermGoalTooLong(
+                short_term.chars().count(),
+            ));
+        }
+
+        // 长远目标：最大100字符
+        if let Some(ref long_term) = self.goals.long_term
+            && long_term.chars().count() > 100
+        {
+            return Err(CharacterRegisterValidationError::LongTermGoalTooLong(
+                long_term.chars().count(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 /// 角色注册响应（返回给 CLI）
 #[derive(Debug, Serialize)]
 pub struct CharacterRegisterResponse {
@@ -1318,7 +1404,21 @@ pub(super) async fn register_character_handler(
 
     info!("角色注册请求: {}", payload.name);
 
-    // 2. 生成默认 system_prompt（如果未提供）
+    // 2. 验证前端输入约束
+    if let Err(e) = payload.validate() {
+        warn!("角色注册参数验证失败: {}", e);
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(CharacterRegisterResponse {
+                agent_id: String::new(),
+                message: e.to_string(),
+                warning: None,
+            }),
+        )
+            .into_response();
+    }
+
+    // 3. 生成默认 system_prompt（如果未提供）
     let system_prompt = payload.system_prompt.clone().unwrap_or_else(|| {
         format!(
             "你是{}，{}岁，{}。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
@@ -1334,7 +1434,7 @@ pub(super) async fn register_character_handler(
         )
     });
 
-    // 3. 构建发送到 Server 的请求
+    // 4. 构建发送到 Server 的请求
     let server_request = serde_json::json!({
         "device_id": device_id,
         "auth_token": auth_token,
@@ -1350,7 +1450,7 @@ pub(super) async fn register_character_handler(
         "system_prompt": system_prompt,
     });
 
-    // 4. 转发到 Server
+    // 5. 转发到 Server
     let client = Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
     let server_url = format!("{}/api/v1/agent/register", server_http_url);
