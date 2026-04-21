@@ -189,6 +189,35 @@ pub struct HttpApiState {
     /// LLM Client 容器（支持热重载时重建）
     pub llm_container:
         std::sync::Arc<tokio::sync::RwLock<Option<crate::runtime::claw::LlmClientContainer>>>,
+    /// 上一次决策上下文快照（供 /api/v1/context enrichment 使用）
+    pub decision_context_snapshot:
+        std::sync::Arc<tokio::sync::RwLock<Option<DecisionContextSnapshot>>>,
+}
+
+/// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）
+#[derive(Debug, Clone)]
+pub struct DecisionContextSnapshot {
+    pub tick_id: i64,
+    /// 完整 memory_context（三层记忆 + 生存/理智/延迟对话/托梦）
+    pub memory_context: String,
+    /// 行动历史滑窗
+    pub summary_context: String,
+    /// 行动结果学习
+    pub outcome_section: String,
+    /// 动作描述列表
+    pub action_descriptions: String,
+    /// 动作字段 schema
+    pub action_field_hints: String,
+    /// 上次执行结果
+    pub last_execution_result: Option<ExecutionSummary>,
+}
+
+/// 执行结果摘要
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExecutionSummary {
+    pub action_type: String,
+    pub success: bool,
+    pub narrative: String,
 }
 
 /// HTTP 决策状态
@@ -341,7 +370,7 @@ pub fn http_decision(
 // HTTP Server
 // ============================================================================
 
-/// 创建 HTTP API Router（供 claw 模式复用）
+/// 创建 HTTP API Router
 ///
 /// 返回包含所有数据访问 API 的 Router，需要调用者提供 HttpApiState
 pub fn create_api_router() -> Router<HttpApiState> {
@@ -482,7 +511,7 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 获取 LLM Token 累计使用统计
 }
 
-/// 获取静态文件服务目录（供 claw 模式复用）
+/// 获取静态文件服务目录
 pub fn get_static_serve_dir() -> PathBuf {
     let panel_path = PathBuf::from("crates/agent/static/panel");
     let panel_path_alt = PathBuf::from("static/panel");
@@ -551,7 +580,7 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
 
 /// 空操作对话处理器
 ///
-/// 用于 Claw 模式下的默认初始化，所有事件处理器都是空操作
+/// 用于默认初始化，所有事件处理器都是空操作
 /// 实际处理由外部系统（OpenClaw）通过 WebSocket + HTTP API 完成
 #[derive(Debug, Default)]
 struct NoopDialogueHandler;
@@ -743,6 +772,7 @@ pub fn create_http_state(
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {
@@ -815,6 +845,21 @@ impl HttpApiState {
         use std::sync::atomic::Ordering;
         self.tick_duration_secs.store(secs, Ordering::Relaxed);
         tracing::info!("[http] Updated tick_duration to {}s", secs);
+    }
+
+    /// 读取当前托梦内容（不消费 — 不减少 remaining_ticks）
+    ///
+    /// 供 HTTP API handler 使用，lifecycle.rs 使用 consume_dream() 进行实际消费。
+    /// 前提：consume_dream() 已在当前 tick 调用过（由 lifecycle run_cycle 保证），
+    /// 因此 dream 数据已从磁盘加载到内存。使用 read lock 不阻塞消费端。
+    pub async fn peek_dream(&self) -> Option<String> {
+        let dream_store = self.dream_store.as_ref()?;
+        let dream = dream_store.read().await;
+        if dream.remaining_ticks > 0 {
+            dream.thought.clone()
+        } else {
+            None
+        }
     }
 
     /// 获取当前托梦内容（如果有）
