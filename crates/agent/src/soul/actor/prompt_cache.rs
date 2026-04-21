@@ -122,7 +122,10 @@ impl PromptCache {
     ) {
         self.action_descriptions = action_descriptions;
         self.action_field_hints = action_field_hints;
-        self.actions_list = format!("{}\n\n{}", self.action_descriptions, self.action_field_hints);
+        self.actions_list = format!(
+            "{}\n\n{}",
+            self.action_descriptions, self.action_field_hints
+        );
     }
 
     /// 获取 actions_list（兼容旧 prompt）

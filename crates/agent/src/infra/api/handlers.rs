@@ -497,8 +497,8 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
     let current = state.current_state.read().await;
     let agent_id = *state.agent_id.read().await;
 
-    // 获取托梦内容（如果有），每次调用会减少剩余回合数
-    let dream_thought = state.consume_dream().await;
+    // 读取托梦内容（不消费 — lifecycle.rs 已在决策周期中消费）
+    let dream_thought = state.peek_dream().await;
 
     match current.as_ref() {
         Some(world_state) => {
@@ -507,10 +507,27 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
             } else {
                 generate_context_markdown_no_relationship(world_state, dream_thought.as_deref())
             };
+
+            // 读取决策上下文快照（enrichment）
+            let enrichment = state
+                .decision_context_snapshot
+                .read()
+                .await
+                .as_ref()
+                .map(|s| super::context::ContextEnrichment {
+                    memory_context: s.memory_context.clone(),
+                    summary_context: s.summary_context.clone(),
+                    outcome_section: s.outcome_section.clone(),
+                    action_descriptions: s.action_descriptions.clone(),
+                    action_field_hints: s.action_field_hints.clone(),
+                    last_execution_result: s.last_execution_result.clone(),
+                });
+
             Json(ContextResponse {
                 context,
                 tick_id: world_state.tick_id,
                 agent_id: agent_id.to_string(),
+                enrichment,
             })
             .into_response()
         }
@@ -3910,7 +3927,6 @@ pub(super) async fn get_llm_config_handler(State(state): State<HttpApiState>) ->
 
 /// LLM 配置更新响应
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 pub struct LlmConfigUpdateResponse {
     pub success: bool,
     pub message: String,
@@ -3918,7 +3934,6 @@ pub struct LlmConfigUpdateResponse {
 }
 
 /// 验证 LLM 配置并创建测试客户端
-#[allow(dead_code)]
 fn validate_llm_config(
     provider: &str,
     model: &str,
@@ -3953,7 +3968,6 @@ fn validate_llm_config(
 /// POST /api/v1/config/llm - 更新 LLM 配置
 ///
 /// 验证配置、测试 LLM 连接、保存配置文件
-#[allow(dead_code)]
 pub(super) async fn update_llm_config_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<dto::LlmConfigUpdate>,

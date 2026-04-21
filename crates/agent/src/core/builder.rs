@@ -53,13 +53,13 @@ pub struct AgentBuilder {
     lifespan_calculator: Option<LifespanCalculator>,
     /// 重连请求接收通道
     reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
-    /// HTTP API 状态（可选，用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
+    /// HTTP API 状态（可选，用于更新 current_state 供 Web Panel 查询）
     http_api_state: Option<Arc<HttpApiState>>,
     /// 设备身份配置（可选，从 device.yaml 加载）
     device_config: Option<DeviceConfig>,
     /// 角色配置（可选，当前活跃角色）
     character_config: Option<CharacterConfig>,
-    /// Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    /// Cognitive Engine 引用（用于注册后更新 agent_name）
     cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
     /// 数据目录
     data_dir: PathBuf,
@@ -194,7 +194,7 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 HTTP API 状态（用于 Cognitive 模式更新 current_state 供 Web Panel 查询）
+    /// 设置 HTTP API 状态（用于更新 current_state 供 Web Panel 查询）
     pub fn with_http_api_state(mut self, state: Arc<HttpApiState>) -> Self {
         self.http_api_state = Some(state);
         self
@@ -212,7 +212,7 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置 Cognitive Engine 引用（Cognitive 模式，用于注册后更新 agent_name）
+    /// 设置 Cognitive Engine 引用（用于注册后更新 agent_name）
     pub fn cognitive_engine(
         mut self,
         engine: std::sync::Arc<crate::soul::actor::CognitiveEngine>,

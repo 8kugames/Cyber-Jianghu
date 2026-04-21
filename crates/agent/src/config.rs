@@ -342,13 +342,12 @@ impl CharacterConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
-    /// Claw 模式（默认）- 为 OpenClaw 等外部助手提供 WebSocket + HTTP API
-    /// Agent 不内置 LLM 调用，被动等待外部决策
+    /// Cognitive 模式（默认）- 内置 LLM 决策，无需外部调度器
     #[default]
-    Claw,
-    /// Cognitive 模式 - 内置 LLM 决策，无需外部调度器
-    /// Agent 内部调用 LLM 直接进行决策
     Cognitive,
+    /// Claw 模式 - 为 OpenClaw 等外部助手提供 WebSocket + HTTP API
+    /// LLM 由外部 OpenClaw 提供，Agent 内部认知引擎通过 OpenClawBridge 调用
+    Claw,
 }
 
 impl std::fmt::Display for RuntimeMode {
@@ -391,27 +390,9 @@ impl Default for RuntimeConfig {
 // Claw 模式配置
 // ============================================================================
 
-/// Claw 模式专用配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClawConfig {
-    /// 是否使用统一认知架构（OpenClawBridge + CognitiveEngine）
-    /// - true (默认): 使用新架构，Agent 内部运行认知引擎，OpenClaw 作为 LLM 提供者
-    /// - false: 使用旧架构，Agent 被动等待 OpenClaw 提交完整 Intent
-    #[serde(default = "default_use_unified_cognitive")]
-    pub use_unified_cognitive: bool,
-}
-
-fn default_use_unified_cognitive() -> bool {
-    true
-}
-
-impl Default for ClawConfig {
-    fn default() -> Self {
-        Self {
-            use_unified_cognitive: true,
-        }
-    }
-}
+/// Claw 模式配置（当前为空壳，仅保留结构以便未来扩展）
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ClawConfig {}
 
 // ============================================================================
 // LLM 配置（仅 Cognitive 模式使用）
@@ -700,7 +681,7 @@ pub struct Config {
     #[serde(default)]
     pub claw: ClawConfig,
 
-    /// LLM 配置（仅 Cognitive 模式使用）
+    /// LLM 配置（Cognitive 模式直连 LLM，Claw 模式通过 OpenClawBridge）
     #[serde(default)]
     pub llm: LlmConfig,
 

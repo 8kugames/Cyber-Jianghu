@@ -85,7 +85,7 @@ pub struct Agent {
     pub(crate) reconnect_backoff: u32,
 
     /// 重连请求接收通道（可选，用于热切换触发重连）
-    /// Claw 模式下由 HTTP API 触发重连，WebSocket 模式为 None
+    /// 由 HTTP API 触发重连
     pub(crate) reconnect_rx: Option<broadcast::Receiver<ReconnectRequest>>,
 
     /// 死亡是否已报告（避免重复日志）
@@ -97,7 +97,7 @@ pub struct Agent {
     /// 允许热重载时更新 LLM Client，决策回调会自动使用新配置
     pub(crate) actor_llm_container: Option<LlmClientContainer>,
 
-    /// HTTP API 状态（可选，Cognitive 模式用于更新 current_state 供 Web Panel 查询）
+    /// HTTP API 状态（可选，用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
@@ -106,7 +106,7 @@ pub struct Agent {
     /// 角色配置（当前活跃角色）
     pub(crate) character_config: Option<CharacterConfig>,
 
-    /// 认知引擎引用（Cognitive 模式，用于注册后更新 agent_name）
+    /// 认知引擎引用（用于注册后更新 agent_name）
     pub(crate) cognitive_engine: Option<std::sync::Arc<crate::soul::actor::CognitiveEngine>>,
 
     /// 服务器分配的角色名称（注册时由 ServerMessage::Registered.agent_name 填充）

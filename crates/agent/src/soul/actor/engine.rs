@@ -435,7 +435,10 @@ impl CognitiveEngine {
                     .ok_or_else(|| anyhow::anyhow!("未识别的动作类型: {}", a.action_type))?;
                 let mut action_data = a.action_data.clone();
                 if let Some(ref mut data) = action_data {
-                    self.field_alias_map.read().unwrap().translate_data(&action_type, data);
+                    self.field_alias_map
+                        .read()
+                        .unwrap()
+                        .translate_data(&action_type, data);
                 }
                 Ok(DirectCognitiveAction {
                     action_type,
@@ -613,7 +616,10 @@ impl CognitiveEngine {
             .unwrap_or_else(|| actions[0].action_type.clone());
         let mut action_data = actions[0].action_data.clone();
         if let Some(ref mut data) = action_data {
-            self.field_alias_map.read().unwrap().translate_data(&translated_type, data);
+            self.field_alias_map
+                .read()
+                .unwrap()
+                .translate_data(&translated_type, data);
         }
         let intent = Intent::new(agent_id, tick_id, translated_type, action_data)
             .with_thought(response.thought_process.clone());
@@ -712,6 +718,23 @@ impl CognitiveEngine {
         } else {
             String::new()
         }
+    }
+
+    /// 获取 Outcome Memory 上下文（公开接口，供 lifecycle snapshot 使用）
+    pub fn get_outcome_context_public(&self) -> String {
+        self.outcome_memory
+            .as_ref()
+            .map(|m| m.to_prompt_context())
+            .unwrap_or_default()
+    }
+
+    /// 获取 action descriptions 和 field hints（公开接口）
+    pub fn get_action_context(&self) -> (String, String) {
+        let cache = self.prompt_cache.read().unwrap();
+        (
+            cache.get_action_descriptions().to_string(),
+            cache.get_action_field_hints().to_string(),
+        )
     }
 
     /// 获取详细滑动窗口上下文（用于调试）

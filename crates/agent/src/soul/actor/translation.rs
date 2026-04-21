@@ -36,7 +36,8 @@ impl ActionAliasMap {
         for a in actions {
             let canonical = a.action.clone();
             // canonical → self
-            forward.entry(canonical.to_lowercase())
+            forward
+                .entry(canonical.to_lowercase())
                 .or_insert_with(|| canonical.clone());
             // name → canonical (name 和 action 可能相同，也可能不同)
             if !a.name.is_empty() {

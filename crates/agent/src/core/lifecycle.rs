@@ -882,6 +882,48 @@ impl super::Agent {
                         memory_context.push_str(sw);
                     }
 
+                    // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）
+                    if let Some(ref api_state) = self.http_api_state
+                        && let Some(dream_thought) = api_state.consume_dream().await
+                    {
+                        info!("[dream] 托梦注入决策上下文: {}字", dream_thought.chars().count());
+                        memory_context.push_str("\n### 托梦\n");
+                        memory_context.push_str(&dream_thought);
+                        memory_context.push('\n');
+                    }
+
+                    // 4.5 决策上下文快照写入（供 /api/v1/context enrichment 使用）
+                    if let Some(ref api_state) = self.http_api_state {
+                        let (summary_ctx, outcome_ctx, action_desc, action_hints) =
+                            if let Some(ref engine) = self.cognitive_engine {
+                                let (desc, hints) = engine.get_action_context();
+                                (
+                                    engine.get_summary_context(),
+                                    engine.get_outcome_context_public(),
+                                    desc,
+                                    hints,
+                                )
+                            } else {
+                                (String::new(), String::new(), String::new(), String::new())
+                            };
+
+                        // 读取上次执行结果（如果有）
+                        let last_exec = api_state.decision_context_snapshot.read().await
+                            .as_ref()
+                            .and_then(|s| s.last_execution_result.clone());
+
+                        let snapshot = crate::infra::api::DecisionContextSnapshot {
+                            tick_id: world_state.tick_id,
+                            memory_context: memory_context.clone(),
+                            summary_context: summary_ctx,
+                            outcome_section: outcome_ctx,
+                            action_descriptions: action_desc,
+                            action_field_hints: action_hints,
+                            last_execution_result: last_exec,
+                        };
+                        *api_state.decision_context_snapshot.write().await = Some(snapshot);
+                    }
+
                     // 5. 三魂循环：人魂决策 → 天魂审核 → 驳回则重试
                     // 循环直到审查通过或达到最大重试次数
                     let max_retries = self.config.game_rules
@@ -1215,6 +1257,10 @@ impl super::Agent {
                             // 使用 watch channel 阻塞等待，3s 超时（替代固定 sleep + 非阻塞 poll）
                             match self.client.wait_for_execution_result(3000).await {
                                 Ok(Some(result)) => {
+                                    // 快照数据提取（在分支消费 result 之前）
+                                    let exec_success = result.success;
+                                    let exec_error = result.error.clone();
+
                                     if result.success {
                                         debug!(
                                             "ExecutionResult: tick={}, intent={}, success",
@@ -1259,6 +1305,20 @@ impl super::Agent {
                                                 context_hash: crate::component::memory::compute_context_hash(&world_state),
                                                 tick_id: final_intent.tick_id,
                                             });
+                                        }
+                                    }
+
+                                    // 更新执行结果到快照（供 /api/v1/context enrichment 使用）
+                                    if let Some(ref api_state) = self.http_api_state {
+                                        let mut snapshot = api_state.decision_context_snapshot.write().await;
+                                        if let Some(s) = snapshot.as_mut() {
+                                            s.last_execution_result = Some(
+                                                crate::infra::api::ExecutionSummary {
+                                                    action_type: final_intent.action_type.to_string(),
+                                                    success: exec_success,
+                                                    narrative: exec_error.unwrap_or_default(),
+                                                }
+                                            );
                                         }
                                     }
                                 }

@@ -22,6 +22,27 @@ pub struct ContextResponse {
     pub tick_id: i64,
     /// Agent ID
     pub agent_id: String,
+    /// 决策上下文 enrichment（CognitiveEngine 内部数据）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrichment: Option<ContextEnrichment>,
+}
+
+/// 决策上下文补充数据（与 CognitiveEngine prompt 对齐）
+#[derive(Serialize, Clone)]
+pub struct ContextEnrichment {
+    /// 完整 memory_context（三层记忆 + 生存/理智/延迟对话/托梦）
+    pub memory_context: String,
+    /// 行动历史滑窗
+    pub summary_context: String,
+    /// 行动结果学习
+    pub outcome_section: String,
+    /// 动作描述列表
+    pub action_descriptions: String,
+    /// 动作字段 schema
+    pub action_field_hints: String,
+    /// 上次执行结果
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_execution_result: Option<super::ExecutionSummary>,
 }
 
 /// "梦中一瞥"属性响应
