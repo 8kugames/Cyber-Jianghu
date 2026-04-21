@@ -597,6 +597,7 @@ pub fn build_reactive_world_state(
     agent_names: &HashMap<Uuid, String>,
     online_ids: &std::collections::HashSet<Uuid>,
     game_data_cache: &Arc<GameDataCache>,
+    recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
 ) -> crate::models::WorldState {
     let (year, month, day, hour) = compute_game_time(tick_id);
     let current_node_id = &agent_state.node_id;
@@ -670,7 +671,10 @@ pub fn build_reactive_world_state(
                     entity_state_alive.clone()
                 },
                 hostile: false,
-                recent_actions: vec![], // reactive 模式不加载涌现数据
+                recent_actions: recent_actions_map
+                    .get(&other.agent_id)
+                    .map(|actions| actions.iter().take(3).cloned().collect())
+                    .unwrap_or_default(),
             }
         })
         .collect();

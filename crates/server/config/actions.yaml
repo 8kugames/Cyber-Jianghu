@@ -83,7 +83,7 @@ data:
       - effect_type: attribute_change
         attribute: sanity
         operation: add
-        value: 1
+        value: 3
 
   use:
     name: "使用物品"
@@ -376,7 +376,7 @@ data:
   meditate:
     name: "打坐"
     aliases: ["冥想", "打坐冥想"]
-    description: "通过打坐恢复内力。不消耗体力，但需要一定体力才能执行。注意区分：meditate 恢复内力，idle 恢复体力和心神。"
+    description: "通过打坐恢复内力和心神。不消耗体力，但需要一定体力才能执行。打坐是恢复理智的有效方式。注意区分：meditate 恢复内力和理智，idle 恢复体力和少量理智。"
     category: martial
     ooc_risk: low
     validation: {}
@@ -390,6 +390,10 @@ data:
         attribute: qi
         operation: add
         value: 15
+      - effect_type: attribute_change
+        attribute: sanity
+        operation: add
+        value: 5
 
   practice:
     name: "修炼"

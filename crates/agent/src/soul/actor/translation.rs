@@ -13,7 +13,12 @@ use std::collections::HashMap;
 /// action_type 别名映射: alias (lowercase) → canonical english key
 ///
 /// 包含 action_type 自身（英文 canonical 也可查到自身）
-pub struct ActionAliasMap(HashMap<String, String>);
+pub struct ActionAliasMap {
+    /// alias (lowercase) → canonical english key
+    forward: HashMap<String, String>,
+    /// canonical english key → chinese name (用于 prompt 展示)
+    chinese_names: HashMap<String, String>,
+}
 
 /// action_data 字段别名映射: (action_type, field_alias) → canonical field
 ///
@@ -29,22 +34,27 @@ impl ActionAliasMap {
     /// - 每个别名映射到 canonical
     /// - 所有 key 统一转小写以支持大小写不敏感匹配
     pub fn from_actions(actions: &[AvailableAction]) -> Self {
-        let mut map = HashMap::new();
+        let mut forward = HashMap::new();
+        let mut chinese_names = HashMap::new();
         for a in actions {
             let canonical = a.action.to_lowercase();
             // canonical english key → self
-            map.entry(canonical.clone())
+            forward.entry(canonical.clone())
                 .or_insert_with(|| a.action.clone());
             // chinese name → canonical
             if !a.name.is_empty() {
-                map.insert(a.name.to_lowercase(), a.action.clone());
+                forward.insert(a.name.to_lowercase(), a.action.clone());
             }
             // aliases → canonical
             for alias in &a.aliases {
-                map.insert(alias.to_lowercase(), a.action.clone());
+                forward.insert(alias.to_lowercase(), a.action.clone());
+            }
+            // english canonical → chinese name
+            if !a.name.is_empty() {
+                chinese_names.insert(a.action.to_lowercase(), a.name.clone());
             }
         }
-        Self(map)
+        Self { forward, chinese_names }
     }
 
     /// 翻译 action_type（中文/别名 → 英文 canonical）
@@ -53,7 +63,15 @@ impl ActionAliasMap {
     /// 1. 精确匹配（lowercase）
     /// 2. 未匹配时返回 None（fail-fast，由调用方决定处理）
     pub fn translate(&self, input: &str) -> Option<String> {
-        self.0.get(&input.to_lowercase()).cloned()
+        self.forward.get(&input.to_lowercase()).cloned()
+    }
+
+    /// 反向查找：英文 canonical → 中文名（用于 prompt 展示）
+    pub fn chinese_name(&self, action_type: &str) -> String {
+        self.chinese_names
+            .get(&action_type.to_lowercase())
+            .cloned()
+            .unwrap_or_else(|| action_type.to_string())
     }
 }
 

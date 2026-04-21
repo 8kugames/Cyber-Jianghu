@@ -511,6 +511,34 @@ impl IntentWorker {
             connections.values().map(|c| c.agent_id).collect()
         };
 
+        // 3.5 加载同位置 Agent 的 recent_actions（让社交因果链闭合）
+        let recent_actions_map = {
+            let tick_duration = self
+                .game_data_cache
+                .get()
+                .game_rules
+                .data
+                .agent_state
+                .tick
+                .real_seconds_per_tick as i64;
+            // 只回溯 2 个 tick 的动作，控制 DB 负载
+            let since_tick = tick_id - tick_duration * 2;
+            match crate::db::get_recent_actions_batch(
+                &self.db_pool,
+                &co_located_ids,
+                since_tick,
+                3, // 每人最多 3 条
+            )
+            .await
+            {
+                Ok(map) => map,
+                Err(e) => {
+                    warn!("reactive WorldState: 加载 recent_actions 失败: {}", e);
+                    HashMap::new()
+                }
+            }
+        };
+
         // 4. 为每个同位置 Agent 构建个性化 WorldState 并发送
         for state in &co_located {
             let target_id = state.agent_id;
@@ -572,6 +600,7 @@ impl IntentWorker {
                 &agent_names,
                 &online_ids,
                 &self.game_data_cache,
+                &recent_actions_map,
             );
 
             if let Err(e) = super::send_to_agent(
