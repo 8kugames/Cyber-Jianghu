@@ -65,7 +65,11 @@ impl OutcomeMemory {
     }
 
     /// 创建 OutcomeMemory（指定最大记录数）
-    pub fn with_max_records(db_path: &Path, prompt_limit: usize, max_records: usize) -> Result<Self> {
+    pub fn with_max_records(
+        db_path: &Path,
+        prompt_limit: usize,
+        max_records: usize,
+    ) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).context("创建 outcome memory 目录失败")?;
         }
@@ -194,9 +198,9 @@ impl OutcomeMemory {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
-        let mut stmt = match conn.prepare(
-            "SELECT DISTINCT action_type FROM outcome_records ORDER BY action_type",
-        ) {
+        let mut stmt = match conn
+            .prepare("SELECT DISTINCT action_type FROM outcome_records ORDER BY action_type")
+        {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
@@ -220,7 +224,10 @@ impl OutcomeMemory {
             if records.is_empty() {
                 continue;
             }
-            let success_count = records.iter().filter(|r| matches!(r.result, OutcomeResult::Success)).count();
+            let success_count = records
+                .iter()
+                .filter(|r| matches!(r.result, OutcomeResult::Success))
+                .count();
             let fail_count = records.len() - success_count;
 
             if success_count > 0 {
@@ -230,10 +237,15 @@ impl OutcomeMemory {
                 && let Some(OutcomeRecord {
                     result: OutcomeResult::Failed(reason),
                     ..
-                }) = records.iter().find(|r| matches!(r.result, OutcomeResult::Failed(_)))
+                }) = records
+                    .iter()
+                    .find(|r| matches!(r.result, OutcomeResult::Failed(_)))
             {
                 let short_reason: String = reason.chars().take(30).collect();
-                lines.push(format!("- {} → 失败（{}）[{}次]", at, short_reason, fail_count));
+                lines.push(format!(
+                    "- {} → 失败（{}）[{}次]",
+                    at, short_reason, fail_count
+                ));
             }
         }
 

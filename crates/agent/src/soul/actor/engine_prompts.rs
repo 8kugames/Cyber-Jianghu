@@ -314,11 +314,7 @@ impl super::CognitiveEngine {
                         .iter()
                         .map(|f| {
                             // 从 field_aliases 找中文名，否则用英文名
-                            let cn = a
-                                .field_aliases
-                                .get(f)
-                                .and_then(|v| v.first())
-                                .unwrap_or(f);
+                            let cn = a.field_aliases.get(f).and_then(|v| v.first()).unwrap_or(f);
                             format!("\"{}\": ...", cn)
                         })
                         .collect::<Vec<_>>()

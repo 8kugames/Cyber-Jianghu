@@ -6,7 +6,7 @@
         <title>LLM 配置 | Cyber-Jianghu</title>
         <link rel="stylesheet" href="css/dashboard.css" />
         <style>
-            /* settings-specific — Cyberpunk Ink theme */
+            /* settings-specific — Light Mode */
 
             body {
                 background: var(--bg-base);
@@ -30,9 +30,9 @@
                 bottom: 0;
                 left: 0;
                 right: 0;
-                height: 1px;
+                height: 2px;
                 background: linear-gradient(90deg, transparent, var(--accent), transparent);
-                opacity: 0.3;
+                opacity: 0.5;
             }
 
             .settings-header h1 {
@@ -43,7 +43,6 @@
 
             .settings-header h1 span {
                 color: var(--accent);
-                text-shadow: 0 0 20px rgba(20, 184, 166, 0.5);
             }
 
             .back-btn {
@@ -77,7 +76,6 @@
                 padding: 24px;
                 margin-bottom: 16px;
                 box-shadow: var(--card-shadow);
-                backdrop-filter: blur(12px);
             }
 
             .settings-card-title {
@@ -137,12 +135,10 @@
             .connection-dot.connected {
                 background: var(--success);
                 border-color: var(--success);
-                box-shadow: 0 0 0 2px var(--success-muted), 0 0 8px rgba(52, 211, 153, 0.4);
             }
             .connection-dot.disconnected {
                 background: var(--error);
                 border-color: var(--error);
-                box-shadow: 0 0 0 2px var(--error-muted);
             }
 
             /* Toggle */
@@ -176,12 +172,11 @@
                 background-color: var(--text-secondary);
                 transition: 0.2s;
                 border-radius: 50%;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.15);
             }
             .toggle input:checked + .toggle-slider {
                 background-color: var(--accent);
                 border-color: var(--accent);
-                box-shadow: 0 0 8px rgba(20, 184, 166, 0.4);
             }
             .toggle input:checked + .toggle-slider:before {
                 transform: translateX(18px);
@@ -293,7 +288,7 @@
                 margin-bottom: 20px;
             }
             .stat-card {
-                background: var(--bg-level-1);
+                background: var(--bg-level-2);
                 border: 1px solid var(--border-subtle);
                 border-radius: var(--radius-md);
                 padding: 14px 12px;
