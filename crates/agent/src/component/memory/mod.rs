@@ -24,6 +24,7 @@ pub use embedder::EmbedderService;
 pub use forgetting::ForgettingScheduler;
 pub use local_embedder::LocalEmbedder;
 pub use manager::{MemoryManager, MemoryManagerConfig, MemoryManagerStats};
+pub use outcome::{OutcomeMemory, OutcomeRecord, OutcomeResult, compute_context_hash};
 pub use registry::{AgentLifetime, GlobalMemoryRegistry, GlobalMemoryReport};
 pub use scorer::ImportanceScorer;
 pub use store::{ClientMemory, MemoryStore};
@@ -31,5 +32,4 @@ pub use tools::{
     MemorySearchResult, MemoryToolDefinition, MemoryToolResult, RECALL_ARCHIVED_TOOL,
     RecallArchivedParams, SEARCH_MEMORY_TOOL, SearchMemoryParams,
 };
-pub use outcome::{compute_context_hash, OutcomeMemory, OutcomeRecord, OutcomeResult};
 pub use types::{EbbinghausConfig, EmbedderStatus, ForgettingReport, MemoryEntry};
