@@ -5,7 +5,8 @@
 -- ============================================================================
 
 -- 加速 result = 'success' 过滤 + tick_id DESC 排序的全表扫描
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_action_logs_result_tick
+-- 注意：移除了 CONCURRENTLY，因为在 --single-transaction 模式下无法使用
+CREATE INDEX IF NOT EXISTS idx_agent_action_logs_result_tick
 ON agent_action_logs (result, tick_id DESC);
 
 COMMENT ON INDEX idx_agent_action_logs_result_tick
