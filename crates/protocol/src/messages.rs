@@ -369,6 +369,9 @@ pub struct ImmediateIntentReport {
     pub route_type: String,
     pub action_type: String,
     pub action_data: Option<serde_json::Value>,
+    /// 说话者名称（用于 server-web 渲染说话对象）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_agent_name: Option<String>,
     pub speech_content: Option<String>,
     pub send_status: String,
     pub send_error: Option<String>,

@@ -1391,12 +1391,14 @@ impl super::Agent {
                                     }
                                 }).collect();
 
+                                let agent_name = self.character_name().to_string();
                                 let immediate_intents: Vec<cyber_jianghu_protocol::ImmediateIntentReport> = immediate_records.into_iter().map(|r| {
                                     cyber_jianghu_protocol::ImmediateIntentReport {
                                         intent_id: r.intent_id,
                                         route_type: r.route_type,
                                         action_type: r.action_type,
                                         action_data: r.action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                        from_agent_name: Some(agent_name.clone()),
                                         speech_content: r.speech_content,
                                         send_status: r.send_status,
                                         send_error: r.send_error,
