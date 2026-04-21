@@ -20,7 +20,7 @@
 //! let intent = Intent::new(
 //!     Uuid::new_v4(),
 //!     1,
-//!     "speak",
+//!     "说话",
 //!     Some(serde_json::json!({"content": "Hello World"})),
 //! );
 //! ```

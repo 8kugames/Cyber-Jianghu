@@ -139,7 +139,7 @@ pub struct GradedValidationConfig {
     /// Adaptive 审核字段映射（数据驱动）
     ///
     /// 格式: { "action_type": "action_data_field_name" }
-    /// 例如: { "move": "target_location", "trade": "item_id", "steal": "item_id", "give": "item_id" }
+    /// 例如: { "移动": "target_location", "交易": "item_id", "偷窃": "item_id", "赠送": "item_id" }
     /// 当 action_type 在此映射中时，检查对应字段的值是否匹配对应的关键词列表：
     /// - "target_location" → 检查 restricted_area_keywords
     /// - "item_id" → 检查 high_value_item_keywords
@@ -150,17 +150,17 @@ pub struct GradedValidationConfig {
 
 fn default_always_types() -> Vec<String> {
     // 武侠主题默认值：说话类动作强制审核
-    vec!["speak".into(), "shout".into(), "whisper".into()]
+    vec!["说话".into(), "大喊".into(), "私语".into()]
 }
 
 fn default_adaptive_types() -> Vec<String> {
     // 武侠主题默认值：交易/移动类动作动态审核
-    vec!["steal".into(), "trade".into(), "give".into(), "move".into()]
+    vec!["偷窃".into(), "交易".into(), "赠送".into(), "移动".into()]
 }
 
 fn default_skip_types() -> Vec<String> {
     // 武侠主题默认值：空闲动作跳过审核
-    vec!["idle".into(), "wait".into()]
+    vec!["休息".into(), "wait".into()]
 }
 
 fn default_restricted_area_keywords() -> Vec<String> {
@@ -177,10 +177,10 @@ fn default_high_value_item_keywords() -> Vec<String> {
 
 fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String> {
     [
-        ("move".into(), "target_location".into()),
-        ("trade".into(), "item_id".into()),
-        ("steal".into(), "item_id".into()),
-        ("give".into(), "item_id".into()),
+        ("移动".into(), "target_location".into()),
+        ("交易".into(), "item_id".into()),
+        ("偷窃".into(), "item_id".into()),
+        ("赠送".into(), "item_id".into()),
     ]
     .into()
 }
@@ -366,7 +366,7 @@ fn default_max_immediate_intents_per_tick() -> usize {
 
 fn default_immediate_routing_actions() -> Vec<String> {
     // 武侠主题默认值：说话类动作走即时通道
-    vec!["speak".into(), "whisper".into()]
+    vec!["说话".into(), "私语".into()]
 }
 
 impl Default for ImmediateDecisionRules {

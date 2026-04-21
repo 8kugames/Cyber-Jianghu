@@ -55,7 +55,7 @@ impl Default for CognitiveEngineConfig {
 /// 单个结构化 action
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DirectCognitiveAction {
-    /// 结构化 action_type（如 "eat", "move", "idle"）
+    /// 结构化 action_type（如 "进食", "移动", "休息"）
     pub action_type: String,
     /// 结构化 action_data（精确 ID）
     pub action_data: Option<serde_json::Value>,
@@ -107,7 +107,7 @@ impl DirectCognitiveResponse {
             }]
         } else {
             vec![DirectCognitiveAction {
-                action_type: "idle".to_string(),
+                action_type: "休息".to_string(),
                 action_data: None,
             }]
         }
@@ -757,7 +757,7 @@ impl CognitiveEngine {
                     Ok(chain) => chain.final_intent,
                     Err(e) => {
                         tracing::error!("多阶段认知失败: {}", e);
-                        Intent::new(agent_id, tick_id, "idle", None)
+                        Intent::new(agent_id, tick_id, "休息", None)
                             .with_thought("忽然心神不宁，难以决断，只得暂且静候".to_string())
                     }
                 }

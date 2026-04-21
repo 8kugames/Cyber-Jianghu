@@ -301,7 +301,7 @@ mod tests {
         let mem = OutcomeMemory::new(&db, 10).unwrap();
 
         mem.record(OutcomeRecord {
-            action_type: "eat".into(),
+            action_type: "进食".into(),
             action_data: Some(serde_json::json!({"item_id": "mantou"})),
             result: OutcomeResult::Success,
             context_hash: "longmen_lobby:food,drink:2".into(),
@@ -309,19 +309,19 @@ mod tests {
         });
 
         mem.record(OutcomeRecord {
-            action_type: "eat".into(),
+            action_type: "进食".into(),
             action_data: Some(serde_json::json!({"item_id": "invalid"})),
             result: OutcomeResult::Failed("物品不存在".into()),
             context_hash: "longmen_lobby:food,drink:2".into(),
             tick_id: 101,
         });
 
-        let records = mem.query_recent("eat", 10);
+        let records = mem.query_recent("进食", 10);
         assert_eq!(records.len(), 2);
         assert!(matches!(records[0].result, OutcomeResult::Failed(_)));
         assert!(matches!(records[1].result, OutcomeResult::Success));
 
-        let rate = mem.success_rate("eat");
+        let rate = mem.success_rate("进食");
         assert!((rate - 0.5).abs() < 0.01);
 
         let _ = std::fs::remove_file(&db);
@@ -333,7 +333,7 @@ mod tests {
         let mem = OutcomeMemory::new(&db, 10).unwrap();
 
         mem.record(OutcomeRecord {
-            action_type: "move".into(),
+            action_type: "移动".into(),
             action_data: Some(serde_json::json!({"target_location": "longmen_kitchen"})),
             result: OutcomeResult::Success,
             context_hash: "longmen_lobby::1".into(),
@@ -342,7 +342,7 @@ mod tests {
 
         let ctx = mem.to_prompt_context();
         assert!(ctx.contains("经验教训"));
-        assert!(ctx.contains("move → 成功"));
+        assert!(ctx.contains("移动 → 成功"));
 
         let _ = std::fs::remove_file(&db);
     }
@@ -353,7 +353,7 @@ mod tests {
         let mem = OutcomeMemory::new(&db, 10).unwrap();
 
         mem.record(OutcomeRecord {
-            action_type: "attack".into(),
+            action_type: "攻击".into(),
             action_data: None,
             result: OutcomeResult::Success,
             context_hash: "loc::0".into(),
@@ -361,10 +361,10 @@ mod tests {
         });
 
         let types = mem.distinct_action_types();
-        assert!(types.contains(&"attack".to_string()));
+        assert!(types.contains(&"攻击".to_string()));
 
         let ctx = mem.to_prompt_context();
-        assert!(ctx.contains("attack → 成功"));
+        assert!(ctx.contains("攻击 → 成功"));
 
         let _ = std::fs::remove_file(&db);
     }

@@ -65,37 +65,37 @@ impl ActionExecutor {
 
         // 3. 执行特定逻辑（数据驱动：字符串匹配）
         let mut result = match intent.action_type.as_str() {
-            "idle" => BasicActionExecutor::execute_idle(intent),
-            "speak" => BasicActionExecutor::execute_speak(intent, action_data.clone()),
-            "move" => BasicActionExecutor::execute_move(
+            "休息" => BasicActionExecutor::execute_idle(intent),
+            "说话" => BasicActionExecutor::execute_speak(intent, action_data.clone()),
+            "移动" => BasicActionExecutor::execute_move(
                 intent,
                 action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "give" => InteractionActionExecutor::execute_give(intent, agent_state),
-            "steal" => InteractionActionExecutor::execute_steal(intent, agent_state),
-            "use" | "eat" | "drink" => CombatActionExecutor::execute_use(intent, agent_state),
-            "pickup" => BasicActionExecutor::execute_pickup(
+            "赠送" => InteractionActionExecutor::execute_give(intent, agent_state),
+            "偷窃" => InteractionActionExecutor::execute_steal(intent, agent_state),
+            "使用" | "进食" | "饮水" => CombatActionExecutor::execute_use(intent, agent_state),
+            "拾取" => BasicActionExecutor::execute_pickup(
                 intent,
                 action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "drop" => BasicActionExecutor::execute_drop(
+            "丢弃" => BasicActionExecutor::execute_drop(
                 intent,
                 action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "gather" => BasicActionExecutor::execute_gather(
+            "采集" => BasicActionExecutor::execute_gather(
                 intent,
                 action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "craft" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
-            "attack" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
-            "trade" => InteractionActionExecutor::execute_trade(intent, action_data.clone()),
-            "shout" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
-            "practice" => BasicActionExecutor::execute_practice(intent, action_data.clone()),
-            "flee" => CombatActionExecutor::execute_flee(
+            "制造" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
+            "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
+            "交易" => InteractionActionExecutor::execute_trade(intent, action_data.clone()),
+            "大喊" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
+            "修炼" => BasicActionExecutor::execute_practice(intent, action_data.clone()),
+            "逃跑" => CombatActionExecutor::execute_flee(
                 intent,
                 action_data.clone(),
                 &agent_state.node_id.clone(),

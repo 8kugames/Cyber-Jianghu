@@ -170,7 +170,7 @@ mod tests {
             "test1".to_string(),
             "测试规则".to_string(),
             RuleType::ActionCooldown,
-            RuleCondition::Equals("action".to_string(), serde_json::json!("speak")),
+            RuleCondition::Equals("action".to_string(), serde_json::json!("说话")),
             "测试错误".to_string(),
         );
 
@@ -186,7 +186,7 @@ mod tests {
             "test1".to_string(),
             "测试规则".to_string(),
             RuleType::ActionCooldown,
-            RuleCondition::Equals("action".to_string(), serde_json::json!("speak")),
+            RuleCondition::Equals("action".to_string(), serde_json::json!("说话")),
             "测试错误".to_string(),
         );
 

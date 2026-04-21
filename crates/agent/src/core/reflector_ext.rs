@@ -145,7 +145,7 @@ impl super::Agent {
     /// 此处别名匹配是防御性安全网。
     fn validate_action_type(&self, intent: &Intent) -> Result<(), String> {
         // idle 始终合法
-        if intent.action_type.as_str() == "idle" {
+        if intent.action_type.as_str() == "休息" {
             return Ok(());
         }
 
@@ -213,7 +213,7 @@ impl super::Agent {
             let max_consecutive = self.config.llm.max_consecutive_follow;
             if (self.consecutive_follow_count as usize) >= max_consecutive {
                 return Err(format!(
-                    "已连续跟随 {} 次，请尝试其他行为（如 speak、gather、idle）",
+                    "已连续跟随 {} 次，请尝试其他行为（如 说话、采集、休息）",
                     max_consecutive
                 ));
             }

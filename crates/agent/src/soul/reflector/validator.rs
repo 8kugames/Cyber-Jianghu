@@ -411,7 +411,7 @@ mod tests {
             ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
@@ -442,7 +442,7 @@ mod tests {
             ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
 
         let request = ValidationRequest {
-            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "idle", None),
+            intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
