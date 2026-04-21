@@ -1146,10 +1146,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('load-more-dream-records-btn').addEventListener('click', loadMoreDreamRecords);
     document.getElementById('character-select').addEventListener('change', switchCharacter);
 
-    loadRelationships();
-    loadMemories();
-    loadDreamStatus();
-
     // 关系抽屉关闭事件
     document.getElementById('drawer-close').addEventListener('click', closeRelationshipDrawer);
     document.getElementById('relationship-drawer-overlay').addEventListener('click', closeRelationshipDrawer);
