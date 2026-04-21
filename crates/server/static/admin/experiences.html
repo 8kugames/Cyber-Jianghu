@@ -502,7 +502,7 @@
         let total = 0;
         let currentPage = 1;
         let pageSize = 20;
-        let authToken = localStorage.getItem('admin_token') || '';
+        // authToken 已由 utils.js 声明为全局变量
 
         function getHeaders() {
             return {
@@ -571,10 +571,12 @@
                 const locationDisplay = entry.location || '-';
                 const actionDisplay = entry.action_type_display || entry.action_type;
 
-                return `<div class="exp-card" data-entry='${escapeHtml(JSON.stringify(entry))}'>
+                // 序列化时转义，防止恶意 agent_name 注入
+                const safeEntry = JSON.stringify(entry).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+                return `<div class="exp-card" data-entry='${safeEntry}'>
                     <div class="exp-card-header">
                         <span class="tick-badge">T${entry.tick_id}</span>
-                        <span class="exp-agent">${escapeHtml(entry.agent_name)}</span>
+                        <span class="exp-agent">${escapeHtml(entry.agent_name || '')}</span>
                         <span class="exp-location">(${escapeHtml(locationDisplay)})</span>
                         <span class="exp-action">${escapeHtml(actionDisplay)}</span>
                         <span class="expand-icon">▼</span>
