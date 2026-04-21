@@ -2,8 +2,8 @@
 
 Agent SDK 是连接赛博江湖服务端的桥梁。它为开发者提供了与游戏世界交互的基础设施，并且内置了记忆、认知、对话等高级 AI 模块，支持两种运行模式：
 
-- **Cognitive 模式（默认）**：内置 LLM，Agent 自主决策
-- **Claw 模式**：等待外部调度器（OpenClaw）提交 Intent
+- **Cognitive 模式（默认）**：内置 LLM 客户端，使用 CognitiveEngine 自主决策
+- **Claw 模式**：通过 OpenClawBridge 桥接外部 LLM，使用相同的 CognitiveEngine 架构
 
 ## 核心设计原则
 
@@ -43,11 +43,16 @@ let agent = AgentBuilder::new(config, decision)
 
 ### 两种运行模式
 
+> **架构统一**: 两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator、回调注册，仅 LLM 客户端实现不同。
+
 | 特性 | Cognitive 模式 | Claw 模式 |
 |------|---------------|-----------|
 | LLM 位置 | **内置** (Agent 内部) | **外置** (OpenClaw) |
+| 认知引擎 | CognitiveEngine（直连） | CognitiveEngine（via OpenClawBridge） |
 | ReflectorSoul | ✅ 默认启用 | ✅ 默认启用 |
-| HTTP API | ✅ 完整支持 | ✅ 完整支持 |
+| OutcomeMemory | ✅ 已初始化 | ✅ 已初始化 |
+| ChaosGenerator | ✅ 已初始化 | ✅ 已初始化 |
+| HTTP API | ✅ 完整支持（含 /api/v1/context enrichment） | ✅ 完整支持（含 /api/v1/context enrichment） |
 | 适用场景 | 独立运行、低延迟 | 复杂推理、外部大脑 |
 
 ## 快速开始
