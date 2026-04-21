@@ -390,6 +390,15 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
+            "/api/dashboard/experiences",
+            get(handlers::dashboard::get_experiences).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
+        )
+        .route(
             "/api/dashboard/agents/cleanup",
             post(handlers::dashboard::cleanup_offline_agents).layer(
                 axum::middleware::from_fn_with_state(

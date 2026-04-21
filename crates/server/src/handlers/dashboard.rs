@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1053,4 +1053,170 @@ pub async fn get_actions_map() -> Json<std::collections::HashMap<String, String>
             .map(|a| (a.action, a.name))
             .collect();
     Json(map)
+}
+
+// ============================================================================
+// Experience Stream API (经历日志流水)
+// ============================================================================
+
+/// 经历日志流水查询参数
+#[derive(Debug, Deserialize)]
+pub struct ExperienceStreamQuery {
+    pub page: Option<i32>,
+    pub limit: Option<i32>,
+    pub agent_id: Option<Uuid>,
+    pub location: Option<String>,
+    pub action_type: Option<String>,
+    pub from_tick: Option<i64>,
+    pub to_tick: Option<i64>,
+}
+
+/// 经历日志流水条目
+#[derive(Debug, Serialize)]
+pub struct StreamEntry {
+    pub tick_id: i64,
+    pub agent_id: Uuid,
+    pub agent_name: String,
+    pub location: Option<String>,
+    pub action_type: String,
+    pub action_type_display: Option<String>,
+    pub action_data: serde_json::Value,
+    pub result: Option<String>,
+    pub result_message: Option<String>,
+    pub thought_log: Option<String>,
+    pub observer_thought: Option<String>,
+    pub narrative: Option<String>,
+    pub soul_cycle_metadata: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 经历日志流水响应
+#[derive(Debug, Serialize)]
+pub struct ExperienceStreamResponse {
+    pub entries: Vec<StreamEntry>,
+    pub total: i64,
+    pub page: i32,
+    pub limit: i32,
+}
+
+/// GET /api/dashboard/experiences
+///
+/// 返回所有成功的 agent 动作日志（全局视图），用于经历日志流水
+pub async fn get_experiences(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ExperienceStreamQuery>,
+) -> Result<Json<ExperienceStreamResponse>, StatusCode> {
+    let page = params.page.unwrap_or(1).max(1);
+    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * limit;
+
+    // 构建过滤条件
+    let agent_id_filter = params.agent_id;
+    let location_filter = params.location;
+    let action_type_filter = params.action_type;
+    let from_tick_filter = params.from_tick;
+    let to_tick_filter = params.to_tick;
+
+    // 查询总数：使用与 main query 一致的 LATERAL JOIN 逻辑
+    let total: i64 = sqlx::query_scalar(
+        r#"
+        WITH action_with_location AS (
+            SELECT a.tick_id, a.agent_id,
+                   loc.node_id as location
+            FROM agent_action_logs a
+            LEFT JOIN LATERAL (
+                SELECT st2.node_id
+                FROM agent_states st2
+                WHERE st2.agent_id = a.agent_id AND st2.tick_id <= a.tick_id
+                ORDER BY st2.tick_id DESC
+                LIMIT 1
+            ) loc ON true
+            WHERE a.result = 'success'
+              AND ($1::uuid IS NULL OR a.agent_id = $1)
+              AND ($3::text IS NULL OR a.action_type = $3)
+              AND ($4::bigint IS NULL OR a.tick_id >= $4)
+              AND ($5::bigint IS NULL OR a.tick_id <= $5)
+        )
+        SELECT COUNT(*)
+        FROM action_with_location
+        WHERE ($2::text IS NULL OR location = $2)
+        "#,
+    )
+    .bind(agent_id_filter)
+    .bind(&location_filter)
+    .bind(&action_type_filter)
+    .bind(from_tick_filter)
+    .bind(to_tick_filter)
+    .fetch_one(&state.db_pool)
+    .await
+    .unwrap_or(0);
+
+    // 查询条目：使用 LATERAL JOIN 获取动作发生时的位置
+    let rows = sqlx::query(
+        r#"
+        SELECT a.tick_id, a.agent_id, ag.name as agent_name, loc.node_id as location,
+               a.action_type, a.action_type_display, a.action_data,
+               a.result, a.result_message, a.thought_log, a.observer_thought,
+               a.narrative, a.soul_cycle_metadata, a.created_at
+        FROM agent_action_logs a
+        JOIN agents ag ON a.agent_id = ag.agent_id
+        LEFT JOIN LATERAL (
+            SELECT st2.node_id
+            FROM agent_states st2
+            WHERE st2.agent_id = a.agent_id AND st2.tick_id <= a.tick_id
+            ORDER BY st2.tick_id DESC
+            LIMIT 1
+        ) loc ON true
+        WHERE a.result = 'success'
+          AND ($1::uuid IS NULL OR a.agent_id = $1)
+          AND ($2::text IS NULL OR loc.node_id = $2)
+          AND ($3::text IS NULL OR a.action_type = $3)
+          AND ($4::bigint IS NULL OR a.tick_id >= $4)
+          AND ($5::bigint IS NULL OR a.tick_id <= $5)
+        ORDER BY a.tick_id DESC
+        LIMIT $6 OFFSET $7
+        "#,
+    )
+    .bind(agent_id_filter)
+    .bind(&location_filter)
+    .bind(&action_type_filter)
+    .bind(from_tick_filter)
+    .bind(to_tick_filter)
+    .bind(limit as i64)
+    .bind(offset as i64)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("获取经历日志流水失败: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let entries: Vec<StreamEntry> = rows
+        .into_iter()
+        .map(|row| StreamEntry {
+            tick_id: row.get("tick_id"),
+            agent_id: row.get("agent_id"),
+            agent_name: row.get("agent_name"),
+            location: row.get("location"),
+            action_type: row.get("action_type"),
+            action_type_display: row.get("action_type_display"),
+            action_data: row
+                .get::<Option<serde_json::Value>, _>("action_data")
+                .unwrap_or(serde_json::Value::Null),
+            result: row.get("result"),
+            result_message: row.get("result_message"),
+            thought_log: row.get("thought_log"),
+            observer_thought: row.get("observer_thought"),
+            narrative: row.get("narrative"),
+            soul_cycle_metadata: row.get("soul_cycle_metadata"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(ExperienceStreamResponse {
+        entries,
+        total,
+        page,
+        limit,
+    }))
 }
