@@ -23,10 +23,12 @@ cyber-jianghu-agent run --mode claw
 
 ### 运行模式说明
 
-| 模式 | 说明 | LLM 位置 | ReflectorSoul |
-|------|------|----------|-------------|
-| Cognitive | **默认模式**，Agent 自主决策 | 内置 | ✅ 默认启用 |
-| Claw | 等待外部 OpenClaw 调度器 | 外置 | ✅ 默认启用 |
+> 两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator，仅 LLM 客户端不同。
+
+| 模式 | 说明 | LLM 位置 | 认知引擎 | ReflectorSoul |
+|------|------|----------|---------|-------------|
+| Cognitive | **默认模式**，Agent 自主决策 | 内置 | CognitiveEngine（直连） | ✅ 默认启用 |
+| Claw | 通过 OpenClaw 接入外部 LLM | 外置 | CognitiveEngine（via OpenClawBridge） | ✅ 默认启用 |
 
 ### Docker 部署
 

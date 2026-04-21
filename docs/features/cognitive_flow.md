@@ -16,12 +16,18 @@
 
 ### 运行时模式对比
 
+> **架构统一**：两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator、DecisionContextSnapshot、回调注册。唯一差异是 LLM 客户端创建位置。
+
 | 特性               | Cognitive 模式              | Claw 模式                   |
 | ---------------- | ------------------------- | ------------------------- |
 | LLM 位置           | 内置（Agent 内）               | 外置（OpenClaw）              |
+| 认知引擎            | CognitiveEngine（直连 LLM）   | CognitiveEngine（via OpenClawBridge） |
+| 初始化架构          | 与 Claw 完全统一               | 与 Cognitive 完全统一          |
+| OutcomeMemory      | ✅ 已初始化 | ✅ 已初始化 |
+| ChaosGenerator     | ✅ 已初始化 | ✅ 已初始化 |
 | WebSocket        | ✅ 必须（tick 同步 + Intent 提交） | ✅ 必须（tick 同步 + Intent 提交） |
-| HTTP API         | ✅ 辅助功能                    | ✅ 辅助功能                    |
-| 托梦注入             | ✅                         | ✅                         |
+| HTTP API         | ✅ 辅助功能（含 /api/v1/context enrichment） | ✅ 辅助功能（含 /api/v1/context enrichment） |
+| 托梦注入             | ✅ lifecycle.rs 统一处理       | ✅ lifecycle.rs 统一处理       |
 | ReflectorSoul 审查 | ✅ 默认启用                    | ✅ 默认启用                    |
 | 适用场景             | 独立运行、低延迟                  | 外部大脑编排、复杂推理               |
 
@@ -48,7 +54,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    AGENT (Cognitive Mode)                               │
+│                                    AGENT (Unified Architecture)                         │
 │                                         "众生" / 意识层                                  │
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                         │
@@ -632,13 +638,15 @@ llm:
 
 | 特性        | Cognitive 模式                | Claw 模式                         |
 | --------- | --------------------------- | ------------------------------- |
-| LLM 调用位置  | Agent 内置                    | 外部调度器 (OpenClaw)                |
-| 决策方式      | 多阶段认知引擎                     | WebSocket 推送 Tick，外部回调提交 Intent |
+| LLM 客户端   | DirectLlmClient（Agent 内置）     | OpenClawBridge（桥接外部 OpenClaw）    |
+| 认知引擎      | CognitiveEngine（直连）          | CognitiveEngine（通过 OpenClawBridge）  |
+| 初始化流程      | 与 Claw 完全统一               | 与 Cognitive 完全统一          |
 | WebSocket | **必须**（tick 同步 + Intent 提交） | **必须**（tick 同步 + Intent 提交）     |
 | HTTP API  | 辅助查询/管理（状态、记忆、关系、托梦、审查、面板）  | 辅助查询/管理（同 Cognitive）            |
 | 适用场景      | 独立运行，内置智能                   | 集成外部 LLM 调度系统                   |
 
 > **重要**: 两种模式下，Intent 提交都**必须**通过 WebSocket；HTTP `POST /api/v1/intent` 已禁用。
+> **架构统一**: 两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator，仅 LLM 客户端实现不同。
 
 ***
 
