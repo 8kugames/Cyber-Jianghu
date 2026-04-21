@@ -47,7 +47,7 @@ async function loadStats() {
 // ============================================================================
 // Smooth Time Animation
 // ============================================================================
-
+// 注意：.stat-value 在 loadStats 时已由 data.game_time.text 填充，无需动画更新
 function startSmoothTimeAnimation() {
     if (smoothTimeAnimationId) cancelAnimationFrame(smoothTimeAnimationId);
 
