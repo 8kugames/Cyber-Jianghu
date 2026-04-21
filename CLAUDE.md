@@ -340,10 +340,6 @@ use super::builder::AgentBuilder;
 - `GET /create.html` - Character creation
 - `GET /character.html` - Character info
 
-## Slash Commands
-
-- `/create-character [概念]` - Generate new AI agent persona following world-building constraints
-
 ## Quick Start Guides
 
 - [QuickStart-Server.md](crates/server/QuickStart-Server.md) - Server development

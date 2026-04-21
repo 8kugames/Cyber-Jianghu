@@ -421,11 +421,7 @@ impl WebSocketClient {
         }
 
         // 阻塞等待，带超时
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            rx.changed(),
-        )
-        .await
+        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx.changed()).await
         {
             Ok(Ok(())) => Ok(rx.borrow().as_ref().cloned()),
             Ok(Err(_)) => anyhow::bail!("ExecutionResult channel closed"),
@@ -886,7 +882,10 @@ impl AgentClient {
         client.try_receive_execution_result().await
     }
 
-    pub async fn wait_for_execution_result(&self, timeout_ms: u64) -> Result<Option<ExecutionResultData>> {
+    pub async fn wait_for_execution_result(
+        &self,
+        timeout_ms: u64,
+    ) -> Result<Option<ExecutionResultData>> {
         let client = self.client.read().await;
         client.wait_for_execution_result(timeout_ms).await
     }

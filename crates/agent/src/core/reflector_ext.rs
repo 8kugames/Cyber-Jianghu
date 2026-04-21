@@ -176,7 +176,10 @@ impl super::Agent {
             if a.name.to_lowercase() == action_input {
                 return Ok(());
             }
-            if a.aliases.iter().any(|alias| alias.to_lowercase() == action_input) {
+            if a.aliases
+                .iter()
+                .any(|alias| alias.to_lowercase() == action_input)
+            {
                 return Ok(());
             }
         }
@@ -235,9 +238,7 @@ impl super::Agent {
 
         match self.rule_engine.validate_context(&context).await {
             Ok(crate::soul::reflector::ValidationResult::Approved { .. }) => Ok(()),
-            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => {
-                Err(reason)
-            }
+            Ok(crate::soul::reflector::ValidationResult::Rejected { reason, .. }) => Err(reason),
             Err(e) => {
                 tracing::warn!("RuleEngine error, bypassing: {}", e);
                 Ok(())

@@ -33,7 +33,8 @@ impl ActionAliasMap {
         for a in actions {
             let canonical = a.action.to_lowercase();
             // canonical english key → self
-            map.entry(canonical.clone()).or_insert_with(|| a.action.clone());
+            map.entry(canonical.clone())
+                .or_insert_with(|| a.action.clone());
             // chinese name → canonical
             if !a.name.is_empty() {
                 map.insert(a.name.to_lowercase(), a.action.clone());
@@ -153,10 +154,7 @@ mod tests {
         let mut fa_eat = HashMap::new();
         fa_eat.insert(
             "item_id".to_string(),
-            vec![
-                "物品ID".to_string(),
-                "物品".to_string(),
-            ],
+            vec!["物品ID".to_string(), "物品".to_string()],
         );
 
         vec![

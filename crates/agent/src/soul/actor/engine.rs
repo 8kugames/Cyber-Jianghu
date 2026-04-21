@@ -138,9 +138,9 @@ pub struct CognitiveEngine {
     /// 行动结果记忆（Hermes 模式）
     pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
     /// action_type 别名映射（中文/别名 → 英文 canonical）
-    pub(super) action_alias_map: ActionAliasMap,
+    pub(super) action_alias_map: std::sync::RwLock<ActionAliasMap>,
     /// action_data 字段别名映射（中文/别名 → 英文 canonical）
-    pub(super) field_alias_map: FieldAliasMap,
+    pub(super) field_alias_map: std::sync::RwLock<FieldAliasMap>,
 }
 
 impl CognitiveEngine {
@@ -165,8 +165,8 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             prompt_template,
             outcome_memory: None,
-            action_alias_map: alias_map,
-            field_alias_map: field_map,
+            action_alias_map: std::sync::RwLock::new(alias_map),
+            field_alias_map: std::sync::RwLock::new(field_map),
         }
     }
 
@@ -195,8 +195,8 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             prompt_template,
             outcome_memory: None,
-            action_alias_map: alias_map,
-            field_alias_map: field_map,
+            action_alias_map: std::sync::RwLock::new(alias_map),
+            field_alias_map: std::sync::RwLock::new(field_map),
         }
     }
 
@@ -280,6 +280,33 @@ impl CognitiveEngine {
     /// 设置 Outcome Memory（由 builder 在构建后注入）
     pub fn set_outcome_memory(&mut self, mem: crate::component::memory::OutcomeMemory) {
         self.outcome_memory = Some(mem);
+    }
+
+    /// 更新动作别名映射（收到 game_rules_update 后调用）
+    ///
+    /// 热更新 alias map 和 field alias map，无需重建引擎。
+    pub fn update_action_aliases(&self, actions: &[cyber_jianghu_protocol::AvailableAction]) {
+        let new_alias_map = ActionAliasMap::from_actions(actions);
+        let new_field_map = FieldAliasMap::from_actions(actions);
+
+        {
+            let mut alias_guard = self.action_alias_map.write().unwrap();
+            *alias_guard = new_alias_map;
+        }
+        {
+            let mut field_guard = self.field_alias_map.write().unwrap();
+            *field_guard = new_field_map;
+        }
+
+        // 同时更新 prompt cache 中的动作描述
+        let descriptions = Self::build_action_descriptions(actions);
+        let field_hints = Self::build_action_field_hints(actions);
+        {
+            let mut cache = self.prompt_cache.write().unwrap();
+            cache.update_action_descriptions(descriptions, field_hints);
+        }
+
+        info!("动作别名映射已更新: {} 个动作", actions.len());
     }
 
     /// 获取 Outcome Memory 经验教训 prompt 段
@@ -402,13 +429,13 @@ impl CognitiveEngine {
             .map(|a| {
                 let action_type = self
                     .action_alias_map
+                    .read()
+                    .unwrap()
                     .translate(&a.action_type)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("未识别的动作类型: {}", a.action_type)
-                    })?;
+                    .ok_or_else(|| anyhow::anyhow!("未识别的动作类型: {}", a.action_type))?;
                 let mut action_data = a.action_data.clone();
                 if let Some(ref mut data) = action_data {
-                    self.field_alias_map.translate_data(&action_type, data);
+                    self.field_alias_map.read().unwrap().translate_data(&action_type, data);
                 }
                 Ok(DirectCognitiveAction {
                     action_type,
@@ -419,8 +446,13 @@ impl CognitiveEngine {
         let intents: Vec<Intent> = translated_actions
             .iter()
             .map(|a| {
-                Intent::new(agent_id, tick_id, a.action_type.clone(), a.action_data.clone())
-                    .with_thought(response.thought_process.clone())
+                Intent::new(
+                    agent_id,
+                    tick_id,
+                    a.action_type.clone(),
+                    a.action_data.clone(),
+                )
+                .with_thought(response.thought_process.clone())
             })
             .collect();
 
@@ -451,7 +483,11 @@ impl CognitiveEngine {
 
         info!(
             "[{}-{}] 人魂直连认知完成，耗时 {}ms，决策: {} ({} 个 action)",
-            agent_name, tick_id, chain.duration_ms, primary_action.action_type, translated_actions.len()
+            agent_name,
+            tick_id,
+            chain.duration_ms,
+            primary_action.action_type,
+            translated_actions.len()
         );
 
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
@@ -571,19 +607,16 @@ impl CognitiveEngine {
         let actions = response.get_actions();
         let translated_type = self
             .action_alias_map
+            .read()
+            .unwrap()
             .translate(&actions[0].action_type)
             .unwrap_or_else(|| actions[0].action_type.clone());
         let mut action_data = actions[0].action_data.clone();
         if let Some(ref mut data) = action_data {
-            self.field_alias_map.translate_data(&translated_type, data);
+            self.field_alias_map.read().unwrap().translate_data(&translated_type, data);
         }
-        let intent = Intent::new(
-            agent_id,
-            tick_id,
-            translated_type,
-            action_data,
-        )
-        .with_thought(response.thought_process.clone());
+        let intent = Intent::new(agent_id, tick_id, translated_type, action_data)
+            .with_thought(response.thought_process.clone());
 
         let decision = super::stages::StageOutput::with_metadata(
             CognitiveStage::Decision,
@@ -666,10 +699,7 @@ impl CognitiveEngine {
     }
 
     /// 记录行动结果到 Outcome Memory
-    pub fn record_outcome(
-        &self,
-        record: crate::component::memory::OutcomeRecord,
-    ) {
+    pub fn record_outcome(&self, record: crate::component::memory::OutcomeRecord) {
         if let Some(ref mem) = self.outcome_memory {
             mem.record(record);
         }

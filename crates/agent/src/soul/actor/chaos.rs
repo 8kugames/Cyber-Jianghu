@@ -7,9 +7,9 @@
 // ============================================================================
 
 use cyber_jianghu_protocol::{Intent, WorldState};
-use rand::distr::weighted::WeightedIndex;
-use rand::distr::Distribution;
 use rand::RngExt;
+use rand::distr::Distribution;
+use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 

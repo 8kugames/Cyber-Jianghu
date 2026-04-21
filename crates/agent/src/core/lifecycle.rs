@@ -339,6 +339,11 @@ impl super::Agent {
         // 更新游戏规则
         self.config.update_game_rules(game_rules.clone());
 
+        // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
+        if let Some(ref engine) = self.cognitive_engine {
+            engine.update_action_aliases(&game_rules.available_actions);
+        }
+
         // 更新即时事件处理器配置（如果有 immediate_events 配置）
         if let Some(ref immediate_events) = game_rules.immediate_events
             && let Some(ref handler) = self.immediate_handler

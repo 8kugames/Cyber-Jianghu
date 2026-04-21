@@ -129,7 +129,10 @@ impl IntentWorker {
 
         debug!(
             "处理 Intent: agent={}, action={}, intent={}, subsequent={}",
-            agent_id, action_type, intent_id, intent.subsequent_intents.len()
+            agent_id,
+            action_type,
+            intent_id,
+            intent.subsequent_intents.len()
         );
 
         // 1. 从 DashMap 读取 Agent 状态
@@ -230,7 +233,10 @@ impl IntentWorker {
                 "处理 subsequent Intent: agent={}, action={}",
                 agent_id, subsequent.action_type
             );
-            if let Err(e) = self.process_single_subsequent(subsequent, agent_id, tick_id).await {
+            if let Err(e) = self
+                .process_single_subsequent(subsequent, agent_id, tick_id)
+                .await
+            {
                 warn!(
                     "Subsequent intent 失败，中断 pipeline: agent={}, action={}, error={}",
                     agent_id, subsequent.action_type, e
@@ -473,25 +479,31 @@ impl IntentWorker {
             }
         };
 
-        let inventories =
-            match crate::inventory::InventoryManager::get_all_items_batch(&self.db_pool, &co_located_ids)
-                .await
-            {
-                Ok(batch) => batch,
-                Err(e) => {
-                    warn!("reactive WorldState: 加载背包失败: {}", e);
-                    HashMap::new()
-                }
-            };
+        let inventories = match crate::inventory::InventoryManager::get_all_items_batch(
+            &self.db_pool,
+            &co_located_ids,
+        )
+        .await
+        {
+            Ok(batch) => batch,
+            Err(e) => {
+                warn!("reactive WorldState: 加载背包失败: {}", e);
+                HashMap::new()
+            }
+        };
 
-        let ground_items =
-            match crate::db::get_ground_items_by_nodes(&self.db_pool, std::slice::from_ref(&location)).await {
-                Ok(map) => map,
-                Err(e) => {
-                    warn!("reactive WorldState: 加载地面物品失败: {}", e);
-                    HashMap::new()
-                }
-            };
+        let ground_items = match crate::db::get_ground_items_by_nodes(
+            &self.db_pool,
+            std::slice::from_ref(&location),
+        )
+        .await
+        {
+            Ok(map) => map,
+            Err(e) => {
+                warn!("reactive WorldState: 加载地面物品失败: {}", e);
+                HashMap::new()
+            }
+        };
 
         // 在线状态
         let online_ids: HashSet<Uuid> = {
@@ -564,9 +576,7 @@ impl IntentWorker {
 
             if let Err(e) = super::send_to_agent(
                 target_id,
-                &cyber_jianghu_protocol::ServerMessage::WorldState {
-                    data: world_state,
-                },
+                &cyber_jianghu_protocol::ServerMessage::WorldState { data: world_state },
                 &self.connection_manager,
                 &self.agent_to_device_map,
             )

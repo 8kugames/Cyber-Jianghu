@@ -114,6 +114,17 @@ impl PromptCache {
         self.persona_initialized = false;
     }
 
+    /// 更新动作描述（game_rules_update 后调用）
+    pub fn update_action_descriptions(
+        &mut self,
+        action_descriptions: String,
+        action_field_hints: String,
+    ) {
+        self.action_descriptions = action_descriptions;
+        self.action_field_hints = action_field_hints;
+        self.actions_list = format!("{}\n\n{}", self.action_descriptions, self.action_field_hints);
+    }
+
     /// 获取 actions_list（兼容旧 prompt）
     pub fn get_actions_list(&self) -> &str {
         &self.actions_list

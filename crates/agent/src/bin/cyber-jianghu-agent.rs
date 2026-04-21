@@ -777,16 +777,21 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let outcome_db_path = data_dir.join("outcome_memory.db");
             match cyber_jianghu_agent::component::memory::OutcomeMemory::new(&outcome_db_path, 10) {
                 Ok(mem) => {
-                    info!("Outcome memory initialized at {}", outcome_db_path.display());
+                    info!(
+                        "Outcome memory initialized at {}",
+                        outcome_db_path.display()
+                    );
                     engine.set_outcome_memory(mem);
                 }
                 Err(e) => {
-                    warn!("Failed to initialize outcome memory: {}. Running without it.", e);
+                    warn!(
+                        "Failed to initialize outcome memory: {}. Running without it.",
+                        e
+                    );
                 }
             }
 
-            let cognitive_engine =
-                Arc::new(engine);
+            let cognitive_engine = Arc::new(engine);
             let cognitive_engine_for_builder = cognitive_engine.clone();
 
             let cognitive_decision_with_chain_cb: DecisionWithChainCallback =
