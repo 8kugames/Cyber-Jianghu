@@ -651,8 +651,37 @@ impl DirectLlmClient {
         executor: &dyn ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
+        let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
+        self.run_tool_loop(messages, tools, executor, max_rounds).await
+    }
+
+    /// 使用对话历史 + tool calling 的组合调用
+    async fn call_with_conversation_and_tools(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[ToolDefinition],
+        executor: &dyn ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let messages = super::client::build_conversation_messages(system, summary, turns, current_prompt);
+        self.run_tool_loop(messages, tools, executor, max_rounds).await
+    }
+
+    /// Tool-calling 循环核心逻辑
+    ///
+    /// 接收预构建的消息列表，执行多轮 tool-calling 直到 LLM 返回文本或超时。
+    async fn run_tool_loop(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: &[ToolDefinition],
+        executor: &dyn ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
         let model = self.config.get_model_with_default();
-        let mut messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
+        let mut messages = messages;
 
         for round in 0..max_rounds {
             debug!("Tool calling round {}/{}", round + 1, max_rounds);
@@ -818,6 +847,23 @@ impl LlmClient for DirectLlmClient {
             anyhow::bail!("LLM 调用已被停止");
         }
         self.call_openai_compatible_api_with_tools(system, prompt, tools, executor, max_rounds)
+            .await
+    }
+
+    async fn complete_with_conversation_and_tools(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[ToolDefinition],
+        executor: &dyn ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        if is_llm_disabled() {
+            anyhow::bail!("LLM 调用已被停止");
+        }
+        self.call_with_conversation_and_tools(system, summary, turns, current_prompt, tools, executor, max_rounds)
             .await
     }
 
