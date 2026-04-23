@@ -112,6 +112,17 @@ pub struct SkillInfo {
     pub name: String,
 }
 
+/// 技能内容（用于 Server → Agent 下发 SKILL.md body）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillContent {
+    /// 技能 ID（如 martial/sword-basic）
+    pub skill_id: String,
+    /// 技能名称（中文）
+    pub name: String,
+    /// SKILL.md body 内容（行为指令 markdown）
+    pub body: String,
+}
+
 /// 周围实体（其他 Agent）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entity {

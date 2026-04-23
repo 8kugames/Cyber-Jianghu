@@ -32,6 +32,7 @@ use cyber_jianghu_protocol::{
     ClientMessage, DialogueMessage, GameError, ServerMessage, SoulCycleMetadata,
 };
 
+use super::broadcast;
 use super::connection::Connection;
 use super::types::{WebSocketQuery, build_game_rules_from_config, load_world_building_rules};
 
@@ -275,6 +276,44 @@ async fn handle_websocket(
                 "Sent Registered message with game rules to agent '{}' ({})",
                 agent_name, agent_id
             );
+        }
+    }
+
+    // ===== 发送技能配置（ConfigUpdate） =====
+    // Agent 连接后立即下发全量技能内容
+    if agent_id != uuid::Uuid::nil() {
+        let skills = crate::game_data::registry::SkillRegistry::all_with_id();
+        let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = skills
+            .into_iter()
+            .map(|s| cyber_jianghu_protocol::types::SkillContent {
+                skill_id: s.skill_id,
+                name: s.definition.name,
+                body: s.definition.content,
+            })
+            .collect();
+
+        if !skill_contents.is_empty() {
+            let config_update = ServerMessage::ConfigUpdate {
+                config_type: "skills".to_string(),
+                update_type: "full".to_string(),
+                version: "1.0.0".to_string(),
+                content: serde_json::to_value(skill_contents).unwrap_or_default(),
+                updated_items: vec![],
+                removed_items: vec![],
+            };
+
+            if let Err(e) = broadcast::send_config_update(
+                agent_id,
+                config_update,
+                &state.connection_manager,
+                &state.agent_to_device_map,
+            )
+            .await
+            {
+                warn!("Failed to send skills ConfigUpdate to agent {}: {}", agent_id, e);
+            } else {
+                debug!("Sent skills ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+            }
         }
     }
 
@@ -747,7 +786,7 @@ async fn handle_intent(
                 .data
                 .intent_batch
                 .as_ref()
-                .map(|ib| ib.max_intents_per_tick as usize)
+                .map(|ib| ib.max_intents_per_tick)
                 .unwrap_or(3)
         })
         .unwrap_or(3)

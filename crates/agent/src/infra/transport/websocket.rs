@@ -23,8 +23,8 @@ use url::Url;
 use uuid::Uuid;
 
 use cyber_jianghu_protocol::{
-    ClientMessage, DialogueMessage, GameRules, Intent, ServerMessage, WorldBuildingRules,
-    WorldState,
+    ClientMessage, DialogueMessage, GameRules, Intent, ServerMessage, SkillContent,
+    WorldBuildingRules, WorldState,
 };
 
 // 重导出 config 中的 ServerConfig
@@ -74,6 +74,9 @@ pub struct ExecutionResultData {
     pub state_change_summary: Option<String>,
 }
 
+/// 技能配置更新回调类型
+pub type SkillUpdateCallback = Arc<dyn Fn(Vec<SkillContent>, Vec<String>) + Send + Sync>;
+
 /// 连接状态
 struct ConnectionState {
     connected: bool,
@@ -93,6 +96,9 @@ struct ConnectionState {
     server_msg_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
     /// 动作配置更新回调
     action_update_callback: Option<Arc<dyn Fn(ServerMessage) + Send + Sync>>,
+    /// 技能配置更新回调（ConfigUpdate with config_type="skills"）
+    /// 参数: (skills, removed_items)
+    skill_update_callback: Option<SkillUpdateCallback>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -125,6 +131,7 @@ impl WebSocketClient {
                 world_building_rules_callback: None,
                 server_msg_callback: None,
                 action_update_callback: None,
+                skill_update_callback: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -292,6 +299,18 @@ impl WebSocketClient {
             rt.block_on(async {
                 let mut state = self.state.write().await;
                 state.action_update_callback = Some(callback);
+            });
+        });
+    }
+
+    /// 设置技能配置更新回调（ConfigUpdate with config_type="skills"）
+    /// 参数: (skills, removed_items)
+    pub fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.skill_update_callback = Some(callback);
             });
         });
     }
@@ -595,13 +614,14 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
                                 state_guard.dialogue_callback.clone(),
                                 state_guard.world_building_rules_callback.clone(),
                                 state_guard.action_update_callback.clone(),
+                                state_guard.skill_update_callback.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -662,6 +682,46 @@ async fn websocket_background_task(
                                     );
                                     if let Some(ref cb) = action_update_cb {
                                         cb(msg.clone());
+                                    }
+                                }
+                                if let Some(ref cb) = server_msg_cb {
+                                    cb(msg);
+                                }
+                            }
+                            Ok(msg @ ServerMessage::ConfigUpdate { .. }) => {
+                                if let ServerMessage::ConfigUpdate {
+                                    ref config_type,
+                                    ref update_type,
+                                    ref version,
+                                    ref content,
+                                    ref updated_items,
+                                    ref removed_items,
+                                    ..
+                                } = msg
+                                {
+                                    info!(
+                                        "Background: ConfigUpdate type={}, config_type={}, v={}, +{}, -{}",
+                                        update_type, config_type, version,
+                                        updated_items.len(), removed_items.len()
+                                    );
+
+                                    // 处理 skills 配置更新
+                                    if config_type == "skills" {
+                                        // 目前仅支持 full update_type，增量更新暂未实现
+                                        if update_type != "full" {
+                                            warn!(
+                                                "ConfigUpdate: skills update_type={} not fully supported, treating as full",
+                                                update_type
+                                            );
+                                        }
+
+                                        if let Ok(skills) = serde_json::from_value::<Vec<SkillContent>>(content.clone()) {
+                                            if let Some(ref cb) = skill_update_cb {
+                                                cb(skills, removed_items.clone());
+                                            }
+                                        } else {
+                                            warn!("Failed to parse skills content from ConfigUpdate");
+                                        }
                                     }
                                 }
                                 if let Some(ref cb) = server_msg_cb {
@@ -949,6 +1009,13 @@ impl AgentClient {
     ) {
         let client = self.client.read().await;
         client.set_world_building_rules_callback(callback);
+    }
+
+    /// 设置技能配置更新回调
+    /// 参数: (skills, removed_items)
+    pub async fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {
+        let client = self.client.read().await;
+        client.set_skill_update_callback(callback);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）

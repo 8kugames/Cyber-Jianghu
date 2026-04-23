@@ -21,7 +21,7 @@ use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use super::translation::{ActionAliasMap, EntityTranslationRegistry, FieldAliasMap};
 use crate::component::llm::conversation::ConversationHistory;
-use crate::component::llm::{ConversationTurn, LlmClient, LlmClientExt};
+use crate::component::llm::{ConversationInput, ConversationTurn, LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
@@ -190,6 +190,38 @@ impl CognitiveEngine {
     pub fn set_narrative_window_size(&self, size: usize) {
         let mut window = self.summary_window.write().unwrap();
         *window = NarrativeSummaryWindow::new(size);
+    }
+
+    /// 更新技能缓存（接收 ConfigUpdate 后调用）
+    ///
+    /// - update_type == "full": 全量替换，先清空再插入
+    /// - update_type == "incremental": 增量更新，插入新版 + 移除已删除的
+    pub fn update_skill_cache(
+        &self,
+        skills: Vec<cyber_jianghu_protocol::types::SkillContent>,
+        removed_items: Vec<String>,
+    ) {
+        let mut cache = self.skill_cache.write().unwrap();
+        let skills_count = skills.len();
+        let removed_count = removed_items.len();
+
+        // 处理增量更新：移除已删除的技能
+        for skill_id in &removed_items {
+            cache.remove(skill_id);
+            tracing::debug!("Removed skill from cache: {}", skill_id);
+        }
+
+        // 插入/更新技能
+        for skill in skills {
+            cache.insert(skill.skill_id.clone(), skill.body);
+        }
+
+        tracing::debug!(
+            "Updated skill cache: +{} skills, -{} removed, total {}",
+            skills_count,
+            removed_count,
+            cache.len()
+        );
     }
 
     /// 设置是否启用流式 LLM 调用
@@ -525,9 +557,11 @@ impl CognitiveEngine {
                         self.llm_client
                             .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
                                 &system,
-                                summary.as_deref(),
-                                &turns,
-                                &prompt,
+                                ConversationInput {
+                                    summary: summary.as_deref(),
+                                    turns: &turns,
+                                    current_prompt: &prompt,
+                                },
                                 &tools,
                                 &executor,
                                 3,

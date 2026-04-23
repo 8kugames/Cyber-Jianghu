@@ -98,10 +98,13 @@ pub struct DialogueSession {
 ///     initial_items: vec![],
 ///     survival_actions: vec![],
 ///     survival_threshold: 30,
+///     critical_attack_threshold: 15,
 ///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
 ///     intent_batch: None,
 ///     reflector_narrative: None,
+///     immediate_events: None,
+///     rebirth_delay_ticks: 0,
 /// };
 ///
 /// let msg = ServerMessage::Registered {
@@ -160,6 +163,28 @@ pub enum ServerMessage {
         removed_actions: Vec<String>,
         /// 规则版本
         version: String,
+    },
+
+    /// 通用配置更新（统一收拢所有配置下发消息）
+    ///
+    /// config_type: "game_rules" | "actions" | "world_building_rules" | "skills"
+    /// update_type: "full" | "incremental"
+    /// content: JSON 格式的具体配置内容
+    ConfigUpdate {
+        /// 配置类型
+        config_type: String,
+        /// 更新类型
+        update_type: String,
+        /// 版本号
+        version: String,
+        /// 配置内容（JSON 格式）
+        content: serde_json::Value,
+        /// 增量更新的项目 ID 列表（增量时有效）
+        #[serde(default)]
+        updated_items: Vec<String>,
+        /// 被删除的项目 ID 列表（增量时有效）
+        #[serde(default)]
+        removed_items: Vec<String>,
     },
 
     /// 心跳响应
@@ -260,6 +285,7 @@ pub enum ServerMessage {
 ///     action_type: "说话".to_string(),
 ///     action_data: Some(json!({"content": "你好"})),
 ///     priority: 5,
+///     subsequent_intents: vec![],
 /// };
 /// ```
 ///

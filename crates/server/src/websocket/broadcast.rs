@@ -203,6 +203,56 @@ pub async fn send_agent_died_notification(
     Ok(())
 }
 
+/// 向指定 Agent 发送配置更新（单播）
+pub async fn send_config_update(
+    agent_id: uuid::Uuid,
+    config_update: ServerMessage,
+    connection_manager: &ConnectionManager,
+    agent_to_device_map: &AgentToDeviceMap,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let device_id = {
+        let agent_to_device = agent_to_device_map.read().await;
+        match agent_to_device.get(&agent_id) {
+            Some(&device_id) => device_id,
+            None => {
+                warn!(
+                    "Agent {} is not online and no device mapping found",
+                    agent_id
+                );
+                return Ok(());
+            }
+        }
+    };
+
+    let mut connections = connection_manager.write().await;
+    if let Some(connection) = connections.get_mut(&device_id) {
+        if connection.is_dead() {
+            warn!(
+                "Agent {} connection is dead, skipping ConfigUpdate",
+                agent_id
+            );
+            return Ok(());
+        }
+        let json = serde_json::to_string(&config_update)?;
+        if connection.send(Message::Text(json.into())).await.is_err() {
+            connection.mark_dead();
+            warn!("Agent {} send failed, marking connection as dead", agent_id);
+            return Ok(());
+        }
+        debug!(
+            "ConfigUpdate sent to agent {} via device {}",
+            agent_id, device_id
+        );
+    } else {
+        warn!(
+            "Agent {} is not online (device {} not connected)",
+            agent_id, device_id
+        );
+    }
+
+    Ok(())
+}
+
 /// 广播动作配置更新到所有在线 Agent
 pub async fn broadcast_action_update(
     action_update: ServerMessage,

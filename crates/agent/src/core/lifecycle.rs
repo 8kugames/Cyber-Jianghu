@@ -93,6 +93,7 @@ impl super::Agent {
 
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
+        let agent_name_for_skills = agent_name_for_callback.clone();
         let immediate_handler_for_rules = self.immediate_handler.clone();
         let llm_container_for_rules = self.actor_llm_container.clone();
         let persona_for_rules = self.extract_persona();
@@ -144,6 +145,22 @@ impl super::Agent {
                             let _ = new_handler;
                         }
                     });
+                }
+            }))
+            .await;
+
+        // 设置技能配置更新回调
+        let cognitive_engine_for_skills = self.cognitive_engine.clone();
+        self.client
+            .set_skill_update_callback(Arc::new(move |skills, removed_items| {
+                info!(
+                    "Agent '{}' received skill config update: {} skills, {} removed",
+                    agent_name_for_skills,
+                    skills.len(),
+                    removed_items.len()
+                );
+                if let Some(ref engine) = cognitive_engine_for_skills {
+                    engine.update_skill_cache(skills, removed_items);
                 }
             }))
             .await;
