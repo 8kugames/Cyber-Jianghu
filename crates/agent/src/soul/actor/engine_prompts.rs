@@ -20,6 +20,7 @@ impl super::CognitiveEngine {
         validation_feedback: Option<&str>,
         persona_desc: &str,
         agent_name: &str,
+        use_tool_calling: bool,
     ) -> String {
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
@@ -43,6 +44,9 @@ impl super::CognitiveEngine {
         // 从 WorldState 构建精确数据段
         let world_state_section = self.build_world_state_section(world_state);
 
+        // 构建技能行为指令（progressive disclosure：tool-calling 时只输出索引）
+        let skill_instructions = self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
+
         // 尝试使用模板配置
         if let Some(ref template_config) = self.prompt_template
             && let Some(tmpl) = template_config.get_template("actor_direct")
@@ -57,6 +61,7 @@ impl super::CognitiveEngine {
             vars.insert("action_descriptions".to_string(), action_descriptions);
             vars.insert("action_field_hints".to_string(), action_field_hints);
             vars.insert("outcome_section".to_string(), outcome_section);
+            vars.insert("skill_instructions".to_string(), skill_instructions);
 
             return tmpl.render_all(&vars);
         }
@@ -230,8 +235,15 @@ impl super::CognitiveEngine {
 - **世界地图仅由"可前往的地点"定义。不存在其他地点。不得在 thought_process 或 environment 中提及未列出的地点**
 - 不得编造未发生的事件（如劫镖、打斗、天灾），除非"近期事件"中有记录
 - 如果对某事没有观察证据，thought_process 中应标注[未确认]
-- **观察分级**："附近的人"中 说话/私语/大喊 的引号内容仅代表该角色说的话，不代表事实发生。他人可能在说谎、吹嘘或编造。只有非语言动作（攻击/赠送/偷窃/移动/拾取 等）的执行结果才是可靠的行为观察
+- **观察分级**："附近的人"中 说话/私语/大喊 的引号内容仅代表该角色说的话，不代表事实发生。他人可能在说谎、吹嘘或编造。只有非语言动作（攻击/给予/偷窃/移动/拾取 等）的执行结果才是可靠的行为观察
 - thought_process 中区分"直接观察"与"听闻"：基于他人言语推断的内容必须标注[听闻]，不得当作确凿事实
+
+## 交易规则
+- 没有系统强制的交易动作。交易通过 speak（说话/私语）议价，双方各自用 give（给予）完成交割
+- 交易流程：先用 speak 与对方协商价格 → 双方同意后，卖方 give 物品给买方，买方 give 银两给卖方
+- **先给的人承担对方不给的风险**。这是江湖的规矩，信错人就要付出代价
+- 也可以用多次 speak 建立信任后再交易，或要求对方先付定金
+- 价格完全由双方自行决定，没有公定价。可以参考采集成本、稀缺程度、个人需求
 
 ## 可做之事（参考）
 {action_descriptions}
@@ -397,4 +409,96 @@ impl super::CognitiveEngine {
             action_list = action_list,
         )
     }
+
+    /// 从本地配置目录加载技能行为指令（带缓存）
+    ///
+    /// 查找路径: $CYBER_JIANGHU_CONFIG_DIR/skills/{skill_id}/SKILL.md
+    /// 目录不存在时 warn + 返回空字符串，不 panic。
+    /// 缓存在 self.skill_cache 中，避免每 tick 重复 IO。
+    ///
+    /// `index_only=true` 时输出技能索引（progressive disclosure，配合地魂 tool-calling）。
+    /// `index_only=false` 时输出完整 body（非 tool-calling 降级路径）。
+    fn build_skill_instructions(
+        &self,
+        skills: &[cyber_jianghu_protocol::types::entities::SkillInfo],
+        index_only: bool,
+    ) -> String {
+        if skills.is_empty() {
+            return String::new();
+        }
+
+        // 使用引擎统一解析的配置目录（单一数据源）
+        let config_dir = self.config_dir.clone();
+        if config_dir.as_os_str().is_empty() {
+            tracing::warn!("配置目录为空，跳过技能指令加载");
+            return String::new();
+        }
+
+        let skills_dir = config_dir.join("skills");
+
+        // 始终填充缓存（地魂 tool-calling 需要缓存数据）
+        if skills_dir.exists() {
+            let mut cache = self.skill_cache.write().unwrap();
+            for skill in skills {
+                if cache.contains_key(&skill.skill_id) {
+                    continue;
+                }
+                let skill_path = skills_dir.join(&skill.skill_id).join("SKILL.md");
+                if let Ok(content) = std::fs::read_to_string(&skill_path) {
+                    let body = super::super::earth::extract_skill_body(&content);
+                    if !body.is_empty() {
+                        cache.insert(skill.skill_id.clone(), body);
+                    }
+                }
+            }
+        }
+
+        if index_only {
+            // Progressive disclosure：只输出索引 + 可用工具提示
+            let header = self.render_template_section("skill_index_header")
+                .unwrap_or_else(|| "## 已掌握技能（使用 skill_view 工具查看详情）".to_string());
+
+            let mut lines = vec![header];
+            for skill in skills {
+                lines.push(format!("- {} ({})", skill.name, skill.skill_id));
+            }
+            lines.push(String::new());
+
+            let tool_header = self.render_template_section("tool_hints_header")
+                .unwrap_or_else(|| "## 可用工具\n你可以调用以下工具获取更多信息：".to_string());
+            lines.push(tool_header);
+
+            // 从 ToolDefinition 动态构建工具描述（单一数据源，无硬编码）
+            for tool in super::super::earth::EarthToolExecutor::tool_definitions() {
+                lines.push(format!("- {}: {}", tool.function.name, tool.function.description));
+            }
+            return lines.join("\n");
+        }
+
+        // 降级路径：注入完整 body
+        let full_header = self.render_template_section("skill_full_header")
+            .unwrap_or_else(|| "## 已掌握技能行为准则".to_string());
+
+        let cache = self.skill_cache.read().unwrap();
+        let mut instructions = Vec::new();
+        for skill in skills {
+            if let Some(body) = cache.get(&skill.skill_id) {
+                instructions.push(format!("### {} ({})\n{}", skill.name, skill.skill_id, body));
+            }
+        }
+        if instructions.is_empty() {
+            return String::new();
+        }
+        format!("{}\n{}", full_header, instructions.join("\n\n"))
+    }
+
+    /// 渲染模板中的非 required section（progressive disclosure 用）
+    fn render_template_section(&self, section_name: &str) -> Option<String> {
+        self.prompt_template
+            .as_ref()
+            .and_then(|t| t.templates.get("actor_direct"))
+            .and_then(|tmpl| tmpl.sections.get(section_name))
+            .map(|s| s.trim().to_string())
+    }
+
 }

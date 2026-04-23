@@ -110,6 +110,26 @@ pub trait LlmClient: Send + Sync {
         anyhow::bail!("Tool calling not supported by this LLM client")
     }
 
+    /// 使用对话历史 + tool calling 的组合调用
+    ///
+    /// 结合 `complete_with_conversation` 和 `complete_with_tools`：
+    /// 消息列表包含对话历史，同时 LLM 可调用工具。
+    /// 默认退化：忽略对话历史，委托给 `complete_with_tools`。
+    async fn complete_with_conversation_and_tools(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let _ = (summary, turns);
+        self.complete_with_tools(system, current_prompt, tools, executor, max_rounds)
+            .await
+    }
+
     /// 使用对话历史完成调用（长窗口）
     ///
     /// `summary` 为旧轮次的压缩摘要（注入 system message）。
@@ -226,6 +246,18 @@ pub trait LlmClientExt {
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<T>;
+
+    /// 使用对话历史 + tool calling 的结构化输出
+    async fn complete_json_with_conversation_and_tools<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<D>;
 }
 
 /// 剥离 LLM 响应中的 thinking/reasoning 标签
@@ -407,6 +439,24 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     ) -> Result<D> {
         let text = self
             .complete_with_tools(system, prompt, tools, executor, max_rounds)
+            .await?;
+        parse_json_response::<D>(&text)
+    }
+
+    async fn complete_json_with_conversation_and_tools<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<D> {
+        let text = self
+            .complete_with_conversation_and_tools(
+                system, summary, turns, current_prompt, tools, executor, max_rounds,
+            )
             .await?;
         parse_json_response::<D>(&text)
     }
@@ -781,6 +831,44 @@ impl LlmClient for FallbackLlmClient {
             async move {
                 client
                     .complete_with_tools(&system, &prompt, &tools, executor, max_rounds)
+                    .await
+            }
+        })
+        .await
+    }
+
+    async fn complete_with_conversation_and_tools(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+        tools: &[super::tool_types::ToolDefinition],
+        executor: &dyn super::tool_types::ToolExecutor,
+        max_rounds: usize,
+    ) -> Result<String> {
+        let system = system.to_string();
+        let summary_owned = summary.map(|s| s.to_string());
+        let turns = turns.to_vec();
+        let current_prompt = current_prompt.to_string();
+        let tools = tools.to_vec();
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let system = system.clone();
+            let summary = summary_owned.clone();
+            let turns = turns.clone();
+            let current_prompt = current_prompt.clone();
+            let tools = tools.clone();
+            async move {
+                client
+                    .complete_with_conversation_and_tools(
+                        &system,
+                        summary.as_deref(),
+                        &turns,
+                        &current_prompt,
+                        &tools,
+                        executor,
+                        max_rounds,
+                    )
                     .await
             }
         })

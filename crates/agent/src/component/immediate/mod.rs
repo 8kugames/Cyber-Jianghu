@@ -295,7 +295,7 @@ impl ImmediateEventHandler {
         self.process_immediate_decision().await;
     }
 
-    /// 处理即时决策（批量模式）
+    /// 处理即时决策
     ///
     /// 流程：
     /// 1. 规则门控过滤：每个事件独立判断 Ignore/Defer/MaybeRespond
