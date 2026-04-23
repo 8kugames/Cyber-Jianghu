@@ -7,7 +7,92 @@
 
 ## [Unreleased]
 
-### ⚠️ Breaking Changes — 0.1.0 实时架构改造
+### ⚠️ Breaking Changes
+
+- **Protocol**: 移除 `TRADE` 动作常量 (`protocol::types::actions::TRADE`)
+  - 不再存在系统强制的交易动作类型
+  - 交易改由 Agent 自行通过 `speak` 议价 + `give` 交割
+
+- **Protocol**: 移除 `TradeExecuted` StateChange 变体
+  - `state_changes::TradeExecuted` 不再存在
+  - Server 端交易处理逻辑（~230 行 DB 事务）全部移除
+
+- **Protocol**: 移除 `default_adaptive_types()` / `default_adaptive_field_mapping()` 中的 `"交易"` 条目
+  - 自适应动作系统不再包含交易类型
+
+- **Server**: 移除 `actions.yaml` 交易动作定义
+  - 交易不再是 Server 识别的合法动作
+
+- **Server**: 配置文件 `world-building-rules.yaml` 重命名为 `world_building_rules.yaml`（snake_case 统一）
+  - 旧文件名不再生效
+
+### Added
+
+- **Server**: AI Procedural Skills 系统
+  - SKILL.md 行为指令文件（7 个初始技能：武功/社交/生存/采集）
+  - `skills_loader` + `skill_registry` + `SkillMutator` 完整加载链路
+  - `practice` 动作 → `SkillLearned` StateChange → `SkillMutator` 追加到 `AgentState.skills`
+  - `SkillInfo` protocol 类型 + `WorldState.self_state.skills` 字段
+  - 路径: `config/skills/{category}/{skill_id}/SKILL.md`
+
+- **Agent**: 地魂（EarthSoul）tool-calling 工具池
+  - `EarthToolExecutor`: 复合 ToolExecutor，路由 skill_view / search_memory / recall_archived
+  - `skill_view`: 从缓存或文件加载 SKILL.md body，供 LLM 按需获取技能详情
+  - `search_memory` / `recall_archived`: 预留接口（待 MemoryManager 所有权解决后接入）
+  - 工具池位于 `soul/earth/` 目录，与天人二魂并列
+
+- **Agent**: LlmClient tool-calling 增强
+  - 新增 `complete_with_conversation_and_tools()` trait 方法
+  - 提取 `run_tool_loop()` 消除 tool-calling 循环代码重复
+  - 支持对话历史 + tool-calling 组合路径（正常部署主路径）
+  - `FallbackLlmClient` 完整转发支持
+
+- **Agent**: Progressive disclosure 技能加载
+  - prompt_templates.yaml 新增 `skill_index_header` / `skill_full_header` / `tool_hints_header` section
+  - Tool-calling 启用时：prompt 只注入技能索引，LLM 通过 `skill_view` 按需加载详情
+  - 非 tool-calling 降级：注入完整 SKILL.md body（向后兼容）
+  - 工具描述从 `ToolDefinition.description` 动态构建（单一数据源，数据驱动）
+
+- **Agent**: 交易 prompt 引导
+  - 新增"交易规则" prompt section：speak 议价 + give 交割
+  - 强调先给风险（"江湖规矩，信错人要付出代价"）
+  - 无公定价，价格由双方自行决定
+
+### Changed
+
+- **Agent**: `think_direct()` 路由重构
+  - tool-calling 提升为顶层条件（先前嵌套在 `conv_data == None` 分支下是死代码）
+  - 路由顺序：tool-calling + conversation → tool-calling only → streaming/plain
+  - streaming 不支持 tool-calling 组合（文档说明）
+
+- **Agent**: `build_direct_prompt()` 新增 `use_tool_calling` 参数
+  - 根据 LLM 能力自动切换 progressive disclosure / full body 模式
+
+- **Agent**: `config_dir` 统一解析
+  - `CognitiveEngine` 新增 `config_dir` 字段，启动时从 env 解析一次
+  - `build_skill_instructions()` 使用 `self.config_dir` 替代重复 env var 解析
+
+- **Agent**: `extract_skill_body()` 去重
+  - 统一为 `earth::skill_tool::extract_skill_body()`（`pub(crate)`）
+  - 消除 `engine_prompts.rs` 和 `skill_tool.rs` 两份不一致实现
+
+- **Agent+Server**: "赠送" 统一改为 "给予"
+  - Server: processor/executor.rs state_change description
+  - Agent: lifecycle.rs / social.rs / chaos.rs / relationship.rs 测试
+
+### Removed
+
+- **Server**: 交易动作完整链路
+  - `actions.yaml` 交易定义
+  - `TradeData` struct / `TRADE` 常量
+  - `execute_trade()` (~80 行) / `TradeExecuted` handler (~230 行)
+  - validator 交易验证规则
+
+---
+
+## [0.1.0] — 实时架构改造
+
+### ⚠️ Breaking Changes
 
 Tick 批处理模式全面退役，Intent 实时化。版本 0.0.x → 0.1.0。
 
