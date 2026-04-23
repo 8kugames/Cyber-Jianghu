@@ -6,6 +6,7 @@
 // ============================================================================
 
 use super::display_messages::DisplayMessagesConfig;
+use super::skills::SkillsData;
 use super::unified_attributes::UnifiedAttributesConfig;
 use super::unified_config::*;
 use cyber_jianghu_protocol::NarrativeConfig;
@@ -52,4 +53,7 @@ pub struct GameData {
     /// 显示消息配置 (display_messages.yaml)
     /// 数据驱动的 UI 显示消息
     pub display_messages: DisplayMessagesConfig,
+
+    /// 技能定义 (skills/ 目录下的 SKILL.md 文件)
+    pub skills: SkillsData,
 }

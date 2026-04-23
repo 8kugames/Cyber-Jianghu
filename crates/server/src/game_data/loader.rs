@@ -48,6 +48,7 @@ impl GameDataLoader {
         let time = loaders::load_time(self.find_config_path("time"))?;
         let narrative = loaders::load_narrative(&self.config_dir)?;
         let display_messages = loaders::load_display_messages(&self.config_dir)?;
+        let skills = loaders::load_skills(self.config_dir.join("skills"))?;
 
         Ok(GameData {
             game_rules,
@@ -62,6 +63,7 @@ impl GameDataLoader {
             time,
             narrative,
             display_messages,
+            skills,
         })
     }
 

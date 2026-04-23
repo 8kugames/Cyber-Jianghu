@@ -23,6 +23,7 @@ pub mod primary_attributes;
 pub mod recipes;
 pub mod status_component;
 pub mod unified_attributes;
+pub mod skills;
 pub mod unified_config;
 pub mod validation;
 
@@ -36,6 +37,7 @@ pub use actions::*;
 pub use inventory::*;
 pub use items::*;
 pub use recipes::*;
+pub use skills::*;
 
 // 重新导出组件类型
 pub use attribute_component::*;

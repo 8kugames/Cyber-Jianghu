@@ -145,20 +145,6 @@ pub enum StateChange {
         quantity: i32,
     },
 
-    /// 交易（原子操作：物品换银两）
-    TradeExecuted {
-        /// 发起者 Agent ID
-        initiator: Uuid,
-        /// 目标 Agent ID
-        target: Uuid,
-        /// 物品 ID
-        item_id: String,
-        /// 物品数量
-        item_quantity: i32,
-        /// 银两价格
-        price: i32,
-    },
-
     /// 物品使用（消耗）
     ItemUsed {
         /// Agent ID
@@ -246,5 +232,13 @@ pub enum StateChange {
         old_location: String,
         /// 新位置
         new_location: String,
+    },
+
+    /// 技能习得
+    SkillLearned {
+        /// Agent ID
+        agent_id: Uuid,
+        /// 技能 ID（如 martial/sword-basic）
+        skill_id: String,
     },
 }

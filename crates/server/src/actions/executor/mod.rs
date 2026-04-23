@@ -72,7 +72,7 @@ impl ActionExecutor {
                 action_data.clone(),
                 &agent_state.node_id.clone(),
             ),
-            "赠送" => InteractionActionExecutor::execute_give(intent, agent_state),
+            "给予" => InteractionActionExecutor::execute_give(intent, agent_state),
             "偷窃" => InteractionActionExecutor::execute_steal(intent, agent_state),
             "使用" | "进食" | "饮水" => {
                 CombatActionExecutor::execute_use(intent, agent_state)
@@ -94,9 +94,8 @@ impl ActionExecutor {
             ),
             "制造" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
             "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
-            "交易" => InteractionActionExecutor::execute_trade(intent, action_data.clone()),
             "大喊" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
-            "修炼" => BasicActionExecutor::execute_practice(intent, action_data.clone()),
+            "修炼" => BasicActionExecutor::execute_practice(intent, action_data.clone(), &agent_state.skills),
             "逃跑" => CombatActionExecutor::execute_flee(
                 intent,
                 action_data.clone(),

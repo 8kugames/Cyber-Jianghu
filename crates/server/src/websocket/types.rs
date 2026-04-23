@@ -134,14 +134,14 @@ pub fn load_world_building_rules() -> Option<WorldBuildingRules> {
     let config_dir = crate::paths::get_config_dir();
 
     // 优先尝试 YAML 格式
-    let yaml_path = config_dir.join("world-building-rules.yaml");
-    let json_path = config_dir.join("world-building-rules.json");
+    let yaml_path = config_dir.join("world_building_rules.yaml");
+    let json_path = config_dir.join("world_building_rules.json");
 
     let (content, format) = if yaml_path.exists() {
         match std::fs::read_to_string(&yaml_path) {
             Ok(c) => (c, ConfigFormat::Yaml),
             Err(e) => {
-                tracing::warn!("Failed to read world-building-rules.yaml: {}", e);
+                tracing::warn!("Failed to read world_building_rules.yaml: {}", e);
                 return None;
             }
         }
@@ -149,12 +149,12 @@ pub fn load_world_building_rules() -> Option<WorldBuildingRules> {
         match std::fs::read_to_string(&json_path) {
             Ok(c) => (c, ConfigFormat::Json),
             Err(e) => {
-                tracing::warn!("Failed to read world-building-rules.json: {}", e);
+                tracing::warn!("Failed to read world_building_rules.json: {}", e);
                 return None;
             }
         }
     } else {
-        tracing::warn!("No world-building-rules config file found");
+        tracing::warn!("No world_building_rules config file found");
         return None;
     };
 
@@ -164,7 +164,7 @@ pub fn load_world_building_rules() -> Option<WorldBuildingRules> {
             Ok(config) => config,
             Err(e) => {
                 tracing::warn!(
-                    "Failed to parse world-building-rules: {}. Using default rules.",
+                    "Failed to parse world_building_rules: {}. Using default rules.",
                     e
                 );
                 return None;

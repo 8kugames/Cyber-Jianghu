@@ -97,6 +97,10 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
             node_id: row.try_get("node_id")?,
             is_alive: row.try_get("is_alive")?,
             inventory_cleared_this_tick: false,
+            skills: attributes_json
+                .get("_skills")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default(),
             created_at: row.try_get("created_at")?,
         })
     }

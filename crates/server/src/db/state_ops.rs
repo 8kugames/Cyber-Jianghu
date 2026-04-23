@@ -16,6 +16,21 @@ use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
 
+/// 序列化属性为 JSONB，包含 _skills 数组
+///
+/// `get_attributes_for_protocol()` 返回 `HashMap<String, i32>`（纯数值），
+/// 此 helper 在序列化后注入 `_skills` 键（字符串数组）。
+/// `from_row()` 中 `as_i64()` 循环天然跳过非数值类型，零冲突。
+pub(super) fn serialize_attributes_with_skills(state: &AgentState) -> Result<serde_json::Value> {
+    let mut json = serde_json::to_value(state.get_attributes_for_protocol())
+        .map_err(|e| anyhow::anyhow!("Agent {} 属性序列化失败: {}", state.agent_id, e))?;
+    if !state.skills.is_empty() {
+        json["_skills"] = serde_json::to_value(&state.skills)
+            .map_err(|e| anyhow::anyhow!("Agent {} skills 序列化失败: {}", state.agent_id, e))?;
+    }
+    Ok(json)
+}
+
 // ============================================================================
 // AgentState 相关操作
 // ============================================================================
@@ -153,11 +168,7 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
     let serialized: Vec<(uuid::Uuid, i64, serde_json::Value, String, bool)> = states
         .iter()
         .map(|state| {
-            let attributes_json = serde_json::to_value(state.get_attributes_for_protocol())
-                .map_err(|e| {
-                    error!("序列化 Agent {} 属性失败: {}", state.agent_id, e);
-                    anyhow::anyhow!("F-05: Agent {} 属性序列化失败: {}", state.agent_id, e)
-                })?;
+            let attributes_json = serialize_attributes_with_skills(state)?;
             Ok((
                 state.agent_id,
                 state.tick_id,
@@ -206,11 +217,7 @@ pub async fn batch_insert_agent_states(pool: &PgPool, states: &[AgentState]) -> 
 /// UPSERT 语义：同 (agent_id, tick_id) 时更新，否则插入。
 /// 用于 IntentWorker 的 per-intent 状态持久化。
 pub async fn upsert_agent_state(pool: &PgPool, state: &AgentState) -> Result<()> {
-    let attributes_json =
-        serde_json::to_value(state.get_attributes_for_protocol()).map_err(|e| {
-            error!("序列化 Agent {} 属性失败: {}", state.agent_id, e);
-            anyhow::anyhow!("Agent {} 属性序列化失败: {}", state.agent_id, e)
-        })?;
+    let attributes_json = serialize_attributes_with_skills(state)?;
 
     sqlx::query(
         r#"

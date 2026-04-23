@@ -159,7 +159,7 @@ pub struct GradedValidationConfig {
     /// Adaptive 审核字段映射（数据驱动）
     ///
     /// 格式: { "action_type": "action_data_field_name" }
-    /// 例如: { "移动": "target_location", "交易": "item_id", "偷窃": "item_id", "赠送": "item_id" }
+    /// 例如: { "移动": "target_location", "偷窃": "item_id", "给予": "item_id" }
     /// 当 action_type 在此映射中时，检查对应字段的值是否匹配对应的关键词列表：
     /// - "target_location" → 检查 restricted_area_keywords
     /// - "item_id" → 检查 high_value_item_keywords
@@ -175,7 +175,7 @@ fn default_always_types() -> Vec<String> {
 
 fn default_adaptive_types() -> Vec<String> {
     // 武侠主题默认值：交易/移动类动作动态审核
-    vec!["偷窃".into(), "交易".into(), "赠送".into(), "移动".into()]
+    vec!["偷窃".into(), "给予".into(), "移动".into()]
 }
 
 fn default_skip_types() -> Vec<String> {
@@ -198,9 +198,8 @@ fn default_high_value_item_keywords() -> Vec<String> {
 fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String> {
     [
         ("移动".into(), "target_location".into()),
-        ("交易".into(), "item_id".into()),
         ("偷窃".into(), "item_id".into()),
-        ("赠送".into(), "item_id".into()),
+        ("给予".into(), "item_id".into()),
     ]
     .into()
 }

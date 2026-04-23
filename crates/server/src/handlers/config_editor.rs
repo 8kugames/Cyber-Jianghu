@@ -200,7 +200,7 @@ fn validate_config_content(
         "attributes.json" | "attributes.yaml" | "attributes.yml" => {
             validate!(UnifiedAttributesConfig)
         }
-        "world-building-rules.json" | "world-building-rules.yaml" | "world-building-rules.yml" => {
+        "world_building_rules.json" | "world_building_rules.yaml" | "world_building_rules.yml" => {
             validate!(UnifiedWorldBuildingRulesConfig)
         }
         "time.json" | "time.yaml" | "time.yml" => {

@@ -192,6 +192,10 @@ pub struct GameRulesData {
     #[serde(default)]
     pub emergence: Option<EmergenceConfig>,
 
+    /// 技能配置
+    #[serde(default)]
+    pub skills: Option<SkillsConfig>,
+
     /// Vendor 自动补货配置（DEPRECATED: 已迁移到 DB agent_vendor_refill 表）
     #[serde(default, skip_serializing)]
     pub vendors: Vec<VendorConfig>,
@@ -243,6 +247,26 @@ impl Default for EmergenceConfig {
         Self {
             recent_action_ticks: default_recent_action_ticks(),
             max_recent_actions_per_entity: default_max_recent_actions_per_entity(),
+        }
+    }
+}
+
+/// 技能配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SkillsConfig {
+    /// 单个 Agent 可掌握的技能上限
+    #[serde(default = "default_max_skills_per_agent")]
+    pub max_skills_per_agent: usize,
+}
+
+fn default_max_skills_per_agent() -> usize {
+    10
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            max_skills_per_agent: default_max_skills_per_agent(),
         }
     }
 }

@@ -46,7 +46,7 @@ fn action_type_display(action_type: &str) -> String {
         "说话" => "交谈".to_string(),
         "移动" => "行走".to_string(),
         "攻击" => "战斗".to_string(),
-        "赠送" => "赠送".to_string(),
+        "给予" => "给予".to_string(),
         "偷窃" => "偷窃".to_string(),
         "制造" => "锻造".to_string(),
         "大喊" => "呼喊".to_string(),

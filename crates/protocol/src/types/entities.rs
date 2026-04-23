@@ -45,6 +45,10 @@ pub struct AgentSelfState {
     /// 背包物品
     #[serde(default)]
     pub inventory: Vec<InventoryItem>,
+
+    /// 已掌握的技能
+    #[serde(default)]
+    pub skills: Vec<SkillInfo>,
 }
 
 impl AgentSelfState {
@@ -97,6 +101,15 @@ pub struct InventoryItem {
     /// 别名列表（供 LLM 别名映射使用）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
+}
+
+/// 技能信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillInfo {
+    /// 技能 ID（如 martial/sword-basic）
+    pub skill_id: String,
+    /// 技能名称（中文）
+    pub name: String,
 }
 
 /// 周围实体（其他 Agent）

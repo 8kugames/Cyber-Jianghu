@@ -228,7 +228,7 @@ pub fn init_test_registry() {
                         "requirements": [],
                         "effects": []
                     },
-                    "赠送": {
+                    "给予": {
                         "description": "将物品给予目标",
                         "stamina_cost": 2,
                         "validation": {

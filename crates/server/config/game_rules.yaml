@@ -114,6 +114,11 @@ data:
     # 每个实体最多展示多少条最近动作
     max_recent_actions_per_entity: 9
 
+  # 技能配置
+  skills:
+    # 单个 Agent 可掌握的技能上限
+    max_skills_per_agent: 10
+
   # 即时事件处理配置
   immediate_events:
     # 即时路由动作列表（这些动作走即时通道，不占 tick 配额）

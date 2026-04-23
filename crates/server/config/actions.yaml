@@ -179,7 +179,8 @@ data:
 
   移动:
     name: "移动"
-    aliases: ["行走", "前往", "走", "移动到", "去", "move", "go", "walk", "travel"]
+    aliases:
+      ["行走", "前往", "走", "移动到", "去", "move", "go", "walk", "travel"]
     description: "移动到相邻位置。必须指定目标位置 ID（target_location）。只能移动到 WorldState 中 adjacent_nodes 列出的相邻节点，不支持非相邻节点的直接移动。移动消耗 stamina。"
     category: survival
     ooc_risk: low
@@ -187,7 +188,8 @@ data:
       required_fields:
         - target_location
       field_aliases:
-        target_location: ["目标地点", "目的地", "目标位置", "destination", "target"]
+        target_location:
+          ["目标地点", "目的地", "目标位置", "destination", "target"]
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -211,7 +213,8 @@ data:
       required_fields:
         - target_agent_id
       field_aliases:
-        target_agent_id: ["目标人物ID", "对象ID", "目标ID", "target_uuid", "character_id"]
+        target_agent_id:
+          ["目标人物ID", "对象ID", "目标ID", "target_uuid", "character_id"]
     requirements:
       - requirement_type: attribute
         attribute: stamina
@@ -313,7 +316,7 @@ data:
   偷窃:
     name: "偷窃"
     aliases: ["偷", "窃取", "steal", "pickpocket"]
-    description: "尝试从目标 Agent 身上偷取物品。必须指定目标 Agent ID（target_agent_id）和物品 ID（item_id）。成功率由属性决定，失败可能被目标发现并遭受惩罚。此动作需要目标存活。注意区分：赠送 是主动给予，偷窃 是偷窃（目标不知情）。"
+    description: "尝试从目标 Agent 身上偷取物品。必须指定目标 Agent ID（target_agent_id）和物品 ID（item_id）。成功率由属性决定，失败可能被目标发现并遭受惩罚。此动作需要目标存活。注意区分：给予 是主动提供，偷窃 是偷窃（目标不知情）。"
     category: martial
     ooc_risk: medium
     success_rate_formula: "agility * 0.02 + luck * 0.01"
@@ -501,10 +504,10 @@ data:
   # ==========================================================================
   # 经济
   # ==========================================================================
-  赠送:
-    name: "赠送"
+  给予:
+    name: "给予"
     aliases: ["赠送", "给", "送", "give", "gift", "donate"]
-    description: "将自己的物品给予目标 Agent。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）和数量（quantity）。发起方单方面将物品从背包转移到目标背包。注意区分：赠送 是主动给予，偷窃 是偷窃（目标不知情）。"
+    description: "将自己的物品给予目标 Agent。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）和数量（quantity）。发起方单方面将物品从背包转移到目标背包。注意区分：给予 是主动给予，偷窃 是偷窃（目标不知情）。"
     category: economic
     ooc_risk: medium
     validation:
@@ -527,38 +530,6 @@ data:
         attribute: stamina
         min: 2
         cost: 2
-
-  交易:
-    name: "交易"
-    aliases: ["买卖", "交换", "购买", "trade", "buy", "sell", "exchange"]
-    description: "与目标 Agent 进行物品交易。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）、数量（quantity）和价格（price）。价格可以为 0（表示赠送）。发起方提交 trade intent 即可执行，系统自动完成物品和金钱的交换。"
-    category: economic
-    ooc_risk: medium
-    validation:
-      requires_target: true
-      requires_target_alive: true
-      required_fields:
-        - target_agent_id
-        - item_id
-        - quantity
-        - price
-      field_aliases:
-        target_agent_id: ["目标人物ID", "对象ID", "目标ID"]
-        item_id: ["物品ID", "物品", "item"]
-        quantity: ["数量", "个数"]
-        price: ["价格", "价钱", "cost"]
-      field_validations:
-        - field: quantity
-          validation_type: min_value
-          min_value: 1
-        - field: price
-          validation_type: min_value
-          min_value: 0
-    requirements:
-      - requirement_type: attribute
-        attribute: stamina
-        min: 3
-        cost: 3
 
   采集:
     name: "采集"

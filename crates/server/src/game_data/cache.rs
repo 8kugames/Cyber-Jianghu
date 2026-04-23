@@ -288,6 +288,7 @@ mod tests {
                     },
                     death_defaults: None,
                     emergence: None,
+                    skills: None,
                     vendors: Vec::new(),
                 },
             },
@@ -382,6 +383,7 @@ mod tests {
             },
             narrative: Default::default(),
             display_messages: Default::default(),
+            skills: Default::default(),
         }
     }
 

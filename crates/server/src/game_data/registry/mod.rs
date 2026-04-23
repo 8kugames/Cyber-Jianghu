@@ -21,6 +21,7 @@ mod inventory_registry;
 mod item_registry;
 mod network_registry;
 pub mod recipe_registry;
+pub mod skill_registry;
 mod state_registry;
 pub mod time_registry;
 
@@ -30,6 +31,7 @@ pub use inventory_registry::{InitialInventoryRegistry, InventoryRegistry};
 pub use item_registry::ItemRegistry;
 pub use network_registry::NetworkRegistry;
 pub use recipe_registry::RecipeRegistry;
+pub use skill_registry::SkillRegistry;
 pub use state_registry::StateRegistry;
 pub use time_registry::TimeRegistry;
 

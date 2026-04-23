@@ -32,12 +32,11 @@ impl ActionType {
     pub const IDLE: &'static str = "休息";
     pub const SPEAK: &'static str = "说话";
     pub const MOVE: &'static str = "移动";
-    pub const GIVE: &'static str = "赠送";
+    pub const GIVE: &'static str = "给予";
     pub const STEAL: &'static str = "偷窃";
     pub const USE: &'static str = "使用";
     pub const PICKUP: &'static str = "拾取";
     pub const ATTACK: &'static str = "攻击";
-    pub const TRADE: &'static str = "交易";
     pub const DROP: &'static str = "丢弃";
     pub const GATHER: &'static str = "采集";
     pub const CRAFT: &'static str = "制造";

@@ -87,7 +87,7 @@ pub async fn apply_state_change(
                     tick_id,
                     description: format!("你给 {} 转移了 {} 个 {}", to, quantity, item_id),
                     metadata: serde_json::json!({
-                        "action": "赠送",
+                        "action": "给予",
                         "target": to.to_string(),
                         "item_id": item_id,
                         "quantity": quantity,
@@ -654,238 +654,6 @@ pub async fn apply_state_change(
                 true
             }
         }
-        StateChange::TradeExecuted {
-            initiator,
-            target,
-            item_id,
-            item_quantity,
-            price,
-        } => {
-            let result = async {
-                let currency_id = crate::items::get_currency_item_id();
-                let mut tx = match db_pool.begin().await {
-                    Ok(tx) => tx,
-                    Err(e) => {
-                        warn!("交易失败：无法开启事务: {}", e);
-                        return Err("交易失败：数据库错误".to_string());
-                    }
-                };
-
-                let available: Option<i32> = sqlx::query_scalar(
-                    "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
-                )
-                .bind(*initiator)
-                .bind(item_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .ok()
-                .flatten();
-
-                let available = available.unwrap_or(0);
-                if available < *item_quantity {
-                    return Err(format!(
-                        "物品数量不足: 需要 {}, 拥有 {}",
-                        item_quantity, available
-                    ));
-                }
-
-                if available == *item_quantity {
-                    sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = $2")
-                        .bind(*initiator)
-                        .bind(item_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("扣除物品失败: {}", e))?;
-                } else {
-                    sqlx::query("UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3")
-                        .bind(available - item_quantity)
-                        .bind(*initiator)
-                        .bind(item_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("更新物品数量失败: {}", e))?;
-                }
-
-                let silver_available: Option<i32> = sqlx::query_scalar(
-                    "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
-                )
-                .bind(*target)
-                .bind(&currency_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .ok()
-                .flatten();
-
-                let silver_available = silver_available.unwrap_or(0);
-                if silver_available < *price {
-                    return Err(format!(
-                        "银两不足: 需要 {}, 拥有 {}",
-                        price, silver_available
-                    ));
-                }
-
-                if *price > 0 {
-                    if silver_available == *price {
-                        sqlx::query(
-                            "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
-                        )
-                        .bind(*target)
-                        .bind(&currency_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("扣除银两失败: {}", e))?;
-                    } else {
-                        sqlx::query(
-                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
-                        )
-                        .bind(silver_available - price)
-                        .bind(*target)
-                        .bind(&currency_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("更新银两数量失败: {}", e))?;
-                    }
-                }
-
-                let target_has_item: Option<i32> = sqlx::query_scalar(
-                    "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
-                )
-                .bind(*target)
-                .bind(item_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .ok()
-                .flatten();
-
-                if let Some(qty) = target_has_item {
-                    sqlx::query(
-                        "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
-                    )
-                    .bind(qty + item_quantity)
-                    .bind(*target)
-                    .bind(item_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("给目标添加物品失败: {}", e))?;
-                } else {
-                    let slot_count: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM agent_inventory WHERE agent_id = $1",
-                    )
-                    .bind(*target)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|e| format!("检查目标背包失败: {}", e))?;
-
-                    if slot_count >= crate::inventory::get_max_slots() as i64 {
-                        return Err("目标背包已满".to_string());
-                    }
-
-                    sqlx::query(
-                        "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)",
-                    )
-                    .bind(*target)
-                    .bind(item_id)
-                    .bind(item_quantity)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("给目标插入物品失败: {}", e))?;
-                }
-
-                if *price > 0 {
-                    let initiator_has_silver: Option<i32> = sqlx::query_scalar(
-                        "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
-                    )
-                    .bind(*initiator)
-                    .bind(&currency_id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .ok()
-                    .flatten();
-
-                    if let Some(qty) = initiator_has_silver {
-                        sqlx::query(
-                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
-                        )
-                        .bind(qty + price)
-                        .bind(*initiator)
-                        .bind(&currency_id)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("给发起者添加银两失败: {}", e))?;
-                    } else {
-                        sqlx::query(
-                            "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)",
-                        )
-                        .bind(*initiator)
-                        .bind(&currency_id)
-                        .bind(price)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(|e| format!("给发起者插入银两失败: {}", e))?;
-                    }
-                }
-
-                tx.commit()
-                    .await
-                    .map_err(|e| format!("提交事务失败: {}", e))?;
-
-                Ok(())
-            }
-            .await;
-
-            match result {
-                Ok(()) => {
-                    let initiator_event = WorldEvent {
-                        event_type: WorldEventType::SocialInteraction,
-                        tick_id,
-                        description: format!(
-                            "你以 {} 两银子出售了 {} 个 {}",
-                            price, item_quantity, item_id
-                        ),
-                        metadata: serde_json::json!({
-                            "action": "trade_sell",
-                            "target": target.to_string(),
-                            "item_id": item_id,
-                            "quantity": item_quantity,
-                            "price": price,
-                        }),
-                    };
-                    events.push((*initiator, initiator_event));
-
-                    let target_event = WorldEvent {
-                        event_type: WorldEventType::SocialInteraction,
-                        tick_id,
-                        description: format!(
-                            "你以 {} 两银子购买了 {} 个 {}",
-                            price, item_quantity, item_id
-                        ),
-                        metadata: serde_json::json!({
-                            "action": "trade_buy",
-                            "from": initiator.to_string(),
-                            "item_id": item_id,
-                            "quantity": item_quantity,
-                            "price": price,
-                        }),
-                    };
-                    events.push((*target, target_event));
-                    true
-                }
-                Err(e) => {
-                    warn!("交易失败: {}", e);
-                    let event = WorldEvent {
-                        event_type: WorldEventType::ActionResult,
-                        tick_id,
-                        description: format!("交易失败: {}", e),
-                        metadata: serde_json::json!({
-                            "action": "trade_failed",
-                            "reason": e,
-                        }),
-                    };
-                    events.push((*initiator, event));
-                    false
-                }
-            }
-        }
         StateChange::LocationChanged {
             agent_id,
             old_location,
@@ -915,6 +683,8 @@ pub async fn apply_state_change(
             }
         }
         // AttributeChanged, HpChanged 由 AttributeMutator 处理
+        // SkillLearned 由 SkillMutator 处理
+        StateChange::SkillLearned { .. } => true,
         _ => true,
     }
 }
@@ -965,6 +735,7 @@ mod tests {
             node_id: "test".to_string(),
             is_alive: true,
             inventory_cleared_this_tick: false,
+            skills: vec![],
             created_at: chrono::Utc::now(),
         }
     }
