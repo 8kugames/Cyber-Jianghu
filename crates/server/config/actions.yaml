@@ -194,7 +194,7 @@ data:
       - requirement_type: attribute
         attribute: stamina
         min: 10
-        cost: 10
+        cost: 2
 
   # ==========================================================================
   # 战斗

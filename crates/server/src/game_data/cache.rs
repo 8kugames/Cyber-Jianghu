@@ -290,6 +290,7 @@ mod tests {
                     emergence: None,
                     skills: None,
                     vendors: Vec::new(),
+                    chronicle: None,
                 },
             },
             items: UnifiedItemsConfig {
