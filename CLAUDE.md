@@ -245,6 +245,9 @@ The `protocol` crate defines all shared types:
 All game mechanics configured via YAML in `crates/server/config/` (JSON fallback):
 - `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
 - `game_rules.yaml`, `time.yaml`, `inventory.yaml`, `recipes.yaml`
+- `skills/` — AI Procedural Skills (SKILL.md behavioral instructions, see below)
+
+**AI Procedural Skills**: Skills are SKILL.md files (YAML frontmatter + markdown body) that define behavioral instructions injected into the Agent's LLM context. Not RPG numerical attributes. Path: `config/skills/{category}/{skill_id}/SKILL.md`. Agent reads SKILL.md from `$CYBER_JIANGHU_CONFIG_DIR/skills/` at prompt-build time. Skill acquisition: Agent issues `practice` action → `StateChange::SkillLearned` → `SkillMutator` appends to `AgentState.skills` (JSONB `_skills` key).
 
 **Formula Engine**: Dynamic calculations use `evalexpr` syntax.
 
@@ -336,7 +339,8 @@ use super::builder::AgentBuilder;
 |---------|------|
 | Environment variables | `.env` |
 | Server configuration | `crates/server/config/*.yaml` |
-| World-building rules | `crates/server/config/world-building-rules.yaml` |
+| World-building rules | `crates/server/config/world_building_rules.yaml` |
+| Skill definitions | `crates/server/config/skills/{category}/{skill_id}/SKILL.md` |
 | Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
