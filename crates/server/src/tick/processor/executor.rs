@@ -662,6 +662,7 @@ pub async fn apply_state_change(
             price,
         } => {
             let result = async {
+                let currency_id = crate::items::get_currency_item_id();
                 let mut tx = match db_pool.begin().await {
                     Ok(tx) => tx,
                     Err(e) => {
@@ -706,9 +707,10 @@ pub async fn apply_state_change(
                 }
 
                 let silver_available: Option<i32> = sqlx::query_scalar(
-                    "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = 'silver' FOR UPDATE",
+                    "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2 FOR UPDATE",
                 )
                 .bind(*target)
+                .bind(&currency_id)
                 .fetch_optional(&mut *tx)
                 .await
                 .ok()
@@ -725,18 +727,20 @@ pub async fn apply_state_change(
                 if *price > 0 {
                     if silver_available == *price {
                         sqlx::query(
-                            "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = 'silver'",
+                            "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
                         )
                         .bind(*target)
+                        .bind(&currency_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| format!("扣除银两失败: {}", e))?;
                     } else {
                         sqlx::query(
-                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = 'silver'",
+                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
                         )
                         .bind(silver_available - price)
                         .bind(*target)
+                        .bind(&currency_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| format!("更新银两数量失败: {}", e))?;
@@ -789,9 +793,10 @@ pub async fn apply_state_change(
 
                 if *price > 0 {
                     let initiator_has_silver: Option<i32> = sqlx::query_scalar(
-                        "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = 'silver'",
+                        "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
                     )
                     .bind(*initiator)
+                    .bind(&currency_id)
                     .fetch_optional(&mut *tx)
                     .await
                     .ok()
@@ -799,10 +804,11 @@ pub async fn apply_state_change(
 
                     if let Some(qty) = initiator_has_silver {
                         sqlx::query(
-                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = 'silver'",
+                            "UPDATE agent_inventory SET quantity = $1 WHERE agent_id = $2 AND item_id = $3",
                         )
                         .bind(qty + price)
                         .bind(*initiator)
+                        .bind(&currency_id)
                         .execute(&mut *tx)
                         .await
                         .map_err(|e| format!("给发起者添加银两失败: {}", e))?;
@@ -811,7 +817,7 @@ pub async fn apply_state_change(
                             "INSERT INTO agent_inventory (agent_id, item_id, quantity, is_equipped) VALUES ($1, $2, $3, false)",
                         )
                         .bind(*initiator)
-                        .bind("silver")
+                        .bind(&currency_id)
                         .bind(price)
                         .execute(&mut *tx)
                         .await

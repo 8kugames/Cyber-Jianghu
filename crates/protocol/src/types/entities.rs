@@ -93,6 +93,10 @@ pub struct InventoryItem {
     /// 物品类型（consumable/weapon/material 等）
     #[serde(default)]
     pub item_type: String,
+
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 周围实体（其他 Agent）
@@ -149,6 +153,10 @@ pub struct SceneItem {
     /// 物品类型（食物、水、武器等）
     #[serde(default)]
     pub item_type: String,
+
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 可用动作

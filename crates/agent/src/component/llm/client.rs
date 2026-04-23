@@ -17,6 +17,13 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
 
+/// 对话轮次（用于长窗口对话）
+#[derive(Debug, Clone)]
+pub struct ConversationTurn {
+    pub user: String,
+    pub assistant: String,
+}
+
 /// LLM 客户端 Trait（仅由 OpenClaw 实现）
 ///
 /// **重要约束**：
@@ -79,6 +86,24 @@ pub trait LlmClient: Send + Sync {
         let _ = (system, prompt, tools, executor, max_rounds);
         anyhow::bail!("Tool calling not supported by this LLM client")
     }
+
+    /// 使用对话历史完成调用（长窗口）
+    ///
+    /// `summary` 为旧轮次的压缩摘要（注入 system message）。
+    /// `turns` 为保留的近期完整轮次。
+    /// `current_prompt` 为当前 tick 的用户输入。
+    ///
+    /// 默认实现退化为 system + current_prompt（不使用历史）。
+    async fn complete_with_conversation(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<String> {
+        let _ = (summary, turns);
+        self.complete_with_system(system, current_prompt).await
+    }
 }
 
 /// LlmClient 扩展 Trait
@@ -104,6 +129,15 @@ pub trait LlmClientExt {
         tools: &[super::tool_types::ToolDefinition],
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
+    ) -> Result<T>;
+
+    /// 使用对话历史完成结构化输出（长窗口）
+    async fn complete_json_with_conversation<T: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
     ) -> Result<T>;
 }
 
@@ -288,6 +322,19 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             .complete_with_tools(system, prompt, tools, executor, max_rounds)
             .await?;
         parse_json_response::<D>(&text)
+    }
+
+    async fn complete_json_with_conversation<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<D> {
+        let response = self
+            .complete_with_conversation(system, summary, turns, current_prompt)
+            .await?;
+        parse_json_response::<D>(&response)
     }
 }
 
@@ -548,6 +595,36 @@ impl LlmClient for FallbackLlmClient {
         })
         .await
     }
+
+    async fn complete_with_conversation(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<String> {
+        let system = system.to_string();
+        let summary_owned = summary.map(|s| s.to_string());
+        let turns = turns.to_vec();
+        let current_prompt = current_prompt.to_string();
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let system = system.clone();
+            let summary = summary_owned.clone();
+            let turns = turns.clone();
+            let current_prompt = current_prompt.clone();
+            async move {
+                client
+                    .complete_with_conversation(
+                        &system,
+                        summary.as_deref(),
+                        &turns,
+                        &current_prompt,
+                    )
+                    .await
+            }
+        })
+        .await
+    }
 }
 
 // ============================================================================
@@ -698,7 +775,7 @@ mod tests {
         let input = r#"<think.../>
 思考过程...
 
-{"action_type": "进食", "action_data": {"item_id": "mantou"}, "speech_content": ""}"#;
+{"action_type": "进食", "action_data": {"item_id": "馒头"}, "speech_content": ""}"#;
         let result = strip_thinking_tags(input);
         assert!(
             result.contains(r#"{"action_type": "进食"#),
@@ -738,7 +815,7 @@ mod tests {
         // 完整 MiniMax 输出：self-closing think 后跟思考文字和 JSON
         // <think.../> 是自闭合标签，后面的思考文字是普通文本（非标签包裹）
         // extract_json_str 会通过 find_first_json_end 定位到 JSON
-        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"water\"}, \"speech_content\": \"\"}";
+        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"清水\"}, \"speech_content\": \"\"}";
         let result = strip_thinking_tags(input);
         // 自闭合标签被移除，但思考文本仍在（非标签包裹无法剥离）
         assert!(!result.contains("<think"), "think 标签应被移除");

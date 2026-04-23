@@ -83,6 +83,10 @@ pub use actions::{ActionResult, ActionType, AgentAction};
 // Tick 相关
 pub use tick::TickLog;
 
+// Vendor 待注入事件缓冲区
+pub type VendorPendingEvents =
+    std::sync::Arc<dashmap::DashMap<uuid::Uuid, Vec<protocol::WorldEvent>>>;
+
 // API 响应相关
 pub use responses::{
     AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,

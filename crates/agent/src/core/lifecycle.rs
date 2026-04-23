@@ -1560,6 +1560,21 @@ impl super::Agent {
                                     error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
                                 }
                             }
+
+                            // 8. 对话历史 summary 压缩（长窗口）
+                            if let Some(ref engine) = self.cognitive_engine
+                                && engine.conversation_needs_summary()
+                                && let Some(prompt) = engine.conversation_summary_prompt()
+                                && let Some(ref container) = self.actor_llm_container
+                            {
+                                let llm = container.read().await;
+                                if let Ok(summary) = llm.complete(&prompt).await {
+                                    engine.conversation_replace_with_summary(summary);
+                                    info!("对话历史 summary 压缩完成");
+                                } else {
+                                    tracing::warn!("对话历史 summary 生成失败");
+                                }
+                            }
                         }
                     }
                 }

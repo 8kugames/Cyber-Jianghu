@@ -122,11 +122,11 @@ mod tests {
             call_type: "function".to_string(),
             function: ToolCallFunction {
                 name: "get_inventory".to_string(),
-                arguments: r#"{"item_id": "mantou"}"#.to_string(),
+                arguments: r#"{"item_id": "馒头"}"#.to_string(),
             },
         };
         let args = tc.parse_arguments().unwrap();
-        assert_eq!(args["item_id"], "mantou");
+        assert_eq!(args["item_id"], "馒头");
     }
 
     #[test]

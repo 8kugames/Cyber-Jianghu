@@ -7,8 +7,173 @@
 // 数据驱动：映射来自 AvailableAction 的 aliases/field_aliases，零硬编码
 // ============================================================================
 
-use cyber_jianghu_protocol::AvailableAction;
+use cyber_jianghu_protocol::{AvailableAction, WorldState};
 use std::collections::HashMap;
+
+// ============================================================================
+// 通用实体别名映射
+// ============================================================================
+
+/// 通用实体别名映射: alias (lowercase) → canonical ID
+///
+/// 用于 location、item 等实体的别名归一化。
+/// LLM 输出的中文/英文别名 → canonical 中文主键。
+pub struct EntityAliasMap {
+    /// alias (lowercase) → canonical ID
+    forward: HashMap<String, String>,
+}
+
+impl EntityAliasMap {
+    /// 从 (canonical_id, aliases) 对列表构建
+    pub fn from_entries(entries: Vec<(String, Vec<String>)>) -> Self {
+        let mut forward = HashMap::new();
+        for (canonical, aliases) in entries {
+            // canonical → self
+            forward
+                .entry(canonical.to_lowercase())
+                .or_insert_with(|| canonical.clone());
+            // aliases → canonical
+            for alias in aliases {
+                forward.insert(alias.to_lowercase(), canonical.clone());
+            }
+        }
+        Self { forward }
+    }
+
+    /// 翻译别名 → canonical ID
+    pub fn translate(&self, input: &str) -> Option<String> {
+        self.forward.get(&input.to_lowercase()).cloned()
+    }
+
+    /// 空映射
+    pub fn empty() -> Self {
+        Self {
+            forward: HashMap::new(),
+        }
+    }
+
+    /// 从 WorldState 的 adjacent_nodes 构建位置别名映射
+    pub fn from_world_state_locations(world_state: &WorldState) -> Self {
+        let entries: Vec<(String, Vec<String>)> = world_state
+            .location
+            .adjacent_nodes
+            .iter()
+            .map(|n| (n.node_id.clone(), n.aliases.clone()))
+            .collect();
+        // 同时包含当前位置自身
+        let mut entries = entries;
+        entries.push((world_state.location.node_id.clone(), vec![]));
+        Self::from_entries(entries)
+    }
+
+    /// 从 WorldState 的 inventory + nearby_items + gatherable_items 合并构建 item 别名映射
+    ///
+    /// 覆盖所有 LLM 可见的物品来源，确保拾取/进食/饮水都能翻译
+    pub fn from_world_state_all_items(world_state: &WorldState) -> Self {
+        let mut entries: Vec<(String, Vec<String>)> = Vec::new();
+
+        // 背包物品
+        for item in &world_state.self_state.inventory {
+            entries.push((item.item_id.clone(), item.aliases.clone()));
+        }
+
+        // 附近地面物品
+        for item in &world_state.nearby_items {
+            entries.push((item.item_id.clone(), item.aliases.clone()));
+        }
+
+        // 可采集物品
+        for item in &world_state.location.gatherable_items {
+            entries.push((item.item_id.clone(), item.aliases.clone()));
+        }
+
+        Self::from_entries(entries)
+    }
+
+    /// 从 WorldState 的 entities 构建 agent name → UUID 别名映射
+    ///
+    /// LLM 输出 "小鹿" → 自动翻译为 UUID
+    pub fn from_world_state_entities(world_state: &WorldState) -> Self {
+        let entries: Vec<(String, Vec<String>)> = world_state
+            .entities
+            .iter()
+            .map(|e| (e.id.to_string(), vec![e.name.clone()]))
+            .collect();
+        Self::from_entries(entries)
+    }
+}
+
+// ============================================================================
+// 实体翻译注册表 (数据驱动)
+// ============================================================================
+
+/// 实体翻译注册表 — 数据驱动的字段值翻译
+///
+/// 注册 field_name → EntityAliasMap 映射，`translate()` 自动遍历所有已注册字段。
+/// 新增实体类型只需在 `from_world_state()` 中加一行注册。
+///
+/// ```text
+/// // 注册示例:
+/// ("target_location", EntityAliasMap::from_world_state_locations(ws)),
+/// ("item_id",         EntityAliasMap::from_world_state_all_items(ws)),
+/// ("target_agent_id", EntityAliasMap::from_world_state_entities(ws)),
+/// ```
+pub struct EntityTranslationRegistry {
+    /// (field_name, EntityAliasMap) — 按注册顺序翻译
+    field_maps: Vec<(String, EntityAliasMap)>,
+}
+
+impl EntityTranslationRegistry {
+    /// 从 WorldState 自动构建所有已注册字段的别名映射
+    ///
+    /// 当前注册字段:
+    /// - `target_location` — 相邻地点别名
+    /// - `item_id` — 背包+地面+可采集物品别名
+    /// - `target_agent_id` — 附近角色 name→UUID
+    ///
+    /// 新增实体类型只需在此加一行
+    pub fn from_world_state(ws: &WorldState) -> Self {
+        Self {
+            field_maps: vec![
+                (
+                    "target_location".to_string(),
+                    EntityAliasMap::from_world_state_locations(ws),
+                ),
+                (
+                    "item_id".to_string(),
+                    EntityAliasMap::from_world_state_all_items(ws),
+                ),
+                (
+                    "target_agent_id".to_string(),
+                    EntityAliasMap::from_world_state_entities(ws),
+                ),
+            ],
+        }
+    }
+
+    /// 翻译 action_data 中所有已注册字段的值
+    ///
+    /// 遍历 field_maps，对每个已注册字段做 alias→canonical 翻译。
+    /// 未注册的字段不受影响。
+    pub fn translate(&self, data: &mut serde_json::Value) {
+        let Some(obj) = data.as_object_mut() else {
+            return;
+        };
+
+        for (field_name, alias_map) in &self.field_maps {
+            if let Some(val) = obj.get_mut(field_name)
+                && let Some(s) = val.as_str()
+                && let Some(translated) = alias_map.translate(s)
+            {
+                *val = serde_json::Value::String(translated);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// action_type 别名映射
+// ============================================================================
 
 /// action_type 别名映射: alias (lowercase) → canonical chinese name
 ///
@@ -281,9 +446,9 @@ mod tests {
         let actions = make_test_actions();
         let map = FieldAliasMap::from_actions(&actions);
 
-        let mut data = serde_json::json!({"目标地点": "longmen_kitchen"});
+        let mut data = serde_json::json!({"目标地点": "龙门厨房"});
         map.translate_data("移动", &mut data);
-        assert_eq!(data["target_location"], "longmen_kitchen");
+        assert_eq!(data["target_location"], "龙门厨房");
         assert!(data.get("目标地点").is_none());
     }
 
@@ -292,9 +457,9 @@ mod tests {
         let actions = make_test_actions();
         let map = FieldAliasMap::from_actions(&actions);
 
-        let mut data = serde_json::json!({"destination": "longmen_kitchen"});
+        let mut data = serde_json::json!({"destination": "龙门厨房"});
         map.translate_data("移动", &mut data);
-        assert_eq!(data["target_location"], "longmen_kitchen");
+        assert_eq!(data["target_location"], "龙门厨房");
     }
 
     #[test]
@@ -302,9 +467,9 @@ mod tests {
         let actions = make_test_actions();
         let map = FieldAliasMap::from_actions(&actions);
 
-        let mut data = serde_json::json!({"物品ID": "mantou"});
+        let mut data = serde_json::json!({"物品ID": "馒头"});
         map.translate_data("进食", &mut data);
-        assert_eq!(data["item_id"], "mantou");
+        assert_eq!(data["item_id"], "馒头");
     }
 
     #[test]
@@ -353,5 +518,157 @@ mod tests {
         let mut data = serde_json::json!({"thought": "我要说话"});
         map.translate_data("说话", &mut data);
         assert_eq!(data["thought"], "我要说话");
+    }
+
+    // ========================================================================
+    // EntityTranslationRegistry tests
+    // ========================================================================
+
+    #[test]
+    fn test_registry_translate_target_location() {
+        let registry = EntityTranslationRegistry {
+            field_maps: vec![
+                (
+                    "target_location".to_string(),
+                    EntityAliasMap::from_entries(vec![
+                        (
+                            "酒泉".to_string(),
+                            vec!["jiuquan".to_string(), "绿洲".to_string()],
+                        ),
+                        ("龙门客栈".to_string(), vec!["longmen_inn".to_string()]),
+                    ]),
+                ),
+                ("item_id".to_string(), EntityAliasMap::empty()),
+                ("target_agent_id".to_string(), EntityAliasMap::empty()),
+            ],
+        };
+
+        let mut data = serde_json::json!({"target_location": "jiuquan"});
+        registry.translate(&mut data);
+        assert_eq!(data["target_location"], "酒泉");
+
+        let mut data2 = serde_json::json!({"target_location": "绿洲"});
+        registry.translate(&mut data2);
+        assert_eq!(data2["target_location"], "酒泉");
+    }
+
+    #[test]
+    fn test_registry_translate_item_id() {
+        let registry = EntityTranslationRegistry {
+            field_maps: vec![
+                ("target_location".to_string(), EntityAliasMap::empty()),
+                (
+                    "item_id".to_string(),
+                    EntityAliasMap::from_entries(vec![
+                        ("馒头".to_string(), vec!["mantou".to_string()]),
+                        (
+                            "清水".to_string(),
+                            vec!["water".to_string(), "水".to_string()],
+                        ),
+                    ]),
+                ),
+                ("target_agent_id".to_string(), EntityAliasMap::empty()),
+            ],
+        };
+
+        let mut data = serde_json::json!({"item_id": "水"});
+        registry.translate(&mut data);
+        assert_eq!(data["item_id"], "清水");
+    }
+
+    #[test]
+    fn test_registry_translate_agent_name_to_uuid() {
+        let registry = EntityTranslationRegistry {
+            field_maps: vec![
+                ("target_location".to_string(), EntityAliasMap::empty()),
+                ("item_id".to_string(), EntityAliasMap::empty()),
+                (
+                    "target_agent_id".to_string(),
+                    EntityAliasMap::from_entries(vec![
+                        (
+                            "cd6101be-868c-4c6b-bf17-47f5611f3aac".to_string(),
+                            vec!["小鹿".to_string()],
+                        ),
+                        (
+                            "82835b43-3ae8-495d-a350-8035883debd5".to_string(),
+                            vec!["柳如烟".to_string()],
+                        ),
+                    ]),
+                ),
+            ],
+        };
+
+        // 中文名 → UUID
+        let mut data = serde_json::json!({"target_agent_id": "小鹿", "content": "你好"});
+        registry.translate(&mut data);
+        assert_eq!(
+            data["target_agent_id"],
+            "cd6101be-868c-4c6b-bf17-47f5611f3aac"
+        );
+        assert_eq!(data["content"], "你好"); // content 不受影响
+
+        // UUID 原样保留
+        let mut data2 =
+            serde_json::json!({"target_agent_id": "82835b43-3ae8-495d-a350-8035883debd5"});
+        registry.translate(&mut data2);
+        assert_eq!(
+            data2["target_agent_id"],
+            "82835b43-3ae8-495d-a350-8035883debd5"
+        );
+    }
+
+    #[test]
+    fn test_registry_unregistered_field_untouched() {
+        let registry = EntityTranslationRegistry {
+            field_maps: vec![
+                ("target_location".to_string(), EntityAliasMap::empty()),
+                ("item_id".to_string(), EntityAliasMap::empty()),
+                ("target_agent_id".to_string(), EntityAliasMap::empty()),
+            ],
+        };
+
+        let mut data = serde_json::json!({"content": "你好", "quantity": 5});
+        registry.translate(&mut data);
+        assert_eq!(data["content"], "你好");
+        assert_eq!(data["quantity"], 5);
+    }
+
+    #[test]
+    fn test_registry_multiple_fields_in_one_pass() {
+        let registry = EntityTranslationRegistry {
+            field_maps: vec![
+                (
+                    "target_location".to_string(),
+                    EntityAliasMap::from_entries(vec![(
+                        "龙门客栈".to_string(),
+                        vec!["客栈".to_string()],
+                    )]),
+                ),
+                (
+                    "item_id".to_string(),
+                    EntityAliasMap::from_entries(vec![(
+                        "馒头".to_string(),
+                        vec!["mantou".to_string()],
+                    )]),
+                ),
+                (
+                    "target_agent_id".to_string(),
+                    EntityAliasMap::from_entries(vec![(
+                        "uuid-123".to_string(),
+                        vec!["赵万金".to_string()],
+                    )]),
+                ),
+            ],
+        };
+
+        let mut data = serde_json::json!({
+            "target_location": "客栈",
+            "item_id": "mantou",
+            "target_agent_id": "赵万金"
+        });
+        registry.translate(&mut data);
+        assert_eq!(data["target_location"], "龙门客栈");
+        assert_eq!(data["item_id"], "馒头");
+        assert_eq!(data["target_agent_id"], "uuid-123");
     }
 }

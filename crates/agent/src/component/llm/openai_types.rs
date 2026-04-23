@@ -65,6 +65,16 @@ impl ChatMessage {
         }
     }
 
+    pub(crate) fn assistant(content: &str) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: Some(content.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
     pub(crate) fn tool_result(tool_call_id: &str, name: &str, content: &str) -> Self {
         Self {
             role: "tool".to_string(),

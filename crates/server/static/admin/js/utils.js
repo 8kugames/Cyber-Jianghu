@@ -7,6 +7,7 @@ var attributeMeta = {}; // key -> { display_name, category } data-driven attribu
 var locationNames = {};
 var authToken = localStorage.getItem("admin_token") || "";
 var currentFile = null;
+var authTokenType = localStorage.getItem("admin_token_type") || null;
 var refreshInterval = null;
 var smoothTimeConfig = null;
 var smoothTimeAnimationId = null;
@@ -17,6 +18,15 @@ if (urlParams.has("token")) {
     authToken = urlParams.get("token");
     localStorage.setItem("admin_token", authToken);
     window.history.replaceState({}, document.title, window.location.pathname);
+    // Resolve token type async (URL token doesn't go through login endpoint)
+    fetch("/api/admin/session", { headers: { Authorization: "Bearer " + authToken } })
+        .then(function (r) { return r.ok ? r.json() : {}; })
+        .then(function (data) {
+            if (data.token_type) {
+                authTokenType = data.token_type;
+                localStorage.setItem("admin_token_type", authTokenType);
+            }
+        });
 }
 
 // ============================================================================

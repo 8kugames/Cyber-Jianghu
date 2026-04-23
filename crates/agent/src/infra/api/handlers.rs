@@ -4125,6 +4125,9 @@ pub(super) async fn update_llm_config_handler(
         fallback_models: config.llm.fallback_models.clone(),
         idle_rotate_threshold: config.llm.idle_rotate_threshold,
         max_consecutive_follow: config.llm.max_consecutive_follow,
+        context_window_tokens: config.llm.context_window_tokens,
+        summary_trigger_ratio: config.llm.summary_trigger_ratio,
+        keep_recent_turns: config.llm.keep_recent_turns,
     };
 
     // 更新 reflector 配置
@@ -4145,6 +4148,9 @@ pub(super) async fn update_llm_config_handler(
             fallback_models: Vec::new(),
             idle_rotate_threshold: config.llm.idle_rotate_threshold,
             max_consecutive_follow: config.llm.max_consecutive_follow,
+            context_window_tokens: config.llm.context_window_tokens,
+            summary_trigger_ratio: config.llm.summary_trigger_ratio,
+            keep_recent_turns: config.llm.keep_recent_turns,
         });
     }
 

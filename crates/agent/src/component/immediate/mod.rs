@@ -688,7 +688,18 @@ impl CognitiveImmediateDecisionMaker {
         let personality = self.personality_str();
 
         // 交易关键词检测：如果消息包含交易相关词汇，注入库存上下文
-        let trade_keywords = ["买", "卖", "价格", "银子", "两", "成交", "便宜", "贵", "多少钱", "物品"];
+        let trade_keywords = [
+            "买",
+            "卖",
+            "价格",
+            "银子",
+            "两",
+            "成交",
+            "便宜",
+            "贵",
+            "多少钱",
+            "物品",
+        ];
         let is_trade_related = trade_keywords.iter().any(|k| truncated.contains(k));
 
         let trade_context = if is_trade_related {

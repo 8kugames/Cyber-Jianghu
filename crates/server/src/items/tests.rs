@@ -41,6 +41,7 @@ fn test_init_item_cache_from_config() {
         description: "测试用食物".to_string(),
         max_durability: -1,
         decay_rate: 0,
+        aliases: vec![],
     }];
 
     let result = init_item_cache_from_config(&config_items);
@@ -77,7 +78,7 @@ fn test_get_item_definition() {
 
     // 先初始化缓存
     let config_items = vec![ItemConfigEntry {
-        item_id: "mantou".to_string(),
+        item_id: "馒头".to_string(),
         name: "馒头".to_string(),
         item_type: "consumable".to_string(),
         effects: vec![ItemEffect {
@@ -90,11 +91,12 @@ fn test_get_item_definition() {
         description: "热腾腾的馒头".to_string(),
         max_durability: 100,
         decay_rate: 1,
+        aliases: vec![],
     }];
     let _ = init_item_cache_from_config(&config_items);
 
     // 测试存在的物品
-    let mantou = get_item_definition("mantou");
+    let mantou = get_item_definition("馒头");
     assert!(mantou.is_some());
     let mantou = mantou.unwrap();
     assert_eq!(mantou.name, "馒头");
@@ -131,6 +133,7 @@ fn test_item_usability() {
             description: "测试食物".to_string(),
             max_durability: -1,
             decay_rate: 0,
+            aliases: vec![],
         },
         ItemConfigEntry {
             item_id: "weapon".to_string(),
@@ -141,6 +144,7 @@ fn test_item_usability() {
             description: "测试武器".to_string(),
             max_durability: 100,
             decay_rate: 0,
+            aliases: vec![],
         },
     ];
     let _ = init_item_cache_from_config(&config_items);
