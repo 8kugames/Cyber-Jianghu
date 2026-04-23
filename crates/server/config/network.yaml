@@ -36,6 +36,14 @@ data:
     cleanup_interval_secs: 300
     # 触发清理的连接数阈值
     cleanup_threshold: 100
+    # WebSocket 消息通道容量（背压控制）
+    channel_capacity: 100
+    # 心跳 Ping 间隔（秒）
+    heartbeat_interval_secs: 30
+    # 连续未收到 Pong 的最大次数（超过则断连）
+    max_missed_pongs: 3
+    # 日志消息预览截断长度（字节）
+    log_preview_length: 50
 
   # 对话系统配置
   dialogue:
