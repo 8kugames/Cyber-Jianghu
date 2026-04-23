@@ -787,6 +787,16 @@ impl super::Agent {
                             warnings.push(hint);
                         }
 
+                        // 交易议价提示：附近有其他人且有银两时注入
+                        let has_silver = world_state.self_state.inventory.iter()
+                            .any(|i| i.item_id == "银子" && i.quantity > 0);
+                        if !world_state.entities.is_empty() && has_silver
+                            && let Some(t) = tmpl
+                            && let Some(hint) = t.render_section("trade_bargaining_hint", &std::collections::HashMap::new())
+                        {
+                            warnings.push(hint);
+                        }
+
                         warnings
                     };
 

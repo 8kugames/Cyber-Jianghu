@@ -90,15 +90,15 @@ templates:
         {{"actions": [{{"action_type": "说话", "action_data": {{"内容": "各位好汉，在下有礼了。"}}}}]}}
 
         单动作 - 移动：
-        {{"actions": [{{"action_type": "移动", "action_data": {{"目标地点": "longmen_kitchen"}}}}]}}
+        {{"actions": [{{"action_type": "移动", "action_data": {{"目标地点": "龙门厨房"}}}}]}}
 
         单动作 - 进食：
-        {{"actions": [{{"action_type": "进食", "action_data": {{"物品ID": "mantou"}}}}]}}
+        {{"actions": [{{"action_type": "进食", "action_data": {{"物品ID": "馒头"}}}}]}}
 
         多动作 - 拾取后进食：
         {{"actions": [
-          {{"action_type": "拾取", "action_data": {{"物品ID": "mantou"}}}},
-          {{"action_type": "进食", "action_data": {{"物品ID": "mantou"}}}}
+          {{"action_type": "拾取", "action_data": {{"物品ID": "馒头"}}}},
+          {{"action_type": "进食", "action_data": {{"物品ID": "馒头"}}}}
         ]}}
 
         ### action_data 字段要求：
@@ -151,6 +151,15 @@ templates:
         【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先拾取再饮水。选择能恢复口渴值的物品。
       thirst_nothing: |
         【紧急】你极度口渴（当前 {value}/{max}），附近无水源！移动到有水的地点或采集。
+      critical_survival_hint: |
+        【生存警告】饥饿/口渴值已降至危险水平！在极端情况下，你可以：
+        1. 向龙门客栈老板娘购买馒头（1银两1个），使用交易动作
+        2. 向其他江湖人士乞讨或交易获取食物
+        3. 攻击持有食物的江湖人士并夺取食物（使用攻击动作）
+      trade_bargaining_hint: |
+        【交易提示】你可以使用「说话」与对方讨价还价。先询价，协商好价格后再执行「交易」。
+        好友可以给折扣，陌生人正常价或加价。关系越好，价格越优惠。
+        交易是双方互换物品：你付出银两（或其他物品），对方付出你想要的物品。
     truncation: {}
 
   # Sanity 注入模板
