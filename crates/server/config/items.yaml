@@ -49,8 +49,8 @@ data:
     stack_size: 10
     aliases: ["mantou"]
 
-  - item_id: "清水"
-    name: "清水"
+  - item_id: "水"
+    name: "水"
     item_type: "consumable"
     effects:
       - attribute: "thirst"
@@ -58,7 +58,7 @@ data:
         value: 60
     description: "清凉的井水，解渴必备。恢复60点口渴值。"
     stack_size: 10
-    aliases: ["water", "水"]
+    aliases: ["water", "清水", "井水", "泉水"]
 
   - item_id: "李广杏"
     name: "李广杏"

@@ -199,6 +199,10 @@ pub struct GameRulesData {
     /// Vendor 自动补货配置（DEPRECATED: 已迁移到 DB agent_vendor_refill 表）
     #[serde(default, skip_serializing)]
     pub vendors: Vec<VendorConfig>,
+
+    /// 群像传记配置
+    #[serde(default)]
+    pub chronicle: Option<ChronicleRulesData>,
 }
 
 /// Vendor 自动补货配置
@@ -292,6 +296,35 @@ pub struct OpsRulesData {
 
     /// 离线多久（天）的 Agent 会被清理脚本删除
     pub offline_cleanup_days: i32,
+}
+
+/// 群像传记规则数据
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ChronicleRulesData {
+    /// 关键事件每个类型的最大数量
+    #[serde(default = "default_highlight_threshold")]
+    pub highlight_threshold: i32,
+
+    /// 传记生成周期（游戏日）
+    #[serde(default = "default_days_per_period")]
+    pub days_per_period: i32,
+}
+
+fn default_highlight_threshold() -> i32 {
+    3
+}
+
+fn default_days_per_period() -> i32 {
+    7
+}
+
+impl Default for ChronicleRulesData {
+    fn default() -> Self {
+        Self {
+            highlight_threshold: default_highlight_threshold(),
+            days_per_period: default_days_per_period(),
+        }
+    }
 }
 
 /// 死亡默认配置（当属性未配置 death_cause/death_message 时使用）

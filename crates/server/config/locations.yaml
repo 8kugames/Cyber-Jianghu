@@ -76,10 +76,10 @@ data:
       name: "荒漠"
       type: "map"
       parent_id: "河西走廊"
-      environmental_damage: 5 # 沙漠环境伤害
+      environmental_damage: 2 # 沙漠环境伤害
       gatherable_items:
-        - "李广杏" # 李广杏
-        - "木材" # 枯木
+        - "李广杏"
+        - "木材"
       description: "无尽的黄沙，危险与机遇并存"
       aliases: ["desert", "沙漠"]
 
@@ -92,8 +92,8 @@ data:
       type: "map"
       parent_id: "河西走廊"
       gatherable_items:
-        - "小麦" # 小麦
-        - "清水" # 泉水
+        - "小麦"
+        - "泉水"
       description: "绿洲小镇，以泉水甘美闻名"
       aliases: ["jiuquan", "绿洲"]
 

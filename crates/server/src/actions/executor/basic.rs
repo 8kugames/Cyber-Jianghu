@@ -25,6 +25,7 @@ impl BasicActionExecutor {
     /// 执行 move 动作
     ///
     /// 现在支持实际的子场景间移动
+    /// 体力消耗 = travel_cost * 2（数据驱动）
     pub(super) fn execute_move(
         intent: &Intent,
         action_data: Option<serde_json::Value>,
@@ -53,13 +54,10 @@ impl BasicActionExecutor {
             }
         };
 
+        let location_registry = registry.location_registry.read().unwrap();
+
         // 验证目标位置存在
-        if !registry
-            .location_registry
-            .read()
-            .unwrap()
-            .node_exists(&data.target_location)
-        {
+        if !location_registry.node_exists(&data.target_location) {
             return ActionExecutionResult::failure(
                 format!("目标位置不存在: {}", data.target_location),
                 intent.action_type.to_string(),
@@ -68,12 +66,7 @@ impl BasicActionExecutor {
         }
 
         // 验证目标位置与当前位置相邻
-        if !registry
-            .location_registry
-            .read()
-            .unwrap()
-            .is_connected(current_location, &data.target_location)
-        {
+        if !location_registry.is_connected(current_location, &data.target_location) {
             return ActionExecutionResult::failure(
                 format!(
                     "无法从 {} 移动到 {}（位置不相邻）",
@@ -84,14 +77,26 @@ impl BasicActionExecutor {
             );
         }
 
+        // 获取 travel_cost 并计算体力消耗 = travel_cost * 2
+        let travel_cost = location_registry
+            .get_travel_cost(current_location, &data.target_location)
+            .unwrap_or(1);
+        let stamina_cost = travel_cost as i32 * 2;
+
         let mut result = ActionExecutionResult::success(
             format!(
-                "Agent {} 从 {} 移动到 {}",
-                intent.agent_id, current_location, data.target_location
+                "Agent {} 从 {} 移动到 {}，消耗 {} 体力",
+                intent.agent_id, current_location, data.target_location, stamina_cost
             ),
             intent.action_type.to_string(),
             Some(intent.intent_id),
         );
+
+        // 添加体力消耗（travel_cost * 2）
+        result.add_change(StateChange::StaminaChanged {
+            agent_id: intent.agent_id,
+            delta: -stamina_cost,
+        });
 
         result.add_change(StateChange::LocationChanged {
             agent_id: intent.agent_id,

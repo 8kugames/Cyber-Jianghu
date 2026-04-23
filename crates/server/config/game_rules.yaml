@@ -191,6 +191,13 @@ data:
     # 离线多久（天）的 Agent 会被清理脚本删除
     offline_cleanup_days: 30
 
+  # 群像传记配置
+  chronicle:
+    # 关键事件每个类型的最大数量
+    highlight_threshold: 3
+    # 传记生成周期（游戏日）
+    days_per_period: 7
+
   # 死亡默认配置（当属性未配置 death_cause/death_message 时使用）
   death_defaults:
     # 未知原因死亡的默认消息

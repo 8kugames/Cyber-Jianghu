@@ -140,6 +140,12 @@ impl ActionExecutor {
     ) -> Result<HashSet<String>, String> {
         let mut consumed: HashSet<String> = HashSet::new();
         let action_name = intent.action_type.to_string();
+
+        // "移动" 动作的体力消耗由 travel_cost * 2 决定，在 execute_move 中动态计算
+        if action_name == "移动" {
+            return Ok(consumed);
+        }
+
         if let Some(config) = ActionRegistry::get(&action_name) {
             let context = agent_state.get_formula_context();
 

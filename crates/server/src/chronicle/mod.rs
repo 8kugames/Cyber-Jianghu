@@ -104,30 +104,43 @@ pub struct ChronicleConfig {
 impl Default for ChronicleConfig {
     fn default() -> Self {
         Self {
-            // 从 time.yaml 动态读取：days_per_season * hours_per_day * ticks_per_hour
-            // 假设 7 游戏日为一个周期
             period_ticks: Self::calculate_period_ticks(),
-            highlight_threshold: 3,
+            highlight_threshold: Self::get_highlight_threshold(),
         }
     }
 }
 
 impl ChronicleConfig {
-    /// 从 time.yaml 配置计算周期 tick 数
+    /// 从 time.yaml + game_rules.yaml 计算周期 tick 数
     fn calculate_period_ticks() -> i64 {
-        crate::game_data::registry::TimeRegistry::get_config()
-            .map(|c| {
-                // 7 游戏日 * 每天 24 小时 * 每小时 tick 数
-                // 注：days_per_season 用于季节周期，chronicle 固定为 7 日
-                let days_per_period = 7;
+        let time_config = crate::game_data::registry::TimeRegistry::get_config();
+        let chronicle_config = crate::game_data::registry::ChronicleRegistry::get_config();
+
+        match (time_config, chronicle_config) {
+            (Some(c), Some(chronicle)) => {
+                let days_per_period = chronicle.days_per_period;
                 (days_per_period * c.hours_per_day * c.ticks_per_hour) as i64
-            })
-            .unwrap_or(168) // 回退值
+            }
+            (Some(c), None) => {
+                // 回退：使用默认 7 日
+                (7 * c.hours_per_day * c.ticks_per_hour) as i64
+            }
+            _ => 168, // 回退值
+        }
+    }
+
+    /// 从 game_rules.yaml 获取 highlight_threshold
+    fn get_highlight_threshold() -> i32 {
+        crate::game_data::registry::ChronicleRegistry::get_config()
+            .map(|c| c.highlight_threshold)
+            .unwrap_or(3)
     }
 
     /// 获取周期天数配置（供外部使用）
     pub fn period_days() -> i64 {
-        7 // 固定 7 日
+        crate::game_data::registry::ChronicleRegistry::get_config()
+            .map(|c| c.days_per_period as i64)
+            .unwrap_or(7)
     }
 }
 
