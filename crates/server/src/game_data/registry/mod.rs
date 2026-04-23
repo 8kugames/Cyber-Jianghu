@@ -16,6 +16,7 @@
 // ============================================================================
 
 mod action_registry;
+mod chronicle_registry;
 mod global;
 mod inventory_registry;
 mod item_registry;
@@ -26,6 +27,7 @@ mod state_registry;
 pub mod time_registry;
 
 pub use action_registry::{ActionField, ActionRegistry};
+pub use chronicle_registry::ChronicleRegistry;
 pub use global::{init_registry, registry, registry_or_error};
 pub use inventory_registry::{InitialInventoryRegistry, InventoryRegistry};
 pub use item_registry::ItemRegistry;
