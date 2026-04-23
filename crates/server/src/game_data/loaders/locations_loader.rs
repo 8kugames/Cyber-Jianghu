@@ -57,7 +57,7 @@ mod tests {
                             "node_id": "inn",
                             "name": "龙门客栈",
                             "type": "map",
-                            "parent_id": "hexi_corridor"
+                            "parent_id": "河西走廊"
                         },
                         {
                             "node_id": "lobby",
@@ -91,7 +91,7 @@ data:
     - node_id: "inn"
       name: "龙门客栈"
       type: "map"
-      parent_id: "hexi_corridor"
+      parent_id: "河西走廊"
     - node_id: "lobby"
       name: "大堂"
       type: "sub_scene"

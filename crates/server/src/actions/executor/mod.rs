@@ -74,7 +74,9 @@ impl ActionExecutor {
             ),
             "赠送" => InteractionActionExecutor::execute_give(intent, agent_state),
             "偷窃" => InteractionActionExecutor::execute_steal(intent, agent_state),
-            "使用" | "进食" | "饮水" => CombatActionExecutor::execute_use(intent, agent_state),
+            "使用" | "进食" | "饮水" => {
+                CombatActionExecutor::execute_use(intent, agent_state)
+            }
             "拾取" => BasicActionExecutor::execute_pickup(
                 intent,
                 action_data.clone(),

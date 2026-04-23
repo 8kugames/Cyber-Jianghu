@@ -184,7 +184,7 @@ mod tests {
             Uuid::new_v4(),
             1,
             "使用",
-            Some(serde_json::json!({"item_id": "mantou"})),
+            Some(serde_json::json!({"item_id": "馒头"})),
         )
         .with_thought("因为饥饿，所以决定使用馒头".to_string());
 

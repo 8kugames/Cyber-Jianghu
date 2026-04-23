@@ -451,7 +451,7 @@ mod tests {
     async fn test_evaluate_in_item_ids() {
         let evaluator = DefaultEvaluator;
         let mut context = create_test_context();
-        context.available_item_ids = vec!["mantou".to_string(), "water".to_string()];
+        context.available_item_ids = vec!["馒头".to_string(), "清水".to_string()];
 
         // item_id 在列表中
         let condition = RuleCondition::In(
@@ -462,7 +462,7 @@ mod tests {
             Uuid::new_v4(),
             10,
             ActionType::SPEAK,
-            Some(serde_json::json!({"item_id": "mantou"})),
+            Some(serde_json::json!({"item_id": "馒头"})),
         );
         assert!(evaluator.evaluate(&condition, &context).await);
 
@@ -480,10 +480,7 @@ mod tests {
     async fn test_evaluate_in_node_ids() {
         let evaluator = DefaultEvaluator;
         let mut context = create_test_context();
-        context.reachable_node_ids = vec![
-            "longmen_kitchen".to_string(),
-            "longmen_backyard".to_string(),
-        ];
+        context.reachable_node_ids = vec!["龙门厨房".to_string(), "龙门后院".to_string()];
 
         let condition = RuleCondition::In(
             "intent.action_data.target_location".to_string(),
@@ -494,7 +491,7 @@ mod tests {
             Uuid::new_v4(),
             10,
             ActionType::SPEAK,
-            Some(serde_json::json!({"target_location": "longmen_kitchen"})),
+            Some(serde_json::json!({"target_location": "龙门厨房"})),
         );
         assert!(evaluator.evaluate(&condition, &context).await);
 

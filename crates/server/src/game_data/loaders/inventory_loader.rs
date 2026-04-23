@@ -81,7 +81,7 @@ mod tests {
                 "data": {
                     "items": {
                         "food": [
-                            { "item_id": "mantou", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" }
+                            { "item_id": "馒头", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" }
                         ]
                     }
                 }
@@ -91,7 +91,7 @@ mod tests {
         let config = load_initial_inventory(dir.path()).unwrap();
         assert_eq!(config.version, "2.0.0");
         assert_eq!(config.data.items.len(), 1);
-        assert_eq!(config.data.items[0].item_id, "mantou");
+        assert_eq!(config.data.items[0].item_id, "馒头");
         assert_eq!(config.data.items[0].quantity, 3);
     }
 
@@ -104,7 +104,7 @@ meta: {}
 data:
   items:
     food:
-      - item_id: "mantou"
+      - item_id: "馒头"
         name: "馒头"
         quantity: 3
         description: "热腾腾的馒头"
@@ -113,7 +113,7 @@ data:
         let config: UnifiedInitialInventoryConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
         assert_eq!(config.version, "2.0.0");
         assert_eq!(config.data.items.len(), 1);
-        assert_eq!(config.data.items[0].item_id, "mantou");
+        assert_eq!(config.data.items[0].item_id, "馒头");
     }
 
     #[test]
@@ -124,7 +124,7 @@ description: "初始物品配置"
 meta: {}
 data:
   items:
-    - item_id: "mantou"
+    - item_id: "馒头"
       name: "馒头"
       quantity: 3
       description: "热腾腾的馒头"

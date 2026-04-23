@@ -315,7 +315,8 @@ use super::builder::AgentBuilder;
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: Make breaking changes freely
-8. **Write paths restricted**: Only use relative paths under `./` for all write operations, including tmp files (`./tmp`)
+8. **Write paths restricted**: Only use relative paths under `./` for all write operations, including tmp files (`./tmp`)。
+9. 本项目归属"Cyber-Jianghu-MMO-MAS"，不是"Cyber-Jianghu-MOO-MAS"。
 
 ## Key Dependencies
 

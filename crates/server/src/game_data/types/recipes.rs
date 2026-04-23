@@ -31,4 +31,8 @@ pub struct RecipeDefinition {
     pub materials: Vec<RecipeMaterial>,
     pub tools: Vec<String>,
     pub stamina_cost: i32,
+
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }

@@ -16,8 +16,9 @@ use super::prompt_cache::PromptCache;
 use super::prompt_template::PromptTemplateConfig;
 use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
-use super::translation::{ActionAliasMap, FieldAliasMap};
-use crate::component::llm::{LlmClient, LlmClientExt};
+use super::translation::{ActionAliasMap, EntityTranslationRegistry, FieldAliasMap};
+use crate::component::llm::conversation::ConversationHistory;
+use crate::component::llm::{ConversationTurn, LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
@@ -133,6 +134,8 @@ pub struct CognitiveEngine {
     pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
+    /// 对话历史（长窗口，SQLite 持久化）
+    conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
     /// Prompt 模板配置（从 YAML 加载，None 时 fail-fast）
     pub(super) prompt_template: Option<PromptTemplateConfig>,
     /// 行动结果记忆（Hermes 模式）
@@ -163,6 +166,7 @@ impl CognitiveEngine {
             config: std::sync::RwLock::new(config),
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
+            conversation_history: None,
             prompt_template,
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
@@ -193,6 +197,7 @@ impl CognitiveEngine {
             config: std::sync::RwLock::new(config),
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
+            conversation_history: None,
             prompt_template,
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
@@ -280,6 +285,79 @@ impl CognitiveEngine {
     /// 设置 Outcome Memory（由 builder 在构建后注入）
     pub fn set_outcome_memory(&mut self, mem: crate::component::memory::OutcomeMemory) {
         self.outcome_memory = Some(mem);
+    }
+
+    /// 设置对话历史（由 lifecycle 在注册后注入）
+    pub fn set_conversation_history(&mut self, history: ConversationHistory) {
+        info!(
+            "对话历史已注入: {} 轮, tokens≈{}",
+            history.turn_count(),
+            history.estimated_tokens(),
+        );
+        self.conversation_history = Some(std::sync::Mutex::new(history));
+    }
+
+    /// 添加一轮对话到历史
+    pub fn push_conversation_turn(&self, tick_id: i64, user: String, assistant: String) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+            && let Err(e) = h.push_turn(tick_id, user, assistant)
+        {
+            tracing::warn!("对话历史写入失败: {}", e);
+        }
+    }
+
+    /// 检查是否需要 summary 压缩
+    pub fn conversation_needs_summary(&self) -> bool {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(h) = history.lock()
+        {
+            return h.needs_summary();
+        }
+        false
+    }
+
+    /// 生成 summary prompt
+    pub fn conversation_summary_prompt(&self) -> Option<String> {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(h) = history.lock()
+        {
+            let prompt = h.generate_summary_prompt();
+            if prompt.is_empty() {
+                return None;
+            }
+            return Some(prompt);
+        }
+        None
+    }
+
+    /// 执行 summary 压缩
+    pub fn conversation_replace_with_summary(&self, summary: String) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+            && let Err(e) = h.replace_with_summary(summary)
+        {
+            tracing::warn!("对话历史压缩失败: {}", e);
+        }
+    }
+
+    /// 清空对话历史 (rebirth)
+    pub fn clear_conversation_history(&self) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+            && let Err(e) = h.clear()
+        {
+            tracing::warn!("对话历史清空失败: {}", e);
+        }
+    }
+
+    /// 更新对话历史的 system message (persona 变更时)
+    pub fn update_conversation_system_message(&self, msg: &str) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+        {
+            h.update_system_message(msg);
+        }
     }
 
     /// 更新动作别名映射（收到 game_rules_update 后调用）
@@ -375,7 +453,38 @@ impl CognitiveEngine {
             &agent_name,
         );
 
-        let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
+        // 使用对话历史（长窗口）或单次调用
+        let response: DirectCognitiveResponse = {
+            let conv_data = self.conversation_history.as_ref().map(|history| {
+                let h = history.lock().unwrap();
+                (
+                    h.get_turns()
+                        .iter()
+                        .map(|t| ConversationTurn {
+                            user: t.user.clone(),
+                            assistant: t.assistant.clone(),
+                        })
+                        .collect::<Vec<_>>(),
+                    h.get_system_message().to_string(),
+                    h.get_summary().map(|s| s.to_string()),
+                )
+            });
+            // lock 已释放
+
+            match conv_data {
+                Some((turns, system, summary)) => {
+                    self.llm_client
+                        .complete_json_with_conversation(
+                            &system,
+                            summary.as_deref(),
+                            &turns,
+                            &prompt,
+                        )
+                        .await?
+                }
+                None => self.llm_client.complete_json(&prompt).await?,
+            }
+        };
         let response_json = serde_json::to_string(&response)?;
 
         // 构建 CognitiveChain 的 4 个 stage（从统一响应中提取）
@@ -422,7 +531,8 @@ impl CognitiveEngine {
         chain.add_stage(planning);
 
         // 构建结构化 Intents（从 actions 数组，向后兼容旧格式）
-        // 翻译硬边界：中文/别名 → 英文 canonical，ReflectorSoul 只看到英文
+        // 翻译硬边界：中文/别名 → canonical 中文，ReflectorSoul 只看到 canonical
+        let entity_registry = EntityTranslationRegistry::from_world_state(world_state);
         let actions = response.get_actions();
         let translated_actions: Vec<DirectCognitiveAction> = actions
             .iter()
@@ -439,6 +549,8 @@ impl CognitiveEngine {
                         .read()
                         .unwrap()
                         .translate_data(&action_type, data);
+                    // entity-alias 翻译：所有已注册字段的值 (target_location, item_id, target_agent_id)
+                    entity_registry.translate(data);
                 }
                 Ok(DirectCognitiveAction {
                     action_type,

@@ -53,7 +53,7 @@ mod tests {
                 "meta": {},
                 "data": [
                     {
-                        "item_id": "mantou",
+                        "item_id": "馒头",
                         "name": "馒头",
                         "item_type": "consumable",
                         "effects": [
@@ -74,7 +74,7 @@ mod tests {
         let items = load_items(dir.path()).unwrap();
         assert_eq!(items.version, "2.0.0");
         assert_eq!(items.data.len(), 1);
-        assert_eq!(items.data[0].item_id, "mantou");
+        assert_eq!(items.data[0].item_id, "馒头");
     }
 
     #[test]
@@ -84,7 +84,7 @@ version: "2.0.0"
 description: "物品配置文件"
 meta: {}
 data:
-  - item_id: "mantou"
+  - item_id: "馒头"
     name: "馒头"
     item_type: "consumable"
     effects:
@@ -98,6 +98,6 @@ data:
         let config: UnifiedItemsConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
         assert_eq!(config.version, "2.0.0");
         assert_eq!(config.data.len(), 1);
-        assert_eq!(config.data[0].item_id, "mantou");
+        assert_eq!(config.data[0].item_id, "馒头");
     }
 }

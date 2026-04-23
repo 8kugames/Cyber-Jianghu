@@ -298,14 +298,14 @@ mod tests {
 
     #[test]
     fn test_game_error_item_not_usable() {
-        let err = GameError::ItemNotUsable("silver".to_string());
-        assert_eq!(err.to_string(), "物品不可使用: silver");
+        let err = GameError::ItemNotUsable("银子".to_string());
+        assert_eq!(err.to_string(), "物品不可使用: 银子");
     }
 
     #[test]
     fn test_game_error_item_not_equippable() {
-        let err = GameError::ItemNotEquippable("mantou".to_string());
-        assert_eq!(err.to_string(), "物品不可装备: mantou");
+        let err = GameError::ItemNotEquippable("馒头".to_string());
+        assert_eq!(err.to_string(), "物品不可装备: 馒头");
     }
 
     #[test]
