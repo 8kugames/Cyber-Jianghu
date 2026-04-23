@@ -79,6 +79,16 @@ pub fn cognitive_decision_with_chain(
                     Ok(chain) => {
                         let final_intent = chain.final_intent.clone();
                         last_chain = Some(chain.clone());
+
+                        // 推送到对话历史（长窗口）
+                        if !memory_context.is_empty() {
+                            engine.push_conversation_turn(
+                                world_state.tick_id,
+                                memory_context.clone(),
+                                final_intent.action_type.to_string(),
+                            );
+                        }
+
                         // CognitiveValidator: 验证认知链质量
                         let validator = CognitiveValidator::new(chain.persona.clone());
                         let validation = validator.validate(&chain);

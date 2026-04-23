@@ -193,7 +193,8 @@ impl TickScheduler {
 
     /// Vendor 自动补货：从 DB 读取补货规则，低于 threshold 时触发，扣除银两
     async fn refill_vendors(&mut self, tick_id: i64) -> Result<()> {
-        let refill_rules = crate::db::get_all_enabled_vendor_refills(&self.db_pool).await
+        let refill_rules = crate::db::get_all_enabled_vendor_refills(&self.db_pool)
+            .await
             .context("读取 Vendor 补货规则失败")?;
 
         if refill_rules.is_empty() {
@@ -201,24 +202,24 @@ impl TickScheduler {
         }
 
         // 按 agent_id 分组
-        let mut rules_by_agent: std::collections::HashMap<uuid::Uuid, Vec<&crate::db::VendorRefillRule>> =
-            std::collections::HashMap::new();
+        let mut rules_by_agent: std::collections::HashMap<
+            uuid::Uuid,
+            Vec<&crate::db::VendorRefillRule>,
+        > = std::collections::HashMap::new();
         for rule in &refill_rules {
             rules_by_agent.entry(rule.agent_id).or_default().push(rule);
         }
 
         for (agent_id, rules) in &rules_by_agent {
             // 查询当前库存
-            let inventory: Vec<(String, i32)> = sqlx::query_as(
-                "SELECT item_id, quantity FROM agent_inventory WHERE agent_id = $1",
-            )
-            .bind(*agent_id)
-            .fetch_all(&self.db_pool)
-            .await
-            .context("查询 Vendor 库存失败")?;
+            let inventory: Vec<(String, i32)> =
+                sqlx::query_as("SELECT item_id, quantity FROM agent_inventory WHERE agent_id = $1")
+                    .bind(*agent_id)
+                    .fetch_all(&self.db_pool)
+                    .await
+                    .context("查询 Vendor 库存失败")?;
 
-            let inv_map: std::collections::HashMap<String, i32> =
-                inventory.into_iter().collect();
+            let inv_map: std::collections::HashMap<String, i32> = inventory.into_iter().collect();
 
             let silver = inv_map.get("银子").copied().unwrap_or(0);
             if silver == 0 {
@@ -266,7 +267,11 @@ impl TickScheduler {
 
                 info!(
                     "Vendor 补货: agent={} item={} qty={} ({} -> {})",
-                    agent_id, rule.item_id, buy_count, current, current + buy_count
+                    agent_id,
+                    rule.item_id,
+                    buy_count,
+                    current,
+                    current + buy_count
                 );
             }
 
@@ -283,11 +288,13 @@ impl TickScheduler {
                     .await
                     .context("扣除 Vendor 银两失败")?;
                 } else {
-                    sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = '银子'")
-                        .bind(*agent_id)
-                        .execute(&self.db_pool)
-                        .await
-                        .context("扣除 Vendor 银两失败")?;
+                    sqlx::query(
+                        "DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = '银子'",
+                    )
+                    .bind(*agent_id)
+                    .execute(&self.db_pool)
+                    .await
+                    .context("扣除 Vendor 银两失败")?;
                 }
 
                 // 注入 LLM 消息
@@ -444,7 +451,8 @@ impl TickScheduler {
         for entry in self.vendor_pending_events.iter() {
             let agent_id = *entry.key();
             for event in entry.value() {
-                self.event_manager.add_event_for_agent(agent_id, event.clone());
+                self.event_manager
+                    .add_event_for_agent(agent_id, event.clone());
             }
         }
         self.vendor_pending_events.clear();

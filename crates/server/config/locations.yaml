@@ -12,7 +12,7 @@ description: "地图位置配置文件"
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-03-16"
+  updated_at: "2026-04-21"
   author: "Cyber-Jianghu Community"
   tags: ["locations", "map", "config"]
 
@@ -25,139 +25,146 @@ data:
     # 河西走廊 - 主地图
     # --------------------------------------------------------------------------
 
-    - node_id: "hexi_corridor"
+    - node_id: "河西走廊"
       name: "河西走廊"
       type: "region" # 区域级别
       parent_id: ""
+      aliases: ["hexi_corridor", "走廊"]
 
     # --------------------------------------------------------------------------
     # 龙门客栈（地图）
     # --------------------------------------------------------------------------
 
-    - node_id: "longmen_inn"
+    - node_id: "龙门客栈"
       name: "龙门客栈"
       type: "map"
-      parent_id: "hexi_corridor"
+      parent_id: "河西走廊"
       description: "大漠中的传奇客栈，各路人马汇聚之地"
+      aliases: ["longmen_inn", "客栈"]
 
     # 龙门客栈 - 子场景
-    - node_id: "longmen_lobby"
+    - node_id: "龙门大堂"
       name: "大堂"
       type: "sub_scene"
-      parent_id: "longmen_inn"
+      parent_id: "龙门客栈"
       description: "客栈的大堂，人声鼎沸"
+      aliases: ["longmen_lobby", "大堂"]
 
-    - node_id: "longmen_backyard"
+    - node_id: "龙门后院"
       name: "后院"
       type: "sub_scene"
-      parent_id: "longmen_inn"
+      parent_id: "龙门客栈"
       gatherable_items:
-        - "water" # 井水
+        - "清水" # 井水
       description: "客栈后院，有一口古井"
+      aliases: ["longmen_backyard", "后院"]
 
-    - node_id: "longmen_kitchen"
+    - node_id: "龙门厨房"
       name: "厨房"
       type: "sub_scene"
-      parent_id: "longmen_inn"
+      parent_id: "龙门客栈"
       gatherable_items:
-        - "water" # 缸中清水
+        - "清水" # 缸中清水
       description: "客栈的厨房，飘着饭香"
+      aliases: ["longmen_kitchen", "厨房"]
 
     # --------------------------------------------------------------------------
     # 荒漠（地图）
     # --------------------------------------------------------------------------
 
-    - node_id: "desert"
+    - node_id: "荒漠"
       name: "荒漠"
       type: "map"
-      parent_id: "hexi_corridor"
+      parent_id: "河西走廊"
       environmental_damage: 5 # 沙漠环境伤害
       gatherable_items:
-        - "li_guang_apricot" # 李广杏
-        - "wood" # 枯木
+        - "李广杏" # 李广杏
+        - "木材" # 枯木
       description: "无尽的黄沙，危险与机遇并存"
+      aliases: ["desert", "沙漠"]
 
     # --------------------------------------------------------------------------
     # 酒泉（地图）
     # --------------------------------------------------------------------------
 
-    - node_id: "jiuquan"
+    - node_id: "酒泉"
       name: "酒泉"
       type: "map"
-      parent_id: "hexi_corridor"
+      parent_id: "河西走廊"
       gatherable_items:
-        - "wheat" # 小麦
-        - "water" # 泉水
+        - "小麦" # 小麦
+        - "清水" # 泉水
       description: "绿洲小镇，以泉水甘美闻名"
+      aliases: ["jiuquan", "绿洲"]
 
   # ============================================================================
   # 地点连接（旅行路径）
   # ============================================================================
   edges:
     # 龙门客栈 <-> 酒泉
-    - from_node_id: "longmen_inn"
-      to_node_id: "jiuquan"
+    - from_node_id: "龙门客栈"
+      to_node_id: "酒泉"
       travel_cost: 5 # 5 tick
 
-    - from_node_id: "jiuquan"
-      to_node_id: "longmen_inn"
+    - from_node_id: "酒泉"
+      to_node_id: "龙门客栈"
       travel_cost: 5
 
     # 龙门客栈 <-> 荒漠
-    - from_node_id: "longmen_inn"
-      to_node_id: "desert"
+    - from_node_id: "龙门客栈"
+      to_node_id: "荒漠"
       travel_cost: 2
 
-    - from_node_id: "desert"
-      to_node_id: "longmen_inn"
+    - from_node_id: "荒漠"
+      to_node_id: "龙门客栈"
       travel_cost: 3 # 回程更累
 
     # 龙门客栈 <-> 子场景连接（从客栈大地图进入/离开子场景）
-    - from_node_id: "longmen_inn"
-      to_node_id: "longmen_lobby"
+    - from_node_id: "龙门客栈"
+      to_node_id: "龙门大堂"
       travel_cost: 1
 
-    - from_node_id: "longmen_lobby"
-      to_node_id: "longmen_inn"
+    - from_node_id: "龙门大堂"
+      to_node_id: "龙门客栈"
       travel_cost: 1
 
-    - from_node_id: "longmen_inn"
-      to_node_id: "longmen_backyard"
+    - from_node_id: "龙门客栈"
+      to_node_id: "龙门后院"
       travel_cost: 1
 
-    - from_node_id: "longmen_backyard"
-      to_node_id: "longmen_inn"
+    - from_node_id: "龙门后院"
+      to_node_id: "龙门客栈"
       travel_cost: 1
 
-    - from_node_id: "longmen_inn"
-      to_node_id: "longmen_kitchen"
+    - from_node_id: "龙门客栈"
+      to_node_id: "龙门厨房"
       travel_cost: 1
 
-    - from_node_id: "longmen_kitchen"
-      to_node_id: "longmen_inn"
+    - from_node_id: "龙门厨房"
+      to_node_id: "龙门客栈"
       travel_cost: 1
 
     # 龙门客栈内部移动
-    - from_node_id: "longmen_lobby"
-      to_node_id: "longmen_backyard"
+    - from_node_id: "龙门大堂"
+      to_node_id: "龙门后院"
       travel_cost: 1
 
-    - from_node_id: "longmen_backyard"
-      to_node_id: "longmen_lobby"
+    - from_node_id: "龙门后院"
+      to_node_id: "龙门大堂"
       travel_cost: 1
 
-    - from_node_id: "longmen_lobby"
-      to_node_id: "longmen_kitchen"
+    - from_node_id: "龙门大堂"
+      to_node_id: "龙门厨房"
       travel_cost: 1
 
-    - from_node_id: "longmen_kitchen"
-      to_node_id: "longmen_lobby"
+    - from_node_id: "龙门厨房"
+      to_node_id: "龙门大堂"
       travel_cost: 1
 
-    - from_node_id: "longmen_backyard"
-      to_node_id: "longmen_kitchen"
+    - from_node_id: "龙门后院"
+      to_node_id: "龙门厨房"
       travel_cost: 1
 
-    - from_node_id: "longmen_kitchen"
-      to_node_id: "longmen_backyard"
+    - from_node_id: "龙门厨房"
+      to_node_id: "龙门后院"
       travel_cost: 1

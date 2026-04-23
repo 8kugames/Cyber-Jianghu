@@ -30,7 +30,7 @@ pub fn create_test_config_dir() -> TempDir {
                         "real_seconds_per_tick": 60
                     },
                     "location": {
-                        "spawn_location": "longmen_inn"
+                        "spawn_location": "龙门客栈"
                     },
                     "game_time": {
                         "start_date": "2024-01-01"
@@ -64,7 +64,7 @@ pub fn create_test_config_dir() -> TempDir {
             "version": "0.0.1",
             "items": [
                 {
-                    "item_id": "mantou",
+                    "item_id": "馒头",
                     "name": "馒头",
                     "item_type": "consumable",
                     "effects": [
@@ -106,7 +106,7 @@ pub fn create_test_config_dir() -> TempDir {
             "data": {
                 "items": {
                     "food": [
-                        { "item_id": "mantou", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" }
+                        { "item_id": "馒头", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" }
                     ]
                 }
             }

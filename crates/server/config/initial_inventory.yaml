@@ -22,7 +22,7 @@ description: "初始背包物品配置"
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-03-19"
+  updated_at: "2026-04-21"
   author: "Cyber-Jianghu Community"
   tags: ["inventory", "initial", "config"]
 
@@ -30,19 +30,19 @@ data:
   # 初始物品列表（按组分类，组名仅用于组织，不影响功能）
   items:
     food:
-      - item_id: "mantou"
+      - item_id: "馒头"
         name: "馒头"
         quantity: 3
         description: "普通的馒头，可以恢复饥饿值"
 
     drink:
-      - item_id: "water"
+      - item_id: "清水"
         name: "清水"
         quantity: 3
         description: "干净的饮用水，可以恢复口渴值"
 
     currency:
-      - item_id: "silver"
+      - item_id: "银子"
         name: "银两"
         quantity: 10
         description: "通用货币，用于交易"

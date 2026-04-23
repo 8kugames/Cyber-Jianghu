@@ -121,6 +121,8 @@ pub async fn forward_dialogue_message(
 pub struct DeathNotificationContext<'a> {
     pub connection_manager: &'a ConnectionManager,
     pub agent_to_device_map: &'a AgentToDeviceMap,
+    /// 自动重生延迟 (0 = 不自动重生，需断连)
+    pub rebirth_delay_ticks: i32,
 }
 
 /// 向指定 Agent 发送死亡通知
@@ -157,6 +159,7 @@ pub async fn send_agent_died_notification(
             );
             return Ok(());
         }
+        let rebirth_delay = ctx.rebirth_delay_ticks;
         let msg = ServerMessage::AgentDied {
             agent_id,
             cause,
@@ -164,7 +167,7 @@ pub async fn send_agent_died_notification(
             location,
             tick_id,
             died_at,
-            rebirth_delay_ticks: 0,
+            rebirth_delay_ticks: rebirth_delay,
         };
         let json = serde_json::to_string(&msg)?;
         if connection.send(Message::Text(json.into())).await.is_err() {
@@ -175,18 +178,20 @@ pub async fn send_agent_died_notification(
             );
         } else {
             debug!(
-                "AgentDied notification sent to agent {} via device {}",
-                agent_id, device_id
+                "AgentDied notification sent to agent {} via device {} (rebirth_delay={})",
+                agent_id, device_id, rebirth_delay
             );
-            // 发送 WebSocket Close frame，触发 handler 的 recv 循环退出 → 连接清理
-            // 必须在 mark_dead() 之前发送，否则 send() 会因 is_dead 检查被拒绝
-            if connection.send(Message::Close(None)).await.is_err() {
-                warn!(
-                    "Agent {} Close frame send failed (channel already closed)",
-                    agent_id
-                );
+            // 自动重生启用时 (delay > 0)：不断连，让 agent 端计时后自动调用 auto-rebirth
+            // 不启用自动重生 (delay = 0)：发送 WebSocket Close 断连（原始行为）
+            if rebirth_delay <= 0 {
+                if connection.send(Message::Close(None)).await.is_err() {
+                    warn!(
+                        "Agent {} Close frame send failed (channel already closed)",
+                        agent_id
+                    );
+                }
+                connection.mark_dead();
             }
-            connection.mark_dead();
         }
     } else {
         warn!(

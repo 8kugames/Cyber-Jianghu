@@ -104,6 +104,25 @@ pub fn get_item_definition(item_id: &str) -> Option<ItemDefinition> {
     }
 }
 
+/// 获取货币物品 ID（数据驱动）
+///
+/// 从缓存中查找 item_type 为 Currency 的物品，返回其 item_id。
+/// 如果存在多个货币，返回第一个；如果没有货币，回退到 "银子"。
+pub fn get_currency_item_id() -> String {
+    match ITEM_CACHE.read() {
+        Ok(guard) => {
+            for (id, def) in guard.iter() {
+                if def.item_type == ItemType::Currency {
+                    return id.clone();
+                }
+            }
+            // 回退：缓存中没有 Currency 类型
+            "银子".to_string()
+        }
+        Err(_) => "银子".to_string(),
+    }
+}
+
 // 仅用于测试的重置函数
 #[cfg(test)]
 pub(crate) fn reset_item_cache() {

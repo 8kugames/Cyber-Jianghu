@@ -189,7 +189,11 @@ pub async fn agent_register(
         (
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
             gd.game_rules.data.agent_state.survival.critical_threshold,
-            gd.game_rules.data.agent_state.survival.critical_attack_threshold,
+            gd.game_rules
+                .data
+                .agent_state
+                .survival
+                .critical_attack_threshold,
             gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
             gd.game_rules.version.clone(),
             gd.game_rules.data.immediate_events.clone(),
@@ -348,7 +352,12 @@ pub async fn agent_auto_rebirth(
         let gd = state.game_data.get();
         let rebirth_config = &gd.game_rules.data.agent_state.survival.rebirth;
         let spawn_location = if rebirth_config.spawn_location.is_empty() {
-            gd.game_rules.data.agent_state.location.spawn_location.clone()
+            gd.game_rules
+                .data
+                .agent_state
+                .location
+                .spawn_location
+                .clone()
         } else {
             rebirth_config.spawn_location.clone()
         };
@@ -391,11 +400,13 @@ pub async fn agent_auto_rebirth(
     })?;
 
     // 更新 DashMap（内存缓存）
-    let new_state =
-        crate::models::AgentState::new(result.agent_id, crate::db::get_current_world_tick_id(&state.db_pool).await.unwrap_or(0));
-    state
-        .agent_state_cache
-        .insert(result.agent_id, new_state);
+    let new_state = crate::models::AgentState::new(
+        result.agent_id,
+        crate::db::get_current_world_tick_id(&state.db_pool)
+            .await
+            .unwrap_or(0),
+    );
+    state.agent_state_cache.insert(result.agent_id, new_state);
 
     info!(
         "Agent 自动重生成功: {} ({}) → {}",
@@ -503,11 +514,17 @@ pub async fn agent_grant_items(
 
         match result {
             Ok(_) => {
-                info!("Grant: agent={}, item={}, qty={}", payload.agent_id, item.item_id, item.quantity);
+                info!(
+                    "Grant: agent={}, item={}, qty={}",
+                    payload.agent_id, item.item_id, item.quantity
+                );
                 granted += 1;
             }
             Err(e) => {
-                error!("Grant failed: agent={}, item={}, error={}", payload.agent_id, item.item_id, e);
+                error!(
+                    "Grant failed: agent={}, item={}, error={}",
+                    payload.agent_id, item.item_id, e
+                );
             }
         }
     }
@@ -521,7 +538,9 @@ pub async fn agent_grant_items(
 
     // 注入 LLM 消息（"意外获得......，可用于销售"）
     if granted > 0 {
-        let items_desc: String = payload.items.iter()
+        let items_desc: String = payload
+            .items
+            .iter()
             .map(|i| {
                 let name = crate::game_data::registry::ItemRegistry::get(&i.item_id)
                     .map(|c| c.name.clone())
@@ -540,7 +559,8 @@ pub async fn agent_grant_items(
                 "items": payload.items.iter().map(|i| serde_json::json!({"item_id": i.item_id, "quantity": i.quantity})).collect::<Vec<_>>(),
             }),
         };
-        state.vendor_pending_events
+        state
+            .vendor_pending_events
             .entry(payload.agent_id)
             .or_default()
             .push(event);

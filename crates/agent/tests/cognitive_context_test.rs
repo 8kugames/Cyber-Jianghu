@@ -39,11 +39,13 @@ fn create_test_world_state() -> WorldState {
                     node_id: "market".to_string(),
                     name: "集市场".to_string(),
                     travel_cost: 1,
+                    aliases: vec![],
                 },
                 AdjacentNode {
                     node_id: "dojo".to_string(),
                     name: "武馆".to_string(),
                     travel_cost: 1,
+                    aliases: vec![],
                 },
             ],
             gatherable_items: vec![],
@@ -73,6 +75,7 @@ fn create_test_world_state() -> WorldState {
             name: "女儿红".to_string(),
             quantity: 1,
             item_type: "drink".to_string(),
+            aliases: vec![],
         }],
         events_log: vec![WorldEvent {
             event_type: WorldEventType::EnvironmentalChange,

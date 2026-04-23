@@ -668,3 +668,137 @@ pub async fn list_retired_agents(pool: &PgPool, device_id: Uuid) -> Result<Vec<R
     debug!("查询到 {} 个归隐角色", agents.len());
     Ok(agents)
 }
+
+// ============================================================================
+// 自动重生（死亡后属性重置）
+// ============================================================================
+
+/// 自动重生结果
+pub struct AutoRebirthResult {
+    /// 重生的 Agent ID
+    pub agent_id: Uuid,
+    /// 角色名称
+    pub name: String,
+    /// 重生位置
+    pub spawn_location: String,
+}
+
+/// 自动重生：重置死亡 Agent 的属性和库存，使其复活
+///
+/// 保留 agent_id、name、persona。重置属性到初始值、清空背包、重置位置。
+/// 调用者负责更新 DashMap 和 agent_to_device_map。
+pub async fn auto_rebirth_agent(
+    pool: &PgPool,
+    agent_id: Uuid,
+    spawn_location: &str,
+    reset_attributes: bool,
+    initial_items: &[(String, String, i32, String)],
+) -> Result<AutoRebirthResult> {
+    debug!("自动重生: agent_id={}, spawn={}", agent_id, spawn_location);
+
+    // 1. 确认 Agent 存在且为 dead 状态
+    let agent: Option<(String,)> = sqlx::query_as(
+        r#"
+        SELECT name FROM agents WHERE agent_id = $1 AND status = 'dead'
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(pool)
+    .await
+    .context("查询 Agent 失败")?;
+
+    let (name,) = match agent {
+        Some(a) => a,
+        None => anyhow::bail!("Agent {} 不存在或非 dead 状态，无法重生", agent_id),
+    };
+
+    // 2. 获取当前 tick_id
+    let current_tick: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(tick_id), 0) FROM agent_states WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .fetch_one(pool)
+    .await
+    .context("查询 tick_id 失败")?;
+
+    let rebirth_tick = current_tick + 1;
+
+    // 3. 重置属性到初始值 + is_alive=true
+    if reset_attributes {
+        let initial_state = crate::models::AgentState::new(agent_id, rebirth_tick);
+        let attrs = serde_json::to_value(initial_state.get_attributes_for_protocol())
+            .context("序列化初始属性失败")?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive)
+            VALUES ($1, $2, $3, $4, true)
+            "#,
+        )
+        .bind(agent_id)
+        .bind(rebirth_tick)
+        .bind(attrs)
+        .bind(spawn_location)
+        .execute(pool)
+        .await
+        .context("插入重生状态快照失败")?;
+    } else {
+        // 不重置属性：仅更新 is_alive 和位置
+        sqlx::query(
+            r#"
+            INSERT INTO agent_states (agent_id, tick_id, attributes, node_id, is_alive)
+            SELECT $1, $2, attributes, $4, true
+            FROM agent_states
+            WHERE agent_id = $1
+            ORDER BY tick_id DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(agent_id)
+        .bind(rebirth_tick)
+        .bind(spawn_location)
+        .execute(pool)
+        .await
+        .context("插入重生状态快照失败")?;
+    }
+
+    // 4. 清空背包 + 重新分配初始物品
+    sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1")
+        .bind(agent_id)
+        .execute(pool)
+        .await
+        .context("清空背包失败")?;
+
+    for item in initial_items {
+        sqlx::query(
+            r#"
+            INSERT INTO agent_inventory (agent_id, item_id, quantity)
+            VALUES ($1, $2, $3)
+            "#,
+        )
+        .bind(agent_id)
+        .bind(&item.0)
+        .bind(item.2)
+        .execute(pool)
+        .await
+        .context("分配初始物品失败")?;
+    }
+
+    // 5. 恢复 agents 表状态为 active
+    sqlx::query("UPDATE agents SET status = 'active' WHERE agent_id = $1")
+        .bind(agent_id)
+        .execute(pool)
+        .await
+        .context("恢复 Agent 状态失败")?;
+
+    info!(
+        "Agent 自动重生成功: {} ({}) → {}",
+        name, agent_id, spawn_location
+    );
+
+    Ok(AutoRebirthResult {
+        agent_id,
+        name,
+        spawn_location: spawn_location.to_string(),
+    })
+}

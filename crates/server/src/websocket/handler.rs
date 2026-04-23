@@ -221,7 +221,12 @@ async fn handle_websocket(
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
         let survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
-        let critical_attack_threshold = gd.game_rules.data.agent_state.survival.critical_attack_threshold;
+        let critical_attack_threshold = gd
+            .game_rules
+            .data
+            .agent_state
+            .survival
+            .critical_attack_threshold;
         let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
