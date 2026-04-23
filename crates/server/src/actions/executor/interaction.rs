@@ -2,11 +2,11 @@
 // 交互动作执行器
 // ============================================================================
 //
-// 实现Agent间交互动作：give, steal, trade
+// 实现Agent间交互动作：give, steal
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{GiveData, StealData, TradeData};
+use super::super::{GiveData, StealData};
 use crate::game_data::{ActionField, ActionRegistry};
 use crate::items::get_item_definition;
 use crate::models::{AgentState, Intent};
@@ -168,84 +168,5 @@ impl InteractionActionExecutor {
                 Some(intent.intent_id),
             )
         }
-    }
-
-    /// 执行 trade 动作
-    ///
-    /// 交易，带价格协商的物品转移
-    /// 使用 TradeExecuted 变体进行原子处理
-    pub(super) fn execute_trade(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-    ) -> ActionExecutionResult {
-        let data: TradeData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少交易数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
-
-        // 解析目标 ID
-        let target_id = match Uuid::parse_str(&data.target_agent_id) {
-            Ok(id) => id,
-            Err(_) => {
-                return ActionExecutionResult::failure(
-                    "无效的目标 ID".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
-
-        // 验证物品是否存在
-        if get_item_definition(&data.item_id).is_none() {
-            return ActionExecutionResult::failure(
-                format!("物品不存在: {}", data.item_id),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        // 验证数量有效
-        if data.quantity <= 0 {
-            return ActionExecutionResult::failure(
-                "交易数量必须大于 0".to_string(),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        // 验证价格有效
-        if data.price < 0 {
-            return ActionExecutionResult::failure(
-                "交易价格不能为负数".to_string(),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        let mut result = ActionExecutionResult::success(
-            format!(
-                "准备交易：{} x{} 以 {} 两银子",
-                data.item_id, data.quantity, data.price
-            ),
-            intent.action_type.to_string(),
-            Some(intent.intent_id),
-        );
-
-        // 使用 TradeExecuted 进行原子交易（物品和银两在一个事务中处理）
-        result.add_change(StateChange::TradeExecuted {
-            initiator: intent.agent_id,
-            target: target_id,
-            item_id: data.item_id.clone(),
-            item_quantity: data.quantity,
-            price: data.price,
-        });
-
-        result
     }
 }

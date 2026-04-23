@@ -44,6 +44,7 @@ impl AgentState {
             node_id,
             is_alive: true,
             inventory_cleared_this_tick: false,
+            skills: vec![],
             created_at: Utc::now(),
         }
     }

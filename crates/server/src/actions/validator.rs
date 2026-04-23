@@ -511,7 +511,7 @@ mod tests {
             "item_id": "馒头",
             "quantity": 1
         });
-        let intent = create_test_intent(ActionType::new("赠送"), Some(data));
+        let intent = create_test_intent(ActionType::new("给予"), Some(data));
         let state = create_test_state(agent_id, true);
         let target_state = create_test_state(target_id, false);
 
@@ -531,7 +531,7 @@ mod tests {
             "item_id": "馒头",
             "quantity": 0
         });
-        let intent = create_test_intent(ActionType::new("赠送"), Some(data));
+        let intent = create_test_intent(ActionType::new("给予"), Some(data));
         let state = create_test_state(agent_id, true);
         let target_state = create_test_state(target_id, true);
 

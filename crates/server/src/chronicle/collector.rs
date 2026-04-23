@@ -367,7 +367,7 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            "赠送" => {
+            "给予" => {
                 let result_message: Option<String> = row.get("result_message");
                 Highlight {
                     tick_id,
@@ -385,7 +385,7 @@ async fn collect_highlights(
         match action_type.as_str() {
             "说话" => dialogues.push(highlight),
             "攻击" => combats.push(highlight),
-            "赠送" => socials.push(highlight),
+            "给予" => socials.push(highlight),
             _ => {}
         }
     }

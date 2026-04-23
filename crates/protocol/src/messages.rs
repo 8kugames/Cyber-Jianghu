@@ -542,6 +542,7 @@ mod tests {
                 derived_attributes: std::collections::HashMap::new(),
                 attribute_descriptions: std::collections::HashMap::new(),
                 status_effects: vec![],
+                skills: vec![],
                 inventory: vec![],
             },
             entities: vec![],
