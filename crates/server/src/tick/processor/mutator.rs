@@ -183,6 +183,35 @@ impl StateMutator for LocationMutator {
     }
 }
 
+/// 技能变更器
+///
+/// 处理 Agent 技能习得
+pub struct SkillMutator;
+
+#[async_trait]
+impl StateMutator for SkillMutator {
+    async fn mutate(
+        &self,
+        change: &StateChange,
+        states: &mut [AgentState],
+        _ctx: &mut MutationContext<'_>,
+    ) -> Result<bool> {
+        if let StateChange::SkillLearned { agent_id, skill_id } = change {
+            if let Some(state) = states.iter_mut().find(|s| s.agent_id == *agent_id) {
+                if !state.skills.contains(skill_id) {
+                    state.skills.push(skill_id.clone());
+                    tracing::info!("Agent {} 习得技能: {}", agent_id, skill_id);
+                }
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +224,7 @@ mod tests {
         state.node_id = "test_location".to_string();
         state.is_alive = true;
         state.inventory_cleared_this_tick = false;
+        state.skills = vec![];
         state
     }
 
@@ -226,5 +256,64 @@ mod tests {
         let result = mutator.mutate(&change, &mut states, &mut ctx).await;
         assert!(result.unwrap());
         // LocationMutator 只标记成功，实际更新在 apply_state_change 中处理
+    }
+
+    #[tokio::test]
+    async fn test_skill_mutator_learn() {
+        let mutator = SkillMutator;
+        let agent_id = Uuid::new_v4();
+        let mut states = vec![make_test_agent(agent_id)];
+        let mut events = vec![];
+        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
+        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+
+        let change = StateChange::SkillLearned {
+            agent_id,
+            skill_id: "martial/sword-basic".to_string(),
+        };
+
+        let result = mutator.mutate(&change, &mut states, &mut ctx).await;
+        assert!(result.unwrap());
+        assert!(states[0].skills.contains(&"martial/sword-basic".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_skill_mutator_idempotent() {
+        let mutator = SkillMutator;
+        let agent_id = Uuid::new_v4();
+        let mut states = vec![make_test_agent(agent_id)];
+        states[0].skills.push("martial/sword-basic".to_string());
+        let mut events = vec![];
+        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
+        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+
+        let change = StateChange::SkillLearned {
+            agent_id,
+            skill_id: "martial/sword-basic".to_string(),
+        };
+
+        let result = mutator.mutate(&change, &mut states, &mut ctx).await;
+        assert!(result.unwrap());
+        assert_eq!(states[0].skills.len(), 1); // 无重复
+    }
+
+    #[tokio::test]
+    async fn test_skill_mutator_wrong_agent() {
+        let mutator = SkillMutator;
+        let agent_id = Uuid::new_v4();
+        let other_id = Uuid::new_v4();
+        let mut states = vec![make_test_agent(agent_id)];
+        let mut events = vec![];
+        let db_pool = DbPool::connect_lazy("postgres://postgres@localhost/postgres").unwrap();
+        let mut ctx = MutationContext::new(&db_pool, 1, None, &mut events);
+
+        let change = StateChange::SkillLearned {
+            agent_id: other_id,
+            skill_id: "martial/sword-basic".to_string(),
+        };
+
+        let result = mutator.mutate(&change, &mut states, &mut ctx).await;
+        assert!(!result.unwrap()); // 未找到目标 agent
+        assert!(states[0].skills.is_empty());
     }
 }

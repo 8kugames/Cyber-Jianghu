@@ -436,7 +436,7 @@ pub async fn register_agent_transactional(
 
     // 步骤2: 创建初始状态
     let initial_state = AgentState::new(agent_id, initial_tick_id);
-    let attributes_json = serde_json::to_value(initial_state.get_attributes_for_protocol())
+    let attributes_json = super::state_ops::serialize_attributes_with_skills(&initial_state)
         .context("序列化属性失败")?;
 
     let state = sqlx::query_as::<Postgres, AgentState>(
@@ -726,7 +726,7 @@ pub async fn auto_rebirth_agent(
     // 3. 重置属性到初始值 + is_alive=true
     if reset_attributes {
         let initial_state = crate::models::AgentState::new(agent_id, rebirth_tick);
-        let attrs = serde_json::to_value(initial_state.get_attributes_for_protocol())
+        let attrs = super::state_ops::serialize_attributes_with_skills(&initial_state)
             .context("序列化初始属性失败")?;
 
         sqlx::query(

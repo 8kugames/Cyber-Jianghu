@@ -43,6 +43,7 @@ impl StateProcessor {
                 Box::new(super::mutator::AttributeMutator),
                 Box::new(super::mutator::InventoryMutator),
                 Box::new(super::mutator::LocationMutator),
+                Box::new(super::mutator::SkillMutator),
             ],
             db_pool,
         }

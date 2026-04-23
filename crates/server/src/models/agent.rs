@@ -71,6 +71,10 @@ pub struct AgentState {
     /// 本Tick内是否已清空过背包（防止重复清空）
     pub inventory_cleared_this_tick: bool,
 
+    /// 已掌握的技能 ID 列表
+    #[serde(default)]
+    pub skills: Vec<String>,
+
     /// 状态记录时间
     pub created_at: DateTime<Utc>,
 }
