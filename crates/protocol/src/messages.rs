@@ -288,6 +288,9 @@ pub enum ClientMessage {
         action_data: Option<serde_json::Value>,
         /// 优先级
         priority: i32,
+        /// Pipeline 后续 Intent（multi-Intent 支持）
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        subsequent_intents: Vec<crate::types::Intent>,
     },
 
     /// 对话消息
@@ -402,6 +405,7 @@ impl ClientMessage {
             action_type: intent.action_type.to_string(),
             action_data: intent.action_data,
             priority: intent.priority,
+            subsequent_intents: intent.subsequent_intents,
         }
     }
 
