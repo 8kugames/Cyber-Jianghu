@@ -306,7 +306,7 @@ impl super::Agent {
                     location: String::new(),
                     tick_id: 0,
                     died_at: chrono::Utc::now().timestamp_millis(),
-                    rebirth_delay_ticks: 0,
+                    rebirth_delay_ticks: self.config.rebirth_delay_ticks(),
                 };
                 let _ = api_state.death_event_tx.send(death_msg);
             }
@@ -547,8 +547,12 @@ impl super::Agent {
                                 self.character_name(), death_event.description
                             );
                             self.death_reported = true;
+                            self.death_tick_id = Some(world_state.tick_id);
+
+                            // 从 HttpApiState 读取 rebirth_delay_ticks（由 AgentDied 回调写入）
                             if let Some(ref api_state) = self.http_api_state {
                                 api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                                self.rebirth_delay_ticks = api_state.rebirth_delay_ticks.load(std::sync::atomic::Ordering::Relaxed);
                             }
 
                             // 持久化死亡状态到 character.yaml（确保世界树显示正确）
@@ -562,11 +566,79 @@ impl super::Agent {
                                 }
                             }
 
-                            // 死亡后不退出，等待转生：
-                            // - Cognitive 模式：继续循环，等待 rebirth handler 触发重连
-                            // - Claw 模式：OpenClaw 已收到 AgentDied 信号，会通过 reconnect_rx 触发重连
+                            // 自动重生：调度延迟后的重生 API 调用
+                            if self.rebirth_delay_ticks > 0 {
+                                let delay_ticks = self.rebirth_delay_ticks;
+                                let tick_secs = self.get_tick_duration().await.as_secs();
+                                let delay_ms = delay_ticks as u64 * tick_secs * 1000;
+                                let agent_id = world_state.agent_id.unwrap_or_default();
+                                let http_url = self.config.server.http_url.clone();
+                                let api_state = self.http_api_state.clone();
+
+                                info!(
+                                    "自动重生已调度: agent={}, delay={} ticks ({}s)",
+                                    agent_id, delay_ticks, delay_ms / 1000
+                                );
+
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                    info!("自动重生: 调用 auto-rebirth API (agent={})", agent_id);
+
+                                    let client = reqwest::Client::new();
+                                    let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
+                                    match client
+                                        .post(&url)
+                                        .json(&serde_json::json!({ "agent_id": agent_id }))
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(resp) if resp.status().is_success() => {
+                                            info!("自动重生成功: agent={}", agent_id);
+                                            if let Some(ref api_state) = api_state {
+                                                api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                            }
+                                        }
+                                        Ok(resp) => {
+                                            let status = resp.status();
+                                            let body = resp.text().await.unwrap_or_default();
+                                            warn!("自动重生失败: agent={}, status={}, body={}", agent_id, status, body);
+                                        }
+                                        Err(e) => {
+                                            warn!("自动重生请求失败: agent={}, error={}", agent_id, e);
+                                        }
+                                    }
+                                });
+                            }
+
                             continue;
                         }
+
+                    // 1.5b 已死亡 + 自动重生已完成 → 重置状态恢复决策循环
+                    if self.death_reported && self.rebirth_delay_ticks > 0 {
+                        let rebirth_done = self.http_api_state.as_ref()
+                            .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                            .unwrap_or(false);
+                        if rebirth_done {
+                            info!(
+                                "Agent '{}' 自动重生恢复决策: tick={}",
+                                self.character_name(),
+                                world_state.tick_id
+                            );
+                            self.death_reported = false;
+                            self.death_tick_id = None;
+                            if let Some(ref mut char_cfg) = self.character_config {
+                                char_cfg.status = crate::config::CharacterStatus::Alive;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    let characters_dir = api_state.character_dir.read().await.clone();
+                                    if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                                        warn!("Failed to persist rebirth status: {}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
 
                     // 1.5 清除上一 tick 的 rejection reason（在消费新反馈之前）
                     self.last_rejection_reason = None;
@@ -705,6 +777,16 @@ impl super::Agent {
                             };
                             warnings.push(warning);
                         }
+
+                        // 生存攻击安全阀：hunger/thirst 极低时注入攻击/交易提示
+                        let critical = self.config.critical_attack_threshold();
+                        if ((hunger > 0 && hunger <= critical) || (thirst > 0 && thirst <= critical))
+                            && let Some(t) = tmpl
+                            && let Some(hint) = t.render_section("critical_survival_hint", &std::collections::HashMap::new())
+                        {
+                            warnings.push(hint);
+                        }
+
                         warnings
                     };
 
@@ -1041,6 +1123,16 @@ impl super::Agent {
                                     intents.extend(chaos_intents);
                                 }
                             }
+                            // LLM 失败混沌：配额耗尽时注入生存导向的随机 intents
+                            if self.llm_chaos_active
+                                && let Some(ref mut generator) = self.chaos_generator
+                            {
+                                let remaining = max_per_tick.saturating_sub(intents.len());
+                                if remaining > 0 {
+                                    let llm_chaos = generator.generate_llm_chaos_intents(&world_state, remaining);
+                                    intents.extend(llm_chaos);
+                                }
+                            }
                             intents
                         };
 
@@ -1185,6 +1277,33 @@ impl super::Agent {
                                 .with_thought("三魂循环未产出有效意图".to_string())
                         }
                     };
+
+                    // LLM 失败追踪：检测是否为 LLM 不可用导致的 fallback idle
+                    let is_llm_failure = final_intent.action_type.as_str() == "休息"
+                        && final_intent.thought_log.as_ref()
+                            .map(|t| t.contains("意图多次被驳回") || t.contains("三魂循环未产出有效意图"))
+                            .unwrap_or(false);
+                    if is_llm_failure {
+                        self.consecutive_llm_failures += 1;
+                    } else {
+                        self.consecutive_llm_failures = 0;
+                    }
+                    // 阈值: 从 game_rules 读取 llm_chaos_threshold（默认 12）
+                    let llm_chaos_threshold = self.config.game_rules
+                        .as_ref()
+                        .and_then(|g| g.intent_batch.as_ref())
+                        .map(|b| b.llm_chaos_threshold)
+                        .unwrap_or(12);
+                    let was_chaos_active = self.llm_chaos_active;
+                    self.llm_chaos_active = self.consecutive_llm_failures >= llm_chaos_threshold;
+                    if self.llm_chaos_active && !was_chaos_active {
+                        warn!(
+                            "LLM chaos 模式激活: agent={}, consecutive_failures={}",
+                            self.character_name(), self.consecutive_llm_failures
+                        );
+                    } else if !self.llm_chaos_active && was_chaos_active {
+                        info!("LLM chaos 模式解除: agent={}, LLM 恢复正常", self.character_name());
+                    }
 
                     // 5.6 记录 Intent 到经历日志（供 Web Panel 查询）
                     if let Some(ref api_state) = self.http_api_state

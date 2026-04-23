@@ -191,6 +191,31 @@ pub struct GameRulesData {
     /// 涌现配置（跨 tick 动作观察）
     #[serde(default)]
     pub emergence: Option<EmergenceConfig>,
+
+    /// Vendor 自动补货配置（DEPRECATED: 已迁移到 DB agent_vendor_refill 表）
+    #[serde(default, skip_serializing)]
+    pub vendors: Vec<VendorConfig>,
+}
+
+/// Vendor 自动补货配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VendorConfig {
+    /// Agent 名称（匹配 agent_name）
+    pub agent_name: String,
+    /// 库存补货规则
+    #[serde(default)]
+    pub inventory_refill: Vec<VendorRefillRule>,
+}
+
+/// 单个 Vendor 补货规则
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VendorRefillRule {
+    /// 物品 ID
+    pub item_id: String,
+    /// 低于此阈值时触发补货
+    pub threshold: i32,
+    /// 单次最大购买量（受银两预算约束，实际购买 ≤ min(refill_to, 银两/2)）
+    pub refill_to: i32,
 }
 
 /// 涌现配置：控制 Agent 能观察到的其他 Agent 行为历史
@@ -291,6 +316,48 @@ pub struct SurvivalRulesData {
     /// hunger/thirst 低于此阈值时，survival 动作绕过 ReflectorSoul 审查
     #[serde(default = "default_survival_threshold")]
     pub critical_threshold: i32,
+
+    /// hunger/thirst 低于此阈值时注入攻击/交易提示（应 < critical_threshold）
+    #[serde(default = "default_critical_attack_threshold")]
+    pub critical_attack_threshold: i32,
+
+    /// 自动重生配置
+    #[serde(default)]
+    pub rebirth: RebirthRulesData,
+}
+
+fn default_critical_attack_threshold() -> i32 {
+    15
+}
+
+/// 自动重生规则数据
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RebirthRulesData {
+    /// 死亡后延迟 N 个 tick 自动重生 (0 = 不自动重生)
+    #[serde(default)]
+    pub delay_ticks: i32,
+
+    /// 是否重置属性到初始值
+    #[serde(default = "default_true")]
+    pub reset_attributes: bool,
+
+    /// 重生地点 (空字符串 = 使用 spawn_location)
+    #[serde(default)]
+    pub spawn_location: String,
+}
+
+impl Default for RebirthRulesData {
+    fn default() -> Self {
+        Self {
+            delay_ticks: 0,
+            reset_attributes: true,
+            spawn_location: String::new(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_survival_threshold() -> i32 {
@@ -404,6 +471,9 @@ pub struct LocationNodeData {
     pub environmental_damage: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gatherable_items: Option<Vec<String>>,
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 位置边数据
