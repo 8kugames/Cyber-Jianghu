@@ -1,210 +1,160 @@
-# Cyber-Jianghu 已实现功能摘要 (Feature Summary)
+# Cyber-Jianghu 功能摘要
 
- 本文档为开发者提供当前赛博江湖架构中**已实际实现并可用**的核心业务功能摘要。所有模块遵循数据驱动设计，通过 Tick 引擎和 Agent SDK 交互。
+**日期**: 2026-04-23
 
- ## 一、 服务端 (天道引擎)
+## 核心定位
 
- ### 1. 核心运行机制
- - [x] **Tick 驱动**: 可配置周期循环，时序为 **广播(开单) → 收集窗口 → 关单 → 结算 → 持久化**。Agent 在收到广播后有完整窗口提交意图。
- - [x] **tick_id 秒级时间戳**: `tick_id` 改为 Unix 秒级时间戳，支持 `real_seconds_per_tick` 动态调整游戏时间流速。
- - [x] **公式引擎**: `evalexpr`（战斗伤害等运行时计算）+ 自研 AST 引擎（派生属性动态计算），均支持 YAML 编写表达式。
- - [x] **数据驱动配置**: 所有核心数据（属性、物品、地图、动作、叙事配置等）通过 YAML 加载，支持热更新 (`POST /api/admin/reload-config`)。
+**Cyber-Jianghu (赛博江湖)** — MMO-MAS (Massive Agent Simulation)，每个角色都是 AI Agent。
 
-### 2. 实体与状态管理
-- [x] **Agent 生命周期**: 注册降生、属性初始化、存活状态维护、寿命衰减与死亡判定。
-- [x] **持久化**: PostgreSQL 存储 Agent 基础数据、实时状态、场景掉落物。
-- [x] **状态广播**: 基于 WebSocket 的 `WorldState` 广播，维护 `agent_id -> device_id` 反向映射确保路由正确。
+- **Server (天道)**: 权威物理引擎，Tick 驱动，状态广播
+- **Agent (众生)**: 自主 AI 决策，三魂架构，三级记忆
 
-### 3. 动作与交互系统（数据驱动）
+---
 
-动作系统完全由 `crates/server/config/actions.yaml` 定义，无需修改代码即可新增或修改动作。
+## 一、服务端 (天道引擎)
 
-**Tick 循环时序**:
+### 1. Tick 循环
+
+服务端采用**实时模式**（唯一模式）:
+
 ```
-广播(开单) --> 收集窗口(sleep) --> 关单 --> 结算 --> 持久化
-```
-
-结算内部流水线:
-```
-加载状态 --> 收集意图 --> 验证 --> 冲突解析 --> 执行 --> 状态变更 --> 衰减 --> 统计 --> 持久化
+TickScheduler: interval.tick() → calculate_tick_id() → TickBoundary + WorldState 广播
+                                                              ↓
+IntentWorker: Decay → Persist → Update DashMap → Send ExecutionResult → Death Check
+                                                              ↓
+Agent 决策: CognitiveEngine → ReflectorSoul 审核 → Intent 实时提交
 ```
 
-- **广播**: 新 Tick 开始时立即推送 `WorldState`，设置 `accepting_tick_id` 开单
-- **收集窗口**: 等待 `collection_window_secs` 秒，Agent 提交意图（`deadline_ms` 为绝对 Unix 毫秒时间戳）
-- **关单**: `accepting_tick_id` 归零，拒收新意图
-- **意图收集**: 从 `IntentManager` 提取已提交意图
-- **验证**: `IntentValidator` 检查动作合法性、属性充足性、目标状态
-- **冲突解析**: `IntentResolver` 处理位置冲突和资源竞争
-- **执行**: `ActionExecutor` 根据 `actions.yaml` 中的定义执行动作
-- **状态变更**: `AttributeMutator`/`InventoryMutator`/`LocationMutator` 等 `StateMutator` 应用变更
-- **衰减**: 饥饿、口渴、物品耐久等被动损耗
-- **持久化**: 写入 PostgreSQL（结算事件在下一个 Tick 的广播中推送）
+- `tick_id` = Unix 秒级时间戳 (`current_unix_secs - game_epoch`)
+- `accepting_tick_id` = 当前 tick_id（**无关单机制**，实时模式持续开单）
+- Intent 由 IntentWorker **实时处理**，不经过 Scheduler
+- Scheduler 仅负责时钟驱动和 WorldState 广播
 
-**动作定义结构**（`actions.yaml`）:
-```yaml
-attack:
-  description: "攻击目标，造成伤害"
-  damage_formula: "10 + strength * 0.5 + weapon_bonus * weapon_multiplier"
-  validation:
-    requires_target: true
-    requires_target_alive: true
-    required_fields: [target_agent_id]
-  requirements:
-    - attribute: stamina
-      min: 5
-      cost: 5
+### 2. 状态管理
+
+- **DashMap write-through 缓存**: `realtime.rs` 先持久化到 PostgreSQL (await 确认)，再更新 DashMap
+- **PostgreSQL 持久化**: Agent 基础数据、实时状态、场景掉落物
+- **`agent_id → device_id` 反向映射**: `AgentToDeviceMap`
+
+### 3. 公式引擎
+
+- **统一使用 `evalexpr`**: `formula_engine/engine.rs` 明确说明"消灭系统中混用的两套逻辑"
+- 派生属性、伤害计算、恢复公式均通过 `FormulaEngine` 执行
+- 无"自研 AST"，代码已统一到 evalexpr
+
+### 4. 数据驱动配置
+
+配置文件 (`crates/server/config/`):
+- `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
+- `game_rules.yaml`, `time.yaml`
+- `skills/` — AI 行为技能 (SKILL.md)
+
+热更新: `scheduler.rs` 每 Tick 检查 `actions.yaml` 修改时间，触发重载并广播 `ServerMessage::ActionUpdate`。
+
+### 5. 动作系统
+
+**已实现动作** (`actions.yaml` uncommented 定义):
+
+| 类别 | 动作 |
+|------|------|
+| 生存 | `休息`, `使用`, `进食`, `饮水`, `拾取`, `丢弃`, `移动` |
+| 战斗 | `攻击`, `逃跑` |
+| 江湖技能 | `偷窃`, `打坐`, `修炼` |
+| 社交 | `说话`, `私语`, `大喊` |
+| 经济 | `给予`, `采集`, `制造` |
+
+**已注释未实现**: `defend`, `dodge`, `parry`, `heavy_strike`, `follow`, `stealth`, `poison`, `repair`
+
+### 6. 对话系统
+
+完整生命周期 (`dialogue_handler.rs`):
+```
+Request → Accept/Reject → Content → End
 ```
 
-`ActionType` 为字符串包装（任何字符串均有效），扩展动作只需编辑 YAML。
+服务端作为中间人路由与验证，`DialogueSession` 状态机管理。
 
-**已实现动作** (基于 `actions.yaml`):
-- 基础生存: `idle`, `use`, `eat`, `drink`
-- 移动: `move`, `follow`, `flee`
-- 战斗: `attack`, `defend`, `dodge`, `parry`, `heavy_strike`, `stealth`
-- 采集: `gather`
-- 社交: `speak`, `whisper`, `shout`, `steal`
-- 经济: `give`, `drop`, `pickup`, `trade`, `craft`, `repair`
-- 技能: `poison`, `practice`, `meditate`
-- 对话动作通过 `ClientMessage::Dialogue` 而非独立 ActionType
+---
 
-**物品与背包**: 地上物品拾取、背包容量校验、物品消耗（武器/消耗品/任务道具）
-
-**对话系统**: 完整的对话生命周期管理（请求/接受/拒绝/内容传输/结束），服务端作为中间人路由与验证。
-
-## 二、 Agent SDK (众生躯壳)
-
-支持内置 LLM 自主决策（Cognitive 模式）或外部调度（Claw 模式）。
+## 二、Agent SDK (众生躯壳)
 
 ### 1. 运行模式
- - [x] **Cognitive 模式**（默认）: 内置多阶段认知引擎，Agent 完全自主。
- - [x] **Claw 模式**: WebSocket + HTTP API 供 OpenClaw 接入，内置认知能力作为 API。
- - [x] **统一初始化**: 两模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator、DecisionContextSnapshot。
- - [x] **唯一差异**: 仅 LLM 客户端创建位置不同（Cognitive 直连 vs Claw 通过 OpenClawBridge）。
- - [x] **默认 LLM**: 默认使用 ollama，支持 openclaw 及 openai_compatible 等多种 provider。
- - [x] **网络容错**: WebSocket 自动断线重连、指数退避、注册流自动恢复。
- - [x] **WebSocket 心跳**: 内置 Ping/Pong 消息机制，保持连接活跃。
- - [x] **LLM 开关闸**: 停止 token 消耗的控制机制，Web 面板可操作。
 
-### 2. AI 与认知核心
+| | Cognitive (默认) | Claw |
+|---|---|---|
+| LLM Client | 内置 `FallbackLlmClient` | 外部 `OpenClawBridge` |
+| 决策 | Agent 完全自主 | OpenClaw 调度 |
+| 共享 | CognitiveEngine、四阶段流水线、三级记忆 | 相同 |
 
-**三层记忆系统**:
-- [x] **工作记忆**: FIFO 短期上下文队列（最大条目数可配置）
-- [x] **情景记忆**: SQLite 持久化，带时间戳的事件流
-- [-] **语义记忆**:
-  - [x] FTS 全文搜索（返回完整记忆条目）
-  - [x] HNSW 向量索引基础设施（Embedder + `instant-distance`）
-  - [ ] `add()` 为 no-op（语义记忆由 episodic 后端通过向量生成写入，非 direct add）
-  - [ ] `ensure_embeddings_for_priority()` 未实现
-  - [ ] `ensure_embedding(memory_id)` 未实现
+### 2. 三魂架构
 
-**四阶段认知流水线**（两种模式均使用 CognitiveEngine，仅 LLM 客户端不同）:
- - **Perception**: 数值状态 → 叙事化自然语言
- - **Motivation**: 基于人设推断内在驱动力
- - **Planning**: 制定行动计划与可用动作
- - **Decision**: 引导最终行动决策
- - [x] **合并优化**: Perception + Motivation + Planning 合并为一次 LLM 调用，减少 token 消耗
- - [x] **persona 缓存**: 认知引擎缓存人设，减少重复计算
- - [x] **deadline 感知**: 认知引擎感知 tick 截止时间，避免过期被拒
+```
+ActorSoul (人魂) ──→ 直连 WorldState ──→ 结构化 Intent
+       │
+       └─→ EarthSoul (地魂) ──→ tool calling 工具池
 
-**叙事引擎**: 将生硬数值（`health: 30%`）转化为自然语言（"身负重伤、头晕目眩"），方便 LLM 理解。
+ReflectorSoul (天魂) ──→ 三层审查:
+  Layer1: action_type 合法性
+  Layer2: RuleEngine 规则引擎
+  Layer3: LLM 最终审核
+```
 
- **动态人设**: `Persona` 根据外界反馈（被攻击/被治愈）动态偏移；支持好感度/信任度关系图谱。
+**地魂模块** (`soul/earth/`):
+- `EarthToolExecutor` 复合工具执行器
+- 三个工具: `skill_view` (已实现), `search_memory` / `recall_archived` (预留未接入)
+- 设计原则: progressive disclosure — prompt 只注入索引，LLM 自主判断何时加载详情
 
- **三魂架构**:
- - ActorSoul (人魂/行动之魂): 直连 WorldState，输出含精确 ID 的结构化 Intent
- - ReflectorSoul (天魂/守护之魂): 分级审查（Always/Adaptive/Skip）
- - 地魂 (能力之魂): 提供 tool calling 工具池，行动落地层（嵌入 ActorSoul）
- - `ReviewStore` 共享内存用于进程内审查通信
+### 3. 四阶段认知流水线
 
-### 3. 意图控制（分级审核 + multi-Intent Pipeline）
+```
+Perception → Motivation → Planning → Decision
+  数值→叙事   人设驱动    行动计划    最终决策
+```
 
-**multi-Intent Pipeline**:
- - [x] 单 tick 可提交多 Intent，顺序执行，失败回滚
- - [x] `IntentBatchConfig`: max_intents_per_tick（默认 5）, max_retries（默认 3）
- - [x] `ExecutionSummary`: Server 广播执行汇总（total/succeeded/failed/skipped）
+- **合并优化**: Perception + Motivation + Planning 合并为单次 LLM 调用 (`engine.rs` 第 529-628 行)
+- `deadline` 感知，避免过期 Intent 被拒
+- `CognitiveStage` 定义于 `actor/stages.rs`
 
-**分级审核策略**（`GradedValidationConfig`）:
- - [x] **Always**: 完整三层审核（action_type → RuleEngine → LLM），适用于 speak/shout/whisper
- - [x] **Adaptive**: 动态判断（限制区域 move，高价值物品 trade/steal/give），根据 `adaptive_field_mapping` 配置
- - [x] **Skip**: 仅 RuleEngine Layer1+2 确定性校验，适用于 idle/wait
+### 4. 三级记忆系统
 
-**第一层: 认知链质量验证**（决策循环内，重试机制）:
- - [x] `CognitiveValidator` - 确定性规则（完整性、长度、状态引用、重复检测、连贯性），非 LLM
- - [x] 验证失败自动重试（`cognitive_decision_with_retry`），反馈注入下一轮 LLM 调用
- - [x] 达到最大重试后降级使用原始 intent
+| 层级 | 存储 | 特性 |
+|------|------|------|
+| Working Memory | `VecDeque<MemoryEntry>` FIFO | 短期上下文队列 |
+| Episodic Memory | SQLite | 事件序列 + Ebbinghaus 遗忘曲线 |
+| Semantic Memory | HNSW (`instant-distance`) | 向量检索，`add()` 为空操作 |
 
-**第二层: 规则引擎验证**（接入 intent 提交链路）:
- - [x] 规则引擎验证器 (`RuleEngine`)，HTTP API `POST /api/v1/validate`
- - [x] 默认冷却规则: speak/move 动作冷却（`with_default_config()` 预注册）
- - [x] LLM 验证器 (`IntentValidator`)，10 秒超时降级策略，驳回后返回 `ServerError{ValidationFailed}`
- - [x] Cognitive 路径: 人魂决策 → 天魂验证 → 驳回 → `think_with_feedback(feedback)` 重试（天魂与人魂共用 `llm_arc`）
+### 5. 网络与容错
 
-**天魂审查**（三魂架构）:
- - [x] `validate_with_reflector()` 在 `lifecycle.rs` 中被调用，结构化 intent 经审查后再发送
- - [x] `ReflectorSoul` 后台任务轮询 `ReviewStore`，超时自动通过（可配置）
- - [x] 远程 Observer 模式已移除（HTTP 轮询 + 协议层 `ReviewRequest`/`ReviewResult` 均已删除）
- - [x] 审查系统 API 仅供监控工具使用: `GET /api/v1/review/pending`、`POST /api/v1/review/{intent_id}`、`GET /api/v1/review/{intent_id}/status`
- - [x] 三魂循环：人魂决策 → 天魂分级审核 → 驳回则重试 → deadline 超时则 idle（`lifecycle.rs` 主循环）
-
-## 三、 通信协议 (Protocol)
-
-- [x] 统一 Rust 数据结构，Serde JSON 序列化/反序列化
-- [x] 明确区分 `ServerMessage`（下行）和 `ClientMessage`（上行），涵盖世界状态、动作意图、热更通知
-
-## 四、 OpenClaw 集成
-
- - [x] npm 包 `@8kugames/cyber-jianghu-openclaw` 已独立发布
- - [x] 提供 `jianghu_act` 动作执行工具、注册 Hook、内存插件
- - [x] Claw 模式 WebSocket Tick 消息携带四阶段认知上下文，引导外部 AI 结构化推理
- - [x] WebSocket 心跳机制（Ping/Pong）保持连接活跃
- - [x] LLMRequest 消息字段: `llm_request`（注意：旧版本为 `l_l_m_request`）
- - [x] 详见 [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
+- **WebSocket**: `tungstenite` 自动响应 Ping/Pong 心跳
+- **连接断开**: 发送 `None` 到 worldstate_tx，**无自动重连**
+- **LLM 开关闸**: Web 面板可停止 token 消耗
 
 ---
 
-## 五、 设备与角色系统（Phase 3）
+## 三、通信协议
 
-### 1. 设备管理
-- [x] `/api/v1/agent/connect` 端点获取设备身份凭证
-- [x] `devices` 表持久化（`auth_token` + `last_seen`）
-- [x] WebSocket 双重验证: `device_id` + `auth_token`
+`protocol` crate 定义所有共享类型:
 
-### 2. 角色管理
-- [x] `/api/v1/agent/register` 创角，支持一设备多角色
-- [x] `/api/v1/agent/rebirth` 归隐机制：死亡角色标记 `retired`，保留历史数据
-
-### 3. Web 管理面板
- - [x] `GET /admin/` → Admin Dashboard 入口（agent 列表、统计数据）
- - [x] `GET /welcome.html` → Web 面板首页（根据状态显示不同卡片）
- - [x] `GET /character.html` → 角色属性、背包、经历、梦境注入与转生
- - [x] `GET /settings.html` → 服务器/LLM 配置
-
-## 六、 生产部署（Phase 4）
-
-- [x] 容器启动自动执行数据库迁移（`/app/migrations/*.sql`）
-- [x] `ADMIN_READ_TOKEN`/`ADMIN_WRITE_TOKEN` 空值自动生成
-- [x] `scripts/version-bump.sh` 自动检测变更并升级版本号
-- [x] PostgreSQL 就绪等待机制
+- `ServerMessage` (下行): WorldState, Error, DeathNotification, ImmediateEvent, PrivateDialogueRecord...
+- `ClientMessage` (上行): Intent, Dialogue
+- `WorldState`: 完整世界快照
+- `Intent`: Agent 决策结构
 
 ---
 
-## 七、 待实现功能 (TODO)
+## 四、OpenClaw 集成
 
-### 服务端
+- npm 包 `@8kugames/cyber-jianghu-openclaw` (独立仓库)
+- `OpenClawBridge` 实现 `LlmClient` trait (`runtime/claw/bridge.rs`)
+- WebSocket 协议: `runtime/claw/protocol.rs`
 
-- [ ] **物品自然损坏**: `crates/server/src/tick/decay.rs:219-227`
-  - 基础设施已就绪（`AgentItem.durability`、`agent_inventory.durability` 列、`ItemDefinition.max_durability/decay_rate` 类型定义）
-  - 需要实现：衰减逻辑（查询背包 → 扣减耐久 → 移除物品 → 发送通知）+ `items.yaml` 配置衰减率
+---
 
-### Agent SDK
+## 五、待实现功能
 
-- [ ] **语义记忆向量生成**: `crates/agent/src/component/memory/backends/semantic/`
-  - 基础设施已就绪（HNSW 向量索引 + FTS fallback + LocalEmbedder）
-  - 需要实现：`SemanticMemoryBackend::add()` 空操作 → 改为真正写入向量存储
-  - 需要实现：`ensure_embeddings_for_priority()` stub → 实现优先级记忆的向量生成
-  - 需要实现：`ensure_embedding(memory_id)` stub → 实现单个记忆的向量生成
-
-- [ ] **记忆归档与强度更新**: `crates/agent/src/component/memory/backends/episodic.rs:166-178`
-  - 已实现：Ebbinghaus 遗忘曲线计算、重要性评分器
-  - 需要实现：`archive_memories()` stub → 改为调用 `ArchiveMemoryBackend::archive()` 真正移动到归档表
-  - 需要实现：`strengthen_memory()` stub → 需要 `MemoryStore` schema 支持 `strength`/`access_count`/`last_accessed_at` 列
+| 功能 | 位置 | 状态 |
+|------|------|------|
+| 物品耐久衰减 | `tick/decay.rs:225-232` | TODO 注释，基础设施未实现 |
+| 语义记忆向量写入 | `component/memory/backends/semantic/backend.rs:161-163` | `add()` 为空操作 |
+| 记忆归档 | `component/memory/backends/episodic.rs` | `archive_memories()` stub 未实现 |
+| 未实现战斗动作 | `actions.yaml` 注释掉的 | defend/dodge/parry/heavy_strike/... |
