@@ -15,7 +15,6 @@
 // - drop: 将物品丢弃到地面
 // - give: 给予物品，单向转移所有权
 // - steal: 偷窃，从目标 Agent 背包中偷取物品（有成功率）
-// - trade: 交易，带价格协商的物品转移（原子操作）
 //
 // 战斗动作：
 // - attack: 攻击目标，造成伤害
@@ -134,6 +133,12 @@ pub struct CraftData {
     pub recipe_id: String,
 }
 
+/// practice 动作数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PracticeData {
+    pub skill_id: String,
+}
+
 /// attack 动作数据
 ///
 /// 攻击目标 Agent
@@ -141,21 +146,6 @@ pub struct CraftData {
 pub struct AttackData {
     /// 目标 Agent ID
     pub target_agent_id: String,
-}
-
-/// trade 动作数据
-///
-/// 交易，带价格协商的物品转移
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradeData {
-    /// 目标 Agent ID
-    pub target_agent_id: String,
-    /// 物品 ID
-    pub item_id: String,
-    /// 物品数量
-    pub quantity: i32,
-    /// 价格（单位：两银子）
-    pub price: i32,
 }
 
 /// shout 动作数据

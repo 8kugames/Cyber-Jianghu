@@ -492,6 +492,13 @@ impl Broadcaster {
                     // Agent 的实际状态效果通过 attribute_descriptions 描述
                     status_effects: vec![],
                     inventory,
+                    skills: agent_state.skills.iter().filter_map(|skill_id| {
+                        crate::game_data::registry::SkillRegistry::get(skill_id)
+                            .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
+                                skill_id: skill_id.clone(),
+                                name: def.name,
+                            })
+                    }).collect(),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -732,6 +739,13 @@ pub fn build_reactive_world_state(
             attribute_descriptions,
             status_effects: vec![],
             inventory: inventory.to_vec(),
+            skills: agent_state.skills.iter().filter_map(|skill_id| {
+                crate::game_data::registry::SkillRegistry::get(skill_id)
+                    .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
+                        skill_id: skill_id.clone(),
+                        name: def.name,
+                    })
+            }).collect(),
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -859,6 +873,13 @@ pub fn build_initial_world_state(
             attribute_descriptions,
             status_effects: vec![],
             inventory: initial_inventory,
+            skills: agent_state.skills.iter().filter_map(|skill_id| {
+                crate::game_data::registry::SkillRegistry::get(skill_id)
+                    .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
+                        skill_id: skill_id.clone(),
+                        name: def.name,
+                    })
+            }).collect(),
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items,
