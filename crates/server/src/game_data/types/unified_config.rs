@@ -507,6 +507,31 @@ pub struct WebSocketConfigData {
     pub rate_limit_ms: u64,
     pub cleanup_interval_secs: u64,
     pub cleanup_threshold: usize,
+    /// WebSocket 消息通道容量（背压控制）
+    #[serde(default = "default_channel_capacity")]
+    pub channel_capacity: usize,
+    /// 心跳 Ping 间隔（秒）
+    #[serde(default = "default_heartbeat_interval_secs")]
+    pub heartbeat_interval_secs: u64,
+    /// 连续未收到 Pong 的最大次数（超过则断连）
+    #[serde(default = "default_max_missed_pongs")]
+    pub max_missed_pongs: u8,
+    /// 日志消息预览截断长度
+    #[serde(default = "default_log_preview_length")]
+    pub log_preview_length: usize,
+}
+
+fn default_channel_capacity() -> usize {
+    100
+}
+fn default_heartbeat_interval_secs() -> u64 {
+    30
+}
+fn default_max_missed_pongs() -> u8 {
+    3
+}
+fn default_log_preview_length() -> usize {
+    50
 }
 
 /// 对话配置数据

@@ -169,11 +169,14 @@ async fn handle_websocket(
     }
 
     // 创建消息通道（用于向 Agent 发送消息），限制容量以提供背压
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100);
+    let ws_config = crate::game_data::NetworkRegistry::websocket();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(ws_config.channel_capacity);
 
     // 心跳追踪：连续未收到 Pong 的次数
     let pings_without_pong = Arc::new(AtomicU8::new(0));
-    const MAX_MISSED_PONGS: u8 = 3;
+    let max_missed_pongs = ws_config.max_missed_pongs;
+    let heartbeat_interval = ws_config.heartbeat_interval_secs;
+    let log_preview_length = ws_config.log_preview_length;
 
     // 添加到连接管理器（使用 device_id 作为 key）
     // 重连时：先移除旧连接，确保旧 send_task 收到通道关闭信号并退出
@@ -415,7 +418,8 @@ async fn handle_websocket(
     let agent_name_for_heartbeat = agent_name.clone();
     let pings_without_pong_for_heartbeat = pings_without_pong.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(heartbeat_interval));
         loop {
             interval.tick().await;
             pings_without_pong_for_heartbeat.fetch_add(1, Ordering::Relaxed);
@@ -430,10 +434,10 @@ async fn handle_websocket(
                 );
                 break;
             }
-            if pings_without_pong_for_heartbeat.load(Ordering::Relaxed) >= MAX_MISSED_PONGS {
+            if pings_without_pong_for_heartbeat.load(Ordering::Relaxed) >= max_missed_pongs {
                 warn!(
                     "Agent '{}' missed {} pongs, closing connection",
-                    agent_name_for_heartbeat, MAX_MISSED_PONGS
+                    agent_name_for_heartbeat, max_missed_pongs
                 );
                 break;
             }
@@ -456,11 +460,11 @@ async fn handle_websocket(
                 Ok(msg) => match msg {
                     Message::Text(text) => {
                         // 安全地截取文本预览（避免在 UTF-8 字符边界截断导致 panic）
-                        let preview = if text.len() > 50 {
-                            // 找到第 50 字节附近的字符边界
+                        let preview = if text.len() > log_preview_length {
+                            // 找到截断字节附近的字符边界
                             let end = text
                                 .char_indices()
-                                .take_while(|(idx, _)| *idx < 50)
+                                .take_while(|(idx, _)| *idx < log_preview_length)
                                 .last()
                                 .map(|(idx, c)| idx + c.len_utf8())
                                 .unwrap_or(0);

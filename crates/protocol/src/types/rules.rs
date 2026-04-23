@@ -363,6 +363,9 @@ pub struct ImmediateDecisionRules {
     /// 超限的即时意图降级为 DeferToMainTick
     #[serde(default = "default_max_immediate_intents_per_tick")]
     pub max_immediate_intents_per_tick: usize,
+    /// 即时意图优先级（高于普通 tick 意图）
+    #[serde(default = "default_immediate_intent_priority")]
+    pub immediate_intent_priority: i32,
 }
 
 fn default_event_ttl_ms() -> u64 {
@@ -383,6 +386,9 @@ fn default_max_llm_calls_per_tick() -> usize {
 fn default_max_immediate_intents_per_tick() -> usize {
     3
 }
+fn default_immediate_intent_priority() -> i32 {
+    10
+}
 
 fn default_immediate_routing_actions() -> Vec<String> {
     // 武侠主题默认值：说话类动作走即时通道
@@ -399,6 +405,7 @@ impl Default for ImmediateDecisionRules {
             max_event_context_chars: default_max_event_context_chars(),
             max_llm_calls_per_tick: default_max_llm_calls_per_tick(),
             max_immediate_intents_per_tick: default_max_immediate_intents_per_tick(),
+            immediate_intent_priority: default_immediate_intent_priority(),
         }
     }
 }

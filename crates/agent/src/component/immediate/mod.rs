@@ -37,11 +37,8 @@ use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::PersonaInfo;
 
 // ============================================================================
-// 常量
+// 类型
 // ============================================================================
-
-/// 即时意图优先级（高于普通意图）
-pub const IMMEDIATE_INTENT_PRIORITY: i32 = 10;
 
 // Type alias for rule validator callback
 pub type RuleValidatorFn = dyn Fn(&str) -> std::result::Result<(), String> + Send + Sync;
@@ -440,7 +437,7 @@ impl ImmediateEventHandler {
                         action_data: Some(serde_json::json!({
                             "content": content
                         })),
-                        priority: IMMEDIATE_INTENT_PRIORITY,
+                        priority: self.rules.read().await.immediate_intent_priority,
                         observer_thought: None,
                         narrative: None,
                         already_broadcast: false,
@@ -747,12 +744,13 @@ action_type 只能是 "说话" 或 "私语"。
 
     /// 返回 LLM 调用超时（ms）
     ///
-    /// 取 min(cognitive_timeout_ms, event_ttl_ms - 500)
+    /// 取 min(cognitive_timeout_ms, event_ttl_ms - safety_margin)
     /// 确保在事件过期前留有安全余量
     fn effective_timeout_ms(&self) -> u64 {
+        let safety_margin = 500; // 内部安全余量：确保事件过期前有足够时间处理
         self.rules
             .cognitive_timeout_ms
-            .min(self.rules.event_ttl_ms.saturating_sub(500))
+            .min(self.rules.event_ttl_ms.saturating_sub(safety_margin))
     }
 
     /// 构建批量 LLM prompt（多条消息合并为单次调用）

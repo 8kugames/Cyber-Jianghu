@@ -174,6 +174,12 @@ impl CognitiveEngine {
         }
     }
 
+    /// 设置 NarrativeSummaryWindow 窗口大小
+    pub fn set_narrative_window_size(&self, size: usize) {
+        let mut window = self.summary_window.write().unwrap();
+        *window = NarrativeSummaryWindow::new(size);
+    }
+
     /// 使用自定义窗口大小创建认知引擎
     pub fn with_window_size(
         llm_client: Arc<dyn LlmClient>,

@@ -79,7 +79,10 @@ impl super::Agent {
                     }
                 }
             }
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs(
+                self.config.llm.reconnect_delay_secs,
+            ))
+            .await;
         }
         info!("Agent '{}' connected to server", self.character_name());
 
@@ -1384,7 +1387,7 @@ impl super::Agent {
                             // Server 同时会发送 reactive WorldState（交互驱动即时推送），
                             // 下一次 select 循环的 receive_world_state() 会立即收到（无需等 tick 广播）。
                             // 使用 watch channel 阻塞等待，3s 超时（替代固定 sleep + 非阻塞 poll）
-                            match self.client.wait_for_execution_result(3000).await {
+                            match self.client.wait_for_execution_result(self.config.llm.execution_result_timeout_ms).await {
                                 Ok(Some(result)) => {
                                     // 快照数据提取（在分支消费 result 之前）
                                     let exec_success = result.success;
@@ -1541,7 +1544,9 @@ impl super::Agent {
                                 };
 
                                 let mut reported = false;
-                                for attempt in 0..3 {
+                                let max_retries = self.config.llm.soul_cycle_report_retries;
+                                let base_delay = self.config.llm.soul_cycle_report_base_delay_ms;
+                                for attempt in 0..max_retries {
                                     match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
                                         Ok(()) => {
                                             debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
@@ -1549,9 +1554,9 @@ impl super::Agent {
                                             break;
                                         }
                                         Err(e) => {
-                                            warn!("三魂循环元数据上报失败 (尝试 {}/3): tick={}, err={}", attempt + 1, tick_id_for_report, e);
-                                            if attempt < 2 {
-                                                tokio::time::sleep(tokio::time::Duration::from_millis(100 * (1 << attempt))).await;
+                                            warn!("三魂循环元数据上报失败 (尝试 {}/{}): tick={}, err={}", attempt + 1, max_retries, tick_id_for_report, e);
+                                            if attempt + 1 < max_retries {
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(base_delay * (1 << attempt))).await;
                                             }
                                         }
                                     }

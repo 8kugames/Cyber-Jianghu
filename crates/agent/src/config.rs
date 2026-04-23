@@ -406,6 +406,11 @@ const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
 const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.8;
 const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
+const DEFAULT_RECONNECT_DELAY_SECS: u64 = 5;
+const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;
+const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
+const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
+const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -442,6 +447,26 @@ pub struct LlmConfig {
     /// Summary 后保留最近 N 轮对话
     #[serde(default = "default_keep_recent_turns")]
     pub keep_recent_turns: u32,
+
+    /// 重连延迟（秒）
+    #[serde(default = "default_reconnect_delay_secs")]
+    pub reconnect_delay_secs: u64,
+
+    /// 等待执行结果超时（毫秒）
+    #[serde(default = "default_execution_result_timeout_ms")]
+    pub execution_result_timeout_ms: u64,
+
+    /// 灵魂周期上报重试次数
+    #[serde(default = "default_soul_cycle_report_retries")]
+    pub soul_cycle_report_retries: u32,
+
+    /// 灵魂周期上报基础延迟（毫秒），指数退避
+    #[serde(default = "default_soul_cycle_report_base_delay_ms")]
+    pub soul_cycle_report_base_delay_ms: u64,
+
+    /// NarrativeSummaryWindow 窗口大小
+    #[serde(default = "default_narrative_window_size")]
+    pub narrative_window_size: usize,
 }
 
 fn default_idle_rotate_threshold() -> u32 {
@@ -462,6 +487,26 @@ fn default_summary_trigger_ratio() -> f64 {
 
 fn default_keep_recent_turns() -> u32 {
     DEFAULT_KEEP_RECENT_TURNS
+}
+
+fn default_reconnect_delay_secs() -> u64 {
+    DEFAULT_RECONNECT_DELAY_SECS
+}
+
+fn default_execution_result_timeout_ms() -> u64 {
+    DEFAULT_EXECUTION_RESULT_TIMEOUT_MS
+}
+
+fn default_soul_cycle_report_retries() -> u32 {
+    DEFAULT_SOUL_CYCLE_REPORT_RETRIES
+}
+
+fn default_soul_cycle_report_base_delay_ms() -> u64 {
+    DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS
+}
+
+fn default_narrative_window_size() -> usize {
+    DEFAULT_NARRATIVE_WINDOW_SIZE
 }
 
 fn default_llm_provider() -> String {
@@ -491,6 +536,11 @@ impl Default for LlmConfig {
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
             keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
+            reconnect_delay_secs: DEFAULT_RECONNECT_DELAY_SECS,
+            execution_result_timeout_ms: DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
+            soul_cycle_report_retries: DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
+            soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
+            narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
         }
     }
 }
@@ -525,6 +575,11 @@ impl LlmConfig {
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
             keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
+            reconnect_delay_secs: DEFAULT_RECONNECT_DELAY_SECS,
+            execution_result_timeout_ms: DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
+            soul_cycle_report_retries: DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
+            soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
+            narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
         }
     }
 
