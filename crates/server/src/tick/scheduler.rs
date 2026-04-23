@@ -77,6 +77,9 @@ pub struct TickScheduler {
 
     /// 上次加载的 actions.yaml 修改时间
     last_actions_mtime: Option<std::time::SystemTime>,
+
+    /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
+    vendor_pending_events: crate::models::VendorPendingEvents,
 }
 
 impl TickScheduler {
@@ -90,6 +93,7 @@ impl TickScheduler {
         worker_tx: mpsc::Sender<WorkerMessage>,
         agent_state_cache: AgentStateCache,
         accepting_tick_id: Arc<AtomicI64>,
+        vendor_pending_events: crate::models::VendorPendingEvents,
     ) -> Self {
         Self {
             game_data_cache,
@@ -104,6 +108,7 @@ impl TickScheduler {
             agent_state_cache,
             accepting_tick_id,
             last_actions_mtime: None,
+            vendor_pending_events,
         }
     }
 
@@ -186,6 +191,142 @@ impl TickScheduler {
         Ok(())
     }
 
+    /// Vendor 自动补货：从 DB 读取补货规则，低于 threshold 时触发，扣除银两
+    async fn refill_vendors(&mut self, tick_id: i64) -> Result<()> {
+        let refill_rules = crate::db::get_all_enabled_vendor_refills(&self.db_pool).await
+            .context("读取 Vendor 补货规则失败")?;
+
+        if refill_rules.is_empty() {
+            return Ok(());
+        }
+
+        // 按 agent_id 分组
+        let mut rules_by_agent: std::collections::HashMap<uuid::Uuid, Vec<&crate::db::VendorRefillRule>> =
+            std::collections::HashMap::new();
+        for rule in &refill_rules {
+            rules_by_agent.entry(rule.agent_id).or_default().push(rule);
+        }
+
+        for (agent_id, rules) in &rules_by_agent {
+            // 查询当前库存
+            let inventory: Vec<(String, i32)> = sqlx::query_as(
+                "SELECT item_id, quantity FROM agent_inventory WHERE agent_id = $1",
+            )
+            .bind(*agent_id)
+            .fetch_all(&self.db_pool)
+            .await
+            .context("查询 Vendor 库存失败")?;
+
+            let inv_map: std::collections::HashMap<String, i32> =
+                inventory.into_iter().collect();
+
+            let silver = inv_map.get("银子").copied().unwrap_or(0);
+            if silver == 0 {
+                continue;
+            }
+
+            // 取所有规则中最高的 budget_ratio
+            let budget_ratio = rules.iter().map(|r| r.budget_ratio).max().unwrap_or(50);
+            let max_spend = silver * budget_ratio / 100;
+            let mut total_spent = 0i32;
+            let mut restocked_items: Vec<(String, i32)> = Vec::new();
+
+            for rule in rules {
+                let current = inv_map.get(&rule.item_id).copied().unwrap_or(0);
+                if current >= rule.threshold {
+                    continue;
+                }
+
+                let remaining_budget = max_spend - total_spent;
+                if remaining_budget <= 0 {
+                    break;
+                }
+                let buy_count = rule.refill_to.min(remaining_budget);
+
+                sqlx::query(
+                    "INSERT INTO agent_inventory (agent_id, item_id, quantity) \
+                     VALUES ($1, $2, $3) \
+                     ON CONFLICT (agent_id, item_id) \
+                     DO UPDATE SET quantity = agent_inventory.quantity + EXCLUDED.quantity, \
+                                   updated_at = CURRENT_TIMESTAMP",
+                )
+                .bind(*agent_id)
+                .bind(&rule.item_id)
+                .bind(buy_count)
+                .execute(&self.db_pool)
+                .await
+                .context("Vendor 补货失败")?;
+
+                total_spent += buy_count;
+
+                let item_name = crate::game_data::registry::ItemRegistry::get(&rule.item_id)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| rule.item_id.clone());
+                restocked_items.push((item_name, buy_count));
+
+                info!(
+                    "Vendor 补货: agent={} item={} qty={} ({} -> {})",
+                    agent_id, rule.item_id, buy_count, current, current + buy_count
+                );
+            }
+
+            if total_spent > 0 {
+                let new_silver = silver - total_spent;
+                if new_silver > 0 {
+                    sqlx::query(
+                        "UPDATE agent_inventory SET quantity = $1, updated_at = CURRENT_TIMESTAMP \
+                         WHERE agent_id = $2 AND item_id = '银子'",
+                    )
+                    .bind(new_silver)
+                    .bind(*agent_id)
+                    .execute(&self.db_pool)
+                    .await
+                    .context("扣除 Vendor 银两失败")?;
+                } else {
+                    sqlx::query("DELETE FROM agent_inventory WHERE agent_id = $1 AND item_id = '银子'")
+                        .bind(*agent_id)
+                        .execute(&self.db_pool)
+                        .await
+                        .context("扣除 Vendor 银两失败")?;
+                }
+
+                // 注入 LLM 消息
+                let items_desc: String = restocked_items
+                    .iter()
+                    .map(|(name, qty)| format!("{}x{}", name, qty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                let messages = [
+                    format!("从外地采购{}，可用于销售", items_desc),
+                    format!("新到一批货：{}，可用于销售", items_desc),
+                ];
+                let msg = &messages[tick_id as usize % messages.len()];
+
+                self.event_manager.add_event_for_agent(
+                    *agent_id,
+                    crate::models::WorldEvent {
+                        event_type: cyber_jianghu_protocol::WorldEventType::SystemNotification,
+                        tick_id,
+                        description: msg.clone(),
+                        metadata: serde_json::json!({
+                            "type": "vendor_restock",
+                            "items": restocked_items.iter().map(|(n, q)| serde_json::json!({"name": n, "quantity": q})).collect::<Vec<_>>(),
+                            "cost_silver": total_spent,
+                        }),
+                    },
+                );
+
+                info!(
+                    "Vendor 补货完成: agent={} spent={} silver remaining={}",
+                    agent_id, total_spent, new_silver
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     /// 启动Tick循环
     ///
     /// 实时模式：纯时钟驱动。
@@ -248,6 +389,11 @@ impl TickScheduler {
                 );
             }
 
+            // 1.5 Vendor 自动补货（在广播前执行，事件注入到 event_manager）
+            if let Err(e) = self.refill_vendors(self.current_tick_id).await {
+                warn!("Vendor 补货失败: {}", e);
+            }
+
             // 2. 广播 WorldState
             if let Err(e) = self.broadcast_new_tick(self.current_tick_id).await {
                 error!("Tick {} 广播失败: {}", self.current_tick_id, e);
@@ -293,6 +439,15 @@ impl TickScheduler {
             .collect();
 
         self.event_manager.clear();
+
+        // drain grant-items 跨请求缓冲事件（clear 后注入，确保本 tick 可见）
+        for entry in self.vendor_pending_events.iter() {
+            let agent_id = *entry.key();
+            for event in entry.value() {
+                self.event_manager.add_event_for_agent(agent_id, event.clone());
+            }
+        }
+        self.vendor_pending_events.clear();
 
         self.broadcaster
             .broadcast_states(

@@ -221,6 +221,8 @@ async fn handle_websocket(
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
         let survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
+        let critical_attack_threshold = gd.game_rules.data.agent_state.survival.critical_attack_threshold;
+        let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
         let intent_batch = gd.game_rules.data.intent_batch.clone();
@@ -229,6 +231,8 @@ async fn handle_websocket(
         let game_rules = build_game_rules_from_config(
             tick_duration_secs,
             survival_threshold,
+            critical_attack_threshold,
+            rebirth_delay_ticks,
             game_rules_version,
             immediate_events,
             intent_batch,
@@ -300,12 +304,17 @@ async fn handle_websocket(
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default();
+                                let aliases = config
+                                    .as_ref()
+                                    .map(|c| c.aliases.clone())
+                                    .unwrap_or_default();
                                 crate::models::InventoryItem {
                                     item_id: item.item_id,
                                     name,
                                     quantity: item.quantity,
                                     is_equipped: item.is_equipped,
                                     item_type,
+                                    aliases,
                                 }
                             })
                             .collect(),
@@ -337,6 +346,10 @@ async fn handle_websocket(
                                     name,
                                     quantity: gi.quantity,
                                     item_type,
+                                    aliases: config
+                                        .as_ref()
+                                        .map(|c| c.aliases.clone())
+                                        .unwrap_or_default(),
                                 }
                             })
                             .collect(),

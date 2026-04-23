@@ -55,6 +55,10 @@ pub struct GameRules {
     #[serde(default = "default_survival_threshold")]
     pub survival_threshold: i32,
 
+    /// 生存攻击阈值（hunger/thirst 低于此值时注入攻击/交易提示）
+    #[serde(default = "default_critical_attack_threshold")]
+    pub critical_attack_threshold: i32,
+
     /// 规则版本（用于检测变更）
     pub version: String,
 
@@ -72,6 +76,14 @@ pub struct GameRules {
     /// 即时事件处理配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub immediate_events: Option<ImmediateEventConfig>,
+
+    /// 死亡后自动重生延迟 tick 数（0 = 不自动重生）
+    #[serde(default)]
+    pub rebirth_delay_ticks: i32,
+}
+
+fn default_critical_attack_threshold() -> i32 {
+    15
 }
 
 // ============================================================================
@@ -100,6 +112,14 @@ pub struct IntentBatchConfig {
     /// 分级审核配置
     #[serde(default)]
     pub llm_validation: GradedValidationConfig,
+
+    /// LLM 连续失败多少 tick 后激活 chaos 模式
+    #[serde(default = "default_llm_chaos_threshold")]
+    pub llm_chaos_threshold: u32,
+}
+
+fn default_llm_chaos_threshold() -> u32 {
+    12
 }
 
 fn default_max_intents() -> usize {
@@ -172,7 +192,7 @@ fn default_restricted_area_keywords() -> Vec<String> {
 fn default_high_value_item_keywords() -> Vec<String> {
     // 武侠主题默认值：高价值物品前缀
     // 生产环境应通过 game_rules.yaml 配置
-    vec!["silver".into(), "gold".into()]
+    vec!["银子".into(), "silver".into(), "gold".into()]
 }
 
 fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String> {

@@ -2,6 +2,11 @@
 // Agent Functions
 // ============================================================================
 
+// 全局物品列表缓存（供 grant-items UI 使用）
+var allItemsList = null;
+// 当前打开 modal 的 agent ID
+var currentModalAgentId = null;
+
 // Load status configs (data-driven)
 async function loadStatusConfigs() {
     try {
@@ -190,6 +195,8 @@ async function openAgentModal(agentId) {
     var title = document.getElementById("modal-agent-name");
     modal.classList.add("show");
     switchModalTab("basic");
+    currentModalAgentId = agentId;
+    grantItemsBuffer = []; // 重置待注入列表
 
     try {
         var agentRes = await fetch("/api/dashboard/agent/" + agentId, { headers: getAuthHeaders() });
@@ -198,6 +205,7 @@ async function openAgentModal(agentId) {
         title.textContent = agent.name;
 
         document.getElementById("modal-tab-basic").innerHTML = renderBasicInfo(agent);
+        document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
 
         var expRes = await fetch("/api/dashboard/agent/" + agentId + "/experiences?page=1&limit=20", { headers: getAuthHeaders() });
         if (handleAuthError(expRes)) {
@@ -224,6 +232,8 @@ function switchModalTab(tab) {
 
 function closeAgentModal() {
     document.getElementById("agent-modal").classList.remove("show");
+    grantItemsBuffer = [];
+    currentModalAgentId = null;
 }
 
 window.onclick = function (event) {
@@ -446,6 +456,178 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ============================================================================
+// Inventory Management (grant-items UI)
+// ============================================================================
+
+async function loadAllItems() {
+    if (allItemsList) return allItemsList;
+    try {
+        var res = await fetch("/api/dashboard/items");
+        if (res.ok) {
+            allItemsList = await res.json();
+        }
+    } catch (e) {
+        console.error("Failed to load items list:", e);
+    }
+    return allItemsList || [];
+}
+
+async function renderInventoryManage(agent) {
+    var inventoryHtml = (!agent.inventory || agent.inventory.length === 0)
+        ? '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">空空如也</div>'
+        : '<div class="inventory-grid">' +
+        agent.inventory.map(function (item) {
+            return '<div class="inventory-item">' +
+                '<div style="margin-bottom: 2px;">' + escapeHtml(item.name) + '</div>' +
+                '<div style="font-weight: 600; color: var(--text-secondary);">x' + item.count + '</div></div>';
+        }).join("") + '</div>';
+
+    var html = '<div class="detail-section">' +
+        '<div class="detail-title">当前背包</div>' +
+        inventoryHtml +
+        '</div>';
+
+    // grant-items UI: 仅 write token 可见
+    if (authTokenType === "write") {
+        var items = await loadAllItems();
+        var optionsHtml = items.map(function (item) {
+            return '<option value="' + escapeHtml(item.item_id) + '">' +
+                escapeHtml(item.name) + ' (' + escapeHtml(item.item_type) + ')</option>';
+        }).join("");
+
+        html += '<div class="detail-section">' +
+            '<div class="detail-title">注入物品</div>' +
+            '<div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">' +
+            '<div style="flex: 1; min-width: 150px;">' +
+            '<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">物品</label>' +
+            '<select id="grant-item-select" class="form-input" style="width: 100%;">' + optionsHtml + '</select>' +
+            '</div>' +
+            '<div style="width: 100px;">' +
+            '<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">数量</label>' +
+            '<input type="number" id="grant-item-qty" class="form-input" value="1" min="1" max="9999" style="width: 100%;" />' +
+            '</div>' +
+            '<button class="btn btn-success" onclick="addGrantItem()" id="grant-item-btn">添加</button>' +
+            '</div>' +
+            '<div id="grant-items-list" style="margin-top: 10px;"></div>' +
+            '</div>';
+    } else {
+        html += '<div class="detail-section">' +
+            '<div style="font-size: 12px; color: var(--text-subtle); text-align: center; padding: 10px;">需要编辑权限才能注入物品</div>' +
+            '</div>';
+    }
+
+    // Vendor 补货规则配置（仅 write token 可编辑）
+    html += await renderVendorRefillSection(agent.agent_id);
+
+    return html;
+}
+
+// 待注入物品列表
+var grantItemsBuffer = [];
+
+function addGrantItem() {
+    var select = document.getElementById("grant-item-select");
+    var qtyInput = document.getElementById("grant-item-qty");
+    if (!select || !qtyInput) return;
+
+    var itemId = select.value;
+    var qty = parseInt(qtyInput.value, 10);
+    if (!itemId || isNaN(qty) || qty <= 0) {
+        showToast("请选择物品并输入有效数量", "error");
+        return;
+    }
+
+    var itemName = select.options[select.selectedIndex].text;
+    grantItemsBuffer.push({ item_id: itemId, name: itemName, quantity: qty });
+    renderGrantItemsBuffer();
+}
+
+function removeGrantItem(index) {
+    grantItemsBuffer.splice(index, 1);
+    renderGrantItemsBuffer();
+}
+
+function renderGrantItemsBuffer() {
+    var container = document.getElementById("grant-items-list");
+    if (!container) return;
+
+    if (grantItemsBuffer.length === 0) {
+        container.innerHTML = "";
+        return;
+    }
+
+    var html = '<div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 8px;">' +
+        '<div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">待注入列表:</div>' +
+        grantItemsBuffer.map(function (item, idx) {
+            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border-color);">' +
+                '<span style="font-size: 13px;">' + escapeHtml(item.name) + ' x' + item.quantity + '</span>' +
+                '<button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="removeGrantItem(' + idx + ')">移除</button>' +
+                '</div>';
+        }).join("") +
+        '<button class="btn btn-success" style="margin-top: 8px; width: 100%;" onclick="grantItemsToAgent()">确认注入 (' + grantItemsBuffer.length + ' 种物品)</button>' +
+        '</div>';
+    container.innerHTML = html;
+}
+
+async function grantItemsToAgent() {
+    if (!currentModalAgentId) return;
+
+    var select = document.getElementById("grant-item-select");
+    var qtyInput = document.getElementById("grant-item-qty");
+    if (!select || !qtyInput) return;
+
+    // 如果 buffer 为空，自动添加当前选中的物品
+    if (grantItemsBuffer.length === 0) {
+        var itemId = select.value;
+        var qty = parseInt(qtyInput.value, 10);
+        if (!itemId || isNaN(qty) || qty <= 0) {
+            showToast("请选择物品并输入有效数量", "error");
+            return;
+        }
+        grantItemsBuffer.push({ item_id: itemId, quantity: qty });
+    }
+
+    var items = grantItemsBuffer.map(function (item) {
+        return { item_id: item.item_id, quantity: item.quantity };
+    });
+
+    try {
+        var res = await fetch("/api/v1/agent/grant-items", {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                agent_id: currentModalAgentId,
+                items: items,
+            }),
+        });
+
+        if (res.ok) {
+            var data = await res.json();
+            if (data.success) {
+                showToast("成功注入 " + data.granted_count + " 个物品", "success");
+                grantItemsBuffer = [];
+                renderGrantItemsBuffer();
+                // 仅刷新库存 tab
+                var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+                if (agentRes.ok) {
+                    var agent = await agentRes.json();
+                    document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
+                }
+            } else {
+                showToast("注入失败: " + data.message, "error");
+            }
+        } else {
+            var errData = await res.json().catch(function () { return null; });
+            var errMsg = errData && errData.message ? errData.message : "HTTP " + res.status;
+            showToast("注入失败: " + errMsg, "error");
+        }
+    } catch (e) {
+        console.error("Grant items failed:", e);
+        showToast("网络请求失败", "error");
+    }
+}
+
 async function cleanupOfflineAgents() {
     if (!confirm("确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。")) return;
     try {
@@ -464,6 +646,131 @@ async function cleanupOfflineAgents() {
         }
     } catch (e) {
         console.error("Failed to cleanup agents", e);
+        showToast("网络请求失败", "error");
+    }
+}
+
+// ============================================================================
+// Vendor 补货规则管理
+// ============================================================================
+
+async function renderVendorRefillSection(agentId) {
+    var rules = [];
+    try {
+        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill", { headers: getAuthHeaders() });
+        if (res.ok) rules = await res.json();
+    } catch (e) { /* ignore */ }
+
+    var isWrite = authTokenType === "write";
+    var html = '<div class="detail-section">' +
+        '<div class="detail-title">自动补货规则</div>';
+
+    if (rules.length === 0) {
+        html += '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">未配置补货规则</div>';
+    } else {
+        html += '<table style="width:100%; font-size:13px; border-collapse:collapse;">' +
+            '<tr style="color:var(--text-secondary); border-bottom:1px solid var(--border-color);">' +
+            '<th style="text-align:left; padding:4px 8px;">物品</th>' +
+            '<th style="text-align:center; padding:4px;">触发</th>' +
+            '<th style="text-align:center; padding:4px;">补到</th>' +
+            '<th style="text-align:center; padding:4px;">预算%</th>' +
+            '<th style="text-align:center; padding:4px;">状态</th>' +
+            (isWrite ? '<th style="text-align:center; padding:4px;">操作</th>' : '') +
+            '</tr>';
+        rules.forEach(function (r) {
+            var itemName = r.item_id;
+            html += '<tr style="border-bottom:1px solid var(--border-color);">' +
+                '<td style="padding:4px 8px;">' + escapeHtml(itemName) + '</td>' +
+                '<td style="text-align:center; padding:4px;">' + r.threshold + '</td>' +
+                '<td style="text-align:center; padding:4px;">' + r.refill_to + '</td>' +
+                '<td style="text-align:center; padding:4px;">' + r.budget_ratio + '%</td>' +
+                '<td style="text-align:center; padding:4px;">' + (r.enabled ? "启用" : "停用") + '</td>' +
+                (isWrite ? '<td style="text-align:center; padding:4px;">' +
+                    '<button class="btn btn-secondary" style="padding:2px 6px; font-size:11px;" onclick="deleteRefillRule(\'' + agentId + '\',\'' + escapeHtml(r.item_id) + '\')">删除</button>' +
+                    '</td>' : '') +
+                '</tr>';
+        });
+        html += '</table>';
+    }
+
+    if (isWrite) {
+        var items = await loadAllItems();
+        var optionsHtml = items.map(function (item) {
+            return '<option value="' + escapeHtml(item.item_id) + '">' + escapeHtml(item.name) + '</option>';
+        }).join("");
+
+        html += '<div style="display:flex; gap:8px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">' +
+            '<div style="flex:1; min-width:120px;">' +
+            '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">物品</label>' +
+            '<select id="refill-item-select" class="form-input" style="width:100%;">' + optionsHtml + '</select></div>' +
+            '<div style="width:70px;">' +
+            '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">触发</label>' +
+            '<input type="number" id="refill-threshold" class="form-input" value="10" min="1" style="width:100%;" /></div>' +
+            '<div style="width:70px;">' +
+            '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">补到</label>' +
+            '<input type="number" id="refill-refill-to" class="form-input" value="50" min="1" style="width:100%;" /></div>' +
+            '<div style="width:70px;">' +
+            '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">预算%</label>' +
+            '<input type="number" id="refill-budget" class="form-input" value="50" min="1" max="100" style="width:100%;" /></div>' +
+            '<button class="btn btn-success" style="padding:4px 12px;" onclick="addRefillRule(\'' + agentId + '\')">添加</button>' +
+            '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+async function addRefillRule(agentId) {
+    var itemId = document.getElementById("refill-item-select").value;
+    var threshold = parseInt(document.getElementById("refill-threshold").value, 10);
+    var refillTo = parseInt(document.getElementById("refill-refill-to").value, 10);
+    var budget = parseInt(document.getElementById("refill-budget").value, 10);
+
+    if (!itemId || isNaN(threshold) || isNaN(refillTo) || isNaN(budget) || threshold <= 0 || refillTo <= threshold || budget <= 0 || budget > 100) {
+        showToast("参数不合法: 触发>0, 补到>触发, 预算1-100", "error");
+        return;
+    }
+
+    try {
+        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill", {
+            method: "PUT",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ item_id: itemId, threshold: threshold, refill_to: refillTo, budget_ratio: budget }),
+        });
+        if (res.ok) {
+            showToast("补货规则已添加", "success");
+            var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+            if (agentRes.ok) {
+                var agent = await agentRes.json();
+                document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
+            }
+        } else {
+            var err = await res.json().catch(function () { return {}; });
+            showToast("添加失败: " + (err.error || "HTTP " + res.status), "error");
+        }
+    } catch (e) {
+        showToast("网络请求失败", "error");
+    }
+}
+
+async function deleteRefillRule(agentId, itemId) {
+    if (!confirm("确定删除 " + itemId + " 的补货规则？")) return;
+    try {
+        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill/" + encodeURIComponent(itemId), {
+            method: "DELETE",
+            headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+            showToast("补货规则已删除", "success");
+            var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+            if (agentRes.ok) {
+                var agent = await agentRes.json();
+                document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
+            }
+        } else {
+            showToast("删除失败", "error");
+        }
+    } catch (e) {
         showToast("网络请求失败", "error");
     }
 }
