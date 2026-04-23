@@ -329,7 +329,26 @@ impl CognitiveContextBuilder {
         for entity in &world_state.entities {
             let rel_info = relationship_store
                 .and_then(|store| store.get_relationship(entity.id).ok().flatten())
-                .map(|mem| format!("[{}]", mem.self_description))
+                .map(|mem| {
+                    let fav = mem.favorability;
+                    let desc = if mem.self_description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", mem.self_description)
+                    };
+                    // 好感度标注：正值显示友好，负值显示敌意
+                    if fav > 30 {
+                        format!("[关系:友好({}){}]", fav, desc)
+                    } else if fav > 0 {
+                        format!("[关系:认识({}){}]", fav, desc)
+                    } else if fav < -30 {
+                        format!("[关系:敌对({}){}]", fav, desc)
+                    } else if fav < 0 {
+                        format!("[关系:不熟({}){}]", fav, desc)
+                    } else {
+                        format!("[陌生人{}]", desc)
+                    }
+                })
                 .unwrap_or_default();
 
             observations.push(format!(

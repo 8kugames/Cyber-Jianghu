@@ -687,9 +687,19 @@ impl CognitiveImmediateDecisionMaker {
 
         let personality = self.personality_str();
 
+        // 交易关键词检测：如果消息包含交易相关词汇，注入库存上下文
+        let trade_keywords = ["买", "卖", "价格", "银子", "两", "成交", "便宜", "贵", "多少钱", "物品"];
+        let is_trade_related = trade_keywords.iter().any(|k| truncated.contains(k));
+
+        let trade_context = if is_trade_related {
+            "\n[交易相关] 你可以讨价还价，协商价格后再决定是否交易。".to_string()
+        } else {
+            String::new()
+        };
+
         format!(
             r#"你是{name}，{personality}。
-{sender}在你附近说：「{truncated}」
+{sender}在你附近说：「{truncated}」{trade_context}
 
 你需要快速判断：
 1. 这句话是否与你有关或需要你回应？
@@ -705,6 +715,7 @@ action_type 只能是 "说话" 或 "私语"。
             personality = personality,
             sender = sender,
             truncated = truncated,
+            trade_context = trade_context,
         )
     }
 
