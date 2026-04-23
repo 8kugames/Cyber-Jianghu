@@ -441,7 +441,7 @@ impl CognitiveContextBuilder {
             });
         }
 
-        drives.sort_by(|a, b| b.intensity.cmp(&a.intensity));
+        drives.sort_by_key(|d| std::cmp::Reverse(d.intensity));
 
         let dominant_drive = drives
             .first()
@@ -544,7 +544,7 @@ mod tests {
             },
         ];
 
-        drives.sort_by(|a, b| b.intensity.cmp(&a.intensity));
+        drives.sort_by_key(|d| std::cmp::Reverse(d.intensity));
         assert_eq!(drives[0].drive, "high");
         assert_eq!(drives[1].drive, "mid");
         assert_eq!(drives[2].drive, "low");

@@ -201,7 +201,7 @@ pub fn generate_template(data: &CollectedData) -> Result<String> {
 
         // 找出最活跃的 agent
         let mut sorted_agents: Vec<_> = data.agents.iter().collect();
-        sorted_agents.sort_by(|a, b| b.actions_count.cmp(&a.actions_count));
+        sorted_agents.sort_by_key(|a| std::cmp::Reverse(a.actions_count));
 
         for agent in sorted_agents.iter().take(5) {
             summary.push_str(&format!("### {}\n\n", agent.name));

@@ -24,6 +24,17 @@ pub struct ConversationTurn {
     pub assistant: String,
 }
 
+/// 对话输入参数（用于减少函数参数数量）
+#[derive(Debug, Clone)]
+pub struct ConversationInput<'a> {
+    /// 对话历史摘要
+    pub summary: Option<&'a str>,
+    /// 保留的近期完整轮次
+    pub turns: &'a [ConversationTurn],
+    /// 当前请求的 prompt
+    pub current_prompt: &'a str,
+}
+
 /// 构建对话消息列表（system + summary + history + current prompt）
 pub fn build_conversation_messages(
     system: &str,
@@ -118,15 +129,13 @@ pub trait LlmClient: Send + Sync {
     async fn complete_with_conversation_and_tools(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: ConversationInput<'_>,
         tools: &[super::tool_types::ToolDefinition],
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
-        let _ = (summary, turns);
-        self.complete_with_tools(system, current_prompt, tools, executor, max_rounds)
+        let _ = (&input.summary, input.turns);
+        self.complete_with_tools(system, input.current_prompt, tools, executor, max_rounds)
             .await
     }
 
@@ -251,9 +260,7 @@ pub trait LlmClientExt {
     async fn complete_json_with_conversation_and_tools<D: DeserializeOwned + Send>(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: ConversationInput<'_>,
         tools: &[super::tool_types::ToolDefinition],
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
@@ -446,16 +453,18 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     async fn complete_json_with_conversation_and_tools<D: DeserializeOwned + Send>(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: ConversationInput<'_>,
         tools: &[super::tool_types::ToolDefinition],
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
     ) -> Result<D> {
         let text = self
             .complete_with_conversation_and_tools(
-                system, summary, turns, current_prompt, tools, executor, max_rounds,
+                system,
+                input,
+                tools,
+                executor,
+                max_rounds,
             )
             .await?;
         parse_json_response::<D>(&text)
@@ -840,31 +849,31 @@ impl LlmClient for FallbackLlmClient {
     async fn complete_with_conversation_and_tools(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: ConversationInput<'_>,
         tools: &[super::tool_types::ToolDefinition],
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
         let system = system.to_string();
-        let summary_owned = summary.map(|s| s.to_string());
-        let turns = turns.to_vec();
-        let current_prompt = current_prompt.to_string();
+        let turns = input.turns.to_vec();
+        let current_prompt = input.current_prompt.to_string();
         let tools = tools.to_vec();
+        let summary = input.summary.map(|s| s.to_string());
         self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
             let system = system.clone();
-            let summary = summary_owned.clone();
             let turns = turns.clone();
             let current_prompt = current_prompt.clone();
             let tools = tools.clone();
+            let summary = summary.clone();
             async move {
                 client
                     .complete_with_conversation_and_tools(
                         &system,
-                        summary.as_deref(),
-                        &turns,
-                        &current_prompt,
+                        ConversationInput {
+                            summary: summary.as_deref(),
+                            turns: &turns,
+                            current_prompt: &current_prompt,
+                        },
                         &tools,
                         executor,
                         max_rounds,
