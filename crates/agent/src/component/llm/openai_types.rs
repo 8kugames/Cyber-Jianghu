@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// OpenAI 兼容 API 请求
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct OpenAIRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
@@ -25,6 +25,9 @@ pub(crate) struct OpenAIRequest {
     /// DashScope/Kimi 要求非流式调用禁用 thinking
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
+    /// 启用 SSE 流式响应
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
 }
 
 /// 聊天消息
@@ -107,4 +110,31 @@ pub(crate) struct OpenAIUsage {
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenAIChoice {
     pub message: ChatMessage,
+}
+
+// ============================================================================
+// SSE 流式响应类型
+// ============================================================================
+
+/// SSE 流式响应（每个 chunk）
+#[derive(Debug, Deserialize)]
+pub(crate) struct OpenAIStreamResponse {
+    pub choices: Vec<OpenAIStreamChoice>,
+    #[serde(default)]
+    pub usage: Option<OpenAIUsage>,
+}
+
+/// 流式响应选项
+#[derive(Debug, Deserialize)]
+pub(crate) struct OpenAIStreamChoice {
+    pub delta: OpenAIDelta,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+}
+
+/// 流式增量内容
+#[derive(Debug, Deserialize)]
+pub(crate) struct OpenAIDelta {
+    #[serde(default)]
+    pub content: Option<String>,
 }

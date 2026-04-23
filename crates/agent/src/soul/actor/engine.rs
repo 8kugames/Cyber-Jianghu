@@ -130,6 +130,8 @@ impl DirectCognitiveResponse {
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: std::sync::RwLock<CognitiveEngineConfig>,
+    /// 启用流式 LLM 调用
+    enable_streaming: bool,
     /// Prompt 缓存（分层缓存优化）
     pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
@@ -164,6 +166,7 @@ impl CognitiveEngine {
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
+            enable_streaming: false,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             conversation_history: None,
@@ -178,6 +181,11 @@ impl CognitiveEngine {
     pub fn set_narrative_window_size(&self, size: usize) {
         let mut window = self.summary_window.write().unwrap();
         *window = NarrativeSummaryWindow::new(size);
+    }
+
+    /// 设置是否启用流式 LLM 调用
+    pub fn set_enable_streaming(&mut self, enable: bool) {
+        self.enable_streaming = enable;
     }
 
     /// 使用自定义窗口大小创建认知引擎
@@ -201,6 +209,7 @@ impl CognitiveEngine {
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
+            enable_streaming: false,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             conversation_history: None,
@@ -479,16 +488,35 @@ impl CognitiveEngine {
 
             match conv_data {
                 Some((turns, system, summary)) => {
-                    self.llm_client
-                        .complete_json_with_conversation(
-                            &system,
-                            summary.as_deref(),
-                            &turns,
-                            &prompt,
-                        )
-                        .await?
+                    if self.enable_streaming {
+                        self.llm_client
+                            .complete_json_streaming_with_conversation(
+                                &system,
+                                summary.as_deref(),
+                                &turns,
+                                &prompt,
+                            )
+                            .await?
+                    } else {
+                        self.llm_client
+                            .complete_json_with_conversation(
+                                &system,
+                                summary.as_deref(),
+                                &turns,
+                                &prompt,
+                            )
+                            .await?
+                    }
                 }
-                None => self.llm_client.complete_json(&prompt).await?,
+                None => {
+                    if self.enable_streaming {
+                        self.llm_client
+                            .complete_json_streaming(&persona_for_prompt, &prompt)
+                            .await?
+                    } else {
+                        self.llm_client.complete_json(&prompt).await?
+                    }
+                }
             }
         };
         let response_json = serde_json::to_string(&response)?;

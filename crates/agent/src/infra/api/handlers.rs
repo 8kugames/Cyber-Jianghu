@@ -4133,6 +4133,7 @@ pub(super) async fn update_llm_config_handler(
         soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
         soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
         narrative_window_size: config.llm.narrative_window_size,
+        enable_streaming: config.llm.enable_streaming,
     };
 
     // 更新 reflector 配置
@@ -4161,6 +4162,7 @@ pub(super) async fn update_llm_config_handler(
             soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
             soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
             narrative_window_size: config.llm.narrative_window_size,
+            enable_streaming: config.llm.enable_streaming,
         });
     }
 
