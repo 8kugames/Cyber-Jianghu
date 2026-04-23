@@ -41,10 +41,20 @@ data:
     survival:
       # hunger/thirst 低于此阈值时，survival 动作绕过 ReflectorSoul 审查
       critical_threshold: 30
+      # hunger/thirst 低于此阈值时注入攻击/交易提示（应 < critical_threshold）
+      critical_attack_threshold: 15
+      # 自动重生配置
+      rebirth:
+        # 死亡后延迟 N 个 tick 自动重生 (0 = 不自动重生)
+        delay_ticks: 5
+        # 重置属性到初始值
+        reset_attributes: true
+        # 重生地点 (空字符串 = 使用 spawn_location)
+        spawn_location: ""
 
     # 出生点配置
     location:
-      spawn_location: "longmen_lobby"
+      spawn_location: "龙门大堂"
       # parent-child 隐式连接的默认 travel_cost
       # 节点可在 locations.yaml 中通过 implicit_travel_cost 覆盖
       default_implicit_travel_cost: 1
@@ -74,6 +84,8 @@ data:
     max_intents_per_tick: 5
     # 三魂循环最大重试次数
     max_retries: 33
+    # LLM 连续失败多少 tick 后激活 chaos 模式
+    llm_chaos_threshold: 12
     # 分级审核辅助配置
     llm_validation:
       # 每 tick 至少审核的 Intent 数量
@@ -85,6 +97,7 @@ data:
         - secret
       # 高价值物品 item_id 前缀/关键词（medium 风险 trade/steal/give 抽审用）
       high_value_item_keywords:
+        - 银子
         - silver
         - gold
       # Adaptive 审核字段映射（medium 风险动作抽审逻辑用）
@@ -181,3 +194,6 @@ data:
     environmental:
       cause: "environmental"
       message: "你被恶劣的环境吞噬..."
+
+  # Vendor 库存自动补货配置（已迁移到 DB: agent_vendor_refill 表）
+  # 通过 Admin UI (/admin) 管理补货规则，不再使用 YAML 配置

@@ -9,3 +9,4 @@ pub mod context;
 pub mod dashboard;
 pub mod system;
 pub mod validation;
+pub mod vendor;

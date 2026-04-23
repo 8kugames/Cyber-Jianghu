@@ -813,6 +813,22 @@ impl Config {
             .unwrap_or(30)
     }
 
+    /// 获取生存攻击阈值（hunger/thirst 低于此值时注入攻击/交易提示）
+    pub fn critical_attack_threshold(&self) -> i32 {
+        self.game_rules
+            .as_ref()
+            .map(|r| r.critical_attack_threshold)
+            .unwrap_or(15)
+    }
+
+    /// 获取重生延迟 tick 数（0 = 不自动重生）
+    pub fn rebirth_delay_ticks(&self) -> i32 {
+        self.game_rules
+            .as_ref()
+            .map(|r| r.rebirth_delay_ticks)
+            .unwrap_or(0)
+    }
+
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件

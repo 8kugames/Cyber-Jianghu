@@ -36,6 +36,8 @@ pub struct WebSocketQuery {
 pub fn build_game_rules_from_config(
     tick_duration_secs: u64,
     survival_threshold: i32,
+    critical_attack_threshold: i32,
+    rebirth_delay_ticks: i32,
     version: String,
     immediate_events: Option<cyber_jianghu_protocol::ImmediateEventConfig>,
     intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
@@ -87,6 +89,10 @@ pub fn build_game_rules_from_config(
             .map(|ib| ib.partial_execution_enabled)
             .unwrap_or(true),
         llm_validation,
+        llm_chaos_threshold: intent_batch
+            .as_ref()
+            .map(|ib| ib.llm_chaos_threshold)
+            .unwrap_or(12),
     };
 
     let initial_items = InitialInventoryRegistry::items()
@@ -108,11 +114,13 @@ pub fn build_game_rules_from_config(
         initial_items,
         survival_actions,
         survival_threshold,
+        critical_attack_threshold,
         version,
         last_updated: Utc::now().to_rfc3339(),
         intent_batch: Some(intent_batch),
         reflector_narrative: None,
         immediate_events,
+        rebirth_delay_ticks,
     }
 }
 

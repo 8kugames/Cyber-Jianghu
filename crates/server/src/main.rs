@@ -27,7 +27,7 @@ use anyhow::Result;
 use axum::{
     Router,
     body::Body,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -89,6 +89,7 @@ fn start_tick_engine(
     worker_tx: tokio::sync::mpsc::Sender<cyber_jianghu_server::tick::WorkerMessage>,
     agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
+    vendor_pending_events: cyber_jianghu_server::models::VendorPendingEvents,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -99,6 +100,7 @@ fn start_tick_engine(
             worker_tx,
             agent_state_cache,
             accepting_tick_id,
+            vendor_pending_events,
         );
 
         info!("启动Tick引擎（后台任务）");
@@ -291,6 +293,7 @@ async fn main() -> Result<()> {
         worker_tx.clone(),
         agent_state_cache.clone(),
         accepting_tick_id,
+        state.vendor_pending_events.clone(),
     );
 
     // 10.1 启动速率限制器清理任务
@@ -315,6 +318,38 @@ async fn main() -> Result<()> {
             "/api/v1/agent/rebirth",
             post(handlers::agent::agent_rebirth),
         )
+        // 自动重生 - Agent 死亡后延迟调用
+        .route(
+            "/api/v1/agent/auto-rebirth",
+            post(handlers::agent::agent_auto_rebirth),
+        )
+        // 管理员库存注入（Vendor 补货等）
+        .route(
+            "/api/v1/agent/grant-items",
+            post(handlers::agent::agent_grant_items).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_write_token,
+            )),
+        )
+        // Vendor 补货规则管理
+        .route(
+            "/api/dashboard/agent/{id}/vendor-refill",
+            get(handlers::vendor::get_vendor_refill_rules).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            ))
+            .put(handlers::vendor::set_vendor_refill_rule).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_write_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/agent/{id}/vendor-refill/{item_id}",
+            delete(handlers::vendor::delete_vendor_refill_rule).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_write_token,
+            )),
+        )
         .route(
             "/api/v1/agent/{id}/context",
             get(handlers::context::get_agent_context),
@@ -328,6 +363,15 @@ async fn main() -> Result<()> {
         .route(
             "/api/dashboard/actions-map",
             get(handlers::dashboard::get_actions_map),
+        )
+        .route(
+            "/api/dashboard/items",
+            get(handlers::dashboard::get_items).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ),
+            ),
         )
         // Dashboard API (需要 Read 权限)
         .route(

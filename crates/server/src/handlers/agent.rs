@@ -179,6 +179,8 @@ pub async fn agent_register(
     let (
         tick_duration_secs,
         survival_threshold,
+        critical_attack_threshold,
+        rebirth_delay_ticks,
         game_rules_version,
         immediate_events,
         intent_batch,
@@ -187,6 +189,8 @@ pub async fn agent_register(
         (
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
             gd.game_rules.data.agent_state.survival.critical_threshold,
+            gd.game_rules.data.agent_state.survival.critical_attack_threshold,
+            gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
             gd.game_rules.version.clone(),
             gd.game_rules.data.immediate_events.clone(),
             gd.game_rules.data.intent_batch.clone(),
@@ -206,9 +210,11 @@ pub async fn agent_register(
             .collect(),
         survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
         survival_threshold,
+        critical_attack_threshold,
         version: game_rules_version,
         last_updated: chrono::Utc::now().to_rfc3339(),
         intent_batch,
+        rebirth_delay_ticks,
         reflector_narrative: None,
         immediate_events,
     };
@@ -303,4 +309,246 @@ pub async fn agent_rebirth(
             ))
         }
     }
+}
+
+// ============================================================================
+// Agent 自动重生 API（死亡后自动恢复）
+// ============================================================================
+
+/// 自动重生请求
+#[derive(Debug, serde::Deserialize)]
+pub struct AutoRebirthRequest {
+    /// Agent ID
+    pub agent_id: uuid::Uuid,
+}
+
+/// 自动重生响应
+#[derive(Debug, serde::Serialize)]
+pub struct AutoRebirthResponse {
+    pub success: bool,
+    pub message: String,
+    pub agent_id: String,
+    pub spawn_location: String,
+}
+
+/// Agent 自动重生接口
+///
+/// POST /api/v1/agent/auto-rebirth
+///
+/// Agent 端在等待 rebirth_delay_ticks 后调用此接口完成重生。
+/// 服务端重置属性到初始值、清空背包、重置位置、更新 DashMap。
+pub async fn agent_auto_rebirth(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<AutoRebirthRequest>,
+) -> Result<Json<AutoRebirthResponse>, (StatusCode, Json<AutoRebirthResponse>)> {
+    info!("自动重生请求: agent_id={}", payload.agent_id);
+
+    // 从配置读取重生参数（必须在 await 之前提取，RwLockReadGuard 不是 Send）
+    let (spawn_location, reset_attributes, initial_items_data) = {
+        let gd = state.game_data.get();
+        let rebirth_config = &gd.game_rules.data.agent_state.survival.rebirth;
+        let spawn_location = if rebirth_config.spawn_location.is_empty() {
+            gd.game_rules.data.agent_state.location.spawn_location.clone()
+        } else {
+            rebirth_config.spawn_location.clone()
+        };
+        let reset_attributes = rebirth_config.reset_attributes;
+        let initial_items = game_data::InitialInventoryRegistry::items();
+        let initial_items_data: Vec<(String, String, i32, String)> = initial_items
+            .iter()
+            .map(|item| {
+                (
+                    item.item_id.clone(),
+                    item.name.clone(),
+                    item.quantity,
+                    item.description.clone(),
+                )
+            })
+            .collect();
+        (spawn_location, reset_attributes, initial_items_data)
+    };
+
+    // 执行重生
+    let result = db::auto_rebirth_agent(
+        &state.db_pool,
+        payload.agent_id,
+        &spawn_location,
+        reset_attributes,
+        &initial_items_data,
+    )
+    .await
+    .map_err(|e| {
+        error!("自动重生失败: agent_id={}, error={}", payload.agent_id, e);
+        (
+            StatusCode::BAD_REQUEST,
+            Json(AutoRebirthResponse {
+                success: false,
+                message: format!("重生失败: {}", e),
+                agent_id: payload.agent_id.to_string(),
+                spawn_location: String::new(),
+            }),
+        )
+    })?;
+
+    // 更新 DashMap（内存缓存）
+    let new_state =
+        crate::models::AgentState::new(result.agent_id, crate::db::get_current_world_tick_id(&state.db_pool).await.unwrap_or(0));
+    state
+        .agent_state_cache
+        .insert(result.agent_id, new_state);
+
+    info!(
+        "Agent 自动重生成功: {} ({}) → {}",
+        result.name, result.agent_id, result.spawn_location
+    );
+
+    Ok(Json(AutoRebirthResponse {
+        success: true,
+        message: format!("角色 '{}' 已重生到 {}", result.name, result.spawn_location),
+        agent_id: result.agent_id.to_string(),
+        spawn_location: result.spawn_location,
+    }))
+}
+
+// ============================================================================
+// 管理员库存注入 API（Vendor 支持）
+// ============================================================================
+
+/// 库存注入请求
+#[derive(Debug, serde::Deserialize)]
+pub struct GrantItemsRequest {
+    /// Agent ID
+    pub agent_id: uuid::Uuid,
+    /// 物品列表 (item_id, quantity)
+    pub items: Vec<GrantItem>,
+}
+
+/// 单个物品
+#[derive(Debug, serde::Deserialize)]
+pub struct GrantItem {
+    pub item_id: String,
+    pub quantity: i32,
+}
+
+/// 库存注入响应
+#[derive(Debug, serde::Serialize)]
+pub struct GrantItemsResponse {
+    pub success: bool,
+    pub message: String,
+    pub granted_count: usize,
+}
+
+/// 管理员库存注入接口
+///
+/// POST /api/v1/agent/grant-items
+///
+/// 为指定 Agent 注入物品库存（用于 Vendor 补货等管理操作）。
+pub async fn agent_grant_items(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<GrantItemsRequest>,
+) -> Result<Json<GrantItemsResponse>, (StatusCode, Json<GrantItemsResponse>)> {
+    if payload.items.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(GrantItemsResponse {
+                success: false,
+                message: "物品列表为空".to_string(),
+                granted_count: 0,
+            }),
+        ));
+    }
+
+    // 验证每个物品：存在性 + 数量合法性
+    for item in &payload.items {
+        if !crate::game_data::registry::ItemRegistry::exists(&item.item_id) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(GrantItemsResponse {
+                    success: false,
+                    message: format!("物品 '{}' 不存在", item.item_id),
+                    granted_count: 0,
+                }),
+            ));
+        }
+        if item.quantity <= 0 || item.quantity > 9999 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(GrantItemsResponse {
+                    success: false,
+                    message: format!("物品 '{}' 数量不合法 (1-9999)", item.item_id),
+                    granted_count: 0,
+                }),
+            ));
+        }
+    }
+
+    let mut granted = 0usize;
+    for item in &payload.items {
+        // 直接 INSERT ... ON CONFLICT DO UPDATE 实现叠加
+        let result = sqlx::query(
+            r#"
+            INSERT INTO agent_inventory (agent_id, item_id, quantity)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (agent_id, item_id)
+            DO UPDATE SET
+                quantity = agent_inventory.quantity + EXCLUDED.quantity,
+                updated_at = CURRENT_TIMESTAMP
+            "#,
+        )
+        .bind(payload.agent_id)
+        .bind(&item.item_id)
+        .bind(item.quantity)
+        .execute(&state.db_pool)
+        .await;
+
+        match result {
+            Ok(_) => {
+                info!("Grant: agent={}, item={}, qty={}", payload.agent_id, item.item_id, item.quantity);
+                granted += 1;
+            }
+            Err(e) => {
+                error!("Grant failed: agent={}, item={}, error={}", payload.agent_id, item.item_id, e);
+            }
+        }
+    }
+
+    info!(
+        "管理员库存注入完成: agent={}, granted={}/{}",
+        payload.agent_id,
+        granted,
+        payload.items.len()
+    );
+
+    // 注入 LLM 消息（"意外获得......，可用于销售"）
+    if granted > 0 {
+        let items_desc: String = payload.items.iter()
+            .map(|i| {
+                let name = crate::game_data::registry::ItemRegistry::get(&i.item_id)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| i.item_id.clone());
+                format!("{}×{}", name, i.quantity)
+            })
+            .collect::<Vec<_>>()
+            .join("、");
+
+        let event = crate::models::WorldEvent {
+            event_type: cyber_jianghu_protocol::WorldEventType::SystemNotification,
+            tick_id: 0,
+            description: format!("意外获得{}，可用于销售", items_desc),
+            metadata: serde_json::json!({
+                "type": "vendor_grant",
+                "items": payload.items.iter().map(|i| serde_json::json!({"item_id": i.item_id, "quantity": i.quantity})).collect::<Vec<_>>(),
+            }),
+        };
+        state.vendor_pending_events
+            .entry(payload.agent_id)
+            .or_default()
+            .push(event);
+    }
+
+    Ok(Json(GrantItemsResponse {
+        success: granted > 0,
+        message: format!("成功注入 {} 个物品", granted),
+        granted_count: granted,
+    }))
 }

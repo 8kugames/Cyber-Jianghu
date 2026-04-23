@@ -31,15 +31,17 @@ mod common;
 mod ground_item_ops;
 mod item_ops;
 mod state_ops;
+mod vendor_ops;
 
 // 导出公共API - 连接池初始化和工具函数
 pub use common::init_db_pool;
 
 // 导出公共API - Agent操作
 pub use agent_ops::{
-    DeviceConnectResult, RebirthResult, connect_device, get_agent_by_device_id, get_agent_by_id,
-    get_all_agents, get_intent_timeout_stats, rebirth_agent, register_agent_transactional,
-    update_agent_location, update_agent_online, update_device_last_seen, verify_device_token,
+    AutoRebirthResult, DeviceConnectResult, RebirthResult, auto_rebirth_agent, connect_device,
+    get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
+    rebirth_agent, register_agent_transactional, update_agent_location, update_agent_online,
+    update_device_last_seen, verify_device_token,
 };
 
 // 导出公共API - AgentState操作
@@ -64,6 +66,12 @@ pub use ground_item_ops::{
 
 // 导出公共API - 物品操作
 pub use item_ops::sync_items_from_config;
+
+// 导出公共API - Vendor 补货操作
+pub use vendor_ops::{
+    VendorRefillRule, get_all_enabled_vendor_refills, get_vendor_refills, remove_vendor_refill,
+    set_vendor_refill, toggle_vendor_refill,
+};
 
 // 数据库连接池类型别名
 pub type DbPool = sqlx::PgPool;
