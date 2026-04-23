@@ -4128,6 +4128,11 @@ pub(super) async fn update_llm_config_handler(
         context_window_tokens: config.llm.context_window_tokens,
         summary_trigger_ratio: config.llm.summary_trigger_ratio,
         keep_recent_turns: config.llm.keep_recent_turns,
+        reconnect_delay_secs: config.llm.reconnect_delay_secs,
+        execution_result_timeout_ms: config.llm.execution_result_timeout_ms,
+        soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
+        soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
+        narrative_window_size: config.llm.narrative_window_size,
     };
 
     // 更新 reflector 配置
@@ -4151,6 +4156,11 @@ pub(super) async fn update_llm_config_handler(
             context_window_tokens: config.llm.context_window_tokens,
             summary_trigger_ratio: config.llm.summary_trigger_ratio,
             keep_recent_turns: config.llm.keep_recent_turns,
+            reconnect_delay_secs: config.llm.reconnect_delay_secs,
+            execution_result_timeout_ms: config.llm.execution_result_timeout_ms,
+            soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
+            soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
+            narrative_window_size: config.llm.narrative_window_size,
         });
     }
 
