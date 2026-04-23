@@ -28,6 +28,9 @@ pub struct ChaosConfig {
     /// 动作权重（action_type → weight）
     #[serde(default = "default_action_weights")]
     pub action_weights: std::collections::HashMap<String, f64>,
+    /// LLM 失败时使用的动作权重（生存优先）
+    #[serde(default = "default_llm_failure_weights")]
+    pub llm_failure_weights: std::collections::HashMap<String, f64>,
 }
 
 fn default_threshold() -> i32 {
@@ -50,6 +53,19 @@ fn default_action_weights() -> std::collections::HashMap<String, f64> {
     m
 }
 
+fn default_llm_failure_weights() -> std::collections::HashMap<String, f64> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("进食".into(), 0.25);
+    m.insert("饮水".into(), 0.20);
+    m.insert("拾取".into(), 0.15);
+    m.insert("采集".into(), 0.15);
+    m.insert("移动".into(), 0.10);
+    m.insert("说话".into(), 0.05);
+    m.insert("打坐".into(), 0.05);
+    m.insert("攻击".into(), 0.05);
+    m
+}
+
 impl Default for ChaosConfig {
     fn default() -> Self {
         Self {
@@ -57,6 +73,7 @@ impl Default for ChaosConfig {
             activation_probability: default_probability(),
             max_chaos_intents: default_max(),
             action_weights: default_action_weights(),
+            llm_failure_weights: default_llm_failure_weights(),
         }
     }
 }
@@ -137,6 +154,88 @@ impl ChaosGenerator {
             sanity,
             intents.len()
         );
+        intents
+    }
+
+    /// LLM 失败触发的 chaos — 不检查 sanity，使用配置的 llm_failure_weights
+    ///
+    /// 当 LLM 连续失败超过阈值时，生成生存导向的随机 intents。
+    /// 不检查 sanity 和概率，100% 触发。
+    pub fn generate_llm_chaos_intents(
+        &mut self,
+        world_state: &WorldState,
+        max_total: usize,
+    ) -> Vec<Intent> {
+        let action_types: Vec<&String> = self.config.llm_failure_weights.keys().collect();
+        if action_types.is_empty() {
+            return Vec::new();
+        }
+
+        let weights: Vec<f64> = action_types
+            .iter()
+            .map(|at| *self.config.llm_failure_weights.get(*at).unwrap_or(&0.1))
+            .collect();
+
+        let dist = match WeightedIndex::new(&weights) {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
+
+        let agent_id = world_state.agent_id.unwrap_or_default();
+        let tick_id = world_state.tick_id;
+        let mut intents = Vec::new();
+
+        let max_chaos = self.config.max_chaos_intents.min(max_total);
+        let mut rng = rand::rng();
+        let count: usize = rng.random_range(1..=max_chaos);
+
+        for _ in 0..count {
+            let idx = dist.sample(&mut rng);
+            let action_type = action_types[idx].as_str();
+
+            // 扩展的动作数据构建（包含采集/说话/打坐/拾取）
+            let action_data = match action_type {
+                "采集" => {
+                    // 采集当前位置的资源
+                    if world_state.location.gatherable_items.is_empty() {
+                        continue;
+                    }
+                    let items = &world_state.location.gatherable_items;
+                    let item = &items[rng.random_range(0..items.len())];
+                    Some(serde_json::json!({
+                        "item_id": item.item_id,
+                    }))
+                }
+                "拾取" => {
+                    // 拾取附近的地面物品
+                    if world_state.nearby_items.is_empty() {
+                        continue;
+                    }
+                    let items = &world_state.nearby_items;
+                    let item = &items[rng.random_range(0..items.len())];
+                    Some(serde_json::json!({
+                        "item_id": item.item_id,
+                    }))
+                }
+                "说话" => {
+                    // 对附近的人说随机话
+                    Some(serde_json::json!({
+                        "content": "...",
+                    }))
+                }
+                "打坐" => Some(serde_json::json!({})),
+                _ => Self::build_action_data(action_type, world_state, &mut rng),
+            };
+
+            if let Some(data) = action_data {
+                intents.push(
+                    Intent::new(agent_id, tick_id, action_type, Some(data))
+                        .with_thought("[LLM 配额耗尽: 自动生存模式]".into()),
+                );
+            }
+        }
+
+        debug!("LLM Chaos: generated {} survival intents", intents.len());
         intents
     }
 
@@ -230,6 +329,7 @@ mod tests {
             item_type: "food".into(),
             quantity: 1,
             is_equipped: false,
+            aliases: vec![],
         }];
 
         WorldState {
@@ -244,6 +344,7 @@ mod tests {
                     node_id: "loc_b".into(),
                     name: "地点B".into(),
                     travel_cost: 1,
+                    aliases: vec![],
                 }],
                 gatherable_items: vec![],
             },
@@ -260,6 +361,7 @@ mod tests {
                 name: "地面物品".into(),
                 item_type: "food".into(),
                 quantity: 1,
+                aliases: vec![],
             }],
             self_state: AgentSelfState {
                 attributes: attrs,

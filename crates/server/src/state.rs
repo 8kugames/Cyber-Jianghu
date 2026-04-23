@@ -173,6 +173,9 @@ pub struct AppState {
     /// 当前 tick_id（原子变量，handler 用于构建重连 WorldState）
     /// 0 表示 scheduler 尚未启动
     pub current_accepting_tick_id: Arc<AtomicI64>,
+
+    /// Vendor 待注入事件（跨请求缓冲，grant-items 写入，tick 广播时消费）
+    pub vendor_pending_events: crate::models::VendorPendingEvents,
 }
 
 impl AppState {
@@ -207,6 +210,7 @@ impl AppState {
             start_time: chrono::Utc::now(),
             config_dir,
             current_accepting_tick_id,
+            vendor_pending_events: crate::models::VendorPendingEvents::default(),
         }
     }
 }

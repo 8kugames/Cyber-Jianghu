@@ -91,6 +91,18 @@ pub struct Agent {
     /// 死亡是否已报告（避免重复日志）
     pub(crate) death_reported: bool,
 
+    /// 自动重生延迟 ticks（从 AgentDied 消息读取，0 = 不自动重生）
+    pub(crate) rebirth_delay_ticks: i32,
+
+    /// 死亡时的 tick_id（用于计算重生时机）
+    pub(crate) death_tick_id: Option<i64>,
+
+    /// 连续 LLM 失败计数（成功时重置为 0）
+    pub(crate) consecutive_llm_failures: u32,
+
+    /// LLM 失败 chaos 模式是否激活
+    pub(crate) llm_chaos_active: bool,
+
     /// ActorSoul LLM Client 容器（支持热重载）
     ///
     /// 与 `ClawDecisionState.llm` 共享同一个 `RwLock`，
@@ -182,6 +194,10 @@ impl Agent {
             reconnect_backoff: 0,
             reconnect_rx,
             death_reported: false,
+            rebirth_delay_ticks: 0,
+            death_tick_id: None,
+            consecutive_llm_failures: 0,
+            llm_chaos_active: false,
             actor_llm_container: None,
             http_api_state: None,
             device_config,
@@ -225,6 +241,7 @@ impl Agent {
                     Ok(char_config) => {
                         let prompt = char_config.generate_system_prompt();
                         engine.update_persona(name, &prompt);
+                        engine.update_conversation_system_message(&prompt);
                         self.character_config = Some(char_config);
                         info!("已从 character.yaml 重新加载人设并更新认知引擎");
                     }

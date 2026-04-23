@@ -184,6 +184,8 @@ pub struct HttpApiState {
     pub runtime_mode: crate::config::RuntimeMode,
     pub narrative_config: std::sync::Arc<RwLock<Option<cyber_jianghu_protocol::NarrativeConfig>>>,
     pub is_dead: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// 自动重生延迟 ticks（从 AgentDied 消息读取，0 = 不自动重生）
+    pub rebirth_delay_ticks: std::sync::Arc<std::sync::atomic::AtomicI32>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
     /// LLM Client 容器（支持热重载时重建）
@@ -770,6 +772,7 @@ pub fn create_http_state(
         runtime_mode,
         narrative_config: Arc::new(RwLock::new(narrative_config)),
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        rebirth_delay_ticks: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),

@@ -161,6 +161,7 @@ impl IntentWorker {
 
         // 4. 通过 StateProcessor 执行
         let tick_id = agent_state.tick_id; // 使用当前 tick_id
+        let pre_node_id = agent_state.node_id.clone();
         let result = match self
             .state_processor
             .process_single_intent(tick_id, agent_state, &intent, &all_states)
@@ -180,6 +181,18 @@ impl IntentWorker {
                 return Err(e.context(format!("Intent 执行失败: agent={}", agent_id)));
             }
         };
+
+        // DEBUG: Intent 执行后状态检查
+        {
+            let post_node_id = &result.updated_state.node_id;
+            let post_tick_id = result.updated_state.tick_id;
+            if pre_node_id != *post_node_id || action_type == "移动" {
+                info!(
+                    "[DEBUG-MOVE] agent={}, action={}, tick={}, pre_node={}, post_node={}, post_tick={}",
+                    agent_id, action_type, tick_id, pre_node_id, post_node_id, post_tick_id
+                );
+            }
+        }
 
         // 5. 持久化到 DB（await 确认）
         if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
@@ -313,6 +326,16 @@ impl IntentWorker {
         // 1. 从 DashMap 读取所有 Agent 状态
         let mut ghost_ids: Vec<uuid::Uuid> = Vec::new();
         let states: Vec<AgentState> = self.state_cache.iter().map(|r| r.value().clone()).collect();
+
+        // DEBUG: 打印 DashMap 中所有 agent 的 node_id
+        for s in &states {
+            if s.node_id != "龙门大堂" {
+                info!(
+                    "[DEBUG-TICK] Tick {}: agent={} node={} alive={}",
+                    tick_id, s.agent_id, s.node_id, s.is_alive
+                );
+            }
+        }
 
         if states.is_empty() {
             debug!("Tick {}: 无存活 Agent，跳过衰减", tick_id);
@@ -561,6 +584,10 @@ impl IntentWorker {
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
                                     .unwrap_or_default(),
+                                aliases: config
+                                    .as_ref()
+                                    .map(|c| c.aliases.clone())
+                                    .unwrap_or_default(),
                             }
                         })
                         .collect::<Vec<_>>()
@@ -584,6 +611,10 @@ impl IntentWorker {
                                 item_type: config
                                     .as_ref()
                                     .map(|c| c.item_type.clone())
+                                    .unwrap_or_default(),
+                                aliases: config
+                                    .as_ref()
+                                    .map(|c| c.aliases.clone())
                                     .unwrap_or_default(),
                             }
                         })
@@ -713,10 +744,20 @@ impl IntentWorker {
                 }
             }
 
-            // 5. 发送 AgentDied + WebSocket Close → 断连
+            // 5. 发送 AgentDied + (可选) WebSocket Close
+            let rebirth_delay = self
+                .game_data_cache
+                .get()
+                .game_rules
+                .data
+                .agent_state
+                .survival
+                .rebirth
+                .delay_ticks;
             let ctx = DeathNotificationContext {
                 connection_manager: &self.connection_manager,
                 agent_to_device_map: &self.agent_to_device_map,
+                rebirth_delay_ticks: rebirth_delay,
             };
             if let Err(e) = send_agent_died_notification(
                 agent_id,
@@ -732,8 +773,10 @@ impl IntentWorker {
                 warn!("AgentDied 通知发送失败: agent={}, error={}", agent_id, e);
             }
 
-            // 6. 清理 agent_to_device_map（防止后续消息路由到已断连设备）
-            self.agent_to_device_map.write().await.remove(&agent_id);
+            // 6. 自动重生时不断连，保留 agent_to_device_map 映射
+            if rebirth_delay <= 0 {
+                self.agent_to_device_map.write().await.remove(&agent_id);
+            }
 
             info!(
                 "Agent {} 已死亡处理完成: cause={}, location={}",

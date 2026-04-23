@@ -895,6 +895,8 @@ mod tests {
                 initial_items: vec![],
                 survival_actions: vec![],
                 survival_threshold: 30,
+                critical_attack_threshold: 15,
+                rebirth_delay_ticks: 0,
                 version: "0.0.6".to_string(),
                 last_updated: "2024-03-22T12:00:00Z".to_string(),
                 intent_batch: None,

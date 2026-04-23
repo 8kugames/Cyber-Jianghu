@@ -52,7 +52,7 @@ pub fn init_test_registry() {
                 "data": {
                     "agent_state": {
                         "tick": { "game_hours_per_tick": 2, "real_seconds_per_tick": 60 },
-                        "location": { "spawn_location": "longmen_inn" },
+                        "location": { "spawn_location": "龙门客栈" },
                         "game_time": { "time_ratio": 120, "start_date": "2024-01-01" }
                     },
                     "validation": {
@@ -119,7 +119,7 @@ pub fn init_test_registry() {
                 "description": "测试用物品配置",
                 "data": [
                     {
-                        "item_id": "mantou",
+                        "item_id": "馒头",
                         "name": "馒头",
                         "item_type": "consumable",
                         "effects": [
@@ -134,7 +134,7 @@ pub fn init_test_registry() {
                         "description": "热腾腾的馒头"
                     },
                     {
-                        "item_id": "water",
+                        "item_id": "清水",
                         "name": "水",
                         "item_type": "consumable",
                         "effects": [
@@ -149,7 +149,7 @@ pub fn init_test_registry() {
                         "description": "清凉的井水"
                     },
                     {
-                        "item_id": "silver",
+                        "item_id": "银子",
                         "name": "银子",
                         "item_type": "misc",
                         "effects": [],
@@ -157,7 +157,7 @@ pub fn init_test_registry() {
                         "description": "通用货币"
                     },
                     {
-                        "item_id": "knife",
+                        "item_id": "刀",
                         "name": "刀",
                         "item_type": "weapon",
                         "effects": [],
@@ -290,11 +290,11 @@ pub fn init_test_registry() {
                 "data": {
                     "items": {
                         "food": [
-                            { "item_id": "mantou", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" },
-                            { "item_id": "water", "name": "水", "quantity": 3, "description": "清凉的井水" }
+                            { "item_id": "馒头", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" },
+                            { "item_id": "清水", "name": "水", "quantity": 3, "description": "清凉的井水" }
                         ],
                         "currency": [
-                            { "item_id": "silver", "name": "银子", "quantity": 10, "description": "通用货币" }
+                            { "item_id": "银子", "name": "银子", "quantity": 10, "description": "通用货币" }
                         ]
                     }
                 }

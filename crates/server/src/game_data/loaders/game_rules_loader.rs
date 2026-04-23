@@ -57,7 +57,7 @@ mod tests {
                             "real_seconds_per_tick": 60
                         },
                         "location": {
-                            "spawn_location": "longmen_inn"
+                            "spawn_location": "龙门客栈"
                         },
                         "game_time": {
                             "start_date": "2024-01-01"
@@ -96,7 +96,7 @@ data:
     tick:
       real_seconds_per_tick: 60
     location:
-      spawn_location: "longmen_inn"
+      spawn_location: "龙门客栈"
     game_time:
       start_date: "2024-01-01"
   validation:

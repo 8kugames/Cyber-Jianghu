@@ -171,8 +171,7 @@ impl CombatActionExecutor {
             let weapon_bonus =
                 ActionRegistry::get_i32("攻击", ActionField::WeaponBonus).unwrap_or(0);
             let weapon_multiplier =
-                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier)
-                    .unwrap_or(1.0);
+                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier).unwrap_or(1.0);
             let mut float_extras = std::collections::HashMap::new();
             float_extras.insert("weapon_bonus".to_string(), weapon_bonus as f64);
             float_extras.insert("weapon_multiplier".to_string(), weapon_multiplier as f64);
@@ -202,8 +201,7 @@ impl CombatActionExecutor {
             let weapon_bonus =
                 ActionRegistry::get_i32("攻击", ActionField::WeaponBonus).unwrap_or(0);
             let weapon_multiplier =
-                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier)
-                    .unwrap_or(1.0);
+                ActionRegistry::get_f32("攻击", ActionField::WeaponBonusMultiplier).unwrap_or(1.0);
             let weapon_damage = (weapon_bonus as f32) * weapon_multiplier;
             base_damage + weapon_damage as i32
         };

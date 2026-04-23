@@ -2,6 +2,7 @@
 // Note: authToken is declared in utils.js (loaded first)
 
 var authVerified = false; // Set to true after user manually enters token
+// Note: authTokenType is declared in utils.js (loaded first)
 
 function getAuthHeaders() {
     return authToken ? { Authorization: "Bearer " + authToken } : {};
@@ -41,6 +42,9 @@ async function submitAuthToken() {
                 authToken = token;
                 localStorage.setItem("admin_token", token);
                 authVerified = true; // Mark as manually verified
+                var loginData = await res.json();
+                authTokenType = loginData.token_type || "read";
+                localStorage.setItem("admin_token_type", authTokenType);
                 hideAuthModal();
                 if (Object.keys(locationNames).length === 0) {
                     await initLocationMapping();
@@ -66,7 +70,9 @@ async function logout() {
         console.warn('Logout request failed', e);
     }
     localStorage.removeItem("admin_token");
+    localStorage.removeItem("admin_token_type");
     authToken = null;
+    authTokenType = null;
     authVerified = false;
     window.location.href = '/admin';
 }

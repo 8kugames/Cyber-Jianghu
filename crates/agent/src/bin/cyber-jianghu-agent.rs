@@ -870,6 +870,32 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         }
     }
 
+    // Conversation History（长窗口对话）
+    let conv_db_path = data_dir.join("conversation_history.db");
+    match cyber_jianghu_agent::component::llm::conversation::ConversationHistory::new(
+        &conv_db_path,
+        &persona_description,
+        config.llm.context_window_tokens as usize,
+        config.llm.keep_recent_turns as usize,
+        config.llm.summary_trigger_ratio,
+    ) {
+        Ok(history) => {
+            info!(
+                "Conversation history initialized at {} (max_tokens={}, keep_recent={})",
+                conv_db_path.display(),
+                config.llm.context_window_tokens,
+                config.llm.keep_recent_turns,
+            );
+            engine.set_conversation_history(history);
+        }
+        Err(e) => {
+            warn!(
+                "Failed to initialize conversation history: {}. Running without it.",
+                e
+            );
+        }
+    }
+
     let cognitive_engine = Arc::new(engine);
 
     // 决策回调
@@ -989,10 +1015,17 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         let api_state_clone = api_state.clone();
         agent
             .set_server_msg_callback(std::sync::Arc::new(move |msg: ServerMessage| {
-                if matches!(msg, ServerMessage::AgentDied { .. }) {
+                if let ServerMessage::AgentDied {
+                    rebirth_delay_ticks,
+                    ..
+                } = &msg
+                {
                     api_state_clone
                         .is_dead
                         .store(true, std::sync::atomic::Ordering::Relaxed);
+                    api_state_clone
+                        .rebirth_delay_ticks
+                        .store(*rebirth_delay_ticks, std::sync::atomic::Ordering::Relaxed);
                     let _ = death_tx_clone.send(msg);
                 }
             }))
@@ -1007,24 +1040,29 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         let persona_clone = setup.persona_info.clone();
 
         agent.set_registration_callback(std::sync::Arc::new(move |server_agent_id: Uuid| {
-            let old_id = *runtime_agent_id_clone.blocking_read();
-            info!("更新 runtime agent_id: {} -> {}", old_id, server_agent_id);
-            *runtime_agent_id_clone.blocking_write() = server_agent_id;
+            // block_in_place 允许在 multi-threaded runtime 的同步闭包中执行 async 操作
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let old_id = *runtime_agent_id_clone.read().await;
+                    info!("更新 runtime agent_id: {} -> {}", old_id, server_agent_id);
+                    *runtime_agent_id_clone.write().await = server_agent_id;
 
-            // WsSharedState 注入 — 仅 Claw 模式有值
-            if let Some(ref shared_state) = shared_state_clone {
-                if let Some(ref validator) = api_state_clone.intent_validator {
-                    let mut validator_guard = shared_state.intent_validator.blocking_write();
-                    *validator_guard = Some(validator.clone());
-                    info!("Validator injected into WsSharedState");
-                }
+                    // WsSharedState 注入 — 仅 Claw 模式有值
+                    if let Some(ref shared_state) = shared_state_clone {
+                        if let Some(ref validator) = api_state_clone.intent_validator {
+                            let mut validator_guard = shared_state.intent_validator.write().await;
+                            *validator_guard = Some(validator.clone());
+                            info!("Validator injected into WsSharedState");
+                        }
 
-                if let Some(ref persona) = persona_clone {
-                    let mut persona_guard = shared_state.persona.blocking_write();
-                    *persona_guard = Some(persona.clone());
-                    info!("Persona injected into WsSharedState");
-                }
-            }
+                        if let Some(ref persona) = persona_clone {
+                            let mut persona_guard = shared_state.persona.write().await;
+                            *persona_guard = Some(persona.clone());
+                            info!("Persona injected into WsSharedState");
+                        }
+                    }
+                });
+            });
         }));
 
         // server_msg_callback: Claw 模式做 downstream 转发

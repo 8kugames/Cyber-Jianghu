@@ -2,7 +2,10 @@
 // Vendor 补货规则 API
 // ============================================================================
 
-use axum::{Json, extract::{Path, State}};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -60,15 +63,23 @@ pub async fn set_vendor_refill_rule(
             Json(serde_json::json!({"error": format!("物品 '{}' 不存在", payload.item_id)})),
         ));
     }
-    if payload.threshold <= 0 || payload.refill_to <= payload.threshold || payload.budget_ratio <= 0 || payload.budget_ratio > 100 {
+    if payload.threshold <= 0
+        || payload.refill_to <= payload.threshold
+        || payload.budget_ratio <= 0
+        || payload.budget_ratio > 100
+    {
         return Err((
             axum::http::StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "参数不合法: threshold>0, refill_to>threshold, budget_ratio 1-100"})),
+            Json(
+                serde_json::json!({"error": "参数不合法: threshold>0, refill_to>threshold, budget_ratio 1-100"}),
+            ),
         ));
     }
 
-    info!("设置补货规则: agent={}, item={}, threshold={}, refill_to={}, budget={}%",
-        agent_id, payload.item_id, payload.threshold, payload.refill_to, payload.budget_ratio);
+    info!(
+        "设置补货规则: agent={}, item={}, threshold={}, refill_to={}, budget={}%",
+        agent_id, payload.item_id, payload.threshold, payload.refill_to, payload.budget_ratio
+    );
 
     match crate::db::set_vendor_refill(
         &state.db_pool,

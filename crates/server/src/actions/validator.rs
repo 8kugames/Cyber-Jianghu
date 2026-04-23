@@ -508,7 +508,7 @@ mod tests {
         let target_id = Uuid::new_v4();
         let data = serde_json::json!({
             "target_agent_id": target_id.to_string(),
-            "item_id": "mantou",
+            "item_id": "馒头",
             "quantity": 1
         });
         let intent = create_test_intent(ActionType::new("赠送"), Some(data));
@@ -528,7 +528,7 @@ mod tests {
         let target_id = Uuid::new_v4();
         let data = serde_json::json!({
             "target_agent_id": target_id.to_string(),
-            "item_id": "mantou",
+            "item_id": "馒头",
             "quantity": 0
         });
         let intent = create_test_intent(ActionType::new("赠送"), Some(data));

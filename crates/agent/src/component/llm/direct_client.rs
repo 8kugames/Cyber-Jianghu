@@ -31,6 +31,7 @@ pub fn set_llm_disabled(disabled: bool) {
 }
 
 use super::LlmClient;
+use super::client::ConversationTurn;
 use super::openai_types::{ChatMessage, OpenAIRequest, OpenAIResponse};
 use super::token_tracking::record_token_usage;
 use super::tool_types::{ToolDefinition, ToolExecutor};
@@ -627,6 +628,65 @@ impl DirectLlmClient {
         debug!("Tool calling reached max rounds ({})", max_rounds);
         anyhow::bail!("Tool calling exceeded max rounds ({})", max_rounds)
     }
+
+    /// 使用对话历史完成调用（长窗口）
+    ///
+    /// 构建 system (含摘要) + 历史轮次 + 当前 prompt 的完整消息列表。
+    async fn call_with_conversation(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<String> {
+        let mut system_content = system.to_string();
+        if let Some(s) = summary {
+            system_content.push_str(&format!("\n\n## 对话历史摘要\n{}", s));
+        }
+
+        let mut messages = vec![ChatMessage::system(&system_content)];
+        for turn in turns {
+            messages.push(ChatMessage::user(&turn.user));
+            messages.push(ChatMessage::assistant(&turn.assistant));
+        }
+        messages.push(ChatMessage::user(current_prompt));
+
+        let model = self.config.get_model_with_default();
+        let request = OpenAIRequest {
+            model,
+            messages,
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+        };
+
+        debug!(
+            "LLM conversation call: {} history turns, prompt_len={}",
+            turns.len(),
+            current_prompt.len(),
+        );
+
+        let response_data = self.send_request(&request).await?;
+
+        if let Some(choice) = response_data.choices.first() {
+            let content = choice
+                .message
+                .content
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if content.is_empty() {
+                anyhow::bail!("LLM API error: response content is empty");
+            }
+            debug!("LLM conversation response: {} chars", content.len());
+            Ok(content)
+        } else {
+            anyhow::bail!("LLM returned empty response")
+        }
+    }
 }
 
 #[async_trait]
@@ -644,6 +704,20 @@ impl LlmClient for DirectLlmClient {
             anyhow::bail!("LLM 调用已被停止");
         }
         self.call_openai_compatible_api_with_system(system, prompt)
+            .await
+    }
+
+    async fn complete_with_conversation(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<String> {
+        if is_llm_disabled() {
+            anyhow::bail!("LLM 调用已被停止");
+        }
+        self.call_with_conversation(system, summary, turns, current_prompt)
             .await
     }
 

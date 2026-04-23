@@ -334,21 +334,25 @@ async fn main() -> Result<()> {
         // Vendor 补货规则管理
         .route(
             "/api/dashboard/agent/{id}/vendor-refill",
-            get(handlers::vendor::get_vendor_refill_rules).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::auth::require_read_token,
-            ))
-            .put(handlers::vendor::set_vendor_refill_rule).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::auth::require_write_token,
-            )),
+            get(handlers::vendor::get_vendor_refill_rules)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .put(handlers::vendor::set_vendor_refill_rule)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
         )
         .route(
             "/api/dashboard/agent/{id}/vendor-refill/{item_id}",
-            delete(handlers::vendor::delete_vendor_refill_rule).layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                handlers::auth::require_write_token,
-            )),
+            delete(handlers::vendor::delete_vendor_refill_rule).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
         )
         .route(
             "/api/v1/agent/{id}/context",
@@ -366,12 +370,10 @@ async fn main() -> Result<()> {
         )
         .route(
             "/api/dashboard/items",
-            get(handlers::dashboard::get_items).layer(
-                axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_read_token,
-                ),
-            ),
+            get(handlers::dashboard::get_items).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
         )
         // Dashboard API (需要 Read 权限)
         .route(

@@ -26,4 +26,4 @@ pub(crate) mod types;
 #[cfg(test)]
 mod tests;
 
-pub use registry::{get_item_definition, init_item_cache_from_config};
+pub use registry::{get_currency_item_id, get_item_definition, init_item_cache_from_config};

@@ -61,6 +61,10 @@ pub struct LocationNode {
     /// None 时使用全局 default_implicit_travel_cost
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub implicit_travel_cost: Option<u32>,
+
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 节点连接（边）
@@ -162,6 +166,7 @@ impl LocationGraph {
                 node_id: parent_id.clone(),
                 name: parent.name.clone(),
                 travel_cost: cost,
+                aliases: parent.aliases.clone(),
             });
         }
 
@@ -175,6 +180,7 @@ impl LocationGraph {
                     node_id: child_id.clone(),
                     name: child_node.name.clone(),
                     travel_cost: cost,
+                    aliases: child_node.aliases.clone(),
                 });
             }
         }
@@ -202,6 +208,7 @@ impl LocationGraph {
                     node_id: edge.to_node_id.clone(),
                     name: node.name.clone(),
                     travel_cost: edge.travel_cost,
+                    aliases: node.aliases.clone(),
                 });
             }
         }
@@ -232,6 +239,10 @@ pub struct AdjacentNode {
     pub name: String,
     /// 移动消耗（tick 数）
     pub travel_cost: u32,
+
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 可采集资源信息（用于 WorldState）
@@ -244,6 +255,9 @@ pub struct GatherableItem {
     /// 物品类型（consumable/weapon/material 等）
     #[serde(default)]
     pub item_type: String,
+    /// 别名列表（供 LLM 别名映射使用）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 /// 节点信息（简化版，用于 WorldState）

@@ -25,7 +25,7 @@ description: "制作配方配置文件（统一数据格式）"
 
 meta:
   created_at: "2026-03-16"
-  updated_at: "2026-03-19"
+  updated_at: "2026-04-21"
   author: "Cyber-Jianghu Community"
   tags:
     - recipes
@@ -37,64 +37,69 @@ data:
   # 食物制作
   # --------------------------------------------------------------------------
 
-  make_flour:
+  磨面粉:
     name: 磨面粉
     description: "将小麦磨成面粉"
-    result_item: flour
+    result_item: 面粉
     result_quantity: 1
     materials:
-      - item_id: wheat
+      - item_id: 小麦
         quantity: 2
     tools: []
     stamina_cost: 5
+    aliases: ["make_flour"]
 
-  make_dough:
+  揉面团:
     name: 揉面团
     description: "将面粉和水混合，揉制成生面团"
-    result_item: dough
+    result_item: 生面团
     result_quantity: 1
     materials:
-      - item_id: flour
+      - item_id: 面粉
         quantity: 1
-      - item_id: water
+      - item_id: 清水
         quantity: 1
     tools: []
     stamina_cost: 5
+    aliases: ["make_dough"]
 
-  cooked_mantou:
+  蒸馒头:
     name: 蒸馒头
     description: "用生面团蒸制而成的热馒头，能大幅恢复饥饿"
-    result_item: mantou
+    result_item: 馒头
     result_quantity: 1
     materials:
-      - item_id: dough
+      - item_id: 生面团
         quantity: 1
     tools: []
     stamina_cost: 10
+    aliases: ["cooked_mantou"]
 
-  dried_apricot:
+  晒杏干:
     name: 晒杏干
     description: "风干李广杏，更易保存"
-    result_item: dried_li_guang_apricot
+    result_item: 李广杏干
     result_quantity: 1
     materials:
-      - item_id: li_guang_apricot
+      - item_id: 李广杏
         quantity: 2
     tools: []
     stamina_cost: 5
+    aliases: ["dried_apricot"]
 
   # --------------------------------------------------------------------------
   # 武器制作
   # --------------------------------------------------------------------------
 
-  wooden_sword:
+  削木剑:
     name: 削木剑
     description: "简单削制的木剑，适合防身"
-    result_item: wooden_sword
+    result_item: 木剑
     result_quantity: 1
     materials:
-      - item_id: wood
+      - item_id: 木材
         quantity: 2
     tools:
-      - knife
+      - 刀
     stamina_cost: 20
+    aliases: ["wooden_sword"]

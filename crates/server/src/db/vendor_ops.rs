@@ -77,13 +77,12 @@ pub async fn set_vendor_refill(
 
 /// 删除补货规则
 pub async fn remove_vendor_refill(pool: &DbPool, agent_id: Uuid, item_id: &str) -> Result<bool> {
-    let result = sqlx::query(
-        "DELETE FROM agent_vendor_refill WHERE agent_id = $1 AND item_id = $2",
-    )
-    .bind(agent_id)
-    .bind(item_id)
-    .execute(pool)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM agent_vendor_refill WHERE agent_id = $1 AND item_id = $2")
+            .bind(agent_id)
+            .bind(item_id)
+            .execute(pool)
+            .await?;
 
     Ok(result.rows_affected() > 0)
 }

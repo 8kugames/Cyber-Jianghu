@@ -177,6 +177,7 @@ impl LocationRegistry {
                 environmental_damage: node.environmental_damage,
                 gatherable_items: node.gatherable_items.clone().unwrap_or_default(),
                 implicit_travel_cost: None, // 从 locations.yaml 读取（暂不支持 per-node 覆盖）
+                aliases: node.aliases.clone(),
             };
             graph.add_node(location_node);
         }
@@ -257,9 +258,12 @@ mod tests {
                         },
                         survival: SurvivalRulesData {
                             critical_threshold: 30,
+                            critical_attack_threshold: 15,
+                            rebirth:
+                                crate::game_data::types::unified_config::RebirthRulesData::default(),
                         },
                         location: LocationRulesData {
-                            spawn_location: "longmen_inn".to_string(),
+                            spawn_location: "龙门客栈".to_string(),
                             default_implicit_travel_cost: 1,
                         },
                         game_time: GameTimeRulesData {
@@ -284,6 +288,7 @@ mod tests {
                     },
                     death_defaults: None,
                     emergence: None,
+                    vendors: Vec::new(),
                 },
             },
             items: UnifiedItemsConfig {
@@ -444,6 +449,7 @@ mod tests {
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,
+                        aliases: vec![],
                     },
                     LocationNodeData {
                         node_id: "kitchen".to_string(),
@@ -453,6 +459,7 @@ mod tests {
                         description: None,
                         environmental_damage: None,
                         gatherable_items: None,
+                        aliases: vec![],
                     },
                 ],
                 edges: vec![LocationEdgeData {

@@ -302,9 +302,9 @@ mod tests {
 
         mem.record(OutcomeRecord {
             action_type: "进食".into(),
-            action_data: Some(serde_json::json!({"item_id": "mantou"})),
+            action_data: Some(serde_json::json!({"item_id": "馒头"})),
             result: OutcomeResult::Success,
-            context_hash: "longmen_lobby:food,drink:2".into(),
+            context_hash: "龙门大堂:food,drink:2".into(),
             tick_id: 100,
         });
 
@@ -312,7 +312,7 @@ mod tests {
             action_type: "进食".into(),
             action_data: Some(serde_json::json!({"item_id": "invalid"})),
             result: OutcomeResult::Failed("物品不存在".into()),
-            context_hash: "longmen_lobby:food,drink:2".into(),
+            context_hash: "龙门大堂:food,drink:2".into(),
             tick_id: 101,
         });
 
@@ -334,9 +334,9 @@ mod tests {
 
         mem.record(OutcomeRecord {
             action_type: "移动".into(),
-            action_data: Some(serde_json::json!({"target_location": "longmen_kitchen"})),
+            action_data: Some(serde_json::json!({"target_location": "龙门厨房"})),
             result: OutcomeResult::Success,
-            context_hash: "longmen_lobby::1".into(),
+            context_hash: "龙门大堂::1".into(),
             tick_id: 100,
         });
 

@@ -403,6 +403,9 @@ const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
+const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.8;
+const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -427,6 +430,18 @@ pub struct LlmConfig {
     /// 连续 follow 次数达到此阈值后驳回（社交死循环防护）
     #[serde(default = "default_max_consecutive_follow")]
     pub max_consecutive_follow: usize,
+
+    /// 上下文窗口 token 数（用于长窗口对话）
+    #[serde(default = "default_context_window_tokens")]
+    pub context_window_tokens: u32,
+
+    /// Summary 触发比例 (0.0 - 1.0)，token 数超过此比例时触发压缩
+    #[serde(default = "default_summary_trigger_ratio")]
+    pub summary_trigger_ratio: f64,
+
+    /// Summary 后保留最近 N 轮对话
+    #[serde(default = "default_keep_recent_turns")]
+    pub keep_recent_turns: u32,
 }
 
 fn default_idle_rotate_threshold() -> u32 {
@@ -435,6 +450,18 @@ fn default_idle_rotate_threshold() -> u32 {
 
 fn default_max_consecutive_follow() -> usize {
     DEFAULT_MAX_CONSECUTIVE_FOLLOW
+}
+
+fn default_context_window_tokens() -> u32 {
+    DEFAULT_CONTEXT_WINDOW_TOKENS
+}
+
+fn default_summary_trigger_ratio() -> f64 {
+    DEFAULT_SUMMARY_TRIGGER_RATIO
+}
+
+fn default_keep_recent_turns() -> u32 {
+    DEFAULT_KEEP_RECENT_TURNS
 }
 
 fn default_llm_provider() -> String {
@@ -461,6 +488,9 @@ impl Default for LlmConfig {
             fallback_models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
             max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
+            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+            summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
+            keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
         }
     }
 }
@@ -492,6 +522,9 @@ impl LlmConfig {
                 .unwrap_or_default(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
             max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
+            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+            summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
+            keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
         }
     }
 
