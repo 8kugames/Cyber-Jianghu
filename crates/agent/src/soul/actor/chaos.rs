@@ -46,7 +46,7 @@ fn default_action_weights() -> std::collections::HashMap<String, f64> {
     let mut m = std::collections::HashMap::new();
     m.insert("攻击".into(), 0.25);
     m.insert("丢弃".into(), 0.20);
-    m.insert("赠送".into(), 0.15);
+    m.insert("给予".into(), 0.15);
     m.insert("移动".into(), 0.20);
     m.insert("进食".into(), 0.10);
     m.insert("饮水".into(), 0.10);
@@ -268,7 +268,7 @@ impl ChaosGenerator {
                     "quantity": 1,
                 }))
             }
-            "赠送" => {
+            "给予" => {
                 // 给附近随机实体随机物品
                 if world_state.entities.is_empty() || world_state.self_state.inventory.is_empty() {
                     return None;
@@ -369,6 +369,7 @@ mod tests {
                 attribute_descriptions: HashMap::new(),
                 status_effects: vec![],
                 inventory: inv,
+                skills: vec![],
             },
             events_log: vec![],
             private_dialogue_log: vec![],

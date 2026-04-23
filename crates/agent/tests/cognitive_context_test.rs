@@ -61,6 +61,7 @@ fn create_test_world_state() -> WorldState {
             ]),
             status_effects: vec![],
             inventory: vec![],
+            skills: vec![],
         },
         entities: vec![Entity {
             id: Uuid::new_v4(),

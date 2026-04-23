@@ -1701,12 +1701,12 @@ impl super::Agent {
                     .unwrap_or("物品");
                 format!("拾起{}", item)
             }
-            "赠送" => {
+            "给予" => {
                 let item = data
                     .get("item_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("物品");
-                format!("赠送{}", item)
+                format!("给予{}", item)
             }
             "休息" => "原地休息".to_string(),
             other => format!("执行{}", other),

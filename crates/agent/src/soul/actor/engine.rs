@@ -5,6 +5,9 @@
 // 人魂直连 WorldState：直接接收客观世界状态，输出结构化 Intent。
 // 不再输出叙事中间态（"吃馒头充饥"），直接输出精确 ID（item_id: "mantou"）。
 // 天魂翻译步骤已消除。
+//
+// 地魂 tool-calling 集成：当 LLM 支持 tool calling 时，认知流程可调用
+// skill_view / search_memory / recall_archived 工具按需获取精确数据。
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -146,6 +149,10 @@ pub struct CognitiveEngine {
     pub(super) action_alias_map: std::sync::RwLock<ActionAliasMap>,
     /// action_data 字段别名映射（中文/别名 → 英文 canonical）
     pub(super) field_alias_map: std::sync::RwLock<FieldAliasMap>,
+    /// SKILL.md body 缓存（skill_id → body content），避免每 tick 重复 IO
+    pub(super) skill_cache: std::sync::RwLock<std::collections::HashMap<String, String>>,
+    /// 配置目录（用于地魂 tool-calling 的 skill_view 文件加载）
+    pub(super) config_dir: std::path::PathBuf,
 }
 
 impl CognitiveEngine {
@@ -174,6 +181,8 @@ impl CognitiveEngine {
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
+            skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            config_dir: Self::resolve_config_dir(),
         }
     }
 
@@ -217,7 +226,20 @@ impl CognitiveEngine {
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
+            skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            config_dir: Self::resolve_config_dir(),
         }
+    }
+
+    /// 解析配置目录路径
+    fn resolve_config_dir() -> std::path::PathBuf {
+        std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("config"))
+            })
+            .unwrap_or_default()
     }
 
     /// 加载 prompt 模板配置
@@ -460,12 +482,15 @@ impl CognitiveEngine {
             cache.get_persona_simple().to_string()
         };
 
+        let use_tool_calling = self.llm_client.supports_tool_calling();
+
         let prompt = self.build_direct_prompt(
             world_state,
             memory_context,
             validation_feedback,
             &persona_for_prompt,
             &agent_name,
+            use_tool_calling,
         );
 
         // 使用对话历史（长窗口）或单次调用
@@ -486,35 +511,75 @@ impl CognitiveEngine {
             });
             // lock 已释放
 
-            match conv_data {
-                Some((turns, system, summary)) => {
-                    if self.enable_streaming {
+            if use_tool_calling {
+                // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
+                let executor = super::super::earth::EarthToolExecutor::from_rw_lock(
+                    &self.skill_cache,
+                    self.config_dir.clone(),
+                );
+                let tools = super::super::earth::EarthToolExecutor::tool_definitions();
+
+                match conv_data {
+                    Some((turns, system, summary)) => {
+                        // Tool-calling + 对话历史（正常部署路径）
                         self.llm_client
-                            .complete_json_streaming_with_conversation(
+                            .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
                                 &system,
                                 summary.as_deref(),
                                 &turns,
                                 &prompt,
+                                &tools,
+                                &executor,
+                                3,
                             )
                             .await?
-                    } else {
+                    }
+                    None => {
+                        // Tool-calling 无对话历史（降级）
                         self.llm_client
-                            .complete_json_with_conversation(
-                                &system,
-                                summary.as_deref(),
-                                &turns,
+                            .complete_json_with_tools::<DirectCognitiveResponse>(
+                                &persona_for_prompt,
                                 &prompt,
+                                &tools,
+                                &executor,
+                                3,
                             )
                             .await?
                     }
                 }
-                None => {
-                    if self.enable_streaming {
-                        self.llm_client
-                            .complete_json_streaming(&persona_for_prompt, &prompt)
-                            .await?
-                    } else {
-                        self.llm_client.complete_json(&prompt).await?
+            } else {
+                // 非 tool-calling 路径：streaming/plain fallback
+                // 注意：streaming 不支持 tool-calling 组合
+                match conv_data {
+                    Some((turns, system, summary)) => {
+                        if self.enable_streaming {
+                            self.llm_client
+                                .complete_json_streaming_with_conversation(
+                                    &system,
+                                    summary.as_deref(),
+                                    &turns,
+                                    &prompt,
+                                )
+                                .await?
+                        } else {
+                            self.llm_client
+                                .complete_json_with_conversation(
+                                    &system,
+                                    summary.as_deref(),
+                                    &turns,
+                                    &prompt,
+                                )
+                                .await?
+                        }
+                    }
+                    None => {
+                        if self.enable_streaming {
+                            self.llm_client
+                                .complete_json_streaming(&persona_for_prompt, &prompt)
+                                .await?
+                        } else {
+                            self.llm_client.complete_json(&prompt).await?
+                        }
                     }
                 }
             }

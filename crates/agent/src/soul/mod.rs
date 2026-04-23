@@ -3,10 +3,12 @@
 // ============================================================================
 //
 // ActorSoul（人魂/行动之魂）：认知引擎，直连 WorldState，输出结构化 Intent
+// EarthSoul（地魂/工具之魂）：tool-calling 工具池，按需加载技能/记忆
 // ReflectorSoul（天魂/守护之魂）：三层审核 Intent → 提交 server
 //
 // 人魂直连 WorldState 后，翻译步骤已消除。
 // ============================================================================
 
 pub mod actor;
+pub mod earth;
 pub mod reflector;
