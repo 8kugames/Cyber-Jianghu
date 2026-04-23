@@ -899,6 +899,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     // 设置 NarrativeSummaryWindow 窗口大小
     engine.set_narrative_window_size(config.llm.narrative_window_size);
 
+    // 设置流式 LLM
+    engine.set_enable_streaming(config.llm.enable_streaming);
+
     let cognitive_engine = Arc::new(engine);
 
     // 决策回调

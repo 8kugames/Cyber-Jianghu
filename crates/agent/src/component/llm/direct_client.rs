@@ -473,6 +473,92 @@ impl DirectLlmClient {
         Ok(response_data)
     }
 
+    /// 发送流式请求到 OpenAI 兼容 API
+    ///
+    /// 返回 SSE 流，每个 chunk 为 StreamChunk::Delta 或 StreamChunk::Done
+    async fn send_streaming_request(
+        &self,
+        request: &OpenAIRequest,
+    ) -> Result<super::streaming::LlmStream> {
+        let client = self.build_http_client()?;
+        let base_url = self.config.get_base_url()?;
+        let url = format!("{}/chat/completions", base_url);
+
+        let mut request_builder = client.post(&url).header("Content-Type", "application/json");
+        if let Some(ref api_key) = self.config.api_key {
+            request_builder =
+                request_builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        // 设置 stream: true（clone request 避免修改原请求）
+        let mut stream_request = request.clone();
+        stream_request.stream = Some(true);
+
+        let response = request_builder.json(&stream_request).send().await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            super::token_tracking::record_failure(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+            );
+            anyhow::bail!("LLM streaming API error {}: {}", status, error_body);
+        }
+
+        debug!(
+            "LLM streaming connection established: provider={}, model={}",
+            self.config.provider.as_str(),
+            self.config.get_model_with_default(),
+        );
+
+        Ok(super::streaming::parse_sse_stream(response))
+    }
+
+    /// 流式完成（system + user）
+    pub async fn complete_streaming(
+        &self,
+        system: &str,
+        prompt: &str,
+    ) -> Result<super::streaming::LlmStream> {
+        let model = self.config.get_model_with_default();
+        let request = OpenAIRequest {
+            model,
+            messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            stream: None,
+        };
+        self.send_streaming_request(&request).await
+    }
+
+    /// 流式对话完成（长窗口）
+    pub async fn complete_conversation_streaming(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[super::client::ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<super::streaming::LlmStream> {
+        let messages =
+            super::client::build_conversation_messages(system, summary, turns, current_prompt);
+        let model = self.config.get_model_with_default();
+        let request = OpenAIRequest {
+            model,
+            messages,
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            stream: None,
+        };
+        self.send_streaming_request(&request).await
+    }
+
     /// 调用 OpenAI 兼容 API
     ///
     /// OpenClaw Gateway、OpenAI Compatible、Ollama 都使用 OpenAI 兼容接口
@@ -486,6 +572,7 @@ impl DirectLlmClient {
             tools: None,
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            stream: None,
         };
 
         let response_data = self.send_request(&request).await?;
@@ -528,6 +615,7 @@ impl DirectLlmClient {
             tools: None,
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            stream: None,
         };
 
         debug!("Calling OpenAI-compatible API (system+user)");
@@ -577,6 +665,7 @@ impl DirectLlmClient {
                 tools: Some(tools.to_vec()),
                 tool_choice: Some(serde_json::json!("auto")),
                 enable_thinking: Self::extra_body_for_model(&model),
+                stream: None,
             };
 
             let response_data = self.send_request(&request).await?;
@@ -639,17 +728,8 @@ impl DirectLlmClient {
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<String> {
-        let mut system_content = system.to_string();
-        if let Some(s) = summary {
-            system_content.push_str(&format!("\n\n## 对话历史摘要\n{}", s));
-        }
-
-        let mut messages = vec![ChatMessage::system(&system_content)];
-        for turn in turns {
-            messages.push(ChatMessage::user(&turn.user));
-            messages.push(ChatMessage::assistant(&turn.assistant));
-        }
-        messages.push(ChatMessage::user(current_prompt));
+        let messages =
+            super::client::build_conversation_messages(system, summary, turns, current_prompt);
 
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
@@ -660,6 +740,7 @@ impl DirectLlmClient {
             tools: None,
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            stream: None,
         };
 
         debug!(
@@ -738,6 +819,39 @@ impl LlmClient for DirectLlmClient {
         }
         self.call_openai_compatible_api_with_tools(system, prompt, tools, executor, max_rounds)
             .await
+    }
+
+    fn complete_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if is_llm_disabled() {
+                anyhow::bail!("LLM 调用已被停止");
+            }
+            self.complete_streaming(system, prompt).await
+        })
+    }
+
+    fn complete_conversation_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        summary: Option<&'a str>,
+        turns: &'a [ConversationTurn],
+        current_prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if is_llm_disabled() {
+                anyhow::bail!("LLM 调用已被停止");
+            }
+            self.complete_conversation_streaming(system, summary, turns, current_prompt)
+                .await
+        })
     }
 }
 

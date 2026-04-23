@@ -24,6 +24,29 @@ pub struct ConversationTurn {
     pub assistant: String,
 }
 
+/// 构建对话消息列表（system + summary + history + current prompt）
+pub fn build_conversation_messages(
+    system: &str,
+    summary: Option<&str>,
+    turns: &[ConversationTurn],
+    current_prompt: &str,
+) -> Vec<super::openai_types::ChatMessage> {
+    use super::openai_types::ChatMessage;
+
+    let mut system_content = system.to_string();
+    if let Some(s) = summary {
+        system_content.push_str(&format!("\n\n## 对话历史摘要\n{}", s));
+    }
+
+    let mut messages = vec![ChatMessage::system(&system_content)];
+    for turn in turns {
+        messages.push(ChatMessage::user(&turn.user));
+        messages.push(ChatMessage::assistant(&turn.assistant));
+    }
+    messages.push(ChatMessage::user(current_prompt));
+    messages
+}
+
 /// LLM 客户端 Trait（仅由 OpenClaw 实现）
 ///
 /// **重要约束**：
@@ -104,6 +127,50 @@ pub trait LlmClient: Send + Sync {
         let _ = (summary, turns);
         self.complete_with_system(system, current_prompt).await
     }
+
+    /// 流式完成（system + user），返回 SSE 流
+    ///
+    /// 默认实现退化为非流式（包装为单 chunk 流）。
+    fn complete_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let result = self.complete_with_system(system, prompt).await?;
+            let stream = futures_util::stream::once(async move {
+                Ok(super::streaming::StreamChunk::Delta(result))
+            });
+            let boxed: super::streaming::LlmStream = Box::pin(stream);
+            Ok(boxed)
+        })
+    }
+
+    /// 流式对话完成（长窗口），返回 SSE 流
+    ///
+    /// 默认实现退化为非流式（包装为单 chunk 流）。
+    fn complete_conversation_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        summary: Option<&'a str>,
+        turns: &'a [ConversationTurn],
+        current_prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let result = self
+                .complete_with_conversation(system, summary, turns, current_prompt)
+                .await?;
+            let stream = futures_util::stream::once(async move {
+                Ok(super::streaming::StreamChunk::Delta(result))
+            });
+            let boxed: super::streaming::LlmStream = Box::pin(stream);
+            Ok(boxed)
+        })
+    }
 }
 
 /// LlmClient 扩展 Trait
@@ -133,6 +200,26 @@ pub trait LlmClientExt {
 
     /// 使用对话历史完成结构化输出（长窗口）
     async fn complete_json_with_conversation<T: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<T>;
+
+    /// 流式完成结构化输出（system + user）
+    ///
+    /// 内部消费 SSE 流，累积文本，JSON 闭合后早期终止。
+    async fn complete_json_streaming<T: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        prompt: &str,
+    ) -> Result<T>;
+
+    /// 流式对话完成结构化输出（长窗口）
+    ///
+    /// 内部消费 SSE 流，累积文本，JSON 闭合后早期终止。
+    async fn complete_json_streaming_with_conversation<T: DeserializeOwned + Send>(
         &self,
         system: &str,
         summary: Option<&str>,
@@ -335,6 +422,60 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             .complete_with_conversation(system, summary, turns, current_prompt)
             .await?;
         parse_json_response::<D>(&response)
+    }
+
+    async fn complete_json_streaming<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        prompt: &str,
+    ) -> Result<D> {
+        use futures_util::StreamExt;
+
+        let stream = self.complete_streaming(system, prompt).await?;
+        let mut acc = super::streaming::StreamAccumulator::new();
+        let mut stream = std::pin::pin!(stream);
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            if matches!(chunk, super::streaming::StreamChunk::Done { .. }) {
+                break;
+            }
+            acc.push(chunk);
+            if acc.is_json_complete() {
+                break;
+            }
+        }
+
+        parse_json_response::<D>(acc.content())
+    }
+
+    async fn complete_json_streaming_with_conversation<D: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        summary: Option<&str>,
+        turns: &[ConversationTurn],
+        current_prompt: &str,
+    ) -> Result<D> {
+        use futures_util::StreamExt;
+
+        let stream = self
+            .complete_conversation_streaming(system, summary, turns, current_prompt)
+            .await?;
+        let mut acc = super::streaming::StreamAccumulator::new();
+        let mut stream = std::pin::pin!(stream);
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            if matches!(chunk, super::streaming::StreamChunk::Done { .. }) {
+                break;
+            }
+            acc.push(chunk);
+            if acc.is_json_complete() {
+                break;
+            }
+        }
+
+        parse_json_response::<D>(acc.content())
     }
 }
 
@@ -540,6 +681,56 @@ impl FallbackLlmClient {
         // 所有客户端都失败
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有 LLM 客户端均失败")))
     }
+
+    /// 流式调用的 fallback 逻辑
+    ///
+    /// 连接阶段失败（如 403/超时）自动切换到下一个 provider。
+    /// 流中途失败直接返回 Err（无法中途切换）。
+    async fn call_streaming_with_fallback<F, Fut>(
+        &self,
+        f: F,
+    ) -> Result<super::streaming::LlmStream>
+    where
+        F: Fn(Arc<dyn LlmClient>) -> Fut,
+        Fut: std::future::Future<Output = Result<super::streaming::LlmStream>>,
+    {
+        let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
+        let mut last_err = None;
+
+        for offset in 0..self.clients.len() {
+            let idx = (start + offset) % self.clients.len();
+            let client = self.clients[idx].clone();
+
+            match f(client).await {
+                Ok(stream) => {
+                    if offset > 0 {
+                        tracing::warn!(
+                            "LLM streaming fallback 成功：切换到客户端 #{} (主用 #{}）",
+                            idx,
+                            start
+                        );
+                        self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    return Ok(stream);
+                }
+                Err(e) => {
+                    let should = Self::should_fallback(&e);
+                    tracing::warn!(
+                        "LLM streaming 客户端 #{} 失败 (fallback={}: {}",
+                        idx,
+                        should,
+                        e
+                    );
+                    if !should {
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有 LLM 客户端均失败")))
+    }
 }
 
 #[async_trait]
@@ -624,6 +815,59 @@ impl LlmClient for FallbackLlmClient {
             }
         })
         .await
+    }
+
+    fn complete_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let system = system.to_string();
+            let prompt = prompt.to_string();
+            self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+                let system = system.clone();
+                let prompt = prompt.clone();
+                async move { client.complete_streaming(&system, &prompt).await }
+            })
+            .await
+        })
+    }
+
+    fn complete_conversation_streaming<'a>(
+        &'a self,
+        system: &'a str,
+        summary: Option<&'a str>,
+        turns: &'a [ConversationTurn],
+        current_prompt: &'a str,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let system = system.to_string();
+            let summary_owned = summary.map(|s| s.to_string());
+            let turns = turns.to_vec();
+            let current_prompt = current_prompt.to_string();
+            self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+                let system = system.clone();
+                let summary = summary_owned.clone();
+                let turns = turns.clone();
+                let current_prompt = current_prompt.clone();
+                async move {
+                    client
+                        .complete_conversation_streaming(
+                            &system,
+                            summary.as_deref(),
+                            &turns,
+                            &current_prompt,
+                        )
+                        .await
+                }
+            })
+            .await
+        })
     }
 }
 

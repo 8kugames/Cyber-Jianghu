@@ -6,6 +6,7 @@ mod client;
 pub mod conversation;
 pub mod direct_client;
 mod openai_types;
+pub mod streaming;
 pub mod token_tracking;
 pub mod tool_types;
 
