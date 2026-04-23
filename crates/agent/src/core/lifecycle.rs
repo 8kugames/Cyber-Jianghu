@@ -790,14 +790,33 @@ impl super::Agent {
                             warnings.push(hint);
                         }
 
-                        // 交易议价提示：附近有其他人且有银两时注入
+                        // 交易议价提示：附近有其他人时有银两时注入（关系感知）
                         let has_silver = world_state.self_state.inventory.iter()
                             .any(|i| i.item_id == "银子" && i.quantity > 0);
-                        if !world_state.entities.is_empty() && has_silver
-                            && let Some(t) = tmpl
-                            && let Some(hint) = t.render_section("trade_bargaining_hint", &std::collections::HashMap::new())
-                        {
-                            warnings.push(hint);
+                        if !world_state.entities.is_empty() && has_silver {
+                            let silver = world_state.self_state.inventory.iter()
+                                .find(|i| i.item_id == "银子")
+                                .map(|i| i.quantity)
+                                .unwrap_or(0);
+
+                            let mut entity_descs = Vec::new();
+                            for entity in &world_state.entities {
+                                let rel_desc = self.relationship_store
+                                    .as_ref()
+                                    .and_then(|store| store.get_relationship(entity.id).ok().flatten())
+                                    .map(|rel| {
+                                        let (_, label) = crate::component::social::get_relationship_level(rel.favorability);
+                                        format!("{}（{}，好感度{}）", entity.name, label, rel.favorability)
+                                    })
+                                    .unwrap_or_else(|| format!("{}（陌生人，好感度0）", entity.name));
+                                entity_descs.push(rel_desc);
+                            }
+
+                            warnings.push(format!(
+                                "【交易提示】你可以使用「说话」与对方讨价还价。先询价，协商好价格后再执行「交易」。关系越好价格越优惠。你身边有：{}。你身上有{}两银子。",
+                                entity_descs.join("、"),
+                                silver,
+                            ));
                         }
 
                         warnings

@@ -12,4 +12,4 @@ pub use dialogue::{DialogueClient, DialogueEventHandler};
 pub use relationship::RelationshipStore;
 pub use relationship_migration::{MigrationReport, migrate_relationship_descriptions};
 pub use relationship_narrative::NarrativeGenerator;
-pub use relationship_types::{KeyEvent, RelationshipMemory};
+pub use relationship_types::{get_relationship_level, KeyEvent, RelationshipMemory};

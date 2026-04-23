@@ -628,6 +628,7 @@ async fn handle_client_message(
             action_type,
             action_data,
             priority,
+            subsequent_intents,
         } => {
             handle_intent(
                 *agent_id,
@@ -639,6 +640,7 @@ async fn handle_client_message(
                 action_type,
                 action_data,
                 priority,
+                subsequent_intents,
                 state,
             )
             .await
@@ -669,6 +671,7 @@ async fn handle_intent(
     action_type: String,
     action_data: Option<serde_json::Value>,
     priority: i32,
+    subsequent_intents: Vec<Intent>,
     state: &Arc<crate::state::AppState>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // 确定最终的 agent_id
@@ -736,6 +739,50 @@ async fn handle_intent(
     // 解析动作类型（数据驱动：直接使用字符串）
     let action = crate::models::ActionType::new(&action_type);
 
+    // 验证 subsequent_intents 安全性
+    let max_subsequent = crate::game_data::registry()
+        .map(|c| {
+            c.get()
+                .game_rules
+                .data
+                .intent_batch
+                .as_ref()
+                .map(|ib| ib.max_intents_per_tick as usize)
+                .unwrap_or(3)
+        })
+        .unwrap_or(3)
+        .saturating_sub(1); // 减去 primary intent 自身
+
+    if subsequent_intents.len() > max_subsequent {
+        warn!(
+            "Pipeline 过长: agent={} 有 {} 个 subsequent intents，上限 {}",
+            agent_id, subsequent_intents.len(), max_subsequent
+        );
+        return Err(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent).into());
+    }
+
+    // 递归拒绝：只允许单层 pipeline
+    for (i, sub) in subsequent_intents.iter().enumerate() {
+        if !sub.subsequent_intents.is_empty() {
+            warn!(
+                "嵌套 pipeline 拒绝: agent={} subsequent[{}] 含嵌套 intents",
+                agent_id, i
+            );
+            return Err("不支持嵌套 pipeline，subsequent intents 不可再包含 subsequent".into());
+        }
+    }
+
+    // agent_id 一致性验证
+    for (i, sub) in subsequent_intents.iter().enumerate() {
+        if sub.agent_id != uuid::Uuid::nil() && sub.agent_id != agent_id {
+            warn!(
+                "agent_id 不一致: agent={} subsequent[{}] agent_id={}",
+                agent_id, i, sub.agent_id
+            );
+            return Err(format!("subsequent intent[{}] agent_id 不一致", i).into());
+        }
+    }
+
     // 构造 Intent
     let mut intent = Intent {
         intent_id: req_intent_id.unwrap_or_else(uuid::Uuid::new_v4), // 如果 ClientMessage 中没有传 intent_id，这里生成一个新的
@@ -749,7 +796,7 @@ async fn handle_intent(
         narrative: None,
         already_broadcast: false,
         session_id: None,
-        subsequent_intents: vec![],
+        subsequent_intents,
     };
 
     // 如果是 speak 动作，立即广播给同 Location 的所有在线 Agent
