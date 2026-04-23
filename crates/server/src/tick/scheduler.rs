@@ -78,6 +78,9 @@ pub struct TickScheduler {
     /// 上次加载的 actions.yaml 修改时间
     last_actions_mtime: Option<std::time::SystemTime>,
 
+    /// 上次加载的 skills/ 目录修改时间
+    last_skills_mtime: Option<std::time::SystemTime>,
+
     /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
     vendor_pending_events: crate::models::VendorPendingEvents,
 }
@@ -108,6 +111,7 @@ impl TickScheduler {
             agent_state_cache,
             accepting_tick_id,
             last_actions_mtime: None,
+            last_skills_mtime: None,
             vendor_pending_events,
         }
     }
@@ -184,6 +188,108 @@ impl TickScheduler {
                 }
                 Err(e) => {
                     warn!("重新加载 actions.yaml 失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 检查 skills/ 目录是否变更，若变更则重新加载并广播
+    async fn check_and_reload_skills(&mut self) -> Result<()> {
+        use crate::game_data::loaders::load_skills;
+
+        let config_dir = get_config_dir();
+        let skills_path = config_dir.join("skills");
+
+        if !skills_path.exists() {
+            return Ok(()); // 目录不存在，跳过
+        }
+
+        let metadata = match fs::metadata(&skills_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        // 检查是否是新文件或已修改
+        let should_reload = match self.last_skills_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if should_reload {
+            self.last_skills_mtime = Some(modified);
+
+            // 重新加载 skills
+            match load_skills(&skills_path) {
+                Ok(new_skills) => {
+                    let version = "1.0.0".to_string();
+                    let skills_count = new_skills.len();
+
+                    // 更新 GameDataCache（SkillsData）
+                    // 注意：这需要 GameDataCache 支持 update_skills 方法
+                    info!(
+                        "技能配置已热重载: version={}, skills={}",
+                        version, skills_count
+                    );
+
+                    // 构建 SkillContent 列表并广播
+                    let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = new_skills
+                        .into_iter()
+                        .map(|(skill_id, def)| {
+                            cyber_jianghu_protocol::types::SkillContent {
+                                skill_id,
+                                name: def.name,
+                                body: def.content,
+                            }
+                        })
+                        .collect();
+
+                    // 广播给所有在线 Agent
+                    let config_update = ServerMessage::ConfigUpdate {
+                        config_type: "skills".to_string(),
+                        update_type: "full".to_string(),
+                        version,
+                        content: serde_json::to_value(skill_contents).unwrap_or_default(),
+                        updated_items: vec![],
+                        removed_items: vec![],
+                    };
+
+                    // 使用广播函数
+                    let connections = self.connection_manager.read().await;
+                    let mut success_count = 0;
+                    let mut fail_count = 0;
+
+                    for (_device_id, connection) in connections.iter() {
+                        if connection.is_dead() {
+                            fail_count += 1;
+                            continue;
+                        }
+
+                        let json = serde_json::to_string(&config_update)?;
+                        if connection
+                            .send(axum::extract::ws::Message::Text(json.into()))
+                            .await
+                            .is_err()
+                        {
+                            fail_count += 1;
+                        } else {
+                            success_count += 1;
+                        }
+                    }
+
+                    info!(
+                        "Skills ConfigUpdate broadcast complete: {} success, {} failed",
+                        success_count, fail_count
+                    );
+                }
+                Err(e) => {
+                    warn!("重新加载 skills/ 目录失败: {}", e);
                 }
             }
         }
@@ -371,6 +477,11 @@ impl TickScheduler {
             // 热重载 actions.yaml
             if let Err(e) = self.check_and_reload_actions().await {
                 warn!("动作热重载检查失败: {}", e);
+            }
+
+            // 热重载 skills/
+            if let Err(e) = self.check_and_reload_skills().await {
+                warn!("技能热重载检查失败: {}", e);
             }
 
             interval.tick().await;
