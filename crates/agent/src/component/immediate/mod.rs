@@ -382,7 +382,7 @@ impl ImmediateEventHandler {
         // Phase 3: 执行所有决策（发送 RespondNow / 标记 Ignore/Defer）
         let all_decisions: Vec<_> = rule_decisions
             .into_iter()
-            .chain(llm_decisions.into_iter())
+            .chain(llm_decisions)
             .collect();
 
         for mut event in events {

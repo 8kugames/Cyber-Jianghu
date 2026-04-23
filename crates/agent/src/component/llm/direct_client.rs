@@ -659,14 +659,17 @@ impl DirectLlmClient {
     async fn call_with_conversation_and_tools(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: super::client::ConversationInput<'_>,
         tools: &[ToolDefinition],
         executor: &dyn ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
-        let messages = super::client::build_conversation_messages(system, summary, turns, current_prompt);
+        let messages = super::client::build_conversation_messages(
+            system,
+            input.summary,
+            input.turns,
+            input.current_prompt,
+        );
         self.run_tool_loop(messages, tools, executor, max_rounds).await
     }
 
@@ -853,9 +856,7 @@ impl LlmClient for DirectLlmClient {
     async fn complete_with_conversation_and_tools(
         &self,
         system: &str,
-        summary: Option<&str>,
-        turns: &[ConversationTurn],
-        current_prompt: &str,
+        input: super::client::ConversationInput<'_>,
         tools: &[ToolDefinition],
         executor: &dyn ToolExecutor,
         max_rounds: usize,
@@ -863,7 +864,7 @@ impl LlmClient for DirectLlmClient {
         if is_llm_disabled() {
             anyhow::bail!("LLM 调用已被停止");
         }
-        self.call_with_conversation_and_tools(system, summary, turns, current_prompt, tools, executor, max_rounds)
+        self.call_with_conversation_and_tools(system, input, tools, executor, max_rounds)
             .await
     }
 
