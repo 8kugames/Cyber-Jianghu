@@ -40,7 +40,7 @@ pub use handler::websocket_handler;
 
 // 广播功能
 pub use broadcast::{
-    DeathNotificationContext, broadcast_action_update, forward_dialogue_message,
+    DeathNotificationContext, broadcast_config_update, forward_dialogue_message,
     send_agent_died_notification, send_world_state,
 };
 
