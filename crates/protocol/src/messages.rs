@@ -80,8 +80,7 @@ pub struct DialogueSession {
 ///
 /// - `Registered`: Agent 注册成功，包含游戏规则和世界观规则
 /// - `WorldState`: 每个 Tick 下发的完整世界状态快照
-/// - `GameRulesUpdate`: 游戏规则热更新通知
-/// - `WorldBuildingRulesUpdate`: 世界观规则热更新通知
+/// - `ConfigUpdate`: 通用配置更新（统一收拢 game_rules/actions/world_building_rules/skills 下发）
 /// - `Pong`: 心跳响应
 /// - `Error`: 错误通知
 /// - `Dialogue`: 转发 Agent 间对话消息
