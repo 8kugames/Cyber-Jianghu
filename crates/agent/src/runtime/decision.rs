@@ -70,6 +70,7 @@ pub fn cognitive_decision_with_chain(
         Box::pin(async move {
             let mut last_error = String::new();
             let mut last_chain: Option<CognitiveChain> = None;
+            let mut failed_attempts: usize = 0;
 
             for attempt in 0..=max_retries {
                 match engine
@@ -114,6 +115,7 @@ pub fn cognitive_decision_with_chain(
                         }
                     }
                     Err(e) => {
+                        failed_attempts += 1;
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
                     }
@@ -126,7 +128,7 @@ pub fn cognitive_decision_with_chain(
                 "休息",
                 None,
             )
-            .with_thought(format!("认知失败({}次重试): {}", max_retries, last_error));
+            .with_thought(format!("认知失败({}/{}次重试): {}", failed_attempts, max_retries, last_error));
             (idle_intent, last_chain)
         })
     }

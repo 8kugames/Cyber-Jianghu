@@ -89,6 +89,8 @@ pub struct ReflectorSoul {
     llm_container: LlmClientContainer,
     /// 观察者 prompt 模板
     observer_prompt: ObserverPrompt,
+    /// 天魂叙事化开关（关闭时 prompt 不要求 narrative 字段）
+    reflector_narrative: bool,
 }
 
 impl ReflectorSoul {
@@ -97,8 +99,20 @@ impl ReflectorSoul {
         Self {
             rules: Arc::new(RwLock::new(rules)),
             llm_container,
-            observer_prompt: ObserverPrompt::default(),
+            observer_prompt: ObserverPrompt::new(),
+            reflector_narrative: false,
         }
+    }
+
+    /// 设置天魂叙事化开关（同时切换 prompt 模板）
+    pub fn with_reflector_narrative(mut self, enabled: bool) -> Self {
+        self.reflector_narrative = enabled;
+        self.observer_prompt = if enabled {
+            ObserverPrompt::with_narrative()
+        } else {
+            ObserverPrompt::without_narrative()
+        };
+        self
     }
 
     /// 验证意图
@@ -177,6 +191,12 @@ impl ReflectorSoul {
     pub async fn validate_persona(&self, persona: &PersonaInfo) -> Result<ValidationResult> {
         let rules = self.rules.read().await.clone();
 
+        let narrative_instruction = if self.reflector_narrative {
+            "如果是 approved，生成一段简短的人设描述"
+        } else {
+            ""
+        };
+
         let prompt = format!(
             r#"## 世界观规则
 
@@ -203,7 +223,7 @@ impl ReflectorSoul {
   "result": "approved" | "rejected",
   "reason": "通过/驳回的原因",
   "rejection_type": "era_violation" | "other",
-  "narrative": "如果是 approved，生成一段简短的人设描述"
+  "narrative": "{}"
 }}"#,
             rules.era.name,
             rules.era.tech_level,
@@ -212,6 +232,7 @@ impl ReflectorSoul {
             persona.age,
             persona.personality.join("、"),
             persona.values.join("、"),
+            narrative_instruction,
         );
 
         let llm_client = self.llm_container.read().await.clone();

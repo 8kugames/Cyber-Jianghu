@@ -951,28 +951,32 @@ impl super::Agent {
                             None
                         };
 
-                        // 天魂生成上一轮执行叙事
+                        // 天魂生成上一轮执行叙事（受 reflector_narrative 开关控制）
                         let first_tick = world_state.last_execution_summary.is_none();
-                        let execution_narrative = if let Some(ref validator) = self.validator {
-                            match validator
-                                .generate_execution_narrative(
-                                    &last_intents,
-                                    world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
-                                        total: 0,
-                                        succeeded: 0,
-                                        partial: 0,
-                                        failed: 0,
-                                        skipped: 0,
-                                    }),
-                                    first_tick,
-                                )
-                                .await
-                            {
-                                Ok(n) => n,
-                                Err(e) => {
-                                    warn!("天魂生成执行叙事错误: {}", e);
-                                    None
+                        let execution_narrative = if self.config.llm.reflector_narrative {
+                            if let Some(ref validator) = self.validator {
+                                match validator
+                                    .generate_execution_narrative(
+                                        &last_intents,
+                                        world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
+                                            total: 0,
+                                            succeeded: 0,
+                                            partial: 0,
+                                            failed: 0,
+                                            skipped: 0,
+                                        }),
+                                        first_tick,
+                                    )
+                                    .await
+                                {
+                                    Ok(n) => n,
+                                    Err(e) => {
+                                        warn!("天魂生成执行叙事错误: {}", e);
+                                        None
+                                    }
                                 }
+                            } else {
+                                None
                             }
                         } else {
                             None
