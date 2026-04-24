@@ -49,12 +49,14 @@
   - [x] 处理 HP、体力、饥饿、口渴等生理状态随时间的自然衰减。
   - [x] 寿终正寝检查：超龄自动清零 HP。
   - [x] 触发 TickBoundary 事件，如每 7 个游戏日触发传记生成。
-- [x] **实时 Intent 处理管道**: 串行处理 Agent 意图的引擎，确保世界状态更新零并发冲突。
-  - [x] 单消费者 MPSC Channel 队列，消除数据竞争。
-  - [x] 验证、执行与 Saga 失败回滚机制。
-  - [x] 基于数据驱动的 Action Executor，执行具体状态变更。
+- [x] **实时 Intent 处理管道 (Real-time Pipeline)**: 零并发冲突的单线程意图调度器。
+  - [x] **单消费者 MPSC 队列**：彻底消除写锁竞争和数据资源冲突。
+  - [x] **同地广播 (Co-located Broadcast)**：发生动作后仅向处于同一 `node_id` 的周围 Agent 广播事件（如说话、攻击），避免全局风暴。
+- [x] **状态处理器 (StateProcessor)**: 严格执行业务逻辑的核心管道。
+  - [x] **Saga 分布式事务模式**：基于 DashMap 实现写穿透（Write-through），执行包含验证（Validate）、执行（Execute）与数据库持久化。
+  - [x] **失败回滚 (Rollback)**：当数据库持久化失败时，利用 Saga 模式逆向回滚 DashMap 中的状态，确保内存与数据库绝对一致。
   - [x] **死亡与掉落机制 (Death Physics)**：Agent 死亡时触发清空背包 (`InventoryManager`)，物品化为 `ground_items` 散落原地，供其他 Agent `pickup`。
-  - [x] 生成游戏事件并实时返回 ExecutionResult 给 Agent。
+  - [x] **物品消耗管线 (`execute_use`)**：统一实装了“进食/饮水/消耗品”的基础逻辑与对生理属性（如饱食度、水分）的增益影响。
 - [x] **动作执行体系 (Action System)**: 根据数据字典验证和执行具体交互行为。
   - [x] 基础动作 (Basic)：休息、说话、移动、大喊、修炼、拾取、丢弃、采集、制造。
   - [x] 战斗动作 (Combat)：攻击、逃跑、使用（包含进食/饮水）。
