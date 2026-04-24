@@ -80,6 +80,32 @@ pub struct GameRules {
     /// 死亡后自动重生延迟 tick 数（0 = 不自动重生）
     #[serde(default)]
     pub rebirth_delay_ticks: i32,
+
+    /// 寿命配置（可选，不配置则使用 LifespanRules 默认值）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifespan: Option<LifespanRules>,
+}
+
+/// 寿命数据驱动配置（由 server game_rules.yaml 下发）
+///
+/// ticks_per_year 从 time.yaml 唯一配置源派生：
+/// ticks_per_hour * hours_per_day * days_per_season * seasons_per_year
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LifespanRules {
+    /// 角色最大寿命（岁）
+    #[serde(default = "default_max_age")]
+    pub max_age: u8,
+
+    /// 衰老开始年龄（影响叙事描述）
+    #[serde(default = "default_aging_start_age")]
+    pub aging_start_age: u8,
+}
+
+fn default_max_age() -> u8 {
+    80
+}
+fn default_aging_start_age() -> u8 {
+    50
 }
 
 fn default_critical_attack_threshold() -> i32 {

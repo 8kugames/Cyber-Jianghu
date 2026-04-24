@@ -32,7 +32,6 @@ use uuid::Uuid;
 
 use crate::config::{CharacterConfig, CharacterStatus};
 
-use crate::component::persona::LifespanStatus;
 use crate::soul::reflector::{PersonaInfo, ValidationRequest, ValidationResult};
 use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
 
@@ -798,40 +797,27 @@ pub(super) async fn update_relationship_handler(
 // 寿命 API Handlers
 // ============================================================================
 
-/// 获取寿命状态
+/// 获取寿命状态（从 Server 下发的 WorldState 读取）
 pub(super) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    let calculator = match &state.lifespan_calculator {
-        Some(c) => c,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Lifespan calculator not initialized",
-            )
-                .into_response();
+    let current = state.current_state.read().await;
+    match current.as_ref() {
+        Some(ws) => {
+            let age = ws.self_state.age_years.unwrap_or(0) as u8;
+            let max_age = ws.self_state.max_age.unwrap_or(80) as u8;
+            let is_dead = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
+            Json(LifespanResponse {
+                current_age: age,
+                status: if is_dead { "deceased" } else if age >= max_age { "aging" } else { "alive" }.to_string(),
+                aging_effects: None,
+            })
+            .into_response()
         }
-    };
-
-    let calc = calculator.lock().await;
-    let response = match calc.get_status() {
-        LifespanStatus::Alive { age } => LifespanResponse {
-            current_age: age,
-            status: "alive".to_string(),
-            aging_effects: None,
-        },
-        LifespanStatus::Aging { age, effects } => LifespanResponse {
-            current_age: age,
-            status: "aging".to_string(),
-            aging_effects: Some(format!("{:?}", effects)),
-        },
-        LifespanStatus::Deceased { age } => LifespanResponse {
-            current_age: age,
-            status: "deceased".to_string(),
-            aging_effects: None,
-        },
-    };
-    drop(calc);
-
-    Json(response).into_response()
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "No world state available",
+        )
+            .into_response(),
+    }
 }
 
 // ============================================================================

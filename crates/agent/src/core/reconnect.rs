@@ -150,14 +150,23 @@ impl super::Agent {
                                     .store(false, std::sync::atomic::Ordering::Relaxed);
                             }
 
-                            // 自动重建本地 character.yaml（reconnect 路径）
-                            if self.character_config.is_none() {
+                            // 加载最新 character.yaml（reconnect 路径，支持 rebirth 后新角色）
+                            {
                                 let s_dir = self.config.server_dir(&self.config.server.ws_url);
                                 let chars_dir = s_dir.join("characters");
                                 let c_dir = chars_dir.join(agent_id.to_string());
                                 let c_yaml = c_dir.join("character.yaml");
 
-                                if !c_yaml.exists() {
+                                if c_yaml.exists() {
+                                    // 优先从文件加载（rebirth 后 register handler 已保存新角色）
+                                    if let Ok(loaded) = CharacterConfig::from_file(&c_yaml) {
+                                        self.character_config = Some(loaded);
+                                        info!("reconnect 已加载角色配置: {}", c_yaml.display());
+                                    }
+                                } else if self.character_config.is_none()
+                                    || self.character_config.as_ref().and_then(|c| c.agent_id) != Some(agent_id)
+                                {
+                                    // 文件不存在且无匹配配置 → 自动重建
                                     let name = registered_name.as_deref().unwrap_or("未知");
                                     let recon = CharacterConfig {
                                         agent_id: Some(agent_id),
@@ -347,9 +356,13 @@ impl super::Agent {
                         std::future::pending().await
                     }
                 } => {
-                    info!("[rebirth] 收到重连请求: {}", req.ws_url);
+                    info!("[rebirth] 收到重连请求: {} (agent_id: {:?})", req.ws_url, req.agent_id);
                     let http_url = crate::config::ws_to_http_url(&req.ws_url);
                     self.client.update_server_url(req.ws_url.clone(), http_url).await;
+                    // 设置 agent_id (如果需要切换)
+                    if let Some(id) = req.agent_id {
+                        self.client.set_agent_id(Some(id)).await;
+                    }
 
                     match self.reconnect().await {
                         Ok(()) => {

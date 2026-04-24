@@ -37,6 +37,10 @@ pub struct Agent {
 
     /// 最后一次上报意图的时间
     pub last_tick_online: Option<DateTime<Utc>>,
+
+    /// 角色出生 tick（秒级时间戳，不可变）
+    /// NULL = 不朽（迁移前角色不受寿命约束）
+    pub birth_tick: Option<i64>,
 }
 
 /// Agent状态
@@ -74,6 +78,12 @@ pub struct AgentState {
     /// 已掌握的技能 ID 列表
     #[serde(default)]
     pub skills: Vec<String>,
+
+    /// 角色出生 tick（秒级时间戳，不可变）
+    /// 从 agents 表 JOIN 获取，缓存到 DashMap
+    /// NULL = 不朽（迁移前角色不受寿命约束）
+    #[serde(default)]
+    pub birth_tick: Option<i64>,
 
     /// 状态记录时间
     pub created_at: DateTime<Utc>,

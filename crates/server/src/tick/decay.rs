@@ -220,18 +220,97 @@ pub fn apply_decay_and_environmental_damage(
             // 已经死亡的Agent（在本次tick开始前就已死亡）
             debug!("Agent {} 已经死亡", agent_id);
         }
+
+        // 寿终正寝检查（birth_tick 非空时生效，NULL = 不朽）
+        if was_alive && state.is_alive {
+            if let Some(birth_tick) = state.birth_tick {
+                if birth_tick > 0 && birth_tick < tick_id {
+                    // 复用 compute_game_time 相同公式，从秒级 tick_id 计算游戏年
+                    let age_years = compute_age_years(birth_tick, tick_id);
+                    if let Some((max_age, _aging_start)) = registry.get_lifespan_config() {
+                        if age_years >= max_age as i64 {
+                            // 寿终正寝：清零 HP
+                            state.status.set("hp", 0).ok();
+                            state.is_alive = false;
+                            dead_agents.push(agent_id);
+
+                            let death_info = registry.get_old_age_death_info();
+                            warn!(
+                                "Agent {} 寿终正寝，享年 {} 岁（max_age={}）",
+                                agent_id, age_years, max_age
+                            );
+
+                            let death_event = crate::models::WorldEvent {
+                                event_type: WorldEventType::DeathNotification,
+                                tick_id,
+                                description: death_info.message.clone(),
+                                metadata: serde_json::json!({
+                                    "cause": &death_info.cause,
+                                    "location": &state.node_id,
+                                    "age_years": age_years,
+                                }),
+                            };
+                            events.push((agent_id, death_event));
+
+                            let notification = DeathNotification::new(
+                                agent_id,
+                                death_info.cause,
+                                death_info.message,
+                                state.node_id.clone(),
+                                tick_id,
+                            );
+                            death_notifications.push(notification);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 处理物品耐久度自然衰减
     // 异步操作需要 db_pool，这里先收集需要处理的物品 ID
     // TODO: 实现物品自然损坏逻辑 (Phase 2)
-    // 逻辑：
-    // 1. 获取所有 Agent 的背包
-    // 2. 对每个物品，如果有 decay_rate > 0，则减少 durability
-    // 3. 如果 durability <= 0，则移除物品
-    // 4. 发送物品损坏通知
 
     (agent_states, dead_agents, events, death_notifications)
+}
+
+/// 从 birth_tick 和 current_tick 计算角色年龄（游戏年）
+///
+/// 复用 broadcaster.rs::compute_game_time 相同公式：
+/// tick_id 是秒级时间戳（now - game_epoch）
+/// game_hours = tick_id / (real_seconds_per_tick * ticks_per_hour)
+/// game_years = game_hours / (hours_per_day * days_per_season * seasons_per_year)
+pub(crate) fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
+    use crate::game_data::registry::TimeRegistry;
+
+    let age_seconds = current_tick - birth_tick;
+    if age_seconds <= 0 {
+        return 0;
+    }
+
+    let registry = match crate::game_data::registry_or_error() {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    let gd = registry.get();
+    let real_seconds_per_tick = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+
+    if let Some(time_config) = TimeRegistry::get_config() {
+        let real_seconds_per_game_hour = real_seconds_per_tick * time_config.ticks_per_hour as i64;
+        if real_seconds_per_game_hour <= 0 {
+            return 0;
+        }
+        let game_hours = age_seconds / real_seconds_per_game_hour;
+        let hours_per_year = time_config.hours_per_day as i64
+            * time_config.days_per_season as i64
+            * time_config.seasons_per_year as i64;
+        if hours_per_year <= 0 {
+            return 0;
+        }
+        game_hours / hours_per_year
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

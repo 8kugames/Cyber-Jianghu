@@ -438,6 +438,13 @@ impl DirectLlmClient {
                 .await
                 .unwrap_or_else(|_| "Unable to read error body".to_string());
             error!("LLM API error {}: {}", status, error_body);
+
+            // 400 + "stream"：模型强制要求流式，自动用流式重试
+            if status.as_u16() == 400 && error_body.contains("stream") {
+                tracing::info!("模型要求流式调用，自动切换到 streaming 重试");
+                return self.send_request_via_stream(request).await;
+            }
+
             super::token_tracking::record_failure(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
@@ -471,6 +478,47 @@ impl DirectLlmClient {
         }
 
         Ok(response_data)
+    }
+
+    /// 流式降级：用 streaming 收集完整响应，组装为 OpenAIResponse
+    ///
+    /// 当 send_request 遇到 "only support stream mode" 错误时调用此方法。
+    /// 复用 send_streaming_request 建立 SSE 连接，收集全部 Delta 后拼装响应。
+    async fn send_request_via_stream(
+        &self,
+        request: &OpenAIRequest,
+    ) -> Result<OpenAIResponse> {
+        use futures_util::StreamExt;
+        use super::streaming::StreamAccumulator;
+
+        let mut stream = self.send_streaming_request(request).await?;
+        let mut acc = StreamAccumulator::new();
+
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(c) => acc.push(c),
+                Err(e) => {
+                    tracing::warn!("流式降级收集中途失败: {}", e);
+                    break;
+                }
+            }
+        }
+
+        let content = acc.into_content();
+
+        // 组装为 OpenAIResponse 格式（与 send_request 返回一致）
+        Ok(OpenAIResponse {
+            choices: vec![super::openai_types::OpenAIChoice {
+                message: super::openai_types::ChatMessage {
+                    role: "assistant".to_string(),
+                    content: Some(content),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                },
+            }],
+            usage: None,
+        })
     }
 
     /// 发送流式请求到 OpenAI 兼容 API
