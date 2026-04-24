@@ -151,22 +151,24 @@ mod tests {
         let mut backend = WorkingMemoryBackend::new(3);
 
         backend
-            .add(create_test_memory(1, "Event A", 0.5))
+            .add(&mut create_test_memory(1, "Event A", 0.5))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(2, "Event B", 0.5))
+            .add(&mut create_test_memory(2, "Event B", 0.5))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(3, "Event C", 0.5))
+            .add(&mut create_test_memory(3, "Event C", 0.5))
             .await
             .unwrap();
+
+        // 验证数量和顺序（新事件在前面）
         assert_eq!(backend.count().await.unwrap(), 3);
 
-        // 添加第 4 个事件，应该淘汰 Event A
+        // 再添加一个事件，验证 FIFO（A 被淘汰）
         backend
-            .add(create_test_memory(4, "Event D", 0.5))
+            .add(&mut create_test_memory(4, "Event D", 0.5))
             .await
             .unwrap();
         assert_eq!(backend.count().await.unwrap(), 3);
@@ -182,15 +184,15 @@ mod tests {
         let mut backend = WorkingMemoryBackend::new(10);
 
         backend
-            .add(create_test_memory(1, "Low", 0.2))
+            .add(&mut create_test_memory(1, "Low", 0.2))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(2, "High", 0.9))
+            .add(&mut create_test_memory(2, "High", 0.9))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(3, "Medium", 0.5))
+            .add(&mut create_test_memory(3, "Medium", 0.5))
             .await
             .unwrap();
 
@@ -205,15 +207,15 @@ mod tests {
         let mut backend = WorkingMemoryBackend::new(10);
 
         backend
-            .add(create_test_memory(1, "Event 1", 0.5))
+            .add(&mut create_test_memory(1, "Event 1", 0.5))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(5, "Event 5", 0.5))
+            .add(&mut create_test_memory(5, "Event 5", 0.5))
             .await
             .unwrap();
         backend
-            .add(create_test_memory(10, "Event 10", 0.5))
+            .add(&mut create_test_memory(10, "Event 10", 0.5))
             .await
             .unwrap();
 
