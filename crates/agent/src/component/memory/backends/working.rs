@@ -82,12 +82,12 @@ impl MemoryBackend for WorkingMemoryBackend {
         "WorkingMemory"
     }
 
-    async fn add(&mut self, memory: MemoryEntry) -> Result<()> {
+    async fn add(&mut self, memory: &mut MemoryEntry) -> Result<i64> {
         if self.events.len() == self.max_size {
             self.events.pop_back(); // 移除最旧的事件
         }
-        self.events.push_front(memory);
-        Ok(())
+        self.events.push_front(memory.clone());
+        Ok(1) // Working memory 无数据库 ID，返回 1 表示成功
     }
 
     async fn count(&self) -> Result<usize> {

@@ -50,12 +50,12 @@ impl EpisodicMemoryBackend {
         self.save_threshold = threshold;
     }
 
-    /// 将 MemoryEntry 转换为 ClientMemory
-    fn entry_to_memory(entry: MemoryEntry) -> ClientMemory {
-        let mut memory = ClientMemory::new(entry.agent_id, entry.tick_id, entry.content)
-            .with_type(entry.event_type)
+    /// 将 MemoryEntry 转换为 ClientMemory（引用，避免 clone）
+    fn entry_to_memory(entry: &MemoryEntry) -> ClientMemory {
+        let mut memory = ClientMemory::new(entry.agent_id, entry.tick_id, entry.content.clone())
+            .with_type(entry.event_type.clone())
             .with_importance(entry.importance_score)
-            .with_metadata(entry.metadata);
+            .with_metadata(entry.metadata.clone());
 
         memory.strength = entry.strength;
         memory.is_archived = entry.is_archived;
@@ -128,19 +128,22 @@ impl MemoryBackend for EpisodicMemoryBackend {
         "EpisodicMemory"
     }
 
-    async fn add(&mut self, memory: MemoryEntry) -> Result<()> {
+    async fn add(&mut self, memory: &mut MemoryEntry) -> Result<i64> {
         // 只保存高重要性的记忆
         if memory.importance_score < self.save_threshold {
-            return Ok(());
+            return Ok(-1);
         }
 
-        let client_memory = Self::entry_to_memory(memory);
+        let mut client_memory = Self::entry_to_memory(memory);
         let store = self
             .store
             .lock()
             .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
-        store.add_memory(&client_memory)?;
-        Ok(())
+        let id = store.add_memory(&client_memory)?;
+        client_memory.id = Some(id);
+        // 回填 memory.id
+        memory.id = Some(id);
+        Ok(id)
     }
 
     async fn count(&self) -> Result<usize> {
