@@ -202,7 +202,11 @@ pub struct GameRulesData {
 
     /// 群像传记配置
     #[serde(default)]
-    pub chronicle: Option<ChronicleRulesData>,
+    pub chronicle: Option<cyber_jianghu_protocol::ChronicleConfig>,
+
+    /// 寿命配置（数据驱动，下发到 Agent）
+    #[serde(default)]
+    pub lifespan: Option<cyber_jianghu_protocol::LifespanRules>,
 }
 
 /// Vendor 自动补货配置
@@ -484,6 +488,7 @@ pub struct TimeData {
     pub ticks_per_hour: i32,
     pub hours_per_day: i32,
     pub days_per_season: i32,
+    pub seasons_per_year: i32,
     pub seasons: Vec<SeasonData>,
 }
 
@@ -773,9 +778,10 @@ mod tests {
     #[test]
     fn test_time_data_serialization() {
         let data = TimeData {
-            ticks_per_hour: 60,
+            ticks_per_hour: 1,
             hours_per_day: 24,
             days_per_season: 10,
+            seasons_per_year: 4,
             seasons: vec![],
         };
         let config = UnifiedConfig::new("0.0.1", "Time config", data);
