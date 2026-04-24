@@ -9,6 +9,27 @@
 
 ### ⚠️ Breaking Changes
 
+- **Agent**: `MemoryBackend::add()` 签名破坏性变更
+  - 旧: `async fn add(&mut self, MemoryEntry) -> Result<()>`
+  - 新: `async fn add(&mut self, &mut MemoryEntry) -> Result<i64>`
+  - 返回值从 `()` 改为插入记录的 DB ID（-1 表示跳过/过滤）
+  - `add_batch` 默认实现改为 `for mut memory in memories` 消费所有权
+  - 影响: WorkingMemoryBackend / EpisodicMemoryBackend / SemanticMemoryBackend 全部适配
+
+- **Protocol**: `LifespanRules` 删除 `ticks_per_year` 字段
+  - 改为从 `time.yaml` 唯一配置源派生：`ticks_per_hour * hours_per_day * days_per_season * seasons_per_year`
+  - `game_rules.yaml` lifespan 配置仅保留 `max_age` / `aging_start_age`
+  - Agent 端 `LifespanCalculator` / `LifespanConfig` / `LifespanStatus` 全部删除
+  - Agent 寿命数据改为从 Server 下发的 WorldState 被动读取
+
+- **Protocol**: `AgentSelfState` 新增 `age_years: Option<u32>` / `max_age: Option<u32>`
+  - `skip_serializing_if = "Option::is_none"` 兼容旧客户端
+  - Agent 仅用于叙事，不用于决策
+
+- **Server**: DB migration `014_agent_birth_tick.sql` — agents 表新增 `birth_tick BIGINT` 列
+  - 新注册角色写入 `birth_tick = current_tick_id`
+  - 已有角色 `birth_tick = NULL` → 视为不朽，不触发寿命检查
+
 - **Protocol**: 移除 `TRADE` 动作常量 (`protocol::types::actions::TRADE`)
   - 不再存在系统强制的交易动作类型
   - 交易改由 Agent 自行通过 `speak` 议价 + `give` 交割
@@ -60,6 +81,14 @@
 
 ### Changed
 
+- **Server**: 寿命系统 Server 权威化
+  - `decay.rs` 新增寿终检查：生理衰减 + 环境伤害之后，`birth_tick` 非空时计算年龄
+  - `compute_age_years(birth_tick, tick_id)` 复用 broadcaster 相同公式，从 `time.yaml` + `game_rules.yaml` 派生
+  - 超龄 → 清零 HP → 复用现有死亡流程（DeathNotification + AgentDied + 背包清空 + 自动重生）
+  - `broadcaster.rs` 3 个 AgentSelfState 构造点注入 `age_years` / `max_age`
+  - `death_defaults` 新增 `old_age: { cause: "old_age", message: "你已寿终正寝，安详离世......" }`
+  - 重生时 `birth_tick` 重置为 `rebirth_tick`（新角色重新计算寿命）
+
 - **Agent**: `think_direct()` 路由重构
   - tool-calling 提升为顶层条件（先前嵌套在 `conv_data == None` 分支下是死代码）
   - 路由顺序：tool-calling + conversation → tool-calling only → streaming/plain
@@ -81,6 +110,11 @@
   - Agent: lifecycle.rs / social.rs / chaos.rs / relationship.rs 测试
 
 ### Removed
+
+- **Agent**: `LifespanCalculator` / `LifespanConfig` / `LifespanStatus` / `AgingEffectValues` / `AgingEffects` / `AgingStage`
+  - 删除 `crates/agent/src/component/persona/lifespan.rs`
+  - 删除 `crates/agent/src/component/persona/lifespan_types.rs`
+  - 12+ 文件移除所有 lifespan_calculator 引用
 
 - **Server**: 交易动作完整链路
   - `actions.yaml` 交易定义
