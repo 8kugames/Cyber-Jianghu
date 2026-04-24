@@ -225,7 +225,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
-- `src/component/persona/` - Dynamic persona, lifespan, trait evolution
+- `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
 - `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` + `OpenClawBridge`)
 - `src/component/social/` - RelationshipStore (SQLite, social graph)
 - `src/component/immediate/` - ImmediateEventHandler (instant event processing)
