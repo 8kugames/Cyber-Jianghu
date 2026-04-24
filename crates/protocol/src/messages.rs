@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::{AvailableAction, GameRules, WorldBuildingRules, WorldEvent, WorldState};
+use crate::types::{GameRules, WorldBuildingRules, WorldEvent, WorldState};
 
 // ============================================================================
 // 对话消息类型
@@ -137,32 +137,6 @@ pub enum ServerMessage {
     WorldState {
         #[serde(flatten)]
         data: WorldState,
-    },
-
-    /// 游戏规则更新
-    GameRulesUpdate {
-        #[serde(flatten)]
-        game_rules: GameRules,
-    },
-
-    /// 世界观规则更新（新增）
-    WorldBuildingRulesUpdate { rules: WorldBuildingRules },
-
-    /// 动作配置增量更新
-    ///
-    /// 仅当下发变更时出现，完整动作列表由 agent 本地缓存。
-    /// action_update_type: "full" | "incremental"
-    ActionUpdate {
-        /// 更新类型
-        update_type: String,
-        /// 动作列表（全量时有效）
-        actions: Vec<AvailableAction>,
-        /// 增量更新的动作名称列表（增量时有效）
-        updated_actions: Vec<String>,
-        /// 被删除的动作名称列表（增量时有效）
-        removed_actions: Vec<String>,
-        /// 规则版本
-        version: String,
     },
 
     /// 通用配置更新（统一收拢所有配置下发消息）
@@ -658,12 +632,20 @@ mod tests {
         use crate::types::WorldBuildingRules;
 
         let rules = WorldBuildingRules::default();
-        let msg = ServerMessage::WorldBuildingRulesUpdate { rules };
+        let msg = ServerMessage::ConfigUpdate {
+            config_type: "world_building_rules".to_string(),
+            update_type: "full".to_string(),
+            version: rules.version.clone(),
+            content: serde_json::to_value(&rules).unwrap(),
+            updated_items: vec![],
+            removed_items: vec![],
+        };
 
         let json = msg.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["type"], "world_building_rules_update");
-        assert!(parsed.get("rules").is_some());
+        assert_eq!(parsed["type"], "config_update");
+        assert_eq!(parsed["config_type"], "world_building_rules");
+        assert_eq!(parsed["version"], "0.0.1");
     }
 
     #[test]

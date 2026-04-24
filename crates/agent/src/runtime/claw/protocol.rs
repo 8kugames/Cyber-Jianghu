@@ -400,18 +400,41 @@ impl DownstreamMessage {
                     content: None,
                 }),
             },
-            ServerMessage::GameRulesUpdate { game_rules } => {
-                Some(DownstreamMessage::ServerGameRulesUpdate {
-                    tick_duration_secs: game_rules.tick_duration_secs,
-                    version: game_rules.version,
-                    last_updated: game_rules.last_updated,
-                })
-            }
-            ServerMessage::WorldBuildingRulesUpdate { rules } => {
-                Some(DownstreamMessage::ServerWorldBuildingRulesUpdate {
-                    version: rules.version,
-                    last_updated: rules.last_updated,
-                })
+            ServerMessage::ConfigUpdate {
+                config_type,
+                version: _,
+                content,
+                ..
+            } => {
+                match config_type.as_str() {
+                    "game_rules" => {
+                        if let Ok(game_rules) =
+                            serde_json::from_value::<cyber_jianghu_protocol::GameRules>(content.clone())
+                        {
+                            Some(DownstreamMessage::ServerGameRulesUpdate {
+                                tick_duration_secs: game_rules.tick_duration_secs,
+                                version: game_rules.version,
+                                last_updated: game_rules.last_updated,
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    "world_building_rules" => {
+                        if let Ok(rules) = serde_json::from_value::<
+                            cyber_jianghu_protocol::WorldBuildingRules,
+                        >(content.clone())
+                        {
+                            Some(DownstreamMessage::ServerWorldBuildingRulesUpdate {
+                                version: rules.version,
+                                last_updated: rules.last_updated,
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
             }
             ServerMessage::AgentDied {
                 agent_id,
@@ -888,21 +911,26 @@ mod tests {
 
     #[test]
     fn test_from_server_message_game_rules_update() {
-        let server_msg = ServerMessage::GameRulesUpdate {
-            game_rules: GameRules {
-                tick_duration_secs: 30,
-                available_actions: vec![],
-                initial_items: vec![],
-                survival_actions: vec![],
-                survival_threshold: 30,
-                critical_attack_threshold: 15,
-                rebirth_delay_ticks: 0,
-                version: "0.0.6".to_string(),
-                last_updated: "2024-03-22T12:00:00Z".to_string(),
-                intent_batch: None,
-                reflector_narrative: None,
-                immediate_events: None,
-            },
+        let server_msg = ServerMessage::ConfigUpdate {
+            config_type: "game_rules".to_string(),
+            update_type: "full".to_string(),
+            version: "0.0.6".to_string(),
+            content: serde_json::json!({
+                "tick_duration_secs": 30,
+                "available_actions": [],
+                "initial_items": [],
+                "survival_actions": [],
+                "survival_threshold": 30,
+                "critical_attack_threshold": 15,
+                "rebirth_delay_ticks": 0,
+                "version": "0.0.6",
+                "last_updated": "2024-03-22T12:00:00Z",
+                "intent_batch": null,
+                "reflector_narrative": null,
+                "immediate_events": null,
+            }),
+            updated_items: vec![],
+            removed_items: vec![],
         };
 
         let result = DownstreamMessage::from_server_message(server_msg, 100);

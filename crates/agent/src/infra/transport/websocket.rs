@@ -614,7 +614,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, _wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -634,58 +634,6 @@ async fn websocket_background_task(
                                 debug!("Background: WorldState tick={}", data.tick_id);
                                 if let Some(ref tx) = ws_tx {
                                     let _ = tx.send(Some(data));
-                                }
-                            }
-                            Ok(msg @ ServerMessage::GameRulesUpdate { .. }) => {
-                                if let ServerMessage::GameRulesUpdate { ref game_rules } = msg {
-                                    info!("Background: GameRules v{}", game_rules.version);
-                                    {
-                                        let mut guard = state.write().await;
-                                        guard.game_rules = Some(game_rules.clone());
-                                    }
-                                    if let Some(ref cb) = game_rules_cb {
-                                        cb(game_rules.clone());
-                                    }
-                                }
-                                if let Some(ref cb) = server_msg_cb {
-                                    cb(msg);
-                                }
-                            }
-                            Ok(msg @ ServerMessage::WorldBuildingRulesUpdate { .. }) => {
-                                if let ServerMessage::WorldBuildingRulesUpdate { ref rules } = msg {
-                                    info!("Background: WorldBuildingRules v{}", rules.version);
-                                    {
-                                        let mut guard = state.write().await;
-                                        guard.world_building_rules = Some(rules.clone());
-                                    }
-                                    if let Some(ref cb) = wb_rules_cb {
-                                        cb(rules.clone());
-                                    }
-                                }
-                                if let Some(ref cb) = server_msg_cb {
-                                    cb(msg);
-                                }
-                            }
-                            Ok(msg @ ServerMessage::ActionUpdate { .. }) => {
-                                if let ServerMessage::ActionUpdate {
-                                    ref update_type,
-                                    ref version,
-                                    ref updated_actions,
-                                    ref removed_actions,
-                                    ..
-                                } = msg
-                                {
-                                    info!(
-                                        "Background: ActionUpdate type={}, v={}, +{}, -{}",
-                                        update_type, version,
-                                        updated_actions.len(), removed_actions.len()
-                                    );
-                                    if let Some(ref cb) = action_update_cb {
-                                        cb(msg.clone());
-                                    }
-                                }
-                                if let Some(ref cb) = server_msg_cb {
-                                    cb(msg);
                                 }
                             }
                             Ok(msg @ ServerMessage::ConfigUpdate { .. }) => {
@@ -721,6 +669,27 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             warn!("Failed to parse skills content from ConfigUpdate");
+                                        }
+                                    // 处理 actions 配置更新
+                                    } else if config_type == "actions" {
+                                        // actions 仍通过 action_update_callback 处理（接收整个 ServerMessage）
+                                        if let Some(ref cb) = action_update_cb {
+                                            cb(msg.clone());
+                                        }
+                                    // 处理 game_rules 配置更新
+                                    } else if config_type == "game_rules" {
+                                        if let Ok(game_rules) = serde_json::from_value::<GameRules>(content.clone()) {
+                                            // 更新本地缓存
+                                            {
+                                                let mut guard = state.write().await;
+                                                guard.game_rules = Some(game_rules.clone());
+                                            }
+                                            // 调用回调
+                                            if let Some(ref cb) = game_rules_cb {
+                                                cb(game_rules);
+                                            }
+                                        } else {
+                                            warn!("Failed to parse game_rules content from ConfigUpdate");
                                         }
                                     }
                                 }

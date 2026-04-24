@@ -57,6 +57,15 @@ impl GameDataCache {
         data_guard.actions = new_actions;
     }
 
+    /// 仅更新游戏规则配置（用于热重载）
+    pub fn update_game_rules(&self, new_game_rules: super::types::UnifiedGameRulesConfig) {
+        let mut data_guard = self
+            .data
+            .write()
+            .unwrap_or_else(|e| panic!("配置缓存被污染: {}", e));
+        data_guard.game_rules = new_game_rules;
+    }
+
     /// 更新游戏数据
     ///
     /// 用于热加载配置时更新缓存内容

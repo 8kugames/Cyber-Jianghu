@@ -33,7 +33,7 @@ use super::event_manager::EventManager;
 
 use crate::game_data::loaders::load_actions;
 use crate::paths::get_config_dir;
-use crate::websocket::broadcast_action_update;
+use crate::websocket::broadcast_config_update;
 use cyber_jianghu_protocol::ServerMessage;
 use std::fs;
 
@@ -81,6 +81,12 @@ pub struct TickScheduler {
     /// 上次加载的 skills/ 目录修改时间
     last_skills_mtime: Option<std::time::SystemTime>,
 
+    /// 上次加载的 game_rules.yaml 修改时间
+    last_game_rules_mtime: Option<std::time::SystemTime>,
+
+    /// 上次加载的 world_building_rules.yaml 修改时间
+    last_world_building_rules_mtime: Option<std::time::SystemTime>,
+
     /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
     vendor_pending_events: crate::models::VendorPendingEvents,
 }
@@ -112,6 +118,8 @@ impl TickScheduler {
             accepting_tick_id,
             last_actions_mtime: None,
             last_skills_mtime: None,
+            last_game_rules_mtime: None,
+            last_world_building_rules_mtime: None,
             vendor_pending_events,
         }
     }
@@ -172,22 +180,160 @@ impl TickScheduler {
                         crate::game_data::ActionRegistry::build_available_actions();
 
                     // 广播给所有在线 Agent
-                    let action_update = ServerMessage::ActionUpdate {
+                    let config_update = ServerMessage::ConfigUpdate {
+                        config_type: "actions".to_string(),
                         update_type: "full".to_string(),
-                        actions: available_actions,
-                        updated_actions: vec![],
-                        removed_actions: vec![],
                         version,
+                        content: serde_json::to_value(available_actions)?,
+                        updated_items: vec![],
+                        removed_items: vec![],
                     };
 
                     if let Err(e) =
-                        broadcast_action_update(action_update, &self.connection_manager).await
+                        broadcast_config_update(config_update, &self.connection_manager).await
                     {
                         warn!("广播动作更新失败: {}", e);
                     }
                 }
                 Err(e) => {
                     warn!("重新加载 actions.yaml 失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 检查 game_rules.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_game_rules(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let game_rules_path = config_dir.join("game_rules.yaml");
+        let json_path = config_dir.join("game_rules.json");
+
+        // 确定实际使用的文件
+        let file_path = if game_rules_path.exists() {
+            &game_rules_path
+        } else if json_path.exists() {
+            &json_path
+        } else {
+            return Ok(()); // 文件不存在，跳过
+        };
+
+        let metadata = match fs::metadata(file_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        // 检查是否是新文件或已修改
+        let should_reload = match self.last_game_rules_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if should_reload {
+            self.last_game_rules_mtime = Some(modified);
+
+            // 重新加载 game_rules
+            match crate::game_data::load_from_dir(&config_dir) {
+                Ok(new_data) => {
+                    let version = new_data.game_rules.version.clone();
+
+                    // 更新缓存
+                    self.game_data_cache.update_game_rules(new_data.game_rules);
+
+                    info!(
+                        "游戏规则已热重载: version={}",
+                        version
+                    );
+
+                    // 广播给所有在线 Agent
+                    let config_update = ServerMessage::ConfigUpdate {
+                        config_type: "game_rules".to_string(),
+                        update_type: "full".to_string(),
+                        version,
+                        content: serde_json::to_value(&self.game_data_cache.get().game_rules)?,
+                        updated_items: vec![],
+                        removed_items: vec![],
+                    };
+
+                    if let Err(e) =
+                        broadcast_config_update(config_update, &self.connection_manager).await
+                    {
+                        warn!("广播游戏规则更新失败: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("重新加载 game_rules.yaml 失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 检查 world_building_rules.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_world_building_rules(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let world_building_path = config_dir.join("world_building_rules.yaml");
+        let json_path = config_dir.join("world_building_rules.json");
+
+        // 确定实际使用的文件
+        let file_path = if world_building_path.exists() {
+            &world_building_path
+        } else if json_path.exists() {
+            &json_path
+        } else {
+            return Ok(()); // 文件不存在，跳过
+        };
+
+        let metadata = match fs::metadata(file_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        // 检查是否是新文件或已修改
+        let should_reload = match self.last_world_building_rules_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if should_reload {
+            self.last_world_building_rules_mtime = Some(modified);
+
+            // 重新加载 world_building_rules
+            if let Some(world_building_rules) = crate::websocket::types::load_world_building_rules()
+            {
+                let version = world_building_rules.version.clone();
+
+                info!(
+                    "世界观规则已热重载: version={}",
+                    version
+                );
+
+                // 广播给所有在线 Agent
+                let config_update = ServerMessage::ConfigUpdate {
+                    config_type: "world_building_rules".to_string(),
+                    update_type: "full".to_string(),
+                    version,
+                    content: serde_json::to_value(&world_building_rules)?,
+                    updated_items: vec![],
+                    removed_items: vec![],
+                };
+
+                if let Err(e) =
+                    broadcast_config_update(config_update, &self.connection_manager).await
+                {
+                    warn!("广播世界观规则更新失败: {}", e);
                 }
             }
         }
@@ -477,6 +623,16 @@ impl TickScheduler {
             // 热重载 actions.yaml
             if let Err(e) = self.check_and_reload_actions().await {
                 warn!("动作热重载检查失败: {}", e);
+            }
+
+            // 热重载 game_rules.yaml
+            if let Err(e) = self.check_and_reload_game_rules().await {
+                warn!("游戏规则热重载检查失败: {}", e);
+            }
+
+            // 热重载 world_building_rules.yaml
+            if let Err(e) = self.check_and_reload_world_building_rules().await {
+                warn!("世界观规则热重载检查失败: {}", e);
             }
 
             // 热重载 skills/
