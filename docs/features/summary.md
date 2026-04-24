@@ -9,182 +9,169 @@
 
 ## 说明
 
-每项功能的详细文档参照跳转链接指向的 docs/architecture/*.md
+每项功能的详细文档参照跳转链接指向的 `docs/architecture/*.md`。
 
 ---
 
-## protocol
+## Protocol (通信与协议层)
 
- - [x] WebSocket 通信协议 — ServerMessage/ClientMessage 全双工消息
- - [x] 三魂认知架构支持 — SoulCycleReport (renhun/tianhun/final_intent)
- - [x] 数据驱动 Actions — ActionType 字符串化，配置与代码分离
- - [x] 多意图管道 — subsequent_intents 支持批量/管道执行
- - [x] Agent 对话系统 — DialogueSession 会话管理 (Request/Accept/Reject/Content/End)
- - [x] 实时事件广播 — ImmediateEvent (speak/whisper 绕过 tick 周期)
- - [x] 位置图系统 — Region→Map→SubScene 层次 + 隐式连接
- - [x] COI 属性系统 — AttributeComponent/StatusComponent/DerivedAttributeComponent
- - [x] 分级 LLM 验证 — OOC 风险分类 (always/adaptive/skip)
- - [x] 叙事配置 — 数值阈值→中文描述 (HP/饥饿/口渴等)
- - [x] Numeric Leak 检测 — `generate_execution_narrative_impl` 中 LLM 输出后置正则 `/\d+/` 检测 + leak guard prompt 重试
- - [x] WorldBuilding 规则 — Era 设定、允许/禁止概念
- - [x] 统一错误码 — GameError + ERROR_CODE_* 常量
+### P0 核心
 
----
+- [x] **WebSocket 全双工通信**: Server 与 Agent 之间的实时数据管道，负责下发世界状态和上报 Agent 意图。
+- [x] **数据驱动的动作系统 (ActionType)**: 将动作定义为字符串，彻底解耦硬编码，所有动作属性和限制均由 YAML 配置决定。
+- [x] **统一错误码体系 (GameError)**: 规范化全局错误类型和状态码，确保异常信息在前后端流转时的明确性。
 
-## server
+### P1 重要特性
 
- - [x] Tick 调度引擎
-  - [x] 时钟驱动调度 (非 intent 驱动)
-  - [x] tick_id 生成 (Unix 秒级时间戳)
-  - [x] accepting_tick_id 原子管理 (AtomicI64)
-  - [x] 生理衰减计算 (HP/stamina/hunger/thirst)
-  - [x] 寿终检查 (birth_tick → age_years → 超龄清零 HP)
-  - [x] 周期性 WorldState 广播
-  - [x] TickBoundary 事件处理 (每7游戏日触发 chronicle)
+- [x] **三魂认知流转 (SoulCycleReport)**: 将 Agent 决策过程拆分为人魂推演、天魂审查、最终意图三步，便于前端可视化展示。
+- [x] **多意图管道 (Subsequent Intents)**: 允许 Agent 一次性提交包含后续动作的序列，用于复杂连续行为的排队执行。
+- [x] **Agent 对话会话 (DialogueSession)**: 管理 NPC 间的对话状态，支持请求、接受、拒绝、内容传递和结束五步流转。
+- [x] **层级位置图系统**: 定义大区到子场景的树状地图结构（Region→Map→SubScene），并自动推导场景间的连通关系。
+- [x] **COI 属性组件 (AttributeComponent)**: 采用组合优于继承的设计，将 Agent 的基础属性、动态状态和派生属性模块化管理。
 
- - [x] 实时 Intent 处理
-  - [x] IntentWorker (MPSC channel 单消费者)
-  - [x] StateProcessor (验证→执行→Saga 回滚)
-  - [x] Intent Resolver (解析校验)
-  - [x] Action Executor (状态变更执行)
-  - [x] Mutator (item transfer / attribute change)
-  - [x] Event Generator (游戏事件构建)
-  - [x] ExecutionResult 实时反馈
+### P2 体验增强
 
- - [x] 状态管理
-  - [x] AgentStateCache (DashMap write-through)
-  - [x] PostgreSQL 持久化 (await 确认后再更新 DashMap)
-  - [x] Persist failure 处理 (DashMap 不更新，Agent 收到 success=false)
-  - [x] AgentToDeviceMap 反向映射 (device_id → agent_id)
-  - [x] RateLimiter (per-agent 限速)
-
- - [x] WebSocket 连接管理
-  - [x] ConnectionManager (在线 Agent 列表)
-  - [x] WebSocket Upgrade Handler (凭证校验)
-  - [x] 消息广播 (WorldState/对话/死亡通知/配置更新)
-  - [x] Ping/Pong 心跳 (tungstenite 自动处理)
-
- - [x] 游戏数据系统
-  - [x] YAML/JSON 配置加载 (actions/attributes/items/locations/skills/recipes)
-  - [x] 热重载支持 (actions.yaml mtime 检测 + ConfigUpdate 广播)
-  - [x] Formula 引擎 (evalexpr 统一表达式计算)
-  - [x] 派生属性/伤害/恢复公式动态解析
-
- - [x] Action 系统
-  - [x] 数据驱动验证 (ActionValidator + AvailableAction schema)
-  - [x] 分类执行器
-   - [x] basic: idle / speak / move / shout / flee
-   - [x] combat: attack
-   - [x] interaction: give / steal / pickup / drop / gather / craft / practice
-  - [x] 未实现动作 (待开发): defend / dodge / parry / heavy_strike / follow / stealth / poison / repair
-
- - [x] NPC 对话管理
-  - [x] DialogueSession 会话 (Request→Accept/Reject→Content→End)
-  - [x] 消息限流 (MessageLimitReached)
-  - [x] Session 内存管理 (SessionRegistry in-memory RwLock，非 DB 持久化)
-
- - [x] 传记生成 (Chronicle)
-  - [x] 数据收集器 (7 日聚合: agent stats/highlights/location/deaths/births)
-  - [x] 双模式生成 (模板规则同步 / LLM 增强异步)
-  - [x] 异步 LLM 补充 + 失败降级
-
- - [x] 数据库层 (SQLx/PostgreSQL)
-  - [x] Agent CRUD (注册/连接/重生)
-  - [x] State 持久化 (tick log / action log / soul cycle metadata)
-  - [x] GroundItem 管理
-  - [x] Vendor 规则管理
-
- - [x] HTTP API 端点
-  - [x] /admin/* — 管理面板
-  - [x] /api/v1/agent/* — Agent 管理
-  - [x] /api/config/* + /api/admin/reload-config — 热重载配置
-  - [x] /api/dashboard/chronicles — 传记查询
+- [x] **即时事件广播 (ImmediateEvent)**: 绕过 Tick 时钟周期的即时消息通道，专用于处理需要立刻感知的说话或耳语。
+- [x] **分级 LLM 验证机制**: 根据行为的 OOC（出戏）风险等级（总是、自适应、跳过）决定是否触发大模型审核。
+- [x] **自然语言状态映射**: 自动将饥饿、口渴、血量等数值状态转化为中文描述文本，便于直接喂给 LLM。
+- [x] **数值泄漏防护 (Numeric Leak)**: 通过后置正则检测阻止 LLM 在输出文本中直接暴漏系统数值（如“扣除 10 点 HP”），并利用 Guard Prompt 自动重试。
+- [x] **世界观设定边界 (WorldBuilding)**: 规定游戏所属时代及允许/禁止的概念，限制 LLM 生成不符合背景的现代词汇。
 
 ---
 
-## agent
+## Server (天道)
 
- - [x] 三魂架构 (Three-Soul)
-  - [x] ActorSoul (人魂) — 直连 WorldState，输出结构化 Intent
-   - [x] CognitiveChain 因果推理链
-   - [x] 四阶段流程 (Perception→Motivation→Planning→Decision)
-   - [x] ChaosGenerator (低 sanity 随机行为注入)
-  - [x] 地魂 — Tool calling 工具池
-   - [x] EarthToolExecutor (复合工具执行器)
-   - [x] skill_view (SKILL.md 加载)
-   - [ ] search_memory / recall_archived (返回 unimplemented 错误)
-   - [ ] Progressive disclosure 设计
-  - [x] ReflectorSoul (天魂) — 三层审查
-   - [x] Layer1: action_type 合法性校验
-   - [x] Layer2: RuleEngine 规则引擎
-   - [x] Layer3: LLM persona/worldview 最终审核
-   - [x] Graded Validation (OOC 风险分类)
-   - [x] Numeric Leak Detection — `generate_execution_narrative_impl` LLM 输出后正则检测 + leak guard prompt 重试
-   - [x] Review Store (PendingReview / ReviewDecision 持久化)
+### P0 核心
 
- - [x] 认知引擎 (CognitiveEngine)
-  - [x] think_direct 主决策入口 (四阶段合并单次 LLM 调用)
-  - [x] NarrativeSummaryWindow (action history sliding window)
-  - [x] PromptTemplate (YAML 驱动模板加载)
-  - [x] PromptCache (persona + actions prompt 缓存)
-  - [x] Translation 层 (中文 boundary translation: aliases→canonical)
+- [x] **Tick 调度引擎**: 游戏世界的心跳起搏器，负责推进时间、计算生理衰减以及周期性广播世界状态。
+  - [x] 基于 Unix 时间戳生成 tick_id，非事件驱动。
+  - [x] 原子化管理当前接收的 accepting_tick_id。
+  - [x] 处理 HP、体力、饥饿、口渴等生理状态随时间的自然衰减。
+  - [x] 寿终正寝检查：超龄自动清零 HP。
+  - [x] 触发 TickBoundary 事件，如每 7 个游戏日触发传记生成。
+- [x] **实时 Intent 处理管道**: 串行处理 Agent 意图的引擎，确保世界状态更新零并发冲突。
+  - [x] 单消费者 MPSC Channel 队列，消除数据竞争。
+  - [x] 验证、执行与 Saga 失败回滚机制。
+  - [x] 基于数据驱动的 Action Executor，执行具体状态变更。
+  - [x] **死亡与掉落机制 (Death Physics)**：Agent 死亡时触发清空背包 (`InventoryManager`)，物品化为 `ground_items` 散落原地，供其他 Agent `pickup`。
+  - [x] 生成游戏事件并实时返回 ExecutionResult 给 Agent。
+- [x] **动作执行体系 (Action System)**: 根据数据字典验证和执行具体交互行为。
+  - [x] 基础动作 (Basic)：休息、说话、移动、大喊、修炼、拾取、丢弃、采集、制造。
+  - [x] 战斗动作 (Combat)：攻击、逃跑、使用（包含进食/饮水）。
+  - [x] 交互动作 (Interaction)：给予、偷窃。
+  - [ ] *未实装动作*：防御、闪避、招架、重击、跟随、潜行、下毒、修理。
+- [x] **高性能状态管理**: 保障十万级 Agent 并发读写的内存与持久化架构。
+  - [x] DashMap 内存缓存层，支持高并发 Write-Through。
+  - [x] PostgreSQL 异步持久化，入库成功后才更新内存状态。
+  - [x] Per-agent 请求限流器，防止单一 Agent 过载服务器。
 
- - [x] 三层记忆系统
-  - [x] Working Memory — VecDeque FIFO 短期上下文
-  - [x] Episodic Memory — SQLite 事件时序存储
-  - [x] Ebbinghaus 遗忘曲线 (FORGETTING_INTERVAL_TICKS=84)
-  - [x] ImportanceScorer (记忆重要性评分)
-  - [x] archive_memories (store.archive_by_ids 实际 SQL 实现)
-  - [x] Semantic Memory — HNSW 向量索引 (instant-distance)
-   - [x] HnswVectorStore (近似最近邻搜索)
-   - [x] FTS Fallback (full-text search 降级)
-   - [x] add() (embedding 生成 → episodic DB blob 写入 → HNSW 索引更新)
+### P1 重要特性
 
- - [x] Outcome Memory — Action 结果学习
-  - [x] SQLite action result learning
-  - [x] Action→Result 映射存储
-  - [x] 决策上下文学习
+- [x] **连接与会话控制**: 管理所有存活 Agent 的网络接入状态。
+  - [x] WebSocket 凭证校验与连接握手。
+  - [x] 基于 tungstenite 的 Ping/Pong 自动心跳保活。
+  - [x] 针对性或全区广播死亡通知及配置更新。
+- [x] **游戏数据驱动系统**: 将所有业务逻辑抽离为外部配置文件，实现修改即生效。
+  - [x] 支持 actions/attributes/items/locations/skills/recipes 等模块的 YAML/JSON 配置。
+  - [x] 监听文件 mtime 变化，支持配置热重载。
+  - [x] 引入 evalexpr 公式引擎，支持动态计算派生属性和伤害数值。
+- [x] **AI 过程性技能系统 (Procedural Skills)**: 基于 Markdown 的行为指令系统，体现“身心分离”架构的核心设计。
+  - [x] **Server 注册表**：基于 `SKILL.md`（YAML + Markdown）的动态加载与注册 (`SkillRegistry`)。
+  - [x] **习得链路**：通过 `practice` 动作触发 `SkillMutator`，将技能 ID 注入 `AgentState`。
+  - [x] **认知集成**：Agent 地魂实现 `skill_view` 工具，LLM 按需检索长文本行为指令，避免将庞大技能规则硬塞入 System Prompt。
 
- - [x] 动态角色系统
-  - [x] DynamicPersona — 特性演化
-  - [x] Trait 系统 — 事件→特性映射 (EventTraitMapper)
+### P2 体验增强
 
- - [x] LLM 客户端抽象
-  - [x] DirectLlmClient — 直连 API
-  - [x] FallbackLlmClient — 主备模型切换
-  - [x] TokenTracking (token 使用量跟踪)
-
- - [x] 社会关系系统
-  - [x] RelationshipStore (SQLite)
-  - [x] KeyEvent (关系关键事件)
-  - [x] get_relationship_level() (关系等级计算)
-  - [x] LLM 关系描述更新
-
- - [x] 实时事件处理 (ImmediateEvent)
-  - [x] 规则门控 (<1ms)
-  - [x] 2阶段 LLM 决策 (4s timeout)
-
- - [x] WebSocket 传输层 — Pure I/O，无业务逻辑
-
- - [x] HTTP API 服务
-  - [x] /api/v1/state — WorldState 查询
-  - [x] /api/v1/context — 决策上下文快照
-  - [x] /api/v1/character/* — 角色管理/重生/梦境
-  - [x] /api/v1/memory/* — 记忆操作
-  - [x] /api/v1/review/* — Intent 审查系统
-
- - [x] 两种运行时模式
-  - [x] Cognitive 模式 — FallbackLlmClient 内置 LLM
-  - [x] Claw 模式 — OpenClawBridge 外部 LLM 桥接
-   - [x] WebSocket Server (runtime/claw/server.rs)
-   - [x] Protocol 转换 (DownstreamMessage/UpstreamMessage)
+- [x] **群像传记生成 (Chronicle)**: 自动编纂世界历史记录的史官系统。
+  - [x] 每 7 个游戏日聚合 Agent 数据（击杀、高光时刻、生死等）。
+  - [x] 结合模板规则与异步 LLM 生成长篇传记，并支持失败降级。
+- [x] **HTTP API 与管理后台**: 提供可视化管理和人工干预入口。
+  - [x] HTTP API 端点
+    - [x] /admin/* — 管理面板 (带 Read/Write Token 鉴权)
+    - [x] /api/v1/agent/* — Agent 管理 (包含 Vendor 补货规则配置)
+    - [x] /api/config/* + /api/admin/reload-config — 热重载配置
+    - [x] /api/config/llm/* — LLM 服务在线测试与切换
+    - [x] /api/dashboard/chronicles — 传记查询
+    - [x] /health — 节点存活与 Tick 周期探针
+  - [x] 管理后台前端 UI (Server Admin Dashboard)
+    - [x] 静态多页 Web 应用 (crates/server/static/admin)
+    - [x] 细粒度权限控制 (Read/Write Token 鉴权登录)
+    - [x] 服务器状态大盘监控 (Tick流转、Agent在线分布)
+    - [x] 智能体全生命周期管理 (检索、详情面板、物品定点发放干预)
+    - [x] NPC商人自动补货规则管理 (Vendor Refill 阈值/预算设定)
+    - [x] 运行时配置编辑器 (YAML/JSON 语法高亮与热重载)
+    - [x] LLM 服务配置面板 (Ollama/OpenAI 兼容接口在线测试与切换)
+    - [x] 全局经历日志流查询 (Experiences Stream)
+    - [x] 世界传记检阅器 (Chronicles Viewer)
 
 ---
 
-## 待实现功能 (Roadmap)
+## Agent (众生)
 
- | 功能 | 位置 | 分类 |
- |------|------|------|
- | 物品耐久衰减 | tick/decay.rs:225-232 | 历史遗留 |
- | 地魂工具接入 | soul/earth/executor.rs:71-81 | 事实待完成 |
- | Progressive disclosure 设计 | executor.rs / lifecycle.rs | 事实待完成 |
+### P0 核心
+
+- [x] **三魂架构 (Three-Soul)**: Agent 决策的哲学分层模型，隔离认知、执行与自我审查。
+  - [x] **人魂 (ActorSoul)**：主导动机推演与规划的“感性与理性大脑”。
+    - [x] 直连世界状态生成因果推导链，结合环境上下文、记忆和社交关系生成 Intent。
+    - [x] 内置低 San 值混沌行为注入器，模拟精神崩溃时的非理性行为（如发疯、喃喃自语）。
+  - [x] **地魂 (EarthSoul)**：对接物理世界的“工具执行池”。
+    - [x] 负责将人魂意图转换为系统 API 调用，并在决策中途按需获取外部数据。
+    - [x] 记忆检索工具 (`search_memory`, `recall_archived`)：供 LLM 检索工作记忆与情景/语义记忆。
+    - [x] 技能查阅工具 (`skill_view`)：供 LLM 按需获取武功等长文本技能详情，避免撑爆 System Prompt。
+  - [x] **天魂 (ReflectorSoul)**：三段式“自我审查官”。
+    - [x] Layer 1 动作校验：基础 ActionType 与参数合法性验证。
+    - [x] Layer 2 物理规则审查 (RuleEngine)：YAML 配置驱动的世界观刚性规则和物理可行性检验（如禁止穿墙、禁止使用不存在的物品）。
+    - [x] Layer 3 角色 OOC 审查：基于 LLM 的人物性格符合度动态拦截，按严重程度分类 OOC 等级。
+- [x] **认知流转引擎 (CognitiveEngine)**: 将环境感知转化为具体行动的思考中枢。
+  - [x] **认知链追踪 (Cognitive Chain)**：全链路追踪并记录从“感知”到“动机”再到“规划”的每一步逻辑推导，不仅用于日志分析，还作为核心数据打包进 `SoulCycleReport`。
+  - [x] 单次 LLM 调用融合“感知→动机→规划→决策”四阶段，降低延迟。
+  - [x] 基于滑动窗口的历史行为摘要提取。
+  - [x] 动态 YAML 模板渲染，结合 Persona 缓存加速 Prompt 构建。
+  - [x] 内置中英别名翻译转换，纠正 LLM 产生的格式幻觉。
+    - [x] 动作名称翻译（如将 LLM 幻觉的"攻击某人"映射为"攻击"）。
+    - [x] 字段映射转换（如将 LLM 幻觉的 "destination" 映射为 "target_location"）。
+    - [x] 对象 ID 解析（从 WorldState 解析周围实体名称，转换为 UUID / NodeID / ItemID）。
+- [x] **三级记忆系统**: 模拟人类记忆衰退与联想机制的数据结构。
+  - [x] **地魂记忆回溯接入 (Memory Tools)**: 在地魂工具池中实装 `search_memory` 和 `recall_archived`，使 LLM 能在思考过程中按需检索情景与语义记忆。
+  - [x] **工作记忆 (Working Memory)**：基于 FIFO 队列维护短期上下文。
+  - [x] **情景记忆 (Episodic Memory)**：利用 SQLite 持久化存储带时间戳的事件，包含遗忘曲线与重要度评分机制。
+    - [x] 基于艾宾浩斯遗忘曲线的记忆归档机制。
+    - [x] 自动基于事件类型与元数据为记忆进行重要性打分。
+  - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。
+- [x] **双栖运行模式**:
+  - [x] **Cognitive 模式**：调用内置 LLM 的独立智能体。
+  - [x] **Claw 模式**：通过 OpenClaw 桥接外部第三方 LLM 的附庸模式。
+
+### P1 重要特性
+
+- [x] **模型网关与调度**: 统一的 LLM 客户端池，支持主备模型无缝切换及 Token 消耗监控。
+- [x] **经验结果记忆 (Outcome Memory)**: Agent 对动作结果的经验学习池，用于优化未来决策。
+- [x] **动态角色演化 (DynamicPersona)**: 允许 Agent 经历特定事件后获得新性格标签（Trait），实现性格随阅历成长。
+
+### P2 体验增强
+
+- [x] **异步即时事件引擎 (SessionTriageEngine)**: 处理非 Tick 周期突发事件的后台大脑。
+  - [x] 使用 WAL 模式 SQLite 确保事件不丢失。
+  - [x] 基于 LLM 的事件分类器，区分“需立刻响应”、“可稍后批处理”与“忽略”。
+    - [x] urgent (立刻响应): 立即注入 Agent 的 Memory Context 供下一轮主决策循环使用。
+    - [x] batch (稍后批处理): 收集并在当前游戏日结束时打包。
+    - [x] ignore (忽略): 从记录中清理或不进入主流程。
+  - [ ] *名义实现待实装*：每日结束时将当日事件生成总结摘要写入记忆库。
+- [x] **人际社交网络 (RelationshipStore)**: 记录并量化 Agent 间的互动历史与好感度阶梯，影响其社交决策。
+- [x] **玩家控制台 (Agent Control Panel)**: 允许人类玩家观察并干预 AI 角色的前端面板。
+  - [x] 实时 SSE 数据流展示心跳、推演记录与周围状态。
+  - [x] 辅助创建角色，一键生成世界树与属性雷达图。
+  - [x] 托梦接口：上帝视角向指定 Agent 注入强制文本思想。
+- [x] **命令行工具 (CLI)**:
+  - [x] 提供 `run` / `config` / `create-character` / `show` / `reset` 等快速运维指令。
+  - [x] 支持通过 `--port 0` 自动探测并分配可用通信端口。
+
+---
+
+## 待实装/优化功能 (Roadmap)
+
+| 功能 | 位置 | 分类 | 说明 |
+|------|------|------|------|
+| **每日事件摘要入库** | `component/immediate/session_triage.rs` | 逻辑补全 | 游戏日结束时的 `produce_daily_summary` 已生成摘要，但尚未实际写入 Episodic Memory。 |
+| **未实现交互动作拓展** | `actions/executor/` | 功能补全 | 防御、闪避、招架、重击、跟随、潜行、下毒、修理等配置已规划但逻辑未落地。 |
+| **动作冷却检查 (Cooldown)** | `actions/validator.rs:55` | 机制完善 | `TODO BUG-2`: 待在 AgentState 中补充 `last_action_ticks` 以支持动作频率限制。 |
