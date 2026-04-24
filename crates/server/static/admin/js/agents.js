@@ -242,15 +242,6 @@ window.onclick = function (event) {
 };
 
 function renderBasicInfo(agent) {
-    var inventoryHtml = (agent.inventory || []).length === 0
-        ? '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">空空如也</div>'
-        : '<div class="inventory-grid">' +
-        agent.inventory.map(function (item) {
-            return '<div class="inventory-item ' + (item.is_equipped ? "equipped" : "") + '">' +
-                '<div style="margin-bottom: 2px;">' + escapeHtml(item.name) + '</div>' +
-                '<div style="font-weight: 600; color: var(--text-secondary);">x' + item.count + '</div></div>';
-        }).join("") + '</div>';
-
     // 数据驱动：渲染属性列表
     // attrs: agent.attributes 对象
     // category: "primary" | "status" | "derived" | null (显示所有)
@@ -287,11 +278,6 @@ function renderBasicInfo(agent) {
         renderAttrSection(agent.attributes || {}, "derived", "派生属性") +
 
         '<div class="detail-section">' +
-        '<div class="detail-title">背包物品</div>' +
-        inventoryHtml +
-        '</div>' +
-
-        '<div class="detail-section">' +
         '<div class="detail-title">人设 Prompt</div>' +
         '<div style="font-size: 12px; color: var(--text-secondary); background: var(--bg-level-1); padding: 10px; border-radius: var(--radius-sm); line-height: 1.4; max-height: 150px; overflow-y: auto;">' +
         escapeHtml(agent.system_prompt || "") +
@@ -315,26 +301,37 @@ function renderExperiences(data) {
 
         // Fallback: 显示基本信息（当 soul_cycle_metadata 为空时）
         var actionType = getActionTypeDisplay(exp.action_type || '');
-        var resultBadge = exp.result === 'success'
-            ? '<span style="color: var(--success);">成功</span>'
-            : (exp.result === 'failed'
-                ? '<span style="color: var(--error);">失败</span>'
-                : (exp.result ? '<span>' + escapeHtml(exp.result) + '</span>' : '-'));
+        var resultText = exp.result === 'success' ? '成功' : (exp.result === 'failed' ? '失败' : (exp.result || '-'));
+        var resultCls = exp.result === 'success' ? 'approved' : (exp.result === 'failed' ? 'rejected' : '');
 
-        return '<div class="tick-card">' +
+        var html = '<div class="tick-card">' +
             '<div class="tick-card-header">' +
             '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
             '<span class="tick-real-time">' + time + '</span>' +
-            '</div>' +
-            '<div class="tick-section">' +
-            '<div class="tick-section-title">行动</div>' +
-            '<div class="detail-grid" style="padding: 10px;">' +
-            '<div class="detail-item"><span class="detail-label">动作:</span> ' + escapeHtml(actionType) + '</div>' +
-            '<div class="detail-item"><span class="detail-label">结果:</span> ' + resultBadge + '</div>' +
-            '</div>' +
-            (exp.narrative ? '<div style="padding: 10px; color: var(--text-secondary); font-size: 13px;">' + escapeHtml(exp.narrative) + '</div>' : '') +
-            (exp.thought_log ? '<div style="padding: 10px; color: var(--text-subtle); font-size: 12px; font-style: italic;">思考: ' + escapeHtml(exp.thought_log) + '</div>' : '') +
-            '</div></div>';
+            '</div>';
+
+        html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+
+        // 伪装人魂：叙事与思考
+        var renhunHtml = '';
+        if (exp.narrative) renhunHtml += '<div class="soul-text">' + escapeHtml(exp.narrative) + '</div>';
+        if (exp.thought_log) renhunHtml += '<div class="soul-thought">' + escapeHtml(exp.thought_log) + '</div>';
+        if (renhunHtml) html += renderServerSoulInline('人魂', { narrative: exp.narrative, thought_log: exp.thought_log }, 'renhun');
+
+        // 伪装天魂：审查结果
+        var tianhunHtml = '';
+        if (exp.result) {
+            tianhunHtml += '<div class="soul-result ' + resultCls + '">' + resultText + '</div>';
+        }
+        if (tianhunHtml) html += '<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">' + tianhunHtml + '</div></div>';
+
+        // 伪装地魂：动作
+        html += '<div class="exp-action"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">';
+        html += '<div class="soul-text">' + escapeHtml(actionType) + '</div>';
+        html += '</div></div>';
+
+        html += '</div></div>';
+        return html;
     }).join("");
 
     return '<div class="experience-list">' + expHtml + '</div>';
@@ -355,7 +352,9 @@ function renderTickCard(exp, metadata, time) {
 
     // 行动分区
     html += '<div class="tick-section"><div class="tick-section-title">行动</div>';
+    html += '<div class="tick-attempts-container">';
     attempts.forEach(function(attempt, idx) {
+        html += '<div class="tick-attempt-box">';
         if (attempts.length > 1) {
             html += '<div class="tick-attempt-label">第 ' + (idx + 1) + ' 次尝试</div>';
         }
@@ -364,8 +363,9 @@ function renderTickCard(exp, metadata, time) {
         if (attempt.final_intent) {
             html += renderServerSoulInline('地魂', attempt.final_intent, 'action');
         }
+        html += '</div>';
     });
-    html += '</div>';
+    html += '</div></div>';
 
     // 即时分区
     if (immediate.length > 0) {
@@ -432,7 +432,13 @@ function renderServerSoulInline(label, data, type) {
                 var speakLabel = targetId ? '对某人说话' : '向众人说话';
                 html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
             } else if (at === 'whisper') {
-                html += '<div class="soul-text">向某人密语："' + escapeHtml(content) + '"</div>';
+                var targetName = targetId || '某人';
+                // 尝试从 allAgents 列表中查找目标名称（如果存在）
+                if (typeof allAgents !== 'undefined' && allAgents && allAgents.length > 0) {
+                    var found = allAgents.find(function(a) { return a.id === targetId || a.agent_id === targetId; });
+                    if (found && found.name) targetName = found.name;
+                }
+                html += '<div class="soul-text">向 ' + escapeHtml(targetName) + ' 密语："' + escapeHtml(content) + '"</div>';
             } else if (at === 'shout') {
                 html += '<div class="soul-text">大声喊道："' + escapeHtml(content) + '"</div>';
             } else {
@@ -491,17 +497,24 @@ async function renderInventoryManage(agent) {
     // grant-items UI: 仅 write token 可见
     if (authTokenType === "write") {
         var items = await loadAllItems();
-        var optionsHtml = items.map(function (item) {
-            return '<option value="' + escapeHtml(item.item_id) + '">' +
-                escapeHtml(item.name) + ' (' + escapeHtml(item.item_type) + ')</option>';
-        }).join("");
+        
+        var inputHtml = '';
+        if (items.length > 0) {
+            var optionsHtml = items.map(function (item) {
+                return '<option value="' + escapeHtml(item.item_id) + '">' +
+                    escapeHtml(item.name) + ' (' + escapeHtml(item.item_type) + ')</option>';
+            }).join("");
+            inputHtml = '<select id="grant-item-select" class="form-input" style="width: 100%;">' + optionsHtml + '</select>';
+        } else {
+            inputHtml = '<input type="text" id="grant-item-select" class="form-input" placeholder="输入物品 ID..." style="width: 100%;" />';
+        }
 
         html += '<div class="detail-section">' +
             '<div class="detail-title">注入物品</div>' +
             '<div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">' +
             '<div style="flex: 1; min-width: 150px;">' +
             '<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">物品</label>' +
-            '<select id="grant-item-select" class="form-input" style="width: 100%;">' + optionsHtml + '</select>' +
+            inputHtml +
             '</div>' +
             '<div style="width: 100px;">' +
             '<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">数量</label>' +
@@ -538,7 +551,7 @@ function addGrantItem() {
         return;
     }
 
-    var itemName = select.options[select.selectedIndex].text;
+    var itemName = select.tagName === "SELECT" ? select.options[select.selectedIndex].text : itemId;
     grantItemsBuffer.push({ item_id: itemId, name: itemName, quantity: qty });
     renderGrantItemsBuffer();
 }
@@ -695,14 +708,20 @@ async function renderVendorRefillSection(agentId) {
 
     if (isWrite) {
         var items = await loadAllItems();
-        var optionsHtml = items.map(function (item) {
-            return '<option value="' + escapeHtml(item.item_id) + '">' + escapeHtml(item.name) + '</option>';
-        }).join("");
+        var inputHtml = '';
+        if (items.length > 0) {
+            var optionsHtml = items.map(function (item) {
+                return '<option value="' + escapeHtml(item.item_id) + '">' + escapeHtml(item.name) + '</option>';
+            }).join("");
+            inputHtml = '<select id="refill-item-select" class="form-input" style="width:100%;">' + optionsHtml + '</select>';
+        } else {
+            inputHtml = '<input type="text" id="refill-item-select" class="form-input" placeholder="输入物品 ID..." style="width:100%;" />';
+        }
 
         html += '<div style="display:flex; gap:8px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">' +
             '<div style="flex:1; min-width:120px;">' +
             '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">物品</label>' +
-            '<select id="refill-item-select" class="form-input" style="width:100%;">' + optionsHtml + '</select></div>' +
+            inputHtml + '</div>' +
             '<div style="width:70px;">' +
             '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">触发</label>' +
             '<input type="number" id="refill-threshold" class="form-input" value="10" min="1" style="width:100%;" /></div>' +

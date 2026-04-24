@@ -49,6 +49,9 @@ async function submitAuthToken() {
                 if (Object.keys(locationNames).length === 0) {
                     await initLocationMapping();
                 }
+                if (Object.keys(attributeMeta).length === 0) {
+                    await initAttributeMeta();
+                }
                 if (document.getElementById("dashboard").classList.contains("active")) {
                     loadStats();
                 } else {
