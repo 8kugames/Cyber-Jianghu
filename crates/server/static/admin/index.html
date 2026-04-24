@@ -23,10 +23,10 @@
                 >
             </div>
             <div class="nav-tabs">
-                <div class="nav-tab active" onclick="switchTab('dashboard')">
+                <div class="nav-tab active" data-tab-id="dashboard" onclick="switchTab('dashboard')">
                     监控面板
                 </div>
-                <div class="nav-tab" onclick="switchTab('config')">
+                <div class="nav-tab" data-tab-id="config" onclick="switchTab('config')">
                     配置编辑器
                 </div>
                 <div class="nav-tab" onclick="window.open('chronicles.html', '_blank')">
@@ -196,28 +196,7 @@
 
         <div id="toast" class="toast">Message</div>
 
-        <div
-            id="auth-modal"
-        >
-            <div>
-                <h3>需要授权</h3>
-                <p>请输入管理 Token 以继续访问。</p>
-                <input
-                    type="text"
-                    id="auth-token-input"
-                    placeholder="输入 Token..."
-                />
-                <div
-                    style="display: flex; justify-content: flex-end; gap: 8px"
-                >
-                    <button class="btn btn-secondary" onclick="submitAuthToken()">
-                        确定
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <script src="js-yaml.min.js"></script>
+        <script src="js/js-yaml.min.js"></script>
         <script src="js/utils.js"></script>
         <script src="js/auth.js"></script>
         <script src="js/stats.js"></script>

@@ -223,107 +223,10 @@
             50% { opacity: 0.7; }
         }
 
-        /* Detail Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0, 0, 0, 0.4);
-            z-index: 1000;
-            padding: 32px;
-            overflow-y: auto;
-        }
-
-        .modal.active {
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-        }
-
+        /* Detail Modal specifics */
         .modal-content {
-            background: var(--card-bg-solid);
-            border: 1px solid var(--card-border);
-            border-radius: var(--radius-xl);
             width: 100%;
             max-width: 860px;
-            padding: 24px;
-            box-shadow: 0 16px 48px rgba(0,0,0,0.12);
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .modal-header h2 {
-            font-size: 18px;
-            color: var(--accent);
-            font-weight: 600;
-        }
-
-        .close-btn {
-            font-size: 22px;
-            color: var(--text-subtle);
-            cursor: pointer;
-            width: 28px;
-            height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: var(--radius-sm);
-            transition: all 0.15s;
-        }
-
-        .close-btn:hover {
-            color: var(--text-primary);
-            background: var(--bg-level-2);
-        }
-
-        .detail-section {
-            margin-bottom: 20px;
-        }
-
-        .detail-section h3 {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text-secondary);
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            border-bottom: 1px solid var(--border-subtle);
-            padding-bottom: 6px;
-        }
-
-        .detail-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-            gap: 10px;
-        }
-
-        .detail-item {
-            padding: 10px 12px;
-            background: var(--bg-level-2);
-            border-radius: var(--radius-sm);
-            border: 1px solid var(--border-subtle);
-        }
-
-        .detail-item .label {
-            font-size: 10px;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.4px;
-            margin-bottom: 3px;
-        }
-
-        .detail-item .value {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-top: 2px;
         }
 
         .narrative {
@@ -448,21 +351,6 @@
             display: block;
         }
 
-        .loading,
-        .empty-state {
-            text-align: center;
-            padding: 60px;
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-
-        .empty-state svg {
-            width: 64px;
-            height: 64px;
-            margin-bottom: 16px;
-            opacity: 0.25;
-        }
-
         @media (max-width: 768px) {
             .chronicles-grid {
                 grid-template-columns: 1fr;
@@ -493,36 +381,27 @@
                 <h2 id="modal-title">群像传记详情</h2>
                 <span class="close-btn" onclick="closeModal()">&times;</span>
             </div>
-            <div id="modal-body">
+            <div id="modal-body" class="modal-body">
                 <!-- Dynamic content -->
             </div>
         </div>
     </div>
 
+    <script src="js/js-yaml.min.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
     <script>
-        const API_BASE = '/api/dashboard';
         let chronicles = [];
-        let authToken = localStorage.getItem('admin_token') || '';
-
-        function getHeaders() {
-            return {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            };
-        }
 
         async function loadChronicles() {
             try {
                 const [chroniclesRes, pendingRes] = await Promise.all([
-                    fetch(`${API_BASE}/chronicles`, { headers: getHeaders() }),
-                    fetch(`${API_BASE}/chronicles/pending`, { headers: getHeaders() }).catch(() => null)
+                    apiFetch(API.BASE + '/chronicles'),
+                    apiFetch(API.BASE + '/chronicles/pending').catch(e => {
+                        if (e.name === 'ApiError') throw e; // 强制放行框架级异常 (401/500)
+                        return { ok: false };
+                    })
                 ]);
-
-                if (chroniclesRes.status === 401) {
-                    alert('请先登录');
-                    window.location.href = '/admin/';
-                    return;
-                }
 
                 const chroniclesData = await chroniclesRes.json();
                 chronicles = chroniclesData.chronicles || [];
@@ -542,8 +421,10 @@
 
                 renderChronicles(chronicles);
             } catch (e) {
-                document.getElementById('chronicles-container').innerHTML =
-                    '<div class="empty-state">加载失败，请刷新重试</div>';
+                if (e.name !== "ApiError") {
+                    document.getElementById('chronicles-container').innerHTML =
+                        '<div class="empty-state">加载失败，请刷新重试</div>';
+                }
             }
         }
 
@@ -624,12 +505,6 @@
             return statusText(c.status);
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         function filterChronicles() {
             const query = document.getElementById('search-input').value.toLowerCase();
             if (!query) {
@@ -646,11 +521,17 @@
 
         async function openChronicle(id) {
             try {
-                const res = await fetch(`${API_BASE}/chronicles/${id}`, { headers: getHeaders() });
+                const res = await apiFetch(API.BASE + '/chronicles/' + id);
+                if (!res.ok) {
+                    throw new Error(`加载失败 (HTTP ${res.status})`);
+                }
                 const c = await res.json();
                 showModal(c);
             } catch (e) {
-                alert('加载失败');
+                if (e.name !== "ApiError") {
+                    console.error(e);
+                    alert(`详情加载失败: ${e.message}`);
+                }
             }
         }
 
@@ -733,13 +614,17 @@
                 </div>
                 ` : ''}
             `;
-            document.getElementById('detail-modal').classList.add('active');
+            document.getElementById('detail-modal').classList.add('show');
         }
 
         function switchTab(tab) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-            event.target.classList.add('active');
+            if (typeof event !== 'undefined' && event && event.target) {
+                event.target.classList.add('active');
+            } else {
+                document.querySelector(`.tab-btn[onclick*="${tab}"]`)?.classList.add('active');
+            }
             document.getElementById(`tab-${tab}`).classList.add('active');
         }
 
@@ -754,7 +639,7 @@
         }
 
         function closeModal() {
-            document.getElementById('detail-modal').classList.remove('active');
+            document.getElementById('detail-modal').classList.remove('show');
         }
 
         async function generateChronicle() {
@@ -763,16 +648,11 @@
             btn.disabled = true;
             btn.textContent = '生成中...';
             try {
-                const res = await fetch(`${API_BASE}/chronicles/generate`, {
+                const res = await apiFetch(API.BASE + '/chronicles/generate', {
                     method: 'POST',
-                    headers: getHeaders(),
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 });
-                if (res.status === 401) {
-                    alert('请先登录');
-                    window.location.href = 'index.html';
-                    return;
-                }
                 const text = await res.text();
                 if (res.ok) {
                     alert('生成成功');
@@ -781,7 +661,9 @@
                     alert('生成失败: ' + text);
                 }
             } catch (e) {
-                alert('生成失败: ' + e.message);
+                if (e.name !== "ApiError") {
+                    alert('生成失败: ' + e.message);
+                }
             } finally {
                 btn.disabled = false;
                 btn.textContent = '手动生成';

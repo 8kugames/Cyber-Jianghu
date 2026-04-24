@@ -674,6 +674,241 @@ input:checked + .slider:before {
 }
 
 /* ============================================================================
+   Common States
+   ============================================================================ */
+
+.loading,
+.empty-state,
+.error-state {
+    text-align: center;
+    padding: 60px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.empty-state svg {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 16px;
+    opacity: 0.25;
+}
+
+.loading .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================================================
+   Experiences & Tick Cards (三魂流转)
+   ============================================================================ */
+
+.tick-card {
+    background: var(--bg-level-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.tick-card-header {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.tick-world-time {
+    color: var(--text-secondary);
+}
+
+.tick-real-time {
+    color: var(--text-subtle);
+    margin-left: auto;
+}
+
+.tick-section {
+    margin-bottom: 8px;
+}
+
+.tick-section:last-child {
+    margin-bottom: 0;
+}
+
+/* 解决嵌套三魂流转的横向平铺问题 */
+.tick-attempts-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.tick-attempt-box {
+    background: var(--bg-level-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+}
+
+.tick-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.tick-attempt-label {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.exp-renhun, .exp-tianhun, .exp-action {
+    margin-bottom: 6px;
+}
+
+.exp-soul-label {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--accent-muted);
+    color: var(--accent);
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.exp-soul-content {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.soul-text {
+    margin-bottom: 4px;
+}
+
+.soul-thought {
+    font-style: italic;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.soul-result {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.soul-result.approved {
+    background: var(--success-muted);
+    color: var(--success);
+}
+
+.soul-result.rejected {
+    background: var(--error-muted);
+    color: var(--error);
+}
+
+.soul-layers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.soul-layer-tag {
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+}
+
+.soul-layer-tag.passed {
+    background: var(--success-muted);
+    color: var(--success);
+}
+
+.soul-layer-tag.failed {
+    background: var(--error-muted);
+    color: var(--error);
+}
+
+.soul-reason {
+    font-size: 11px;
+    color: var(--text-subtle);
+    margin-bottom: 4px;
+}
+
+.soul-narrative {
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.tick-section-immediate {
+    background: var(--bg-level-1);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+}
+
+.imm-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 12px;
+}
+
+.imm-item:last-child {
+    margin-bottom: 0;
+}
+
+.imm-status {
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.imm-status.sent {
+    background: var(--success-muted);
+    color: var(--success);
+}
+
+.imm-status.failed {
+    background: var(--error-muted);
+    color: var(--error);
+}
+
+.imm-error {
+    font-size: 10px;
+    color: var(--error);
+}
+
+.exp-immediate {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+
+/* ============================================================================
    Agent Grid
    ============================================================================ */
 
@@ -1357,64 +1592,6 @@ input:checked + .slider:before {
 .toast-error {
     background: #dc2626;
     color: #ffffff;
-}
-
-/* ============================================================================
-   Auth Modal
-   ============================================================================ */
-
-#auth-modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 2000;
-    align-items: center;
-    justify-content: center;
-}
-
-#auth-modal > div {
-    background: var(--card-bg-solid);
-    padding: 32px;
-    border-radius: var(--radius-xl);
-    box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.15),
-        0 0 0 1px var(--card-border);
-    width: 320px;
-}
-
-#auth-modal h3 {
-    margin: 0 0 8px;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text-primary);
-}
-
-#auth-modal p {
-    color: var(--text-secondary);
-    font-size: 13px;
-    margin-bottom: 20px;
-}
-
-#auth-modal input {
-    width: 100%;
-    padding: 10px 14px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    background: var(--bg-level-1);
-    color: var(--text-primary);
-    margin-bottom: 16px;
-    outline: none;
-    transition: all 0.15s;
-}
-
-#auth-modal input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 /* ============================================================================
