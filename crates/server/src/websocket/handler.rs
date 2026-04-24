@@ -336,28 +336,28 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil()
         && let Some(wb_rules) = crate::websocket::types::load_world_building_rules()
     {
-            let config_update = ServerMessage::ConfigUpdate {
-                config_type: "world_building_rules".to_string(),
-                update_type: "full".to_string(),
-                version: wb_rules.version.clone(),
-                content: serde_json::to_value(&wb_rules).unwrap_or_default(),
-                updated_items: vec![],
-                removed_items: vec![],
-            };
+        let config_update = ServerMessage::ConfigUpdate {
+            config_type: "world_building_rules".to_string(),
+            update_type: "full".to_string(),
+            version: wb_rules.version.clone(),
+            content: serde_json::to_value(&wb_rules).unwrap_or_default(),
+            updated_items: vec![],
+            removed_items: vec![],
+        };
 
-            if let Err(e) = broadcast::send_config_update(
-                agent_id,
-                config_update,
-                &state.connection_manager,
-                &state.agent_to_device_map,
-            )
-            .await
-            {
-                warn!("Failed to send world_building_rules ConfigUpdate to agent {}: {}", agent_id, e);
-            } else {
-                debug!("Sent world_building_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
-            }
+        if let Err(e) = broadcast::send_config_update(
+            agent_id,
+            config_update,
+            &state.connection_manager,
+            &state.agent_to_device_map,
+        )
+        .await
+        {
+            warn!("Failed to send world_building_rules ConfigUpdate to agent {}: {}", agent_id, e);
+        } else {
+            debug!("Sent world_building_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
         }
+    }
 
     // ===== 发送技能配置（ConfigUpdate） =====
     // Agent 连接后立即下发全量技能内容
