@@ -4,43 +4,46 @@
 
 async function loadStats() {
     try {
-        var res = await fetch("/api/dashboard/stats", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
-        var data = await res.json();
+        var res = await apiFetch(API.BASE + "/stats");
+        if (res.ok) {
+            var data = await res.json();
 
-        smoothTimeConfig = {
-            tickId: data.current_tick_id,
-            tickDurationSecs: data.tick_duration_secs,
-            ticksPerHour: data.ticks_per_hour,
-            season: data.game_time.season,
-            lastSyncTime: Date.now(),
-        };
+            smoothTimeConfig = {
+                tickId: data.current_tick_id,
+                tickDurationSecs: data.tick_duration_secs,
+                ticksPerHour: data.ticks_per_hour,
+                season: data.game_time.season,
+                lastSyncTime: Date.now(),
+            };
 
-        if (!smoothTimeAnimationId) startSmoothTimeAnimation();
+            if (!smoothTimeAnimationId) startSmoothTimeAnimation();
 
-        var renderCard = function (label, value, sub, id) {
-            return '<div class="stat-card"' + (id ? ' id="' + id + '"' : '') + '>' +
-                '<div class="stat-label">' + label + '</div>' +
-                '<div class="stat-value">' + value + '</div>' +
-                (sub ? '<div class="stat-sub">' + sub + '</div>' : '') +
-                '</div>';
-        };
+            var renderCard = function (label, value, sub, id) {
+                return '<div class="stat-card"' + (id ? ' id="' + id + '"' : '') + '>' +
+                    '<div class="stat-label">' + label + '</div>' +
+                    '<div class="stat-value">' + value + '</div>' +
+                    (sub ? '<div class="stat-sub">' + sub + '</div>' : '') +
+                    '</div>';
+            };
 
-        var statsHtml = [
-            renderCard("在线 Agent", data.current_active_agents, "总注册: " + data.total_registered_agents),
-            renderCard("服务器运行时间", formatDuration(data.server_uptime_secs), data.server_running_days + " 天"),
-            renderCard("游戏时间", data.game_time.text, data.game_time.season + " | Tick: " + data.current_tick_id, "game-time-card"),
-            renderCard("日活跃用户 (DAU)", data.dau),
-            renderCard("月活跃用户 (MAU)", data.mau),
-            renderCard("TPS (Ticks/Sec)", (1.0 / data.tick_duration_secs).toFixed(2), "Tick周期: " + data.tick_duration_secs + "s"),
-        ].join("");
+            var statsHtml = [
+                renderCard("在线 Agent", data.current_active_agents, "总注册: " + data.total_registered_agents),
+                renderCard("服务器运行时间", formatDuration(data.server_uptime_secs), data.server_running_days + " 天"),
+                renderCard("游戏时间", data.game_time.text, data.game_time.season + " | Tick: " + data.current_tick_id, "game-time-card"),
+                renderCard("日活跃用户 (DAU)", data.dau),
+                renderCard("月活跃用户 (MAU)", data.mau),
+                renderCard("TPS (Ticks/Sec)", (1.0 / data.tick_duration_secs).toFixed(2), "Tick周期: " + data.tick_duration_secs + "s"),
+            ].join("");
 
-        document.getElementById("stats-grid").innerHTML = statsHtml;
-        document.getElementById("world-overview").textContent = data.world_overview || "暂无世界事件日志...";
+            document.getElementById("stats-grid").innerHTML = statsHtml;
+            document.getElementById("world-overview").textContent = data.world_overview || "暂无世界事件日志...";
 
-        await Promise.all([loadStatusConfigs(), loadActionTypeMap(), loadAllAgents()]);
+            await Promise.all([loadStatusConfigs(), loadActionTypeMap(), loadAllAgents()]);
+        }
     } catch (e) {
-        console.error("Failed to load stats", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load stats", e);
+        }
     }
 }
 

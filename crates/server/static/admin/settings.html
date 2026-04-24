@@ -330,13 +330,6 @@
                 display: block;
             }
 
-            .loading {
-                text-align: center;
-                padding: 48px;
-                color: var(--text-secondary);
-                font-size: 14px;
-            }
-
             /* Section disabled state */
             .form-section-disabled {
                 opacity: 0.45;
@@ -523,11 +516,10 @@
                 </div>
             </div>
         </div>
-
+        <script src="js/js-yaml.min.js"></script>
+        <script src="js/utils.js"></script>
+        <script src="js/auth.js"></script>
         <script>
-            const API_BASE = "/api";
-            let authToken = localStorage.getItem("admin_token") || "";
-
             const PROVIDER_HINTS = {
                 ollama: "Ollama 是本地模型运行器。请确保已安装并运行：<br>• <code>ollama serve</code> 启动服务<br>• <code>ollama pull qwen2.5:14b</code> 下载模型",
                 openai: "使用 OpenAI 官方 API。请填写有效的 API Key。",
@@ -540,23 +532,19 @@
                 document.getElementById("settings-form").style.display =
                     "block";
 
-                const res = await fetch(`${API_BASE}/config/llm`, {
-                    headers: getHeaders(),
-                });
-
-                if (res.status === 401) {
-                    alert("请先在首页登录");
-                    window.location.href = "index.html";
-                    return;
+                try {
+                    const res = await apiFetch(API.BASE + "/config/llm");
+                    if (!res.ok) {
+                        showResult("加载配置失败", false);
+                        return;
+                    }
+                    const config = await res.json();
+                    populateForm(config);
+                } catch (e) {
+                    if (e.name !== "ApiError") {
+                        showResult("加载配置失败: " + e.message, false);
+                    }
                 }
-
-                if (!res.ok) {
-                    showResult("加载配置失败", false);
-                    return;
-                }
-
-                const config = await res.json();
-                populateForm(config);
             }
 
             let originalConfig = null;
@@ -651,20 +639,13 @@
                 };
 
                 try {
-                    const res = await fetch(`${API_BASE}/config/llm`, {
+                    const res = await apiFetch(API.BASE + "/config/llm", {
                         method: "POST",
                         headers: {
-                            ...getHeaders(),
                             "Content-Type": "application/json",
                         },
                         body: JSON.stringify(config),
                     });
-
-                    if (res.status === 401) {
-                        alert("请先在首页登录");
-                        window.location.href = "index.html";
-                        return;
-                    }
 
                     const result = await res.json();
                     if (res.ok) {
@@ -673,7 +654,9 @@
                         showResult(result.message || "保存失败", false);
                     }
                 } catch (e) {
-                    showResult("保存失败: " + e.message, false);
+                    if (e.name !== "ApiError") {
+                        showResult("保存失败: " + e.message, false);
+                    }
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "保存配置";
@@ -687,23 +670,15 @@
                 setTimeout(() => (el.className = "result"), 3000);
             }
 
-            function getHeaders() {
-                return authToken
-                    ? { Authorization: `Bearer ${authToken}` }
-                    : {};
-            }
-
             document
                 .getElementById("llm-enabled-toggle")
                 .addEventListener("change", async function () {
                     const enabled = this.checked;
                     try {
-                        const res = await fetch(
-                            `${API_BASE}/config/llm/enabled`,
+                        const res = await apiFetch(API.BASE + "/config/llm/enabled",
                             {
                                 method: "POST",
                                 headers: {
-                                    ...getHeaders(),
                                     "Content-Type": "application/json",
                                 },
                                 body: JSON.stringify({ enabled }),
@@ -717,22 +692,24 @@
                             this.checked = !enabled;
                         }
                     } catch (e) {
-                        alert("设置失败: " + e.message);
-                        this.checked = !enabled;
+                        if (e.name !== "ApiError") {
+                            alert("设置失败: " + e.message);
+                            this.checked = !enabled;
+                        }
                     }
                 });
 
             async function checkLlmStatus() {
                 try {
-                    const res = await fetch(`${API_BASE}/config/llm/status`, {
-                        headers: getHeaders(),
-                    });
+                    const res = await apiFetch(API.BASE + "/config/llm/status");
                     if (res.ok) {
                         const data = await res.json();
                         updateConnectionIndicator(data.connected, data.message);
                     }
                 } catch (e) {
-                    updateConnectionIndicator(false, "检测失败");
+                    if (e.name !== "ApiError") {
+                        updateConnectionIndicator(false, "检测失败");
+                    }
                 }
             }
 
@@ -750,12 +727,7 @@
 
             async function loadTokenStats() {
                 try {
-                    const res = await fetch(
-                        `${API_BASE}/chronicles/llm-stats`,
-                        {
-                            headers: getHeaders(),
-                        },
-                    );
+                    const res = await apiFetch(API.BASE + "/chronicles/llm-stats");
                     if (res.ok) {
                         const data = await res.json();
                         document.getElementById(
@@ -772,7 +744,9 @@
                         ).textContent = formatNumber(data.error_count || 0);
                     }
                 } catch (e) {
-                    console.warn("加载 Token 统计失败:", e);
+                    if (e.name !== "ApiError") {
+                        console.warn("加载 Token 统计失败:", e);
+                    }
                 }
             }
 

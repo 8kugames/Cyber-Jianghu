@@ -10,8 +10,7 @@ var currentModalAgentId = null;
 // Load status configs (data-driven)
 async function loadStatusConfigs() {
     try {
-        var res = await fetch("/api/dashboard/status-configs", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
+        var res = await apiFetch(API.BASE + "/status-configs");
         if (res.ok) {
             var configs = await res.json();
             configs.forEach(function (cfg) {
@@ -19,7 +18,9 @@ async function loadStatusConfigs() {
             });
         }
     } catch (e) {
-        console.error("Failed to load status configs:", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load status configs:", e);
+        }
     }
 }
 
@@ -27,28 +28,43 @@ async function loadStatusConfigs() {
 var actionTypeMap = {};
 async function loadActionTypeMap() {
     try {
-        var res = await fetch("/api/dashboard/actions-map");
+        var res = await apiFetch(API.BASE + "/actions-map");
         if (res.ok) {
             actionTypeMap = await res.json();
         }
     } catch (e) {
-        console.warn("[actions] Failed to load action type map:", e);
+        if (e.name !== "ApiError") {
+            console.warn("[actions] Failed to load action type map:", e);
+        }
     }
 }
 function getActionTypeDisplay(actionType) {
     return actionTypeMap[actionType] || actionType;
 }
 
+var allAgentsMap = {}; // O(1) lookup map for agents
+
 async function loadAllAgents() {
     try {
-        var res = await fetch("/api/dashboard/agents", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
+        var res = await apiFetch(API.BASE + "/agents");
         allAgents = await res.json();
+        
+        // Build O(1) map for whisper target lookup
+        allAgentsMap = {};
+        if (allAgents) {
+            allAgents.forEach(function(a) {
+                allAgentsMap[a.id] = a;
+                if (a.agent_id) allAgentsMap[a.agent_id] = a;
+            });
+        }
+        
         agentPage = 1;
         renderAgents();
     } catch (e) {
-        console.error("Failed to load agents", e);
-        showToast("加载 Agent 列表失败", "error");
+        if (e.name !== "ApiError") {
+            console.error("Failed to load agents", e);
+            showToast("加载 Agent 列表失败", "error");
+        }
     }
 }
 
@@ -157,12 +173,16 @@ function renderAgents() {
 }
 
 function updateAgentCounts() {
-    var counts = allAgents ? {
-        total: allAgents.length,
-        online: allAgents.filter(function (a) { return a.status === "online"; }).length,
-        offline: allAgents.filter(function (a) { return a.status === "offline"; }).length,
-        dead: allAgents.filter(function (a) { return a.status === "dead"; }).length
-    } : { total: 0, online: 0, offline: 0, dead: 0 };
+    var counts = { total: 0, online: 0, offline: 0, dead: 0 };
+    if (allAgents && allAgents.length > 0) {
+        counts.total = allAgents.length;
+        counts = allAgents.reduce(function(acc, a) {
+            if (a.status === "online") acc.online++;
+            else if (a.status === "offline") acc.offline++;
+            else if (a.status === "dead") acc.dead++;
+            return acc;
+        }, counts);
+    }
 
     document.getElementById("agents-total-title").textContent = "所有角色 (" + counts.total + ")";
     document.getElementById("online-count").textContent = counts.online;
@@ -196,27 +216,28 @@ async function openAgentModal(agentId) {
     modal.classList.add("show");
     switchModalTab("basic");
     currentModalAgentId = agentId;
-    grantItemsBuffer = []; // 重置待注入列表
+    grantItemsBuffer = [];
 
     try {
-        var agentRes = await fetch("/api/dashboard/agent/" + agentId, { headers: getAuthHeaders() });
-        if (handleAuthError(agentRes)) return;
+        var agentRes = await apiFetch(API.BASE + "/agent/" + agentId);
         var agent = await agentRes.json();
         title.textContent = agent.name;
 
         document.getElementById("modal-tab-basic").innerHTML = renderBasicInfo(agent);
         document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
 
-        var expRes = await fetch("/api/dashboard/agent/" + agentId + "/experiences?page=1&limit=20", { headers: getAuthHeaders() });
-        if (handleAuthError(expRes)) {
-            document.getElementById("modal-tab-experiences").innerHTML =
-                '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">无法加载经历日志</div>';
-        } else {
+        var expRes = await apiFetch(API.BASE + "/agent/" + agentId + "/experiences?page=1&limit=20");
+        if (expRes.ok) {
             var expData = await expRes.json();
             document.getElementById("modal-tab-experiences").innerHTML = renderExperiences(expData);
+        } else {
+            document.getElementById("modal-tab-experiences").innerHTML =
+                '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">无法加载经历日志</div>';
         }
     } catch (e) {
-        console.error("Failed to load agent details", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load agent details", e);
+        }
         document.getElementById("modal-agent-body").innerHTML =
             '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">加载失败</div>';
     }
@@ -433,10 +454,9 @@ function renderServerSoulInline(label, data, type) {
                 html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
             } else if (at === 'whisper') {
                 var targetName = targetId || '某人';
-                // 尝试从 allAgents 列表中查找目标名称（如果存在）
-                if (typeof allAgents !== 'undefined' && allAgents && allAgents.length > 0) {
-                    var found = allAgents.find(function(a) { return a.id === targetId || a.agent_id === targetId; });
-                    if (found && found.name) targetName = found.name;
+                // 使用预建的 O(1) 索引进行查找
+                if (allAgentsMap && targetId && allAgentsMap[targetId]) {
+                    targetName = allAgentsMap[targetId].name || targetName;
                 }
                 html += '<div class="soul-text">向 ' + escapeHtml(targetName) + ' 密语："' + escapeHtml(content) + '"</div>';
             } else if (at === 'shout') {
@@ -455,13 +475,6 @@ function renderServerSoulInline(label, data, type) {
     return html;
 }
 
-function escapeHtml(text) {
-    if (!text) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // ============================================================================
 // Inventory Management (grant-items UI)
 // ============================================================================
@@ -469,12 +482,14 @@ function escapeHtml(text) {
 async function loadAllItems() {
     if (allItemsList) return allItemsList;
     try {
-        var res = await fetch("/api/dashboard/items");
+        var res = await apiFetch(API.BASE + "/items");
         if (res.ok) {
             allItemsList = await res.json();
         }
     } catch (e) {
-        console.error("Failed to load items list:", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load items list:", e);
+        }
     }
     return allItemsList || [];
 }
@@ -606,9 +621,9 @@ async function grantItemsToAgent() {
     });
 
     try {
-        var res = await fetch("/api/v1/agent/grant-items", {
+        var res = await apiFetch(API.V1 + "/agent/grant-items", {
             method: "POST",
-            headers: getAuthHeaders(),
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 agent_id: currentModalAgentId,
                 items: items,
@@ -621,8 +636,7 @@ async function grantItemsToAgent() {
                 showToast("成功注入 " + data.granted_count + " 个物品", "success");
                 grantItemsBuffer = [];
                 renderGrantItemsBuffer();
-                // 仅刷新库存 tab
-                var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+                var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
                 if (agentRes.ok) {
                     var agent = await agentRes.json();
                     document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
@@ -636,19 +650,19 @@ async function grantItemsToAgent() {
             showToast("注入失败: " + errMsg, "error");
         }
     } catch (e) {
-        console.error("Grant items failed:", e);
-        showToast("网络请求失败", "error");
+        if (e.name !== "ApiError") {
+            console.error("Grant items failed:", e);
+            showToast("网络请求失败", "error");
+        }
     }
 }
 
 async function cleanupOfflineAgents() {
     if (!confirm("确定要清理长期离线的 Agent 吗？这将直接从数据库中删除它们。")) return;
     try {
-        var res = await fetch("/api/dashboard/agents/cleanup", {
+        var res = await apiFetch(API.BASE + "/agents/cleanup", {
             method: "POST",
-            headers: getAuthHeaders(),
         });
-        if (handleAuthError(res)) return;
         if (res.ok) {
             var data = await res.json();
             showToast("清理成功！共删除了 " + data.deleted_count + " 个离线 Agent。", "success");
@@ -658,8 +672,10 @@ async function cleanupOfflineAgents() {
             showToast("清理失败: " + errorText, "error");
         }
     } catch (e) {
-        console.error("Failed to cleanup agents", e);
-        showToast("网络请求失败", "error");
+        if (e.name !== "ApiError") {
+            console.error("Failed to cleanup agents", e);
+            showToast("网络请求失败", "error");
+        }
     }
 }
 
@@ -670,9 +686,13 @@ async function cleanupOfflineAgents() {
 async function renderVendorRefillSection(agentId) {
     var rules = [];
     try {
-        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill", { headers: getAuthHeaders() });
+        var res = await apiFetch(API.BASE + "/agent/" + agentId + "/vendor-refill");
         if (res.ok) rules = await res.json();
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        if (e.name !== "ApiError") {
+            console.warn("[vendor-refill] Failed to load rules:", e);
+        }
+    }
 
     var isWrite = authTokenType === "write";
     var html = '<div class="detail-section">' +
@@ -751,14 +771,14 @@ async function addRefillRule(agentId) {
     }
 
     try {
-        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill", {
+        var res = await apiFetch(API.BASE + "/agent/" + agentId + "/vendor-refill", {
             method: "PUT",
-            headers: getAuthHeaders(),
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ item_id: itemId, threshold: threshold, refill_to: refillTo, budget_ratio: budget }),
         });
         if (res.ok) {
             showToast("补货规则已添加", "success");
-            var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+            var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
             if (agentRes.ok) {
                 var agent = await agentRes.json();
                 document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
@@ -768,20 +788,21 @@ async function addRefillRule(agentId) {
             showToast("添加失败: " + (err.error || "HTTP " + res.status), "error");
         }
     } catch (e) {
-        showToast("网络请求失败", "error");
+        if (e.name !== "ApiError") {
+            showToast("网络请求失败", "error");
+        }
     }
 }
 
 async function deleteRefillRule(agentId, itemId) {
     if (!confirm("确定删除 " + itemId + " 的补货规则？")) return;
     try {
-        var res = await fetch("/api/dashboard/agent/" + agentId + "/vendor-refill/" + encodeURIComponent(itemId), {
+        var res = await apiFetch(API.BASE + "/agent/" + agentId + "/vendor-refill/" + encodeURIComponent(itemId), {
             method: "DELETE",
-            headers: getAuthHeaders(),
         });
         if (res.ok) {
             showToast("补货规则已删除", "success");
-            var agentRes = await fetch("/api/dashboard/agent/" + currentModalAgentId, { headers: getAuthHeaders() });
+            var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
             if (agentRes.ok) {
                 var agent = await agentRes.json();
                 document.getElementById("modal-tab-inventory").innerHTML = await renderInventoryManage(agent);
@@ -790,6 +811,8 @@ async function deleteRefillRule(agentId, itemId) {
             showToast("删除失败", "error");
         }
     } catch (e) {
-        showToast("网络请求失败", "error");
+        if (e.name !== "ApiError") {
+            showToast("网络请求失败", "error");
+        }
     }
 }
