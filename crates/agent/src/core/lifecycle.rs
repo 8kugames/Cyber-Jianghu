@@ -245,15 +245,22 @@ impl super::Agent {
             info!("已更新 agent 名称为: {}", name);
         }
 
-        // 自动重建本地 character.yaml（解决 agent-server 状态不同步问题）
-        // 场景：服务器已有角色但本地文件丢失（如清除缓存、目录迁移）
-        if self.character_config.is_none() && !agent_id.is_nil() {
+        // 从文件加载角色配置（优先于内存中的旧配置，确保 rebirth 后更新）
+        if !agent_id.is_nil() {
             let server_dir = self.config.server_dir(&self.config.server.ws_url);
             let characters_dir = server_dir.join("characters");
             let char_dir = characters_dir.join(agent_id.to_string());
             let char_yaml = char_dir.join("character.yaml");
 
-            if !char_yaml.exists() {
+            if char_yaml.exists() {
+                if let Ok(loaded) = crate::config::CharacterConfig::from_file(&char_yaml) {
+                    self.character_config = Some(loaded);
+                    info!("已从文件加载角色配置: {}", char_yaml.display());
+                }
+            } else if self.character_config.is_none()
+                || self.character_config.as_ref().and_then(|c| c.agent_id) != Some(agent_id)
+            {
+                // 文件不存在且内存中无匹配配置 → 自动重建
                 let name = registered_name.as_deref().unwrap_or("未知");
                 let reconstructed = crate::config::CharacterConfig {
                     agent_id: Some(agent_id),
@@ -349,6 +356,7 @@ impl super::Agent {
         if let Some(ref callback) = self.registration_callback {
             callback(agent_id);
         }
+
         info!(
             "Received game rules: version {}, {} actions, {} initial items",
             game_rules.version,
@@ -494,11 +502,15 @@ impl super::Agent {
                         std::future::pending().await
                     }
                 } => {
-                    info!("[main] 收到重连请求: {}", req.ws_url);
+                    info!("[main] 收到重连请求: {} (agent_id: {:?})", req.ws_url, req.agent_id);
                     // 推断 HTTP URL
                     let http_url = crate::config::ws_to_http_url(&req.ws_url);
                     // 更新客户端 URL
                     self.client.update_server_url(req.ws_url.clone(), http_url).await;
+                    // 设置 agent_id (如果需要切换)
+                    if let Some(id) = req.agent_id {
+                        self.client.set_agent_id(Some(id)).await;
+                    }
                     // 触发重连
                     self.reconnect().await?;
                     continue;
@@ -1065,7 +1077,7 @@ impl super::Agent {
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
                         .map(|b| b.max_retries)
-                        .unwrap_or(33);
+                        .unwrap_or(12);
                     let _max_intents = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
@@ -1371,31 +1383,7 @@ impl super::Agent {
                                 .await;
                         }
 
-                    // 6. 更新寿命状态（如果启用）
-                    if let Some(ref mut calculator) = self.lifespan_calculator {
-                        let status = calculator.process_tick();
-                        if status.is_deceased() {
-                            info!(
-                                "Agent '{}' has passed away at age {}",
-                                self.character_name(),
-                                status.age()
-                            );
-                            // 发送最后一个 idle 意图后退出（通过天魂规则验证保持不变量）
-                            let agent_id = self.client.agent_id().await.unwrap_or_default();
-                            let death_idle = Intent::new(
-                                agent_id,
-                                world_state.tick_id,
-                                "休息",
-                                None,
-                            );
-                            if self.validate_rules_only(&death_idle, &world_state).await.is_ok() {
-                                self.client.send_intent(&death_idle).await.ok();
-                            }
-                            return Ok(());
-                        }
-                    }
-
-                    // 7. 天魂验证 + 发送意图
+                    // 6. 天魂验证 + 发送意图
                     // 天魂唯一出入口：ALL intents 离开 Agent 前必须经过天魂验证
                     // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
                     if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {

@@ -151,6 +151,28 @@ impl GameDataCache {
             }
         }
     }
+
+    /// 获取寿终正寝死亡的默认信息
+    pub fn get_old_age_death_info(&self) -> DeathInfo {
+        let config = self.get();
+        if let Some(defaults) = &config.game_rules.data.death_defaults {
+            DeathInfo {
+                cause: defaults.old_age.cause.clone(),
+                message: defaults.old_age.message.clone(),
+            }
+        } else {
+            DeathInfo {
+                cause: "old_age".to_string(),
+                message: "你已寿终正寝，安详离世......".to_string(),
+            }
+        }
+    }
+
+    /// 获取寿命配置（max_age, aging_start_age）
+    pub fn get_lifespan_config(&self) -> Option<(u8, u8)> {
+        let config = self.get();
+        config.game_rules.data.lifespan.as_ref().map(|l| (l.max_age, l.aging_start_age))
+    }
 }
 
 // ============================================================================
@@ -300,6 +322,7 @@ mod tests {
                     skills: None,
                     vendors: Vec::new(),
                     chronicle: None,
+                    lifespan: None,
                 },
             },
             items: UnifiedItemsConfig {

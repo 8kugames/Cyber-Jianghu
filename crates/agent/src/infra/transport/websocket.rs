@@ -161,7 +161,10 @@ impl WebSocketClient {
             ))
         })?;
 
-        let url_with_token = self.config.ws_url_with_token(*device_id, auth_token);
+        // 读取 agent_id（如果有）
+        let agent_id_opt = self.agent_id();
+
+        let url_with_token = self.config.ws_url_with_token(*device_id, auth_token, agent_id_opt);
         let url =
             Url::parse(&url_with_token).map_err(|e| ConnectError::ConnectionFailed(e.into()))?;
 
@@ -210,6 +213,17 @@ impl WebSocketClient {
                 e
             ))),
         }
+    }
+
+    /// 设置指定的 Agent ID（用于热切换）
+    pub fn set_agent_id(&self, agent_id: Option<Uuid>) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.agent_id = agent_id;
+            });
+        });
     }
 
     /// 获取 Agent ID
@@ -909,6 +923,12 @@ impl AgentClient {
     pub async fn update_server_url(&self, ws_url: String, http_url: String) {
         let mut client = self.client.write().await;
         client.update_server_url(ws_url, http_url);
+    }
+
+    /// 设置指定的 Agent ID（用于热切换）
+    pub async fn set_agent_id(&self, agent_id: Option<Uuid>) {
+        let client = self.client.read().await;
+        client.set_agent_id(agent_id);
     }
 
     pub async fn connect(&self) -> Result<(), ConnectError> {

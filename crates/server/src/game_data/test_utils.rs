@@ -531,6 +531,7 @@ pub fn init_test_registry() {
                     "ticks_per_hour": 1,
                     "hours_per_day": 24,
                     "days_per_season": 10,
+                    "seasons_per_year": 4,
                     "seasons": [
                         {
                             "id": "test_season",

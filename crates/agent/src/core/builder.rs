@@ -18,7 +18,6 @@ use crate::component::immediate::{
 };
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
-use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -50,7 +49,6 @@ pub struct AgentBuilder {
     dialogue_client: Option<DialogueClient>,
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
-    lifespan_calculator: Option<LifespanCalculator>,
     /// 重连请求接收通道
     reconnect_rx: Option<broadcast::Receiver<crate::infra::api::ReconnectRequest>>,
     /// HTTP API 状态（可选，用于更新 current_state 供 Web Panel 查询）
@@ -85,7 +83,6 @@ impl AgentBuilder {
             dialogue_client: None,
             relationship_store: None,
             validator: None,
-            lifespan_calculator: None,
             reconnect_rx: None,
             http_api_state: None,
             device_config: None,
@@ -182,12 +179,6 @@ impl AgentBuilder {
     /// 决策回调会自动使用最新的 LLM Client。
     pub fn with_llm_container(mut self, container: LlmClientContainer) -> Self {
         self.llm_container = Some(container);
-        self
-    }
-
-    /// 设置寿命计算器
-    pub fn with_lifespan_calculator(mut self, calculator: LifespanCalculator) -> Self {
-        self.lifespan_calculator = Some(calculator);
         self
     }
 
@@ -340,7 +331,6 @@ impl AgentBuilder {
             dialogue_client: self.dialogue_client,
             relationship_store: self.relationship_store,
             validator: self.validator,
-            lifespan_calculator: self.lifespan_calculator,
             last_rejection_reason: None,
             registration_callback: None,
             reconnect_backoff: 0,

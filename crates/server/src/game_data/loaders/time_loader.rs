@@ -55,6 +55,7 @@ mod tests {
                 "ticks_per_hour": 1,
                 "hours_per_day": 24,
                 "days_per_season": 10,
+                "seasons_per_year": 4,
                 "seasons": []
             }
         }"#;
@@ -74,6 +75,7 @@ data:
   ticks_per_hour: 1
   hours_per_day: 24
   days_per_season: 10
+  seasons_per_year: 4
   seasons: []
 "#;
 

@@ -15,7 +15,6 @@ use uuid::Uuid;
 use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
-use crate::component::persona::LifespanCalculator;
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -71,9 +70,6 @@ pub struct Agent {
 
     /// 意图审查器（ReflectorSoul，可选）
     pub(crate) validator: Option<std::sync::Arc<dyn Validator>>,
-
-    /// 寿命计算器（可选）
-    pub(crate) lifespan_calculator: Option<LifespanCalculator>,
 
     /// 上一次 ReflectorSoul 驳回原因（跨 tick 传递给 ActorSoul）
     pub(crate) last_rejection_reason: Option<String>,
@@ -188,7 +184,6 @@ impl Agent {
             dialogue_client: None,
             relationship_store: None,
             validator: None,
-            lifespan_calculator: None,
             last_rejection_reason: None,
             registration_callback: None,
             reconnect_backoff: 0,
@@ -317,15 +312,6 @@ impl Agent {
         self.decision_with_feedback_callback = Some(callback);
         info!(
             "Decision with feedback callback set for agent '{}'",
-            self.character_name()
-        );
-    }
-
-    /// 设置寿命计算器
-    pub fn set_lifespan_calculator(&mut self, calculator: LifespanCalculator) {
-        self.lifespan_calculator = Some(calculator);
-        info!(
-            "Lifespan calculator set for agent '{}'",
             self.character_name()
         );
     }
@@ -569,11 +555,8 @@ impl Agent {
         match &self.character_config {
             Some(character) => PersonaInfo {
                 gender: character.gender.clone(),
-                age: self
-                    .lifespan_calculator
-                    .as_ref()
-                    .map(|c| c.current_age())
-                    .unwrap_or(character.age),
+                // 寿命由 Server 控制，此处使用注册年龄作为人设提示
+                age: character.age,
                 personality: character.personality.clone(),
                 values: character.values.clone(),
             },
@@ -591,7 +574,7 @@ impl Agent {
 
     /// 构建世界上下文
     pub(crate) fn build_world_context(&self, world_state: &crate::models::WorldState) -> String {
-        super::utils::build_world_context(world_state, self.lifespan_calculator.as_ref())
+        super::utils::build_world_context(world_state)
     }
 
     /// 将天魂（RuleEngine）的技术性驳回转换为人魂可理解的叙事化反馈

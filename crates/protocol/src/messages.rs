@@ -489,6 +489,7 @@ mod tests {
             intent_batch: None,
             reflector_narrative: None,
             immediate_events: None,
+            lifespan: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -543,6 +544,8 @@ mod tests {
                 status_effects: vec![],
                 skills: vec![],
                 inventory: vec![],
+                age_years: None,
+                max_age: None,
             },
             entities: vec![],
             nearby_items: vec![],
@@ -665,6 +668,7 @@ mod tests {
             intent_batch: None,
             reflector_narrative: None,
             immediate_events: None,
+            lifespan: None,
         };
         let world_rules = WorldBuildingRules::default();
 

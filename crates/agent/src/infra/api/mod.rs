@@ -67,7 +67,6 @@ pub use handlers::DreamState;
 
 // 导入 AI 模块类型
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
-use crate::component::persona::LifespanCalculator;
 use crate::component::persona::dynamic_persona::ThreadSafePersona;
 use crate::component::social::{DialogueClient, DialogueEventHandler};
 use crate::component::social::{NarrativeGenerator, RelationshipStore};
@@ -152,8 +151,6 @@ pub struct HttpApiState {
     /// 关系存储，持久化存储与其他 Agent 的关系记忆
     pub relationship_store: Arc<std::sync::RwLock<Option<Arc<RelationshipStore>>>>,
     /// 寿命计算器，计算年龄和老化效果
-    /// 需要 Mutex 支持内部状态修改
-    pub lifespan_calculator: Option<Arc<Mutex<LifespanCalculator>>>,
     /// 记忆管理器，管理工作记忆、情景记忆和语义记忆
     /// 需要 Mutex 支持异步操作
     pub memory_manager: Arc<std::sync::RwLock<Option<Arc<Mutex<MemoryManager>>>>>,
@@ -681,11 +678,6 @@ pub fn create_http_state(
         .map(|m| Arc::new(Mutex::new(m)));
     let memory_manager = Arc::new(std::sync::RwLock::new(memory_manager));
 
-    // 初始化寿命计算器（使用默认配置）
-    let lifespan_calculator = Some(Arc::new(Mutex::new(
-        LifespanCalculator::with_default_config(),
-    )));
-
     // 初始化对话客户端（使用空操作处理器）
     // 实际对话事件处理由外部系统通过 API 完成
     let dialogue_handler = Arc::new(NoopDialogueHandler);
@@ -754,7 +746,6 @@ pub fn create_http_state(
         config_path,
         dialogue_client,
         relationship_store,
-        lifespan_calculator,
         memory_manager,
         memory_config_template: Some(memory_config_template),
         intent_validator,
@@ -811,12 +802,6 @@ impl HttpApiState {
     /// 设置关系存储
     pub fn with_relationship_store(mut self, store: Arc<RelationshipStore>) -> Self {
         self.relationship_store = Arc::new(std::sync::RwLock::new(Some(store)));
-        self
-    }
-
-    /// 设置寿命计算器
-    pub fn with_lifespan_calculator(mut self, calculator: LifespanCalculator) -> Self {
-        self.lifespan_calculator = Some(Arc::new(Mutex::new(calculator)));
         self
     }
 

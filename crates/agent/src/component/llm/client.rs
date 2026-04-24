@@ -686,6 +686,8 @@ impl FallbackLlmClient {
         msg.contains("LLM API error 404")
             || msg.contains("LLM API error 403")
             || msg.contains("LLM API error 429")
+            // 400 Bad Request：模型能力不匹配（如 "only support stream mode"）
+            || msg.contains("LLM API error 400")
             // 额度耗尽关键词
             || msg.contains("AllocationQuota")
             // 连接/请求失败（.context() 包装后的前缀）

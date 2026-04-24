@@ -93,7 +93,7 @@ pub struct LocationStat {
 pub use storage::ChronicleMeta;
 
 /// 生成配置
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChronicleConfig {
     /// 每个周期的 tick 数（从 time.yaml 读取）
     pub period_ticks: i64,

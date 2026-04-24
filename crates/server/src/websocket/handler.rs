@@ -90,25 +90,65 @@ pub async fn websocket_handler(
     }
 
     // 3. 获取该设备的角色信息（从数据库查询）
-    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
-        Ok(Some(agent)) => {
-            info!(
-                "Device {} has agent '{}' ({})",
-                query.device_id, agent.name, agent.agent_id
-            );
-            agent.agent_id
+    let agent_id = if let Some(req_agent_id) = query.agent_id {
+        // 客户端指定了 agent_id，校验其归属并允许热切换
+        match crate::db::get_agent_by_id(&state.db_pool, req_agent_id).await {
+            Ok(agent) if agent.device_id == query.device_id => {
+                if agent.retired_at.is_some() {
+                    info!(
+                        "Device {} requested retired agent {}, waiting for new registration",
+                        query.device_id, agent.agent_id
+                    );
+                    uuid::Uuid::nil()
+                } else {
+                    info!(
+                        "Device {} explicitly switched to agent '{}' ({})",
+                        query.device_id, agent.name, agent.agent_id
+                    );
+                    agent.agent_id
+                }
+            }
+            Ok(_) => {
+                warn!("Device {} tried to access agent belonging to another device", query.device_id);
+                uuid::Uuid::nil()
+            }
+            Err(e) => {
+                warn!("Failed to query explicitly requested agent {}: {}", req_agent_id, e);
+                uuid::Uuid::nil()
+            }
         }
-        Ok(None) => {
-            // 设备验证通过但没有角色，允许连接但标记为待注册状态
-            info!(
-                "Device {} connected without agent, waiting for character registration",
-                query.device_id
-            );
-            uuid::Uuid::nil()
-        }
-        Err(e) => {
-            warn!("Failed to query agent by device_id: {}", e);
-            uuid::Uuid::nil()
+    } else {
+        // 回退逻辑：取设备下最新活跃/死亡角色
+        match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
+            Ok(Some(agent)) => {
+                // 检查角色是否已死亡（但允许连接，供后续重生）
+                if agent.retired_at.is_some() {
+                    // 角色已归隐，视作无有效角色（返回 nil）
+                    info!(
+                        "Device {} has retired agent {}, waiting for new registration",
+                        query.device_id, agent.agent_id
+                    );
+                    uuid::Uuid::nil()
+                } else {
+                    info!(
+                        "Device {} has agent '{}' ({})",
+                        query.device_id, agent.name, agent.agent_id
+                    );
+                    agent.agent_id
+                }
+            }
+            Ok(None) => {
+                // 设备验证通过但没有角色，允许连接但标记为待注册状态
+                info!(
+                    "Device {} connected without agent, waiting for character registration",
+                    query.device_id
+                );
+                uuid::Uuid::nil()
+            }
+            Err(e) => {
+                warn!("Failed to query agent by device_id: {}", e);
+                uuid::Uuid::nil()
+            }
         }
     };
 

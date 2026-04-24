@@ -143,6 +143,8 @@ mod tests {
                 status_effects: vec![],
                 inventory: vec![],
                 skills: vec![],
+                age_years: None,
+                max_age: None,
             },
             entities: vec![],
             nearby_items: vec![],

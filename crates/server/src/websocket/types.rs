@@ -121,6 +121,7 @@ pub fn build_game_rules_from_config(
         reflector_narrative: None,
         immediate_events,
         rebirth_delay_ticks,
+        lifespan: None, // ConfigUpdate 路径不含 lifespan，由注册时下发
     }
 }
 

@@ -49,6 +49,14 @@ pub struct AgentSelfState {
     /// 已掌握的技能
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
+
+    /// 当前年龄（游戏年，由 Server 从 birth_tick + time.yaml 计算）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_years: Option<u32>,
+
+    /// 最大寿命（游戏年，由 Server 从 game_rules.yaml 下发）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_age: Option<u32>,
 }
 
 impl AgentSelfState {

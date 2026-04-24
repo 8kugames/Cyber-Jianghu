@@ -851,7 +851,7 @@ pub async fn get_agent_details(
         }
         let derived_component = crate::game_data::types::components::DerivedAttributeComponent::from_config(&base_attrs);
         let formula_engine = crate::game_data::formula_engine::FormulaEngine::new();
-        
+
         let mut context_i64 = std::collections::HashMap::new();
         for (k, v) in &attributes_map {
             context_i64.insert(k.clone(), *v as f64);
