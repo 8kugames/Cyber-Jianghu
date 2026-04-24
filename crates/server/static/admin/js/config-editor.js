@@ -4,8 +4,7 @@
 
 async function loadConfigList() {
     try {
-        var res = await fetch("/api/config", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
+        var res = await apiFetch(API.CONFIG);
         var files = await res.json();
 
         var listHtml = files.map(function (f) {
@@ -17,8 +16,10 @@ async function loadConfigList() {
 
         document.getElementById("config-list").innerHTML = listHtml;
     } catch (e) {
-        console.error(e);
-        showToast("加载文件列表失败", "error");
+        if (e.name !== "ApiError") {
+            console.error(e);
+            showToast("加载文件列表失败", "error");
+        }
     }
 }
 
@@ -32,17 +33,30 @@ async function loadConfigContent(filename) {
     });
 
     try {
-        var res = await fetch("/api/config/" + filename, { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
-        var data = await res.json();
-        document.getElementById("code-editor").value = data.content;
+        var res = await apiFetch(API.CONFIG + "/" + encodeURIComponent(filename));
+        if (res.ok) {
+            var data = await res.json();
+            document.getElementById("code-editor").value = data.content;
+            var saveBtn = document.getElementById("save-config-btn");
+            if (saveBtn && typeof authTokenType !== "undefined") {
+                saveBtn.disabled = authTokenType !== "write";
+            }
+        }
     } catch (e) {
-        showToast("加载文件内容失败", "error");
+        if (e.name !== "ApiError") {
+            console.error(e);
+            showToast("加载文件内容失败", "error");
+        }
     }
 }
 
 async function saveConfig() {
     if (!currentFile) return;
+
+    if (typeof authTokenType !== "undefined" && authTokenType !== "write") {
+        showToast("只读 Token 无法保存修改", "error");
+        return;
+    }
 
     var content = document.getElementById("code-editor").value;
 
@@ -53,25 +67,32 @@ async function saveConfig() {
             showToast("JSON 语法错误，请检查后再保存", "error");
             return;
         }
+    } else if (currentFile.endsWith(".yaml") || currentFile.endsWith(".yml")) {
+        try {
+            jsyaml.load(content);
+        } catch (e) {
+            showToast("YAML 语法错误，请检查后再保存", "error");
+            return;
+        }
     }
 
     try {
-        var headers = Object.assign({ "Content-Type": "application/json" }, getAuthHeaders());
-        var res = await fetch("/api/config/" + currentFile, {
+        var res = await apiFetch(API.CONFIG + "/" + encodeURIComponent(currentFile), {
             method: "PUT",
-            headers: headers,
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content: content }),
         });
 
         if (res.ok) {
             showToast("保存成功！配置已热更新", "success");
         } else {
-            if (handleAuthError(res)) return;
             var errorText = await res.text();
             showToast("保存失败: " + errorText, "error");
         }
     } catch (e) {
-        console.error(e);
-        showToast("网络请求失败", "error");
+        if (e.name !== "ApiError") {
+            console.error(e);
+            showToast("网络请求失败", "error");
+        }
     }
 }
