@@ -51,11 +51,15 @@ impl DeviceConfig {
         serde_yaml::from_str(&yaml).context("Failed to parse device.yaml")
     }
 
-    pub fn ws_url_with_token(&self, ws_url: &str) -> String {
-        format!(
+    pub fn ws_url_with_token(&self, ws_url: &str, agent_id: Option<Uuid>) -> String {
+        let mut url = format!(
             "{}?device_id={}&token={}",
             ws_url, self.device_id, self.auth_token
-        )
+        );
+        if let Some(id) = agent_id {
+            url.push_str(&format!("&agent_id={}", id));
+        }
+        url
     }
 }
 
@@ -114,11 +118,15 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     /// 生成带认证参数的 WebSocket URL
-    pub fn ws_url_with_token(&self, device_id: Uuid, auth_token: &str) -> String {
-        format!(
+    pub fn ws_url_with_token(&self, device_id: Uuid, auth_token: &str, agent_id: Option<Uuid>) -> String {
+        let mut url = format!(
             "{}?device_id={}&token={}",
             self.ws_url, device_id, auth_token
-        )
+        );
+        if let Some(id) = agent_id {
+            url.push_str(&format!("&agent_id={}", id));
+        }
+        url
     }
 }
 

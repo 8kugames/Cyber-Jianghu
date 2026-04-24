@@ -736,6 +736,7 @@ mod tests {
             is_alive: true,
             inventory_cleared_this_tick: false,
             skills: vec![],
+            birth_tick: None,
             created_at: chrono::Utc::now(),
         }
     }

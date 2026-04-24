@@ -208,6 +208,10 @@ data:
     environmental:
       cause: "environmental"
       message: "你被恶劣的环境吞噬..."
+    # 寿终正寝死亡的默认消息
+    old_age:
+      cause: "old_age"
+      message: "你已寿终正寝，安详离世......"
 
   # 寿命配置（数据驱动，下发到 Agent 端）
   # max_age: 角色最大寿命（岁），超过后寿终正寝

@@ -8,7 +8,7 @@
 //! ```
 
 use cyber_jianghu_agent::{
-    LifespanCalculator, LifespanConfig, LlmClient, PersonaInfo, ReflectorSoul, Validator,
+    LlmClient, PersonaInfo, ReflectorSoul, Validator,
 };
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::sync::Arc;
@@ -69,17 +69,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     println!("ReflectorSoul 已创建\n");
 
-    // 4. 创建 LifespanCalculator
-    let lifespan_config = LifespanConfig {
-        initial_age: 28,
-        max_age: 80,
-        ..Default::default()
-    };
-    let mut lifespan = LifespanCalculator::new(lifespan_config);
-    println!("初始年龄: {}", lifespan.current_age());
-    println!("   叙事描述: {}\n", lifespan.get_narrative_description());
-
-    // 5. 模拟验证流程
+    // 4. 模拟验证流程
     println!("=== 模拟验证 ===\n");
 
     // 创建人设信息
@@ -110,32 +100,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 6. 模拟年龄增长
-    println!("\n=== 模拟年龄增长 ===\n");
-
-    for i in 1..=5 {
-        let status = lifespan.process_tick();
-        println!(
-            "Tick {}: 年龄 {} - {}",
-            i,
-            status.age(),
-            lifespan.get_narrative_description()
-        );
-    }
-
-    // 7. 显示最终状态
-    println!("\n=== 最终状态 ===\n");
-    let final_status = lifespan.get_status();
-    println!("年龄: {}", final_status.age());
-    println!(
-        "状态: {}",
-        if final_status.is_alive() {
-            "存活"
-        } else {
-            "已故"
-        }
-    );
-
+    // 5. 完成
     println!("\n示例完成！\n");
     println!("提示：实际使用时，需要：");
     println!("1. 从 OpenClaw 获取 LlmClient 实现");

@@ -370,6 +370,8 @@ mod tests {
                 status_effects: vec![],
                 inventory: inv,
                 skills: vec![],
+                age_years: None,
+                max_age: None,
             },
             events_log: vec![],
             private_dialogue_log: vec![],
