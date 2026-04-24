@@ -752,7 +752,7 @@ pub async fn get_agent_details(
         stamina,
         max_stamina,
         is_alive,
-        attributes_map,
+        mut attributes_map,
     ) = if let Some(row) = state_row {
         // 从 JSONB attributes 列提取属性值
         let attrs: serde_json::Value = row.get::<serde_json::Value, _>("attributes");
@@ -825,6 +825,44 @@ pub async fn get_agent_details(
             std::collections::HashMap::new(),
         )
     };
+
+    // Calculate derived attributes
+    if let Some(cfg) = crate::game_data::registry::StateRegistry::get_attributes_config() {
+        let mut base_attrs = std::collections::HashMap::new();
+        for (k, v) in &cfg.data.derived.attributes {
+            base_attrs.insert(k.clone(), cyber_jianghu_protocol::AttributeMetadata {
+                name: v.name.clone(),
+                display_name: v.display_name.clone(),
+                description: v.description.clone(),
+                formula: v.formula.clone(),
+                affects: vec![],
+                attr_type: cyber_jianghu_protocol::AttributeType::Derived,
+                birth_range: None,
+                default_value: None,
+                min_value: None,
+                max_value_formula: None,
+                decay_per_tick: None,
+                death_condition: None,
+                initial_value: None,
+                growth_rate: None,
+                recovery_formula: None,
+                primary_attribute_deps: vec![],
+            });
+        }
+        let derived_component = crate::game_data::types::components::DerivedAttributeComponent::from_config(&base_attrs);
+        let formula_engine = crate::game_data::formula_engine::FormulaEngine::new();
+        
+        let mut context_i64 = std::collections::HashMap::new();
+        for (k, v) in &attributes_map {
+            context_i64.insert(k.clone(), *v as f64);
+        }
+
+        for (name, _) in &cfg.data.derived.attributes {
+            if let Ok(val) = derived_component.calculate(name, &formula_engine, &context_i64) {
+                attributes_map.insert(name.clone(), val as i32);
+            }
+        }
+    }
 
     Ok(Json(AgentDetail {
         id: agent_row.get("agent_id"),
