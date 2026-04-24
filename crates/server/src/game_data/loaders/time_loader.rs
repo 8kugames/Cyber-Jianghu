@@ -52,7 +52,7 @@ mod tests {
             "description": "Test",
             "meta": {},
             "data": {
-                "ticks_per_hour": 60,
+                "ticks_per_hour": 1,
                 "hours_per_day": 24,
                 "days_per_season": 10,
                 "seasons": []
@@ -61,7 +61,7 @@ mod tests {
 
         let config: UnifiedTimeConfig = parse_config(json, ConfigFormat::Json).unwrap();
         assert_eq!(config.version, "2.0.0");
-        assert_eq!(config.data.ticks_per_hour, 60);
+        assert_eq!(config.data.ticks_per_hour, 1);
     }
 
     #[test]
@@ -71,7 +71,7 @@ version: "2.0.0"
 description: "Test"
 meta: {}
 data:
-  ticks_per_hour: 60
+  ticks_per_hour: 1
   hours_per_day: 24
   days_per_season: 10
   seasons: []
@@ -79,6 +79,6 @@ data:
 
         let config: UnifiedTimeConfig = parse_config(yaml, ConfigFormat::Yaml).unwrap();
         assert_eq!(config.version, "2.0.0");
-        assert_eq!(config.data.ticks_per_hour, 60);
+        assert_eq!(config.data.ticks_per_hour, 1);
     }
 }

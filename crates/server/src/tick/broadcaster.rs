@@ -534,7 +534,7 @@ fn compute_game_time(tick_id: i64) -> (i32, i32, i32, i32) {
         let ticks_per_hour = config.ticks_per_hour as i64;
         let hours_per_day = config.hours_per_day as i64;
         let days_per_season = config.days_per_season as i64;
-        let seasons_per_year = config.seasons.len() as i64;
+        let seasons_per_year = config.seasons_per_year as i64;
         let days_per_year = seasons_per_year * days_per_season;
 
         let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;

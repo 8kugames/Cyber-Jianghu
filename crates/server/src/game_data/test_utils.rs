@@ -528,7 +528,7 @@ pub fn init_test_registry() {
                 "version": "2.0.0",
                 "description": "测试用时间配置",
                 "data": {
-                    "ticks_per_hour": 60,
+                    "ticks_per_hour": 1,
                     "hours_per_day": 24,
                     "days_per_season": 10,
                     "seasons": [

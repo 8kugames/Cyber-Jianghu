@@ -35,8 +35,12 @@ data:
   # Tick → 游戏时间转换（唯一配置源）
   # ticks_per_hour: 1 表示 1 tick = 1 游戏小时
   ticks_per_hour: 1
-  hours_per_day: 24
+  # hours_per_day: 12 表示 1 游戏天 = 12 游戏小时
+  hours_per_day: 12
+  # days_per_season: 10 表示 1 游戏季 = 10 游戏天
   days_per_season: 10
+  # seasons_per_year: 4 表示 1 游戏年 = 24 游戏季
+  seasons_per_year: 4
 
   # 季节定义
   # weather_pool: 该季节可用的天气类型列表
