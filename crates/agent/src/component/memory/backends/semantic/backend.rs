@@ -25,6 +25,8 @@ pub struct SemanticMemoryBackend {
     config: SemanticMemoryConfig,
     vector_store: Mutex<HnswVectorStore>,
     fts_fallback: Mutex<FtsFallback>,
+    /// 可写的 episodic 数据库连接（用于更新 embedding blob）
+    episodic_conn: Mutex<rusqlite::Connection>,
     embedder: Arc<EmbedderService>,
     use_vector: Mutex<bool>,
 }
@@ -53,6 +55,11 @@ impl SemanticMemoryBackend {
         let fts_fallback = FtsFallback::new(agent_id, &fts_db_path, &config.episodic_db_path)
             .context("Failed to initialize FTS fallback")?;
 
+        // 打开可写的 episodic 数据库连接（用于 embedding 写入）
+        let episodic_conn =
+            rusqlite::Connection::open(&config.episodic_db_path)
+                .context("Failed to open episodic database for writing")?;
+
         let use_vector = embedder.is_available() && !vector_store.is_empty();
 
         Ok(Self {
@@ -60,6 +67,7 @@ impl SemanticMemoryBackend {
             config,
             vector_store: Mutex::new(vector_store),
             fts_fallback: Mutex::new(fts_fallback),
+            episodic_conn: Mutex::new(episodic_conn),
             embedder,
             use_vector: Mutex::new(use_vector),
         })
@@ -158,8 +166,45 @@ impl MemoryBackend for SemanticMemoryBackend {
         "SemanticMemory"
     }
 
-    async fn add(&mut self, _memory: MemoryEntry) -> Result<()> {
-        Ok(())
+    async fn add(&mut self, memory: &mut MemoryEntry) -> Result<i64> {
+        // 获取 memory ID（episodic.add() 已设置）
+        let Some(mem_id) = memory.id else {
+            // ID 未设置，跳过（semantic 层无法独立关联 embedding）
+            tracing::debug!("SemanticMemory::add() skipped: memory.id not set");
+            return Ok(-1);
+        };
+
+        // 生成 embedding（embedder 不可用时传播错误，不静默跳过）
+        let embedding = match self.embedder.embed(&memory.content).await {
+            Ok(e) => e,
+            Err(e) => {
+                anyhow::bail!("Failed to generate embedding for memory {}: {}", mem_id, e);
+            }
+        };
+
+        // 写入 embedding blob 到 episodic DB
+        let encoded = HnswVectorStore::encode_vector(&embedding);
+        {
+            let conn = self.episodic_conn.lock().unwrap();
+            conn.execute(
+                "UPDATE client_memories SET embedding = ?1 WHERE id = ?2",
+                rusqlite::params![encoded, mem_id],
+            )
+            .context("Failed to write embedding to episodic DB")?;
+        }
+
+        // 添加到 HNSW 内存索引
+        {
+            let mut vs = self.vector_store.lock().unwrap();
+            vs.add(mem_id, embedding)?;
+        }
+
+        // 标记使用向量模式
+        if !self.is_vector_mode() {
+            self.try_upgrade_to_vector();
+        }
+
+        Ok(mem_id)
     }
 
     async fn count(&self) -> Result<usize> {

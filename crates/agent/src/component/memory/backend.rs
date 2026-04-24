@@ -14,14 +14,18 @@ pub trait MemoryBackend: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// 添加单条记忆
-    async fn add(&mut self, memory: MemoryEntry) -> Result<()>;
+    ///
+    /// `memory.id` 会在成功插入后被设置为数据库 ID（若被过滤则保持不变）。
+    /// 返回插入的数据库 ID（若被过滤则返回 -1）。
+    async fn add(&mut self, memory: &mut MemoryEntry) -> Result<i64>;
 
     /// 批量添加记忆
     async fn add_batch(&mut self, memories: Vec<MemoryEntry>) -> Result<usize> {
         let mut count = 0;
-        for memory in memories {
-            self.add(memory).await?;
-            count += 1;
+        for mut memory in memories {
+            if self.add(&mut memory).await? > 0 {
+                count += 1;
+            }
         }
         Ok(count)
     }

@@ -123,7 +123,7 @@ impl MemoryManager {
                     .score(&event.event_type, &event.description, &event.metadata);
 
             // 创建记忆条目
-            let entry = MemoryEntry::new(
+            let mut entry = MemoryEntry::new(
                 self.config.agent_id,
                 event.tick_id,
                 event.description.clone(),
@@ -133,10 +133,26 @@ impl MemoryManager {
             .with_metadata(event.metadata.clone());
 
             // 添加到工作记忆
-            self.working.add(entry.clone()).await?;
+            self.working.add(&mut entry).await?;
 
-            // 添加到情景记忆（会根据阈值过滤）
-            self.episodic.add(entry).await?;
+            // 添加到情景记忆（会根据阈值过滤），成功后 entry.id 会被设置
+            let episodic_id = self.episodic.add(&mut entry).await?;
+
+            // 添加到语义记忆（使用 episodic 设置的 ID 生成 embedding）
+            if episodic_id > 0 {
+                if let Some(ref semantic) = self.semantic {
+                    match semantic.lock().await.add(&mut entry).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                "SemanticMemory::add() failed for tick {}: {}, embedding not stored",
+                                event.tick_id,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())

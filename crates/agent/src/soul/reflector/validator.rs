@@ -7,7 +7,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
+use regex::Regex;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -18,6 +19,41 @@ use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::prompt::ObserverPrompt;
 use super::types::{LlmValidationResponse, PersonaInfo, ValidationRequest, ValidationResult};
+
+// ============================================================================
+// Numeric Leak Detection
+// ============================================================================
+
+/// 检测叙事文本中是否包含数字泄露
+///
+/// 匹配任意数字字符（0-9），用于防止 LLM 在叙事中泄露数值如"HP=47"。
+/// 返回 Some(泄露的数字) 或 None。
+fn extract_leaked_numbers(narrative: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\d+").unwrap());
+    let matches: Vec<&str> = re.find_iter(narrative).map(|m| m.as_str()).collect();
+    if matches.is_empty() {
+        None
+    } else {
+        Some(matches.join(", "))
+    }
+}
+
+/// 检测叙事中是否包含数字泄露，若泄露则返回带更强约束的 prompt 后缀
+fn leak_guard_prompt_suffix(narrative: &str, attempt: u32) -> Option<String> {
+    if let Some(numbers) = extract_leaked_numbers(narrative) {
+        warn!(
+            "天魂生成执行叙事含数字泄露 (attempt {}): 发现数字 [{}]",
+            attempt, numbers
+        );
+        Some(format!(
+            "\n\n## 严重警告\n你刚才的输出包含了数字: {}。导致「数字泄露」。\n请立即重写，确保输出中不出现任何阿拉伯数字字符（0-9）。",
+            numbers
+        ))
+    } else {
+        None
+    }
+}
 
 // ============================================================================
 // 验证器 Trait（类型擦除）
@@ -334,20 +370,35 @@ impl ReflectorSoul {
             )
         };
 
-        // 重试机制：最多 2 次
+        // 重试机制：最多 2 次（不含 leak guard retry）
         let max_retries = 2;
+        let original_prompt = prompt; // 保存原始 prompt 克隆，避免 leak guard suffix 累积
+        let mut current_prompt = original_prompt.clone();
         for attempt in 1..=max_retries {
             let llm_client = self.llm_container.read().await.clone();
-            match llm_client.complete(&prompt).await {
+            match llm_client.complete(&current_prompt).await {
                 Ok(n) => {
                     let narrative = n.trim().to_string();
-                    if !narrative.is_empty() {
-                        return Ok(Some(narrative));
+                    if narrative.is_empty() {
+                        warn!(
+                            "天魂生成执行叙事返回空 (attempt {}/{})",
+                            attempt, max_retries
+                        );
+                        continue;
                     }
-                    warn!(
-                        "天魂生成执行叙事返回空 (attempt {}/{})",
-                        attempt, max_retries
-                    );
+                    // Numeric Leak Detection：检测叙事中是否包含数字
+                    if let Some(suffix) = leak_guard_prompt_suffix(&narrative, attempt as u32) {
+                        // 泄露数字 → 重置为原始 prompt 再追加 leak guard，避免 suffix 累积
+                        current_prompt = original_prompt.clone();
+                        current_prompt.push_str(&suffix);
+                        warn!(
+                            "天魂叙事含数字泄露，注入 leak guard 重试 (attempt {}/{})",
+                            attempt, max_retries
+                        );
+                        continue;
+                    }
+                    // 无泄露且非空 → 通过
+                    return Ok(Some(narrative));
                 }
                 Err(e) => {
                     warn!(
@@ -356,7 +407,7 @@ impl ReflectorSoul {
                     );
                 }
             }
-            // 空响应或错误，继续重试
+            // 错误或空响应，继续重试（不注入 leak guard）
         }
 
         // 所有重试都失败
