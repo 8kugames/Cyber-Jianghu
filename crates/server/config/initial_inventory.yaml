@@ -36,8 +36,8 @@ data:
         description: "普通的馒头，可以恢复饥饿值"
 
     drink:
-      - item_id: "清水"
-        name: "清水"
+      - item_id: "水"
+        name: "水"
         quantity: 3
         description: "干净的饮用水，可以恢复口渴值"
 

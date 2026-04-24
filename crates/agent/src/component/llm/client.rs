@@ -1158,7 +1158,7 @@ mod tests {
         // 完整 MiniMax 输出：self-closing think 后跟思考文字和 JSON
         // <think.../> 是自闭合标签，后面的思考文字是普通文本（非标签包裹）
         // extract_json_str 会通过 find_first_json_end 定位到 JSON
-        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"清水\"}, \"speech_content\": \"\"}";
+        let input = "<think.../>\n考虑拾取馒头充饥\n\n{\"action_type\": \"drink\", \"action_data\": {\"item_id\": \"水\"}, \"speech_content\": \"\"}";
         let result = strip_thinking_tags(input);
         // 自闭合标签被移除，但思考文本仍在（非标签包裹无法剥离）
         assert!(!result.contains("<think"), "think 标签应被移除");
