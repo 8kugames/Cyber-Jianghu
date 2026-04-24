@@ -1,6 +1,14 @@
 // ============================================================================
-// Global State
+// Global State & Constants
 // ============================================================================
+const API = {
+    BASE: "/api/dashboard",
+    V1: "/api/v1",
+    ADMIN: "/api/admin",
+    CONFIG: "/api/config",
+    HEALTH: "/health"
+};
+
 var allAgents = [];
 var statusConfigs = {}; // data-driven status config
 var attributeMeta = {}; // key -> { display_name, category } data-driven attribute config
@@ -19,19 +27,28 @@ if (urlParams.has("token")) {
     localStorage.setItem("admin_token", authToken);
     window.history.replaceState({}, document.title, window.location.pathname);
     // Resolve token type async (URL token doesn't go through login endpoint)
-    fetch("/api/admin/session", { headers: { Authorization: "Bearer " + authToken } })
+    fetch(API.ADMIN + "/session", { headers: { Authorization: "Bearer " + authToken } })
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
             if (data.token_type) {
                 authTokenType = data.token_type;
                 localStorage.setItem("admin_token_type", authTokenType);
             }
+        })
+        .catch(function (e) {
+            console.warn("[Session] Failed to resolve token type:", e);
         });
 }
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
+function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 function showToast(message, type) {
     type = type || "success";
     var toast = document.getElementById("toast");
@@ -97,8 +114,7 @@ function getLocationName(locId) {
 
 async function initLocationMapping() {
     try {
-        var res = await fetch("/api/config/locations.yaml", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
+        var res = await apiFetch(API.CONFIG + "/locations.yaml");
         if (res.ok) {
             var data = await res.json();
             var doc = jsyaml.load(data.content);
@@ -115,14 +131,15 @@ async function initLocationMapping() {
             }
         }
     } catch (e) {
-        console.error("Failed to load locations mapping", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load locations mapping", e);
+        }
     }
 }
 
 async function initAttributeMeta() {
     try {
-        var res = await fetch("/api/config/attributes.yaml", { headers: getAuthHeaders() });
-        if (handleAuthError(res)) return;
+        var res = await apiFetch(API.CONFIG + "/attributes.yaml");
         if (res.ok) {
             var data = await res.json();
             var doc = jsyaml.load(data.content);
@@ -160,7 +177,9 @@ async function initAttributeMeta() {
             }
         }
     } catch (e) {
-        console.error("Failed to load attribute meta", e);
+        if (e.name !== "ApiError") {
+            console.error("Failed to load attribute meta", e);
+        }
     }
 }
 

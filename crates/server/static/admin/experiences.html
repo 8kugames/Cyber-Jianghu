@@ -244,225 +244,6 @@
             color: var(--text-secondary);
             font-size: 13px;
         }
-
-        .loading, .empty-state, .error-state {
-            text-align: center;
-            padding: 60px;
-            color: var(--text-secondary);
-            font-size: 14px;
-        }
-
-        .loading .spinner {
-            width: 32px;
-            height: 32px;
-            border: 3px solid var(--border-color);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* 复用 agents.js 中的 tick-card 样式 */
-        .tick-card {
-            background: var(--bg-level-2);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: 12px;
-            margin-top: 8px;
-        }
-
-        .tick-card-header {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 8px;
-            font-size: 12px;
-        }
-
-        .tick-world-time {
-            color: var(--text-secondary);
-        }
-
-        .tick-real-time {
-            color: var(--text-subtle);
-            margin-left: auto;
-        }
-
-        .tick-section {
-            margin-bottom: 8px;
-        }
-
-        .tick-section:last-child {
-            margin-bottom: 0;
-        }
-
-        /* 解决嵌套三魂流转的横向平铺问题 */
-        .tick-attempts-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        
-        .tick-attempt-box {
-            background: var(--bg-level-1);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            padding: 10px;
-        }
-
-        .tick-section-title {
-            font-size: 10px;
-            font-weight: 700;
-            color: var(--text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-        }
-
-        .tick-attempt-label {
-            font-size: 11px;
-            color: var(--text-subtle);
-            margin-bottom: 8px;
-            padding-bottom: 4px;
-            border-bottom: 1px dashed var(--border-color);
-        }
-
-        .exp-renhun, .exp-tianhun, .exp-action {
-            margin-bottom: 6px;
-        }
-
-        .exp-soul-label {
-            display: inline-block;
-            padding: 1px 6px;
-            background: var(--accent-muted);
-            color: var(--accent);
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-right: 6px;
-        }
-
-        .exp-soul-content {
-            font-size: 12px;
-            color: var(--text-primary);
-            line-height: 1.5;
-        }
-
-        .soul-text {
-            margin-bottom: 4px;
-        }
-
-        .soul-thought {
-            font-style: italic;
-            color: var(--text-secondary);
-            font-size: 11px;
-        }
-
-        .soul-result {
-            display: inline-block;
-            padding: 1px 6px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .soul-result.approved {
-            background: var(--success-muted);
-            color: var(--success);
-        }
-
-        .soul-result.rejected {
-            background: var(--error-muted);
-            color: var(--error);
-        }
-
-        .soul-layers {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-            margin-bottom: 4px;
-        }
-
-        .soul-layer-tag {
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-size: 10px;
-        }
-
-        .soul-layer-tag.passed {
-            background: var(--success-muted);
-            color: var(--success);
-        }
-
-        .soul-layer-tag.failed {
-            background: var(--error-muted);
-            color: var(--error);
-        }
-
-        .soul-reason {
-            font-size: 11px;
-            color: var(--text-subtle);
-            margin-bottom: 4px;
-        }
-
-        .soul-narrative {
-            font-size: 12px;
-            color: var(--text-primary);
-        }
-
-        .tick-section-immediate {
-            background: var(--bg-level-1);
-            padding: 8px;
-            border-radius: var(--radius-sm);
-            margin-top: 8px;
-        }
-
-        .imm-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 8px;
-            margin-bottom: 4px;
-            font-size: 12px;
-        }
-
-        .imm-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .imm-status {
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-size: 10px;
-            font-weight: 600;
-        }
-
-        .imm-status.sent {
-            background: var(--success-muted);
-            color: var(--success);
-        }
-
-        .imm-status.failed {
-            background: var(--error-muted);
-            color: var(--error);
-        }
-
-        .imm-error {
-            font-size: 10px;
-            color: var(--error);
-        }
-
-        .exp-immediate {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex: 1;
-        }
     </style>
 </head>
 <body>
@@ -510,24 +291,15 @@
         <button id="next-btn" class="btn btn-secondary" onclick="changePage(1)">下一页</button>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <script src="js/js-yaml.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/agents.js"></script>
     <script>
-        const API_BASE = '/api/dashboard';
         let experiences = [];
         let total = 0;
         let currentPage = 1;
         let pageSize = 20;
-        // authToken 已由 utils.js 声明为全局变量
-
-        function getHeaders() {
-            return {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            };
-        }
 
         async function loadExperiences() {
             const container = document.getElementById('experiences-container');
@@ -549,15 +321,7 @@
             if (toTick) params.set('to_tick', toTick);
 
             try {
-                const res = await fetch(`${API_BASE}/experiences?${params}`, {
-                    headers: getHeaders()
-                });
-
-                if (res.status === 401) {
-                    alert('请先登录');
-                    window.location.href = '/admin/';
-                    return;
-                }
+                const res = await apiFetch(API.BASE + "/experiences?" + params);
 
                 if (!res.ok) {
                     throw new Error('加载失败');
@@ -567,16 +331,17 @@
                 experiences = data.entries || [];
                 total = data.total || 0;
 
-                renderExperiences();
+                renderExperiencesPage();
                 updatePagination();
             } catch (e) {
-                container.innerHTML = `<div class="error-state">加载失败: ${e.message}</div>`;
+                if (e.name !== "ApiError") {
+                    container.innerHTML = `<div class="error-state">加载失败: ${e.message}</div>`;
+                }
             }
         }
 
-        function renderExperiences() {
+        function renderExperiencesPage() {
             const container = document.getElementById('experiences-container');
-
             if (experiences.length === 0) {
                 container.innerHTML = '<div class="empty-state">暂无符合条件的经历记录</div>';
                 return;
@@ -685,11 +450,17 @@
         async function initFilters() {
             try {
                 // 加载 agent 列表
-                const agentsRes = await fetch(`${API_BASE}/agents`, { headers: getHeaders() });
+                const agentsRes = await apiFetch(API.BASE + "/agents");
                 if (agentsRes.ok) {
                     const agents = await agentsRes.json();
                     const agentSelect = document.getElementById('filter-agent');
+                    
+                    allAgentsMap = {};
                     agents.forEach(agent => {
+                        // 注入全局 O(1) map 以供私语和展示查找
+                        allAgentsMap[agent.id] = agent;
+                        if (agent.agent_id) allAgentsMap[agent.agent_id] = agent;
+
                         const option = document.createElement('option');
                         option.value = agent.id;
                         option.textContent = agent.name;
@@ -698,7 +469,7 @@
                 }
 
                 // 加载 action type 映射
-                const actionMapRes = await fetch(`${API_BASE}/actions-map`);
+                const actionMapRes = await apiFetch(API.BASE + "/actions-map");
                 if (actionMapRes.ok) {
                     const actionMap = await actionMapRes.json();
                     const actionSelect = document.getElementById('filter-action');
@@ -710,7 +481,9 @@
                     });
                 }
             } catch (e) {
-                console.warn('加载过滤器选项失败:', e);
+                if (e.name !== "ApiError") {
+                    console.warn('加载过滤器选项失败:', e);
+                }
             }
         }
 

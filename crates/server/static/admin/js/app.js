@@ -7,7 +7,7 @@ function switchTab(tabId) {
     document.querySelectorAll(".view-section").forEach(function (c) { c.classList.remove("active"); });
 
     var tabEl = Array.from(document.querySelectorAll(".nav-tab")).find(function (t) {
-        return t.innerText.includes(tabId === "dashboard" ? "监控" : "配置");
+        return t.getAttribute("data-tab-id") === tabId;
     });
     if (tabEl) tabEl.classList.add("active");
 
@@ -46,15 +46,18 @@ function toggleWorldOverview() {
 
 async function loadServerVersion() {
     try {
-        var res = await fetch("/health");
+        var res = await apiFetch(API.HEALTH);
         if (!res.ok) return;
         var data = await res.json();
-        var el = document.getElementById("server-version");
-        if (el && data && data.version) {
-            el.textContent = "v" + data.version;
+        var badge = document.getElementById("server-version-badge");
+        if (badge && data.version) {
+            badge.textContent = "v" + data.version;
+            badge.title = "Build: " + (data.build_timestamp || "Unknown");
         }
     } catch (e) {
-        console.warn("Failed to load server version", e);
+        if (e.name !== "ApiError") {
+            console.warn("Failed to load server version:", e);
+        }
     }
 }
 
