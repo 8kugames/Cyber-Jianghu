@@ -654,6 +654,11 @@ pub fn create_http_state(
         server_dir.join("data")
     };
 
+    // 预建目录：各 DB 模块的 open() 依赖此目录存在
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        tracing::error!("初始化失败: 无法创建数据目录 {:?} - {}", data_dir, e);
+    }
+
     // 初始化关系存储（仅在有有效 agent_id 时创建）
     let relationship_store = if current_agent_id.is_nil() {
         None
@@ -1025,12 +1030,17 @@ impl HttpApiState {
         }
         // 2. 按需加载/创建
         // 其他角色的数据在 character_dir/{agent_id}/data/soul_cycle_{agent_id}.db
-        // 注意：SoulCycleRecorder::open 会通过 Connection::open 自动创建不存在的文件
         let character_dir = self.character_dir.read().await;
-        let db_path = character_dir
+        let data_dir = character_dir
             .join(agent_id.to_string())
-            .join("data")
-            .join(format!("soul_cycle_{}.db", agent_id));
+            .join("data");
+        let db_path = data_dir.join(format!("soul_cycle_{}.db", agent_id));
+        // 预建目录：SoulCycleRecorder::open 内部仅 create_dir_all(parent)，
+        // 若中间目录链不完整仍会失败，此处确保完整路径存在
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!("无法创建 soul_cycle 数据目录 {:?}: {}", data_dir, e);
+            return None;
+        }
         match soul_cycle_recorder::SoulCycleRecorder::open(agent_id, &db_path) {
             Ok(recorder) => {
                 let recorder = Arc::new(recorder);

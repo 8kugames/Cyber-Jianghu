@@ -46,7 +46,7 @@ impl<'a> MemoryService<'a> {
             entry = entry.with_importance(imp);
         }
 
-        self.manager.working_mut().add(entry).await?;
+        self.manager.working_mut().add(&mut entry).await?;
 
         info!("[memory] Memory stored: {}", content);
 
