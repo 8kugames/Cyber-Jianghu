@@ -279,6 +279,86 @@ async fn handle_websocket(
         }
     }
 
+    // ===== 发送 game_rules 配置（ConfigUpdate） =====
+    if agent_id != uuid::Uuid::nil() {
+        let tick_duration_secs;
+        let survival_threshold;
+        let critical_attack_threshold;
+        let rebirth_delay_ticks;
+        let game_rules_version;
+        let immediate_events;
+        let intent_batch;
+        {
+            let gd = state.game_data.get();
+            tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
+            survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
+            critical_attack_threshold = gd.game_rules.data.agent_state.survival.critical_attack_threshold;
+            rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
+            game_rules_version = gd.game_rules.version.clone();
+            immediate_events = gd.game_rules.data.immediate_events.clone();
+            intent_batch = gd.game_rules.data.intent_batch.clone();
+        }
+
+        let game_rules_for_protocol = build_game_rules_from_config(
+            tick_duration_secs,
+            survival_threshold,
+            critical_attack_threshold,
+            rebirth_delay_ticks,
+            game_rules_version,
+            immediate_events,
+            intent_batch,
+        );
+
+        let config_update = ServerMessage::ConfigUpdate {
+            config_type: "game_rules".to_string(),
+            update_type: "full".to_string(),
+            version: game_rules_for_protocol.version.clone(),
+            content: serde_json::to_value(&game_rules_for_protocol).unwrap_or_default(),
+            updated_items: vec![],
+            removed_items: vec![],
+        };
+
+        if let Err(e) = broadcast::send_config_update(
+            agent_id,
+            config_update,
+            &state.connection_manager,
+            &state.agent_to_device_map,
+        )
+        .await
+        {
+            warn!("Failed to send game_rules ConfigUpdate to agent {}: {}", agent_id, e);
+        } else {
+            debug!("Sent game_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+        }
+    }
+
+    // ===== 发送 world_building_rules 配置（ConfigUpdate） =====
+    if agent_id != uuid::Uuid::nil()
+        && let Some(wb_rules) = crate::websocket::types::load_world_building_rules()
+    {
+            let config_update = ServerMessage::ConfigUpdate {
+                config_type: "world_building_rules".to_string(),
+                update_type: "full".to_string(),
+                version: wb_rules.version.clone(),
+                content: serde_json::to_value(&wb_rules).unwrap_or_default(),
+                updated_items: vec![],
+                removed_items: vec![],
+            };
+
+            if let Err(e) = broadcast::send_config_update(
+                agent_id,
+                config_update,
+                &state.connection_manager,
+                &state.agent_to_device_map,
+            )
+            .await
+            {
+                warn!("Failed to send world_building_rules ConfigUpdate to agent {}: {}", agent_id, e);
+            } else {
+                debug!("Sent world_building_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+            }
+        }
+
     // ===== 发送技能配置（ConfigUpdate） =====
     // Agent 连接后立即下发全量技能内容
     if agent_id != uuid::Uuid::nil() {
