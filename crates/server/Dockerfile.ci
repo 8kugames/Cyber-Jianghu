@@ -1,0 +1,111 @@
+# ============================================================================
+# Cyber-Jianghu Server Dockerfile — CI / GitHub Actions
+# 无国内镜像优化，使用标准 crates.io / Debian 源
+# ============================================================================
+# 多阶段构建 + BuildKit 缓存优化
+# 启用 BuildKit: DOCKER_BUILDKIT=1 docker build -f Dockerfile.ci ...
+# ============================================================================
+
+# ============================================================================
+# Stage 1: 构建阶段 - 编译 Rust 代码
+# ============================================================================
+FROM rust:trixie AS builder
+
+# 使用标准 crates.io sparse 协议
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
+# 工作目录
+WORKDIR /app
+
+# 安装构建依赖
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制 Cargo 文件
+COPY Cargo.toml Cargo.lock* ./
+COPY crates/protocol/Cargo.toml ./crates/protocol/
+COPY crates/server/Cargo.toml ./crates/server/
+COPY crates/agent/Cargo.toml ./crates/agent/
+
+# 创建占位 src 目录，用于预下载依赖
+RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
+    echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
+    echo "fn main() {}" > crates/server/src/main.rs && \
+    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
+    echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
+
+# 构建依赖（BuildKit 缓存挂载）
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release -p cyber-jianghu-server
+
+# 复制实际源代码
+COPY crates/protocol/src ./crates/protocol/src
+COPY crates/server/src ./crates/server/src
+
+# 重新构建（只编译源代码，依赖已缓存）
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    touch crates/protocol/src/lib.rs && \
+    cargo build --release -p cyber-jianghu-server && \
+    cp /app/target/release/cyber-jianghu-server /app/server-bin
+
+# ============================================================================
+# Stage 2: 运行阶段 - 最小化镜像
+# ============================================================================
+FROM debian:trixie-slim
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libssl3 \
+    libpq5 \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非 root 用户
+RUN groupadd -g 1000 cyberjianghu && \
+    useradd -u 1000 -g cyberjianghu -m -s /bin/bash cyberjianghu
+
+WORKDIR /app
+
+# 从构建阶段复制编译后的二进制文件
+COPY --from=builder /app/server-bin /app/server
+
+# 复制配置文件
+COPY crates/server/config /app/default_config
+
+# 复制静态文件
+COPY crates/server/static /app/static
+
+# 复制数据库迁移文件
+COPY crates/server/migrations/*.sql /app/migrations/
+
+# 复制 entrypoint 脚本
+COPY crates/server/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# 创建日志目录
+RUN mkdir -p /app/logs && \
+    chown -R cyberjianghu:cyberjianghu /app
+
+EXPOSE 23333
+
+ENV RUST_LOG=info \
+    CYBER_JIANGHU_CONFIG_DIR=/app/config \
+    CYBER_JIANGHU_STATIC_DIR=/app/static \
+    CYBER_JIANGHU_LOGS_DIR=/app/logs
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f http://localhost:23333/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["./server"]
