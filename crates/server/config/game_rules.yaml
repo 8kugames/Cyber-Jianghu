@@ -83,7 +83,7 @@ data:
     # 每 tick 最大 Intent 数
     max_intents_per_tick: 5
     # 三魂循环最大重试次数
-    max_retries: 33
+    max_retries: 12
     # LLM 连续失败多少 tick 后激活 chaos 模式
     llm_chaos_threshold: 12
     # 分级审核辅助配置
@@ -209,5 +209,9 @@ data:
       cause: "environmental"
       message: "你被恶劣的环境吞噬..."
 
-  # Vendor 库存自动补货配置（已迁移到 DB: agent_vendor_refill 表）
-  # 通过 Admin UI (/admin) 管理补货规则，不再使用 YAML 配置
+  # 寿命配置（数据驱动，下发到 Agent 端）
+  # max_age: 角色最大寿命（岁），超过后寿终正寝
+  # aging_start_age: 衰老叙事开始年龄
+  lifespan:
+    max_age: 80
+    aging_start_age: 50
