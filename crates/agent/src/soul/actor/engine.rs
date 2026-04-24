@@ -153,6 +153,8 @@ pub struct CognitiveEngine {
     pub(super) skill_cache: std::sync::RwLock<std::collections::HashMap<String, String>>,
     /// 配置目录（用于地魂 tool-calling 的 skill_view 文件加载）
     pub(super) config_dir: std::path::PathBuf,
+    /// 记忆管理器引用（用于地魂 search_memory / recall_archived）
+    pub(super) memory_manager: std::sync::RwLock<Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>>,
 }
 
 impl CognitiveEngine {
@@ -183,6 +185,7 @@ impl CognitiveEngine {
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             config_dir: Self::resolve_config_dir(),
+            memory_manager: std::sync::RwLock::new(None),
         }
     }
 
@@ -260,6 +263,7 @@ impl CognitiveEngine {
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             config_dir: Self::resolve_config_dir(),
+            memory_manager: std::sync::RwLock::new(None),
         }
     }
 
@@ -354,6 +358,12 @@ impl CognitiveEngine {
     /// 设置 Outcome Memory（由 builder 在构建后注入）
     pub fn set_outcome_memory(&mut self, mem: crate::component::memory::OutcomeMemory) {
         self.outcome_memory = Some(mem);
+    }
+
+    /// 设置 Memory Manager（由 builder 在构建后注入）
+    pub fn set_memory_manager(&self, manager: std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>) {
+        let mut mem_guard = self.memory_manager.write().unwrap();
+        *mem_guard = Some(manager);
     }
 
     /// 设置对话历史（由 lifecycle 在注册后注入）
@@ -545,9 +555,11 @@ impl CognitiveEngine {
 
             if use_tool_calling {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
-                let executor = super::super::earth::EarthToolExecutor::from_rw_lock(
+                let memory_manager = self.memory_manager.read().unwrap().clone();
+                let executor = super::super::earth::EarthToolExecutor::from_engine(
                     &self.skill_cache,
                     self.config_dir.clone(),
+                    memory_manager,
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
 

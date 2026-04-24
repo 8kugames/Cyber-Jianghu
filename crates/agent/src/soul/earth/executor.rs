@@ -12,7 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// 地魂复合工具执行器
 pub struct EarthToolExecutor {
@@ -20,6 +20,8 @@ pub struct EarthToolExecutor {
     skill_cache: HashMap<String, String>,
     /// 配置目录（用于从文件加载 SKILL.md）
     config_dir: PathBuf,
+    /// 记忆管理器（用于 search_memory / recall_archived）
+    memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
 }
 
 impl EarthToolExecutor {
@@ -28,6 +30,20 @@ impl EarthToolExecutor {
         Self {
             skill_cache,
             config_dir,
+            memory_manager: None,
+        }
+    }
+
+    /// 创建带记忆管理器的地魂执行器
+    pub fn with_memory_manager(
+        skill_cache: HashMap<String, String>,
+        config_dir: PathBuf,
+        memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
+    ) -> Self {
+        Self {
+            skill_cache,
+            config_dir,
+            memory_manager,
         }
     }
 
@@ -40,6 +56,21 @@ impl EarthToolExecutor {
         Self {
             skill_cache,
             config_dir,
+            memory_manager: None,
+        }
+    }
+
+    /// 从 CognitiveEngine 的相关缓存和管理器创建
+    pub fn from_engine(
+        cache: &RwLock<HashMap<String, String>>,
+        config_dir: PathBuf,
+        memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
+    ) -> Self {
+        let skill_cache = cache.read().unwrap().clone();
+        Self {
+            skill_cache,
+            config_dir,
+            memory_manager,
         }
     }
 
@@ -69,15 +100,28 @@ impl ToolExecutor for EarthToolExecutor {
                 ))
             }
             "search_memory" | "recall_archived" => {
-                // 预留：memory tool 需要解决 MemoryManager 所有权问题后接入
                 let query = arguments["query"]
                     .as_str()
                     .unwrap_or("未知查询");
-                Ok(serde_json::json!({
-                    "success": false,
-                    "implemented": false,
-                    "message": format!("记忆搜索暂未接入，请勿重试。查询: {}", query)
-                }))
+                let limit = arguments["limit"]
+                    .as_u64()
+                    .map(|v| v as usize)
+                    .unwrap_or(5);
+
+                if let Some(ref memory_manager) = self.memory_manager {
+                    let manager = memory_manager.read().await;
+                    if name == "recall_archived" {
+                        Ok(super::memory_tool::execute_recall_archived(&manager, query, limit).await)
+                    } else {
+                        Ok(super::memory_tool::execute_search_memory(&manager, query, limit).await)
+                    }
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "implemented": false,
+                        "message": "记忆管理器未初始化，无法搜索记忆"
+                    }))
+                }
             }
             _ => Err(anyhow::anyhow!("地魂未知工具: {}", name)),
         }
