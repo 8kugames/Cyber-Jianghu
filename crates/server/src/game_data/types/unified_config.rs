@@ -202,7 +202,7 @@ pub struct GameRulesData {
 
     /// 群像传记配置
     #[serde(default)]
-    pub chronicle: Option<cyber_jianghu_protocol::ChronicleConfig>,
+    pub chronicle: Option<ChronicleRulesData>,
 
     /// 寿命配置（数据驱动，下发到 Agent）
     #[serde(default)]
@@ -339,6 +339,17 @@ pub struct DeathDefaultsData {
 
     /// 环境伤害死亡的默认配置
     pub environmental: DeathDefaultEntry,
+
+    /// 寿终正寝死亡的默认配置
+    #[serde(default = "default_old_age_death")]
+    pub old_age: DeathDefaultEntry,
+}
+
+fn default_old_age_death() -> DeathDefaultEntry {
+    DeathDefaultEntry {
+        cause: "old_age".to_string(),
+        message: "你已寿终正寝，安详离世......".to_string(),
+    }
 }
 
 /// 单个死亡默认配置项
@@ -789,6 +800,6 @@ mod tests {
         let parsed: UnifiedConfig<TimeData> = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.version, "0.0.1");
-        assert_eq!(parsed.data.ticks_per_hour, 60);
+        assert_eq!(parsed.data.ticks_per_hour, 1);
     }
 }

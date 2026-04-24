@@ -416,17 +416,18 @@ pub async fn register_agent_transactional(
         anyhow::bail!("该设备已有活跃角色，请先归隐当前角色后再创建新角色");
     }
 
-    // 步骤1: 创建Agent（关联设备，默认状态为 active）
+    // 步骤1: 创建Agent（关联设备，默认状态为 active，记录 birth_tick）
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
-        INSERT INTO agents (device_id, name, system_prompt, status)
-        VALUES ($1, $2, $3, 'active')
+        INSERT INTO agents (device_id, name, system_prompt, status, birth_tick)
+        VALUES ($1, $2, $3, 'active', $4)
         RETURNING *
         "#,
     )
     .bind(device_id)
     .bind(name)
     .bind(system_prompt)
+    .bind(initial_tick_id)
     .fetch_one(&mut *tx)
     .await
     .context("在事务中创建 Agent 失败")?;
@@ -784,12 +785,15 @@ pub async fn auto_rebirth_agent(
         .context("分配初始物品失败")?;
     }
 
-    // 5. 恢复 agents 表状态为 active
-    sqlx::query("UPDATE agents SET status = 'active' WHERE agent_id = $1")
-        .bind(agent_id)
-        .execute(pool)
-        .await
-        .context("恢复 Agent 状态失败")?;
+    // 5. 恢复 agents 表状态为 active + 重置 birth_tick（寿命重新计算）
+    sqlx::query(
+        "UPDATE agents SET status = 'active', birth_tick = $2 WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .bind(rebirth_tick)
+    .execute(pool)
+    .await
+    .context("恢复 Agent 状态失败")?;
 
     info!(
         "Agent 自动重生成功: {} ({}) → {}",

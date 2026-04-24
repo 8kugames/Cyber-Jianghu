@@ -133,7 +133,7 @@ impl DirectCognitiveResponse {
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
     config: std::sync::RwLock<CognitiveEngineConfig>,
-    /// 启用流式 LLM 调用
+    /// 流式 LLM 调用（默认启用，非流式作为降级路径）
     enable_streaming: bool,
     /// Prompt 缓存（分层缓存优化）
     pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
@@ -173,7 +173,7 @@ impl CognitiveEngine {
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
-            enable_streaming: false,
+            enable_streaming: true,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             conversation_history: None,
@@ -250,7 +250,7 @@ impl CognitiveEngine {
         Self {
             llm_client,
             config: std::sync::RwLock::new(config),
-            enable_streaming: false,
+            enable_streaming: true,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             conversation_history: None,
@@ -582,19 +582,34 @@ impl CognitiveEngine {
                     }
                 }
             } else {
-                // 非 tool-calling 路径：streaming/plain fallback
+                // 非 tool-calling 路径：streaming 优先，失败降级非流式
                 // 注意：streaming 不支持 tool-calling 组合
                 match conv_data {
                     Some((turns, system, summary)) => {
                         if self.enable_streaming {
-                            self.llm_client
+                            match self
+                                .llm_client
                                 .complete_json_streaming_with_conversation(
                                     &system,
                                     summary.as_deref(),
                                     &turns,
                                     &prompt,
                                 )
-                                .await?
+                                .await
+                            {
+                                Ok(resp) => resp,
+                                Err(e) => {
+                                    tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                                    self.llm_client
+                                        .complete_json_with_conversation(
+                                            &system,
+                                            summary.as_deref(),
+                                            &turns,
+                                            &prompt,
+                                        )
+                                        .await?
+                                }
+                            }
                         } else {
                             self.llm_client
                                 .complete_json_with_conversation(
@@ -608,9 +623,17 @@ impl CognitiveEngine {
                     }
                     None => {
                         if self.enable_streaming {
-                            self.llm_client
+                            match self
+                                .llm_client
                                 .complete_json_streaming(&persona_for_prompt, &prompt)
-                                .await?
+                                .await
+                            {
+                                Ok(resp) => resp,
+                                Err(e) => {
+                                    tracing::warn!("流式调用失败，降级到非流式: {}", e);
+                                    self.llm_client.complete_json(&prompt).await?
+                                }
+                            }
                         } else {
                             self.llm_client.complete_json(&prompt).await?
                         }

@@ -1,11 +1,9 @@
-use crate::component::persona::LifespanCalculator;
 use crate::models::WorldState;
 
 /// 构建世界上下文
-pub fn build_world_context(
-    world_state: &WorldState,
-    lifespan_calculator: Option<&LifespanCalculator>,
-) -> String {
+///
+/// 年龄信息从 Server 下发的 WorldState.self_state 读取（Server 权威）
+pub fn build_world_context(world_state: &WorldState) -> String {
     let mut context = format!(
         "当前位置：{}\n时间：{}\n天气：{}",
         world_state.location.name,
@@ -20,11 +18,10 @@ pub fn build_world_context(
         }
     }
 
-    if let Some(calculator) = lifespan_calculator {
-        context.push_str(&format!(
-            "\n年龄状态：{}",
-            calculator.get_narrative_description()
-        ));
+    // 年龄信息由 Server 计算（从 birth_tick + time.yaml 派生）
+    if let Some(age) = world_state.self_state.age_years {
+        let max = world_state.self_state.max_age.unwrap_or(80);
+        context.push_str(&format!("\n年龄：{}岁（寿命上限{}岁）", age, max));
     }
 
     context
