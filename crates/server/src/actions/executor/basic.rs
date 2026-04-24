@@ -12,6 +12,34 @@ use crate::models::Intent;
 /// 基础动作执行器
 pub(super) struct BasicActionExecutor;
 
+/// 反序列化 action_data，带诊断错误信息
+///
+/// LLM 幻觉导致格式错误时，返回包含具体 serde 错误的 failure，
+/// 让 Agent 在下一 tick 能根据错误信息自我纠正（而非"缺少xxx数据"的模糊错误）
+macro_rules! deserialize_action_data {
+    ($action_data:expr, $intent:expr, $type:ty, $action_type_str:expr) => {{
+        match $action_data {
+            Some(v) => match serde_json::from_value::<$type>(v) {
+                Ok(data) => data,
+                Err(e) => {
+                    return ActionExecutionResult::failure(
+                        format!("action_data 格式错误: {}", e),
+                        $action_type_str.to_string(),
+                        Some($intent.intent_id),
+                    );
+                }
+            },
+            None => {
+                return ActionExecutionResult::failure(
+                    format!("缺少 {} 数据", $action_type_str),
+                    $action_type_str.to_string(),
+                    Some($intent.intent_id),
+                );
+            }
+        }
+    }};
+}
+
 impl BasicActionExecutor {
     /// 执行 idle 动作
     pub(super) fn execute_idle(intent: &Intent) -> ActionExecutionResult {
@@ -31,16 +59,7 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         current_location: &str,
     ) -> ActionExecutionResult {
-        let data: MoveData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少移动数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: MoveData = deserialize_action_data!(action_data, intent, MoveData, "移动");
 
         // 获取位置注册表
         let registry = match crate::game_data::registry_or_error() {
@@ -112,16 +131,7 @@ impl BasicActionExecutor {
         intent: &Intent,
         action_data: Option<serde_json::Value>,
     ) -> ActionExecutionResult {
-        let data: SpeakData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少对话数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: SpeakData = deserialize_action_data!(action_data, intent, SpeakData, "说话");
 
         let mut result = ActionExecutionResult::success(
             format!("{} 说: {}", intent.agent_id, data.content),
@@ -149,16 +159,7 @@ impl BasicActionExecutor {
         intent: &Intent,
         action_data: Option<serde_json::Value>,
     ) -> ActionExecutionResult {
-        let data: ShoutData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少喊叫内容".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: ShoutData = deserialize_action_data!(action_data, intent, ShoutData, "大喊");
 
         if data.content.trim().is_empty() {
             return ActionExecutionResult::failure(
@@ -192,16 +193,7 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         current_skills: &[String],
     ) -> ActionExecutionResult {
-        let data: PracticeData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少修炼数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: PracticeData = deserialize_action_data!(action_data, intent, PracticeData, "修炼");
 
         // 验证技能存在于注册表
         if crate::game_data::registry::SkillRegistry::get(&data.skill_id).is_none() {
@@ -256,16 +248,7 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         _current_location: &str,
     ) -> ActionExecutionResult {
-        let data: PickupData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少拾取数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: PickupData = deserialize_action_data!(action_data, intent, PickupData, "拾取");
 
         let mut result = ActionExecutionResult::success(
             format!("尝试从场景中拾取 {} 个 {}", data.quantity, data.item_id),
@@ -288,16 +271,7 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         current_location: &str,
     ) -> ActionExecutionResult {
-        let data: DropData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少丢弃数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: DropData = deserialize_action_data!(action_data, intent, DropData, "丢弃");
 
         let mut result = ActionExecutionResult::success(
             format!("丢弃了 {} 个 {} 到地面", data.quantity, data.item_id),
@@ -334,16 +308,7 @@ impl BasicActionExecutor {
             }
             v
         });
-        let data: GatherData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少采集数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: GatherData = deserialize_action_data!(action_data, intent, GatherData, "采集");
 
         // 获取位置注册表
         let registry = match crate::game_data::registry_or_error() {
@@ -406,16 +371,7 @@ impl BasicActionExecutor {
         intent: &Intent,
         action_data: Option<serde_json::Value>,
     ) -> ActionExecutionResult {
-        let data: CraftData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
-            None => {
-                return ActionExecutionResult::failure(
-                    "缺少制造数据".to_string(),
-                    intent.action_type.to_string(),
-                    Some(intent.intent_id),
-                );
-            }
-        };
+        let data: CraftData = deserialize_action_data!(action_data, intent, CraftData, "制造");
 
         // 验证配方是否存在
         let recipe = match crate::game_data::registry::RecipeRegistry::get(&data.recipe_id) {

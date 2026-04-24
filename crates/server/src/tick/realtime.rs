@@ -359,9 +359,8 @@ impl IntentWorker {
             );
             for state in &updated_states {
                 if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, state).await {
-                    // FK 约束失败 → ghost agent，从 DashMap 清除
                     warn!(
-                        "Tick {}: ghost agent {} 持久化失败，从 DashMap 移除: {}",
+                        "Tick {}: ghost agent {} 持久化失败: {}",
                         tick_id, state.agent_id, e
                     );
                     ghost_ids.push(state.agent_id);
@@ -369,10 +368,47 @@ impl IntentWorker {
             }
         }
 
-        // 4. 更新 DashMap（persist 成功后），清除 ghost agent
-        for id in &ghost_ids {
-            self.state_cache.remove(id);
-            info!("Tick {}: 已从 DashMap 清除 ghost agent {}", tick_id, id);
+        // 4. 关闭 ghost agent 的 WebSocket 连接，然后从 DashMap 移除
+        //    否则客户端连接存活但状态已清，造成"幽灵黑洞"
+        for agent_id in &ghost_ids {
+            // 4a. 发送错误通知，让客户端知悉需要断连重连
+            let device_id = {
+                let map = self.agent_to_device_map.read().await;
+                map.get(agent_id).copied()
+            };
+            if let Some(device_id) = device_id {
+                let error_msg = cyber_jianghu_protocol::ServerMessage::Error {
+                    code: cyber_jianghu_protocol::ERROR_CODE_AGENT_DEAD.into(),
+                    message: format!(
+                        "状态持久化失败 (agent_id={})，请断连后重新连接",
+                        agent_id
+                    ),
+                    current_tick_id: Some(tick_id),
+                };
+                if let Ok(json) = serde_json::to_string(&error_msg) {
+                    let mut connections = self.connection_manager.write().await;
+                    if let Some(conn) = connections.get_mut(&device_id) {
+                        let _ = conn.send(axum::extract::ws::Message::Text(json.into())).await;
+                    }
+                }
+                // 4b. 强制关闭 WebSocket 连接
+                {
+                    let mut connections = self.connection_manager.write().await;
+                    connections.remove(&device_id);
+                }
+                // 4c. 清除 agent→device 映射
+                {
+                    let mut map = self.agent_to_device_map.write().await;
+                    map.remove(agent_id);
+                }
+                info!(
+                    "Tick {}: ghost agent {} WebSocket 已强制关闭 (device={})",
+                    tick_id, agent_id, device_id
+                );
+            }
+            // 4d. 从 DashMap 移除
+            self.state_cache.remove(agent_id);
+            info!("Tick {}: ghost agent {} 已从 DashMap 清除", tick_id, agent_id);
         }
         for state in &updated_states {
             if !ghost_ids.contains(&state.agent_id) {
