@@ -3236,7 +3236,21 @@ pub(super) async fn switch_character_handler(
     {
         let characters_dir = state.character_dir.read().await.clone();
         let data_dir = characters_dir.join(agent_id.to_string()).join("data");
-        
+
+        // 预建目录：各 DB 模块的 open() 依赖此目录存在
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            tracing::error!("切换角色失败: 无法创建数据目录 {:?} - {}", data_dir, e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(SwitchCharacterResponse {
+                    success: false,
+                    message: format!("角色数据目录创建失败: {}", e),
+                    character: None,
+                }),
+            )
+                .into_response();
+        }
+
         // 1. Intent History (Fail Fast)
         let new_history = match super::intent_history::IntentHistoryStore::open(
             agent_id,
