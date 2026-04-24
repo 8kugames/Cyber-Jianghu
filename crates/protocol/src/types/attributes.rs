@@ -505,7 +505,7 @@ impl StatusComponent {
 }
 
 /// 派生属性组件（实时计算）
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DerivedAttributeComponent {
     /// 配置缓存（不序列化，实时计算）
     pub configs: HashMap<String, AttributeMetadata>,

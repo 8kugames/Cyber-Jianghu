@@ -25,12 +25,17 @@ impl CombatActionExecutor {
         intent: &Intent,
         _agent_state: &mut AgentState,
     ) -> ActionExecutionResult {
-        let data: UseData = match intent
-            .action_data
-            .as_ref()
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-        {
-            Some(d) => d,
+        let data: UseData = match intent.action_data.as_ref() {
+            Some(v) => match serde_json::from_value(v.clone()) {
+                Ok(d) => d,
+                Err(e) => {
+                    return ActionExecutionResult::failure(
+                        format!("action_data 格式错误: {}", e),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
+                    );
+                }
+            },
             None => {
                 return ActionExecutionResult::failure(
                     "缺少使用数据".to_string(),
@@ -231,11 +236,20 @@ impl CombatActionExecutor {
         current_location: &str,
         agent_state: &AgentState,
     ) -> ActionExecutionResult {
-        let data: FleeData = match action_data.and_then(|v| serde_json::from_value(v).ok()) {
-            Some(d) => d,
+        let data: FleeData = match action_data {
+            Some(v) => match serde_json::from_value(v) {
+                Ok(d) => d,
+                Err(e) => {
+                    return ActionExecutionResult::failure(
+                        format!("action_data 格式错误: {}", e),
+                        intent.action_type.to_string(),
+                        Some(intent.intent_id),
+                    );
+                }
+            },
             None => {
                 return ActionExecutionResult::failure(
-                    "缺少逃跑目标位置".to_string(),
+                    "缺少逃跑数据".to_string(),
                     intent.action_type.to_string(),
                     Some(intent.intent_id),
                 );
