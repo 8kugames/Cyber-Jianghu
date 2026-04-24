@@ -25,7 +25,11 @@
 //! 这些默认值确保系统在无配置时仍可运行，但**不代表通用的设计决策**。
 //! 不同的游戏主题应通过配置文件覆盖这些值。
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+
+use super::world::WorldEventType;
 
 fn default_survival_threshold() -> i32 {
     30
@@ -84,6 +88,22 @@ pub struct GameRules {
     /// 寿命配置（可选，不配置则使用 LifespanRules 默认值）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifespan: Option<LifespanRules>,
+
+    /// 日历配置（可选，从 time.yaml 下发，Agent 用于计算 game_day）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calendar: Option<CalendarConfig>,
+}
+
+/// 日历配置（数据驱动，从 time.yaml 下发）
+///
+/// Agent 用于从 WorldTime 计算 game_day（单调递增天数），
+/// 避免 Agent 端硬编码日历参数。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarConfig {
+    /// 每季节天数
+    pub days_per_season: u32,
+    /// 每年季节数
+    pub seasons_per_year: u32,
 }
 
 /// 寿命数据驱动配置（由 server game_rules.yaml 下发）
@@ -343,103 +363,121 @@ impl Default for ReflectorNarrativeConfig {
 
 /// 即时事件处理配置
 ///
-/// 控制 Agent 如何响应 Server 下发的即时事件（speak/whisper 等）
-/// 以及 Agent 发送意图的路由策略
+/// 控制 Agent 如何处理 Server 下发的即时事件（speak/whisper 等）
+/// 新架构：EventStore SQLite 持久化 + Session Triage LLM 批量分流
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImmediateEventConfig {
-    /// 即时路由动作列表（这些动作走即时通道，不占 tick 配额）
-    ///
-    /// Agent 发送这些类型的意图时，会通过 `immediate_msg_tx` 立即发送给服务器，
-    /// 而不等待主 tick 周期。适用于说话类动作（speak, whisper）。
-    #[serde(default = "default_immediate_routing_actions")]
-    pub immediate_routing_actions: Vec<String>,
-
-    /// 即时决策规则（数据驱动，替代硬编码 call_keywords/default_response）
+    /// 事件 triage 配置（DB 持久化 + Session LLM 分流）
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub decision_rules: Option<ImmediateDecisionRules>,
-}
-
-/// 即时决策规则（数据驱动）
-///
-/// 控制即时事件的 TTL、LLM 调用超时、队列容量等参数。
-/// 所有参数均可通过 game_rules.yaml 外部配置。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImmediateDecisionRules {
-    /// 当前执行这些动作时，延迟响应
-    #[serde(default)]
-    pub conflict_actions: Vec<String>,
-    /// 事件 TTL（ms）：超过此时间的事件视为过期
-    #[serde(default = "default_event_ttl_ms")]
-    pub event_ttl_ms: u64,
-    /// LLM 认知调用超时（ms），应 < event_ttl_ms
-    #[serde(default = "default_cognitive_timeout_ms")]
-    pub cognitive_timeout_ms: u64,
-    /// 最大待处理事件队列容量
-    #[serde(default = "default_max_pending_events")]
-    pub max_pending_events: usize,
-    /// LLM 调用前的最大事件内容长度（截断长事件）
-    #[serde(default = "default_max_event_context_chars")]
-    pub max_event_context_chars: usize,
-    /// 每 tick 最大即时 LLM 调用次数（防止 O(n²) 扇出）
-    /// 超限的事件直接 DeferToMainTick
-    #[serde(default = "default_max_llm_calls_per_tick")]
-    pub max_llm_calls_per_tick: usize,
-    /// 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
-    /// 超限的即时意图降级为 DeferToMainTick
-    #[serde(default = "default_max_immediate_intents_per_tick")]
-    pub max_immediate_intents_per_tick: usize,
-    /// 即时意图优先级（高于普通 tick 意图）
-    #[serde(default = "default_immediate_intent_priority")]
-    pub immediate_intent_priority: i32,
-}
-
-fn default_event_ttl_ms() -> u64 {
-    5000
-}
-fn default_cognitive_timeout_ms() -> u64 {
-    4000
-}
-fn default_max_pending_events() -> usize {
-    32
-}
-fn default_max_event_context_chars() -> usize {
-    200
-}
-fn default_max_llm_calls_per_tick() -> usize {
-    9
-}
-fn default_max_immediate_intents_per_tick() -> usize {
-    3
-}
-fn default_immediate_intent_priority() -> i32 {
-    10
-}
-
-fn default_immediate_routing_actions() -> Vec<String> {
-    // 武侠主题默认值：说话类动作走即时通道
-    vec!["说话".into(), "私语".into()]
-}
-
-impl Default for ImmediateDecisionRules {
-    fn default() -> Self {
-        Self {
-            conflict_actions: vec![],
-            event_ttl_ms: default_event_ttl_ms(),
-            cognitive_timeout_ms: default_cognitive_timeout_ms(),
-            max_pending_events: default_max_pending_events(),
-            max_event_context_chars: default_max_event_context_chars(),
-            max_llm_calls_per_tick: default_max_llm_calls_per_tick(),
-            max_immediate_intents_per_tick: default_max_immediate_intents_per_tick(),
-            immediate_intent_priority: default_immediate_intent_priority(),
-        }
-    }
+    pub event_triage: Option<EventTriageConfig>,
 }
 
 impl Default for ImmediateEventConfig {
     fn default() -> Self {
         Self {
-            immediate_routing_actions: default_immediate_routing_actions(),
-            decision_rules: None,
+            event_triage: None,
+        }
+    }
+}
+
+// ============================================================================
+// 事件 Triage 配置（数据驱动）
+// ============================================================================
+
+/// 事件 triage 配置（数据驱动，由 game_rules.yaml 下发）
+///
+/// 控制事件摄取→分类→消费的完整生命周期。
+/// 所有字段均有默认值，旧配置文件无需修改即可运行。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EventTriageConfig {
+    /// Session 生命周期模式（当前仅 "game_day"）
+    pub lifecycle: String,
+
+    /// 无事件时的兜底轮询间隔（秒）
+    pub poll_interval_secs: u64,
+
+    /// 收到事件后的收集窗口（秒），窗口内事件合并为一次 triage
+    pub debounce_secs: u64,
+
+    /// 单次 triage LLM 调用超时（ms）
+    pub triage_llm_timeout_ms: u64,
+
+    /// SQL 预筛配置
+    pub pre_filter: EventTriagePreFilter,
+
+    /// 主 tick 上下文注入配置
+    pub context: EventTriageContext,
+
+    /// 保留最近 N 个游戏日的事件
+    pub retention_game_days: u32,
+}
+
+impl Default for EventTriageConfig {
+    fn default() -> Self {
+        Self {
+            lifecycle: "game_day".into(),
+            poll_interval_secs: 10,
+            debounce_secs: 3,
+            triage_llm_timeout_ms: 10000,
+            pre_filter: EventTriagePreFilter::default(),
+            context: EventTriageContext::default(),
+            retention_game_days: 3,
+        }
+    }
+}
+
+/// SQL 预筛配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EventTriagePreFilter {
+    /// 每次 triage 最多处理 N 条
+    pub max_events_per_triage: usize,
+
+    /// 未配置事件类型的默认权重
+    pub default_priority: i32,
+
+    /// SQL ORDER BY 权重（仅用于预筛排序）
+    pub event_type_priority: HashMap<WorldEventType, i32>,
+}
+
+impl Default for EventTriagePreFilter {
+    fn default() -> Self {
+        let mut priorities = HashMap::new();
+        priorities.insert(WorldEventType::DeathNotification, 100);
+        priorities.insert(WorldEventType::PrivateDialogue, 80);
+        priorities.insert(WorldEventType::SocialInteraction, 60);
+        priorities.insert(WorldEventType::StateChange, 50);
+        priorities.insert(WorldEventType::ActionResult, 40);
+        priorities.insert(WorldEventType::PublicMessage, 20);
+        priorities.insert(WorldEventType::EnvironmentalChange, 10);
+        priorities.insert(WorldEventType::SystemNotification, 10);
+        priorities.insert(WorldEventType::TimeUpdate, 5);
+
+        Self {
+            max_events_per_triage: 50,
+            default_priority: 0,
+            event_type_priority: priorities,
+        }
+    }
+}
+
+/// 主 tick 上下文注入配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EventTriageContext {
+    /// 逐条注入的最大 urgent 事件数
+    pub max_urgent_events: usize,
+
+    /// batch 摘要最大字符数
+    pub max_batch_summary_chars: usize,
+}
+
+impl Default for EventTriageContext {
+    fn default() -> Self {
+        Self {
+            max_urgent_events: 5,
+            max_batch_summary_chars: 500,
         }
     }
 }

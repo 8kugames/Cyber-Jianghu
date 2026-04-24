@@ -59,8 +59,8 @@ pub struct Agent {
     /// CognitiveChain 供 soul_cycle_recorder 记录用。
     pub(crate) decision_with_chain_callback: Option<DecisionWithChainCallback>,
 
-    /// 记忆管理器（可选）
-    pub(crate) memory_manager: Option<MemoryManager>,
+    /// 记忆管理器（可选，线程安全）
+    pub(crate) memory_manager: Option<Arc<tokio::sync::RwLock<MemoryManager>>>,
 
     /// 对话客户端（可选）
     pub(crate) dialogue_client: Option<DialogueClient>,
@@ -123,6 +123,9 @@ pub struct Agent {
 
     /// 即时事件处理器（处理 ImmediateEvent）
     pub(crate) immediate_handler: Option<Arc<ImmediateEventHandler>>,
+
+    /// Session Triage Engine 后台任务句柄（每游戏日重生）
+    pub(crate) session_triage_handle: Option<tokio::task::JoinHandle<()>>,
 
     /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
     pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,
@@ -200,6 +203,7 @@ impl Agent {
             cognitive_engine: None,
             server_assigned_name: None,
             immediate_handler: None,
+            session_triage_handle: None,
             server_error_feedback: Arc::new(Mutex::new(None)),
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
@@ -357,56 +361,10 @@ impl Agent {
         );
     }
 
-    /// 从 available_actions 构建 Layer 1 验证闭包
-    ///
-    /// 纯函数，无 side effect。供 `inject_rule_validator` 和 `game_rules_callback` 共用。
-    pub(crate) fn build_rule_validator(
-        available_actions: &[cyber_jianghu_protocol::AvailableAction],
-    ) -> Arc<crate::component::immediate::RuleValidatorFn> {
-        let action_names: Vec<String> =
-            available_actions.iter().map(|a| a.action.clone()).collect();
-        Arc::new(
-            move |action_type: &str| -> std::result::Result<(), String> {
-                if action_type == "休息" {
-                    return Ok(());
-                }
-                if !action_names.iter().any(|a| a == action_type) {
-                    return Err(format!("action_type '{}' 不在可用动作列表中", action_type));
-                }
-                Ok(())
-            },
-        )
-    }
-
-    /// 注入规则验证回调到即时事件处理器
-    ///
-    /// 从 game_rules.available_actions 构建 Layer 1 验证闭包，
-    /// 注入到 ImmediateEventHandler 用于 RespondNow 发送前验证。
-    /// 需在初始注册、game_rules 更新、重连后调用。
-    pub(crate) async fn inject_rule_validator(
-        &self,
-        available_actions: &[cyber_jianghu_protocol::AvailableAction],
-    ) {
-        let Some(ref handler) = self.immediate_handler else {
-            warn!(
-                "inject_rule_validator: immediate_handler is None for agent '{}', \
-                 rule validation disabled for RespondNow",
-                self.character_name()
-            );
-            return;
-        };
-        let rule_validator = Self::build_rule_validator(available_actions);
-        handler.set_rule_validator(rule_validator).await;
-        info!(
-            "Rule validator injected ({} actions) for agent '{}'",
-            available_actions.len(),
-            self.character_name()
-        );
-    }
-
     /// 获取记忆上下文字符串（用于 LLM）
     pub async fn get_memory_context(&self) -> String {
         if let Some(ref manager) = self.memory_manager {
+            let manager = manager.read().await;
             manager.build_llm_context().await
         } else {
             String::new()
@@ -422,12 +380,13 @@ impl Agent {
     pub fn working_memory_size(&self) -> usize {
         match &self.memory_manager {
             Some(manager) => {
+                let manager = manager.clone();
                 // 使用 block_on 在同步方法中调用异步方法
                 // 注意：这可能会阻塞线程，但在 MVP 阶段是可以接受的
                 // 更好的做法是将此方法改为 async
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        let count: usize = manager.working().count().await.unwrap_or(0);
+                        let count: usize = manager.read().await.working().count().await.unwrap_or(0);
                         count
                     })
                 })
@@ -441,6 +400,7 @@ impl Agent {
         &self,
     ) -> Option<crate::component::memory::manager::MemoryManagerStats> {
         if let Some(ref manager) = self.memory_manager {
+            let manager = manager.read().await;
             Some(manager.stats().await)
         } else {
             None
@@ -448,18 +408,13 @@ impl Agent {
     }
 
     /// 设置记忆管理器
-    pub fn set_memory_manager(&mut self, manager: MemoryManager) {
+    pub fn set_memory_manager(&mut self, manager: Arc<tokio::sync::RwLock<MemoryManager>>) {
         self.memory_manager = Some(manager);
         info!("Memory manager set for agent '{}'", self.character_name());
     }
 
-    /// 获取记忆管理器的可变引用
-    pub fn memory_manager_mut(&mut self) -> Option<&mut MemoryManager> {
-        self.memory_manager.as_mut()
-    }
-
     /// 获取记忆管理器的引用
-    pub fn memory_manager(&self) -> Option<&MemoryManager> {
+    pub fn memory_manager(&self) -> Option<&Arc<tokio::sync::RwLock<MemoryManager>>> {
         self.memory_manager.as_ref()
     }
 
@@ -486,7 +441,7 @@ impl Agent {
     /// 处理世界事件并更新记忆
     pub async fn process_events(&mut self, events: &[crate::models::WorldEvent]) -> Result<()> {
         if let Some(ref mut manager) = self.memory_manager {
-            manager.process_events(events).await?;
+            manager.write().await.process_events(events).await?;
         }
         Ok(())
     }
@@ -497,7 +452,7 @@ impl Agent {
         current_tick: i64,
     ) -> Result<crate::component::memory::types::ForgettingReport> {
         if let Some(ref mut manager) = self.memory_manager {
-            manager.run_forgetting(current_tick).await
+            manager.write().await.run_forgetting(current_tick).await
         } else {
             Ok(crate::component::memory::types::ForgettingReport {
                 checked_count: 0,

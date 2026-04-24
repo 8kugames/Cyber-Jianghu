@@ -991,19 +991,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     builder = builder.character_config(character.clone());
 
-    // ImmediateHandler（即时事件处理：规则门控 + 轻量级 LLM）
+    // ImmediateHandler（即时事件处理：SQLite 持久化 + Session Triage LLM）
     {
-        let persona_info = cyber_jianghu_agent::soul::reflector::PersonaInfo {
-            gender: character.gender.clone(),
-            age: character.age,
-            personality: character.personality.clone(),
-            values: character.values.clone(),
-        };
-        builder = builder.with_immediate_handler(
-            llm_container.clone(),
-            persona_info,
-            character.name.clone(),
-        );
+        builder = builder.with_immediate_handler();
         info!("即时事件处理器已创建");
     }
 

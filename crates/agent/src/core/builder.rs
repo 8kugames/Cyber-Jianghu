@@ -13,9 +13,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::component::immediate::{
-    CognitiveImmediateDecisionMaker, ImmediateDecisionMaker, ImmediateEventHandler,
-};
+use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::social::DialogueClient;
@@ -24,7 +22,7 @@ use crate::config::{CharacterConfig, Config, DeviceConfig};
 use crate::infra::api::{HttpApiState, ReconnectRequest};
 use crate::infra::transport::websocket::AgentClient;
 use crate::runtime::claw::LlmClientContainer;
-use crate::soul::reflector::{PersonaInfo, ReflectorSoul, Validator};
+use crate::soul::reflector::{ReflectorSoul, Validator};
 use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::{
@@ -221,38 +219,36 @@ impl AgentBuilder {
         self
     }
 
-    /// 启用即时事件处理（认知决策模式）
+    /// 启用即时事件处理（DB 持久化 + Session Triage LLM 架构）
     ///
-    /// 创建 CognitiveImmediateDecisionMaker（规则门控 + 轻量级 LLM），
-    /// 用于处理 Server 下发的 ImmediateEvent（speak/whisper 等）。
-    /// 首次激活：此方法在 Part 3 之前从未被调用。
-    pub fn with_immediate_handler(
-        mut self,
-        llm_container: LlmClientContainer,
-        persona: PersonaInfo,
-        agent_name: String,
-    ) -> Self {
-        use tokio::sync::mpsc;
+    /// 创建 EventStore + ImmediateEventHandler。
+    /// SessionTriageEngine 在 lifecycle.rs 的主循环中 spawn。
+    pub fn with_immediate_handler(mut self) -> Self {
+        use std::sync::Arc;
+        use tokio::sync::Notify;
 
-        // 创建临时通道（连接后 replace_intent_channel 替换为 WebSocket 的 intent_tx）
-        let (tx, _rx) = mpsc::channel(32);
-
-        // 从配置中获取决策规则
-        let rules = self
+        // 从配置中获取 event_triage 配置
+        let triage_config = self
             .config
             .game_rules
             .as_ref()
             .and_then(|g| g.immediate_events.as_ref())
-            .and_then(|e| e.decision_rules.clone())
+            .and_then(|e| e.event_triage.clone())
             .unwrap_or_default();
 
-        // 创建认知决策器
-        let decision_maker: Arc<dyn ImmediateDecisionMaker> = Arc::new(
-            CognitiveImmediateDecisionMaker::new(llm_container, persona, agent_name, rules.clone()),
-        );
+        let notify = Arc::new(Notify::new());
 
-        // 创建处理器（含数据驱动规则）
-        let handler = Arc::new(ImmediateEventHandler::new(decision_maker, tx, rules));
+        // 创建 EventStore（SQLite）
+        let event_store = match EventStore::open(&self.data_dir, &triage_config, notify) {
+            Ok(store) => Arc::new(store),
+            Err(e) => {
+                tracing::error!("创建 EventStore 失败: {}，即时事件处理不可用", e);
+                return self;
+            }
+        };
+
+        // 创建处理器
+        let handler = Arc::new(ImmediateEventHandler::new(event_store));
 
         self.immediate_handler = Some(handler);
         self
@@ -306,7 +302,7 @@ impl AgentBuilder {
                         .map(|c| c.name.as_str())
                         .unwrap_or("(未创建)");
                     info!("Memory system initialized for agent '{}'", agent_name);
-                    Some(manager)
+                    Some(Arc::new(tokio::sync::RwLock::new(manager)))
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -319,6 +315,12 @@ impl AgentBuilder {
         } else {
             None
         };
+
+        if let Some(engine) = self.cognitive_engine.as_ref() {
+            if let Some(ref mm) = memory_manager {
+                engine.set_memory_manager(mm.clone());
+            }
+        }
 
         Agent {
             config: self.config,
@@ -347,6 +349,7 @@ impl AgentBuilder {
             cognitive_engine: self.cognitive_engine,
             server_assigned_name: None,
             immediate_handler: self.immediate_handler,
+            session_triage_handle: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),

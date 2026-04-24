@@ -14,18 +14,23 @@ use super::{entities::*, locations::Location};
 use super::actions::ExecutionSummary;
 
 /// 世界时间
+///
+/// 实际范围由 server time.yaml 控制（默认 seasons_per_year=4, days_per_season=10）：
+/// - month: 1..seasons_per_year（对应季节）
+/// - day: 1..days_per_season
+/// - hour: 0..hours_per_day-1
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldTime {
     /// 年份
     pub year: i32,
 
-    /// 月份（1-12）
+    /// 月份 / 季节序号（范围由 seasons_per_year 决定，默认 1-4）
     pub month: i32,
 
-    /// 日期（1-30）
+    /// 日期（范围由 days_per_season 决定，默认 1-10）
     pub day: i32,
 
-    /// 小时（0-23）
+    /// 小时（范围由 hours_per_day 决定，默认 0-11）
     pub hour: i32,
 
     /// 分钟（0-59）
@@ -34,7 +39,7 @@ pub struct WorldTime {
     /// 秒（0-59）
     pub second: i32,
 
-    /// 天气（MVP 阶段固定为"晴"）
+    /// 天气
     pub weather: String,
 }
 
@@ -102,7 +107,7 @@ impl WorldTime {
 }
 
 /// 世界事件类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorldEventType {
     /// 公开说话（speak）

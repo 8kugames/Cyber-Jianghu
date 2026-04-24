@@ -7,7 +7,7 @@
 // ============================================================================
 
 use anyhow::Result;
-use cyber_jianghu_protocol::{ExecutionSummary, ServerMessage, WorldTime};
+use cyber_jianghu_protocol::{CalendarConfig, ExecutionSummary, ServerMessage, WorldTime};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -86,66 +86,15 @@ impl super::Agent {
         }
         info!("Agent '{}' connected to server", self.character_name());
 
-        // 注入 HTTP API 状态到 ImmediateEventHandler（用于记录即时意图到 SoulRecorder）
-        if let (Some(handler), Some(api_state)) = (&self.immediate_handler, &self.http_api_state) {
-            handler.set_http_api_state(api_state.clone()).await;
-        }
-
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
         let agent_name_for_skills = agent_name_for_callback.clone();
-        let immediate_handler_for_rules = self.immediate_handler.clone();
-        let llm_container_for_rules = self.actor_llm_container.clone();
-        let persona_for_rules = self.extract_persona();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
                     "Agent '{}' received game rules update: version {}",
                     agent_name_for_callback, game_rules.version
                 );
-                // 重新注入 rule_validator（available_actions 可能已变更）
-                if let Some(ref handler) = immediate_handler_for_rules {
-                    let rule_validator =
-                        super::Agent::build_rule_validator(&game_rules.available_actions);
-                    let h = handler.clone();
-                    let h2 = handler.clone();
-
-                    // 更新决策规则 + 重建 CognitiveImmediateDecisionMaker
-                    let rules_update = game_rules
-                        .immediate_events
-                        .as_ref()
-                        .and_then(|e| e.decision_rules.clone());
-                    let llm_c = llm_container_for_rules.clone();
-                    let persona = persona_for_rules.clone();
-                    let agent_name = agent_name_for_callback.clone();
-
-                    tokio::spawn(async move {
-                        h.set_rule_validator(rule_validator).await;
-
-                        // 更新决策规则（数据驱动）
-                        if let Some(ref rules) = rules_update {
-                            h.update_rules(rules.clone()).await;
-                        }
-
-                        // 重建 CognitiveImmediateDecisionMaker（复用 LLM + persona）
-                        if let Some(ref llm_container) = llm_c {
-                            let rules = rules_update.unwrap_or_default();
-                            let new_maker = Arc::new(
-                                crate::component::immediate::CognitiveImmediateDecisionMaker::new(
-                                    llm_container.clone(),
-                                    persona,
-                                    agent_name,
-                                    rules,
-                                ),
-                            )
-                                as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
-                            let new_handler = h2.with_updated_decision_maker(new_maker);
-                            info!("game_rules_callback: 即时事件处理器已热更新");
-                            // Handler 的 Arc 字段通过 clone 共享，内部状态已正确更新
-                            let _ = new_handler;
-                        }
-                    });
-                }
             }))
             .await;
 
@@ -372,47 +321,8 @@ impl super::Agent {
             engine.update_action_aliases(&game_rules.available_actions);
         }
 
-        // 更新即时事件处理器配置（如果有 immediate_events 配置）
-        if let Some(ref immediate_events) = game_rules.immediate_events
-            && let Some(ref handler) = self.immediate_handler
-        {
-            // 更新决策规则（数据驱动）
-            if let Some(ref rules) = immediate_events.decision_rules {
-                handler.update_rules(rules.clone()).await;
-            }
-
-            // 重建 CognitiveImmediateDecisionMaker（复用 Agent 持有的 LLM + persona）
-            if let Some(ref llm_container) = self.actor_llm_container {
-                let rules = immediate_events.decision_rules.clone().unwrap_or_default();
-                let persona = self.extract_persona();
-                let agent_name = self.character_name().to_string();
-                let new_maker = Arc::new(
-                    crate::component::immediate::CognitiveImmediateDecisionMaker::new(
-                        llm_container.clone(),
-                        persona,
-                        agent_name,
-                        rules,
-                    ),
-                )
-                    as Arc<dyn crate::component::immediate::ImmediateDecisionMaker>;
-                let new_handler = handler.with_updated_decision_maker(new_maker);
-                self.immediate_handler = Some(Arc::new(new_handler));
-                info!("即时事件处理器配置已更新（CognitiveImmediateDecisionMaker）");
-            }
-        }
-
-        // 绑定即时意图通道到 WebSocket 的统一 intent_tx
-        if let Some(ref handler) = self.immediate_handler {
-            if let Some(tx) = self.client.intent_sender().await {
-                handler.replace_intent_channel(tx).await;
-            } else {
-                warn!("WebSocket intent_tx 不可用，即时回应将使用临时 channel");
-            }
-        }
-
-        // 注入规则验证回调到即时事件处理器（Layer 1: action_type 合法性）
-        self.inject_rule_validator(&game_rules.available_actions)
-            .await;
+        // 即时事件处理器：新架构下无需热更新（EventStore 配置在 open 时绑定）
+        // tick_id 在主循环每个 tick 更新
 
         // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
         // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
@@ -433,16 +343,8 @@ impl super::Agent {
                         *guard = Some(reason);
                     });
                 }
-                // 2. ImmediateEvent: 即时决策 + 写入工作记忆
-                if let ServerMessage::ImmediateEvent { event, .. } = &msg {
-                    // 2a. 写入即时事件缓冲区（主循环消费后写入工作记忆）
-                    let evt = event.clone();
-                    let buf = event_buffer.clone();
-                    tokio::spawn(async move {
-                        let mut guard = buf.lock().await;
-                        guard.push(evt);
-                    });
-                    // 2b. 转给即时事件处理器（RespondNow/Defer/Ignore）
+                // 2. ImmediateEvent: DB 写入 + Notify（新架构，无 LLM 调用）
+                if let ServerMessage::ImmediateEvent { .. } = &msg {
                     if let Some(ref handler) = immediate_handler {
                         let h = handler.clone();
                         let msg = msg.clone();
@@ -451,7 +353,7 @@ impl super::Agent {
                         });
                     }
                 }
-                // 2c. Dialogue（whisper 密语）：写入工作记忆
+                // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
                 if let ServerMessage::Dialogue { message, .. } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
                     let desc = match message {
@@ -529,12 +431,52 @@ impl super::Agent {
                         }
                     };
 
-                    // 更新即时事件处理器 tick_id + 尝试绑定通道
+                    // 更新即时事件处理器 tick_id + Session Triage 生命周期管理
                     if let Some(ref handler) = self.immediate_handler {
                         handler.set_tick_id(world_state.tick_id).await;
-                        // 每个 tick 尝试绑定即时意图通道（幂等，首次成功后不再重复）
-                        if let Some(tx) = self.client.intent_sender().await {
-                            handler.replace_intent_channel(tx).await;
+                        let game_day = Self::compute_game_day(
+                            &world_state.world_time,
+                            self.config.game_rules.as_ref().and_then(|g| g.calendar.as_ref()),
+                        );
+                        handler.set_game_day(game_day).await;
+
+                        // Session Triage Engine 生命周期：每游戏日重生
+                        let need_spawn = match self.session_triage_handle {
+                            None => true, // 首次：无 handle
+                            Some(ref handle) => handle.is_finished(),
+                        };
+                        if need_spawn {
+                            // take 旧 handle 并检查退出原因
+                            if let Some(old_handle) = self.session_triage_handle.take() {
+                                match old_handle.await {
+                                    Ok(()) => {} // 正常结束（game day 结束）
+                                    Err(e) => {
+                                        if e.is_panic() {
+                                            warn!("SessionTriageEngine panic（将被重启）: {}", e);
+                                        } else {
+                                            warn!("SessionTriageEngine 被取消: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                            // spawn 新 SessionTriageEngine
+                            if let Some(ref llm_container) = self.actor_llm_container {
+                                let triage_config = handler.event_store().config().clone();
+                                let engine = crate::component::immediate::SessionTriageEngine::new(
+                                    handler.event_store().clone(),
+                                    llm_container.clone(),
+                                    self.extract_persona(),
+                                    self.character_name().to_string(),
+                                    triage_config,
+                                    game_day,
+                                    handler.current_game_day(),
+                                );
+                                self.session_triage_handle = Some(tokio::spawn(engine.run()));
+                                info!(
+                                    "SessionTriageEngine 已 spawn: agent={}, game_day={}",
+                                    self.character_name(), game_day
+                                );
+                            }
                         }
                     }
 
@@ -915,29 +857,51 @@ impl super::Agent {
                         }
                     };
                     if let Some(ref handler) = self.immediate_handler {
-                        let deferred = handler.get_deferred_events().await;
-                        if !deferred.is_empty() {
-                            let deferred_ctx: Vec<String> = deferred.iter()
-                                .filter_map(|e| {
-                                    let content = e.metadata.get("content")
-                                        .and_then(|v| v.as_str()).unwrap_or("");
-                                    if content.is_empty() { None }
-                                    else {
-                                        let sender = e.metadata.get("from_agent_name")
-                                            .and_then(|v| v.as_str()).unwrap_or("有人");
-                                        Some(format!("[{}对你说: {}]", sender, content))
+                        let store = handler.event_store();
+                        let config = store.config();
+                        match store.query_triaged_async(config.context.clone()).await {
+                            Ok(triaged) => {
+                                // URGENT: 逐条高可见性展示
+                                for event in &triaged.urgent {
+                                    let sender = event.from_agent_name.as_deref().unwrap_or("有人");
+                                    memory_context.push_str(&format!(
+                                        "\n!! 紧急事件: {}「{}」",
+                                        sender, event.description
+                                    ));
+                                }
+
+                                // BATCH: 摘要格式展示
+                                if !triaged.batch.is_empty() {
+                                    let batch_lines: Vec<String> = triaged.batch.iter()
+                                        .take(config.context.max_batch_summary_chars / 20) // 粗略条目数限制
+                                        .map(|e| {
+                                            let sender = e.from_agent_name.as_deref().unwrap_or("有人");
+                                            format!("- {}: {}", sender, e.description)
+                                        })
+                                        .collect();
+                                    let batch_summary = batch_lines.join("\n");
+                                    if !batch_summary.is_empty() {
+                                        memory_context.push_str(&format!(
+                                            "\n### 近期事件摘要\n{}\n",
+                                            batch_summary
+                                        ));
                                     }
-                                })
-                                .collect();
-                            if !deferred_ctx.is_empty() {
-                                let deferred_section = format!(
-                                    "\n### 待回应的对话\n{}\n",
-                                    deferred_ctx.join("\n")
-                                );
-                                memory_context.push_str(&deferred_section);
+                                }
+
+                                // 标记已消费（按 ID，避免与后台 triage 竞态）
+                                if !triaged.urgent.is_empty() || !triaged.batch.is_empty() {
+                                    let consumed_ids: Vec<i64> = triaged.urgent.iter()
+                                        .chain(triaged.batch.iter())
+                                        .map(|e| e.id)
+                                        .collect();
+                                    if let Err(e) = store.mark_processed_by_ids_async(consumed_ids, world_state.tick_id).await {
+                                        warn!("标记已消费事件失败: {}", e);
+                                    }
+                                }
                             }
-                            // 标记已消费
-                            handler.cleanup_processed().await;
+                            Err(e) => {
+                                warn!("查询 triage 事件失败: {}", e);
+                            }
                         }
                     }
                     if !memory_context.is_empty() {
@@ -1388,20 +1352,9 @@ impl super::Agent {
                     // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
                     if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {
                         warn!("Tick {} 最终 intent 被天魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
-                        if let Some(ref handler) = self.immediate_handler {
-                            handler.set_current_intent(None).await;
-                        }
                     } else {
-                        // 设置当前意图类型，让即时事件处理器进行冲突检测
-                        if let Some(ref handler) = self.immediate_handler {
-                            handler.set_current_intent(Some(final_intent.action_type.to_string())).await;
-                        }
-
                         if let Err(e) = self.client.send_intent(&final_intent).await {
                             error!("Failed to send intent: {}", e);
-                            if let Some(ref handler) = self.immediate_handler {
-                                handler.set_current_intent(None).await;
-                            }
                             if let Err(reconnect_err) = self.reconnect().await {
                                 error!("Reconnect failed: {}", reconnect_err);
                             }
@@ -1505,9 +1458,6 @@ impl super::Agent {
                             }
                             if final_intent.action_type.as_str() == "休息" {
                                 self.maybe_rotate_model().await;
-                            }
-                            if let Some(ref handler) = self.immediate_handler {
-                                handler.set_current_intent(None).await;
                             }
 
                             // 7.5 上报三魂循环元数据到服务器（使 server-web 可见）
@@ -1616,18 +1566,8 @@ impl super::Agent {
     }
 
     /// 发送即时 Intent（统一走主 intent 通道）
-    ///
-    /// 天魂路由出的 speak/whisper 或混合说话走此通道，
-    /// 与 ImmediateEventHandler 的 RespondNow 共享同一条 WebSocket channel。
     #[allow(dead_code)]
     async fn send_immediate_intent(&self, intent: &Intent) -> std::result::Result<(), String> {
-        // 即时意图 per-tick rate limit
-        if let Some(handler) = &self.immediate_handler
-            && !handler.check_and_increment_send_count(intent.tick_id).await
-        {
-            return Err("本 tick 即时意图已达上限".to_string());
-        }
-
         if let Err(e) = self.client.send_intent(intent).await {
             warn!(
                 "[天魂/即时] intent 发送失败 ({}): {}",
@@ -1642,7 +1582,29 @@ impl super::Agent {
             Ok(())
         }
     }
+
+    /// 从 WorldTime 计算游戏日（用于 EventStore game_day 字段）
+    ///
+    /// 数据驱动：从 CalendarConfig (time.yaml) 读取 days_per_season / seasons_per_year。
+    /// game_day = (year-1) * days_per_year + (month-1) * days_per_season + day
+    /// 其中 days_per_year = seasons_per_year * days_per_season
+    fn compute_game_day(time: &WorldTime, calendar: Option<&CalendarConfig>) -> i64 {
+        if let Some(cal) = calendar {
+            let days_per_year = cal.seasons_per_year as i64 * cal.days_per_season as i64;
+            (time.year as i64 - 1) * days_per_year
+                + (time.month as i64 - 1) * cal.days_per_season as i64
+                + time.day as i64
+        } else {
+            // 降级：无 calendar 配置时（旧服务器），用单调排序键避免碰撞
+            (time.year as i64) * 10000 + (time.month as i64) * 100 + time.day as i64
+        }
+    }
+
     pub async fn close(&mut self) -> Result<()> {
+        // 终止 SessionTriageEngine 后台任务
+        if let Some(handle) = self.session_triage_handle.take() {
+            handle.abort();
+        }
         self.client.close().await;
         info!("Agent '{}' stopped", self.character_name());
         Ok(())

@@ -224,6 +224,12 @@ pub async fn agent_register(
         reflector_narrative: None,
         immediate_events,
         lifespan,
+        calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {
+            cyber_jianghu_protocol::CalendarConfig {
+                days_per_season: tc.days_per_season as u32,
+                seasons_per_year: tc.seasons_per_year as u32,
+            }
+        }),
     };
 
     // 8. 获取叙事化配置（用于属性描述转换）
