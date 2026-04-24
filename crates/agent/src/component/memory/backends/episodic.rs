@@ -262,11 +262,13 @@ mod tests {
         let (mut backend, agent_id, _temp) = create_test_backend();
 
         // 添加低重要性记忆（应该被过滤）
-        backend.add(create_test_entry(agent_id, 0.3)).await.unwrap();
+        let mut entry1 = create_test_entry(agent_id, 0.3);
+        backend.add(&mut entry1).await.unwrap();
         assert_eq!(backend.count().await.unwrap(), 0);
 
         // 添加高重要性记忆（应该被保存）
-        backend.add(create_test_entry(agent_id, 0.7)).await.unwrap();
+        let mut entry2 = create_test_entry(agent_id, 0.7);
+        backend.add(&mut entry2).await.unwrap();
         assert_eq!(backend.count().await.unwrap(), 1);
     }
 
@@ -276,9 +278,9 @@ mod tests {
 
         // 添加多个不同重要性的记忆
         for i in 1..=5 {
-            let entry = MemoryEntry::new(agent_id, i, format!("记忆 {}", i))
+            let mut entry = MemoryEntry::new(agent_id, i, format!("记忆 {}", i))
                 .with_importance(0.5 + i as f32 * 0.1);
-            backend.add(entry).await.unwrap();
+            backend.add(&mut entry).await.unwrap();
         }
 
         let top = backend.get_top_by_importance(3).await.unwrap();
@@ -292,8 +294,8 @@ mod tests {
         let (mut backend, agent_id, _temp) = create_test_backend();
 
         for i in 1..=5 {
-            let entry = MemoryEntry::new(agent_id, i, format!("记忆 {}", i)).with_importance(0.6);
-            backend.add(entry).await.unwrap();
+            let mut entry = MemoryEntry::new(agent_id, i, format!("记忆 {}", i)).with_importance(0.6);
+            backend.add(&mut entry).await.unwrap();
         }
 
         let recent = backend.get_recent(3).await.unwrap();
@@ -305,7 +307,8 @@ mod tests {
         let (mut backend, agent_id, _temp) = create_test_backend();
 
         for _ in 1..=3 {
-            backend.add(create_test_entry(agent_id, 0.6)).await.unwrap();
+            let mut entry = create_test_entry(agent_id, 0.6);
+        backend.add(&mut entry).await.unwrap();
         }
 
         assert_eq!(backend.count().await.unwrap(), 3);
