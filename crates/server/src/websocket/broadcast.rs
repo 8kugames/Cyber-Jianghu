@@ -253,9 +253,9 @@ pub async fn send_config_update(
     Ok(())
 }
 
-/// 广播动作配置更新到所有在线 Agent
-pub async fn broadcast_action_update(
-    action_update: ServerMessage,
+/// 广播配置更新到所有在线 Agent
+pub async fn broadcast_config_update(
+    config_update: ServerMessage,
     connection_manager: &ConnectionManager,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let connections = connection_manager.read().await;
@@ -265,25 +265,25 @@ pub async fn broadcast_action_update(
     for (device_id, connection) in connections.iter() {
         if connection.is_dead() {
             warn!(
-                "Agent {} connection is dead, skipping ActionUpdate",
+                "Agent {} connection is dead, skipping ConfigUpdate",
                 connection.agent_id
             );
             fail_count += 1;
             continue;
         }
 
-        let msg = action_update.clone();
+        let msg = config_update.clone();
 
         let json = serde_json::to_string(&msg)?;
         if connection.send(Message::Text(json.into())).await.is_err() {
             warn!(
-                "Agent {} ActionUpdate send failed, skipped (dead connection)",
+                "Agent {} ConfigUpdate send failed, skipped (dead connection)",
                 connection.agent_id
             );
             fail_count += 1;
         } else {
             debug!(
-                "ActionUpdate sent to agent {} via device {}",
+                "ConfigUpdate sent to agent {} via device {}",
                 connection.agent_id, device_id
             );
             success_count += 1;
@@ -291,7 +291,7 @@ pub async fn broadcast_action_update(
     }
 
     info!(
-        "ActionUpdate broadcast complete: {} success, {} failed",
+        "ConfigUpdate broadcast complete: {} success, {} failed",
         success_count, fail_count
     );
     Ok(())
