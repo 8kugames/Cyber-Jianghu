@@ -412,6 +412,7 @@ const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
 const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
 const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 3;
 const DEFAULT_ENABLE_STREAMING: bool = true;
+const DEFAULT_REFLECTOR_NARRATIVE: bool = false;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -472,6 +473,12 @@ pub struct LlmConfig {
     /// 启用 SSE 流式 LLM 调用（减少有效延迟）
     #[serde(default = "default_enable_streaming")]
     pub enable_streaming: bool,
+
+    /// 天魂叙事化开关（默认关闭）
+    /// 关闭时跳过叙事生成 LLM 调用，仅保留审批结果
+    /// 开启时天魂审批通过后生成第一人称叙事文本
+    #[serde(default = "default_reflector_narrative")]
+    pub reflector_narrative: bool,
 }
 
 fn default_idle_rotate_threshold() -> u32 {
@@ -518,6 +525,10 @@ fn default_enable_streaming() -> bool {
     DEFAULT_ENABLE_STREAMING
 }
 
+fn default_reflector_narrative() -> bool {
+    DEFAULT_REFLECTOR_NARRATIVE
+}
+
 fn default_llm_provider() -> String {
     DEFAULT_LLM_PROVIDER.to_string()
 }
@@ -551,6 +562,7 @@ impl Default for LlmConfig {
             soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
             narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
             enable_streaming: DEFAULT_ENABLE_STREAMING,
+            reflector_narrative: DEFAULT_REFLECTOR_NARRATIVE,
         }
     }
 }
@@ -591,6 +603,7 @@ impl LlmConfig {
             soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
             narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
             enable_streaming: DEFAULT_ENABLE_STREAMING,
+            reflector_narrative: DEFAULT_REFLECTOR_NARRATIVE,
         }
     }
 
