@@ -55,7 +55,7 @@ data:
       type: "sub_scene"
       parent_id: "龙门客栈"
       gatherable_items:
-        - "清水" # 井水
+        - "水" # 井水
       description: "客栈后院，有一口古井"
       aliases: ["longmen_backyard", "后院"]
 
@@ -64,7 +64,7 @@ data:
       type: "sub_scene"
       parent_id: "龙门客栈"
       gatherable_items:
-        - "清水" # 缸中清水
+        - "水" # 缸中清水
       description: "客栈的厨房，飘着饭香"
       aliases: ["longmen_kitchen", "厨房"]
 

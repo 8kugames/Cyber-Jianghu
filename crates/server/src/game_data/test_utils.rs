@@ -134,7 +134,7 @@ pub fn init_test_registry() {
                         "description": "热腾腾的馒头"
                     },
                     {
-                        "item_id": "清水",
+                        "item_id": "水",
                         "name": "水",
                         "item_type": "consumable",
                         "effects": [
@@ -291,7 +291,7 @@ pub fn init_test_registry() {
                     "items": {
                         "food": [
                             { "item_id": "馒头", "name": "馒头", "quantity": 3, "description": "热腾腾的馒头" },
-                            { "item_id": "清水", "name": "水", "quantity": 3, "description": "清凉的井水" }
+                            { "item_id": "水", "name": "水", "quantity": 3, "description": "干净的饮用水" }
                         ],
                         "currency": [
                             { "item_id": "银子", "name": "银子", "quantity": 10, "description": "通用货币" }

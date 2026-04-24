@@ -57,7 +57,7 @@ data:
     materials:
       - item_id: 面粉
         quantity: 1
-      - item_id: 清水
+      - item_id: 水
         quantity: 1
     tools: []
     stamina_cost: 5

@@ -562,7 +562,7 @@ mod tests {
                     EntityAliasMap::from_entries(vec![
                         ("馒头".to_string(), vec!["mantou".to_string()]),
                         (
-                            "清水".to_string(),
+                            "水".to_string(),
                             vec!["water".to_string(), "水".to_string()],
                         ),
                     ]),
@@ -573,7 +573,7 @@ mod tests {
 
         let mut data = serde_json::json!({"item_id": "水"});
         registry.translate(&mut data);
-        assert_eq!(data["item_id"], "清水");
+        assert_eq!(data["item_id"], "水");
     }
 
     #[test]

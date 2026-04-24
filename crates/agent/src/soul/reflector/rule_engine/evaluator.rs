@@ -451,7 +451,7 @@ mod tests {
     async fn test_evaluate_in_item_ids() {
         let evaluator = DefaultEvaluator;
         let mut context = create_test_context();
-        context.available_item_ids = vec!["馒头".to_string(), "清水".to_string()];
+        context.available_item_ids = vec!["馒头".to_string(), "水".to_string()];
 
         // item_id 在列表中
         let condition = RuleCondition::In(
