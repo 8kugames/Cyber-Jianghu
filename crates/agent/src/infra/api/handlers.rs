@@ -502,10 +502,13 @@ pub(super) async fn get_context_handler(State(state): State<HttpApiState>) -> im
 
     match current.as_ref() {
         Some(world_state) => {
-            let context = if let Some(store) = &state.relationship_store {
-                generate_context_markdown(world_state, store, dream_thought.as_deref())
-            } else {
-                generate_context_markdown_no_relationship(world_state, dream_thought.as_deref())
+            let context = {
+                let store_arc = state.relationship_store.read().unwrap().clone();
+                if let Some(store) = store_arc.as_ref() {
+                    generate_context_markdown(world_state, store, dream_thought.as_deref())
+                } else {
+                    generate_context_markdown_no_relationship(world_state, dream_thought.as_deref())
+                }
             };
 
             // 读取决策上下文快照（enrichment）
@@ -670,7 +673,8 @@ pub(super) async fn submit_intent_handler(
 pub(super) async fn get_relationships_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let store = match &state.relationship_store {
+    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
             return (
@@ -702,7 +706,8 @@ pub(super) async fn get_relationship_handler(
     State(state): State<HttpApiState>,
     AxumPath(id): AxumPath<String>,
 ) -> impl IntoResponse {
-    let store = match &state.relationship_store {
+    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
             return (
@@ -738,7 +743,8 @@ pub(super) async fn update_relationship_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<RelationshipUpdateRequest>,
 ) -> impl IntoResponse {
-    let store = match &state.relationship_store {
+    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
             return (
@@ -836,7 +842,8 @@ pub(super) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> i
 pub(super) async fn get_recent_memory_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let manager = match &state.memory_manager {
+    let manager_arc = state.memory_manager.read().unwrap().clone();
+    let manager = match manager_arc.as_ref() {
         Some(m) => m,
         None => {
             return (
@@ -859,7 +866,8 @@ pub(super) async fn search_memory_handler(
     State(state): State<HttpApiState>,
     Json(request): Json<super::dto::MemorySearchRequest>,
 ) -> impl IntoResponse {
-    let manager = match &state.memory_manager {
+    let manager_arc = state.memory_manager.read().unwrap().clone();
+    let manager = match manager_arc.as_ref() {
         Some(m) => m,
         None => {
             return (
@@ -892,7 +900,8 @@ pub(super) async fn store_memory_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<super::dto::MemoryStoreRequest>,
 ) -> impl IntoResponse {
-    let manager = match &state.memory_manager {
+    let manager_arc = state.memory_manager.read().unwrap().clone();
+    let manager = match manager_arc.as_ref() {
         Some(m) => m,
         None => {
             return (
@@ -1698,6 +1707,7 @@ pub(super) async fn register_character_handler(
                 let server_ws_url = state.server_ws_url.read().await.clone();
                 let reconnect_req = super::ReconnectRequest {
                     ws_url: server_ws_url,
+                    agent_id: Some(agent_uuid),
                 };
                 if let Err(e) = tx.send(reconnect_req) {
                     error!("[character] 注册后触发重连失败: {}", e);
@@ -2062,19 +2072,28 @@ pub(super) async fn get_character_by_id_handler(
 pub struct AttributeMetaResponse {
     /// 属性分类
     pub categories: HashMap<String, Vec<String>>,
+    /// 属性显示名称映射
+    pub display_names: HashMap<String, String>,
 }
 
 pub(super) async fn get_attribute_meta_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let categories = state
-        .narrative_config
-        .read()
-        .await
-        .as_ref()
+    let narrative_guard = state.narrative_config.read().await;
+    let narrative = narrative_guard.as_ref();
+    
+    let categories = narrative
         .map(|c| c.attribute_categories.clone())
         .unwrap_or_default();
-    Json(AttributeMetaResponse { categories }).into_response()
+        
+    let mut display_names = HashMap::new();
+    if let Some(n) = narrative {
+        for (key, attr) in &n.attributes {
+            display_names.insert(key.clone(), attr.display_name.clone());
+        }
+    }
+        
+    Json(AttributeMetaResponse { categories, display_names }).into_response()
 }
 
 /// 丰富属性数据，添加叙事描述
@@ -2621,6 +2640,7 @@ pub(super) async fn rebirth_character_handler(
         let server_ws_url = state.server_ws_url.read().await.clone();
         let reconnect_req = super::ReconnectRequest {
             ws_url: server_ws_url,
+            agent_id: None,
         };
         if let Err(e) = tx.send(reconnect_req) {
             error!("发送重连请求失败: {}", e);
@@ -3111,7 +3131,7 @@ pub(super) async fn list_characters_handler(
                 last_connected_world_time: c
                     .last_connected_world_time
                     .as_ref()
-                    .map(|wt| format!("{}年{}月{}日 {}时", wt.year, wt.month, wt.day, wt.hour)),
+                    .map(|wt| wt.to_chinese()),
             }
         })
         .collect();
@@ -3226,20 +3246,106 @@ pub(super) async fn switch_character_handler(
         .is_dead
         .store(false, std::sync::atomic::Ordering::Relaxed);
 
-    // 重建 intent_history 以指向新角色的 SQLite 数据库
+    // 重建各类强相关的数据存储
     {
         let characters_dir = state.character_dir.read().await.clone();
         let data_dir = characters_dir.join(agent_id.to_string()).join("data");
-        let new_history = super::intent_history::IntentHistoryStore::open(
+        
+        // 1. Intent History (Fail Fast)
+        let new_history = match super::intent_history::IntentHistoryStore::open(
             agent_id,
             &data_dir.join(format!("intent_history_{}.db", agent_id)),
-        )
-        .ok()
-        .map(std::sync::Arc::new);
+        ) {
+            Ok(store) => Some(std::sync::Arc::new(store)),
+            Err(e) => {
+                tracing::error!("切换角色失败: 无法打开 IntentHistoryStore - {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(SwitchCharacterResponse {
+                        success: false,
+                        message: format!("意图历史数据库加载失败: {}", e),
+                        character: None,
+                    }),
+                )
+                    .into_response();
+            }
+        };
         *state.intent_history.write().await = new_history;
+
+        // 2. Relationship Store (Fail Fast)
+        let new_rel = match crate::component::social::RelationshipStore::open(
+            agent_id,
+            &data_dir.join(format!("relationships_{}.db", agent_id)),
+        ) {
+            Ok(store) => Some(std::sync::Arc::new(store)),
+            Err(e) => {
+                tracing::error!("切换角色失败: 无法打开 RelationshipStore - {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(SwitchCharacterResponse {
+                        success: false,
+                        message: format!("关系数据库加载失败: {}", e),
+                        character: None,
+                    }),
+                )
+                    .into_response();
+            }
+        };
+        *state.relationship_store.write().unwrap() = new_rel;
+
+        // 3. Memory Manager (Fail Fast)
+        if let Some(template) = &state.memory_config_template {
+            let mut config = template.clone();
+            config.agent_id = agent_id;
+            config.db_dir = data_dir.clone();
+            
+            let new_mem = match crate::component::memory::MemoryManager::new(config) {
+                Ok(manager) => Some(std::sync::Arc::new(tokio::sync::Mutex::new(manager))),
+                Err(e) => {
+                    tracing::error!("切换角色失败: 无法初始化 MemoryManager - {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(SwitchCharacterResponse {
+                            success: false,
+                            message: format!("记忆数据库加载失败: {}", e),
+                            character: None,
+                        }),
+                    )
+                        .into_response();
+                }
+            };
+            *state.memory_manager.write().unwrap() = new_mem;
+        }
+        
+        // 4. Dream Store (按需加载，从文件读取)
+        if let Some(ref dream_store) = state.dream_store {
+            let mut dream = dream_store.write().await;
+            if let Some(new_dream) = super::handlers::DreamState::load_from_file(
+                &data_dir,
+                &agent_id,
+            ) {
+                *dream = new_dream;
+            } else {
+                *dream = super::handlers::DreamState::default();
+            }
+        }
     }
 
     info!("[character] 切换到角色: {} ({})", character.name, agent_id);
+
+    // 触发 WebSocket 重连以切换到新角色
+    if let Some(ref tx) = state.reconnect_tx {
+        let server_ws_url = state.server_ws_url.read().await.clone();
+        let reconnect_req = super::ReconnectRequest {
+            ws_url: server_ws_url,
+            agent_id: Some(agent_id),
+        };
+        if let Err(e) = tx.send(reconnect_req) {
+            error!("[character] 切换角色后触发重连失败: {}", e);
+        } else {
+            info!("[character] 切换角色后触发 WebSocket 重连");
+        }
+    }
 
     Json(SwitchCharacterResponse {
         success: true,
@@ -3261,7 +3367,7 @@ pub(super) async fn switch_character_handler(
             last_connected_world_time: character
                 .last_connected_world_time
                 .as_ref()
-                .map(|wt| format!("{}年{}月{}日 {}时", wt.year, wt.month, wt.day, wt.hour)),
+                .map(|wt| wt.to_chinese()),
         }),
     })
     .into_response()
@@ -3776,6 +3882,7 @@ pub(super) async fn set_server_handler(
     if let Some(ref tx) = state.reconnect_tx {
         let reconnect_req = super::ReconnectRequest {
             ws_url: req.ws_url.clone(),
+            agent_id: None,
         };
         if let Err(e) = tx.send(reconnect_req) {
             error!("发送重连请求失败: {}", e);
@@ -4134,6 +4241,7 @@ pub(super) async fn update_llm_config_handler(
         soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
         narrative_window_size: config.llm.narrative_window_size,
         enable_streaming: config.llm.enable_streaming,
+        reflector_narrative: config.llm.reflector_narrative,
     };
 
     // 更新 reflector 配置
@@ -4163,6 +4271,7 @@ pub(super) async fn update_llm_config_handler(
             soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
             narrative_window_size: config.llm.narrative_window_size,
             enable_streaming: config.llm.enable_streaming,
+            reflector_narrative: config.llm.reflector_narrative,
         });
     }
 
@@ -4289,7 +4398,8 @@ pub(super) async fn get_cognitive_context_handler(
                 (None, None)
             };
 
-            let relationship_store = state.relationship_store.as_deref();
+            let store_arc = state.relationship_store.read().unwrap().clone();
+            let relationship_store = store_arc.as_deref();
             let cognitive_context =
                 builder.build_with_persona(world_state, persona_ref.as_ref(), relationship_store);
 

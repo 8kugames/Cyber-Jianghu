@@ -59,6 +59,7 @@ use anyhow::Context;
 #[derive(Debug, Clone)]
 pub struct ReconnectRequest {
     pub ws_url: String,
+    pub agent_id: Option<Uuid>,
 }
 
 // 导入 handlers 中的 DreamState
@@ -149,13 +150,15 @@ pub struct HttpApiState {
     /// 对话客户端，处理 Agent 间对话
     pub dialogue_client: Option<Arc<DialogueClient>>,
     /// 关系存储，持久化存储与其他 Agent 的关系记忆
-    pub relationship_store: Option<Arc<RelationshipStore>>,
+    pub relationship_store: Arc<std::sync::RwLock<Option<Arc<RelationshipStore>>>>,
     /// 寿命计算器，计算年龄和老化效果
     /// 需要 Mutex 支持内部状态修改
     pub lifespan_calculator: Option<Arc<Mutex<LifespanCalculator>>>,
     /// 记忆管理器，管理工作记忆、情景记忆和语义记忆
     /// 需要 Mutex 支持异步操作
-    pub memory_manager: Option<Arc<Mutex<MemoryManager>>>,
+    pub memory_manager: Arc<std::sync::RwLock<Option<Arc<Mutex<MemoryManager>>>>>,
+    /// 记忆管理器基础配置模板（用于热切角色）
+    pub memory_config_template: Option<crate::component::memory::MemoryManagerConfig>,
     /// 意图验证器，验证意图是否符合人设
     pub intent_validator: Option<Arc<dyn Validator>>,
     /// 叙事生成器（可选，仅在有 LlmClient 时可用）
@@ -665,16 +668,18 @@ pub fn create_http_state(
         .ok()
         .map(Arc::new)
     };
+    let relationship_store = Arc::new(std::sync::RwLock::new(relationship_store));
 
     // 初始化记忆管理器（语义搜索已实现，见 SemanticMemoryBackend）
-    let memory_config = MemoryManagerConfig {
+    let memory_config_template = MemoryManagerConfig {
         agent_id: current_agent_id,
         db_dir: data_dir.clone(),
         ..Default::default()
     };
-    let memory_manager = MemoryManager::new(memory_config)
+    let memory_manager = MemoryManager::new(memory_config_template.clone())
         .ok()
         .map(|m| Arc::new(Mutex::new(m)));
+    let memory_manager = Arc::new(std::sync::RwLock::new(memory_manager));
 
     // 初始化寿命计算器（使用默认配置）
     let lifespan_calculator = Some(Arc::new(Mutex::new(
@@ -751,17 +756,25 @@ pub fn create_http_state(
         relationship_store,
         lifespan_calculator,
         memory_manager,
+        memory_config_template: Some(memory_config_template),
         intent_validator,
         narrative_generator: None,
         dynamic_persona: None,
         review_store: None, // 由 Player Agent 通过 builder 设置
         intent_history: Arc::new(RwLock::new(
-            intent_history::IntentHistoryStore::open(
+            match intent_history::IntentHistoryStore::open(
                 current_agent_id,
                 &data_dir_clone.join(format!("intent_history_{}.db", current_agent_id)),
-            )
-            .ok()
-            .map(Arc::new),
+            ) {
+                Ok(store) => Some(Arc::new(store)),
+                Err(e) => {
+                    tracing::error!("Failed to open IntentHistoryStore: {}", e);
+                    // Depending on context, we might want to panic here if it's a hard requirement,
+                    // but since this is state creation, we'll log it and leave it None to avoid crashing
+                    // the whole node on startup if a single agent's DB is corrupted.
+                    None
+                }
+            }
         )),
         soul_cycle_registrar: soul_cycle_registrar.clone(),
         data_dir: data_dir_clone.clone(),
@@ -797,7 +810,7 @@ impl HttpApiState {
 
     /// 设置关系存储
     pub fn with_relationship_store(mut self, store: Arc<RelationshipStore>) -> Self {
-        self.relationship_store = Some(store);
+        self.relationship_store = Arc::new(std::sync::RwLock::new(Some(store)));
         self
     }
 
@@ -809,7 +822,7 @@ impl HttpApiState {
 
     /// 设置记忆管理器
     pub fn with_memory_manager(mut self, manager: MemoryManager) -> Self {
-        self.memory_manager = Some(Arc::new(Mutex::new(manager)));
+        self.memory_manager = Arc::new(std::sync::RwLock::new(Some(Arc::new(Mutex::new(manager)))));
         self
     }
 
@@ -914,7 +927,8 @@ impl HttpApiState {
             return; // 没有 LlmClient，跳过
         };
 
-        let Some(store) = &self.relationship_store else {
+        let store_guard = self.relationship_store.read().unwrap();
+        let Some(store) = store_guard.as_ref() else {
             return;
         };
 
