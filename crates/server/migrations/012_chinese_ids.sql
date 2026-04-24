@@ -4,7 +4,7 @@
 
 -- 1. items 表 item_id 迁移（必须先于外键引用表）
 UPDATE items SET item_id = '馒头' WHERE item_id = 'mantou';
-UPDATE items SET item_id = '清水' WHERE item_id = 'water';
+UPDATE items SET item_id = '水' WHERE item_id = 'water';
 UPDATE items SET item_id = '银子' WHERE item_id = 'silver';
 UPDATE items SET item_id = '刀' WHERE item_id = 'knife';
 UPDATE items SET item_id = '木剑' WHERE item_id = 'wooden_sword';
@@ -26,7 +26,7 @@ UPDATE agent_states SET node_id = '酒泉' WHERE node_id = 'jiuquan';
 
 -- 3. 背包 item_id 迁移
 UPDATE agent_inventory SET item_id = '馒头' WHERE item_id = 'mantou';
-UPDATE agent_inventory SET item_id = '清水' WHERE item_id = 'water';
+UPDATE agent_inventory SET item_id = '水' WHERE item_id = 'water';
 UPDATE agent_inventory SET item_id = '银子' WHERE item_id = 'silver';
 UPDATE agent_inventory SET item_id = '刀' WHERE item_id = 'knife';
 UPDATE agent_inventory SET item_id = '木剑' WHERE item_id = 'wooden_sword';
@@ -39,7 +39,7 @@ UPDATE agent_inventory SET item_id = '李广杏干' WHERE item_id = 'dried_li_gu
 
 -- 4. 地面物品 item_id 迁移
 UPDATE ground_items SET item_id = '馒头' WHERE item_id = 'mantou';
-UPDATE ground_items SET item_id = '清水' WHERE item_id = 'water';
+UPDATE ground_items SET item_id = '水' WHERE item_id = 'water';
 UPDATE ground_items SET item_id = '银子' WHERE item_id = 'silver';
 UPDATE ground_items SET item_id = '刀' WHERE item_id = 'knife';
 UPDATE ground_items SET item_id = '木剑' WHERE item_id = 'wooden_sword';
