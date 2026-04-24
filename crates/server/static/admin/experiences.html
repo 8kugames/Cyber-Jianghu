@@ -300,6 +300,21 @@
             margin-bottom: 0;
         }
 
+        /* 解决嵌套三魂流转的横向平铺问题 */
+        .tick-attempts-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .tick-attempt-box {
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+        }
+
         .tick-section-title {
             font-size: 10px;
             font-weight: 700;
@@ -312,7 +327,9 @@
         .tick-attempt-label {
             font-size: 11px;
             color: var(--text-subtle);
-            margin-bottom: 4px;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed var(--border-color);
         }
 
         .exp-renhun, .exp-tianhun, .exp-action {
@@ -493,6 +510,7 @@
         <button id="next-btn" class="btn btn-secondary" onclick="changePage(1)">下一页</button>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/auth.js"></script>
     <script src="js/agents.js"></script>
@@ -573,6 +591,7 @@
 
                 // 序列化时转义，防止恶意 agent_name 注入
                 const safeEntry = JSON.stringify(entry).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+                // Check if entry has soul_cycle_metadata properly
                 return `<div class="exp-card" data-entry='${safeEntry}'>
                     <div class="exp-card-header">
                         <span class="tick-badge">T${entry.tick_id}</span>
@@ -600,7 +619,14 @@
                 // 首次展开：懒加载完整内容
                 if (!detail.innerHTML || detail.innerHTML === '') {
                     const entry = JSON.parse(card.dataset.entry);
-                    detail.innerHTML = renderTickCard(entry, entry.soul_cycle_metadata, '');
+                    const metadata = entry.soul_cycle_metadata || {};
+                    // Use renderTickCard directly if it's the full structure, or fallback if empty
+                    if (metadata.cycles && metadata.cycles.length > 0) {
+                        detail.innerHTML = renderTickCard(entry, metadata, '');
+                    } else {
+                        // Create a mock experiences structure so renderExperiences can be reused for the fallback
+                        detail.innerHTML = renderExperiences({experiences: [entry]});
+                    }
                 }
                 detail.style.display = 'block';
                 icon.textContent = '▲';
@@ -689,7 +715,19 @@
         }
 
         // 页面加载时初始化
-        initFilters().then(() => loadExperiences());
+        initFilters().then(() => {
+            if (Object.keys(locationNames).length === 0) {
+                initLocationMapping();
+            }
+            if (Object.keys(attributeMeta).length === 0) {
+                initAttributeMeta();
+            }
+            if (Object.keys(actionTypeMap).length === 0) {
+                loadActionTypeMap().then(() => loadExperiences());
+            } else {
+                loadExperiences();
+            }
+        });
     </script>
 </body>
 </html>
