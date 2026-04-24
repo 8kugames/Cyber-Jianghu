@@ -111,7 +111,7 @@ function renderWorldTree() {
         const lastRealTime = firstChar.last_connected_real_time
             ? new Date(firstChar.last_connected_real_time).toLocaleString('zh-CN')
             : '-';
-        const lastWorldTime = firstChar.last_connected_world_time || '-';
+        const lastWorldTime = formatWorldTime(firstChar.last_connected_world_time);
 
         html += `
             <div class="server-group">
@@ -336,57 +336,9 @@ async function loadCharacterIntoDrawer(char) {
         `;
     }
 
-    // 属性（使用 renderAttrItem 统一渲染）
+    // 属性（使用 generateAttributesHtml 统一渲染）
     if (charData.attributes) {
-        const categories = attributeMeta ? attributeMeta.categories : null;
-        let attrHtml = '';
-
-        if (categories && (categories.primary?.length || categories.status?.length)) {
-            const primaryList = categories.primary || [];
-            const statusList = categories.status || [];
-            if (primaryList.length > 0) {
-                attrHtml += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-                primaryList.forEach(key => { attrHtml += renderAttrItem(key, charData.attributes[key], false); });
-                attrHtml += '</div></div>';
-            }
-            if (statusList.length > 0) {
-                attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-                statusList.forEach(key => { attrHtml += renderAttrItem(key, charData.attributes[key], true); });
-                attrHtml += '</div></div>';
-            }
-        } else {
-            // 无分类信息，自动分组
-            const statusAttrs = [];
-            const otherAttrs = [];
-            Object.entries(charData.attributes).forEach(([key, val]) => {
-                if (key.endsWith('_max')) return;
-                if (val && typeof val === 'object' && val.max !== undefined) {
-                    statusAttrs.push([key, val]);
-                } else {
-                    otherAttrs.push([key, val]);
-                }
-            });
-            if (otherAttrs.length > 0) {
-                attrHtml += '<div class="attr-section"><h4>属性</h4><div class="attr-group">';
-                otherAttrs.forEach(([k, v]) => { attrHtml += renderAttrItem(k, v, false); });
-                attrHtml += '</div></div>';
-            }
-            if (statusAttrs.length > 0) {
-                attrHtml += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-                statusAttrs.forEach(([k, v]) => { attrHtml += renderAttrItem(k, v, true); });
-                attrHtml += '</div></div>';
-            }
-        }
-
-        // 派生属性
-        if (charData.derived_attributes) {
-            attrHtml += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-            Object.entries(charData.derived_attributes).forEach(([key, value]) => {
-                attrHtml += renderAttrItem(key, value, false);
-            });
-            attrHtml += '</div></div>';
-        }
-
+        const attrHtml = generateAttributesHtml(charData.attributes, charData.derived_attributes);
         if (attrHtml) {
             html += `
                 <section class="drawer-section">
@@ -425,7 +377,7 @@ async function loadCharacterIntoDrawer(char) {
 
     // 经历日志（所有角色均可查看，通过 agent_id 加载各自 SQLite）
     try {
-        const expData = await apiGet('/api/v1/character/soul-cycles?agent_id=' + char.agent_id + '&page=1&limit=3');
+        const expData = await apiGet('/api/v1/character/soul-cycles?agent_id=' + char.agent_id + '&page=1&limit=1000');
         const recordsMap = expData.records || {};
         const immMap = expData.immediate_intents || {};
         const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
@@ -541,6 +493,8 @@ async function loadCharacter() {
         document.getElementById('appearance').textContent = data.appearance || '-';
         document.getElementById('location').textContent = data.location || '-';
         document.getElementById('tick-id').textContent = data.tick_id || '-';
+        document.getElementById('agent-id').textContent = data.agent_id || '-';
+        document.getElementById('server-url').textContent = data.server_url ? data.server_url.replace(/^https?:\/\//, '').split('/')[0] : '-';
 
         if (data.status) {
             const statusEl = document.getElementById('status');
@@ -624,21 +578,93 @@ async function loadCharacter() {
 
 // 渲染单个属性行
 function renderAttrItem(key, attr, withMax) {
+    let name = key;
+    if (attr && attr.name) {
+        name = attr.name;
+    } else if (attributeMeta && attributeMeta.display_names && attributeMeta.display_names[key]) {
+        name = attributeMeta.display_names[key];
+    }
+    
     if (attr && typeof attr === 'object' && attr.current !== undefined) {
         if (withMax && attr.max !== undefined && attr.max !== null) {
             const pct = attr.max > 0 ? Math.round((attr.current / attr.max) * 100) : 0;
             const cls = pct > 70 ? 'attr-high' : pct > 30 ? 'attr-medium' : 'attr-low';
-            return `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${attr.current}/${attr.max}</span></div>`;
+            return `<div class="attr-item ${cls}" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(name)}</span><span class="attr-value">${attr.current}/${attr.max}</span></div>`;
         }
         const displayVal = (typeof attr.current === 'number' && !Number.isInteger(attr.current))
             ? attr.current.toFixed(3) : attr.current;
-        return `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(attr.name || key)}</span><span class="attr-value">${displayVal}</span></div>`;
+        return `<div class="attr-item" title="${escapeHtml(attr.description || '')}"><span class="attr-name">${escapeHtml(name)}</span><span class="attr-value">${displayVal}</span></div>`;
     }
     // 兜底：原始数值型属性（非 enriched）
     if (attr !== undefined && attr !== null && typeof attr !== 'object') {
-        return `<div class="attr-item"><span class="attr-name">${escapeHtml(key)}</span><span class="attr-value">${attr}</span></div>`;
+        const displayVal = (typeof attr === 'number' && !Number.isInteger(attr)) ? attr.toFixed(3) : attr;
+        return `<div class="attr-item"><span class="attr-name">${escapeHtml(name)}</span><span class="attr-value">${displayVal}</span></div>`;
     }
     return '';
+}
+
+function generateAttributesHtml(attributes, derivedAttributes) {
+    if (!attributes) return '';
+
+    let html = '';
+    
+    // Helper to get category
+    const getCategory = (key) => {
+        if (attributeMeta && attributeMeta.categories) {
+            for (const [cat, keys] of Object.entries(attributeMeta.categories)) {
+                if (keys.includes(key)) return cat;
+            }
+        }
+        return null;
+    };
+
+    const primary = [];
+    const status = [];
+    const derived = [];
+    const other = [];
+
+    // Process attributes
+    Object.entries(attributes).forEach(([key, val]) => {
+        if (key.endsWith('_max')) return;
+        const cat = getCategory(key);
+        if (cat === 'primary') primary.push([key, val]);
+        else if (cat === 'status') status.push([key, val]);
+        else if (cat === 'derived') derived.push([key, val]);
+        else other.push([key, val]);
+    });
+
+    // Process derivedAttributes
+    if (derivedAttributes) {
+        Object.entries(derivedAttributes).forEach(([key, val]) => {
+            const cat = getCategory(key);
+            if (cat === 'primary') primary.push([key, val]);
+            else if (cat === 'status') status.push([key, val]);
+            else derived.push([key, val]);
+        });
+    }
+
+    if (primary.length > 0) {
+        html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
+        primary.forEach(([k, v]) => { html += renderAttrItem(k, v, v && v.max !== undefined); });
+        html += '</div></div>';
+    }
+    if (status.length > 0) {
+        html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
+        status.forEach(([k, v]) => { html += renderAttrItem(k, v, true); });
+        html += '</div></div>';
+    }
+    if (derived.length > 0) {
+        html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
+        derived.forEach(([k, v]) => { html += renderAttrItem(k, v, false); });
+        html += '</div></div>';
+    }
+    if (other.length > 0) {
+        html += '<div class="attr-section"><h4>其他属性</h4><div class="attr-group">';
+        other.forEach(([k, v]) => { html += renderAttrItem(k, v, v && v.max !== undefined); });
+        html += '</div></div>';
+    }
+
+    return html;
 }
 
 // 渲染属性（含分类和无分类兜底）
@@ -648,66 +674,7 @@ function renderAttributes(attributes, derivedAttributes) {
         attrsEl.innerHTML = '<p class="no-data">暂无属性数据</p>';
         return;
     }
-
-    const categories = attributeMeta ? attributeMeta.categories : null;
-    let html = '';
-
-    if (categories && (categories.primary?.length || categories.status?.length || categories.derived?.length)) {
-        // 有分类信息，按分类渲染
-        const primaryList = categories.primary || [];
-        const statusKeys = new Set(categories.status || []);
-        const derivedList = categories.derived || [];
-
-        if (primaryList.length > 0) {
-            html += '<div class="attr-section"><h4>先天属性</h4><div class="attr-group">';
-            primaryList.forEach(key => { html += renderAttrItem(key, attributes[key], false); });
-            html += '</div></div>';
-        }
-        if (statusKeys.size > 0) {
-            html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-            statusKeys.forEach(key => { html += renderAttrItem(key, attributes[key], true); });
-            html += '</div></div>';
-        }
-        const derivedSource = derivedAttributes || {};
-        if (derivedList.length > 0) {
-            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-            derivedList.forEach(key => {
-                const attr = derivedSource[key] || attributes[key];
-                html += renderAttrItem(key, attr, false);
-            });
-            html += '</div></div>';
-        }
-    } else {
-        // 无分类信息：自动将属性分为有 max 的（状态）和无 max 的（先天/派生）
-        const statusAttrs = [];
-        const otherAttrs = [];
-        Object.entries(attributes).forEach(([key, val]) => {
-            if (key.endsWith('_max')) return;
-            if (val && typeof val === 'object' && val.max !== undefined) {
-                statusAttrs.push([key, val]);
-            } else {
-                otherAttrs.push([key, val]);
-            }
-        });
-        if (otherAttrs.length > 0) {
-            html += '<div class="attr-section"><h4>属性</h4><div class="attr-group">';
-            otherAttrs.forEach(([k, v]) => { html += renderAttrItem(k, v, false); });
-            html += '</div></div>';
-        }
-        if (statusAttrs.length > 0) {
-            html += '<div class="attr-section"><h4>状态属性</h4><div class="attr-group">';
-            statusAttrs.forEach(([k, v]) => { html += renderAttrItem(k, v, true); });
-            html += '</div></div>';
-        }
-        // 派生属性（有 derivedAttributes 时）
-        if (derivedAttributes && Object.keys(derivedAttributes).length > 0) {
-            html += '<div class="attr-section"><h4>派生属性</h4><div class="attr-group">';
-            Object.entries(derivedAttributes).forEach(([k, v]) => { html += renderAttrItem(k, v, false); });
-            html += '</div></div>';
-        }
-    }
-
-    attrsEl.innerHTML = html;
+    attrsEl.innerHTML = generateAttributesHtml(attributes, derivedAttributes);
 }
 
 // 渲染物品（XSS 修复）
@@ -1139,6 +1106,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadRelationships();
         loadMemories();
         loadDreamStatus();
+        loadDreamRecords();
     });
 
     document.getElementById('load-more-experiences-btn').addEventListener('click', loadMoreExperiences);
