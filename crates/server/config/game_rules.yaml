@@ -121,34 +121,36 @@ data:
 
   # 即时事件处理配置
   immediate_events:
-    # 即时路由动作列表（这些动作走即时通道，不占 tick 配额）
-    immediate_routing_actions:
-      - speak
-      - whisper
-    # 即时决策规则（数据驱动）
-    decision_rules:
-      # 当前执行这些动作时，延迟响应
-      conflict_actions:
-        - move
-        - travel
-        - gather
-        - craft
-        - fight
-      # 事件 TTL（ms）：超过此时间的事件视为过期
-      event_ttl_ms: 5000
-      # LLM 认知调用超时（ms），应 < event_ttl_ms
-      cognitive_timeout_ms: 4000
-      # 最大待处理事件队列容量
-      max_pending_events: 32
-      # LLM 调用前的最大事件内容长度（截断长事件）
-      max_event_context_chars: 200
-      # 每 tick 最大即时 LLM 调用次数（防止 O(n²) 扇出）
-      # 超限的事件直接 DeferToMainTick
-      max_llm_calls_per_tick: 9
-      # 每 tick 最大即时意图发送次数（含 RespondNow + 天魂 speech routing）
-      max_immediate_intents_per_tick: 3
-      # 即时意图优先级（高于普通 tick 意图）
-      immediate_intent_priority: 10
+    # 事件 triage 配置（DB 持久化 + Session LLM 分流）
+    event_triage:
+      # Session 生命周期
+      lifecycle: game_day
+      # 无事件时的兜底轮询间隔（秒）
+      poll_interval_secs: 10
+      # 收到事件后的收集窗口（秒）
+      debounce_secs: 3
+      # 单次 triage LLM 调用超时（ms）
+      triage_llm_timeout_ms: 10000
+      # SQL 预筛
+      pre_filter:
+        max_events_per_triage: 50
+        default_priority: 0
+        event_type_priority:
+          death_notification: 100
+          private_dialogue: 80
+          social_interaction: 60
+          state_change: 50
+          action_result: 40
+          public_message: 20
+          environmental_change: 10
+          system_notification: 10
+          time_update: 5
+      # 主 tick 上下文注入
+      context:
+        max_urgent_events: 5
+        max_batch_summary_chars: 500
+      # 保留最近 N 个游戏日的事件
+      retention_game_days: 3
 
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述

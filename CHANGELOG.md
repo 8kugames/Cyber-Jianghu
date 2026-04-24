@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Agent**: 地魂记忆回溯工具接入
+  - 在 `EarthToolExecutor` 中实装了 `search_memory` 和 `recall_archived`
+  - 通过 `Arc<tokio::sync::RwLock<MemoryManager>>` 解决了记忆管理器的并发所有权问题
+  - 将 `MemoryManager` 实例注入到 `CognitiveEngine` 和地魂工具池中
+  - 支持 LLM 在思考过程中按需检索情景与语义记忆
+
 ### ⚠️ Breaking Changes
 
 - **Agent**: `MemoryBackend::add()` 签名破坏性变更
@@ -46,6 +54,21 @@
 
 - **Server**: 配置文件 `world-building-rules.yaml` 重命名为 `world_building_rules.yaml`（snake_case 统一）
   - 旧文件名不再生效
+
+- **Agent**: 即时事件架构全面重写：内存队列 → SQLite 持久化 + Session Triage LLM
+  - 旧架构: `Vec<WorldEvent>` (capacity 32) 内存队列 + per-event LLM triage (4s timeout) + `RespondNow` 即时回应
+  - 新架构: EventStore (SQLite WAL) + SessionTriageEngine (每游戏日后台任务，批量 LLM triage) + Notify 信号
+  - `ImmediateEventHandler` 职责简化为: 收消息 → DB 写入 + Notify 信号（纯 IO，<1ms）
+  - 主 tick 消费 triaged 事件: urgent 逐条注入 memory_context，batch 摘要格式注入
+  - 移除 `RespondNow`: 所有回应由主 tick 统一决策（60s 确定性 > 5s best-effort）
+  - `ImmediateEventConfig` 新增 `event_triage: Option<EventTriageConfig>` 配置段
+  - `WorldEventType` 新增 `Hash` derive（HashMap key）
+  - `game_rules.yaml` 新增 `event_triage` 配置节（lifecycle / pre_filter / context / retention）
+  - `GameRules` 新增 `calendar: Option<CalendarConfig>` 字段（数据驱动 game_day 计算）
+  - `WorldTime` struct 注释修正（month/day/hour 范围由 time.yaml 控制，非固定 1-12/1-30/0-23）
+  - 移除 `ImmediateDecisionRules` / `immediate_routing_actions` 旧架构死代码（~100 行 Rust + 30 行 YAML）
+  - `mark_processed` 改为按 ID 精确标记（`mark_processed_by_ids`），消除与后台 triage 竞态
+  - Agent `close()` 正确终止 `session_triage_handle` 后台任务
 
 ### Added
 

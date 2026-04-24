@@ -206,17 +206,7 @@ impl super::Agent {
                                 engine.update_action_aliases(&game_rules.available_actions);
                             }
 
-                            // 重新注入 rule_validator（available_actions 可能已变更）
-                            self.inject_rule_validator(&game_rules.available_actions)
-                                .await;
-
-                            // 重新绑定即时意图通道（WebSocket 重连后创建了新通道）
-                            if let Some(ref handler) = self.immediate_handler
-                                && let Some(tx) = self.client.intent_sender().await
-                            {
-                                handler.replace_intent_channel(tx).await;
-                                info!("reconnect: 即时意图通道已重新绑定");
-                            }
+                            // 新架构：即时事件处理器无需重新绑定（EventStore 是持久化的）
                         }
                         Ok(None) => {
                             // agent_id 为 nil，等待角色注册，保持连接

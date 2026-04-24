@@ -122,6 +122,12 @@ pub fn build_game_rules_from_config(
         immediate_events,
         rebirth_delay_ticks,
         lifespan: None, // ConfigUpdate 路径不含 lifespan，由注册时下发
+        calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {
+            cyber_jianghu_protocol::CalendarConfig {
+                days_per_season: tc.days_per_season as u32,
+                seasons_per_year: tc.seasons_per_year as u32,
+            }
+        }),
     }
 }
 
