@@ -43,6 +43,9 @@ impl MemoryStore {
         // 渐进式迁移：添加遗忘机制所需的新列
         Self::migrate_forgetting_columns(&conn)?;
 
+        // 渐进式迁移：添加 embedding 向量列
+        Self::migrate_embedding_column(&conn)?;
+
         Ok(Self {
             conn,
             db_path,
@@ -136,6 +139,52 @@ impl MemoryStore {
         }
 
         Ok(())
+    }
+
+    /// 渐进式迁移：添加 embedding 向量列（幂等操作）
+    fn migrate_embedding_column(conn: &Connection) -> Result<()> {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('client_memories') WHERE name='embedding'",
+                [],
+                |row| row.get(0),
+            )
+            .context("Failed to check embedding column existence")?;
+
+        if exists == 0 {
+            conn.execute(
+                "ALTER TABLE client_memories ADD COLUMN embedding BLOB",
+                [],
+            )
+            .context("Failed to add embedding column")?;
+        }
+
+        Ok(())
+    }
+
+    /// 更新记忆的 embedding 向量
+    pub fn update_embedding(&self, memory_id: i64, embedding: &[u8]) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE client_memories SET embedding = ?1 WHERE id = ?2",
+                params![embedding, memory_id],
+            )
+            .context("Failed to update embedding")?;
+        Ok(())
+    }
+
+    /// 获取记忆的 embedding 向量
+    pub fn get_embedding(&self, memory_id: i64) -> Result<Option<Vec<u8>>> {
+        let embedding = self
+            .conn
+            .query_row(
+                "SELECT embedding FROM client_memories WHERE id = ?1 AND embedding IS NOT NULL",
+                params![memory_id],
+                |row| row.get::<_, Option<Vec<u8>>>(0),
+            )
+            .optional()
+            .context("Failed to get embedding")?;
+        Ok(embedding.unwrap_or(None))
     }
 
     /// 添加记忆
