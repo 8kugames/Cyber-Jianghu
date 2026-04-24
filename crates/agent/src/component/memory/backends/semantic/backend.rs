@@ -8,6 +8,7 @@ use crate::component::memory::types::MemoryEntry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -29,6 +30,8 @@ pub struct SemanticMemoryBackend {
     episodic_conn: Mutex<rusqlite::Connection>,
     embedder: Arc<EmbedderService>,
     use_vector: Mutex<bool>,
+    /// 索引是否需要重建（AtomicBool 允许无锁检查，避免每次 search 都加锁）
+    needs_rebuild: Arc<AtomicBool>,
 }
 
 impl SemanticMemoryBackend {
@@ -70,6 +73,7 @@ impl SemanticMemoryBackend {
             episodic_conn: Mutex::new(episodic_conn),
             embedder,
             use_vector: Mutex::new(use_vector),
+            needs_rebuild: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -115,6 +119,18 @@ impl SemanticMemoryBackend {
         if self.is_vector_mode() {
             match self.embedder.embed(&params.query).await {
                 Ok(vector) => {
+                    // 通过 AtomicBool 检查是否需要重建（无需获取锁）
+                    let rebuild = self.needs_rebuild.load(Ordering::SeqCst);
+
+                    if rebuild {
+                        self.needs_rebuild.store(false, Ordering::SeqCst);
+                        // rebuild_index 是 CPU 密集操作
+                        // AtomicBool 标记确保 rebuild 只触发一次（后续 search 直接返回）
+                        let mut vector_store = self.vector_store.lock().unwrap();
+                        vector_store.rebuild_index();
+                        drop(vector_store);
+                    }
+
                     let mut vector_store = self.vector_store.lock().unwrap();
                     match vector_store.search(&vector, params.limit) {
                         Ok(results) => {
@@ -193,10 +209,11 @@ impl MemoryBackend for SemanticMemoryBackend {
             .context("Failed to write embedding to episodic DB")?;
         }
 
-        // 添加到 HNSW 内存索引
+        // 添加到 HNSW 内存索引，并标记需要重建
         {
             let mut vs = self.vector_store.lock().unwrap();
             vs.add(mem_id, embedding)?;
+            self.needs_rebuild.store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
         // 标记使用向量模式

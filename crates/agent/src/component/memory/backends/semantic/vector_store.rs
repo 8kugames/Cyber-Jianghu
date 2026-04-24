@@ -223,6 +223,11 @@ impl HnswVectorStore {
         self.needs_rebuild.set(false);
     }
 
+    /// 检查索引是否需要重建（供外部调用，无需 &mut）
+    pub fn needs_rebuild(&self) -> bool {
+        self.needs_rebuild.get()
+    }
+
     /// 将向量编码为 BLOB
     pub fn encode_vector(vector: &[f32]) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(vector.len() * 4);
