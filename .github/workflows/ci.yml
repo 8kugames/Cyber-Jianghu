@@ -85,7 +85,7 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v2
         if: matrix.use_zigbuild
         with:
-          version: 0.13.0
+          version: 0.16.0
 
       - uses: taiki-e/install-action@v2
         if: matrix.use_zigbuild
