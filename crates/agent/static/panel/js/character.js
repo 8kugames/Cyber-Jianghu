@@ -1011,10 +1011,15 @@ function loadMoreMemories() {
     loadMemories(memoryPage + 1);
 }
 
+function loadMoreDreamRecords() {
+    loadDreamRecords(dreamRecordPage + 1);
+}
+
     // 页面加载
 document.addEventListener('DOMContentLoaded', () => {
     // SSE 连接：实时接收死亡事件（仅对存活角色启用）
     let deathEventSource = null;
+    let sseReconnectTimer = null;
     function connectDeathEvents() {
         deathEventSource = new EventSource('/api/v1/events');
         deathEventSource.addEventListener('connected', () => {
@@ -1044,7 +1049,8 @@ document.addEventListener('DOMContentLoaded', () => {
         deathEventSource.onerror = () => {
             console.warn('SSE connection lost, reconnecting...');
             deathEventSource.close();
-            setTimeout(connectDeathEvents, 5000);
+            if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+            sseReconnectTimer = setTimeout(connectDeathEvents, 5000);
         };
     }
 
@@ -1121,6 +1127,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // 角色抽屉关闭事件
     document.getElementById('char-drawer-close').addEventListener('click', closeCharacterDrawer);
     document.getElementById('character-drawer-overlay').addEventListener('click', closeCharacterDrawer);
+
+    // 页面卸载时清理资源
+    window.addEventListener('beforeunload', () => {
+        stopRefreshTimer();
+        if (deathEventSource) {
+            deathEventSource.close();
+            deathEventSource = null;
+        }
+        if (sseReconnectTimer) {
+            clearTimeout(sseReconnectTimer);
+            sseReconnectTimer = null;
+        }
+    });
 
     // ESC 关闭所有抽屉
     document.addEventListener('keydown', (e) => {
@@ -1200,10 +1219,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             recordsEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
         }
-    }
-
-    function loadMoreDreamRecords() {
-        loadDreamRecords(dreamRecordPage + 1);
     }
 
     // 垂直标签页切换
@@ -1286,12 +1301,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 自动刷新：每秒 1 次（增量刷新，避免闪烁）
     let lastRefreshData = null;
-    setInterval(async () => {
-        const currentChar = allCharacters.find(c => c.is_current);
-        if (currentChar && currentChar.status === 'alive') {
-            await incrementalRefresh();
+    let refreshTimer = null;
+    function startRefreshTimer() {
+        if (refreshTimer) clearInterval(refreshTimer);
+        refreshTimer = setInterval(async () => {
+            const currentChar = allCharacters.find(c => c.is_current);
+            if (currentChar && currentChar.status === 'alive') {
+                await incrementalRefresh();
+            } else {
+                // 角色已死亡或非存活，停止刷新
+                stopRefreshTimer();
+            }
+        }, 1000);
+    }
+    function stopRefreshTimer() {
+        if (refreshTimer) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
         }
-    }, 1000);
+    }
+    startRefreshTimer();
 
     // 增量刷新：只更新变化的字段
     async function incrementalRefresh() {

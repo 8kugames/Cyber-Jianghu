@@ -151,15 +151,15 @@ function renderAgents() {
         var statusText = formatAttrsPretty(agent.attributes || {}, "status");
         var birthText = formatAttrsPretty(agent.birth_attributes || {}, "primary");
 
-        return '<div class="agent-item" onclick="openAgentModal(\'' + agent.id + '\')">' +
+        return '<div class="agent-item" data-agent-id="' + escapeHtml(agent.id) + '" onclick="openAgentModal(\'' + escapeHtml(agent.id) + '\')">' +
 
             '<div class="device-id">' + deviceIdShort + '</div>' +
             '<div class="agent-id">' + agentIdShort + '</div>' +
             '<div class="agent-name">' + escapeHtml(agent.name) + '</div>' +
             '<div class="location">' + escapeHtml(getLocationName(agent.location)) + '</div>' +
-            '<div class="status"><span class="status-badge status-' + agent.status + '">' + getStatusText(agent.status) + '</span></div>' +
+            '<div class="status"><span class="status-badge status-' + escapeHtml(agent.status) + '">' + escapeHtml(getStatusText(agent.status)) + '</span></div>' +
             '<div class="last-active">' + formatLastActive(agent.last_active) + '</div>' +
-            '<div class="last-tick">' + (agent.last_tick_id || '-') + '</div>' +
+            '<div class="last-tick">' + escapeHtml(agent.last_tick_id || '-') + '</div>' +
             '<div class="created-at">' + formatCreatedAt(agent.created_at) + '</div>' +
             '<div class="status-attrs">' + statusText + '</div>' +
             '<div class="birth-attrs">' + birthText + '</div>' +
@@ -286,7 +286,7 @@ function renderBasicInfo(agent) {
 
     return '<div class="basic-info-grid">' +
         '<div class="detail-section">' +
-        '<div class="detail-title">基本信息 <span class="detail-label">ID:</span> <span style="font-family: monospace; font-size: 12px;">' + agent.id + '</span></div>' +
+        '<div class="detail-title">基本信息 <span class="detail-label">ID:</span> <span style="font-family: monospace; font-size: 12px;">' + escapeHtml(agent.id) + '</span></div>' +
         '<div class="detail-grid">' +
         '<div class="detail-item"><span class="detail-label">位置:</span> ' + getLocationName(agent.location) + '</div>' +
         '<div class="detail-item"><span class="detail-label">状态:</span> <span class="status-badge ' + (agent.is_alive ? "status-alive" : "status-dead") + '">' + (agent.is_alive ? "存活" : "死亡") + '</span></div>' +
@@ -327,7 +327,7 @@ function renderExperiences(data) {
 
         var html = '<div class="tick-card">' +
             '<div class="tick-card-header">' +
-            '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+            '<span class="tick-badge">T' + escapeHtml(exp.tick_id || '-') + '</span>' +
             '<span class="tick-real-time">' + time + '</span>' +
             '</div>';
 
@@ -366,7 +366,7 @@ function renderTickCard(exp, metadata, time) {
 
     var html = '<div class="tick-card">' +
         '<div class="tick-card-header">' +
-        '<span class="tick-badge">T' + (exp.tick_id || '-') + '</span>' +
+        '<span class="tick-badge">T' + escapeHtml(exp.tick_id || '-') + '</span>' +
         '<span class="tick-world-time">' + escapeHtml(worldTimeDisplay) + '</span>' +
         '<span class="tick-real-time">' + time + '</span>' +
         '</div>';
@@ -546,7 +546,7 @@ async function renderInventoryManage(agent) {
     }
 
     // Vendor 补货规则配置（仅 write token 可编辑）
-    html += await renderVendorRefillSection(agent.agent_id);
+    html += await renderVendorRefillSection(agent.id);
 
     return html;
 }

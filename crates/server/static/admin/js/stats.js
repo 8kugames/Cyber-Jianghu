@@ -20,9 +20,9 @@ async function loadStats() {
 
             var renderCard = function (label, value, sub, id) {
                 return '<div class="stat-card"' + (id ? ' id="' + id + '"' : '') + '>' +
-                    '<div class="stat-label">' + label + '</div>' +
-                    '<div class="stat-value">' + value + '</div>' +
-                    (sub ? '<div class="stat-sub">' + sub + '</div>' : '') +
+                    '<div class="stat-label">' + escapeHtml(label) + '</div>' +
+                    '<div class="stat-value">' + escapeHtml(String(value)) + '</div>' +
+                    (sub ? '<div class="stat-sub">' + escapeHtml(String(sub)) + '</div>' : '') +
                     '</div>';
             };
 

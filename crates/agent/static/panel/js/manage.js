@@ -1,7 +1,6 @@
 // 管理页逻辑
 
 let providersData = null;
-let tokenUsageTimer = null;
 let llmConfigSnapshot = null;
 
 function formatNumber(n) {
@@ -300,6 +299,7 @@ async function loadLlmConfig() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    let tokenRefreshTimer = null;
     loadServerConfig();
 
     // 服务器配置表单
@@ -453,5 +453,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Token 使用统计：立即加载 + 每分钟刷新
     await loadTokenUsage();
-    tokenUsageTimer = setInterval(loadTokenUsage, 60_000);
+    tokenRefreshTimer = setInterval(loadTokenUsage, 60_000);
+
+    window.addEventListener('beforeunload', () => {
+        if (tokenRefreshTimer) { clearInterval(tokenRefreshTimer); tokenRefreshTimer = null; }
+    });
 });

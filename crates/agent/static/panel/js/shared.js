@@ -138,7 +138,7 @@ function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
     if (typeof worldTime === 'string' || typeof worldTime === 'number') return String(worldTime);
     if (typeof worldTime === 'object') {
-        if (worldTime.display) return String(worldTime.display);
+        if (worldTime.display != null) return String(worldTime.display);
         const year = worldTime.year ?? worldTime.y;
         const month = worldTime.month ?? worldTime.m;
         const day = worldTime.day ?? worldTime.d;

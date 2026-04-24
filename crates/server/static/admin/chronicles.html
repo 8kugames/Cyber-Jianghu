@@ -45,25 +45,6 @@
             color: var(--accent);
         }
 
-        .back-btn {
-            padding: 6px 14px;
-            background: var(--bg-level-2);
-            border: 1px solid var(--border-color);
-            color: var(--text-secondary);
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.15s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-        }
-        .back-btn:hover {
-            border-color: var(--accent);
-            color: var(--accent);
-            background: var(--accent-muted);
-        }
-
         .chr-controls {
             display: flex;
             gap: 12px;
@@ -443,10 +424,10 @@
             }
 
             container.innerHTML = list.map(c => `
-                <div class="chronicle-card" onclick="openChronicle('${c.chronicle_id}')">
+                <div class="chronicle-card" onclick="openChronicle(${JSON.stringify(c.chronicle_id)})">
                     <div class="chronicle-header">
-                        <span class="chronicle-id">${c.chronicle_id}</span>
-                        <span class="chronicle-season">${c.season}</span>
+                        <span class="chronicle-id">${escapeHtml(c.chronicle_id)}</span>
+                        <span class="chronicle-season">${escapeHtml(c.season)}</span>
                     </div>
                     <div class="chronicle-period">第${c.game_day_start}日 - 第${c.game_day_end}日</div>
                     <div class="chronicle-stats">
@@ -468,7 +449,7 @@
                         </div>
                     </div>
                     <div class="chronicle-preview">${escapeHtml(c.summary_preview)}</div>
-                    <span class="chronicle-status status-${getChronicleStatus(c)}">${getChronicleStatusText(c)}</span>
+                    <span class="chronicle-status status-${escapeHtml(getChronicleStatus(c))}">${escapeHtml(getChronicleStatusText(c))}</span>
                 </div>
             `).join('');
         }
@@ -563,7 +544,7 @@
                         </div>
                         <div class="detail-item">
                             <div class="label">状态</div>
-                            <div class="value">${statusText(c.status)}</div>
+                            <div class="value">${escapeHtml(statusText(c.status))}</div>
                         </div>
                     </div>
                 </div>
@@ -588,7 +569,7 @@
                     <div class="highlight-list">
                         ${c.highlights.map(h => `
                             <div class="highlight-item">
-                                <span class="highlight-type type-${h.event_type}">${eventTypeName(h.event_type)}</span>
+                                <span class="highlight-type type-${escapeHtml(h.event_type || '')}">${escapeHtml(eventTypeName(h.event_type))}</span>
                                 <span class="highlight-desc">${escapeHtml(h.description)}</span>
                             </div>
                         `).join('')}
