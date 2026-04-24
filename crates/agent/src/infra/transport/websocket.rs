@@ -614,7 +614,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, _wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -690,6 +690,21 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             warn!("Failed to parse game_rules content from ConfigUpdate");
+                                        }
+                                    // 处理 world_building_rules 配置更新
+                                    } else if config_type == "world_building_rules" {
+                                        if let Ok(wb_rules) = serde_json::from_value::<WorldBuildingRules>(content.clone()) {
+                                            // 更新本地缓存
+                                            {
+                                                let mut guard = state.write().await;
+                                                guard.world_building_rules = Some(wb_rules.clone());
+                                            }
+                                            // 调用回调
+                                            if let Some(ref cb) = wb_rules_cb {
+                                                cb(wb_rules);
+                                            }
+                                        } else {
+                                            warn!("Failed to parse world_building_rules content from ConfigUpdate");
                                         }
                                     }
                                 }
