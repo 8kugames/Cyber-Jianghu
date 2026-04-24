@@ -52,8 +52,6 @@ pub fn recall_archived_definition() -> ToolDefinition {
 }
 
 /// 执行 search_memory
-// TODO: 待 MemoryManager 所有权解决后接入 EarthToolExecutor
-#[allow(dead_code)]
 pub(super) async fn execute_search_memory(
     memory_manager: &MemoryManager,
     query: &str,
@@ -92,8 +90,6 @@ pub(super) async fn execute_search_memory(
 }
 
 /// 执行 recall_archived（与 search_memory 共享底层实现）
-// TODO: 待 MemoryManager 所有权解决后接入 EarthToolExecutor
-#[allow(dead_code)]
 pub(super) async fn execute_recall_archived(
     memory_manager: &MemoryManager,
     query: &str,
