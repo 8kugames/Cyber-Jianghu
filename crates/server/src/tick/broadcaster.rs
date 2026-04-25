@@ -603,8 +603,7 @@ impl Default for Broadcaster {
 /// 构建交互驱动 WorldState（Intent 执行后即时推送）
 ///
 /// 与 tick 广播版相比：
-/// - events_log 为空（ExecutionResult + ImmediateEvent 已通过独立通道发送）
-/// - 不加载涌现（recent_actions），减少 DB 查询
+/// - 包含 Intent 结果事件（events_log），使 Agent 能立即处理 SocialInteraction 等事件
 /// - 包含同位置 entities（让 agent 看到其他 agent 的状态变化）
 #[allow(clippy::too_many_arguments)]
 pub fn build_reactive_world_state(
@@ -617,6 +616,7 @@ pub fn build_reactive_world_state(
     online_ids: &std::collections::HashSet<Uuid>,
     game_data_cache: &Arc<GameDataCache>,
     recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
+    events: Vec<crate::models::WorldEvent>,
 ) -> crate::models::WorldState {
     let (year, month, day, hour) = compute_game_time(tick_id);
     let current_node_id = &agent_state.node_id;
@@ -756,7 +756,7 @@ pub fn build_reactive_world_state(
         },
         entities,
         nearby_items: nearby_items.to_vec(),
-        events_log: vec![], // ExecutionResult + ImmediateEvent 已通过独立通道发送
+        events_log: events, // Intent 结果事件（SocialInteraction 等）
         private_dialogue_log: vec![],
         last_execution_summary: None,
     }

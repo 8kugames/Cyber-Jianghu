@@ -69,12 +69,9 @@ pub struct IntentWorker {
     dialogue_manager: Arc<DialogueManager>,
     /// 游戏数据缓存（构建 WorldState 用）
     game_data_cache: Arc<GameDataCache>,
-    /// 事件管理器（与 TickScheduler 共享，用于 SocialInteraction 事件注入）
-    event_manager: super::event_manager::SharedEventManager,
 }
 
 impl IntentWorker {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: DbPool,
         state_cache: AgentStateCache,
@@ -83,7 +80,6 @@ impl IntentWorker {
         agent_to_device_map: AgentToDeviceMap,
         dialogue_manager: Arc<DialogueManager>,
         game_data_cache: Arc<GameDataCache>,
-        event_manager: super::event_manager::SharedEventManager,
     ) -> Self {
         Self {
             db_pool,
@@ -93,7 +89,6 @@ impl IntentWorker {
             agent_to_device_map,
             dialogue_manager,
             game_data_cache,
-            event_manager,
         }
     }
 
@@ -229,22 +224,13 @@ impl IntentWorker {
         .await;
 
         // 8. 交互驱动即时推送 WorldState（提交 Agent + 同位置 Agent）
-        self.send_reactive_world_state(agent_id, tick_id).await;
+        let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
+        self.send_reactive_world_state(agent_id, tick_id, events).await;
 
         // 9. 广播事件给同位置 Agent
         for (target_id, event) in &result.events {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
                 warn!("事件广播失败: target={}, error={}", target_id, e);
-            }
-        }
-
-        // 9.5 注入 SocialInteraction 事件到 EventManager（使 Agent 的 process_social_events 能读取到）
-        for (target_id, event) in &result.events {
-            if event.event_type == crate::models::WorldEventType::SocialInteraction {
-                self.event_manager
-                    .lock()
-                    .unwrap()
-                    .add_event_for_agent(*target_id, event.clone());
             }
         }
 
@@ -318,8 +304,8 @@ impl IntentWorker {
             Some(intent.action_type.to_string()),
         )
         .await;
-
-        self.send_reactive_world_state(agent_id, tick_id).await;
+        let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
+        self.send_reactive_world_state(agent_id, tick_id, events).await;
 
         for (target_id, event) in &result.events {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
@@ -520,7 +506,12 @@ impl IntentWorker {
     ///
     /// Intent 执行后，为提交 Agent 及同位置在线 Agent 构建并发送最新 WorldState。
     /// 确保 Agent 在下一次认知决策前拥有最新的世界状态。
-    async fn send_reactive_world_state(&self, agent_id: Uuid, tick_id: i64) {
+    async fn send_reactive_world_state(
+        &self,
+        agent_id: Uuid,
+        tick_id: i64,
+        events: Vec<WorldEvent>,
+    ) {
         // 1. 从 DashMap 读取更新后的状态
         let updated_state = match self.state_cache.get(&agent_id) {
             Some(r) => r.value().clone(),
@@ -683,6 +674,7 @@ impl IntentWorker {
                 &online_ids,
                 &self.game_data_cache,
                 &recent_actions_map,
+                events.clone(),
             );
 
             if let Err(e) = super::send_to_agent(
