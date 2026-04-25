@@ -222,47 +222,48 @@ pub fn apply_decay_and_environmental_damage(
         }
 
         // 寿终正寝检查（birth_tick 非空时生效，NULL = 不朽）
-        if was_alive && state.is_alive {
-            if let Some(birth_tick) = state.birth_tick {
-                if birth_tick > 0 && birth_tick < tick_id {
-                    // 复用 compute_game_time 相同公式，从秒级 tick_id 计算游戏年
-                    let age_years = compute_age_years(birth_tick, tick_id);
-                    if let Some((max_age, _aging_start)) = registry.get_lifespan_config() {
-                        if age_years >= max_age as i64 {
-                            // 寿终正寝：清零 HP
-                            state.status.set("hp", 0).ok();
-                            state.is_alive = false;
-                            dead_agents.push(agent_id);
+        if was_alive
+            && state.is_alive
+            && let Some(birth_tick) = state.birth_tick
+            && birth_tick > 0
+            && birth_tick < tick_id
+        {
+            // 复用 compute_game_time 相同公式，从秒级 tick_id 计算游戏年
+            let age_years = compute_age_years(birth_tick, tick_id);
+            if let Some((max_age, _aging_start)) = registry.get_lifespan_config()
+                && age_years >= max_age as i64
+            {
+                // 寿终正寝：清零 HP
+                state.status.set("hp", 0).ok();
+                state.is_alive = false;
+                dead_agents.push(agent_id);
 
-                            let death_info = registry.get_old_age_death_info();
-                            warn!(
-                                "Agent {} 寿终正寝，享年 {} 岁（max_age={}）",
-                                agent_id, age_years, max_age
-                            );
+                let death_info = registry.get_old_age_death_info();
+                warn!(
+                    "Agent {} 寿终正寝，享年 {} 岁（max_age={}）",
+                    agent_id, age_years, max_age
+                );
 
-                            let death_event = crate::models::WorldEvent {
-                                event_type: WorldEventType::DeathNotification,
-                                tick_id,
-                                description: death_info.message.clone(),
-                                metadata: serde_json::json!({
-                                    "cause": &death_info.cause,
-                                    "location": &state.node_id,
-                                    "age_years": age_years,
-                                }),
-                            };
-                            events.push((agent_id, death_event));
+                let death_event = crate::models::WorldEvent {
+                    event_type: WorldEventType::DeathNotification,
+                    tick_id,
+                    description: death_info.message.clone(),
+                    metadata: serde_json::json!({
+                        "cause": &death_info.cause,
+                        "location": &state.node_id,
+                        "age_years": age_years,
+                    }),
+                };
+                events.push((agent_id, death_event));
 
-                            let notification = DeathNotification::new(
-                                agent_id,
-                                death_info.cause,
-                                death_info.message,
-                                state.node_id.clone(),
-                                tick_id,
-                            );
-                            death_notifications.push(notification);
-                        }
-                    }
-                }
+                let notification = DeathNotification::new(
+                    agent_id,
+                    death_info.cause,
+                    death_info.message,
+                    state.node_id.clone(),
+                    tick_id,
+                );
+                death_notifications.push(notification);
             }
         }
     }
@@ -280,7 +281,7 @@ pub fn apply_decay_and_environmental_damage(
 /// tick_id 是秒级时间戳（now - game_epoch）
 /// game_hours = tick_id / (real_seconds_per_tick * ticks_per_hour)
 /// game_years = game_hours / (hours_per_day * days_per_season * seasons_per_year)
-pub(crate) fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
+pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
     use crate::game_data::registry::TimeRegistry;
 
     let age_seconds = current_tick - birth_tick;

@@ -26,11 +26,14 @@ use tracing::{info, warn};
 /// 根据 LlmConfig 构建 FallbackLlmClient（含主模型 + fallback 模型）
 ///
 /// 用于启动时和热重载时统一构建逻辑。
-pub fn build_fallback_client(llm_config: &crate::config::LlmConfig) -> Result<Arc<dyn LlmClient>> {
+pub fn build_fallback_client(
+    llm_config: &crate::config::LlmConfig,
+    prefer_stream: bool,
+) -> Result<Arc<dyn LlmClient>> {
     let mut llm_clients: Vec<Arc<dyn LlmClient>> = Vec::new();
 
     // 主模型
-    match build_direct_client(llm_config, llm_config.model.as_deref()) {
+    match build_direct_client(llm_config, llm_config.model.as_deref(), prefer_stream) {
         Ok(client) => {
             info!(
                 "主模型: {}",
@@ -49,7 +52,7 @@ pub fn build_fallback_client(llm_config: &crate::config::LlmConfig) -> Result<Ar
 
     // Fallback 模型
     for (i, fallback_model) in llm_config.fallback_models.iter().enumerate() {
-        match build_direct_client(llm_config, Some(fallback_model.as_str())) {
+        match build_direct_client(llm_config, Some(fallback_model.as_str()), prefer_stream) {
             Ok(client) => {
                 info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
                 llm_clients.push(Arc::new(client));
@@ -84,11 +87,13 @@ pub fn build_fallback_client(llm_config: &crate::config::LlmConfig) -> Result<Ar
 fn build_direct_client(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
+    prefer_stream: bool,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
 
     let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
+    client_config.prefer_stream = prefer_stream;
 
     if let Some(url) = &llm_config.base_url {
         client_config = client_config.with_base_url(url);

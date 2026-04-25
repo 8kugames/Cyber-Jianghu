@@ -292,6 +292,9 @@ function renderBasicInfo(agent) {
         '<div class="detail-item"><span class="detail-label">状态:</span> <span class="status-badge ' + (agent.is_alive ? "status-alive" : "status-dead") + '">' + (agent.is_alive ? "存活" : "死亡") + '</span></div>' +
         '<div class="detail-item"><span class="detail-label">创建时间:</span> ' + new Date(agent.created_at).toLocaleString() + '</div>' +
         '<div class="detail-item"><span class="detail-label">最后活跃:</span> ' + (agent.last_active ? new Date(agent.last_active).toLocaleString() : "从未") + '</div>' +
+        (agent.age !== null && agent.age !== undefined ?
+        '<div class="detail-item"><span class="detail-label">年龄:</span> ' + agent.age + ' / ' + (agent.max_age || '∞') + ' 岁' + '</div>'
+        : '') +
         '</div></div>' +
 
         renderAttrSection(agent.attributes || {}, "status", "生理状态") +

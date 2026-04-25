@@ -918,10 +918,14 @@ impl Config {
             observer: None,
             game_rules: None,
             config_path: PathBuf::new(),
-            servers_dir: dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".cyber-jianghu")
-                .join("servers"),
+            servers_dir: if let Ok(data_dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
+                PathBuf::from(data_dir).join("servers")
+            } else {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".cyber-jianghu")
+                    .join("servers")
+            },
         })
     }
 
@@ -941,6 +945,22 @@ impl Config {
             .unwrap_or(15)
     }
 
+    /// 获取 HP 逃逸阈值
+    pub fn hp_critical_threshold(&self) -> i32 {
+        self.game_rules
+            .as_ref()
+            .map(|r| r.hp_critical_threshold)
+            .unwrap_or(30)
+    }
+
+    /// 获取 HP 强制逃离阈值
+    pub fn hp_force_flee_threshold(&self) -> i32 {
+        self.game_rules
+            .as_ref()
+            .map(|r| r.hp_force_flee_threshold)
+            .unwrap_or(15)
+    }
+
     /// 获取重生延迟 tick 数（0 = 不自动重生）
     pub fn rebirth_delay_ticks(&self) -> i32 {
         self.game_rules
@@ -952,9 +972,16 @@ impl Config {
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件
-        if let Some(home) = dirs::home_dir() {
-            let config_dir = home.join(".cyber-jianghu").join("config");
-            let actions_path = config_dir.join("actions.json");
+        // 使用 CYBER_JIANGHU_DATA_DIR 或默认路径
+        let data_dir = std::env::var("CYBER_JIANGHU_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".cyber-jianghu")
+            });
+        let config_dir = data_dir.join("config");
+        let actions_path = config_dir.join("actions.json");
 
             // 确保目录存在
             if let Err(e) = fs::create_dir_all(&config_dir) {
@@ -978,7 +1005,6 @@ impl Config {
                     }
                 }
             }
-        }
 
         self.game_rules = Some(game_rules);
     }

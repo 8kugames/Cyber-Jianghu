@@ -69,9 +69,12 @@ pub struct IntentWorker {
     dialogue_manager: Arc<DialogueManager>,
     /// 游戏数据缓存（构建 WorldState 用）
     game_data_cache: Arc<GameDataCache>,
+    /// 事件管理器（与 TickScheduler 共享，用于 SocialInteraction 事件注入）
+    event_manager: super::event_manager::SharedEventManager,
 }
 
 impl IntentWorker {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: DbPool,
         state_cache: AgentStateCache,
@@ -80,6 +83,7 @@ impl IntentWorker {
         agent_to_device_map: AgentToDeviceMap,
         dialogue_manager: Arc<DialogueManager>,
         game_data_cache: Arc<GameDataCache>,
+        event_manager: super::event_manager::SharedEventManager,
     ) -> Self {
         Self {
             db_pool,
@@ -89,6 +93,7 @@ impl IntentWorker {
             agent_to_device_map,
             dialogue_manager,
             game_data_cache,
+            event_manager,
         }
     }
 
@@ -230,6 +235,16 @@ impl IntentWorker {
         for (target_id, event) in &result.events {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
                 warn!("事件广播失败: target={}, error={}", target_id, e);
+            }
+        }
+
+        // 9.5 注入 SocialInteraction 事件到 EventManager（使 Agent 的 process_social_events 能读取到）
+        for (target_id, event) in &result.events {
+            if event.event_type == crate::models::WorldEventType::SocialInteraction {
+                self.event_manager
+                    .lock()
+                    .unwrap()
+                    .add_event_for_agent(*target_id, event.clone());
             }
         }
 

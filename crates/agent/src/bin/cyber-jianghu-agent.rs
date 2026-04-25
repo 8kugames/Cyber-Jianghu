@@ -542,6 +542,7 @@ fn create_llm_client(
             config.llm.check_model_recommendation();
             Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
                 &config.llm,
+                config.llm.enable_streaming,
             )?)
         }
         RuntimeMode::Claw => {
@@ -610,12 +611,18 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         Config::from_env().unwrap_or_default()
     });
 
-    // Ensure servers_dir is set (#[serde(skip)] means it's empty after from_file)
+    // Ensure servers_dir is set (#[serde(default)] means it's empty after from_file)
+    // 优先级：CYBER_JIANGHU_DATA_DIR 环境变量 > ~/.cyber-jianghu/servers
     if config.servers_dir.as_os_str().is_empty() {
-        config.servers_dir = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".cyber-jianghu")
-            .join("servers");
+        config.servers_dir = if let Ok(data_dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
+            info!("使用 CYBER_JIANGHU_DATA_DIR: {}", data_dir);
+            PathBuf::from(data_dir).join("servers")
+        } else {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cyber-jianghu")
+                .join("servers")
+        };
     }
 
     let runtime_mode = match mode.to_lowercase().as_str() {
@@ -738,6 +745,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .join("data");
 
     let persona_info = Some(cyber_jianghu_agent::soul::reflector::PersonaInfo {
+        name: Some(character.name.clone()),
         gender: character.gender.clone(),
         age: character.age,
         personality: character.personality.clone(),

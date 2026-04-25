@@ -90,6 +90,7 @@ fn start_tick_engine(
     agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
     vendor_pending_events: cyber_jianghu_server::models::VendorPendingEvents,
+    event_manager: cyber_jianghu_server::tick::SharedEventManager,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -101,6 +102,7 @@ fn start_tick_engine(
             agent_state_cache,
             accepting_tick_id,
             vendor_pending_events,
+            event_manager,
         );
 
         info!("启动Tick引擎（后台任务）");
@@ -196,7 +198,10 @@ async fn main() -> Result<()> {
     drop(gd_guard); // 释放锁
     info!("对话管理器初始化成功");
 
-    // 7.3 创建 IntentWorker channel 并启动 Worker
+    // 7.3 创建共享 EventManager（TickScheduler 和 IntentWorker 共用）
+    let event_manager = cyber_jianghu_server::tick::event_manager::EventManager::new_shared();
+
+    // 7.4 创建 IntentWorker channel 并启动 Worker
     let (worker_tx, worker_rx) = create_worker_channel();
     let state_processor = Arc::new(StateProcessor::new(db_pool.clone()));
     let intent_worker = IntentWorker::new(
@@ -207,6 +212,7 @@ async fn main() -> Result<()> {
         agent_to_device_map.clone(),
         dialogue_manager.clone(),
         game_data_cache.clone(),
+        event_manager.clone(),
     );
     tokio::spawn(async move {
         intent_worker.run(worker_rx).await;
@@ -294,6 +300,7 @@ async fn main() -> Result<()> {
         agent_state_cache.clone(),
         accepting_tick_id,
         state.vendor_pending_events.clone(),
+        event_manager,
     );
 
     // 10.1 启动速率限制器清理任务

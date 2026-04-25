@@ -172,6 +172,8 @@ pub struct DirectLlmClientConfig {
     pub temperature: f32,
     /// 最大 tokens
     pub max_tokens: u32,
+    /// 优先使用流式调用（避免对只支持 streaming 的模型浪费 400 降级）
+    pub prefer_stream: bool,
 }
 
 impl DirectLlmClientConfig {
@@ -194,6 +196,7 @@ impl DirectLlmClientConfig {
             model: None,
             temperature: 0.7,
             max_tokens: 4096,
+            prefer_stream: false,
         }
     }
 
@@ -406,6 +409,11 @@ impl DirectLlmClient {
 
     /// 发送 OpenAI 兼容 API 请求（公共 HTTP 逻辑）
     async fn send_request(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
+        // prefer_stream: 直接走流式，避免对只支持 streaming 的模型浪费 400 降级
+        if self.config.prefer_stream {
+            return self.send_request_via_stream(request).await;
+        }
+
         let client = self.build_http_client()?;
         let base_url = self.config.get_base_url()?;
         let base_url = base_url.trim_end_matches('/');
