@@ -43,6 +43,10 @@ data:
       critical_threshold: 30
       # hunger/thirst 低于此阈值时注入攻击/交易提示（应 < critical_threshold）
       critical_attack_threshold: 15
+      # HP 低于此阈值时注入环境伤害逃逸警告
+      hp_critical_threshold: 30
+      # HP 低于此阈值时注入最高优先级逃离警告（应 < hp_critical_threshold）
+      hp_force_flee_threshold: 15
       # 自动重生配置
       rebirth:
         # 死亡后延迟 N 个 tick 自动重生 (0 = 不自动重生)

@@ -82,6 +82,8 @@ pub struct ValidateRequest {
     pub tick_id: Option<i64>,
     /// 动作数据（JSON）
     pub action_data: Option<serde_json::Value>,
+    /// 人设：角色名字
+    pub persona_name: Option<String>,
     /// 人设：性别
     pub persona_gender: Option<String>,
     /// 人设：年龄

@@ -63,6 +63,14 @@ pub struct GameRules {
     #[serde(default = "default_critical_attack_threshold")]
     pub critical_attack_threshold: i32,
 
+    /// HP 低于此阈值时注入环境伤害逃逸警告
+    #[serde(default = "default_hp_critical_threshold")]
+    pub hp_critical_threshold: i32,
+
+    /// HP 低于此阈值时注入最高优先级逃离警告
+    #[serde(default = "default_hp_force_flee_threshold")]
+    pub hp_force_flee_threshold: i32,
+
     /// 规则版本（用于检测变更）
     pub version: String,
 
@@ -129,6 +137,14 @@ fn default_aging_start_age() -> u8 {
 }
 
 fn default_critical_attack_threshold() -> i32 {
+    15
+}
+
+fn default_hp_critical_threshold() -> i32 {
+    30
+}
+
+fn default_hp_force_flee_threshold() -> i32 {
     15
 }
 
@@ -365,19 +381,11 @@ impl Default for ReflectorNarrativeConfig {
 ///
 /// 控制 Agent 如何处理 Server 下发的即时事件（speak/whisper 等）
 /// 新架构：EventStore SQLite 持久化 + Session Triage LLM 批量分流
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImmediateEventConfig {
     /// 事件 triage 配置（DB 持久化 + Session LLM 分流）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_triage: Option<EventTriageConfig>,
-}
-
-impl Default for ImmediateEventConfig {
-    fn default() -> Self {
-        Self {
-            event_triage: None,
-        }
-    }
 }
 
 // ============================================================================

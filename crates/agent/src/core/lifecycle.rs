@@ -761,6 +761,50 @@ impl super::Agent {
                             warnings.push(hint);
                         }
 
+                        // HP 逃逸警告：HP 低于阈值时注入逃逸/濒死警告
+                        let hp = attrs.get("hp").copied().unwrap_or(100);
+                        let hp_max = attrs.get("hp_max").copied().unwrap_or(100);
+                        let hp_critical = self.config.hp_critical_threshold();
+                        let hp_force_flee = self.config.hp_force_flee_threshold();
+
+                        if hp > 0 && hp <= hp_force_flee {
+                            // 最高优先级：濒死逃离
+                            let warning = if let Some(t) = tmpl {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), hp.to_string());
+                                vars.insert("max".to_string(), hp_max.to_string());
+                                t.render_section("hp_force_flee_warning", &vars)
+                                    .unwrap_or_else(|| format!(
+                                        "【濒死警告】你即将死亡（HP {}/{}）！必须立即移动到安全区域！",
+                                        hp, hp_max
+                                    ))
+                            } else {
+                                format!(
+                                    "【濒死警告】你即将死亡（HP {}/{}）！必须立即移动到安全区域！",
+                                    hp, hp_max
+                                )
+                            };
+                            warnings.insert(0, warning); // 最高优先级，插入队首
+                        } else if hp > 0 && hp <= hp_critical {
+                            // 高优先级：HP 低，建议逃离
+                            let warning = if let Some(t) = tmpl {
+                                let mut vars = std::collections::HashMap::new();
+                                vars.insert("value".to_string(), hp.to_string());
+                                vars.insert("max".to_string(), hp_max.to_string());
+                                t.render_section("hp_critical_warning", &vars)
+                                    .unwrap_or_else(|| format!(
+                                        "【危险】你的生命值很低（HP {}/{}），当前位置正在受到环境伤害！必须立即移动到安全区域。",
+                                        hp, hp_max
+                                    ))
+                            } else {
+                                format!(
+                                    "【危险】你的生命值很低（HP {}/{}），当前位置正在受到环境伤害！必须立即移动到安全区域。",
+                                    hp, hp_max
+                                )
+                            };
+                            warnings.insert(0, warning); // 高优先级，插入队首（在濒死之后）
+                        }
+
                         // 交易议价提示：附近有其他人时有银两时注入（关系感知）
                         let has_silver = world_state.self_state.inventory.iter()
                             .any(|i| i.item_id == "银子" && i.quantity > 0);

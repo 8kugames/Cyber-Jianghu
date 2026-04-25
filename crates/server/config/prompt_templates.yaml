@@ -154,6 +154,8 @@ templates:
       - thirst_with_items
       - thirst_with_ground
       - thirst_nothing
+      - hp_critical_warning
+      - hp_force_flee_warning
     sections:
       hunger_with_items: |
         【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！背包可用物品：{items}。执行 进食，物品ID 必须是列表中的精确 ID。选择能恢复饥饿值的物品。
@@ -167,6 +169,10 @@ templates:
         【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先拾取再饮水。选择能恢复口渴值的物品。
       thirst_nothing: |
         【紧急】你极度口渴（当前 {value}/{max}），附近无水源！移动到有水的地点或采集。
+      hp_critical_warning: |
+        【危险】你的生命值很低（HP {value}/{max}），当前位置正在受到环境伤害！必须立即移动到安全区域。执行 移动，目标地点 必须是"可前往的地点"中的安全位置（非荒漠/危险区域）。
+      hp_force_flee_warning: |
+        【濒死警告】你即将死亡（HP {value}/{max}）！必须立即移动到安全区域，这是你的最高优先级！执行 移动，离开当前位置。不要进行任何其他行动。
       critical_survival_hint: |
         【生存警告】饥饿/口渴值已降至危险水平！在极端情况下，你可以：
         1. 向龙门客栈老板娘购买馒头（1银两1个），先用说话询价再用给予完成交割

@@ -29,7 +29,7 @@ use crate::websocket::{AgentToDeviceMap, ConnectionManager};
 
 use super::WorkerMessage;
 use super::broadcaster::Broadcaster;
-use super::event_manager::EventManager;
+use super::event_manager::SharedEventManager;
 
 use crate::game_data::loaders::load_actions;
 use crate::paths::get_config_dir;
@@ -60,8 +60,8 @@ pub struct TickScheduler {
     /// agent_id → device_id 反向映射
     agent_to_device_map: AgentToDeviceMap,
 
-    /// 事件管理器
-    event_manager: EventManager,
+    /// 事件管理器（与 IntentWorker 共享）
+    event_manager: SharedEventManager,
 
     /// 广播器
     broadcaster: Broadcaster,
@@ -103,6 +103,7 @@ impl TickScheduler {
         agent_state_cache: AgentStateCache,
         accepting_tick_id: Arc<AtomicI64>,
         vendor_pending_events: crate::models::VendorPendingEvents,
+        event_manager: SharedEventManager,
     ) -> Self {
         Self {
             game_data_cache,
@@ -111,7 +112,7 @@ impl TickScheduler {
             db_pool,
             connection_manager,
             agent_to_device_map,
-            event_manager: EventManager::new(),
+            event_manager,
             broadcaster: Broadcaster::new(),
             worker_tx,
             agent_state_cache,
@@ -562,7 +563,7 @@ impl TickScheduler {
                 ];
                 let msg = &messages[tick_id as usize % messages.len()];
 
-                self.event_manager.add_event_for_agent(
+                self.event_manager.lock().unwrap().add_event_for_agent(
                     *agent_id,
                     crate::models::WorldEvent {
                         event_type: cyber_jianghu_protocol::WorldEventType::SystemNotification,
@@ -712,13 +713,15 @@ impl TickScheduler {
             .map(|r| r.value().clone())
             .collect();
 
-        self.event_manager.clear();
+        self.event_manager.lock().unwrap().clear();
 
         // drain grant-items 跨请求缓冲事件（clear 后注入，确保本 tick 可见）
         for entry in self.vendor_pending_events.iter() {
             let agent_id = *entry.key();
             for event in entry.value() {
                 self.event_manager
+                    .lock()
+                    .unwrap()
                     .add_event_for_agent(agent_id, event.clone());
             }
         }

@@ -115,8 +115,11 @@ impl ObserverPrompt {
 {}
 
 ## 玩家人设
+- 角色：{}
 - 性别：{}
 - 性格：{}
+
+注意：角色名字是游戏设定，不属于穿越概念。角色可以拥有与历史人物相同的名字。
 
 ## 当前世界状态
 {}
@@ -130,6 +133,7 @@ impl ObserverPrompt {
             world_rules.era.name,
             world_rules.era.tech_level,
             world_rules.forbidden_concepts.join("、"),
+            persona.name.as_deref().unwrap_or("未命名"),
             persona.gender,
             persona.personality.join("、"),
             world_context,

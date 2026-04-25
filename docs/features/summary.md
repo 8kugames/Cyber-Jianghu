@@ -77,6 +77,7 @@
   - [x] 支持 actions/attributes/items/locations/skills/recipes 等模块的 YAML/JSON 配置。
   - [x] 监听文件 mtime 变化，支持配置热重载。
   - [x] 引入 evalexpr 公式引擎，支持动态计算派生属性和伤害数值。
+  - [x] HP 生存逃逸阈值配置 (`hp_critical_threshold` / `hp_force_flee_threshold`)。
 - [x] **[AI 过程性技能系统 (Procedural Skills)](../../crates/server/docs/architecture/p1_major/procedural_skills.md)**: 基于 Markdown 的行为指令系统，体现“身心分离”架构的核心设计。
   - [x] **Server 注册表**：基于 `SKILL.md`（YAML + Markdown）的动态加载与注册 (`SkillRegistry`)。
   - [x] **习得链路**：通过 `practice` 动作触发 `SkillMutator`，将技能 ID 注入 `AgentState`。
@@ -124,6 +125,7 @@
     - [x] Layer 1 动作校验：基础 ActionType 与参数合法性验证。
     - [x] Layer 2 物理规则审查 (RuleEngine)：YAML 配置驱动的世界观刚性规则和物理可行性检验（如禁止穿墙、禁止使用不存在的物品）。
     - [x] Layer 3 角色 OOC 审查：基于 LLM 的人物性格符合度动态拦截，按严重程度分类 OOC 等级。
+      - [x] 角色名排除：验证 prompt 包含角色名 + 穿越排除说明，防止历史人物同名被误判。
 - [x] **[认知流转引擎 (CognitiveEngine)](../../crates/agent/docs/architecture/p0_core/cognitive_engine.md)**: 将环境感知转化为具体行动的思考中枢。
   - [x] **认知链追踪 (Cognitive Chain)**：全链路追踪并记录从“感知”到“动机”再到“规划”的每一步逻辑推导，不仅用于日志分析，还作为核心数据打包进 `SoulCycleReport`。
   - [x] 单次 LLM 调用融合“感知→动机→规划→决策”四阶段，降低延迟。
@@ -147,6 +149,7 @@
 ### P1 重要特性
 
 - [x] **[模型网关与调度](../../crates/agent/docs/architecture/p1_major/model_gateway.md)**: 统一的 LLM 客户端池，支持主备模型无缝切换及 Token 消耗监控。
+  - [x] `prefer_stream` 全局流式优化：支持流式的模型跳过 400 降级，直接走 streaming。
 - [x] **[经验结果记忆 (Outcome Memory)](../../crates/agent/docs/architecture/p1_major/outcome_memory.md)**: Agent 对动作结果的经验学习池，用于优化未来决策。
 - [x] **[动态角色演化 (DynamicPersona)](../../crates/agent/docs/architecture/p1_major/dynamic_persona.md)**: 允许 Agent 经历特定事件后获得新性格标签（Trait），实现性格随阅历成长。
 
@@ -167,6 +170,7 @@
 - [x] **[命令行工具 (CLI)](../../crates/agent/docs/architecture/p2_enhancement/cli.md)**:
   - [x] 提供 `run` / `config` / `create-character` / `show` / `reset` 等快速运维指令。
   - [x] 支持通过 `--port 0` 自动探测并分配可用通信端口。
+  - [x] `CYBER_JIANGHU_DATA_DIR` 环境变量：Docker 容器内数据持久化到挂载卷。
 
 ---
 

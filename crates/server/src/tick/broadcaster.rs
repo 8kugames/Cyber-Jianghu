@@ -27,8 +27,6 @@ use crate::models::{AgentState, WorldEvent, WorldEventType, WorldState};
 use crate::websocket::{AgentToDeviceMap, ConnectionManager, send_world_state};
 use cyber_jianghu_protocol::{AdjacentNode, EVENT_TYPE_DEATH_NOTIFICATION, EVENT_TYPE_WORLD_STATE};
 
-use super::event_manager::EventManager;
-
 /// 广播器
 ///
 /// 负责向所有Agent广播新的世界状态
@@ -51,7 +49,7 @@ impl Broadcaster {
         db_pool: &DbPool,
         connection_manager: &ConnectionManager,
         agent_to_device_map: &AgentToDeviceMap,
-        event_manager: &EventManager,
+        event_manager: &super::event_manager::SharedEventManager,
         game_data_cache: &Arc<GameDataCache>,
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
@@ -184,7 +182,7 @@ impl Broadcaster {
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
         for agent_state in agent_states {
-            let events = event_manager.get_events_for_agent(agent_state.agent_id);
+            let events = event_manager.lock().unwrap().get_events_for_agent(agent_state.agent_id);
             let inventory = agent_inventories
                 .get(&agent_state.agent_id)
                 .cloned()

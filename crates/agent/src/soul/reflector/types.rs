@@ -7,6 +7,8 @@ use serde::Deserialize;
 /// 人设信息
 #[derive(Debug, Clone)]
 pub struct PersonaInfo {
+    /// 角色名字
+    pub name: Option<String>,
     /// 性别
     pub gender: String,
     /// 年龄
@@ -20,6 +22,7 @@ pub struct PersonaInfo {
 impl Default for PersonaInfo {
     fn default() -> Self {
         Self {
+            name: None,
             gender: "男".to_string(),
             age: 28,
             personality: vec!["沉稳".into(), "重情义".into()],

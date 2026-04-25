@@ -98,6 +98,8 @@ pub struct DialogueSession {
 ///     survival_actions: vec![],
 ///     survival_threshold: 30,
 ///     critical_attack_threshold: 15,
+///     hp_critical_threshold: 30,
+///     hp_force_flee_threshold: 15,
 ///     version: "0.0.1".to_string(),
 ///     last_updated: "2024-01-01T00:00:00Z".to_string(),
 ///     intent_batch: None,
@@ -483,6 +485,8 @@ mod tests {
             available_actions: vec![],
             survival_threshold: 30,
             critical_attack_threshold: 15,
+            hp_critical_threshold: 30,
+            hp_force_flee_threshold: 15,
             rebirth_delay_ticks: 0,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
@@ -490,6 +494,7 @@ mod tests {
             reflector_narrative: None,
             immediate_events: None,
             lifespan: None,
+            calendar: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -662,6 +667,8 @@ mod tests {
             available_actions: vec![],
             survival_threshold: 30,
             critical_attack_threshold: 15,
+            hp_critical_threshold: 30,
+            hp_force_flee_threshold: 15,
             rebirth_delay_ticks: 0,
             version: "0.0.1".to_string(),
             last_updated: "2024-01-01T00:00:00Z".to_string(),
@@ -669,6 +676,7 @@ mod tests {
             reflector_narrative: None,
             immediate_events: None,
             lifespan: None,
+            calendar: None,
         };
         let world_rules = WorldBuildingRules::default();
 

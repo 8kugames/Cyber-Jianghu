@@ -862,6 +862,7 @@ function loadMoreExperiences() {
 // 加载关系列表
 async function loadRelationships() {
     const relEl = document.getElementById('relationships');
+    relEl.innerHTML = '<p class="loading-text">加载中...</p>';
     try {
         const data = await apiGet('/api/v1/relationship/list');
         if (data.relationships && data.relationships.length > 0) {
@@ -1229,6 +1230,11 @@ document.addEventListener('DOMContentLoaded', () => {
             tab.classList.add('active');
             document.querySelectorAll('.vertical-tab-content').forEach(c => c.classList.remove('active'));
             document.getElementById('vertical-tab-' + targetTab).classList.add('active');
+
+            // 切换到记忆关系 tab 时刷新关系数据
+            if (targetTab === 'memories') {
+                loadRelationships();
+            }
         });
     });
 

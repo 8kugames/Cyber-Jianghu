@@ -989,6 +989,7 @@ pub(super) async fn validate_intent_handler(
     let intent = Intent::new(agent_id, tick_id, req.action_type, req.action_data);
 
     let persona_info = PersonaInfo {
+        name: req.persona_name.clone(),
         gender: req.persona_gender.unwrap_or_else(|| "未知".to_string()),
         age: req.persona_age.unwrap_or(28),
         personality: req.persona_personality.unwrap_or_default(),
@@ -3655,7 +3656,7 @@ pub(super) async fn reload_config_handler(
                 guard.clone()
             };
             if let Some(container) = container {
-                match crate::component::llm::build_fallback_client(&config.llm) {
+                match crate::component::llm::build_fallback_client(&config.llm, config.llm.enable_streaming) {
                     Ok(new_client) => {
                         *container.write().await = new_client;
                         info!(

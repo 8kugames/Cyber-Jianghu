@@ -29,15 +29,22 @@ pub struct WebSocketQuery {
 // 辅助函数
 // ============================================================================
 
+/// 生存配置参数（从 game_rules.yaml 读取）
+pub struct SurvivalConfig {
+    pub survival_threshold: i32,
+    pub critical_attack_threshold: i32,
+    pub hp_critical_threshold: i32,
+    pub hp_force_flee_threshold: i32,
+    pub rebirth_delay_ticks: i32,
+}
+
 /// 构建游戏规则（从配置注册表）
 ///
 /// 从 GameData 缓存中读取配置，包括 immediate_events 和 intent_batch。
 /// llm_validation 的 always/adaptive/skip 分级从 actions.yaml 的 ooc_risk 动态生成。
 pub fn build_game_rules_from_config(
     tick_duration_secs: u64,
-    survival_threshold: i32,
-    critical_attack_threshold: i32,
-    rebirth_delay_ticks: i32,
+    survival: SurvivalConfig,
     version: String,
     immediate_events: Option<cyber_jianghu_protocol::ImmediateEventConfig>,
     intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
@@ -113,14 +120,16 @@ pub fn build_game_rules_from_config(
         available_actions,
         initial_items,
         survival_actions,
-        survival_threshold,
-        critical_attack_threshold,
+        survival_threshold: survival.survival_threshold,
+        critical_attack_threshold: survival.critical_attack_threshold,
+        hp_critical_threshold: survival.hp_critical_threshold,
+        hp_force_flee_threshold: survival.hp_force_flee_threshold,
         version,
         last_updated: Utc::now().to_rfc3339(),
         intent_batch: Some(intent_batch),
         reflector_narrative: None,
         immediate_events,
-        rebirth_delay_ticks,
+        rebirth_delay_ticks: survival.rebirth_delay_ticks,
         lifespan: None, // ConfigUpdate 路径不含 lifespan，由注册时下发
         calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {
             cyber_jianghu_protocol::CalendarConfig {

@@ -393,12 +393,28 @@ pub struct SurvivalRulesData {
     #[serde(default = "default_critical_attack_threshold")]
     pub critical_attack_threshold: i32,
 
+    /// HP 低于此阈值时注入环境伤害逃逸警告
+    #[serde(default = "default_hp_critical_threshold")]
+    pub hp_critical_threshold: i32,
+
+    /// HP 低于此阈值时注入最高优先级逃离警告（应 < hp_critical_threshold）
+    #[serde(default = "default_hp_force_flee_threshold")]
+    pub hp_force_flee_threshold: i32,
+
     /// 自动重生配置
     #[serde(default)]
     pub rebirth: RebirthRulesData,
 }
 
 fn default_critical_attack_threshold() -> i32 {
+    15
+}
+
+fn default_hp_critical_threshold() -> i32 {
+    30
+}
+
+fn default_hp_force_flee_threshold() -> i32 {
     15
 }
 
