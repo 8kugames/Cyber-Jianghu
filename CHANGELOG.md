@@ -15,6 +15,18 @@
   - 将 `MemoryManager` 实例注入到 `CognitiveEngine` 和地魂工具池中
   - 支持 LLM 在思考过程中按需检索情景与语义记忆
 
+### Removed
+
+- **Agent+Server**: 天道无为生存架构重构 — 移除所有天道干预式生存机制
+  - Agent: `lifecycle.rs` 移除 `survival_warnings`（hunger/thirst/HP 阈值警告注入）和 `sanity_warning`（精神状态注入）
+  - Agent: 交易议价提示独立为 `trade_hints`（经济引导，非生存干预）
+  - Server: `game_rules.yaml` 移除 `critical_threshold` / `critical_attack_threshold` / `hp_critical_threshold` / `hp_force_flee_threshold`
+  - Protocol: `GameRules` 移除对应 4 个字段
+  - Protocol: `SurvivalConfig` 简化为仅 `rebirth_delay_ticks`
+  - Agent: `config.rs` 移除 `survival_threshold()` / `critical_attack_threshold()` / `hp_critical_threshold()` / `hp_force_flee_threshold()` accessor
+  - Prompt: `prompt_templates.yaml` 移除 `survival_warnings` 和 `sanity_warnings` 模板段
+  - 替代方案: Agent 通过 `WorldState.attribute_descriptions`（体感叙事，来自 `narrative_config.yaml`）自主感知状态
+
 ### ⚠️ Breaking Changes
 
 - **Agent**: `MemoryBackend::add()` 签名破坏性变更
@@ -23,6 +35,11 @@
   - 返回值从 `()` 改为插入记录的 DB ID（-1 表示跳过/过滤）
   - `add_batch` 默认实现改为 `for mut memory in memories` 消费所有权
   - 影响: WorkingMemoryBackend / EpisodicMemoryBackend / SemanticMemoryBackend 全部适配
+
+- **Protocol**: `GameRules` 移除 4 个生存阈值字段
+  - 删除: `survival_threshold` / `critical_attack_threshold` / `hp_critical_threshold` / `hp_force_flee_threshold`
+  - 影响: 旧 Agent 收到新 GameRules JSON 时这 4 个字段被 serde 静默忽略（无 `deny_unknown_fields`）
+  - 影响: 消费 `survival_threshold()` 等 accessor 的代码需删除对应调用
 
 - **Protocol**: `LifespanRules` 删除 `ticks_per_year` 字段
   - 改为从 `time.yaml` 唯一配置源派生：`ticks_per_hour * hours_per_day * days_per_season * seasons_per_year`

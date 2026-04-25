@@ -77,7 +77,7 @@
   - [x] 支持 actions/attributes/items/locations/skills/recipes 等模块的 YAML/JSON 配置。
   - [x] 监听文件 mtime 变化，支持配置热重载。
   - [x] 引入 evalexpr 公式引擎，支持动态计算派生属性和伤害数值。
-  - [x] HP 生存逃逸阈值配置 (`hp_critical_threshold` / `hp_force_flee_threshold`)。
+  - [x] 体感叙事系统（`narrative_config.yaml` → `attribute_descriptions`）：Agent 通过世界状态自主感知，替代天道干预式警告注入。
 - [x] **[AI 过程性技能系统 (Procedural Skills)](../../crates/server/docs/architecture/p1_major/procedural_skills.md)**: 基于 Markdown 的行为指令系统，体现“身心分离”架构的核心设计。
   - [x] **Server 注册表**：基于 `SKILL.md`（YAML + Markdown）的动态加载与注册 (`SkillRegistry`)。
   - [x] **习得链路**：通过 `practice` 动作触发 `SkillMutator`，将技能 ID 注入 `AgentState`。
