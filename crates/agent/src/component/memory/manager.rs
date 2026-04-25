@@ -139,6 +139,7 @@ impl MemoryManager {
             let episodic_id = self.episodic.add(&mut entry).await?;
 
             // 添加到语义记忆（使用 episodic 设置的 ID 生成 embedding）
+            #[allow(clippy::collapsible_if)]
             if episodic_id > 0 {
                 if let Some(ref semantic) = self.semantic {
                     match semantic.lock().await.add(&mut entry).await {
