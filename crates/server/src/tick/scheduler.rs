@@ -103,7 +103,6 @@ impl TickScheduler {
         agent_state_cache: AgentStateCache,
         accepting_tick_id: Arc<AtomicI64>,
         vendor_pending_events: crate::models::VendorPendingEvents,
-        event_manager: SharedEventManager,
     ) -> Self {
         Self {
             game_data_cache,
@@ -112,7 +111,7 @@ impl TickScheduler {
             db_pool,
             connection_manager,
             agent_to_device_map,
-            event_manager,
+            event_manager: super::event_manager::EventManager::new_shared(),
             broadcaster: Broadcaster::new(),
             worker_tx,
             agent_state_cache,
