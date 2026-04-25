@@ -31,15 +31,14 @@ use serde::{Deserialize, Serialize};
 
 use super::world::WorldEventType;
 
-fn default_survival_threshold() -> i32 {
-    30
-}
-
 use super::entities::{AvailableAction, InitialItem};
 
 /// 游戏规则
 ///
 /// 服务端下发的游戏规则配置，包含可用动作和初始物品
+///
+/// 天道无为：survival_threshold / critical_attack_threshold / hp_critical / hp_force_flee
+/// 等干预字段已移除。Agent 通过 WorldState.attribute_descriptions（体感叙事）自主感知状态。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameRules {
     /// Tick 周期（秒）
@@ -52,24 +51,9 @@ pub struct GameRules {
     pub initial_items: Vec<InitialItem>,
 
     /// 生存相关动作列表（hunger/thirst 低于阈值时绕过 ReflectorSoul 审查）
+    /// 保留用于 ReflectorSoul 分级审核路由，非 Agent 端干预
     #[serde(default)]
     pub survival_actions: Vec<String>,
-
-    /// 生存底线阈值（hunger/thirst 低于此值时触发 survival 动作绕过审查）
-    #[serde(default = "default_survival_threshold")]
-    pub survival_threshold: i32,
-
-    /// 生存攻击阈值（hunger/thirst 低于此值时注入攻击/交易提示）
-    #[serde(default = "default_critical_attack_threshold")]
-    pub critical_attack_threshold: i32,
-
-    /// HP 低于此阈值时注入环境伤害逃逸警告
-    #[serde(default = "default_hp_critical_threshold")]
-    pub hp_critical_threshold: i32,
-
-    /// HP 低于此阈值时注入最高优先级逃离警告
-    #[serde(default = "default_hp_force_flee_threshold")]
-    pub hp_force_flee_threshold: i32,
 
     /// 规则版本（用于检测变更）
     pub version: String,
@@ -134,18 +118,6 @@ fn default_max_age() -> u8 {
 }
 fn default_aging_start_age() -> u8 {
     50
-}
-
-fn default_critical_attack_threshold() -> i32 {
-    15
-}
-
-fn default_hp_critical_threshold() -> i32 {
-    30
-}
-
-fn default_hp_force_flee_threshold() -> i32 {
-    15
 }
 
 // ============================================================================

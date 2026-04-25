@@ -46,7 +46,6 @@ templates:
         - 没有食物时：先拾取地上的食物/水（拾取），再进食/饮水（进食/饮水）
         - 背包和地面都没有时：采集（采集）或移动到可能有资源的地点（移动）
         - 休息（原地休息）是合法行为，不必强求每个 tick 都行动
-        - 进食/饮水 的 动作数据 中必须使用"背包物品"或"附近物品"中列出的精确物品ID，禁止使用物品名称或自创 ID
 
       narrative_limits: |
         ## 叙事限制
@@ -142,59 +141,3 @@ templates:
         移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 移动，目标地点 必须是上述之一。
     truncation:
       max_items: 5
-
-  # 生存压力注入模板
-  # hunger/thirst 低于阈值时，向 prompt 注入紧急信号引导 LLM 优先处理生存
-  # 注意：item_type 不区分食物/饮品，列出所有可用物品由 LLM 自行判断
-  survival_warnings:
-    required_sections:
-      - hunger_with_items
-      - hunger_with_ground
-      - hunger_nothing
-      - thirst_with_items
-      - thirst_with_ground
-      - thirst_nothing
-      - hp_critical_warning
-      - hp_force_flee_warning
-    sections:
-      hunger_with_items: |
-        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！背包可用物品：{items}。执行 进食，物品ID 必须是列表中的精确 ID。选择能恢复饥饿值的物品。
-      hunger_with_ground: |
-        【紧急】你极度饥饿（当前 {value}/{max}），必须立即进食！地上有：{items}。先拾取再进食。选择能恢复饥饿值的物品。
-      hunger_nothing: |
-        【紧急】你极度饥饿（当前 {value}/{max}），附近无食物！移动到有资源的地点或采集。
-      thirst_with_items: |
-        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！背包可用物品：{items}。执行 饮水，物品ID 必须是列表中的精确 ID。选择能恢复口渴值的物品。
-      thirst_with_ground: |
-        【紧急】你极度口渴（当前 {value}/{max}），必须立即饮水！地上有：{items}。先拾取再饮水。选择能恢复口渴值的物品。
-      thirst_nothing: |
-        【紧急】你极度口渴（当前 {value}/{max}），附近无水源！移动到有水的地点或采集。
-      hp_critical_warning: |
-        【危险】你的生命值很低（HP {value}/{max}），当前位置正在受到环境伤害！必须立即移动到安全区域。执行 移动，目标地点 必须是"可前往的地点"中的安全位置（非荒漠/危险区域）。
-      hp_force_flee_warning: |
-        【濒死警告】你即将死亡（HP {value}/{max}）！必须立即移动到安全区域，这是你的最高优先级！执行 移动，离开当前位置。不要进行任何其他行动。
-      critical_survival_hint: |
-        【生存警告】饥饿/口渴值已降至危险水平！在极端情况下，你可以：
-        1. 向龙门客栈老板娘购买馒头（1银两1个），先用说话询价再用给予完成交割
-        2. 向其他江湖人士乞讨或交易获取食物
-        3. 攻击持有食物的江湖人士并夺取食物（使用攻击动作）
-      trade_bargaining_hint: |
-        【交易提示】江湖没有系统担保的交易。使用「说话」与对方议价，双方用「给予」分别交出物品和银两。
-        先给的人承担对方不给的风险，建议要求对方先付定金或找值得信任的人交易。
-        好友可以给折扣，陌生人正常价或加价。关系越好，价格越优惠。
-    truncation: {}
-
-  # Sanity 注入模板
-  # 理智值降低时，向 prompt 注入精神状态描述，引导 LLM 产生混乱行为
-  sanity_warnings:
-    required_sections:
-      - mild
-      - critical
-    sections:
-      mild: |
-        【心神不宁】你的精神状态有些恍惚（理智 {value}/{max}），思绪开始混乱，可能做出不合常理的决定。
-      critical: |
-        【精神崩溃】你已失去理智控制（理智 {value}/{max}）！你的行为可能变得疯狂、混乱、不可理喻。可以做出攻击他人、丢弃物品、胡乱吃喝、无目的移动等行为。这不完全受你控制。
-    truncation:
-      warning_threshold: 50
-      critical_threshold: 30

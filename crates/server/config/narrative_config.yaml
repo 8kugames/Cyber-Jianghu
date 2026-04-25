@@ -65,13 +65,13 @@ attributes:
           description: "身体状况一般，能感受到明显的疲劳和轻微伤痛"
         - min: 30
           max: 49
-          description: "身体虚弱，伤痛明显，需要休息或治疗"
+          description: "身体虚弱，伤痛明显，行动困难"
         - min: 10
           max: 29
-          description: "身受重伤，意识模糊，急需救治"
+          description: "身受重伤，剧痛袭来，意识模糊，随时可能倒下"
         - min: 0
           max: 9
-          description: "生命垂危，濒临死亡边缘"
+          description: "生命垂危，意识在消散，死亡的阴影笼罩着你"
 
     hunger:
       name: hunger
@@ -89,10 +89,10 @@ attributes:
           description: "肚子有些饿了，该考虑找点东西吃"
         - min: 20
           max: 39
-          description: "饥肠辘辘，肚子饿得咕咕叫，需要尽快进食"
+          description: "饥肠辘辘，胃在剧烈绞痛，四肢无力"
         - min: 0
           max: 19
-          description: "饥饿难耐，已经饿得头昏眼花，再不进食会有生命危险"
+          description: "饿得头昏眼花，意识逐渐模糊，生命正在消逝"
 
     thirst:
       name: thirst
@@ -110,10 +110,10 @@ attributes:
           description: "口渴明显，嗓子发干，该找水喝了"
         - min: 20
           max: 39
-          description: "非常口渴，嘴唇干裂，急需补充水分"
+          description: "口渴难耐，喉咙如火烧，嘴唇干裂出血"
         - min: 0
           max: 19
-          description: "渴得难以忍受，已经出现脱水症状，再不喝水会有生命危险"
+          description: "脱水严重，视线模糊，意识在消散"
 
     stamina:
       name: stamina
@@ -173,7 +173,7 @@ attributes:
           description: "理智涣散，难以集中注意力"
         - min: 0
           max: 19
-          description: "神志不清，已接近疯狂边缘"
+          description: "神志不清，幻觉与现实交织，无法分辨真伪"
 
     reputation:
       name: reputation

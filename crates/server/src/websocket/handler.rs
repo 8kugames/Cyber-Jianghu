@@ -264,20 +264,6 @@ async fn handle_websocket(
         // 从配置构建 GameRules
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
-        let survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
-        let critical_attack_threshold = gd
-            .game_rules
-            .data
-            .agent_state
-            .survival
-            .critical_attack_threshold;
-        let hp_critical_threshold = gd.game_rules.data.agent_state.survival.hp_critical_threshold;
-        let hp_force_flee_threshold = gd
-            .game_rules
-            .data
-            .agent_state
-            .survival
-            .hp_force_flee_threshold;
         let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
@@ -285,10 +271,6 @@ async fn handle_websocket(
         drop(gd);
 
         let survival = super::types::SurvivalConfig {
-            survival_threshold,
-            critical_attack_threshold,
-            hp_critical_threshold,
-            hp_force_flee_threshold,
             rebirth_delay_ticks,
         };
         let game_rules = build_game_rules_from_config(
@@ -342,10 +324,6 @@ async fn handle_websocket(
             let gd = state.game_data.get();
             tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
             survival = super::types::SurvivalConfig {
-                survival_threshold: gd.game_rules.data.agent_state.survival.critical_threshold,
-                critical_attack_threshold: gd.game_rules.data.agent_state.survival.critical_attack_threshold,
-                hp_critical_threshold: gd.game_rules.data.agent_state.survival.hp_critical_threshold,
-                hp_force_flee_threshold: gd.game_rules.data.agent_state.survival.hp_force_flee_threshold,
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
             };
             game_rules_version = gd.game_rules.version.clone();

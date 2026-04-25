@@ -188,10 +188,6 @@ pub async fn agent_register(
         (
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
             crate::websocket::types::SurvivalConfig {
-                survival_threshold: gd.game_rules.data.agent_state.survival.critical_threshold,
-                critical_attack_threshold: gd.game_rules.data.agent_state.survival.critical_attack_threshold,
-                hp_critical_threshold: gd.game_rules.data.agent_state.survival.hp_critical_threshold,
-                hp_force_flee_threshold: gd.game_rules.data.agent_state.survival.hp_force_flee_threshold,
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
             },
             gd.game_rules.version.clone(),
@@ -213,10 +209,6 @@ pub async fn agent_register(
             })
             .collect(),
         survival_actions: game_data::ActionRegistry::action_names_with_tag("survival"),
-        survival_threshold: survival.survival_threshold,
-        critical_attack_threshold: survival.critical_attack_threshold,
-        hp_critical_threshold: survival.hp_critical_threshold,
-        hp_force_flee_threshold: survival.hp_force_flee_threshold,
         version: game_rules_version,
         last_updated: chrono::Utc::now().to_rfc3339(),
         intent_batch,

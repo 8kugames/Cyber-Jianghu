@@ -344,15 +344,15 @@ impl super::Agent {
                     });
                 }
                 // 2. ImmediateEvent: DB 写入 + Notify（新架构，无 LLM 调用）
-                if let ServerMessage::ImmediateEvent { .. } = &msg {
-                    if let Some(ref handler) = immediate_handler {
+                if let ServerMessage::ImmediateEvent { .. } = &msg
+                    && let Some(ref handler) = immediate_handler
+                {
                         let h = handler.clone();
                         let msg = msg.clone();
                         tokio::spawn(async move {
                             h.handle_server_message(msg).await;
                         });
                     }
-                }
                 // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
                 if let ServerMessage::Dialogue { message, .. } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
@@ -655,157 +655,10 @@ impl super::Agent {
                     // 4. 构建增强的世界状态（包含记忆上下文 + deferred 对话）
                     let mut memory_context = self.get_memory_context().await;
 
-                    // 4.1 生存压力注入：hunger/thirst 低于阈值时强制注入紧急信号
-                    // 数据驱动：模板从 prompt_templates.yaml 加载，无模板时 fallback 到硬编码
-                    let survival_warnings = {
-                        let survival_threshold = self.config.survival_threshold();
-                        let attrs = &world_state.self_state.attributes;
-                        let hunger = attrs.get("hunger").copied().unwrap_or(100);
-                        let thirst = attrs.get("thirst").copied().unwrap_or(100);
-                        let mut warnings = Vec::new();
-
-                        // 尝试获取模板配置
-                        let tmpl_config = self.cognitive_engine
-                            .as_ref()
-                            .and_then(|e| e.prompt_template());
-                        let tmpl = tmpl_config
-                            .and_then(|c| c.get_template("survival_warnings"));
-
-                        // 口渴优先（更致命）
-                        if thirst > 0 && thirst <= survival_threshold {
-                            let backpack_drinks: Vec<String> = world_state.self_state.inventory.iter()
-                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                .map(|i| i.name.clone())
-                                .collect();
-                            let ground_drinks: Vec<String> = world_state.nearby_items.iter()
-                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                .map(|i| i.name.clone())
-                                .collect();
-
-                            let warning = if let Some(t) = tmpl {
-                                let (section, items) = if !backpack_drinks.is_empty() {
-                                    ("thirst_with_items", backpack_drinks.join("、"))
-                                } else if !ground_drinks.is_empty() {
-                                    ("thirst_with_ground", ground_drinks.join("、"))
-                                } else {
-                                    ("thirst_nothing", String::new())
-                                };
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), thirst.to_string());
-                                vars.insert("max".to_string(), "100".to_string());
-                                vars.insert("items".to_string(), items);
-                                t.render_section(section, &vars)
-                                    .unwrap_or_else(|| "【紧急】极度口渴，必须立即饮水！".to_string())
-                            } else if !backpack_drinks.is_empty() {
-                                format!(
-                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！背包中有：{}。使用 drink 命令饮用。",
-                                    backpack_drinks.join("、")
-                                )
-                            } else if !ground_drinks.is_empty() {
-                                format!(
-                                    "【生存警告】你正处于极度口渴状态，必须立即饮水！地上有：{}。先 pickup 再 drink。",
-                                    ground_drinks.join("、")
-                                )
-                            } else {
-                                "【生存警告】你正处于极度口渴状态，必须立即饮水！附近没有水源，移动到有水的地点。".to_string()
-                            };
-                            warnings.push(warning);
-                        }
-
-                        if hunger > 0 && hunger <= survival_threshold {
-                            let foods: Vec<String> = world_state.self_state.inventory.iter()
-                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                .map(|i| i.name.clone())
-                                .collect();
-                            let ground_foods: Vec<String> = world_state.nearby_items.iter()
-                                .filter(|i| i.item_type == cyber_jianghu_protocol::ITEM_TYPE_CONSUMABLE)
-                                .map(|i| i.name.clone())
-                                .collect();
-
-                            let warning = if let Some(t) = tmpl {
-                                let (section, items) = if !foods.is_empty() {
-                                    ("hunger_with_items", foods.join("、"))
-                                } else if !ground_foods.is_empty() {
-                                    ("hunger_with_ground", ground_foods.join("、"))
-                                } else {
-                                    ("hunger_nothing", String::new())
-                                };
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), hunger.to_string());
-                                vars.insert("max".to_string(), "100".to_string());
-                                vars.insert("items".to_string(), items);
-                                t.render_section(section, &vars)
-                                    .unwrap_or_else(|| "【紧急】极度饥饿，必须立即进食！".to_string())
-                            } else if !foods.is_empty() {
-                                format!(
-                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！背包中有：{}。使用 eat 命令吃掉其中一个。",
-                                    foods.join("、")
-                                )
-                            } else if !ground_foods.is_empty() {
-                                format!(
-                                    "【生存警告】你正处于极度饥饿状态，必须立即进食！地上有：{}。先 pickup 再 eat。",
-                                    ground_foods.join("、")
-                                )
-                            } else {
-                                "【生存警告】你正处于极度饥饿状态，必须立即进食！背包和地上都没有食物，移动到有资源的地点。".to_string()
-                            };
-                            warnings.push(warning);
-                        }
-
-                        // 生存攻击安全阀：hunger/thirst 极低时注入攻击/交易提示
-                        let critical = self.config.critical_attack_threshold();
-                        if ((hunger > 0 && hunger <= critical) || (thirst > 0 && thirst <= critical))
-                            && let Some(t) = tmpl
-                            && let Some(hint) = t.render_section("critical_survival_hint", &std::collections::HashMap::new())
-                        {
-                            warnings.push(hint);
-                        }
-
-                        // HP 逃逸警告：HP 低于阈值时注入逃逸/濒死警告
-                        let hp = attrs.get("hp").copied().unwrap_or(100);
-                        let hp_max = attrs.get("hp_max").copied().unwrap_or(100);
-                        let hp_critical = self.config.hp_critical_threshold();
-                        let hp_force_flee = self.config.hp_force_flee_threshold();
-
-                        if hp > 0 && hp <= hp_force_flee {
-                            // 最高优先级：濒死逃离
-                            let warning = if let Some(t) = tmpl {
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), hp.to_string());
-                                vars.insert("max".to_string(), hp_max.to_string());
-                                t.render_section("hp_force_flee_warning", &vars)
-                                    .unwrap_or_else(|| format!(
-                                        "【濒死警告】你即将死亡（HP {}/{}）！必须立即移动到安全区域！",
-                                        hp, hp_max
-                                    ))
-                            } else {
-                                format!(
-                                    "【濒死警告】你即将死亡（HP {}/{}）！必须立即移动到安全区域！",
-                                    hp, hp_max
-                                )
-                            };
-                            warnings.insert(0, warning); // 最高优先级，插入队首
-                        } else if hp > 0 && hp <= hp_critical {
-                            // 高优先级：HP 低，建议逃离
-                            let warning = if let Some(t) = tmpl {
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), hp.to_string());
-                                vars.insert("max".to_string(), hp_max.to_string());
-                                t.render_section("hp_critical_warning", &vars)
-                                    .unwrap_or_else(|| format!(
-                                        "【危险】你的生命值很低（HP {}/{}），当前位置正在受到环境伤害！必须立即移动到安全区域。",
-                                        hp, hp_max
-                                    ))
-                            } else {
-                                format!(
-                                    "【危险】你的生命值很低（HP {}/{}），当前位置正在受到环境伤害！必须立即移动到安全区域。",
-                                    hp, hp_max
-                                )
-                            };
-                            warnings.insert(0, warning); // 高优先级，插入队首（在濒死之后）
-                        }
-
-                        // 交易议价提示：附近有其他人时有银两时注入（关系感知）
+                    // 4.1 交易议价提示（经济引导，非生存干预）
+                    // 附近有其他人且有银两时注入交易建议（关系感知）
+                    let trade_hints = {
+                        let mut hints = Vec::new();
                         let has_silver = world_state.self_state.inventory.iter()
                             .any(|i| i.item_id == "银子" && i.quantity > 0);
                         if !world_state.entities.is_empty() && has_silver {
@@ -827,79 +680,18 @@ impl super::Agent {
                                 entity_descs.push(rel_desc);
                             }
 
-                            warnings.push(format!(
-                                "【交易提示】你可以使用「说话」与对方讨价还价。先询价，协商好价格后再执行「交易」。关系越好价格越优惠。你身边有：{}。你身上有{}两银子。",
+                            hints.push(format!(
+                                "【交易提示】你可以使用「说话」与对方讨价还价。先询价，协商好价格后再用「给予」交付物品换取银两。关系越好价格越优惠。你身边有：{}。你身上有{}两银子。",
                                 entity_descs.join("、"),
                                 silver,
                             ));
                         }
-
-                        warnings
+                        hints
                     };
 
-                    // 4.2 Sanity 注入：理智值降低时注入精神状态描述
-                    let sanity_warning = {
-                        let attrs = &world_state.self_state.attributes;
-                        let sanity = attrs.get("sanity").copied().unwrap_or(100);
-
-                        // 模板阈值（数据驱动）
-                        let (warning_threshold, critical_threshold) = {
-                            let tmpl_config = self.cognitive_engine
-                                .as_ref()
-                                .and_then(|e| e.prompt_template());
-                            let trunc = tmpl_config
-                                .and_then(|c| c.get_template("sanity_warnings"));
-                            let wt = trunc
-                                .and_then(|t| t.truncation.get("warning_threshold"))
-                                .copied()
-                                .unwrap_or(50) as i32;
-                            let ct = trunc
-                                .and_then(|t| t.truncation.get("critical_threshold"))
-                                .copied()
-                                .unwrap_or(30) as i32;
-                            (wt, ct)
-                        };
-
-                        if sanity <= critical_threshold {
-                            // 临界：精神崩溃
-                            let tmpl_config = self.cognitive_engine
-                                .as_ref()
-                                .and_then(|e| e.prompt_template());
-                            if let Some(tmpl) = tmpl_config
-                                .and_then(|c| c.get_template("sanity_warnings"))
-                            {
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), sanity.to_string());
-                                vars.insert("max".to_string(), "100".to_string());
-                                tmpl.render_section("critical", &vars)
-                            } else {
-                                Some(format!(
-                                    "【精神崩溃】你已失去理智控制（理智 {}/100）！你的行为变得疯狂、混乱、不可理喻。",
-                                    sanity
-                                ))
-                            }
-                        } else if sanity <= warning_threshold {
-                            // 轻度：心神不宁
-                            let tmpl_config = self.cognitive_engine
-                                .as_ref()
-                                .and_then(|e| e.prompt_template());
-                            if let Some(tmpl) = tmpl_config
-                                .and_then(|c| c.get_template("sanity_warnings"))
-                            {
-                                let mut vars = std::collections::HashMap::new();
-                                vars.insert("value".to_string(), sanity.to_string());
-                                vars.insert("max".to_string(), "100".to_string());
-                                tmpl.render_section("mild", &vars)
-                            } else {
-                                Some(format!(
-                                    "【心神不宁】你的精神状态有些恍惚（理智 {}/100），可能做出不合常理的决定。",
-                                    sanity
-                                ))
-                            }
-                        } else {
-                            None
-                        }
-                    };
+                    // 4.2 Sanity：已移除天道干预式警告注入
+                    // 低理智行为由 chaos generator (chaos.rs) 处理，体感叙事由
+                    // WorldState.attribute_descriptions 提供（sanity 阈值 narrative_config.yaml）
                     if let Some(ref handler) = self.immediate_handler {
                         let store = handler.event_store();
                         let config = store.config();
@@ -1025,16 +817,10 @@ impl super::Agent {
                         }
                     }
 
-                    // 4.2 生存压力注入（延迟到物品信息之后，可引用具体物品名）
-                    if !survival_warnings.is_empty() {
-                        memory_context.push_str("\n### 紧急\n");
-                        memory_context.push_str(&survival_warnings.join("\n"));
-                    }
-
-                    // 4.3 Sanity 精神状态注入
-                    if let Some(ref sw) = sanity_warning {
-                        memory_context.push_str("\n### 精神状态\n");
-                        memory_context.push_str(sw);
+                    // 4.3 交易议价提示注入
+                    if !trade_hints.is_empty() {
+                        memory_context.push_str("\n### 交易提示\n");
+                        memory_context.push_str(&trade_hints.join("\n"));
                     }
 
                     // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）

@@ -105,7 +105,7 @@ data:
   进食:
     name: "进食"
     aliases: ["吃", "食用", "吃东西", "eat", "consume"]
-    description: '消耗食物以恢复饥饿度。必须指定要吃的食物物品 ID（如 item_id: "馒头" 表示吃馒头）。此动作会从背包中移除食物并恢复 hunger 属性。注意区分：进食 用于固体食物，饮水 用于液体饮水，拾取 用于拾取地面物品，使用 用于其他物品交互。'
+    description: '消耗食物恢复饥饿度。长期不进食将导致饥饿值归零而死亡。必须指定食物的 item_id（如 item_id: "馒头"）。此动作从背包中移除食物并恢复 hunger 属性。'
     category: survival
     ooc_risk: low
     validation:
@@ -122,7 +122,7 @@ data:
   饮水:
     name: "饮水"
     aliases: ["喝", "喝水", "drink"]
-    description: '消耗液体以恢复口渴度。必须指定要饮用的液体物品 ID（如 item_id: "水" 表示喝水）。此动作会从背包中移除液体并恢复 thirst 属性。注意区分：饮水 用于饮水（水、酒等液体），进食 用于进食（固体食物），拾取 用于拾取地面物品。'
+    description: '消耗液体恢复口渴度。长期不饮水将导致脱水死亡。必须指定液体的 item_id（如 item_id: "水"）。此动作从背包中移除液体并恢复 thirst 属性。'
     category: survival
     ooc_risk: low
     validation:

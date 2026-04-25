@@ -288,10 +288,6 @@ mod tests {
                             real_seconds_per_tick: 60,
                         },
                         survival: SurvivalRulesData {
-                            critical_threshold: 30,
-                            critical_attack_threshold: 15,
-                            hp_critical_threshold: 30,
-                            hp_force_flee_threshold: 15,
                             rebirth:
                                 crate::game_data::types::unified_config::RebirthRulesData::default(),
                         },
