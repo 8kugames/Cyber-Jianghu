@@ -30,11 +30,9 @@ pub struct WebSocketQuery {
 // ============================================================================
 
 /// 生存配置参数（从 game_rules.yaml 读取）
+///
+/// 天道无为：干预阈值已移除，仅保留重生配置
 pub struct SurvivalConfig {
-    pub survival_threshold: i32,
-    pub critical_attack_threshold: i32,
-    pub hp_critical_threshold: i32,
-    pub hp_force_flee_threshold: i32,
     pub rebirth_delay_ticks: i32,
 }
 
@@ -120,10 +118,6 @@ pub fn build_game_rules_from_config(
         available_actions,
         initial_items,
         survival_actions,
-        survival_threshold: survival.survival_threshold,
-        critical_attack_threshold: survival.critical_attack_threshold,
-        hp_critical_threshold: survival.hp_critical_threshold,
-        hp_force_flee_threshold: survival.hp_force_flee_threshold,
         version,
         last_updated: Utc::now().to_rfc3339(),
         intent_batch: Some(intent_batch),

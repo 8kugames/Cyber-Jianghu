@@ -929,38 +929,6 @@ impl Config {
         })
     }
 
-    /// 获取生存阈值
-    pub fn survival_threshold(&self) -> i32 {
-        self.game_rules
-            .as_ref()
-            .map(|r| r.survival_threshold)
-            .unwrap_or(30)
-    }
-
-    /// 获取生存攻击阈值（hunger/thirst 低于此值时注入攻击/交易提示）
-    pub fn critical_attack_threshold(&self) -> i32 {
-        self.game_rules
-            .as_ref()
-            .map(|r| r.critical_attack_threshold)
-            .unwrap_or(15)
-    }
-
-    /// 获取 HP 逃逸阈值
-    pub fn hp_critical_threshold(&self) -> i32 {
-        self.game_rules
-            .as_ref()
-            .map(|r| r.hp_critical_threshold)
-            .unwrap_or(30)
-    }
-
-    /// 获取 HP 强制逃离阈值
-    pub fn hp_force_flee_threshold(&self) -> i32 {
-        self.game_rules
-            .as_ref()
-            .map(|r| r.hp_force_flee_threshold)
-            .unwrap_or(15)
-    }
-
     /// 获取重生延迟 tick 数（0 = 不自动重生）
     pub fn rebirth_delay_ticks(&self) -> i32 {
         self.game_rules
