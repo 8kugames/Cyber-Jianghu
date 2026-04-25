@@ -74,6 +74,9 @@
                     <th class="col-agent">角色</th>
                     <th class="col-location">位置</th>
                     <th class="col-action">动作</th>
+                    <th class="col-renhun">人魂</th>
+                    <th class="col-tianhun">天魂</th>
+                    <th class="col-dihun">地魂</th>
                     <th class="col-narrative">叙事</th>
                 </tr>
             </thead>
@@ -145,7 +148,7 @@
             } catch (e) {
                 if (e.name !== "ApiError") {
                     loading.style.display = 'none';
-                    tbody.innerHTML = `<tr><td colspan="5" class="exp-empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="8" class="exp-empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
                 }
             }
         }
@@ -154,7 +157,6 @@
             const tbody = document.getElementById('experiences-tbody');
             const loading = document.getElementById('experiences-loading');
             const empty = document.getElementById('experiences-empty');
-            const container = document.getElementById('experiences-container');
 
             if (experiences.length === 0) {
                 tbody.innerHTML = '';
@@ -170,116 +172,108 @@
                 const locationDisplay = entry.location || '-';
                 const actionDisplay = entry.action_type_display || entry.action_type || '-';
                 const narrativeText = entry.narrative || '';
+                const metadata = entry.soul_cycle_metadata || {};
 
-                // 基础行：Tick | Agent | Location | Action | Narrative
+                // 三魂 metadata 单元格（无 cycles 时为 '-'）
+                const renhunCell = renderRenhunCell(metadata.cycles, entry);
+                const tianhunCell = renderTianhunCell(metadata.cycles, entry);
+                const dihunCell = renderDihunCell(metadata.cycles, entry);
+
+                // 基础行：Tick | Agent | Location | Action | 人魂 | 天魂 | 地魂 | 叙事
                 let html = `<tr>` +
                     `<td class="col-tick"><span class="tick-badge">T${escapeHtml(entry.tick_id || '-')}</span></td>` +
                     `<td class="col-agent">${escapeHtml(entry.agent_name || '')}</td>` +
                     `<td class="col-location"><span class="exp-location-text">${escapeHtml(locationDisplay)}</span></td>` +
                     `<td class="col-action"><span class="exp-action-badge">${escapeHtml(actionDisplay)}</span></td>` +
+                    `<td class="col-renhun">${renhunCell}</td>` +
+                    `<td class="col-tianhun">${tianhunCell}</td>` +
+                    `<td class="col-dihun">${dihunCell}</td>` +
                     `<td class="col-narrative">`;
 
                 // Narrative 文本
                 if (narrativeText) {
                     html += `<div class="exp-narrative-full">${escapeHtml(narrativeText)}</div>`;
                 }
-
-                // 三魂 metadata 内联展示
-                const metadata = entry.soul_cycle_metadata || {};
-                if (metadata.cycles && metadata.cycles.length > 0) {
-                    html += renderSoulMetaInline(metadata.cycles, entry.tick_id);
-                } else if (entry.thought_log || entry.result) {
-                    // Fallback: basic info
-                    html += renderBasicMetaInline(entry);
-                }
-
                 html += `</td></tr>`;
                 return html;
             }).join('');
         }
 
-        // 内联渲染三魂 metadata（表格行内）
-        function renderSoulMetaInline(cycles, tickId) {
-            let html = `<div class="exp-meta-inline">`;
+        // 渲染人魂单元格
+        function renderRenhunCell(cycles, entry) {
+            if (!cycles || cycles.length === 0) {
+                if (!entry.thought_log) return '-';
+                return `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>`;
+            }
+            let html = '';
             cycles.forEach((cycle, idx) => {
                 if (cycles.length > 1) {
-                    html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+                    html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
                 }
-                // 人魂
-                if (cycle.renhun && (cycle.renhun.narrative || cycle.renhun.thought_log)) {
-                    html += `<div class="exp-meta-row">` +
-                        `<div class="exp-meta-block">` +
-                        `<div class="exp-meta-block-title renhun">人魂</div>`;
-                    if (cycle.renhun.narrative) {
-                        html += `<div class="exp-meta-text">${escapeHtml(cycle.renhun.narrative)}</div>`;
-                    }
-                    if (cycle.renhun.thought_log) {
-                        html += `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(cycle.renhun.thought_log)}</div>`;
-                    }
-                    html += `</div></div>`;
+                const rh = cycle.renhun;
+                if (!rh) return;
+                if (rh.narrative) {
+                    html += `<div class="exp-meta-text">${escapeHtml(rh.narrative)}</div>`;
                 }
-                // 天魂
-                if (cycle.tianhun) {
-                    const t = cycle.tianhun;
-                    const isApproved = t.result === 'approved';
-                    html += `<div class="exp-meta-block">` +
-                        `<div class="exp-meta-block-title tianhun">天魂 ${isApproved ? '✓通过' : '✗驳回'}</div>`;
-                    if (t.layers && t.layers.length > 0) {
-                        html += `<div class="soul-layers">`;
-                        t.layers.forEach(l => {
-                            const passed = l.passed;
-                            const name = LAYER_NAMES[l.layer] || l.layer;
-                            html += `<span class="soul-layer-tag ${passed ? 'passed' : 'failed'}">${escapeHtml(name)}${passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
-                        });
-                        html += `</div>`;
-                    }
-                    if (t.reason) {
-                        html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(t.reason)}</div>`;
-                    }
-                    html += `</div>`;
+                if (rh.thought_log) {
+                    html += `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(rh.thought_log)}</div>`;
                 }
-                // 地魂
-                if (cycle.final_intent) {
-                    const fi = cycle.final_intent;
-                    const fiActionType = fi.action_type || '';
-                    const fiData = (fi.action_data && typeof fi.action_data === 'object') ? fi.action_data : {};
-                    const fiContent = fiData.content || '';
-                    const fiTarget = fiData.target_agent_id;
-                    let fiText = getActionTypeDisplay(fiActionType);
-                    if (fiActionType === 'speak' && fiContent) fiText = `"${escapeHtml(fiContent)}"`;
-                    else if (fiActionType === 'whisper' && fiContent) fiText = `向某人密语: "${escapeHtml(fiContent)}"`;
-                    else if (fiActionType === 'shout' && fiContent) fiText = `大喊: "${escapeHtml(fiContent)}"`;
-                    else if (Object.keys(fiData).length > 0) fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
-                    html += `<div class="exp-meta-block">` +
-                        `<div class="exp-meta-block-title action">地魂</div>` +
-                        `<div class="exp-meta-text">${escapeHtml(fiText)}</div>` +
-                        `</div>`;
-                }
-                html += `</div>`; // end .exp-meta-row
             });
-            html += `</div>`; // end .exp-meta-inline
-            return html;
+            return html || '-';
         }
 
-        // Fallback: basic metadata when no cycles
-        function renderBasicMetaInline(entry) {
-            let html = `<div class="exp-meta-inline">`;
-            if (entry.thought_log) {
-                html += `<div class="exp-meta-row">` +
-                    `<div class="exp-meta-block">` +
-                    `<div class="exp-meta-block-title renhun">人魂</div>` +
-                    `<div class="exp-meta-text" style="font-style:italic;color:var(--text-secondary);">${escapeHtml(entry.thought_log)}</div>` +
-                    `</div></div>`;
-            }
-            if (entry.result) {
+        // 渲染天魂单元格
+        function renderTianhunCell(cycles, entry) {
+            if (!cycles || cycles.length === 0) {
+                if (!entry.result) return '-';
                 const isApproved = entry.result === 'success';
-                html += `<div class="exp-meta-row">` +
-                    `<div class="exp-meta-block">` +
-                    `<div class="exp-meta-block-title tianhun">天魂 ${isApproved ? '✓成功' : '✗失败'}</div>` +
-                    `</div></div>`;
+                return `<span class="soul-layer-tag ${isApproved ? 'passed' : 'failed'}">${isApproved ? '✓通过' : '✗驳回'}</span>`;
             }
-            html += `</div>`;
-            return html;
+            let html = '';
+            cycles.forEach((cycle, idx) => {
+                if (cycles.length > 1) {
+                    html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
+                }
+                const th = cycle.tianhun;
+                if (!th) return;
+                const isApproved = th.result === 'approved';
+                if (th.layers && th.layers.length > 0) {
+                    html += `<div class="soul-layers">`;
+                    th.layers.forEach(l => {
+                        const passed = l.passed;
+                        const name = LAYER_NAMES[l.layer] || l.layer;
+                        html += `<span class="soul-layer-tag ${passed ? 'passed' : 'failed'}">${escapeHtml(name)}${passed ? '' : ': ' + escapeHtml(l.detail || '')}</span>`;
+                    });
+                    html += `</div>`;
+                }
+                if (th.reason) {
+                    html += `<div class="exp-meta-text" style="color:var(--text-secondary);">${escapeHtml(th.reason)}</div>`;
+                }
+            });
+            return html || '-';
+        }
+
+        // 渲染地魂单元格
+        function renderDihunCell(cycles, entry) {
+            if (!cycles || cycles.length === 0) return '-';
+            let html = '';
+            cycles.forEach((cycle, idx) => {
+                if (cycles.length > 1) {
+                    html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
+                }
+                const fi = cycle.final_intent;
+                if (!fi) return;
+                const fiActionType = fi.action_type || '';
+                const fiData = (fi.action_data && typeof fi.action_data === 'object') ? fi.action_data : {};
+                const fiContent = fiData.content || '';
+                let fiText = getActionTypeDisplay(fiActionType);
+                if (fiActionType === 'speak' && fiContent) fiText = `"${escapeHtml(fiContent)}"`;
+                else if (fiActionType === 'whisper' && fiContent) fiText = `向某人密语: "${escapeHtml(fiContent)}"`;
+                else if (fiActionType === 'shout' && fiContent) fiText = `大喊: "${escapeHtml(fiContent)}"`;
+                else if (Object.keys(fiData).length > 0) fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
+                html += `<div class="exp-meta-text">${escapeHtml(fiText)}</div>`;
+            });
+            return html || '-';
         }
 
         function updatePagination() {
