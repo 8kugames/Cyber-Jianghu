@@ -247,12 +247,13 @@ impl ReflectorSoul {
 
 请验证以下人设是否符合世界观设定：
 
+- 角色：{}
 - 性别：{}
 - 年龄：{}
 - 性格：{}
 - 价值观：{}
 
-注意：人设中的性格和价值观不应包含现代概念、魔法元素或穿越者知识。
+注意：人设中的性格和价值观不应包含现代概念、魔法元素或穿越者知识。角色名字是游戏设定，不属于穿越概念。角色可以拥有与历史人物相同的名字。
 
 请按以下 JSON 格式输出：
 {{
@@ -264,6 +265,7 @@ impl ReflectorSoul {
             rules.era.name,
             rules.era.tech_level,
             rules.forbidden_concepts.join("、"),
+            persona.name.as_deref().unwrap_or("未命名"),
             persona.gender,
             persona.age,
             persona.personality.join("、"),

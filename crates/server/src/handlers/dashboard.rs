@@ -685,6 +685,10 @@ pub struct AgentDetail {
     pub is_alive: bool,
     pub inventory: Vec<AgentInventoryItem>,
     pub attributes: std::collections::HashMap<String, i32>,
+    /// 当前年龄（游戏年），NULL = 不朽
+    pub age: Option<i64>,
+    /// 寿元上限（游戏年），NULL = 无上限
+    pub max_age: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -753,7 +757,7 @@ pub async fn get_agent_details(
         max_stamina,
         is_alive,
         mut attributes_map,
-    ) = if let Some(row) = state_row {
+    ) = if let Some(ref row) = state_row {
         // 从 JSONB attributes 列提取属性值
         let attrs: serde_json::Value = row.get::<serde_json::Value, _>("attributes");
 
@@ -857,12 +861,28 @@ pub async fn get_agent_details(
             context_i64.insert(k.clone(), *v as f64);
         }
 
-        for (name, _) in &cfg.data.derived.attributes {
+        for name in cfg.data.derived.attributes.keys() {
             if let Ok(val) = derived_component.calculate(name, &formula_engine, &context_i64) {
                 attributes_map.insert(name.clone(), val as i32);
             }
         }
     }
+
+    // 计算年龄与寿元
+    let age = if let Some(birth_tick) = agent_row.get::<Option<i64>, _>("birth_tick") {
+        let current_tick = state_row
+            .as_ref()
+            .map(|r| r.get::<i64, _>("tick_id"))
+            .unwrap_or(0);
+        if birth_tick > 0 && birth_tick < current_tick {
+            Some(crate::tick::decay::compute_age_years(birth_tick, current_tick))
+        } else {
+            Some(0)
+        }
+    } else {
+        None
+    };
+    let max_age = state.game_data.get_lifespan_config().map(|(m, _)| m as i64);
 
     Ok(Json(AgentDetail {
         id: agent_row.get("agent_id"),
@@ -882,6 +902,8 @@ pub async fn get_agent_details(
         is_alive,
         inventory,
         attributes: attributes_map,
+        age,
+        max_age,
     }))
 }
 
