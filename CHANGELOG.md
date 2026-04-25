@@ -102,6 +102,35 @@
   - 强调先给风险（"江湖规矩，信错人要付出代价"）
   - 无公定价，价格由双方自行决定
 
+- **Agent+Server**: HP 逃逸生存机制
+  - Server: `game_rules.yaml` 新增 `hp_critical_threshold`(30) / `hp_force_flee_threshold`(15)
+  - Protocol: `GameRules` 新增对应字段 + `SurvivalConfig` 结构化参数
+  - Agent: `lifecycle.rs` 在 survival_warnings 增加 HP 低阈值检查，分濒死/危险两级
+  - HP < 15 注入濒死警告（最高优先级），HP < 30 注入危险警告
+  - `prompt_templates.yaml` 新增 `hp_critical_warning` / `hp_force_flee_warning` 模板
+
+- **Agent**: 流式模式全局优化
+  - `DirectLlmClientConfig` 新增 `prefer_stream: bool`（默认 false）
+  - `send_request()` 短路: `prefer_stream=true` 时直接走 streaming，跳过 400 降级
+  - `build_fallback_client()` 从 `config.llm.enable_streaming` 读取
+  - 向后兼容：缺失时默认 false
+
+- **Agent**: 天魂角色名排除
+  - `PersonaInfo` 新增 `name: Option<String>` 字段
+  - ReflectorSoul 验证 prompt 增加"角色：{name}" + 穿越排除说明
+  - 防止角色名（如"张三丰"）被误判为穿越概念
+
+- **Agent**: `CYBER_JIANGHU_DATA_DIR` 数据持久化
+  - `Config::default()` 从环境变量读取 `servers_dir`
+  - `update_game_rules()` 使用环境变量定位 `actions.json`
+  - Docker 容器内数据写入挂载卷，避免 `down` 时丢失
+
+### Fixed
+
+- **Agent**: `lifecycle.rs` HP 最大值 key 错误 (`max_hp` → `hp_max`)
+  - Server JSONB 存储格式为 `{attr}_max`，即 `hp_max`
+  - 修复前 `unwrap_or(100)` 静默掩盖，HP 警告始终显示 X/100
+
 ### Changed
 
 - **Server**: 寿命系统 Server 权威化

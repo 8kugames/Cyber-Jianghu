@@ -509,6 +509,7 @@ impl Agent {
     pub(crate) fn extract_persona(&self) -> PersonaInfo {
         match &self.character_config {
             Some(character) => PersonaInfo {
+                name: Some(character.name.clone()),
                 gender: character.gender.clone(),
                 // 寿命由 Server 控制，此处使用注册年龄作为人设提示
                 age: character.age,
@@ -518,6 +519,7 @@ impl Agent {
             None => {
                 // 未创建角色时的默认人设
                 PersonaInfo {
+                    name: None,
                     gender: "未知".to_string(),
                     age: 25,
                     personality: vec![],

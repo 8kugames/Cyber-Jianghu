@@ -271,17 +271,29 @@ async fn handle_websocket(
             .agent_state
             .survival
             .critical_attack_threshold;
+        let hp_critical_threshold = gd.game_rules.data.agent_state.survival.hp_critical_threshold;
+        let hp_force_flee_threshold = gd
+            .game_rules
+            .data
+            .agent_state
+            .survival
+            .hp_force_flee_threshold;
         let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
         let intent_batch = gd.game_rules.data.intent_batch.clone();
         drop(gd);
 
-        let game_rules = build_game_rules_from_config(
-            tick_duration_secs,
+        let survival = super::types::SurvivalConfig {
             survival_threshold,
             critical_attack_threshold,
+            hp_critical_threshold,
+            hp_force_flee_threshold,
             rebirth_delay_ticks,
+        };
+        let game_rules = build_game_rules_from_config(
+            tick_duration_secs,
+            survival,
             game_rules_version,
             immediate_events,
             intent_batch,
@@ -322,18 +334,20 @@ async fn handle_websocket(
     // ===== 发送 game_rules 配置（ConfigUpdate） =====
     if agent_id != uuid::Uuid::nil() {
         let tick_duration_secs;
-        let survival_threshold;
-        let critical_attack_threshold;
-        let rebirth_delay_ticks;
+        let survival;
         let game_rules_version;
         let immediate_events;
         let intent_batch;
         {
             let gd = state.game_data.get();
             tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
-            survival_threshold = gd.game_rules.data.agent_state.survival.critical_threshold;
-            critical_attack_threshold = gd.game_rules.data.agent_state.survival.critical_attack_threshold;
-            rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
+            survival = super::types::SurvivalConfig {
+                survival_threshold: gd.game_rules.data.agent_state.survival.critical_threshold,
+                critical_attack_threshold: gd.game_rules.data.agent_state.survival.critical_attack_threshold,
+                hp_critical_threshold: gd.game_rules.data.agent_state.survival.hp_critical_threshold,
+                hp_force_flee_threshold: gd.game_rules.data.agent_state.survival.hp_force_flee_threshold,
+                rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
+            };
             game_rules_version = gd.game_rules.version.clone();
             immediate_events = gd.game_rules.data.immediate_events.clone();
             intent_batch = gd.game_rules.data.intent_batch.clone();
@@ -341,9 +355,7 @@ async fn handle_websocket(
 
         let game_rules_for_protocol = build_game_rules_from_config(
             tick_duration_secs,
-            survival_threshold,
-            critical_attack_threshold,
-            rebirth_delay_ticks,
+            survival,
             game_rules_version,
             immediate_events,
             intent_batch,
