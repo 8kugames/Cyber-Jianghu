@@ -198,7 +198,7 @@ async fn main() -> Result<()> {
     drop(gd_guard); // 释放锁
     info!("对话管理器初始化成功");
 
-    // 7.3 创建共享 EventManager（TickScheduler 和 IntentWorker 共用）
+    // 7.3 创建共享 EventManager（TickScheduler 专用，IntentWorker 不再使用）
     let event_manager = cyber_jianghu_server::tick::event_manager::EventManager::new_shared();
 
     // 7.4 创建 IntentWorker channel 并启动 Worker
@@ -212,7 +212,6 @@ async fn main() -> Result<()> {
         agent_to_device_map.clone(),
         dialogue_manager.clone(),
         game_data_cache.clone(),
-        event_manager.clone(),
     );
     tokio::spawn(async move {
         intent_worker.run(worker_rx).await;
