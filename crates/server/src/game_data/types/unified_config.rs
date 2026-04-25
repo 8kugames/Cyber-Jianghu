@@ -383,39 +383,15 @@ pub struct AgentStateRulesData {
 }
 
 /// 生存底线规则数据
+///
+/// 天道无为：服务器不干预 Agent 生存决策，仅提供物理规则（衰减、伤害、死亡）。
+/// 所有生存阈值/警告注入已移除，Agent 通过 WorldState.attribute_descriptions（体感叙事）
+/// 自主感知状态并做出决策。
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SurvivalRulesData {
-    /// hunger/thirst 低于此阈值时，survival 动作绕过 ReflectorSoul 审查
-    #[serde(default = "default_survival_threshold")]
-    pub critical_threshold: i32,
-
-    /// hunger/thirst 低于此阈值时注入攻击/交易提示（应 < critical_threshold）
-    #[serde(default = "default_critical_attack_threshold")]
-    pub critical_attack_threshold: i32,
-
-    /// HP 低于此阈值时注入环境伤害逃逸警告
-    #[serde(default = "default_hp_critical_threshold")]
-    pub hp_critical_threshold: i32,
-
-    /// HP 低于此阈值时注入最高优先级逃离警告（应 < hp_critical_threshold）
-    #[serde(default = "default_hp_force_flee_threshold")]
-    pub hp_force_flee_threshold: i32,
-
     /// 自动重生配置
     #[serde(default)]
     pub rebirth: RebirthRulesData,
-}
-
-fn default_critical_attack_threshold() -> i32 {
-    15
-}
-
-fn default_hp_critical_threshold() -> i32 {
-    30
-}
-
-fn default_hp_force_flee_threshold() -> i32 {
-    15
 }
 
 /// 自动重生规则数据
@@ -448,9 +424,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_survival_threshold() -> i32 {
-    30
-}
 
 /// Tick规则数据（现实时间 → Tick 转换）
 ///

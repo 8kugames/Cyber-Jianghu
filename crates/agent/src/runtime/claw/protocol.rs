@@ -505,7 +505,6 @@ impl DownstreamMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cyber_jianghu_protocol::GameRules;
 
     fn create_test_world_state() -> WorldState {
         // 使用 JSON 构造测试数据，避免直接构造复杂结构
@@ -920,8 +919,6 @@ mod tests {
                 "available_actions": [],
                 "initial_items": [],
                 "survival_actions": [],
-                "survival_threshold": 30,
-                "critical_attack_threshold": 15,
                 "rebirth_delay_ticks": 0,
                 "version": "0.0.6",
                 "last_updated": "2024-03-22T12:00:00Z",
