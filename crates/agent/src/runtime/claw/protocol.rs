@@ -405,37 +405,35 @@ impl DownstreamMessage {
                 version: _,
                 content,
                 ..
-            } => {
-                match config_type.as_str() {
-                    "game_rules" => {
-                        if let Ok(game_rules) =
-                            serde_json::from_value::<cyber_jianghu_protocol::GameRules>(content.clone())
-                        {
-                            Some(DownstreamMessage::ServerGameRulesUpdate {
-                                tick_duration_secs: game_rules.tick_duration_secs,
-                                version: game_rules.version,
-                                last_updated: game_rules.last_updated,
-                            })
-                        } else {
-                            None
-                        }
+            } => match config_type.as_str() {
+                "game_rules" => {
+                    if let Ok(game_rules) =
+                        serde_json::from_value::<cyber_jianghu_protocol::GameRules>(content.clone())
+                    {
+                        Some(DownstreamMessage::ServerGameRulesUpdate {
+                            tick_duration_secs: game_rules.tick_duration_secs,
+                            version: game_rules.version,
+                            last_updated: game_rules.last_updated,
+                        })
+                    } else {
+                        None
                     }
-                    "world_building_rules" => {
-                        if let Ok(rules) = serde_json::from_value::<
-                            cyber_jianghu_protocol::WorldBuildingRules,
-                        >(content.clone())
-                        {
-                            Some(DownstreamMessage::ServerWorldBuildingRulesUpdate {
-                                version: rules.version,
-                                last_updated: rules.last_updated,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
                 }
-            }
+                "world_building_rules" => {
+                    if let Ok(rules) = serde_json::from_value::<
+                        cyber_jianghu_protocol::WorldBuildingRules,
+                    >(content.clone())
+                    {
+                        Some(DownstreamMessage::ServerWorldBuildingRulesUpdate {
+                            version: rules.version,
+                            last_updated: rules.last_updated,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
             ServerMessage::AgentDied {
                 agent_id,
                 cause,

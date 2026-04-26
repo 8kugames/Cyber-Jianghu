@@ -786,14 +786,12 @@ pub async fn auto_rebirth_agent(
     }
 
     // 5. 恢复 agents 表状态为 active + 重置 birth_tick（寿命重新计算）
-    sqlx::query(
-        "UPDATE agents SET status = 'active', birth_tick = $2 WHERE agent_id = $1",
-    )
-    .bind(agent_id)
-    .bind(rebirth_tick)
-    .execute(pool)
-    .await
-    .context("恢复 Agent 状态失败")?;
+    sqlx::query("UPDATE agents SET status = 'active', birth_tick = $2 WHERE agent_id = $1")
+        .bind(agent_id)
+        .bind(rebirth_tick)
+        .execute(pool)
+        .await
+        .context("恢复 Agent 状态失败")?;
 
     info!(
         "Agent 自动重生成功: {} ({}) → {}",

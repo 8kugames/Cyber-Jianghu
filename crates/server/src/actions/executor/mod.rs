@@ -95,7 +95,11 @@ impl ActionExecutor {
             "制造" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
             "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
             "大喊" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
-            "修炼" => BasicActionExecutor::execute_practice(intent, action_data.clone(), &agent_state.skills),
+            "修炼" => BasicActionExecutor::execute_practice(
+                intent,
+                action_data.clone(),
+                &agent_state.skills,
+            ),
             "逃跑" => CombatActionExecutor::execute_flee(
                 intent,
                 action_data.clone(),
