@@ -386,7 +386,8 @@ impl Agent {
                 // 更好的做法是将此方法改为 async
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        let count: usize = manager.read().await.working().count().await.unwrap_or(0);
+                        let count: usize =
+                            manager.read().await.working().count().await.unwrap_or(0);
                         count
                     })
                 })

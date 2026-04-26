@@ -274,7 +274,11 @@ mod tests {
 
         let result = mutator.mutate(&change, &mut states, &mut ctx).await;
         assert!(result.unwrap());
-        assert!(states[0].skills.contains(&"martial/sword-basic".to_string()));
+        assert!(
+            states[0]
+                .skills
+                .contains(&"martial/sword-basic".to_string())
+        );
     }
 
     #[tokio::test]

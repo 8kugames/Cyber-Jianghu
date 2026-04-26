@@ -59,9 +59,8 @@ impl SemanticMemoryBackend {
             .context("Failed to initialize FTS fallback")?;
 
         // 打开可写的 episodic 数据库连接（用于 embedding 写入）
-        let episodic_conn =
-            rusqlite::Connection::open(&config.episodic_db_path)
-                .context("Failed to open episodic database for writing")?;
+        let episodic_conn = rusqlite::Connection::open(&config.episodic_db_path)
+            .context("Failed to open episodic database for writing")?;
 
         let use_vector = embedder.is_available() && !vector_store.is_empty();
 
@@ -213,7 +212,8 @@ impl MemoryBackend for SemanticMemoryBackend {
         {
             let mut vs = self.vector_store.lock().unwrap();
             vs.add(mem_id, embedding)?;
-            self.needs_rebuild.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.needs_rebuild
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
         // 标记使用向量模式

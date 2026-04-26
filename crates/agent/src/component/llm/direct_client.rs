@@ -492,12 +492,9 @@ impl DirectLlmClient {
     ///
     /// 当 send_request 遇到 "only support stream mode" 错误时调用此方法。
     /// 复用 send_streaming_request 建立 SSE 连接，收集全部 Delta 后拼装响应。
-    async fn send_request_via_stream(
-        &self,
-        request: &OpenAIRequest,
-    ) -> Result<OpenAIResponse> {
-        use futures_util::StreamExt;
+    async fn send_request_via_stream(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
         use super::streaming::StreamAccumulator;
+        use futures_util::StreamExt;
 
         let mut stream = self.send_streaming_request(request).await?;
         let mut acc = StreamAccumulator::new();
@@ -708,7 +705,8 @@ impl DirectLlmClient {
         max_rounds: usize,
     ) -> Result<String> {
         let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
-        self.run_tool_loop(messages, tools, executor, max_rounds).await
+        self.run_tool_loop(messages, tools, executor, max_rounds)
+            .await
     }
 
     /// 使用对话历史 + tool calling 的组合调用
@@ -726,7 +724,8 @@ impl DirectLlmClient {
             input.turns,
             input.current_prompt,
         );
-        self.run_tool_loop(messages, tools, executor, max_rounds).await
+        self.run_tool_loop(messages, tools, executor, max_rounds)
+            .await
     }
 
     /// Tool-calling 循环核心逻辑

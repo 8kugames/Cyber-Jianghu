@@ -225,7 +225,8 @@ impl IntentWorker {
 
         // 8. 交互驱动即时推送 WorldState（提交 Agent + 同位置 Agent）
         let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
-        self.send_reactive_world_state(agent_id, tick_id, events).await;
+        self.send_reactive_world_state(agent_id, tick_id, events)
+            .await;
 
         // 9. 广播事件给同位置 Agent
         for (target_id, event) in &result.events {
@@ -305,7 +306,8 @@ impl IntentWorker {
         )
         .await;
         let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
-        self.send_reactive_world_state(agent_id, tick_id, events).await;
+        self.send_reactive_world_state(agent_id, tick_id, events)
+            .await;
 
         for (target_id, event) in &result.events {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
@@ -380,16 +382,15 @@ impl IntentWorker {
             if let Some(device_id) = device_id {
                 let error_msg = cyber_jianghu_protocol::ServerMessage::Error {
                     code: cyber_jianghu_protocol::ERROR_CODE_AGENT_DEAD.into(),
-                    message: format!(
-                        "状态持久化失败 (agent_id={})，请断连后重新连接",
-                        agent_id
-                    ),
+                    message: format!("状态持久化失败 (agent_id={})，请断连后重新连接", agent_id),
                     current_tick_id: Some(tick_id),
                 };
                 if let Ok(json) = serde_json::to_string(&error_msg) {
                     let mut connections = self.connection_manager.write().await;
                     if let Some(conn) = connections.get_mut(&device_id) {
-                        let _ = conn.send(axum::extract::ws::Message::Text(json.into())).await;
+                        let _ = conn
+                            .send(axum::extract::ws::Message::Text(json.into()))
+                            .await;
                     }
                 }
                 // 4b. 强制关闭 WebSocket 连接
@@ -409,7 +410,10 @@ impl IntentWorker {
             }
             // 4d. 从 DashMap 移除
             self.state_cache.remove(agent_id);
-            info!("Tick {}: ghost agent {} 已从 DashMap 清除", tick_id, agent_id);
+            info!(
+                "Tick {}: ghost agent {} 已从 DashMap 清除",
+                tick_id, agent_id
+            );
         }
         for state in &updated_states {
             if !ghost_ids.contains(&state.agent_id) {

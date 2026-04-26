@@ -154,7 +154,9 @@ pub struct CognitiveEngine {
     /// 配置目录（用于地魂 tool-calling 的 skill_view 文件加载）
     pub(super) config_dir: std::path::PathBuf,
     /// 记忆管理器引用（用于地魂 search_memory / recall_archived）
-    pub(super) memory_manager: std::sync::RwLock<Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>>,
+    pub(super) memory_manager: std::sync::RwLock<
+        Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
+    >,
 }
 
 impl CognitiveEngine {
@@ -272,9 +274,7 @@ impl CognitiveEngine {
         std::env::var("CYBER_JIANGHU_CONFIG_DIR")
             .ok()
             .map(std::path::PathBuf::from)
-            .or_else(|| {
-                dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("config"))
-            })
+            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("config")))
             .unwrap_or_default()
     }
 
@@ -361,7 +361,10 @@ impl CognitiveEngine {
     }
 
     /// 设置 Memory Manager（由 builder 在构建后注入）
-    pub fn set_memory_manager(&self, manager: std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>) {
+    pub fn set_memory_manager(
+        &self,
+        manager: std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>,
+    ) {
         let mut mem_guard = self.memory_manager.write().unwrap();
         *mem_guard = Some(manager);
     }

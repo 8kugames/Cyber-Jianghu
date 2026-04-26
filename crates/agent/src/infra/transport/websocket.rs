@@ -164,7 +164,9 @@ impl WebSocketClient {
         // 读取 agent_id（如果有）
         let agent_id_opt = self.agent_id();
 
-        let url_with_token = self.config.ws_url_with_token(*device_id, auth_token, agent_id_opt);
+        let url_with_token = self
+            .config
+            .ws_url_with_token(*device_id, auth_token, agent_id_opt);
         let url =
             Url::parse(&url_with_token).map_err(|e| ConnectError::ConnectionFailed(e.into()))?;
 

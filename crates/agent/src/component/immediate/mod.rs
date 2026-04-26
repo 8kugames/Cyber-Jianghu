@@ -115,14 +115,13 @@ impl ImmediateEventHandler {
                 .insert_event_async(&incoming, tick_id, game_day)
                 .await
             {
-                error!(
-                    "写入即时事件到 DB 失败: event_id={}, error={}",
-                    event_id, e
-                );
+                error!("写入即时事件到 DB 失败: event_id={}, error={}", event_id, e);
             } else {
                 debug!(
                     "即时事件已入库: event_id={}, type={}, game_day={}",
-                    event_id, incoming.event_type.as_str(), game_day
+                    event_id,
+                    incoming.event_type.as_str(),
+                    game_day
                 );
             }
         }
