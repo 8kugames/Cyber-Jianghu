@@ -424,7 +424,6 @@ fn default_true() -> bool {
     true
 }
 
-
 /// Tick规则数据（现实时间 → Tick 转换）
 ///
 /// 注意：Tick → 游戏时间转换由 time.yaml 的 ticks_per_hour 控制

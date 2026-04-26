@@ -319,8 +319,8 @@ impl AgentBuilder {
         if let Some(engine) = self.cognitive_engine.as_ref()
             && let Some(ref mm) = memory_manager
         {
-                engine.set_memory_manager(mm.clone());
-            }
+            engine.set_memory_manager(mm.clone());
+        }
 
         Agent {
             config: self.config,

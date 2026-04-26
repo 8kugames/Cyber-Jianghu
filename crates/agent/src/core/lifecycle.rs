@@ -347,12 +347,12 @@ impl super::Agent {
                 if let ServerMessage::ImmediateEvent { .. } = &msg
                     && let Some(ref handler) = immediate_handler
                 {
-                        let h = handler.clone();
-                        let msg = msg.clone();
-                        tokio::spawn(async move {
-                            h.handle_server_message(msg).await;
-                        });
-                    }
+                    let h = handler.clone();
+                    let msg = msg.clone();
+                    tokio::spawn(async move {
+                        h.handle_server_message(msg).await;
+                    });
+                }
                 // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
                 if let ServerMessage::Dialogue { message, .. } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
