@@ -1145,6 +1145,7 @@ pub struct ExperienceStreamQuery {
 pub struct StreamEntry {
     pub tick_id: i64,
     pub agent_id: Uuid,
+    pub device_id: Option<Uuid>,
     pub agent_name: String,
     pub location: Option<String>,
     pub action_type: String,
@@ -1223,7 +1224,7 @@ pub async fn get_experiences(
     // 查询条目：使用 LATERAL JOIN 获取动作发生时的位置
     let rows = sqlx::query(
         r#"
-        SELECT a.tick_id, a.agent_id, ag.name as agent_name, loc.node_id as location,
+        SELECT a.tick_id, a.agent_id, ag.device_id, ag.name as agent_name, loc.node_id as location,
                a.action_type, a.action_type_display, a.action_data,
                a.result, a.result_message, a.thought_log, a.observer_thought,
                a.narrative, a.soul_cycle_metadata, a.created_at
@@ -1265,6 +1266,7 @@ pub async fn get_experiences(
         .map(|row| StreamEntry {
             tick_id: row.get("tick_id"),
             agent_id: row.get("agent_id"),
+            device_id: row.get("device_id"),
             agent_name: row.get("agent_name"),
             location: row.get("location"),
             action_type: row.get("action_type"),

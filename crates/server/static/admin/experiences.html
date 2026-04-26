@@ -72,6 +72,8 @@
                 <tr>
                     <th class="col-tick">Tick</th>
                     <th class="col-agent">角色</th>
+                    <th class="col-agent-id">Agent ID</th>
+                    <th class="col-device-id">Device ID</th>
                     <th class="col-location">位置</th>
                     <th class="col-action">动作</th>
                     <th class="col-renhun">人魂</th>
@@ -148,7 +150,7 @@
             } catch (e) {
                 if (e.name !== "ApiError") {
                     loading.style.display = 'none';
-                    tbody.innerHTML = `<tr><td colspan="8" class="exp-empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="10" class="exp-empty">加载失败: ${escapeHtml(e.message)}</td></tr>`;
                 }
             }
         }
@@ -179,10 +181,12 @@
                 const tianhunCell = renderTianhunCell(metadata.cycles, entry);
                 const dihunCell = renderDihunCell(metadata.cycles, entry);
 
-                // 基础行：Tick | Agent | Location | Action | 人魂 | 天魂 | 地魂 | 叙事
+                // 基础行：Tick | Agent | AgentID | DeviceID | Location | Action | 人魂 | 天魂 | 地魂 | 叙事
                 let html = `<tr>` +
                     `<td class="col-tick"><span class="tick-badge">T${escapeHtml(entry.tick_id || '-')}</span></td>` +
                     `<td class="col-agent">${escapeHtml(entry.agent_name || '')}</td>` +
+                    `<td class="col-agent-id"><span class="mono-text">${entry.agent_id ? escapeHtml(entry.agent_id.substring(0, 8)) : '-'}</span></td>` +
+                    `<td class="col-device-id"><span class="mono-text">${entry.device_id ? escapeHtml(entry.device_id.substring(0, 8)) : '-'}</span></td>` +
                     `<td class="col-location"><span class="exp-location-text">${escapeHtml(locationDisplay)}</span></td>` +
                     `<td class="col-action"><span class="exp-action-badge">${escapeHtml(actionDisplay)}</span></td>` +
                     `<td class="col-renhun">${renhunCell}</td>` +
@@ -267,11 +271,28 @@
                 const fiData = (fi.action_data && typeof fi.action_data === 'object') ? fi.action_data : {};
                 const fiContent = fiData.content || '';
                 let fiText = getActionTypeDisplay(fiActionType);
-                if (fiActionType === 'speak' && fiContent) fiText = `"${escapeHtml(fiContent)}"`;
-                else if (fiActionType === 'whisper' && fiContent) fiText = `向某人密语: "${escapeHtml(fiContent)}"`;
-                else if (fiActionType === 'shout' && fiContent) fiText = `大喊: "${escapeHtml(fiContent)}"`;
-                else if (Object.keys(fiData).length > 0) fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
+
+                if (fiActionType === 'speak' && fiContent) {
+                    fiText = `"${escapeHtml(fiContent)}"`;
+                } else if (fiActionType === 'whisper' && fiContent) {
+                    const targetId = fiData.target_agent_id;
+                    const targetLabel = (targetId && allAgentsMap[targetId]) ? allAgentsMap[targetId].name : (targetId ? targetId.substring(0, 8) : null);
+                    fiText = targetLabel
+                        ? `向 ${escapeHtml(targetLabel)} 密语: "${escapeHtml(fiContent)}"`
+                        : `密语: "${escapeHtml(fiContent)}"`;
+                } else if (fiActionType === 'shout' && fiContent) {
+                    fiText = `大喊: "${escapeHtml(fiContent)}"`;
+                }
+
                 html += `<div class="exp-meta-text">${escapeHtml(fiText)}</div>`;
+
+                // 动作参数（非聊天内容）pretty-print
+                const dataKeys = Object.keys(fiData).filter(k => k !== 'content' && k !== 'target_agent_id');
+                if (dataKeys.length > 0) {
+                    const prettyData = {};
+                    dataKeys.forEach(k => prettyData[k] = fiData[k]);
+                    html += `<div class="exp-meta-text" style="color:var(--text-subtle);font-size:11px;">${escapeHtml(JSON.stringify(prettyData, null, 2))}</div>`;
+                }
             });
             return html || '-';
         }
