@@ -27,13 +27,8 @@ pub fn load_skills<P: AsRef<Path>>(skills_dir: P) -> Result<SkillsData> {
 }
 
 /// 递归扫描目录，查找 SKILL.md 文件
-fn scan_skill_dir(
-    dir: &Path,
-    root: &Path,
-    skills: &mut SkillsData,
-) -> Result<()> {
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("读取技能目录失败: {:?}", dir))?;
+fn scan_skill_dir(dir: &Path, root: &Path, skills: &mut SkillsData) -> Result<()> {
+    let entries = std::fs::read_dir(dir).with_context(|| format!("读取技能目录失败: {:?}", dir))?;
 
     for entry in entries {
         let entry = entry.context("读取目录条目失败")?;

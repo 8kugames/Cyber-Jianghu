@@ -118,7 +118,12 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     /// 生成带认证参数的 WebSocket URL
-    pub fn ws_url_with_token(&self, device_id: Uuid, auth_token: &str, agent_id: Option<Uuid>) -> String {
+    pub fn ws_url_with_token(
+        &self,
+        device_id: Uuid,
+        auth_token: &str,
+        agent_id: Option<Uuid>,
+    ) -> String {
         let mut url = format!(
             "{}?device_id={}&token={}",
             self.ws_url, device_id, auth_token
@@ -951,28 +956,28 @@ impl Config {
         let config_dir = data_dir.join("config");
         let actions_path = config_dir.join("actions.json");
 
-            // 确保目录存在
-            if let Err(e) = fs::create_dir_all(&config_dir) {
-                tracing::warn!("创建配置目录失败: {}", e);
-            } else {
-                // 序列化并保存
-                match serde_json::to_string_pretty(&game_rules.available_actions) {
-                    Ok(json) => {
-                        if let Err(e) = fs::write(&actions_path, json) {
-                            tracing::warn!("保存 actions.json 失败: {}", e);
-                        } else {
-                            tracing::debug!(
-                                "已保存 {} 个动作到 {:?}",
-                                game_rules.available_actions.len(),
-                                actions_path
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("序列化 actions 失败: {}", e);
+        // 确保目录存在
+        if let Err(e) = fs::create_dir_all(&config_dir) {
+            tracing::warn!("创建配置目录失败: {}", e);
+        } else {
+            // 序列化并保存
+            match serde_json::to_string_pretty(&game_rules.available_actions) {
+                Ok(json) => {
+                    if let Err(e) = fs::write(&actions_path, json) {
+                        tracing::warn!("保存 actions.json 失败: {}", e);
+                    } else {
+                        tracing::debug!(
+                            "已保存 {} 个动作到 {:?}",
+                            game_rules.available_actions.len(),
+                            actions_path
+                        );
                     }
                 }
+                Err(e) => {
+                    tracing::warn!("序列化 actions 失败: {}", e);
+                }
             }
+        }
 
         self.game_rules = Some(game_rules);
     }

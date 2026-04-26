@@ -182,7 +182,10 @@ impl Broadcaster {
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
         for agent_state in agent_states {
-            let events = event_manager.lock().unwrap().get_events_for_agent(agent_state.agent_id);
+            let events = event_manager
+                .lock()
+                .unwrap()
+                .get_events_for_agent(agent_state.agent_id);
             let inventory = agent_inventories
                 .get(&agent_state.agent_id)
                 .cloned()
@@ -490,18 +493,25 @@ impl Broadcaster {
                     // Agent 的实际状态效果通过 attribute_descriptions 描述
                     status_effects: vec![],
                     inventory,
-                    skills: agent_state.skills.iter().filter_map(|skill_id| {
-                        crate::game_data::registry::SkillRegistry::get(skill_id)
-                            .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
-                                skill_id: skill_id.clone(),
-                                name: def.name,
+                    skills: agent_state
+                        .skills
+                        .iter()
+                        .filter_map(|skill_id| {
+                            crate::game_data::registry::SkillRegistry::get(skill_id).map(|def| {
+                                cyber_jianghu_protocol::types::entities::SkillInfo {
+                                    skill_id: skill_id.clone(),
+                                    name: def.name,
+                                }
                             })
-                    }).collect(),
+                        })
+                        .collect(),
                     // 寿命数据（由 Server 从 birth_tick + time.yaml 计算）
-                    age_years: agent_state.birth_tick.map(|bt| {
-                        super::decay::compute_age_years(bt, tick_id) as u32
-                    }),
-                    max_age: game_data_cache.get_lifespan_config().map(|(max, _)| max as u32),
+                    age_years: agent_state
+                        .birth_tick
+                        .map(|bt| super::decay::compute_age_years(bt, tick_id) as u32),
+                    max_age: game_data_cache
+                        .get_lifespan_config()
+                        .map(|(max, _)| max as u32),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -742,17 +752,24 @@ pub fn build_reactive_world_state(
             attribute_descriptions,
             status_effects: vec![],
             inventory: inventory.to_vec(),
-            skills: agent_state.skills.iter().filter_map(|skill_id| {
-                crate::game_data::registry::SkillRegistry::get(skill_id)
-                    .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
-                        skill_id: skill_id.clone(),
-                        name: def.name,
+            skills: agent_state
+                .skills
+                .iter()
+                .filter_map(|skill_id| {
+                    crate::game_data::registry::SkillRegistry::get(skill_id).map(|def| {
+                        cyber_jianghu_protocol::types::entities::SkillInfo {
+                            skill_id: skill_id.clone(),
+                            name: def.name,
+                        }
                     })
-            }).collect(),
-            age_years: agent_state.birth_tick.map(|bt| {
-                super::decay::compute_age_years(bt, agent_state.tick_id) as u32
-            }),
-            max_age: game_data_cache.get_lifespan_config().map(|(max, _)| max as u32),
+                })
+                .collect(),
+            age_years: agent_state
+                .birth_tick
+                .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
+            max_age: game_data_cache
+                .get_lifespan_config()
+                .map(|(max, _)| max as u32),
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -880,17 +897,24 @@ pub fn build_initial_world_state(
             attribute_descriptions,
             status_effects: vec![],
             inventory: initial_inventory,
-            skills: agent_state.skills.iter().filter_map(|skill_id| {
-                crate::game_data::registry::SkillRegistry::get(skill_id)
-                    .map(|def| cyber_jianghu_protocol::types::entities::SkillInfo {
-                        skill_id: skill_id.clone(),
-                        name: def.name,
+            skills: agent_state
+                .skills
+                .iter()
+                .filter_map(|skill_id| {
+                    crate::game_data::registry::SkillRegistry::get(skill_id).map(|def| {
+                        cyber_jianghu_protocol::types::entities::SkillInfo {
+                            skill_id: skill_id.clone(),
+                            name: def.name,
+                        }
                     })
-            }).collect(),
-            age_years: agent_state.birth_tick.map(|bt| {
-                super::decay::compute_age_years(bt, agent_state.tick_id) as u32
-            }),
-            max_age: game_data_cache.get_lifespan_config().map(|(max, _)| max as u32),
+                })
+                .collect(),
+            age_years: agent_state
+                .birth_tick
+                .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
+            max_age: game_data_cache
+                .get_lifespan_config()
+                .map(|(max, _)| max as u32),
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items,

@@ -164,7 +164,8 @@ impl super::Agent {
                                         info!("reconnect 已加载角色配置: {}", c_yaml.display());
                                     }
                                 } else if self.character_config.is_none()
-                                    || self.character_config.as_ref().and_then(|c| c.agent_id) != Some(agent_id)
+                                    || self.character_config.as_ref().and_then(|c| c.agent_id)
+                                        != Some(agent_id)
                                 {
                                     // 文件不存在且无匹配配置 → 自动重建
                                     let name = registered_name.as_deref().unwrap_or("未知");
