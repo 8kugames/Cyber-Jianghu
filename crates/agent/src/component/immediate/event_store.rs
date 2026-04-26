@@ -122,10 +122,7 @@ impl EventStore {
         )
         .context("创建事件表失败")?;
 
-        info!(
-            "EventStore 已打开: {:?} (WAL 模式)",
-            db_path
-        );
+        info!("EventStore 已打开: {:?} (WAL 模式)", db_path);
 
         Ok(Self {
             conn: std::sync::Mutex::new(conn),
@@ -137,13 +134,11 @@ impl EventStore {
     /// 摄取事件（WebSocket 回调，纯 IO）
     ///
     /// INSERT + Notify 信号。耗时 <1ms。
-    pub fn insert_event(
-        &self,
-        event: &IncomingEvent,
-        tick_id: i64,
-        game_day: i64,
-    ) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+    pub fn insert_event(&self, event: &IncomingEvent, tick_id: i64, game_day: i64) -> Result<()> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
         let event_type_str = event.event_type.as_str();
         let metadata_str = serde_json::to_string(&event.metadata).unwrap_or_else(|_| "{}".into());
@@ -189,7 +184,10 @@ impl EventStore {
 
     /// 查询待 triage 事件（预筛排序 + LIMIT）
     pub fn query_pending(&self, game_day: i64) -> Result<Vec<StoredEvent>> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
         let limit = self.config.pre_filter.max_events_per_triage;
         let priority_map = &self.config.pre_filter.event_type_priority;
@@ -257,7 +255,10 @@ impl EventStore {
 
     /// 写入 triage 决策（批量）
     pub fn update_triage(&self, decisions: &[TriageDecision], batch_id: i64) -> Result<()> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
         for dec in decisions {
             conn.execute(
@@ -292,7 +293,10 @@ impl EventStore {
 
     /// 查询已 triage 未消费事件（主 tick 用）
     pub fn query_triaged(&self, context_config: &EventTriageContext) -> Result<TriageResult> {
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
         // URGENT: 逐条，top-N
         let mut urgent_stmt = conn.prepare(
@@ -305,9 +309,10 @@ impl EventStore {
              LIMIT ?1",
         )?;
 
-        let urgent_rows = urgent_stmt.query_map(params![context_config.max_urgent_events], |row| {
-            Self::row_to_stored_event(row)
-        })?;
+        let urgent_rows = urgent_stmt
+            .query_map(params![context_config.max_urgent_events], |row| {
+                Self::row_to_stored_event(row)
+            })?;
 
         let mut urgent = Vec::new();
         for row in urgent_rows {
@@ -327,9 +332,7 @@ impl EventStore {
              ORDER BY received_at_tick DESC",
         )?;
 
-        let batch_rows = batch_stmt.query_map([], |row| {
-            Self::row_to_stored_event(row)
-        })?;
+        let batch_rows = batch_stmt.query_map([], Self::row_to_stored_event)?;
 
         let mut batch = Vec::new();
         for row in batch_rows {
@@ -359,7 +362,10 @@ impl EventStore {
         if ids.is_empty() {
             return Ok(());
         }
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
         // 构建 IN 子句：?, ?, ?
         let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
@@ -370,14 +376,17 @@ impl EventStore {
             placeholders.join(", ")
         );
 
-        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> =
-            ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>).collect();
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
         params_vec.push(Box::new(tick_id));
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
 
-        let affected = conn.execute(&sql, param_refs.as_slice())
+        let affected = conn
+            .execute(&sql, param_refs.as_slice())
             .context("按 ID 标记已消费事件失败")?;
 
         if affected > 0 {
@@ -404,7 +413,10 @@ impl EventStore {
         let retention = self.config.retention_game_days as i64;
         let cutoff = current_game_day.saturating_sub(retention);
 
-        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
         let affected = conn
             .execute(
                 "DELETE FROM immediate_events WHERE game_day < ?1",
@@ -413,10 +425,7 @@ impl EventStore {
             .context("清理过期事件失败")?;
 
         if affected > 0 {
-            info!(
-                "已清理 {} 条过期事件 (game_day < {})",
-                affected, cutoff
-            );
+            info!("已清理 {} 条过期事件 (game_day < {})", affected, cutoff);
         }
         Ok(())
     }
@@ -445,7 +454,10 @@ impl EventStore {
     fn row_to_stored_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
         let event_type_str: String = row.get(2)?;
         let event_type = event_type_str.parse().unwrap_or_else(|_| {
-            warn!("未知 event_type '{}'，降级为 SystemNotification", event_type_str);
+            warn!(
+                "未知 event_type '{}'，降级为 SystemNotification",
+                event_type_str
+            );
             WorldEventType::SystemNotification
         });
         Ok(StoredEvent {
@@ -466,10 +478,7 @@ impl EventStore {
     }
 
     /// 构建 SQL CASE 表达式用于 priority 排序
-    fn build_priority_case(
-        priorities: &HashMap<WorldEventType, i32>,
-        default: i32,
-    ) -> String {
+    fn build_priority_case(priorities: &HashMap<WorldEventType, i32>, default: i32) -> String {
         let mut cases: Vec<String> = priorities
             .iter()
             .map(|(et, pri)| format!("WHEN '{}' THEN {}", et.as_str(), pri))

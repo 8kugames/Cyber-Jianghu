@@ -34,7 +34,7 @@ struct TriageLlmOutput {
 #[derive(Debug, Clone, Deserialize)]
 struct TriageItem {
     event_id: String,
-    decision: String,   // urgent / batch / ignore
+    decision: String, // urgent / batch / ignore
     reason: String,
 }
 
@@ -106,8 +106,10 @@ impl SessionTriageEngine {
 
         info!(
             "SessionTriageEngine 启动: agent={}, game_day={}, poll={}s, debounce={}s",
-            self.agent_name, self.game_day,
-            self.config.poll_interval_secs, self.config.debounce_secs
+            self.agent_name,
+            self.game_day,
+            self.config.poll_interval_secs,
+            self.config.debounce_secs
         );
 
         loop {
@@ -144,25 +146,21 @@ impl SessionTriageEngine {
             );
 
             // 阶段 3：批量 LLM triage（带超时）
-            let decisions = match tokio::time::timeout(
-                llm_timeout,
-                self.triage_batch(&pending),
-            )
-            .await
-            {
-                Ok(Ok(decisions)) => decisions,
-                Ok(Err(e)) => {
-                    warn!("Session triage LLM 调用失败: {}，使用规则兜底", e);
-                    Self::fallback_priority_split(&pending, &self.config.pre_filter)
-                }
-                Err(_) => {
-                    warn!(
-                        "Session triage LLM 超时（{}ms），使用规则兜底",
-                        self.config.triage_llm_timeout_ms
-                    );
-                    Self::fallback_priority_split(&pending, &self.config.pre_filter)
-                }
-            };
+            let decisions =
+                match tokio::time::timeout(llm_timeout, self.triage_batch(&pending)).await {
+                    Ok(Ok(decisions)) => decisions,
+                    Ok(Err(e)) => {
+                        warn!("Session triage LLM 调用失败: {}，使用规则兜底", e);
+                        Self::fallback_priority_split(&pending, &self.config.pre_filter)
+                    }
+                    Err(_) => {
+                        warn!(
+                            "Session triage LLM 超时（{}ms），使用规则兜底",
+                            self.config.triage_llm_timeout_ms
+                        );
+                        Self::fallback_priority_split(&pending, &self.config.pre_filter)
+                    }
+                };
 
             // 阶段 4：写回 DB
             let batch_id = self.next_batch_id;
@@ -326,11 +324,7 @@ event_id 必须是以下值之一：{event_ids}"#,
                     .get(&e.event_type)
                     .copied()
                     .unwrap_or(config.default_priority);
-                let decision = if priority >= 80 {
-                    "urgent"
-                } else {
-                    "batch"
-                };
+                let decision = if priority >= 80 { "urgent" } else { "batch" };
                 TriageDecision {
                     event_id: e.event_id.clone(),
                     decision: decision.to_string(),
@@ -380,11 +374,7 @@ event_id 必须是以下值之一：{event_ids}"#,
         info!("游戏日 {} 摘要: {}", self.game_day, summary);
 
         // 清理过期事件
-        if let Err(e) = self
-            .event_store
-            .cleanup_old_async(self.game_day)
-            .await
-        {
+        if let Err(e) = self.event_store.cleanup_old_async(self.game_day).await {
             warn!("清理过期事件失败: {}", e);
         }
 

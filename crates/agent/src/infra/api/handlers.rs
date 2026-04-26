@@ -807,16 +807,19 @@ pub(super) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> i
             let is_dead = state.is_dead.load(std::sync::atomic::Ordering::Relaxed);
             Json(LifespanResponse {
                 current_age: age,
-                status: if is_dead { "deceased" } else if age >= max_age { "aging" } else { "alive" }.to_string(),
+                status: if is_dead {
+                    "deceased"
+                } else if age >= max_age {
+                    "aging"
+                } else {
+                    "alive"
+                }
+                .to_string(),
                 aging_effects: None,
             })
             .into_response()
         }
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "No world state available",
-        )
-            .into_response(),
+        None => (StatusCode::SERVICE_UNAVAILABLE, "No world state available").into_response(),
     }
 }
 
@@ -2068,19 +2071,23 @@ pub(super) async fn get_attribute_meta_handler(
 ) -> impl IntoResponse {
     let narrative_guard = state.narrative_config.read().await;
     let narrative = narrative_guard.as_ref();
-    
+
     let categories = narrative
         .map(|c| c.attribute_categories.clone())
         .unwrap_or_default();
-        
+
     let mut display_names = HashMap::new();
     if let Some(n) = narrative {
         for (key, attr) in &n.attributes {
             display_names.insert(key.clone(), attr.display_name.clone());
         }
     }
-        
-    Json(AttributeMetaResponse { categories, display_names }).into_response()
+
+    Json(AttributeMetaResponse {
+        categories,
+        display_names,
+    })
+    .into_response()
 }
 
 /// 丰富属性数据，添加叙事描述
@@ -3299,7 +3306,7 @@ pub(super) async fn switch_character_handler(
             let mut config = template.clone();
             config.agent_id = agent_id;
             config.db_dir = data_dir.clone();
-            
+
             let new_mem = match crate::component::memory::MemoryManager::new(config) {
                 Ok(manager) => Some(std::sync::Arc::new(tokio::sync::Mutex::new(manager))),
                 Err(e) => {
@@ -3317,14 +3324,13 @@ pub(super) async fn switch_character_handler(
             };
             *state.memory_manager.write().unwrap() = new_mem;
         }
-        
+
         // 4. Dream Store (按需加载，从文件读取)
         if let Some(ref dream_store) = state.dream_store {
             let mut dream = dream_store.write().await;
-            if let Some(new_dream) = super::handlers::DreamState::load_from_file(
-                &data_dir,
-                &agent_id,
-            ) {
+            if let Some(new_dream) =
+                super::handlers::DreamState::load_from_file(&data_dir, &agent_id)
+            {
                 *dream = new_dream;
             } else {
                 *dream = super::handlers::DreamState::default();
@@ -3656,7 +3662,10 @@ pub(super) async fn reload_config_handler(
                 guard.clone()
             };
             if let Some(container) = container {
-                match crate::component::llm::build_fallback_client(&config.llm, config.llm.enable_streaming) {
+                match crate::component::llm::build_fallback_client(
+                    &config.llm,
+                    config.llm.enable_streaming,
+                ) {
                     Ok(new_client) => {
                         *container.write().await = new_client;
                         info!(

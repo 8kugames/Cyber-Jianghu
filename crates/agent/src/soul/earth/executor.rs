@@ -48,10 +48,7 @@ impl EarthToolExecutor {
     }
 
     /// 从 CognitiveEngine 的 skill_cache RwLock 创建
-    pub fn from_rw_lock(
-        cache: &RwLock<HashMap<String, String>>,
-        config_dir: PathBuf,
-    ) -> Self {
+    pub fn from_rw_lock(cache: &RwLock<HashMap<String, String>>, config_dir: PathBuf) -> Self {
         let skill_cache = cache.read().unwrap().clone();
         Self {
             skill_cache,
@@ -86,7 +83,11 @@ impl EarthToolExecutor {
 
 #[async_trait]
 impl ToolExecutor for EarthToolExecutor {
-    async fn execute(&self, name: &str, arguments: &serde_json::Value) -> Result<serde_json::Value> {
+    async fn execute(
+        &self,
+        name: &str,
+        arguments: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
         match name {
             "skill_view" => {
                 let skill_id = arguments["skill_id"]
@@ -100,18 +101,16 @@ impl ToolExecutor for EarthToolExecutor {
                 ))
             }
             "search_memory" | "recall_archived" => {
-                let query = arguments["query"]
-                    .as_str()
-                    .unwrap_or("未知查询");
-                let limit = arguments["limit"]
-                    .as_u64()
-                    .map(|v| v as usize)
-                    .unwrap_or(5);
+                let query = arguments["query"].as_str().unwrap_or("未知查询");
+                let limit = arguments["limit"].as_u64().map(|v| v as usize).unwrap_or(5);
 
                 if let Some(ref memory_manager) = self.memory_manager {
                     let manager = memory_manager.read().await;
                     if name == "recall_archived" {
-                        Ok(super::memory_tool::execute_recall_archived(&manager, query, limit).await)
+                        Ok(
+                            super::memory_tool::execute_recall_archived(&manager, query, limit)
+                                .await,
+                        )
                     } else {
                         Ok(super::memory_tool::execute_search_memory(&manager, query, limit).await)
                     }
@@ -148,10 +147,11 @@ mod tests {
         let executor = EarthToolExecutor::new(cache, PathBuf::from("/tmp"));
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(executor.execute(
-            "skill_view",
-            &serde_json::json!({"skill_id": "bargaining"}),
-        )).unwrap();
+        let result = rt
+            .block_on(
+                executor.execute("skill_view", &serde_json::json!({"skill_id": "bargaining"})),
+            )
+            .unwrap();
 
         assert_eq!(result["skill_id"], "bargaining");
         assert_eq!(result["content"], "讨价还价指引");
@@ -162,10 +162,12 @@ mod tests {
         let executor = EarthToolExecutor::new(HashMap::new(), PathBuf::from("/tmp"));
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(executor.execute(
-            "skill_view",
-            &serde_json::json!({"skill_id": "nonexistent"}),
-        )).unwrap();
+        let result = rt
+            .block_on(executor.execute(
+                "skill_view",
+                &serde_json::json!({"skill_id": "nonexistent"}),
+            ))
+            .unwrap();
 
         assert!(result["error"].is_string());
     }

@@ -152,11 +152,8 @@ impl MemoryStore {
             .context("Failed to check embedding column existence")?;
 
         if exists == 0 {
-            conn.execute(
-                "ALTER TABLE client_memories ADD COLUMN embedding BLOB",
-                [],
-            )
-            .context("Failed to add embedding column")?;
+            conn.execute("ALTER TABLE client_memories ADD COLUMN embedding BLOB", [])
+                .context("Failed to add embedding column")?;
         }
 
         Ok(())

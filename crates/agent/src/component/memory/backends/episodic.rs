@@ -294,7 +294,8 @@ mod tests {
         let (mut backend, agent_id, _temp) = create_test_backend();
 
         for i in 1..=5 {
-            let mut entry = MemoryEntry::new(agent_id, i, format!("记忆 {}", i)).with_importance(0.6);
+            let mut entry =
+                MemoryEntry::new(agent_id, i, format!("记忆 {}", i)).with_importance(0.6);
             backend.add(&mut entry).await.unwrap();
         }
 
@@ -308,7 +309,7 @@ mod tests {
 
         for _ in 1..=3 {
             let mut entry = create_test_entry(agent_id, 0.6);
-        backend.add(&mut entry).await.unwrap();
+            backend.add(&mut entry).await.unwrap();
         }
 
         assert_eq!(backend.count().await.unwrap(), 3);

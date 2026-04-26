@@ -834,26 +834,32 @@ pub async fn get_agent_details(
     if let Some(cfg) = crate::game_data::registry::StateRegistry::get_attributes_config() {
         let mut base_attrs = std::collections::HashMap::new();
         for (k, v) in &cfg.data.derived.attributes {
-            base_attrs.insert(k.clone(), cyber_jianghu_protocol::AttributeMetadata {
-                name: v.name.clone(),
-                display_name: v.display_name.clone(),
-                description: v.description.clone(),
-                formula: v.formula.clone(),
-                affects: vec![],
-                attr_type: cyber_jianghu_protocol::AttributeType::Derived,
-                birth_range: None,
-                default_value: None,
-                min_value: None,
-                max_value_formula: None,
-                decay_per_tick: None,
-                death_condition: None,
-                initial_value: None,
-                growth_rate: None,
-                recovery_formula: None,
-                primary_attribute_deps: vec![],
-            });
+            base_attrs.insert(
+                k.clone(),
+                cyber_jianghu_protocol::AttributeMetadata {
+                    name: v.name.clone(),
+                    display_name: v.display_name.clone(),
+                    description: v.description.clone(),
+                    formula: v.formula.clone(),
+                    affects: vec![],
+                    attr_type: cyber_jianghu_protocol::AttributeType::Derived,
+                    birth_range: None,
+                    default_value: None,
+                    min_value: None,
+                    max_value_formula: None,
+                    decay_per_tick: None,
+                    death_condition: None,
+                    initial_value: None,
+                    growth_rate: None,
+                    recovery_formula: None,
+                    primary_attribute_deps: vec![],
+                },
+            );
         }
-        let derived_component = crate::game_data::types::components::DerivedAttributeComponent::from_config(&base_attrs);
+        let derived_component =
+            crate::game_data::types::components::DerivedAttributeComponent::from_config(
+                &base_attrs,
+            );
         let formula_engine = crate::game_data::formula_engine::FormulaEngine::new();
 
         let mut context_i64 = std::collections::HashMap::new();
@@ -875,7 +881,10 @@ pub async fn get_agent_details(
             .map(|r| r.get::<i64, _>("tick_id"))
             .unwrap_or(0);
         if birth_tick > 0 && birth_tick < current_tick {
-            Some(crate::tick::decay::compute_age_years(birth_tick, current_tick))
+            Some(crate::tick::decay::compute_age_years(
+                birth_tick,
+                current_tick,
+            ))
         } else {
             Some(0)
         }

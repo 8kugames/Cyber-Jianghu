@@ -64,7 +64,10 @@ pub(crate) fn extract_skill_body(content: &str) -> String {
     } else if let Some(rest) = content.strip_prefix("---") {
         if let Some(pos) = rest.find("\n---") {
             let after = &rest[pos + 4..];
-            after.trim_start_matches(['-', '\r', '\n']).trim().to_string()
+            after
+                .trim_start_matches(['-', '\r', '\n'])
+                .trim()
+                .to_string()
         } else {
             content.trim().to_string()
         }

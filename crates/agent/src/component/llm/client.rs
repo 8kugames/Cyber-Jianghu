@@ -459,13 +459,7 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         max_rounds: usize,
     ) -> Result<D> {
         let text = self
-            .complete_with_conversation_and_tools(
-                system,
-                input,
-                tools,
-                executor,
-                max_rounds,
-            )
+            .complete_with_conversation_and_tools(system, input, tools, executor, max_rounds)
             .await?;
         parse_json_response::<D>(&text)
     }

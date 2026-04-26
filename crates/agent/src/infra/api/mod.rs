@@ -757,21 +757,19 @@ pub fn create_http_state(
         narrative_generator: None,
         dynamic_persona: None,
         review_store: None, // 由 Player Agent 通过 builder 设置
-        intent_history: Arc::new(RwLock::new(
-            match intent_history::IntentHistoryStore::open(
-                current_agent_id,
-                &data_dir_clone.join(format!("intent_history_{}.db", current_agent_id)),
-            ) {
-                Ok(store) => Some(Arc::new(store)),
-                Err(e) => {
-                    tracing::error!("Failed to open IntentHistoryStore: {}", e);
-                    // Depending on context, we might want to panic here if it's a hard requirement,
-                    // but since this is state creation, we'll log it and leave it None to avoid crashing
-                    // the whole node on startup if a single agent's DB is corrupted.
-                    None
-                }
+        intent_history: Arc::new(RwLock::new(match intent_history::IntentHistoryStore::open(
+            current_agent_id,
+            &data_dir_clone.join(format!("intent_history_{}.db", current_agent_id)),
+        ) {
+            Ok(store) => Some(Arc::new(store)),
+            Err(e) => {
+                tracing::error!("Failed to open IntentHistoryStore: {}", e);
+                // Depending on context, we might want to panic here if it's a hard requirement,
+                // but since this is state creation, we'll log it and leave it None to avoid crashing
+                // the whole node on startup if a single agent's DB is corrupted.
+                None
             }
-        )),
+        })),
         soul_cycle_registrar: soul_cycle_registrar.clone(),
         data_dir: data_dir_clone.clone(),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
@@ -1031,9 +1029,7 @@ impl HttpApiState {
         // 2. 按需加载/创建
         // 其他角色的数据在 character_dir/{agent_id}/data/soul_cycle_{agent_id}.db
         let character_dir = self.character_dir.read().await;
-        let data_dir = character_dir
-            .join(agent_id.to_string())
-            .join("data");
+        let data_dir = character_dir.join(agent_id.to_string()).join("data");
         let db_path = data_dir.join(format!("soul_cycle_{}.db", agent_id));
         // 预建目录：SoulCycleRecorder::open 内部仅 create_dir_all(parent)，
         // 若中间目录链不完整仍会失败，此处确保完整路径存在

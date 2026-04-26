@@ -7,9 +7,7 @@
 //! cargo run -p cyber-jianghu-agent --example validator_example
 //! ```
 
-use cyber_jianghu_agent::{
-    LlmClient, PersonaInfo, ReflectorSoul, Validator,
-};
+use cyber_jianghu_agent::{LlmClient, PersonaInfo, ReflectorSoul, Validator};
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::sync::Arc;
 use tokio::sync::RwLock;

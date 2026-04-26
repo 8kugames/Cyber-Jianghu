@@ -45,7 +45,8 @@ impl super::CognitiveEngine {
         let world_state_section = self.build_world_state_section(world_state);
 
         // 构建技能行为指令（progressive disclosure：tool-calling 时只输出索引）
-        let skill_instructions = self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
+        let skill_instructions =
+            self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
 
         // 尝试使用模板配置
         if let Some(ref template_config) = self.prompt_template
@@ -455,7 +456,8 @@ impl super::CognitiveEngine {
 
         if index_only {
             // Progressive disclosure：只输出索引 + 可用工具提示
-            let header = self.render_template_section("skill_index_header")
+            let header = self
+                .render_template_section("skill_index_header")
                 .unwrap_or_else(|| "## 已掌握技能（使用 skill_view 工具查看详情）".to_string());
 
             let mut lines = vec![header];
@@ -464,19 +466,24 @@ impl super::CognitiveEngine {
             }
             lines.push(String::new());
 
-            let tool_header = self.render_template_section("tool_hints_header")
+            let tool_header = self
+                .render_template_section("tool_hints_header")
                 .unwrap_or_else(|| "## 可用工具\n你可以调用以下工具获取更多信息：".to_string());
             lines.push(tool_header);
 
             // 从 ToolDefinition 动态构建工具描述（单一数据源，无硬编码）
             for tool in super::super::earth::EarthToolExecutor::tool_definitions() {
-                lines.push(format!("- {}: {}", tool.function.name, tool.function.description));
+                lines.push(format!(
+                    "- {}: {}",
+                    tool.function.name, tool.function.description
+                ));
             }
             return lines.join("\n");
         }
 
         // 降级路径：注入完整 body
-        let full_header = self.render_template_section("skill_full_header")
+        let full_header = self
+            .render_template_section("skill_full_header")
             .unwrap_or_else(|| "## 已掌握技能行为准则".to_string());
 
         let cache = self.skill_cache.read().unwrap();
@@ -500,5 +507,4 @@ impl super::CognitiveEngine {
             .and_then(|tmpl| tmpl.sections.get(section_name))
             .map(|s| s.trim().to_string())
     }
-
 }

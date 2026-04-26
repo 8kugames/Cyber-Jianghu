@@ -246,10 +246,7 @@ impl TickScheduler {
                     // 更新缓存
                     self.game_data_cache.update_game_rules(new_data.game_rules);
 
-                    info!(
-                        "游戏规则已热重载: version={}",
-                        version
-                    );
+                    info!("游戏规则已热重载: version={}", version);
 
                     // 广播给所有在线 Agent
                     let config_update = ServerMessage::ConfigUpdate {
@@ -315,10 +312,7 @@ impl TickScheduler {
             {
                 let version = world_building_rules.version.clone();
 
-                info!(
-                    "世界观规则已热重载: version={}",
-                    version
-                );
+                info!("世界观规则已热重载: version={}", version);
 
                 // 广播给所有在线 Agent
                 let config_update = ServerMessage::ConfigUpdate {
@@ -385,16 +379,17 @@ impl TickScheduler {
                     );
 
                     // 构建 SkillContent 列表并广播
-                    let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = new_skills
-                        .into_iter()
-                        .map(|(skill_id, def)| {
-                            cyber_jianghu_protocol::types::SkillContent {
-                                skill_id,
-                                name: def.name,
-                                body: def.content,
-                            }
-                        })
-                        .collect();
+                    let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> =
+                        new_skills
+                            .into_iter()
+                            .map(
+                                |(skill_id, def)| cyber_jianghu_protocol::types::SkillContent {
+                                    skill_id,
+                                    name: def.name,
+                                    body: def.content,
+                                },
+                            )
+                            .collect();
 
                     // 广播给所有在线 Agent
                     let config_update = ServerMessage::ConfigUpdate {

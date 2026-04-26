@@ -6,7 +6,9 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, PracticeData, ShoutData, SpeakData};
+use super::super::{
+    CraftData, DropData, GatherData, MoveData, PickupData, PracticeData, ShoutData, SpeakData,
+};
 use crate::models::Intent;
 
 /// 基础动作执行器
@@ -193,7 +195,8 @@ impl BasicActionExecutor {
         action_data: Option<serde_json::Value>,
         current_skills: &[String],
     ) -> ActionExecutionResult {
-        let data: PracticeData = deserialize_action_data!(action_data, intent, PracticeData, "修炼");
+        let data: PracticeData =
+            deserialize_action_data!(action_data, intent, PracticeData, "修炼");
 
         // 验证技能存在于注册表
         if crate::game_data::registry::SkillRegistry::get(&data.skill_id).is_none() {
@@ -216,11 +219,22 @@ impl BasicActionExecutor {
         // 检查技能数量上限（数据驱动）
         let max_skills = crate::game_data::registry_or_error()
             .ok()
-            .and_then(|r| r.get().game_rules.data.skills.as_ref().map(|c| c.max_skills_per_agent))
+            .and_then(|r| {
+                r.get()
+                    .game_rules
+                    .data
+                    .skills
+                    .as_ref()
+                    .map(|c| c.max_skills_per_agent)
+            })
             .unwrap_or(10);
         if current_skills.len() >= max_skills {
             return ActionExecutionResult::failure(
-                format!("已掌握 {} 个技能，达到上限 {}", current_skills.len(), max_skills),
+                format!(
+                    "已掌握 {} 个技能，达到上限 {}",
+                    current_skills.len(),
+                    max_skills
+                ),
                 intent.action_type.to_string(),
                 Some(intent.intent_id),
             );

@@ -109,11 +109,17 @@ pub async fn websocket_handler(
                 }
             }
             Ok(_) => {
-                warn!("Device {} tried to access agent belonging to another device", query.device_id);
+                warn!(
+                    "Device {} tried to access agent belonging to another device",
+                    query.device_id
+                );
                 uuid::Uuid::nil()
             }
             Err(e) => {
-                warn!("Failed to query explicitly requested agent {}: {}", req_agent_id, e);
+                warn!(
+                    "Failed to query explicitly requested agent {}: {}",
+                    req_agent_id, e
+                );
                 uuid::Uuid::nil()
             }
         }
@@ -356,9 +362,15 @@ async fn handle_websocket(
         )
         .await
         {
-            warn!("Failed to send game_rules ConfigUpdate to agent {}: {}", agent_id, e);
+            warn!(
+                "Failed to send game_rules ConfigUpdate to agent {}: {}",
+                agent_id, e
+            );
         } else {
-            debug!("Sent game_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+            debug!(
+                "Sent game_rules ConfigUpdate to agent '{}' ({})",
+                agent_name, agent_id
+            );
         }
     }
 
@@ -383,9 +395,15 @@ async fn handle_websocket(
         )
         .await
         {
-            warn!("Failed to send world_building_rules ConfigUpdate to agent {}: {}", agent_id, e);
+            warn!(
+                "Failed to send world_building_rules ConfigUpdate to agent {}: {}",
+                agent_id, e
+            );
         } else {
-            debug!("Sent world_building_rules ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+            debug!(
+                "Sent world_building_rules ConfigUpdate to agent '{}' ({})",
+                agent_name, agent_id
+            );
         }
     }
 
@@ -420,9 +438,15 @@ async fn handle_websocket(
             )
             .await
             {
-                warn!("Failed to send skills ConfigUpdate to agent {}: {}", agent_id, e);
+                warn!(
+                    "Failed to send skills ConfigUpdate to agent {}: {}",
+                    agent_id, e
+                );
             } else {
-                debug!("Sent skills ConfigUpdate to agent '{}' ({})", agent_name, agent_id);
+                debug!(
+                    "Sent skills ConfigUpdate to agent '{}' ({})",
+                    agent_name, agent_id
+                );
             }
         }
     }
@@ -905,7 +929,9 @@ async fn handle_intent(
     if subsequent_intents.len() > max_subsequent {
         warn!(
             "Pipeline 过长: agent={} 有 {} 个 subsequent intents，上限 {}",
-            agent_id, subsequent_intents.len(), max_subsequent
+            agent_id,
+            subsequent_intents.len(),
+            max_subsequent
         );
         return Err(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent).into());
     }

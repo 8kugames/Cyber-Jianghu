@@ -128,7 +128,10 @@ pub fn cognitive_decision_with_chain(
                 "休息",
                 None,
             )
-            .with_thought(format!("认知失败({}/{}次重试): {}", failed_attempts, max_retries, last_error));
+            .with_thought(format!(
+                "认知失败({}/{}次重试): {}",
+                failed_attempts, max_retries, last_error
+            ));
             (idle_intent, last_chain)
         })
     }
