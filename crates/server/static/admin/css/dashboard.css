@@ -719,7 +719,9 @@ input:checked + .slider:before {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* ============================================================================
@@ -791,7 +793,9 @@ input:checked + .slider:before {
     border-bottom: 1px dashed var(--border-color);
 }
 
-.exp-renhun, .exp-tianhun, .exp-action {
+.exp-renhun,
+.exp-tianhun,
+.exp-action {
     margin-bottom: 6px;
 }
 
@@ -852,6 +856,8 @@ input:checked + .slider:before {
     padding: 1px 5px;
     border-radius: 3px;
     font-size: 10px;
+    white-space: normal;
+    word-break: break-all;
 }
 
 .soul-layer-tag.passed {
@@ -921,6 +927,175 @@ input:checked + .slider:before {
     align-items: center;
     gap: 6px;
     flex: 1;
+}
+
+/* ============================================================================
+   Experiences Table
+   ============================================================================ */
+
+.exp-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+    font-size: 13px;
+}
+
+.exp-table th {
+    background: var(--bg-level-2);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 12px;
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--border-color);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.exp-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: top;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.exp-table tbody tr:hover td {
+    background: var(--bg-level-1);
+}
+
+.col-tick {
+    width: 60px;
+    min-width: 60px;
+}
+.col-agent {
+    width: 100px;
+    min-width: 100px;
+}
+.col-location {
+    width: 100px;
+    min-width: 100px;
+}
+.col-action {
+    width: 80px;
+    min-width: 80px;
+}
+.col-renhun {
+    width: 330px;
+    min-width: 130px;
+}
+.col-tianhun {
+    width: 130px;
+    min-width: 130px;
+}
+.col-dihun {
+    width: 330px;
+    min-width: 130px;
+}
+.col-narrative {
+    min-width: 130px;
+}
+.col-agent-id {
+    width: 80px;
+    min-width: 80px;
+}
+.col-device-id {
+    width: 80px;
+    min-width: 80px;
+}
+.mono-text {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.exp-list-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius-md);
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--card-shadow);
+}
+
+.exp-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.exp-controls .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.exp-controls .filter-select {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-level-1);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.exp-controls .filter-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.exp-controls .tick-range {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.exp-controls .tick-range-sep {
+    color: var(--text-secondary);
+}
+
+.exp-controls .filter-input {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-level-1);
+    color: var(--text-primary);
+    font-size: 13px;
+    width: 80px;
+}
+
+.exp-empty {
+    text-align: center;
+    padding: 32px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.exp-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.exp-pagination .page-size-select {
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-level-1);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.exp-pagination .page-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-width: 80px;
+    text-align: center;
 }
 
 /* ============================================================================
@@ -1698,7 +1873,8 @@ input:checked + .slider:before {
 /* ============================================================================
    Shared Form Components (server-web)
    ============================================================================ */
-.form-input, .form-select {
+.form-input,
+.form-select {
     width: 100%;
     padding: 9px 13px;
     background: var(--bg-level-1);
@@ -1710,7 +1886,8 @@ input:checked + .slider:before {
     outline: none;
     transition: all 0.15s;
 }
-.form-input:focus, .form-select:focus {
+.form-input:focus,
+.form-select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-muted);
 }
@@ -1755,7 +1932,7 @@ input:checked + .slider:before {
     position: relative;
 }
 .settings-header::after {
-    content: '';
+    content: "";
     position: absolute;
     bottom: 0;
     left: 0;
@@ -1882,7 +2059,10 @@ input:checked + .slider:before {
 .settings-container .toggle-slider {
     position: absolute;
     cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background-color: var(--bg-level-3);
     transition: 0.2s;
     border-radius: 22px;
@@ -1898,7 +2078,7 @@ input:checked + .slider:before {
     background-color: var(--text-secondary);
     transition: 0.2s;
     border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 .settings-container .toggle input:checked + .toggle-slider {
     background-color: var(--accent);
@@ -1969,4 +2149,3 @@ input:checked + .slider:before {
     opacity: 0.45;
     pointer-events: none;
 }
-
