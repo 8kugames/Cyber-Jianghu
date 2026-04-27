@@ -181,6 +181,17 @@ impl Broadcaster {
 
         // 为每个Agent构建个性化WorldState并发送
         let mut sent_count = 0;
+
+        // 跨 Agent 传承 Layer 2: 批量加载教训（所有 Agent 共享同一份）
+        let lessons = {
+            let gd = game_data_cache.get();
+            let (threshold, limit) = gd.game_rules.data.lesson.as_ref()
+                .map(|c| (c.threshold, c.max_broadcast))
+                .unwrap_or((3, 5));
+            drop(gd);
+            super::lessons::fetch_lessons_for_broadcast(db_pool, threshold, limit).await
+        };
+
         for agent_state in agent_states {
             let events = event_manager
                 .lock()
@@ -221,7 +232,7 @@ impl Broadcaster {
                 })
                 .unwrap_or_default();
 
-            let world_state = self.build_world_state_for_agent(
+            let mut world_state = self.build_world_state_for_agent(
                 agent_state,
                 tick_id,
                 events,
@@ -234,6 +245,11 @@ impl Broadcaster {
                 &recent_actions_map,
                 &emergence_config,
             );
+
+            // 注入教训（所有 Agent 共享）
+            if !lessons.is_empty() {
+                world_state.lessons_learned = lessons.clone();
+            }
 
             // 向该Agent发送其专属的WorldState
             if let Err(e) = send_world_state(
@@ -519,6 +535,7 @@ impl Broadcaster {
             events_log: events,
             private_dialogue_log: vec![], // 实时模式：密语记录由 IntentWorker 即时处理
             last_execution_summary: None, // 实时模式：ExecutionResult 通过独立通道反馈
+            lessons_learned: vec![],      // 广播路径通过外层赋值注入
         }
     }
 }
@@ -776,6 +793,7 @@ pub fn build_reactive_world_state(
         events_log: events, // Intent 结果事件（SocialInteraction 等）
         private_dialogue_log: vec![],
         last_execution_summary: None,
+        lessons_learned: vec![], // 响应式 WorldState 不含教训
     }
 }
 
@@ -921,5 +939,6 @@ pub fn build_initial_world_state(
         events_log: events,
         private_dialogue_log: vec![],
         last_execution_summary: None,
+        lessons_learned: vec![], // 初始 WorldState 不含教训
     }
 }
