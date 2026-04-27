@@ -53,6 +53,10 @@ impl Connection {
             return Err("Connection marked as dead".into());
         }
         if self.sender.try_send(msg).is_err() {
+            tracing::warn!(
+                "[ws] channel full, message dropped: agent_id={:?}, agent_name={}",
+                self.agent_id, self.agent_name
+            );
             return Err("Channel full or closed".into());
         }
         Ok(())

@@ -217,3 +217,4 @@ data:
   lifespan:
     max_age: 80
     aging_start_age: 50
+    starting_age: 18

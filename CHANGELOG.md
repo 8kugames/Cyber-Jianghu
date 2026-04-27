@@ -9,6 +9,67 @@
 
 ### Added
 
+- **Protocol**: `ServerMessage::AgentDied` 新增 `metadata: Option<Value>` 字段（跨Agent传承 Layer 1）
+  - 携带死亡时属性快照（hp/hunger/thirst/sanity）、birth_tick、survival_ticks、death_tick、cause
+  - `#[serde(skip_serializing_if = "Option::is_none")]` 兼容旧客户端
+  - Claw 模式 `DownstreamMessage::AgentDied` 同步透传 metadata
+
+- **Protocol**: `LifespanRules` 新增 `starting_age: u8` 字段（默认 18）
+  - 重生角色 age 从 0 改为配置的 starting_age，避免天魂误判"婴儿"
+  - `compute_starting_age_ticks()` 函数从 game_rules.yaml 读取并 clamp
+
+- **Agent**: 社交事件扩展 — `process_social_events()` 支持 PublicMessage 和 PrivateDialogue
+  - 之前仅 SocialInteraction（物品转移）触发好感度更新
+  - 现在说话（speak）和密语（whisper）也纳入 LLM 好感度评估
+  - 密语事件 metadata 补充 `from_agent_id` + `action: "whisper"`
+
+- **Agent**: bge-small-zh-v1.5 嵌入模型 Docker 集成（Semantic Memory Docker Plan A）
+  - Agent Dockerfile 运行阶段自动下载模型三文件（~100MB）
+  - 使用 hf-mirror.com（可通过 `--build-arg HF_MIRROR=` 覆盖）
+
+### Fixed
+
+- **Agent**: Ghost Agent — 已死 Agent（`rebirth_delay_ticks == 0`）继续提交 Intent
+  - `lifecycle.rs` 死亡等待逻辑缺失 `else { continue; }` 分支
+
+- **Agent**: Soul Cycle DB 停写 — tick 后不再追加
+  - `record_renhun` recorder 初始化失败时静默跳过，现增加 `error!` 日志
+
+- **Agent**: ChaosGenerator 不触发 — S<30 持续 22+ tick 但 0 次触发
+  - `debug!` 升级为 `info!`，增加参数（sanity/threshold/chaos_action）
+
+- **Agent**: OutcomeMemory 100% success — failure 记录路径缺失
+  - `handler.rs` handler 层拒绝（rate limit/agent dead/queue full 等）现发送 `ExecutionResult(success=false)`
+  - Agent 端 OutcomeMemory 可记录失败结果用于学习
+
+- **Server**: Session Lock — 对话 session 未正确释放（302 次 "already in dialogue"）
+  - Whisper intent 执行后立即 `close_session()`，避免同 tick AlreadyInDialogue
+  - `DialogueManager` 新增 `close_session()` 方法
+
+- **Agent**: Token Tracking persist_and_reset 从未调用
+  - 从 tokio::select! 宏体内移至每个 tick 结束后的正确位置
+  - `fs::write` 改为 write-to-tmp + rename 原子写入
+
+- **Server**: Event Queue 溢出 — 6 Agent 同地 30 events/tick，队列容量 32
+  - `connection.rs` channel full 时增加 agent_id/agent_name warn 日志
+
+- **Agent**: Stream 降级往返 — LongCat-Flash-Lite 每次 non-stream 400
+  - `should_fallback()` 增加 context-length 错误短路，不再无意义重试
+  - `FallbackLlmClient` 400 错误时 warn 建议 `prefer_stream: true`
+
+- **Agent**: Fallback 模型追踪 — `OpenAIResponse` 新增 `model` 字段
+  - 非流式响应检测实际 model 与请求 model 是否一致，记录 info 日志
+
+- **Agent+Server**: 记忆/关系系统事件丢失 — Reactive WS events_log 硬编码为空
+
+- **Admin**: experiences.html 叙事列 HTML 破损修复（`<td>` 缺少 `</td>`）
+
+### Changed
+
+- **Agent**: 感知增强配置更新
+  - `narrative_config.yaml` 增加 Episodic 噪声过滤、对话污染清理、物品盲区描述、进食紧迫性叙事
+  - `prompt_templates.yaml` 相关模板段更新
+
 - **Agent**: 地魂记忆回溯工具接入
   - 在 `EarthToolExecutor` 中实装了 `search_memory` 和 `recall_archived`
   - 通过 `Arc<tokio::sync::RwLock<MemoryManager>>` 解决了记忆管理器的并发所有权问题
