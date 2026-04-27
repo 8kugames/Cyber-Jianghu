@@ -151,9 +151,16 @@ pub fn persist_and_reset() {
                 merged.insert(key, s.clone());
             }
         }
-        // Write back
+        // Write back (atomic: write to tmp file then rename)
         if let Ok(json) = serde_json::to_string_pretty(&merged) {
-            let _ = fs::write(&path, json);
+            let tmp_path = path.with_extension("tmp_write");
+            if fs::write(&tmp_path, &json).is_err() {
+                tracing::warn!("[token_tracking] 写入临时文件失败: {:?}", tmp_path);
+                return;
+            }
+            if let Err(e) = fs::rename(&tmp_path, &path) {
+                tracing::warn!("[token_tracking] rename 失败: {} -> {:?}: {}", tmp_path.display(), path, e);
+            }
         }
     }
     // Reset current tick counters

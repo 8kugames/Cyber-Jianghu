@@ -141,7 +141,7 @@
   - [x] **情景记忆 (Episodic Memory)**：利用 SQLite 持久化存储带时间戳的事件，包含遗忘曲线与重要度评分机制。
     - [x] 基于艾宾浩斯遗忘曲线的记忆归档机制。
     - [x] 自动基于事件类型与元数据为记忆进行重要性打分。
-  - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。
+  - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。Docker 镜像内建 bge-small-zh-v1.5 嵌入模型（~100MB）。
 - [x] **[双栖运行模式](../../crates/agent/docs/architecture/p0_core/dual_mode.md)**:
   - [x] **Cognitive 模式**：调用内置 LLM 的独立智能体。
   - [x] **Claw 模式**：通过 OpenClaw 桥接外部第三方 LLM 的附庸模式。
@@ -163,6 +163,7 @@
     - [x] ignore (忽略): 从记录中清理或不进入主流程。
   - [ ] *名义实现待实装*：每日结束时将当日事件生成总结摘要写入记忆库。
 - [x] **[人际社交网络 (RelationshipStore)](../../crates/agent/docs/architecture/p2_enhancement/relationship_store.md)**: 记录并量化 Agent 间的互动历史与好感度阶梯，影响其社交决策。
+  - [x] 支持物品转移（SocialInteraction）、公开说话（PublicMessage）、密语（PrivateDialogue）三种事件类型触发好感度更新。
 - [x] **[玩家控制台 (Agent Control Panel)](../../crates/agent/docs/architecture/p2_enhancement/agent_control_panel.md)**: 允许人类玩家观察并干预 AI 角色的前端面板。
   - [x] 实时 SSE 数据流展示心跳、推演记录与周围状态。
   - [x] 辅助创建角色，一键生成世界树与属性雷达图。

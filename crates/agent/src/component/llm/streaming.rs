@@ -89,6 +89,11 @@ impl StreamAccumulator {
     pub fn into_content(self) -> String {
         self.content
     }
+
+    /// 获取 token 用量 (prompt_tokens, completion_tokens)
+    pub fn token_stats(&self) -> (u64, u64) {
+        (self.prompt_tokens, self.completion_tokens)
+    }
 }
 
 // ============================================================================

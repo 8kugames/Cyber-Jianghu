@@ -107,6 +107,14 @@ impl DialogueManager {
         registry.cleanup_timeout_sessions(timeout)
     }
 
+    /// 关闭指定会话（whisper 执行后立即释放）
+    ///
+    /// 原子双删 sessions + agent_index（一个 write lock 内）
+    pub async fn close_session(&self, session_id: &str) -> bool {
+        let mut registry = self.sessions.write().await;
+        registry.remove_session(session_id).is_some()
+    }
+
     /// 关闭所有活动会话（Tick 结束时调用）
     ///
     /// 返回所有被关闭的会话信息

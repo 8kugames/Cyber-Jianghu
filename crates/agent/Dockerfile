@@ -112,6 +112,18 @@ COPY crates/agent/static /app/static
 RUN mkdir -p /app/data /app/config && \
     chown -R cyberjianghu:cyberjianghu /app
 
+# 下载 bge-small-zh-v1.5 嵌入模型（~100MB，Semantic Memory 向量搜索）
+ARG HF_MIRROR=https://hf-mirror.com
+RUN MODEL_DIR=/home/cyberjianghu/.cyber-jianghu/models/bge-small-zh-v1.5 && \
+    mkdir -p ${MODEL_DIR} && \
+    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/config.json" \
+        -o ${MODEL_DIR}/config.json && \
+    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/tokenizer.json" \
+        -o ${MODEL_DIR}/tokenizer.json && \
+    curl -fsSL "${HF_MIRROR}/BAAI/bge-small-zh-v1.5/resolve/main/model.safetensors" \
+        -o ${MODEL_DIR}/model.safetensors && \
+    chown -R cyberjianghu:cyberjianghu /home/cyberjianghu/.cyber-jianghu
+
 # 暴露 HTTP API 端口（23340-23349）
 # 默认使用 23340，可在运行时通过 PORT 环境变量覆盖
 EXPOSE 23340
