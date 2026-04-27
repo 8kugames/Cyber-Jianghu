@@ -511,7 +511,7 @@ impl Broadcaster {
                         .map(|bt| super::decay::compute_age_years(bt, tick_id) as u32),
                     max_age: game_data_cache
                         .get_lifespan_config()
-                        .map(|(max, _)| max as u32),
+                        .map(|(max, _, _)| max as u32),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -769,7 +769,7 @@ pub fn build_reactive_world_state(
                 .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
             max_age: game_data_cache
                 .get_lifespan_config()
-                .map(|(max, _)| max as u32),
+                .map(|(max, _, _)| max as u32),
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -914,7 +914,7 @@ pub fn build_initial_world_state(
                 .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
             max_age: game_data_cache
                 .get_lifespan_config()
-                .map(|(max, _)| max as u32),
+                .map(|(max, _, _)| max as u32),
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items,

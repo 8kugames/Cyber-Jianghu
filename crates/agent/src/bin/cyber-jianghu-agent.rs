@@ -953,9 +953,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             })
         });
 
-    // RelationshipStore
+    // RelationshipStore（per-character DB，与 HTTP API 路径对齐）
     let agent_id_for_rel = character.agent_id.unwrap_or_else(Uuid::new_v4);
-    let relationship_db_path = data_dir.join("relationships.db");
+    let relationship_db_path = data_dir.join(format!("relationships_{}.db", agent_id_for_rel));
     let relationship_store = match cyber_jianghu_agent::component::social::RelationshipStore::open(
         agent_id_for_rel,
         &relationship_db_path,

@@ -111,6 +111,10 @@ pub struct LifespanRules {
     /// 衰老开始年龄（影响叙事描述）
     #[serde(default = "default_aging_start_age")]
     pub aging_start_age: u8,
+
+    /// 新角色/重生角色的初始年龄（岁）
+    #[serde(default = "default_starting_age")]
+    pub starting_age: u8,
 }
 
 fn default_max_age() -> u8 {
@@ -118,6 +122,9 @@ fn default_max_age() -> u8 {
 }
 fn default_aging_start_age() -> u8 {
     50
+}
+fn default_starting_age() -> u8 {
+    18
 }
 
 // ============================================================================

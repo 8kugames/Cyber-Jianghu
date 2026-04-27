@@ -694,6 +694,7 @@ pub async fn auto_rebirth_agent(
     spawn_location: &str,
     reset_attributes: bool,
     initial_items: &[(String, String, i32, String)],
+    starting_age_ticks: i64,
 ) -> Result<AutoRebirthResult> {
     debug!("自动重生: agent_id={}, spawn={}", agent_id, spawn_location);
 
@@ -722,7 +723,7 @@ pub async fn auto_rebirth_agent(
     .await
     .context("查询 tick_id 失败")?;
 
-    let rebirth_tick = current_tick + 1;
+    let rebirth_tick = current_tick + 1 - starting_age_ticks;
 
     // 3. 重置属性到初始值 + is_alive=true
     if reset_attributes {

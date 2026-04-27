@@ -95,6 +95,8 @@ pub(crate) struct OpenAIResponse {
     pub choices: Vec<OpenAIChoice>,
     #[serde(default)]
     pub usage: Option<OpenAIUsage>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Token 用量

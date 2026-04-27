@@ -23,8 +23,9 @@ impl ImportanceScorer {
     /// 评分规则：
     /// - 1.0: 最高重要性（死亡通知）
     /// - 0.8: 高重要性（状态变更）
-    /// - 0.5-0.6: 中等重要性（环境变化、社交互动）
-    /// - 0.2-0.4: 低重要性（动作结果、消息、系统通知）
+    /// - 0.7: 社交核心（密语、公开说话、社交互动）
+    /// - 0.4: 中等重要性（动作结果）
+    /// - 0.2: 低重要性（环境变化、系统通知）
     /// - 0.1: 最低重要性（时间更新）
     pub fn score(&self, event_type: &WorldEventType, description: &str, metadata: &Value) -> f32 {
         let base_score = self.score_by_type(event_type);
@@ -38,11 +39,11 @@ impl ImportanceScorer {
         match event_type {
             WorldEventType::DeathNotification => 1.0,
             WorldEventType::StateChange => 0.8,
-            WorldEventType::EnvironmentalChange => 0.6,
-            WorldEventType::SocialInteraction => 0.5,
+            WorldEventType::PrivateDialogue => 0.7,
+            WorldEventType::PublicMessage => 0.7,
+            WorldEventType::SocialInteraction => 0.7,
             WorldEventType::ActionResult => 0.4,
-            WorldEventType::PublicMessage => 0.3,
-            WorldEventType::PrivateDialogue => 0.3,
+            WorldEventType::EnvironmentalChange => 0.2,
             WorldEventType::SystemNotification => 0.2,
             WorldEventType::TimeUpdate => 0.1,
         }
@@ -136,7 +137,13 @@ mod tests {
         assert_eq!(scorer.score_by_type(&WorldEventType::ActionResult), 0.4);
         assert_eq!(
             scorer.score_by_type(&WorldEventType::SocialInteraction),
-            0.5
+            0.7
+        );
+        assert_eq!(scorer.score_by_type(&WorldEventType::PublicMessage), 0.7);
+        assert_eq!(scorer.score_by_type(&WorldEventType::PrivateDialogue), 0.7);
+        assert_eq!(
+            scorer.score_by_type(&WorldEventType::EnvironmentalChange),
+            0.2
         );
         assert_eq!(scorer.score_by_type(&WorldEventType::TimeUpdate), 0.1);
     }

@@ -253,6 +253,7 @@ impl super::Agent {
                     tick_id: 0,
                     died_at: chrono::Utc::now().timestamp_millis(),
                     rebirth_delay_ticks: 0,
+                    metadata: None,
                 };
                 let _ = api_state.death_event_tx.send(death_msg);
             }
@@ -283,6 +284,7 @@ impl super::Agent {
                     tick_id: 0,
                     died_at: chrono::Utc::now().timestamp_millis(),
                     rebirth_delay_ticks: self.config.rebirth_delay_ticks(),
+                    metadata: None,
                 };
                 let _ = api_state.death_event_tx.send(death_msg);
             }
@@ -356,26 +358,39 @@ impl super::Agent {
                 // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
                 if let ServerMessage::Dialogue { message, .. } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
-                    let desc = match message {
-                        DialogueMessage::Request { opening_remark, .. } => {
-                            format!("收到密语请求: {}", opening_remark)
+                    let (desc, from_id) = match message {
+                        DialogueMessage::Request { opening_remark, from_agent_id, .. } => {
+                            (format!("收到密语请求: {}", opening_remark), Some(*from_agent_id))
                         }
-                        DialogueMessage::Content { content, .. } => {
-                            format!("密语内容: {}", content)
+                        DialogueMessage::Content { content, from_agent_id, .. } => {
+                            (format!("密语内容: {}", content), Some(*from_agent_id))
                         }
-                        DialogueMessage::Accept { .. } => "密语对话已接受".to_string(),
-                        DialogueMessage::Reject { reason, .. } => {
-                            format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由"))
+                        DialogueMessage::Accept { from_agent_id, .. } => {
+                            ("密语对话已接受".to_string(), Some(*from_agent_id))
                         }
-                        DialogueMessage::End { .. } => "密语对话已结束".to_string(),
+                        DialogueMessage::Reject { reason, from_agent_id, .. } => {
+                            (format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")), Some(*from_agent_id))
+                        }
+                        DialogueMessage::End { from_agent_id, .. } => {
+                            ("密语对话已结束".to_string(), Some(*from_agent_id))
+                        }
                     };
                     let buf = event_buffer.clone();
                     tokio::spawn(async move {
+                        let mut meta = serde_json::json!({
+                            "action": "whisper",
+                        });
+                        if let Some(fid) = from_id {
+                            meta.as_object_mut().unwrap().insert(
+                                "from_agent_id".to_string(),
+                                serde_json::json!(fid.to_string()),
+                            );
+                        }
                         let world_event = cyber_jianghu_protocol::WorldEvent {
                             event_type: cyber_jianghu_protocol::WorldEventType::PrivateDialogue,
                             tick_id: 0,
                             description: desc,
-                            metadata: serde_json::json!({}),
+                            metadata: meta,
                         };
                         let mut guard = buf.lock().await;
                         guard.push(world_event);
@@ -587,29 +602,34 @@ impl super::Agent {
                             continue;
                         }
 
-                    // 1.5b 已死亡 + 自动重生已完成 → 重置状态恢复决策循环
-                    if self.death_reported && self.rebirth_delay_ticks > 0 {
-                        let rebirth_done = self.http_api_state.as_ref()
-                            .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
-                            .unwrap_or(false);
-                        if rebirth_done {
-                            info!(
-                                "Agent '{}' 自动重生恢复决策: tick={}",
-                                self.character_name(),
-                                world_state.tick_id
-                            );
-                            self.death_reported = false;
-                            self.death_tick_id = None;
-                            if let Some(ref mut char_cfg) = self.character_config {
-                                char_cfg.status = crate::config::CharacterStatus::Alive;
-                                if let Some(ref api_state) = self.http_api_state {
-                                    let characters_dir = api_state.character_dir.read().await.clone();
-                                    if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
-                                        warn!("Failed to persist rebirth status: {}", e);
+                    // 1.5b 已死亡 → 跳过决策循环（等待重生恢复）
+                    if self.death_reported {
+                        if self.rebirth_delay_ticks > 0 {
+                            let rebirth_done = self.http_api_state.as_ref()
+                                .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                                .unwrap_or(false);
+                            if rebirth_done {
+                                info!(
+                                    "Agent '{}' 自动重生恢复决策: tick={}",
+                                    self.character_name(),
+                                    world_state.tick_id
+                                );
+                                self.death_reported = false;
+                                self.death_tick_id = None;
+                                if let Some(ref mut char_cfg) = self.character_config {
+                                    char_cfg.status = crate::config::CharacterStatus::Alive;
+                                    if let Some(ref api_state) = self.http_api_state {
+                                        let characters_dir = api_state.character_dir.read().await.clone();
+                                        if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                                            warn!("Failed to persist rebirth status: {}", e);
+                                        }
                                     }
                                 }
+                            } else {
+                                continue;
                             }
                         } else {
+                            // 无自动重生：持续等待直到外部重生触发（通过 API 或重启）
                             continue;
                         }
                     }
@@ -943,6 +963,11 @@ impl super::Agent {
                             // 记录游戏内时间和现实时间
                             let world_time_str = Self::format_world_time(&world_state.world_time);
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
+                        } else {
+                            tracing::warn!(
+                                "[soul_cycle] recorder unavailable at tick {}, skipping renhun record",
+                                world_state.tick_id
+                            );
                         }
 
                         // 5b. 翻译步骤已消除 — 人魂直接输出结构化 Intent
@@ -1392,6 +1417,9 @@ impl super::Agent {
                     }
                 }
             }
+
+            // 每个 tick 结束时持久化 token 统计
+            crate::component::llm::token_tracking::persist_and_reset();
         }
     }
 

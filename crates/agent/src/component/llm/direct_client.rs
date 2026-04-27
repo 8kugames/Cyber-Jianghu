@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 /// 全局 LLM 停止标志
 static LLM_DISABLED: AtomicBool = AtomicBool::new(false);
@@ -469,6 +469,11 @@ impl DirectLlmClient {
         })?;
 
         let model = self.config.get_model_with_default();
+        if let Some(ref actual_model) = response_data.model {
+            if actual_model != &model {
+                info!("[llm] model fallback: requested={}, actual={}", model, actual_model);
+            }
+        }
         if let Some(ref usage) = response_data.usage {
             record_token_usage(
                 &self.config.provider,
@@ -509,7 +514,24 @@ impl DirectLlmClient {
             }
         }
 
+        let (pt, ct) = acc.token_stats();
         let content = acc.into_content();
+
+        // 记录流式 token 用量
+        if pt > 0 || ct > 0 {
+            record_token_usage(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+                pt,
+                ct,
+            );
+            debug!(
+                "Stream token usage: provider={}, model={}, prompt={}, completion={}",
+                self.config.provider.as_str(),
+                self.config.get_model_with_default(),
+                pt, ct
+            );
+        }
 
         // 组装为 OpenAIResponse 格式（与 send_request 返回一致）
         Ok(OpenAIResponse {
@@ -523,6 +545,7 @@ impl DirectLlmClient {
                 },
             }],
             usage: None,
+            model: None,
         })
     }
 

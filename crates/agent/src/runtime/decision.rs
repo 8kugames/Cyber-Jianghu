@@ -82,13 +82,18 @@ pub fn cognitive_decision_with_chain(
                         last_chain = Some(chain.clone());
 
                         // 推送到对话历史（长窗口）
-                        if !memory_context.is_empty() {
-                            engine.push_conversation_turn(
-                                world_state.tick_id,
-                                memory_context.clone(),
-                                final_intent.action_type.to_string(),
-                            );
-                        }
+                        // user 字段使用 world_state 摘要而非 memory_context，
+                        // 避免工作记忆（环境观察/紧急事件）伪装成对话历史
+                        let ws_summary = format!(
+                            "Tick {} @ {}",
+                            world_state.tick_id,
+                            &world_state.location.node_id,
+                        );
+                        engine.push_conversation_turn(
+                            world_state.tick_id,
+                            ws_summary,
+                            final_intent.action_type.to_string(),
+                        );
 
                         // CognitiveValidator: 验证认知链质量
                         let validator = CognitiveValidator::new(chain.persona.clone());
@@ -118,6 +123,17 @@ pub fn cognitive_decision_with_chain(
                         failed_attempts += 1;
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
+
+                        // Prompt 超长是确定性的，重试无意义
+                        let err_msg = &last_error;
+                        if err_msg.contains("exceeds max context window")
+                            || err_msg.contains("Prompt too long")
+                            || err_msg.contains("context_length_exceeded")
+                            || err_msg.contains("maximum context length")
+                        {
+                            warn!("[cognitive] Prompt exceeds context window, aborting retries");
+                            break;
+                        }
                     }
                 }
             }

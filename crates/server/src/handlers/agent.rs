@@ -378,6 +378,9 @@ pub async fn agent_auto_rebirth(
         (spawn_location, reset_attributes, initial_items_data)
     };
 
+    // 计算 starting_age 对应的 tick 偏移
+    let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
+
     // 执行重生
     let result = db::auto_rebirth_agent(
         &state.db_pool,
@@ -385,6 +388,7 @@ pub async fn agent_auto_rebirth(
         &spawn_location,
         reset_attributes,
         &initial_items_data,
+        starting_age_ticks,
     )
     .await
     .map_err(|e| {

@@ -168,15 +168,15 @@ impl GameDataCache {
         }
     }
 
-    /// 获取寿命配置（max_age, aging_start_age）
-    pub fn get_lifespan_config(&self) -> Option<(u8, u8)> {
+    /// 获取寿命配置（max_age, aging_start_age, starting_age）
+    pub fn get_lifespan_config(&self) -> Option<(u8, u8, u8)> {
         let config = self.get();
         config
             .game_rules
             .data
             .lifespan
             .as_ref()
-            .map(|l| (l.max_age, l.aging_start_age))
+            .map(|l| (l.max_age, l.aging_start_age, l.starting_age))
     }
 }
 

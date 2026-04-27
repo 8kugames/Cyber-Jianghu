@@ -169,7 +169,7 @@ impl IntentWorker {
         {
             Ok(r) => r,
             Err(e) => {
-                // 执行失败 → 反馈给 Agent
+                // 执行失败 → 反馈给 Agent + 释放 whisper session
                 self.send_error_to_agent(
                     agent_id,
                     intent_id,
@@ -178,6 +178,11 @@ impl IntentWorker {
                     tick_id,
                 )
                 .await;
+                if action_type == "私语" {
+                    if let Some(ref session_id) = intent.session_id {
+                        self.dialogue_manager.close_session(session_id).await;
+                    }
+                }
                 return Err(e.context(format!("Intent 执行失败: agent={}", agent_id)));
             }
         };
@@ -196,7 +201,7 @@ impl IntentWorker {
 
         // 5. 持久化到 DB（await 确认）
         if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
-            // persist 失败 → DashMap 不更新 → 反馈失败给 Agent
+            // persist 失败 → DashMap 不更新 → 反馈失败给 Agent + 释放 whisper session
             self.send_error_to_agent(
                 agent_id,
                 intent_id,
@@ -205,6 +210,11 @@ impl IntentWorker {
                 tick_id,
             )
             .await;
+            if action_type == "私语" {
+                if let Some(ref session_id) = intent.session_id {
+                    self.dialogue_manager.close_session(session_id).await;
+                }
+            }
             return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
         }
 
@@ -257,6 +267,13 @@ impl IntentWorker {
                     agent_id, subsequent.action_type, e
                 );
                 break;
+            }
+        }
+
+        // 11. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
+        if action_type == "私语" {
+            if let Some(ref session_id) = intent.session_id {
+                self.dialogue_manager.close_session(session_id).await;
             }
         }
 
@@ -726,6 +743,35 @@ impl IntentWorker {
             let agent_id = notif.agent_id;
             let location = &notif.location;
 
+            // 死亡归因日志 + 元数据构建（DashMap 移除前完成）
+            let death_metadata = if let Some(state) = self.state_cache.get(&agent_id) {
+                let attrs = &state.value().status;
+                let hp = attrs.get("hp").unwrap_or(-1);
+                let hunger = attrs.get("hunger").unwrap_or(-1);
+                let thirst = attrs.get("thirst").unwrap_or(-1);
+                let sanity = attrs.get("sanity").unwrap_or(-1);
+                let birth_tick = state.value().birth_tick;
+                let survival_ticks = birth_tick.map(|bt| tick_id - bt).unwrap_or(-1);
+                info!(
+                    "[death] agent={} cause={} tick={} hp={} hunger={} thirst={} sanity={} survival_ticks={}",
+                    agent_id, notif.cause, tick_id, hp, hunger, thirst, sanity, survival_ticks
+                );
+                Some(serde_json::json!({
+                    "attributes": {
+                        "hp": hp,
+                        "hunger": hunger,
+                        "thirst": thirst,
+                        "sanity": sanity,
+                    },
+                    "birth_tick": birth_tick,
+                    "survival_ticks": survival_ticks,
+                    "death_tick": tick_id,
+                    "cause": notif.cause,
+                }))
+            } else {
+                None
+            };
+
             // 1. 物品掉落：清空背包 → 掉落到地面
             match crate::inventory::InventoryManager::clear_inventory(&self.db_pool, agent_id).await
             {
@@ -805,6 +851,7 @@ impl IntentWorker {
                 connection_manager: &self.connection_manager,
                 agent_to_device_map: &self.agent_to_device_map,
                 rebirth_delay_ticks: rebirth_delay,
+                death_metadata,
             };
             if let Err(e) = send_agent_died_notification(
                 agent_id,

@@ -123,6 +123,8 @@ pub struct DeathNotificationContext<'a> {
     pub agent_to_device_map: &'a AgentToDeviceMap,
     /// 自动重生延迟 (0 = 不自动重生，需断连)
     pub rebirth_delay_ticks: i32,
+    /// 死亡时属性快照（跨Agent传承 Layer 1）
+    pub death_metadata: Option<serde_json::Value>,
 }
 
 /// 向指定 Agent 发送死亡通知
@@ -168,6 +170,7 @@ pub async fn send_agent_died_notification(
             tick_id,
             died_at,
             rebirth_delay_ticks: rebirth_delay,
+            metadata: ctx.death_metadata.clone(),
         };
         let json = serde_json::to_string(&msg)?;
         if connection.send(Message::Text(json.into())).await.is_err() {

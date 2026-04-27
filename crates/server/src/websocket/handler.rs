@@ -881,10 +881,31 @@ async fn handle_intent(
         _ => connection_agent_id,
     };
 
+    let intent_id = req_intent_id.unwrap_or_else(uuid::Uuid::new_v4);
+
+    // Handler 层拒绝时发送 ExecutionResult 给 agent（让 OutcomeMemory 记录失败）
+    let reject_and_notify = |err_msg: String| async {
+        let msg = cyber_jianghu_protocol::ServerMessage::ExecutionResult {
+            tick_id,
+            intent_id,
+            success: false,
+            error: Some(err_msg.clone()),
+            state_change_summary: None,
+        };
+        let _ = crate::tick::send_to_agent(
+            agent_id,
+            &msg,
+            &state.connection_manager,
+            &state.agent_to_device_map,
+        )
+        .await;
+        Err::<(), Box<dyn std::error::Error + Send + Sync>>(err_msg.into())
+    };
+
     // 速率限制检查
     if !crate::state::check_rate_limit(&state.rate_limiter, agent_id).await {
         warn!("Rate limit exceeded for agent {}", agent_id);
-        return Err("Rate limit exceeded. Please wait before sending another intent.".into());
+        return reject_and_notify("Rate limit exceeded. Please wait before sending another intent.".into()).await;
     }
 
     // Agent 存活检查：从 DashMap 内存缓存读取（实时模式，不再查 DB）
@@ -899,9 +920,7 @@ async fn handle_intent(
             "Intent rejected: agent {} is dead or not in cache",
             agent_id
         );
-        return Err(
-            Box::new(GameError::AgentDead { agent_id }) as Box<dyn std::error::Error + Send + Sync>
-        );
+        return reject_and_notify(format!("Agent {} is dead or not in cache", agent_id)).await;
     }
 
     info!(
@@ -933,7 +952,7 @@ async fn handle_intent(
             subsequent_intents.len(),
             max_subsequent
         );
-        return Err(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent).into());
+        return reject_and_notify(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent)).await;
     }
 
     // 递归拒绝：只允许单层 pipeline
@@ -943,7 +962,7 @@ async fn handle_intent(
                 "嵌套 pipeline 拒绝: agent={} subsequent[{}] 含嵌套 intents",
                 agent_id, i
             );
-            return Err("不支持嵌套 pipeline，subsequent intents 不可再包含 subsequent".into());
+            return reject_and_notify("不支持嵌套 pipeline，subsequent intents 不可再包含 subsequent".into()).await;
         }
     }
 
@@ -954,7 +973,7 @@ async fn handle_intent(
                 "agent_id 不一致: agent={} subsequent[{}] agent_id={}",
                 agent_id, i, sub.agent_id
             );
-            return Err(format!("subsequent intent[{}] agent_id 不一致", i).into());
+            return reject_and_notify(format!("subsequent intent[{}] agent_id 不一致", i)).await;
         }
     }
 
@@ -1068,9 +1087,7 @@ async fn handle_intent(
                 "Intent queue full or closed: agent={}, error={}",
                 agent_id, e
             );
-            return Err(
-                Box::new(GameError::NotAccepting) as Box<dyn std::error::Error + Send + Sync>
-            );
+            return reject_and_notify("Intent queue full, server busy".into()).await;
         }
     }
 

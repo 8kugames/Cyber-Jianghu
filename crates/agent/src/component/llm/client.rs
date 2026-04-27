@@ -490,13 +490,17 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            if matches!(chunk, super::streaming::StreamChunk::Done { .. }) {
-                break;
-            }
             acc.push(chunk);
             if acc.is_json_complete() {
                 break;
             }
+        }
+
+        let (pt, ct) = acc.token_stats();
+        if pt > 0 || ct > 0 {
+            tracing::debug!(
+                "Streaming JSON token usage: prompt={}, completion={}", pt, ct
+            );
         }
 
         parse_json_response::<D>(acc.content())
@@ -519,13 +523,17 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            if matches!(chunk, super::streaming::StreamChunk::Done { .. }) {
-                break;
-            }
             acc.push(chunk);
             if acc.is_json_complete() {
                 break;
             }
+        }
+
+        let (pt, ct) = acc.token_stats();
+        if pt > 0 || ct > 0 {
+            tracing::debug!(
+                "Streaming JSON conv token usage: prompt={}, completion={}", pt, ct
+            );
         }
 
         parse_json_response::<D>(acc.content())
@@ -676,16 +684,31 @@ impl FallbackLlmClient {
     /// - 空响应（模型返回 null/空内容）
     fn should_fallback(error: &anyhow::Error) -> bool {
         let msg = format!("{:#}", error);
+
+        // Prompt 超长是确定性的，重试/fallback 无意义（所有模型都可能超长）
+        if msg.contains("exceeds max context window")
+            || msg.contains("Prompt too long")
+            || msg.contains("context_length_exceeded")
+            || msg.contains("maximum context length")
+        {
+            return false;
+        }
+
         // HTTP 状态码匹配（直接来自 API 响应）
         msg.contains("LLM API error 404")
             || msg.contains("LLM API error 403")
             || msg.contains("LLM API error 429")
+            || msg.contains("LLM streaming API error 404")
+            || msg.contains("LLM streaming API error 403")
+            || msg.contains("LLM streaming API error 429")
             // 400 Bad Request：模型能力不匹配（如 "only support stream mode"）
-            || msg.contains("LLM API error 400")
+            || (msg.contains("LLM API error 400") && !msg.contains("Prompt too long"))
+            || (msg.contains("LLM streaming API error 400") && !msg.contains("Prompt too long"))
             // 额度耗尽关键词
             || msg.contains("AllocationQuota")
             // 连接/请求失败（.context() 包装后的前缀）
             || msg.contains("Failed to send request to LLM API")
+            || msg.contains("error sending request for url")
             // 空响应（MiniMax 等模型偶尔返回 content=null）
             || msg.contains("response content is empty")
             // DashScope "does not support http call"（开发测试用）
@@ -724,6 +747,12 @@ impl FallbackLlmClient {
                 Err(e) => {
                     let should = Self::should_fallback(&e);
                     tracing::warn!("LLM 客户端 #{} 调用失败 (fallback={}: {}", idx, should, e);
+                    let err_msg = format!("{:#}", &e);
+                    if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long") {
+                        tracing::warn!(
+                            "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
+                        );
+                    }
                     if !should {
                         // 非 fallback 类错误（如 JSON 解析失败），直接返回
                         return Err(e);

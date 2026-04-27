@@ -23,10 +23,17 @@ impl super::Agent {
             return;
         };
 
-        // 收集所有社交事件
+        // 收集所有社交事件（物品转移 + 公开说话 + 密语）
         let social_events: Vec<crate::models::WorldEvent> = events
             .iter()
-            .filter(|e| e.event_type == crate::models::WorldEventType::SocialInteraction)
+            .filter(|e| {
+                matches!(
+                    e.event_type,
+                    crate::models::WorldEventType::SocialInteraction
+                        | crate::models::WorldEventType::PublicMessage
+                        | crate::models::WorldEventType::PrivateDialogue
+                )
+            })
             .cloned()
             .collect();
 
@@ -100,12 +107,17 @@ impl super::Agent {
                 };
 
                 let action = meta.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                let other_id_str = match action {
+                let is_speak = meta.contains_key("from_agent_id") && !meta.contains_key("action");
+                let resolved_action = if is_speak { "speak" } else { action };
+                let other_id_str = match resolved_action {
                     "给予" | "trade_sell" => meta.get("target").and_then(|v| v.as_str()),
                     "receive" | "trade_buy" | "stolen_from" => {
                         meta.get("from").and_then(|v| v.as_str())
                     }
-                    _ => None,
+                    _ => {
+                        // PublicMessage: from_agent_id 标识说话者
+                        meta.get("from_agent_id").and_then(|v| v.as_str())
+                    }
                 };
 
                 let Some(id_str) = other_id_str else {
@@ -123,7 +135,7 @@ impl super::Agent {
                     other_id,
                     other_name,
                     event.tick_id,
-                    action,
+                    resolved_action,
                     &event.description,
                     delta,
                 ) {

@@ -230,7 +230,7 @@ pub fn apply_decay_and_environmental_damage(
         {
             // 复用 compute_game_time 相同公式，从秒级 tick_id 计算游戏年
             let age_years = compute_age_years(birth_tick, tick_id);
-            if let Some((max_age, _aging_start)) = registry.get_lifespan_config()
+            if let Some((max_age, _aging_start, _starting_age)) = registry.get_lifespan_config()
                 && age_years >= max_age as i64
             {
                 // 寿终正寝：清零 HP
@@ -312,6 +312,50 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
     } else {
         0
     }
+}
+
+/// 计算 starting_age 对应的 tick 偏移量（用于重生时设置 birth_tick）
+///
+/// 使 age 计算结果为 starting_age 岁，而非 0 岁。
+pub fn compute_starting_age_ticks() -> i64 {
+    let registry = match crate::game_data::registry_or_error() {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    let gd = registry.get();
+    let starting_age = gd
+        .game_rules
+        .data
+        .lifespan
+        .as_ref()
+        .map(|l| l.starting_age as i64)
+        .unwrap_or(18);
+
+    // 边界检查：starting_age 不能大于 max_age
+    let max_age = gd
+        .game_rules
+        .data
+        .lifespan
+        .as_ref()
+        .map(|l| l.max_age as i64)
+        .unwrap_or(80);
+    let starting_age = starting_age.min(max_age);
+
+    if starting_age <= 0 {
+        return 0;
+    }
+
+    if let Some(time_config) = crate::game_data::registry::TimeRegistry::get_config() {
+        let ticks_per_hour = time_config.ticks_per_hour as i64;
+        let hours_per_year = time_config.hours_per_day as i64
+            * time_config.days_per_season as i64
+            * time_config.seasons_per_year as i64;
+        let ticks_per_year = ticks_per_hour * hours_per_year;
+        if ticks_per_year > 0 {
+            return starting_age * ticks_per_year;
+        }
+    }
+    0
 }
 
 #[cfg(test)]

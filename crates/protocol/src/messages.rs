@@ -199,6 +199,9 @@ pub enum ServerMessage {
         died_at: i64,
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
+        /// 死亡上下文（属性快照/存活时间/最后行为，供同地 Agent 学习）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
 
     /// 立即事件（speak 等需要立即广播的事件）
@@ -692,6 +695,7 @@ mod tests {
             tick_id: 42,
             died_at: 1234567890000,
             rebirth_delay_ticks: 10,
+            metadata: None,
         };
 
         let json = msg.to_json().unwrap();
@@ -718,6 +722,7 @@ mod tests {
                 tick_id,
                 died_at,
                 rebirth_delay_ticks,
+                metadata: _,
             } => {
                 assert_eq!(agent_id, Uuid::nil());
                 assert_eq!(cause, "hunger");
