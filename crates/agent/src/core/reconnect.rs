@@ -92,6 +92,7 @@ impl super::Agent {
                                         tick_id: 0,
                                         died_at: chrono::Utc::now().timestamp_millis(),
                                         rebirth_delay_ticks: 0,
+                                        metadata: None,
                                     };
                                     let _ = api_state.death_event_tx.send(death_msg);
                                 }
@@ -117,6 +118,7 @@ impl super::Agent {
                                         tick_id: 0,
                                         died_at: chrono::Utc::now().timestamp_millis(),
                                         rebirth_delay_ticks: self.config.rebirth_delay_ticks(),
+                                        metadata: None,
                                     };
                                     let _ = api_state.death_event_tx.send(death_msg);
                                 }

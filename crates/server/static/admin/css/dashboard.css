@@ -982,9 +982,13 @@ input:checked + .slider:before {
     width: 80px;
     min-width: 80px;
 }
+.col-narrative {
+    width: 100px;
+    min-width: 100px;
+}
 .col-renhun {
     width: 330px;
-    min-width: 130px;
+    min-width: 330px;
 }
 .col-tianhun {
     width: 130px;
@@ -992,10 +996,7 @@ input:checked + .slider:before {
 }
 .col-dihun {
     width: 330px;
-    min-width: 130px;
-}
-.col-narrative {
-    min-width: 130px;
+    min-width: 330px;
 }
 .col-agent-id {
     width: 80px;

@@ -177,6 +177,9 @@ pub enum DownstreamMessage {
         died_at: i64,
         /// 重生等待时间（tick 数，0 = 立即，-1 = 不可重生）
         rebirth_delay_ticks: i32,
+        /// 死亡上下文（属性快照等，供同地 Agent 学习）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<serde_json::Value>,
     },
 
     /// Server 即时事件（speak 广播等实时推送）
@@ -442,6 +445,7 @@ impl DownstreamMessage {
                 tick_id,
                 died_at,
                 rebirth_delay_ticks,
+                metadata,
             } => Some(DownstreamMessage::AgentDied {
                 agent_id,
                 cause,
@@ -450,6 +454,7 @@ impl DownstreamMessage {
                 tick_id,
                 died_at,
                 rebirth_delay_ticks,
+                metadata,
             }),
             ServerMessage::ImmediateEvent { event_id: _, event } => {
                 Some(DownstreamMessage::ServerImmediateEvent {

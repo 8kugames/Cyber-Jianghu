@@ -719,21 +719,27 @@ pub fn create_http_state(
     // 预注册当前角色的记录器
     let soul_cycle_registrar = Arc::new(RwLock::new(HashMap::new()))
         as Arc<RwLock<HashMap<Uuid, Arc<soul_cycle_recorder::SoulCycleRecorder>>>>;
-    if !current_agent_id.is_nil()
-        && let Ok(recorder) = soul_cycle_recorder::SoulCycleRecorder::open(
-            current_agent_id,
-            &data_dir.join(format!("soul_cycle_{}.db", current_agent_id)),
-        )
-    {
-        let recorder = Arc::new(recorder);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                soul_cycle_registrar
-                    .write()
-                    .await
-                    .insert(current_agent_id, recorder);
-            })
-        });
+    if !current_agent_id.is_nil() {
+        let db_path = data_dir.join(format!("soul_cycle_{}.db", current_agent_id));
+        match soul_cycle_recorder::SoulCycleRecorder::open(current_agent_id, &db_path) {
+            Ok(recorder) => {
+                let recorder = Arc::new(recorder);
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        soul_cycle_registrar
+                            .write()
+                            .await
+                            .insert(current_agent_id, recorder);
+                    })
+                });
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[soul_cycle] 预注册失败: agent={}, path={:?}, error={}",
+                    current_agent_id, db_path, e
+                );
+            }
+        }
     }
     let data_dir_clone = data_dir.clone();
 
@@ -1034,7 +1040,7 @@ impl HttpApiState {
         // 预建目录：SoulCycleRecorder::open 内部仅 create_dir_all(parent)，
         // 若中间目录链不完整仍会失败，此处确保完整路径存在
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
-            tracing::warn!("无法创建 soul_cycle 数据目录 {:?}: {}", data_dir, e);
+            tracing::error!("[soul_cycle] 无法创建数据目录 {:?}: {}", data_dir, e);
             return None;
         }
         match soul_cycle_recorder::SoulCycleRecorder::open(agent_id, &db_path) {
@@ -1045,7 +1051,7 @@ impl HttpApiState {
                 Some(recorder)
             }
             Err(e) => {
-                tracing::warn!("Failed to open soul_cycle DB for {}: {}", agent_id, e);
+                tracing::error!("[soul_cycle] 懒加载失败: agent={}, error={}", agent_id, e);
                 None
             }
         }

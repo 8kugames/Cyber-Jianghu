@@ -11,7 +11,7 @@ use rand::RngExt;
 use rand::distr::Distribution;
 use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 /// 混沌配置（使用硬编码默认值，未来可从 YAML 配置加载）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +106,10 @@ impl ChaosGenerator {
 
         // 阈值检查
         if sanity > self.config.activation_threshold {
+            info!(
+                "Chaos: sanity={} > threshold={}, skipping",
+                sanity, self.config.activation_threshold
+            );
             return Vec::new();
         }
 
@@ -149,9 +153,11 @@ impl ChaosGenerator {
             );
         }
 
-        debug!(
-            "Chaos: sanity={}, generated {} chaos intents",
+        info!(
+            "Chaos: sanity={}, threshold={}, remaining={}, generated {} chaos intents",
             sanity,
+            self.config.activation_threshold,
+            max_total,
             intents.len()
         );
         intents
