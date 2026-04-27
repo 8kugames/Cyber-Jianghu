@@ -88,6 +88,7 @@ fn create_test_world_state() -> WorldState {
         }],
         private_dialogue_log: vec![],
         last_execution_summary: None,
+        lessons_learned: vec![],
     }
 }
 

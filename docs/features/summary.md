@@ -88,6 +88,10 @@
 - [x] **[群像传记生成 (Chronicle)](../../crates/server/docs/architecture/p2_enhancement/chronicle.md)**: 自动编纂世界历史记录的史官系统。
   - [x] 每 7 个游戏日聚合 Agent 数据（击杀、高光时刻、生死等）。
   - [x] 结合模板规则与异步 LLM 生成长篇传记，并支持失败降级。
+- [x] **[跨 Agent 传承 (Lessons)]()**: 基于集体死亡经验的共享教训库（Layer 1-2）。
+  - [x] Layer 1: AgentDied.metadata 携带属性快照/存活时间/死因，broadcast 透传。
+  - [x] Layer 2: public_lessons 表按死因聚合教训，WorldState.lessons_learned 下发，Agent DecisionContext 注入。
+  - [ ] Layer 3: 代际遗传（待 Layer 1-2 验证后推进）。
 - [x] **[HTTP API 与管理后台](../../crates/server/docs/architecture/p2_enhancement/http_api_admin.md)**: 提供可视化管理和人工干预入口。
   - [x] HTTP API 端点
     - [x] /admin/* — 管理面板 (带 Read/Write Token 鉴权)

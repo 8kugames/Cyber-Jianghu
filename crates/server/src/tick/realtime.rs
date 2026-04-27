@@ -772,6 +772,29 @@ impl IntentWorker {
                 None
             };
 
+            // 0. 跨 Agent 传承 Layer 2: 记录教训
+            {
+                let survival = death_metadata
+                    .as_ref()
+                    .and_then(|m| m.get("survival_ticks"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(-1);
+                let gd = self.game_data_cache.get();
+                let lesson_cfg = gd.game_rules.data.lesson.as_ref();
+                let threshold = lesson_cfg.map(|c| c.threshold).unwrap_or(3);
+                let cause_map = lesson_cfg.map(|c| c.cause_advice_map.clone()).unwrap_or_default();
+                drop(gd);
+                super::lessons::record_death_lesson(
+                    &self.db_pool,
+                    &notif.cause,
+                    survival,
+                    tick_id,
+                    threshold,
+                    &cause_map,
+                )
+                .await;
+            }
+
             // 1. 物品掉落：清空背包 → 掉落到地面
             match crate::inventory::InventoryManager::clear_inventory(&self.db_pool, agent_id).await
             {

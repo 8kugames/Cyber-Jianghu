@@ -218,3 +218,27 @@ data:
     max_age: 80
     aging_start_age: 50
     starting_age: 18
+
+  # 跨 Agent 传承 Layer 2: 共享教训库
+  # threshold: 同一死因累计多少次死亡后生成教训
+  # max_broadcast: WorldState 下发最多几条教训
+  # cause_advice_map: 死因 → 中文标签/建议映射（数据驱动，可扩展）
+  lesson:
+    threshold: 3
+    max_broadcast: 5
+    cause_advice_map:
+      hunger:
+        label: "饥饿"
+        advice: "请留意饱食度，及时进食"
+      thirst:
+        label: "口渴"
+        advice: "请留意水分，及时饮水"
+      hp:
+        label: "外伤"
+        advice: "请避免危险区域，注意安全"
+      old_age:
+        label: "寿终正寝"
+        advice: "自然规律，无人可免"
+      environmental:
+        label: "环境"
+        advice: "请注意天气和环境影响"

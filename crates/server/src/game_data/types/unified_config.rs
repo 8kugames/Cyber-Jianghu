@@ -207,6 +207,62 @@ pub struct GameRulesData {
     /// 寿命配置（数据驱动，下发到 Agent）
     #[serde(default)]
     pub lifespan: Option<cyber_jianghu_protocol::LifespanRules>,
+
+    /// 跨 Agent 传承教训配置
+    #[serde(default)]
+    pub lesson: Option<LessonConfig>,
+}
+
+/// 死因到建议文本的映射（数据驱动，来自 game_rules.yaml）
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct CauseAdvice {
+    /// 死因中文名
+    pub label: String,
+    /// 建议文本
+    pub advice: String,
+}
+
+/// 教训提取配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LessonConfig {
+    /// 同一死因累计多少次死亡后生成教训
+    #[serde(default = "default_lesson_threshold")]
+    pub threshold: u32,
+
+    /// WorldState 下发最多几条教训
+    #[serde(default = "default_lesson_max_broadcast")]
+    pub max_broadcast: u32,
+
+    /// 死因 → 建议 映射（数据驱动，替代硬编码 cause_to_advice）
+    #[serde(default = "default_cause_advice_map")]
+    pub cause_advice_map: std::collections::HashMap<String, CauseAdvice>,
+}
+
+fn default_lesson_threshold() -> u32 {
+    3
+}
+fn default_lesson_max_broadcast() -> u32 {
+    5
+}
+
+impl Default for LessonConfig {
+    fn default() -> Self {
+        Self {
+            threshold: default_lesson_threshold(),
+            max_broadcast: default_lesson_max_broadcast(),
+            cause_advice_map: default_cause_advice_map(),
+        }
+    }
+}
+
+fn default_cause_advice_map() -> std::collections::HashMap<String, CauseAdvice> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("hunger".into(), CauseAdvice { label: "饥饿".into(), advice: "请留意饱食度，及时进食".into() });
+    m.insert("thirst".into(), CauseAdvice { label: "口渴".into(), advice: "请留意水分，及时饮水".into() });
+    m.insert("hp".into(), CauseAdvice { label: "外伤".into(), advice: "请避免危险区域，注意安全".into() });
+    m.insert("old_age".into(), CauseAdvice { label: "寿终正寝".into(), advice: "自然规律，无人可免".into() });
+    m.insert("environmental".into(), CauseAdvice { label: "环境".into(), advice: "请注意天气和环境影响".into() });
+    m
 }
 
 /// Vendor 自动补货配置

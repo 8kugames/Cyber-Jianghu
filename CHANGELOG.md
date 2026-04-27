@@ -9,6 +9,13 @@
 
 ### Added
 
+- **跨Agent传承 Layer 2**: 共享教训库（`public_lessons` 表 + WorldState 下发）
+  - Server: 死亡事件按 cause 聚合，达到阈值后自动生成教训条目
+  - Protocol: `WorldState.lessons_learned: Vec<PublicLesson>`（cause/lesson/death_count/avg_survival_ticks）
+  - Agent: lifecycle 注入"前人教训"到 DecisionContext 供认知引擎参考
+  - 配置: `game_rules.yaml lesson.threshold`（默认 3）/ `lesson.max_broadcast`（默认 5）
+  - 迁移: `015_public_lessons.sql`
+
 - **Protocol**: `ServerMessage::AgentDied` 新增 `metadata: Option<Value>` 字段（跨Agent传承 Layer 1）
   - 携带死亡时属性快照（hp/hunger/thirst/sanity）、birth_tick、survival_ticks、death_tick、cause
   - `#[serde(skip_serializing_if = "Option::is_none")]` 兼容旧客户端

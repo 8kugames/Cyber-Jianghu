@@ -271,4 +271,21 @@ pub struct WorldState {
     /// 上一次 Pipeline 执行汇总（无数值泄露风险）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_execution_summary: Option<ExecutionSummary>,
+
+    /// 跨 Agent 传承教训（按死因聚合的集体经验）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lessons_learned: Vec<PublicLesson>,
+}
+
+/// 跨 Agent 传承教训条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublicLesson {
+    /// 死因分类（hunger/thirst/hp/old_age/environmental）
+    pub cause: String,
+    /// 教训文本（供 LLM 参考的自然语言描述）
+    pub lesson: String,
+    /// 该死因的累计死亡人数
+    pub death_count: i32,
+    /// 该死因的平均存活 tick 数
+    pub avg_survival_ticks: i64,
 }

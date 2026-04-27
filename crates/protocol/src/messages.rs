@@ -552,6 +552,7 @@ mod tests {
             events_log: vec![],
             private_dialogue_log: vec![],
             last_execution_summary: None,
+            lessons_learned: vec![],
         };
 
         let msg = ServerMessage::WorldState { data: world_state };

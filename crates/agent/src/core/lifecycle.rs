@@ -853,6 +853,14 @@ impl super::Agent {
                         memory_context.push('\n');
                     }
 
+                    // 4.4b 跨 Agent 传承教训注入
+                    if !world_state.lessons_learned.is_empty() {
+                        memory_context.push_str("\n### 前人教训\n");
+                        for lesson in &world_state.lessons_learned {
+                            memory_context.push_str(&format!("- {}\n", lesson.lesson));
+                        }
+                    }
+
                     // 4.5 决策上下文快照写入（供 /api/v1/context enrichment 使用）
                     if let Some(ref api_state) = self.http_api_state {
                         let (summary_ctx, outcome_ctx, action_desc, action_hints) =
