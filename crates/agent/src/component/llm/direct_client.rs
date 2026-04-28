@@ -388,15 +388,16 @@ impl DirectLlmClient {
             .context("Failed to build HTTP client")
     }
 
-    /// 根据模型名称返回额外请求参数
+    /// 根据模型名称返回 enable_thinking 参数
     ///
-    /// 部分 LLM 要求特定参数：
-    /// - kimi 系列：非流式调用必须 `enable_thinking: false`
-    /// - qwen 系列：DashScope 要求非流式调用 `enable_thinking: false`
+    /// - qwen3-thinking 系列：DashScope 强制要求 `enable_thinking: true`
+    /// - 其他 qwen/kimi 系列：非流式调用必须 `enable_thinking: false`
     fn extra_body_for_model(model: &str) -> Option<bool> {
         let lower = model.to_ascii_lowercase();
-        // DashScope (qwen) 和 Kimi 要求非流式调用禁用 thinking
-        if lower.contains("kimi")
+        // qwen3-thinking 系列强制要求 enable_thinking=true
+        if lower.contains("thinking") {
+            Some(true)
+        } else if lower.contains("kimi")
             || lower.contains("qwen")
             || lower.contains("qwq")
             || lower.contains("qvq")
