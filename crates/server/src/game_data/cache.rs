@@ -48,6 +48,22 @@ impl GameDataCache {
         })
     }
 
+    /// 获取游戏数据的 Arc 快照（owned, Send-safe）
+    ///
+    /// 适用于 async fn 中需要跨 .await 访问配置的场景。
+    /// 返回的是当前数据的深拷贝，不会阻塞写操作。
+    pub fn snapshot(&self) -> Arc<GameData> {
+        let guard = self.data.read().unwrap_or_else(|e| {
+            panic!("配置缓存被污染: {}", e)
+        });
+        Arc::new(guard.clone())
+    }
+
+    /// 获取位置注册表快照（owned, Send-safe）
+    pub fn location_snapshot(&self) -> LocationRegistry {
+        self.location_registry.read().unwrap().clone()
+    }
+
     /// 仅更新动作配置（用于热重载）
     pub fn update_actions(&self, new_actions: UnifiedActionsConfig) {
         let mut data_guard = self
@@ -185,7 +201,7 @@ impl GameDataCache {
 // ============================================================================
 
 /// 位置注册表
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LocationRegistry {
     graph: LocationGraph,
 }
@@ -326,6 +342,7 @@ mod tests {
                     vendors: Vec::new(),
                     chronicle: None,
                     lifespan: None,
+                    lesson: None,
                 },
             },
             items: UnifiedItemsConfig {
