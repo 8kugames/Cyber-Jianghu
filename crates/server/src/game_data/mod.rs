@@ -26,7 +26,7 @@ pub mod types;
 #[cfg(test)]
 mod test_utils;
 
-pub use cache::GameDataCache;
+pub use cache::{GameDataCache, LocationRegistry};
 pub use loader::load_from_dir;
 pub use registry::{
     ActionField, ActionRegistry, InitialInventoryRegistry, InventoryRegistry, ItemRegistry,
