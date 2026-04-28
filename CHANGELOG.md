@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Server**: multi-intent pipeline 失败通知修复
+  - Subsequent intent 执行失败时正确发送 `ExecutionResult(success=false)`
+  - Subsequent intent persist 失败时正确发送 `ExecutionResult(success=false)`（之前静默丢失通知）
+  - Subsequent intent 死亡检查时正确发送 `ExecutionResult(success=false)`（之前无通知）
+  - Subsequent intent 失败时正确清理 whisper session（避免 session 泄漏）
+  - 所有 subsequent intent 必有且仅有一条 ExecutionResult 通知
+
 ### Added
 
 - **跨Agent传承 Layer 2**: 共享教训库（`public_lessons` 表 + WorldState 下发）
