@@ -146,7 +146,6 @@ impl Broadcaster {
         let recent_actions_map = if emergence_config.recent_action_ticks > 0 {
             // tick_id 按 tick_duration_secs 递增，需要乘以 tick 间隔来计算 since_tick
             let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration_secs;
-            let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration_secs;
             info!(
                 "涌现加载: tick={}, since_tick={}, agent_count={}, max_per_entity={}",
                 tick_id,
@@ -626,7 +625,6 @@ impl Default for Broadcaster {
 /// 与 tick 广播版相比：
 /// - 包含 Intent 结果事件（events_log），使 Agent 能立即处理 SocialInteraction 等事件
 /// - 包含同位置 entities（让 agent 看到其他 agent 的状态变化）
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 pub fn build_reactive_world_state(
     agent_state: &AgentState,
