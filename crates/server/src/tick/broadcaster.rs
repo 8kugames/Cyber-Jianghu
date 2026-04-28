@@ -54,6 +54,10 @@ impl Broadcaster {
     ) -> anyhow::Result<()> {
         use crate::db::get_all_agents;
 
+        // 获取配置快照（owned Arc，Send-safe，避免 RwLockReadGuard 跨 .await）
+        let gd = game_data_cache.snapshot();
+        let loc_registry = game_data_cache.location_snapshot();
+
         // 获取所有Agent的基本信息（用于构建entities）
         let all_agents = get_all_agents(db_pool)
             .await
@@ -134,23 +138,15 @@ impl Broadcaster {
         };
 
         // 涌现：批量加载近期动作历史
-        let emergence_config = game_data_cache
-            .get()
-            .game_rules
-            .data
-            .emergence
-            .clone()
-            .unwrap_or_default();
+        let (emergence_config, tick_duration_secs) = {
+            let ec = gd.game_rules.data.emergence.clone().unwrap_or_default();
+            let td = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+            (ec, td)
+        };
         let recent_actions_map = if emergence_config.recent_action_ticks > 0 {
             // tick_id 按 tick_duration_secs 递增，需要乘以 tick 间隔来计算 since_tick
-            let tick_duration = game_data_cache
-                .get()
-                .game_rules
-                .data
-                .agent_state
-                .tick
-                .real_seconds_per_tick as i64;
-            let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration;
+            let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration_secs;
+            let since_tick = tick_id - emergence_config.recent_action_ticks * tick_duration_secs;
             info!(
                 "涌现加载: tick={}, since_tick={}, agent_count={}, max_per_entity={}",
                 tick_id,
@@ -184,11 +180,12 @@ impl Broadcaster {
 
         // 跨 Agent 传承 Layer 2: 批量加载教训（所有 Agent 共享同一份）
         let lessons = {
-            let gd = game_data_cache.get();
             let (threshold, limit) = gd.game_rules.data.lesson.as_ref()
                 .map(|c| (c.threshold, c.max_broadcast))
-                .unwrap_or((3, 5));
-            drop(gd);
+                .unwrap_or((
+                    crate::game_data::types::unified_config::LessonConfig::DEFAULT_THRESHOLD,
+                    crate::game_data::types::unified_config::LessonConfig::DEFAULT_MAX_BROADCAST,
+                ));
             super::lessons::fetch_lessons_for_broadcast(db_pool, threshold, limit).await
         };
 
@@ -241,7 +238,8 @@ impl Broadcaster {
                 inventory,
                 nearby_items,
                 &online_agent_ids,
-                game_data_cache,
+                &gd,
+                &loc_registry,
                 &recent_actions_map,
                 &emergence_config,
             );
@@ -285,7 +283,8 @@ impl Broadcaster {
         inventory: Vec<crate::models::InventoryItem>,
         nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
         online_agent_ids: &std::collections::HashSet<Uuid>,
-        game_data_cache: &Arc<GameDataCache>,
+        game_data: &crate::game_data::types::GameData,
+        location_registry: &crate::game_data::LocationRegistry,
         recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
         emergence_config: &crate::game_data::types::unified_config::EmergenceConfig,
     ) -> WorldState {
@@ -295,8 +294,7 @@ impl Broadcaster {
         // 获取当前Agent的node_id
         let current_node_id = &agent_state.node_id;
 
-        // 从 GameDataCache 获取位置信息和相邻节点
-        let location_registry = game_data_cache.location_registry.read().unwrap();
+        // 位置信息和相邻节点
         let location_node = location_registry.get_node(current_node_id);
 
         // 获取位置名称和类型（数据驱动）
@@ -309,8 +307,7 @@ impl Broadcaster {
             .unwrap_or_else(|| "未知".to_string());
 
         // 获取相邻节点（数据驱动：显式边 + 隐式 parent-child）
-        let default_implicit_cost = game_data_cache
-            .get()
+        let default_implicit_cost = game_data
             .game_rules
             .data
             .agent_state
@@ -342,8 +339,7 @@ impl Broadcaster {
             });
 
             if !has_death_event {
-                let death_message = game_data_cache
-                    .get()
+                let death_message = game_data
                     .display_messages
                     .notifications
                     .death
@@ -364,8 +360,7 @@ impl Broadcaster {
         let weather_key =
             crate::game_data::registry::time_registry::TimeRegistry::get_weather_key(tick_id);
         {
-            let config = game_data_cache.get();
-            if let Some(desc) = config.display_messages.weather_events.get(&weather_key) {
+            if let Some(desc) = game_data.display_messages.weather_events.get(&weather_key) {
                 events.push(WorldEvent {
                     event_type: WorldEventType::EnvironmentalChange,
                     tick_id,
@@ -386,13 +381,10 @@ impl Broadcaster {
         }
 
         // 获取显示消息配置（数据驱动）
-        let (entity_state_alive, entity_state_dead) = {
-            let gd = game_data_cache.get();
-            (
-                gd.display_messages.entity_states.alive.clone(),
-                gd.display_messages.entity_states.dead.clone(),
-            )
-        };
+        let (entity_state_alive, entity_state_dead) = (
+            game_data.display_messages.entity_states.alive.clone(),
+            game_data.display_messages.entity_states.dead.clone(),
+        );
 
         // 筛选同节点的其他存活且在线的Agent（排除自己）
         let entities: Vec<crate::models::Entity> = all_agent_states
@@ -443,7 +435,7 @@ impl Broadcaster {
 
         // 获取天气描述（数据驱动：季节 → weather_pool → display_messages）
         let weather = crate::game_data::registry::time_registry::TimeRegistry::get_weather(tick_id)
-            .unwrap_or_else(|| game_data_cache.get().display_messages.weather.sunny.clone());
+            .unwrap_or_else(|| game_data.display_messages.weather.sunny.clone());
 
         // 构建WorldState
         WorldState {
@@ -490,7 +482,6 @@ impl Broadcaster {
                 let derived_attributes = agent_state.get_derived_attributes_for_protocol();
 
                 // 从 NarrativeConfig 生成叙事描述
-                let game_data = game_data_cache.get();
                 let attribute_descriptions: HashMap<String, String> = attributes
                     .iter()
                     .filter_map(|(name, &value)| {
@@ -525,9 +516,12 @@ impl Broadcaster {
                     age_years: agent_state
                         .birth_tick
                         .map(|bt| super::decay::compute_age_years(bt, tick_id) as u32),
-                    max_age: game_data_cache
-                        .get_lifespan_config()
-                        .map(|(max, _, _)| max as u32),
+                    max_age: game_data
+                        .game_rules
+                        .data
+                        .lifespan
+                        .as_ref()
+                        .map(|l| l.max_age as u32),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -633,6 +627,7 @@ impl Default for Broadcaster {
 /// - 包含 Intent 结果事件（events_log），使 Agent 能立即处理 SocialInteraction 等事件
 /// - 包含同位置 entities（让 agent 看到其他 agent 的状态变化）
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn build_reactive_world_state(
     agent_state: &AgentState,
     co_located_states: &[AgentState],
@@ -641,7 +636,8 @@ pub fn build_reactive_world_state(
     nearby_items: &[cyber_jianghu_protocol::SceneItem],
     agent_names: &HashMap<Uuid, String>,
     online_ids: &std::collections::HashSet<Uuid>,
-    game_data_cache: &Arc<GameDataCache>,
+    game_data: &crate::game_data::GameData,
+    location_registry: &crate::game_data::LocationRegistry,
     recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
     events: Vec<crate::models::WorldEvent>,
 ) -> crate::models::WorldState {
@@ -649,7 +645,6 @@ pub fn build_reactive_world_state(
     let current_node_id = &agent_state.node_id;
 
     // 位置信息
-    let location_registry = game_data_cache.location_registry.read().unwrap();
     let location_node = location_registry.get_node(current_node_id);
     let location_name = location_node
         .map(|n| n.name.clone())
@@ -657,8 +652,7 @@ pub fn build_reactive_world_state(
     let location_type = location_node
         .map(|n| format!("{:?}", n.node_type))
         .unwrap_or_else(|| "未知".to_string());
-    let default_implicit_cost = game_data_cache
-        .get()
+    let default_implicit_cost = game_data
         .game_rules
         .data
         .agent_state
@@ -683,16 +677,12 @@ pub fn build_reactive_world_state(
                 .collect()
         })
         .unwrap_or_default();
-    drop(location_registry);
 
     // 显示消息配置
-    let (entity_state_alive, entity_state_dead) = {
-        let gd = game_data_cache.get();
-        (
-            gd.display_messages.entity_states.alive.clone(),
-            gd.display_messages.entity_states.dead.clone(),
-        )
-    };
+    let (entity_state_alive, entity_state_dead) = (
+        game_data.display_messages.entity_states.alive.clone(),
+        game_data.display_messages.entity_states.dead.clone(),
+    );
 
     // 同位置 entities（排除自己、必须存活且在线）
     let entities: Vec<crate::models::Entity> = co_located_states
@@ -727,12 +717,11 @@ pub fn build_reactive_world_state(
         .collect();
 
     let weather = crate::game_data::registry::time_registry::TimeRegistry::get_weather(tick_id)
-        .unwrap_or_else(|| game_data_cache.get().display_messages.weather.sunny.clone());
+        .unwrap_or_else(|| game_data.display_messages.weather.sunny.clone());
 
     // 属性
     let attributes = agent_state.get_attributes_for_protocol();
     let derived_attributes = agent_state.get_derived_attributes_for_protocol();
-    let game_data = game_data_cache.get();
     let attribute_descriptions: HashMap<String, String> = attributes
         .iter()
         .filter_map(|(name, &value)| {
@@ -784,9 +773,12 @@ pub fn build_reactive_world_state(
             age_years: agent_state
                 .birth_tick
                 .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
-            max_age: game_data_cache
-                .get_lifespan_config()
-                .map(|(max, _, _)| max as u32),
+            max_age: game_data
+                .game_rules
+                .data
+                .lifespan
+                .as_ref()
+                .map(|l| l.max_age as u32),
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -803,7 +795,8 @@ pub fn build_reactive_world_state(
 /// `override_tick_id`: 如果提供，使用此 tick_id 而非 agent_state.tick_id（用于重连时同步到当前 tick）
 pub fn build_initial_world_state(
     agent_state: &AgentState,
-    game_data_cache: &Arc<GameDataCache>,
+    game_data: &crate::game_data::GameData,
+    location_registry: &crate::game_data::LocationRegistry,
     initial_inventory: Vec<crate::models::InventoryItem>,
     nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
     override_tick_id: Option<i64>,
@@ -816,7 +809,6 @@ pub fn build_initial_world_state(
     let current_node_id = &agent_state.node_id;
 
     // 位置信息
-    let location_registry = game_data_cache.location_registry.read().unwrap();
     let location_node = location_registry.get_node(current_node_id);
     let location_name = location_node
         .map(|n| n.name.clone())
@@ -824,8 +816,7 @@ pub fn build_initial_world_state(
     let location_type = location_node
         .map(|n| format!("{:?}", n.node_type))
         .unwrap_or_else(|| "未知".to_string());
-    let default_implicit_cost = game_data_cache
-        .get()
+    let default_implicit_cost = game_data
         .game_rules
         .data
         .agent_state
@@ -850,13 +841,11 @@ pub fn build_initial_world_state(
                 .collect()
         })
         .unwrap_or_default();
-    drop(location_registry);
 
     // 死亡状态事件
     let mut events = Vec::new();
     if !agent_state.is_alive {
-        let death_message = game_data_cache
-            .get()
+        let death_message = game_data
             .display_messages
             .notifications
             .death
@@ -873,12 +862,11 @@ pub fn build_initial_world_state(
     }
 
     let weather = crate::game_data::registry::time_registry::TimeRegistry::get_weather(tick_id)
-        .unwrap_or_else(|| game_data_cache.get().display_messages.weather.sunny.clone());
+        .unwrap_or_else(|| game_data.display_messages.weather.sunny.clone());
 
     // 属性
     let attributes = agent_state.get_attributes_for_protocol();
     let derived_attributes = agent_state.get_derived_attributes_for_protocol();
-    let game_data = game_data_cache.get();
     let attribute_descriptions: HashMap<String, String> = attributes
         .iter()
         .filter_map(|(name, &value)| {
@@ -930,9 +918,12 @@ pub fn build_initial_world_state(
             age_years: agent_state
                 .birth_tick
                 .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
-            max_age: game_data_cache
-                .get_lifespan_config()
-                .map(|(max, _, _)| max as u32),
+            max_age: game_data
+                .game_rules
+                .data
+                .lifespan
+                .as_ref()
+                .map(|l| l.max_age as u32),
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items,

@@ -59,60 +59,49 @@ pub async fn record_death_lesson(
         None
     };
 
-    // 原子 upsert：INSERT 新条目 or UPDATE 已有条目（单次 SQL，无竞态）
-    let result = sqlx::query(
+    // 原子 upsert + RETURNING：单次 SQL 拿回最新 count/avg
+    let result = sqlx::query_as::<_, (i32, Option<i64>)>(
         r#"
         INSERT INTO public_lessons (cause, lesson, death_count, avg_survival_ticks, first_seen_tick, last_seen_tick)
-        VALUES ($1, $2, 1, $3, $4, $4)
+        VALUES ($1, '', 1, $2, $3, $3)
         ON CONFLICT (cause) DO UPDATE SET
             death_count = public_lessons.death_count + 1,
             avg_survival_ticks = CASE
-                WHEN $3 IS NOT NULL THEN
-                    (COALESCE(public_lessons.avg_survival_ticks, 0) * public_lessons.death_count + $3)
+                WHEN $2 IS NOT NULL THEN
+                    (COALESCE(public_lessons.avg_survival_ticks, 0) * public_lessons.death_count + $2)
                     / (public_lessons.death_count + 1)
                 ELSE public_lessons.avg_survival_ticks
             END,
-            lesson = $2,
-            last_seen_tick = $4,
+            last_seen_tick = $3,
             updated_at = NOW()
+        RETURNING death_count, avg_survival_ticks
         "#,
     )
     .bind(cause)
-    .bind("") // placeholder: lesson 在第二次查询中更新
     .bind(valid_survival)
     .bind(tick_id)
-    .execute(db_pool)
+    .fetch_one(db_pool)
     .await;
 
     match result {
-        Ok(_) => {
-            // 读取更新后的数据并重写 lesson 文本
-            let updated = sqlx::query_as::<_, (i32, Option<i64>)>(
-                "SELECT death_count, avg_survival_ticks FROM public_lessons WHERE cause = $1",
+        Ok((count, avg_opt)) => {
+            let avg = avg_opt.unwrap_or(-1);
+            let lesson_text = build_lesson_text(cause, count, avg, cause_map);
+
+            if let Err(e) = sqlx::query(
+                "UPDATE public_lessons SET lesson = $1 WHERE cause = $2",
             )
+            .bind(&lesson_text)
             .bind(cause)
-            .fetch_optional(db_pool)
-            .await;
-
-            if let Ok(Some((count, avg_opt))) = updated {
-                let avg = avg_opt.unwrap_or(-1);
-                let lesson_text = build_lesson_text(cause, count, avg, cause_map);
-
-                if let Err(e) = sqlx::query(
-                    "UPDATE public_lessons SET lesson = $1 WHERE cause = $2",
-                )
-                .bind(&lesson_text)
-                .bind(cause)
-                .execute(db_pool)
-                .await
-                {
-                    error!("[lesson] 更新教训文本失败: cause={}, error={}", cause, e);
-                } else if count >= threshold as i32 {
-                    info!(
-                        "[lesson] 教训已更新: cause={}, count={}, threshold={}",
-                        cause, count, threshold
-                    );
-                }
+            .execute(db_pool)
+            .await
+            {
+                error!("[lesson] 更新教训文本失败: cause={}, error={}", cause, e);
+            } else if count >= threshold as i32 {
+                info!(
+                    "[lesson] 教训已更新: cause={}, count={}, threshold={}",
+                    cause, count, threshold
+                );
             }
         }
         Err(e) => {

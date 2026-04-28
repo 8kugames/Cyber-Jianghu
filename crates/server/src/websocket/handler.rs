@@ -545,9 +545,12 @@ async fn handle_websocket(
                 let current_tick = state
                     .current_accepting_tick_id
                     .load(std::sync::atomic::Ordering::Acquire);
+                let gd = state.game_data.snapshot();
+                let loc = state.game_data.location_snapshot();
                 let world_state = crate::tick::build_initial_world_state(
                     &agent_state,
-                    &state.game_data,
+                    &gd,
+                    &loc,
                     initial_inventory,
                     nearby_items,
                     Some(current_tick),

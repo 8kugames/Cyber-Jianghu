@@ -598,17 +598,17 @@ impl IntentWorker {
         };
 
         // 3.5 加载同位置 Agent 的 recent_actions（让社交因果链闭合）
+        let tick_duration_secs = self
+            .game_data_cache
+            .snapshot()
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
         let recent_actions_map = {
-            let tick_duration = self
-                .game_data_cache
-                .get()
-                .game_rules
-                .data
-                .agent_state
-                .tick
-                .real_seconds_per_tick as i64;
             // 只回溯 2 个 tick 的动作，控制 DB 负载
-            let since_tick = tick_id - tick_duration * 2;
+            let since_tick = tick_id - tick_duration_secs * 2;
             match crate::db::get_recent_actions_batch(
                 &self.db_pool,
                 &co_located_ids,
@@ -685,6 +685,8 @@ impl IntentWorker {
                 })
                 .unwrap_or_default();
 
+            let gd = self.game_data_cache.snapshot();
+            let loc = self.game_data_cache.location_snapshot();
             let world_state = super::broadcaster::build_reactive_world_state(
                 state,
                 &co_located,
@@ -693,7 +695,8 @@ impl IntentWorker {
                 &nearby,
                 &agent_names,
                 &online_ids,
-                &self.game_data_cache,
+                &gd,
+                &loc,
                 &recent_actions_map,
                 events.clone(),
             );
@@ -779,11 +782,12 @@ impl IntentWorker {
                     .and_then(|m| m.get("survival_ticks"))
                     .and_then(|v| v.as_i64())
                     .unwrap_or(-1);
-                let gd = self.game_data_cache.get();
+                let gd = self.game_data_cache.snapshot();
                 let lesson_cfg = gd.game_rules.data.lesson.as_ref();
-                let threshold = lesson_cfg.map(|c| c.threshold).unwrap_or(3);
+                let threshold = lesson_cfg.map(|c| c.threshold).unwrap_or(
+                    crate::game_data::types::unified_config::LessonConfig::DEFAULT_THRESHOLD,
+                );
                 let cause_map = lesson_cfg.map(|c| c.cause_advice_map.clone()).unwrap_or_default();
-                drop(gd);
                 super::lessons::record_death_lesson(
                     &self.db_pool,
                     &notif.cause,
@@ -863,7 +867,7 @@ impl IntentWorker {
             // 5. 发送 AgentDied + (可选) WebSocket Close
             let rebirth_delay = self
                 .game_data_cache
-                .get()
+                .snapshot()
                 .game_rules
                 .data
                 .agent_state

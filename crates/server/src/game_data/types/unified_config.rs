@@ -234,15 +234,20 @@ pub struct LessonConfig {
     pub max_broadcast: u32,
 
     /// 死因 → 建议 映射（数据驱动，替代硬编码 cause_to_advice）
-    #[serde(default = "default_cause_advice_map")]
+    #[serde(default)]
     pub cause_advice_map: std::collections::HashMap<String, CauseAdvice>,
 }
 
+impl LessonConfig {
+    pub const DEFAULT_THRESHOLD: u32 = 3;
+    pub const DEFAULT_MAX_BROADCAST: u32 = 5;
+}
+
 fn default_lesson_threshold() -> u32 {
-    3
+    LessonConfig::DEFAULT_THRESHOLD
 }
 fn default_lesson_max_broadcast() -> u32 {
-    5
+    LessonConfig::DEFAULT_MAX_BROADCAST
 }
 
 impl Default for LessonConfig {
@@ -250,19 +255,9 @@ impl Default for LessonConfig {
         Self {
             threshold: default_lesson_threshold(),
             max_broadcast: default_lesson_max_broadcast(),
-            cause_advice_map: default_cause_advice_map(),
+            cause_advice_map: std::collections::HashMap::new(),
         }
     }
-}
-
-fn default_cause_advice_map() -> std::collections::HashMap<String, CauseAdvice> {
-    let mut m = std::collections::HashMap::new();
-    m.insert("hunger".into(), CauseAdvice { label: "饥饿".into(), advice: "请留意饱食度，及时进食".into() });
-    m.insert("thirst".into(), CauseAdvice { label: "口渴".into(), advice: "请留意水分，及时饮水".into() });
-    m.insert("hp".into(), CauseAdvice { label: "外伤".into(), advice: "请避免危险区域，注意安全".into() });
-    m.insert("old_age".into(), CauseAdvice { label: "寿终正寝".into(), advice: "自然规律，无人可免".into() });
-    m.insert("environmental".into(), CauseAdvice { label: "环境".into(), advice: "请注意天气和环境影响".into() });
-    m
 }
 
 /// Vendor 自动补货配置
