@@ -178,10 +178,10 @@ impl IntentWorker {
                     tick_id,
                 )
                 .await;
-                if action_type == "私语" {
-                    if let Some(ref session_id) = intent.session_id {
-                        self.dialogue_manager.close_session(session_id).await;
-                    }
+                if action_type == "私语"
+                    && let Some(ref session_id) = intent.session_id
+                {
+                    self.dialogue_manager.close_session(session_id).await;
                 }
                 return Err(e.context(format!("Intent 执行失败: agent={}", agent_id)));
             }
@@ -210,10 +210,10 @@ impl IntentWorker {
                 tick_id,
             )
             .await;
-            if action_type == "私语" {
-                if let Some(ref session_id) = intent.session_id {
-                    self.dialogue_manager.close_session(session_id).await;
-                }
+            if action_type == "私语"
+                && let Some(ref session_id) = intent.session_id
+            {
+                self.dialogue_manager.close_session(session_id).await;
             }
             return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
         }
@@ -271,10 +271,10 @@ impl IntentWorker {
         }
 
         // 11. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
-        if action_type == "私语" {
-            if let Some(ref session_id) = intent.session_id {
-                self.dialogue_manager.close_session(session_id).await;
-            }
+        if action_type == "私语"
+            && let Some(ref session_id) = intent.session_id
+        {
+            self.dialogue_manager.close_session(session_id).await;
         }
 
         Ok(())
@@ -295,6 +295,14 @@ impl IntentWorker {
             .ok_or_else(|| anyhow::anyhow!("Agent {} 不在缓存中", agent_id))?;
 
         if !agent_state.is_alive {
+            self.send_error_to_agent(
+                agent_id,
+                intent.intent_id,
+                "agent_dead",
+                "Agent 已死亡",
+                tick_id,
+            )
+            .await;
             return Err(anyhow::anyhow!("Agent 已死亡"));
         }
 
@@ -304,15 +312,52 @@ impl IntentWorker {
         let result = self
             .state_processor
             .process_single_intent(tick_id, agent_state, intent, &all_states)
-            .await?;
+            .await;
 
-        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &result.updated_state).await {
+        let (updated_state, event_tuples) = match result {
+            Ok(r) => (r.updated_state, r.events),
+            Err(e) => {
+                // 执行失败 → 发 failure notification + 清理 whisper session
+                self.send_error_to_agent(
+                    agent_id,
+                    intent.intent_id,
+                    "execution_failed",
+                    &format!("Intent 执行失败: {}", e),
+                    tick_id,
+                )
+                .await;
+                if intent.action_type.as_ref() == "私语"
+                    && let Some(ref session_id) = intent.session_id
+                {
+                    self.dialogue_manager.close_session(session_id).await;
+                }
+                return Err(e).context("Subsequent intent 执行失败");
+            }
+        };
+
+        // 持久化
+        if let Err(e) = crate::db::upsert_agent_state(&self.db_pool, &updated_state).await {
+            // persist 失败 → 发 failure notification + 清理 whisper session（不更新 DashMap）
+            self.send_error_to_agent(
+                agent_id,
+                intent.intent_id,
+                "persist_failed",
+                "状态持久化失败，Intent 未生效",
+                tick_id,
+            )
+            .await;
+            if intent.action_type.as_ref() == "私语"
+                && let Some(ref session_id) = intent.session_id
+            {
+                self.dialogue_manager.close_session(session_id).await;
+            }
             return Err(e).context("Subsequent intent 持久化失败");
         }
 
-        self.state_cache
-            .insert(agent_id, result.updated_state.clone());
+        // persist 成功后更新 DashMap
+        self.state_cache.insert(agent_id, updated_state.clone());
 
+        // 发成功通知
         self.send_execution_result(
             agent_id,
             intent.intent_id,
@@ -322,11 +367,13 @@ impl IntentWorker {
             Some(intent.action_type.to_string()),
         )
         .await;
-        let events: Vec<WorldEvent> = result.events.iter().map(|(_, e)| e.clone()).collect();
+
+        // 提取纯 WorldEvent Vec 用于 reactive push，保留元组用于 broadcast
+        let events: Vec<WorldEvent> = event_tuples.iter().map(|(_, e)| e.clone()).collect();
         self.send_reactive_world_state(agent_id, tick_id, events)
             .await;
 
-        for (target_id, event) in &result.events {
+        for (target_id, event) in &event_tuples {
             if let Err(e) = self.broadcast_event(*target_id, event.clone()).await {
                 warn!("事件广播失败: target={}, error={}", target_id, e);
             }
