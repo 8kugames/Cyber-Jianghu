@@ -58,6 +58,11 @@ pub struct AgentAction {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soul_cycle_metadata: Option<serde_json::Value>,
 
+    /// 混沌行为标记（JSONB）
+    /// None = 正常决策；Some = 混沌降级行为
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chaos_marker: Option<serde_json::Value>,
+
     /// 记录时间
     pub created_at: DateTime<Utc>,
 }

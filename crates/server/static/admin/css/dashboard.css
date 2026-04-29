@@ -881,6 +881,13 @@ input:checked + .slider:before {
     color: var(--text-primary);
 }
 
+.chaos-badge { margin-top: 4px; }
+.chaos-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+    background: rgba(231, 76, 60, 0.15); color: #e74c3c; border: 1px solid #e74c3c;
+}
+
 .tick-section-immediate {
     background: var(--bg-level-1);
     padding: 8px;
