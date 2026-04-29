@@ -165,7 +165,10 @@
     - [x] urgent (立刻响应): 立即注入 Agent 的 Memory Context 供下一轮主决策循环使用。
     - [x] batch (稍后批处理): 收集并在当前游戏日结束时打包。
     - [x] ignore (忽略): 从记录中清理或不进入主流程。
-  - [ ] *名义实现待实装*：每日结束时将当日事件生成总结摘要写入记忆库。
+  - [x] 每日摘要生成：游戏日结束时 `produce_daily_summary()` 生成当日事件摘要。
+  - [x] 摘要本地存储：lifecycle 接收摘要后写入 Episodic Memory（importance 可配置）。
+  - [x] 摘要 Server 提交：通过 WebSocket `ClientMessage::DailySummary` 提交，支持指数退避重试。
+  - [x] Server 入库：`agent_daily_summaries` 表 UPSERT（agent_id + game_day），Admin 端可查询。
 - [x] **[人际社交网络 (RelationshipStore)](../../crates/agent/docs/architecture/p2_enhancement/relationship_store.md)**: 记录并量化 Agent 间的互动历史与好感度阶梯，影响其社交决策。
   - [x] 支持物品转移（SocialInteraction）、公开说话（PublicMessage）、密语（PrivateDialogue）三种事件类型触发好感度更新。
 - [x] **[玩家控制台 (Agent Control Panel)](../../crates/agent/docs/architecture/p2_enhancement/agent_control_panel.md)**: 允许人类玩家观察并干预 AI 角色的前端面板。
