@@ -261,6 +261,49 @@ impl super::Agent {
         self.validate_with_rule_engine(intent, world_state).await
     }
 
+    /// Chaos intent 快速审查（Layer 1 + Layer 2，跳过 LLM）
+    ///
+    /// Chaos intent 是降级行为，不需要 LLM 语义审核。
+    /// 返回完整的 ReflectorResult 以适配上层调用签名。
+    async fn validate_chaos_rules_only(
+        &self,
+        intent: Intent,
+        world_state: &WorldState,
+    ) -> Result<ReflectorResult> {
+        let mut layers = Vec::with_capacity(3);
+
+        // Layer 1: action_type
+        match self.validate_action_type(&intent) {
+            Ok(()) => layers.push(LayerResult { layer: "layer1", passed: true, detail: None }),
+            Err(e) => {
+                layers.push(LayerResult { layer: "layer1", passed: false, detail: Some(e.clone()) });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
+        }
+
+        // Layer 2: RuleEngine
+        match self.validate_with_rule_engine(&intent, world_state).await {
+            Ok(()) => layers.push(LayerResult { layer: "layer2", passed: true, detail: None }),
+            Err(e) => {
+                layers.push(LayerResult { layer: "layer2", passed: false, detail: Some(e.clone()) });
+                return Ok(ReflectorResult::Rejected { reason: e, layers });
+            }
+        }
+
+        // Layer 3: 标记为跳过（chaos intent 不走 LLM）
+        layers.push(LayerResult {
+            layer: "layer3",
+            passed: true,
+            detail: Some("chaos intent skipped LLM validation".to_string()),
+        });
+
+        Ok(ReflectorResult::Approved {
+            intent,
+            layers,
+            narrative: None,
+        })
+    }
+
     // ========================================================================
     // ReflectorSoul 三层审查入口
     // ========================================================================
@@ -276,6 +319,11 @@ impl super::Agent {
         intent: Intent,
         world_state: &WorldState,
     ) -> Result<ReflectorResult> {
+        // Chaos intent: 只做确定性校验，跳过 LLM（降级行为不需要 LLM 语义审核）
+        if intent.chaos_marker.is_some() {
+            return self.validate_chaos_rules_only(intent, world_state).await;
+        }
+
         let mut layers = Vec::with_capacity(3);
 
         // 第一层：action_type 确定性校验（不经过 LLM）

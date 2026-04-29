@@ -1220,10 +1220,11 @@ impl super::Agent {
                         };
 
                         for intent in all_raw_intents {
-                            // 分级决策：Skip 类型只做 RuleEngine（跳过 LLM）
-                            let skip_llm = Self::should_skip_llm_validation(
-                                &intent, graded_config.as_ref(),
-                            );
+                            // 分级决策：Chaos intent 跳过 LLM（降级行为不需要语义审核）
+                            let skip_llm = intent.chaos_marker.is_some()
+                                || Self::should_skip_llm_validation(
+                                    &intent, graded_config.as_ref(),
+                                );
 
                             if skip_llm {
                                 // 仅做 Layer 1 (action_type) + Layer 2 (RuleEngine)
