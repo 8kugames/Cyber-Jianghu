@@ -183,6 +183,6 @@
 
 | 功能 | 位置 | 分类 | 说明 |
 |------|------|------|------|
-| **每日事件摘要入库** | `component/immediate/session_triage.rs` | ✅ 已实装 | 游戏日结束时 `produce_daily_summary` 生成摘要 → Agent 本地 Episodic Memory + WebSocket 提交 Server 存档（`agent_daily_summaries` 表，UPSERT），Chronicle 聚合时 LEFT JOIN 注入 `AgentSummary.narrative`。 |
+| **每日事件摘要入库** | `component/immediate/session_triage.rs` | ✅ 已实装 | 游戏日结束时 `produce_daily_summary` 生成摘要 → Agent 本地 Episodic Memory + WebSocket 提交 Server 存档（`agent_daily_summaries` 表，UPSERT），Chronicle 聚合时 LEFT JOIN 注入 `AgentSummary.narrative`；玩家端 `GET /api/v1/memory/daily-summaries` 查看个人摘要；Admin 端 `admin/agent-daily-summaries.html` 查看所有摘要。 |
 | **未实现交互动作拓展** | `actions/executor/` | 功能补全 | 防御、闪避、招架、重击、跟随、潜行、下毒、修理等配置已规划但逻辑未落地。 |
 | **动作冷却检查 (Cooldown)** | `actions/validator.rs:55` | 机制完善 | `TODO BUG-2`: 待在 AgentState 中补充 `last_action_ticks` 以支持动作频率限制。 |
