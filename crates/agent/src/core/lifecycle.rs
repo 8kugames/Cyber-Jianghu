@@ -327,7 +327,7 @@ impl super::Agent {
         // tick_id 在主循环每个 tick 更新
 
         // 设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
-        // 保留 binary 设置的回调（Cognitive: AgentDied 处理; Claw: OpenClaw 消息转发）
+        // 保留 binary 设置的回调（AgentDied 处理 + 外部 LLM downstream 转发）
         let prev_callback = self.client.get_server_msg_callback().await;
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
@@ -433,6 +433,41 @@ impl super::Agent {
                     continue;
                 }
 
+                // 重生完成通知（BUG-4b 修复：auto-rebirth 成功后唤醒 tick 循环）
+                _ = async {
+                    if let Some(ref api_state) = self.http_api_state {
+                        api_state.rebirth_notify.notified().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {
+                    let is_rebirth_done = self.http_api_state.as_ref()
+                        .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                        .unwrap_or(false);
+                    if is_rebirth_done && self.death_reported {
+                        info!(
+                            "Agent '{}' 自动重生完成（notify 路径），触发重连",
+                            self.character_name()
+                        );
+                        self.death_reported = false;
+                        self.death_tick_id = None;
+                        if let Some(ref mut char_cfg) = self.character_config {
+                            char_cfg.status = crate::config::CharacterStatus::Alive;
+                            if let Some(ref api_state) = self.http_api_state {
+                                let characters_dir = api_state.character_dir.read().await.clone();
+                                if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                                    warn!("Failed to persist rebirth status: {}", e);
+                                }
+                            }
+                        }
+                        // 清除旧 agent_id：rebirth 后 agent_id 已变更，重连时由 server 通过 device_id 重新分配
+                        self.client.set_agent_id(None).await;
+                        // 重连接：断开旧 WS，走完整 connect → register → tick 流程
+                        self.reconnect().await?;
+                    }
+                    continue;
+                }
+
                 // 接收世界状态
                 result = self.client.receive_world_state() => {
                     let world_state = match result {
@@ -464,7 +499,78 @@ impl super::Agent {
                             // take 旧 handle 并检查退出原因
                             if let Some(old_handle) = self.session_triage_handle.take() {
                                 match old_handle.await {
-                                    Ok(()) => {} // 正常结束（game day 结束）
+                                    Ok(summary_opt) => {
+                                        // 游戏日结束，摘要写入 episodic memory
+                                        if let Some(summary) = summary_opt {
+                                            if let Some(ref mm) = self.memory_manager {
+                                                let importance = self.config.game_rules
+                                                    .as_ref()
+                                                    .and_then(|g| g.immediate_events.as_ref())
+                                                    .and_then(|ie| ie.event_triage.as_ref())
+                                                    .map(|et| et.daily_summary_importance as f32)
+                                                    .unwrap_or(0.8);
+                                                let mut entry = crate::component::memory::MemoryEntry::new(
+                                                    world_state.agent_id.unwrap_or_default(),
+                                                    world_state.tick_id,
+                                                    summary.clone(),
+                                                )
+                                                .with_event_type("daily_summary".to_string())
+                                                .with_importance(importance);
+                                                let mut mm_guard = mm.write().await;
+                                                use crate::component::memory::backend::MemoryBackend;
+                                                match mm_guard.episodic_mut().add(&mut entry).await {
+                                                    Ok(_) => {
+                                                        info!(
+                                                            "游戏日 {} 摘要已存储到 episodic memory (importance={:.1})",
+                                                            game_day, importance
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        warn!("游戏日摘要写入 episodic memory 失败: {}", e);
+                                                    }
+                                                }
+                                            } else {
+                                                warn!("游戏日摘要生成但 MemoryManager 未初始化，摘要丢弃");
+                                            }
+
+                                            // 提交每日摘要到 Server（重试 + 指数退避）
+                                            let ds_config = self.config.game_rules
+                                                .as_ref()
+                                                .and_then(|g| g.daily_summary.as_ref());
+                                            let max_retries = ds_config.map(|c| c.max_retries).unwrap_or(3);
+                                            let base_delay_ms = ds_config.map(|c| (c.ttl_ticks as u64).min(1000)).unwrap_or(100);
+
+                                            let mut submitted = false;
+                                            for attempt in 0..max_retries {
+                                                match self.client.send_daily_summary(game_day, &summary).await {
+                                                    Ok(()) => {
+                                                        info!(
+                                                            "游戏日 {} 摘要已提交 Server (attempt {})",
+                                                            game_day, attempt + 1
+                                                        );
+                                                        submitted = true;
+                                                        break;
+                                                    }
+                                                    Err(e) => {
+                                                        warn!(
+                                                            "游戏日 {} 摘要提交 Server 失败 (attempt {}/{}): {}",
+                                                            game_day, attempt + 1, max_retries, e
+                                                        );
+                                                        if attempt + 1 < max_retries {
+                                                            let delay = base_delay_ms * (1 << attempt);
+                                                            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if !submitted {
+                                                error!(
+                                                    "游戏日 {} 摘要提交 Server 最终失败（已重试 {} 次），摘要保留在本地",
+                                                    game_day, max_retries
+                                                );
+                                            }
+                                        }
+                                    }
                                     Err(e) => {
                                         if e.is_panic() {
                                             warn!("SessionTriageEngine panic（将被重启）: {}", e);
@@ -527,13 +633,25 @@ impl super::Agent {
                     }
 
                     // 1.5 检查是否死亡（只报告一次）
-                    if !self.death_reported
-                        && let Some(death_event) = world_state.events_log.iter().find(|e| {
+                    // 路径 1: WorldState.events_log 中包含 DeathNotification
+                    // 路径 2: AgentDied WS 回调已设置 is_dead=true，但 events_log 可能已过期
+                    let death_via_events = !self.death_reported
+                        && world_state.events_log.iter().any(|e| {
                             e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification
-                        }) {
+                        });
+                    let death_via_callback = !self.death_reported
+                        && self.http_api_state.as_ref()
+                            .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                            .unwrap_or(false);
+
+                    if death_via_events || death_via_callback {
+                            let death_desc = world_state.events_log.iter()
+                                .find(|e| e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification)
+                                .map(|e| e.description.as_str())
+                                .unwrap_or("AgentDied 回调通知（events_log 未包含 DeathNotification）");
                             warn!(
                                 "Agent '{}' has died: {}",
-                                self.character_name(), death_event.description
+                                self.character_name(), death_desc
                             );
                             self.death_reported = true;
                             self.death_tick_id = Some(world_state.tick_id);
@@ -555,47 +673,93 @@ impl super::Agent {
                                 }
                             }
 
-                            // 自动重生：调度延迟后的重生 API 调用
+                            // 自动重生：调度延迟后的转世重生 API 调用
                             if self.rebirth_delay_ticks > 0 {
                                 let delay_ticks = self.rebirth_delay_ticks;
                                 let tick_secs = self.get_tick_duration().await.as_secs();
                                 let delay_ms = delay_ticks as u64 * tick_secs * 1000;
-                                let agent_id = world_state.agent_id.unwrap_or_default();
+                                let old_agent_id = world_state.agent_id.unwrap_or_default();
                                 let http_url = self.config.server.http_url.clone();
                                 let api_state = self.http_api_state.clone();
 
+                                // 提取 device_id + auth_token
+                                let Some(device_cfg) = self.device_config.as_ref() else {
+                                    warn!("自动转世重生跳过: device_config 未设置");
+                                    continue;
+                                };
+                                let device_id = device_cfg.device_id;
+                                let auth_token = device_cfg.auth_token.clone();
+
+                                // 提取 name + system_prompt
+                                let (name, system_prompt) = self.character_config
+                                    .as_ref()
+                                    .map(|cc| (cc.name.clone(), cc.system_prompt.clone().unwrap_or_default()))
+                                    .unwrap_or_default();
+
+                                // 重试参数（数据驱动，从 GameRules 配置读取）
+                                let retry_max = self.config.game_rules
+                                    .as_ref()
+                                    .map(|r| r.rebirth_retry_max_attempts)
+                                    .unwrap_or(3);
+                                let retry_interval = std::time::Duration::from_secs(
+                                    self.config.game_rules
+                                        .as_ref()
+                                        .map(|r| r.rebirth_retry_interval_secs)
+                                        .unwrap_or(30)
+                                );
+
                                 info!(
-                                    "自动重生已调度: agent={}, delay={} ticks ({}s)",
-                                    agent_id, delay_ticks, delay_ms / 1000
+                                    "自动转世重生已调度: agent={}, delay={} ticks ({}s)",
+                                    old_agent_id, delay_ticks, delay_ms / 1000
                                 );
 
                                 tokio::spawn(async move {
                                     tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                                    info!("自动重生: 调用 auto-rebirth API (agent={})", agent_id);
+                                    info!("自动转世重生: 调用 auto-rebirth API (old_agent={})", old_agent_id);
 
                                     let client = reqwest::Client::new();
                                     let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
-                                    match client
-                                        .post(&url)
-                                        .json(&serde_json::json!({ "agent_id": agent_id }))
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(resp) if resp.status().is_success() => {
-                                            info!("自动重生成功: agent={}", agent_id);
-                                            if let Some(ref api_state) = api_state {
-                                                api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                    let body = serde_json::json!({
+                                        "device_id": device_id,
+                                        "auth_token": auth_token,
+                                        "old_agent_id": old_agent_id,
+                                        "name": name,
+                                        "system_prompt": system_prompt,
+                                    });
+
+                                    for attempt in 0..retry_max {
+                                        match client.post(&url).json(&body).send().await {
+                                            Ok(resp) if resp.status().is_success() => {
+                                                info!("自动转世重生成功: old_agent={}", old_agent_id);
+                                                if let Some(ref api_state) = api_state {
+                                                    api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                                    api_state.rebirth_notify.notify_waiters();
+                                                }
+                                                return;
+                                            }
+                                            Ok(resp) => {
+                                                let status = resp.status();
+                                                let resp_body = resp.text().await.unwrap_or_default();
+                                                warn!(
+                                                    "自动转世重生服务端拒绝 (attempt {}/{}): status={}, body={}",
+                                                    attempt + 1, retry_max, status, resp_body
+                                                );
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    "自动转世重生网络错误 (attempt {}/{}): {}",
+                                                    attempt + 1, retry_max, e
+                                                );
                                             }
                                         }
-                                        Ok(resp) => {
-                                            let status = resp.status();
-                                            let body = resp.text().await.unwrap_or_default();
-                                            warn!("自动重生失败: agent={}, status={}, body={}", agent_id, status, body);
-                                        }
-                                        Err(e) => {
-                                            warn!("自动重生请求失败: agent={}, error={}", agent_id, e);
+                                        if attempt + 1 < retry_max {
+                                            tokio::time::sleep(retry_interval).await;
                                         }
                                     }
+                                    tracing::error!(
+                                        "自动转世重生最终失败: old_agent={}, 所有 {} 次重试用尽",
+                                        old_agent_id, retry_max
+                                    );
                                 });
                             }
 
@@ -1007,11 +1171,15 @@ impl super::Agent {
                                     intents.push(i.clone());
                                 }
                             }
-                            // Sanity 混沌：低理智时注入随机 intents
+                            // Sanity 混沌：低理智时注入随机 intents（数据驱动，从 available_actions 中选取）
                             if let Some(ref mut generator) = self.chaos_generator {
                                 let remaining = max_per_tick.saturating_sub(intents.len());
                                 if remaining > 0 {
-                                    let chaos_intents = generator.generate_chaos_intents(&world_state, remaining);
+                                    let actions: Vec<_> = self.config.game_rules
+                                        .as_ref()
+                                        .map(|g| g.available_actions.clone())
+                                        .unwrap_or_default();
+                                    let chaos_intents = generator.generate_chaos_intents(&world_state, &actions, remaining);
                                     intents.extend(chaos_intents);
                                 }
                             }
@@ -1021,7 +1189,11 @@ impl super::Agent {
                             {
                                 let remaining = max_per_tick.saturating_sub(intents.len());
                                 if remaining > 0 {
-                                    let llm_chaos = generator.generate_llm_chaos_intents(&world_state, remaining);
+                                    let actions: Vec<_> = self.config.game_rules
+                                        .as_ref()
+                                        .map(|g| g.available_actions.clone())
+                                        .unwrap_or_default();
+                                    let llm_chaos = generator.generate_llm_chaos_intents(&world_state, &actions, remaining);
                                     intents.extend(llm_chaos);
                                 }
                             }
@@ -1173,7 +1345,9 @@ impl super::Agent {
                     // LLM 失败追踪：检测是否为 LLM 不可用导致的 fallback idle
                     let is_llm_failure = final_intent.action_type.as_str() == "休息"
                         && final_intent.thought_log.as_ref()
-                            .map(|t| t.contains("意图多次被驳回") || t.contains("三魂循环未产出有效意图"))
+                            .map(|t| t.contains("意图多次被驳回")
+                                || t.contains("三魂循环未产出有效意图")
+                                || t.contains("认知失败"))
                             .unwrap_or(false);
                     if is_llm_failure {
                         self.consecutive_llm_failures += 1;
@@ -1263,6 +1437,124 @@ impl super::Agent {
                                             result.intent_id,
                                             result.error.as_deref().unwrap_or("unknown")
                                         );
+                                        // BUG-4b: intent 失败且 agent 已死亡 → 立即触发死亡处理
+                                        // 场景：认知循环进行中收到 AgentDied WS 回调，is_dead=true，
+                                        // 认知完成后提交 intent 被拒绝。此时 DashMap 已移除 dead agent，
+                                        // 后续 WorldState 永不到达，tick 循环将挂起。
+                                        if !self.death_reported {
+                                            let is_dead_now = self.http_api_state.as_ref()
+                                                .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                                                .unwrap_or(false);
+                                            if is_dead_now {
+                                                let reason_str = result.error.as_deref().unwrap_or("");
+                                                warn!(
+                                                    "Agent '{}' 检测到死亡（intent 失败后）: {}",
+                                                    self.character_name(), reason_str
+                                                );
+                                                self.death_reported = true;
+                                                self.death_tick_id = Some(world_state.tick_id);
+
+                                                // 读取 rebirth_delay_ticks（WS 回调已写入）
+                                                if let Some(ref api_state) = self.http_api_state {
+                                                    self.rebirth_delay_ticks = api_state
+                                                        .rebirth_delay_ticks.load(std::sync::atomic::Ordering::Relaxed);
+                                                }
+
+                                                // 持久化死亡状态
+                                                if let Some(ref mut char_cfg) = self.character_config {
+                                                    char_cfg.status = crate::config::CharacterStatus::Dead;
+                                                    if let Some(ref api_state) = self.http_api_state {
+                                                        let characters_dir = api_state.character_dir.read().await.clone();
+                                                        if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                                                            warn!("Failed to persist death status: {}", e);
+                                                        }
+                                                    }
+                                                }
+
+                                                // 调度 auto-rebirth（转世重生，含重试）
+                                                if self.rebirth_delay_ticks > 0 {
+                                                    let delay_ticks = self.rebirth_delay_ticks;
+                                                    let tick_secs = self.get_tick_duration().await.as_secs();
+                                                    let delay_ms = delay_ticks as u64 * tick_secs * 1000;
+                                                    let old_agent_id = world_state.agent_id.unwrap_or_default();
+                                                    let http_url = self.config.server.http_url.clone();
+                                                    let api_state = self.http_api_state.clone();
+
+                                                    if let Some(device_cfg) = self.device_config.as_ref() {
+                                                        let device_id = device_cfg.device_id;
+                                                        let auth_token = device_cfg.auth_token.clone();
+                                                        let (name, system_prompt) = self.character_config
+                                                            .as_ref()
+                                                            .map(|cc| (cc.name.clone(), cc.system_prompt.clone().unwrap_or_default()))
+                                                            .unwrap_or_default();
+                                                    // 重试参数（数据驱动，从 GameRules 配置读取）
+                                                    let retry_max = self.config.game_rules
+                                                        .as_ref()
+                                                        .map(|r| r.rebirth_retry_max_attempts)
+                                                        .unwrap_or(3);
+                                                    let retry_interval = std::time::Duration::from_secs(
+                                                        self.config.game_rules
+                                                            .as_ref()
+                                                            .map(|r| r.rebirth_retry_interval_secs)
+                                                            .unwrap_or(30)
+                                                    );
+
+                                                    info!(
+                                                        "自动转世重生已调度（intent失败路径）: agent={}, delay={} ticks ({}s)",
+                                                        old_agent_id, delay_ticks, delay_ms / 1000
+                                                    );
+
+                                                    tokio::spawn(async move {
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                                        info!("自动转世重生（intent失败路径）: old_agent={}", old_agent_id);
+
+                                                        let client = reqwest::Client::new();
+                                                        let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
+                                                        let body = serde_json::json!({
+                                                            "device_id": device_id,
+                                                            "auth_token": auth_token,
+                                                            "old_agent_id": old_agent_id,
+                                                            "name": name,
+                                                            "system_prompt": system_prompt,
+                                                        });
+
+                                                        for attempt in 0..retry_max {
+                                                            match client.post(&url).json(&body).send().await {
+                                                                Ok(resp) if resp.status().is_success() => {
+                                                                    info!("自动转世重生成功: old_agent={}", old_agent_id);
+                                                                    if let Some(ref api_state) = api_state {
+                                                                        api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                                                        api_state.rebirth_notify.notify_waiters();
+                                                                    }
+                                                                    return;
+                                                                }
+                                                                Ok(resp) => {
+                                                                    let status = resp.status();
+                                                                    warn!(
+                                                                        "自动转世重生服务端拒绝 (attempt {}/{}): status={}",
+                                                                        attempt + 1, retry_max, status
+                                                                    );
+                                                                }
+                                                                Err(e) => {
+                                                                    warn!(
+                                                                        "自动转世重生网络错误 (attempt {}/{}): {}",
+                                                                        attempt + 1, retry_max, e
+                                                                    );
+                                                                }
+                                                            }
+                                                            if attempt + 1 < retry_max {
+                                                                tokio::time::sleep(retry_interval).await;
+                                                            }
+                                                        }
+                                                        tracing::error!(
+                                                            "自动转世重生最终失败（intent失败路径）: old_agent={}, 所有 {} 次重试用尽",
+                                                            old_agent_id, retry_max
+                                                        );
+                                                    });
+                                                    }
+                                                }
+                                            }
+                                        }
                                         // 注入失败原因到下轮推理上下文
                                         let reason = result.error.unwrap_or_default();
                                         self.last_rejection_reason = Some(
