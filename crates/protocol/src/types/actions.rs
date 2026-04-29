@@ -102,6 +102,20 @@ impl FromStr for ActionType {
 }
 
 // ============================================================================
+// 混沌标记
+// ============================================================================
+
+/// 混沌行为来源标记，用于前端结构化展示"陷入混乱"徽章
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "detail")]
+pub enum ChaosMarker {
+    /// 低理智触发（sanity < activation_threshold）
+    Sanity { sanity: i32 },
+    /// LLM 配额耗尽触发（连续认知失败 >= llm_chaos_threshold）
+    LlmQuotaExhausted { consecutive_failures: usize },
+}
+
+// ============================================================================
 // 意图
 // ============================================================================
 
@@ -147,6 +161,12 @@ pub struct Intent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub narrative: Option<String>,
 
+    /// 混沌行为标记（前端据此渲染"陷入混乱"徽章）
+    ///
+    /// None = 正常决策；Some = 混沌降级行为
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chaos_marker: Option<ChaosMarker>,
+
     /// 是否已经广播（用于 speak 动作的幂等性）
     ///
     /// speak 动作在 handle_intent 时立即广播给同 Location 的 Agent，
@@ -191,6 +211,7 @@ impl Intent {
             priority: 5,
             observer_thought: None,
             narrative: None,
+            chaos_marker: None,
             already_broadcast: false,
             session_id: None,
             subsequent_intents: vec![],
@@ -215,6 +236,7 @@ impl Intent {
             priority: 5,
             observer_thought: None,
             narrative: None,
+            chaos_marker: None,
             already_broadcast: false,
             session_id: None,
             subsequent_intents: vec![],
@@ -236,6 +258,12 @@ impl Intent {
     /// 设置叙事化描述
     pub fn with_narrative(mut self, narrative: String) -> Self {
         self.narrative = Some(narrative);
+        self
+    }
+
+    /// 设置混沌标记
+    pub fn with_chaos_marker(mut self, marker: ChaosMarker) -> Self {
+        self.chaos_marker = Some(marker);
         self
     }
 
