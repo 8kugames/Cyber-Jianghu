@@ -42,6 +42,7 @@
   - 配置: `game_rules.yaml daily_summary.max_retries` / `daily_summary.ttl_ticks`（默认 10080 = 7 游戏日）
   - `#[serde(skip_serializing_if = "Option::is_none")]` 兼容旧客户端
   - Claw 模式 `DownstreamMessage::AgentDied` 同步透传 metadata
+  - **展示**: Agent HTTP API `GET /api/v1/memory/daily-summaries`（玩家查看个人摘要）；Server Admin API `GET /api/dashboard/agent-daily-summaries` + Admin 页面 `admin/agent-daily-summaries.html`（管理后台查看所有摘要）
 
 - **Protocol**: `LifespanRules` 新增 `starting_age: u8` 字段（默认 18）
   - 重生角色 age 从 0 改为配置的 starting_age，避免天魂误判"婴儿"

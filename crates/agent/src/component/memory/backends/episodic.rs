@@ -120,6 +120,16 @@ impl EpisodicMemoryBackend {
             .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
         store.decay_strength(0.999)
     }
+
+    /// 按事件类型查询记忆（排除已归档）
+    pub fn get_by_event_type(&self, event_type: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        let memories = store.get_memories_by_type(event_type, limit)?;
+        Ok(memories.iter().map(Self::memory_to_entry).collect())
+    }
 }
 
 #[async_trait]
