@@ -9,7 +9,11 @@
 
 ### Fixed
 
-- **Agent**: SemanticMemory embedding 修复 — candle 升级 0.9.2 → 0.10.2（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
+- **Agent**: 社交事件名字解析修复 — `social.rs` 名字解析链路 `name_map → RelationshipStore → "陌生人"`，防止非附近实体的已有真名被覆写回"陌生人"（根因：`entities` 仅含当前在线附近实体，离线/不在范围内时直接 fallback "陌生人"）
+- **Agent Panel**: 关系列表从全宽条改为紧凑卡片网格，详情从侧边抽屉改为居中 Modal
+- **Agent Panel**: Modal 新增 target Agent ID 展示（可选中复制）和密语沟通记录（从 soul-cycles 提取）
+
+### Added — candle 升级 0.9.2 → 0.10.2（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
 - **Agent**: Session Triage 每日摘要写入 episodic memory（之前仅日志输出，未持久化）
 - **Agent**: auto-rebirth spawn 增加重试机制（最多 3 次，间隔 30s），最终失败走 120s 超时兜底 reconnect
 - **Server+Agent**: auto-rebirth 重构 — 转世重生创建新 agent_id，旧 agent 保持 dead 状态（死亡/归隐语义分离）

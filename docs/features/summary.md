@@ -171,6 +171,8 @@
   - [x] Server 入库：`agent_daily_summaries` 表 UPSERT（agent_id + game_day），Admin 端可查询。
 - [x] **[人际社交网络 (RelationshipStore)](../../crates/agent/docs/architecture/p2_enhancement/relationship_store.md)**: 记录并量化 Agent 间的互动历史与好感度阶梯，影响其社交决策。
   - [x] 支持物品转移（SocialInteraction）、公开说话（PublicMessage）、密语（PrivateDialogue）三种事件类型触发好感度更新。
+  - [x] 名字解析链路 `name_map → store → "陌生人"`，防止已有真名被覆写。
+  - [x] 控制台关系卡片化 + Modal 详情（Agent ID、密语沟通记录、关键事件）。
 - [x] **[玩家控制台 (Agent Control Panel)](../../crates/agent/docs/architecture/p2_enhancement/agent_control_panel.md)**: 允许人类玩家观察并干预 AI 角色的前端面板。
   - [x] 实时 SSE 数据流展示心跳、推演记录与周围状态。
   - [x] 辅助创建角色，一键生成世界树与属性雷达图。

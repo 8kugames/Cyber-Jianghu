@@ -470,17 +470,25 @@ impl RelationshipStore {
 
         let transaction = conn.unchecked_transaction()?;
 
-        // 读取现有好感度（不存在则为 0）
-        let existing_favorability: i32 = transaction
+        // 读取现有记录（不存在则为默认值）
+        let (existing_favorability, existing_name): (i32, String) = transaction
             .query_row(
-                "SELECT favorability FROM relationships WHERE target_agent_id = ?",
+                "SELECT favorability, target_name FROM relationships WHERE target_agent_id = ?",
                 params![target_agent_id.to_string()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .unwrap_or(0);
+            .unwrap_or((0, String::new()));
 
         let new_favorability = (existing_favorability + delta).clamp(-100, 100);
         let now = chrono::Utc::now().to_rfc3339();
+
+        // 名字保护：传入泛化名（"陌生人"）但已有真名时，保留真名不被覆写
+        let is_generic = target_name == "陌生人" || target_name.is_empty();
+        let resolved_name = if is_generic && !existing_name.is_empty() && existing_name != "陌生人" {
+            &existing_name
+        } else {
+            target_name
+        };
 
         // 使用 UPDATE 而非 INSERT OR REPLACE，避免 CASCADE 删除 key_events
         let updated = transaction.execute(
@@ -489,7 +497,7 @@ impl RelationshipStore {
              WHERE target_agent_id = ?1",
             params![
                 target_agent_id.to_string(),
-                target_name,
+                resolved_name,
                 new_favorability,
                 tick_id,
                 now,
