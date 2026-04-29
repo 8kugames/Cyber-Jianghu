@@ -11,6 +11,7 @@
 use anyhow::Result;
 use futures_util::Stream;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use super::openai_types::OpenAIStreamResponse;
 
@@ -56,61 +57,54 @@ impl UsageTrackingStream {
             recorded: false,
         }
     }
+
+    /// 转换为 `LlmStream` 类型
+    pub fn into_llm_stream(self) -> LlmStream {
+        Box::pin(self) as LlmStream
+    }
 }
 
 impl Stream for UsageTrackingStream {
     type Item = Result<StreamChunk>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        use std::pin::Pin as PinAlias;
-        use futures_core::Stream as StreamTrait;
-
-        let stream = PinAlias::new(&mut self.as_mut().get_mut().inner);
-        match StreamTrait::poll_next(stream, cx) {
+        // 直接调用 Stream::poll_next
+        let inner = &mut self.inner;
+        match Pin::new(inner).poll_next(cx) {
             Poll::Ready(Some(result)) => {
-                match &result {
-                    Ok(chunk) => {
-                        match chunk {
-                            StreamChunk::Done { prompt_tokens, completion_tokens } => {
-                                if !self.recorded {
-                                    self.recorded = true;
-                                    super::token_tracking::record_token_usage(
-                                        &self.provider,
-                                        &self.model,
-                                        *prompt_tokens,
-                                        *completion_tokens,
-                                    );
-                                    tracing::debug!(
-                                        "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
-                                        self.provider.as_str(),
-                                        self.model,
-                                        prompt_tokens,
-                                        completion_tokens
-                                    );
-                                }
-                            }
-                            StreamChunk::DoneEstimation { completion_chars } => {
-                                if !self.recorded {
-                                    self.recorded = true;
-                                    let est_tokens = (completion_chars / 3).max(1);
-                                    super::token_tracking::record_token_usage(
-                                        &self.provider,
-                                        &self.model,
-                                        0,
-                                        est_tokens,
-                                    );
-                                    tracing::debug!(
-                                        "UsageTrackingStream recorded (est): provider={}, model={}, completion_est={}",
-                                        self.provider.as_str(),
-                                        self.model,
-                                        est_tokens
-                                    );
-                                }
-                            }
-                            StreamChunk::Delta(_) => {}
-                        }
+                // 只在第一个 Done/DoneEstimation 时记录
+                if !self.recorded {
+                    if let Ok(StreamChunk::Done { prompt_tokens, completion_tokens }) = &result {
+                        self.recorded = true;
+                        super::token_tracking::record_token_usage(
+                            &self.provider,
+                            &self.model,
+                            *prompt_tokens,
+                            *completion_tokens,
+                        );
+                        tracing::debug!(
+                            "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
+                            self.provider.as_str(),
+                            self.model,
+                            prompt_tokens,
+                            completion_tokens
+                        );
+                    } else if let Ok(StreamChunk::DoneEstimation { completion_chars }) = &result {
+                        self.recorded = true;
+                        let est_tokens = (completion_chars / 3).max(1);
+                        super::token_tracking::record_token_usage(
+                            &self.provider,
+                            &self.model,
+                            0,
+                            est_tokens,
+                        );
+                        tracing::debug!(
+                            "UsageTrackingStream recorded (est): provider={}, model={}, completion_est={}",
+                            self.provider.as_str(),
+                            self.model,
+                            est_tokens
+                        );
                     }
-                    Err(_) => {}
                 }
                 Poll::Ready(Some(result))
             }
