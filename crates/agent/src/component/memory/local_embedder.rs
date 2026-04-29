@@ -73,13 +73,9 @@ impl LocalEmbedder {
             serde_json::from_str(&config_content).context("Failed to parse BERT config")?;
 
         // 加载模型权重
-        // 注意：使用 DType::F32 作为权重数据类型
+        // candle 0.10+: index_select 不再限制 source dtype，F32 原生精度加载
+        // 下游 to_vec1::<f32>() 无类型转换开销
         let weights_path = config.model_dir.join("model.safetensors");
-        // SAFETY: from_mmaped_safetensors 是 unsafe 的，因为它会内存映射文件。
-        // 安全性保证：
-        // 1. weights_path 指向一个只读的 safetensors 模型文件
-        // 2. 文件在 LocalEmbedder 生命周期内不会被修改
-        // 3. candle 库会验证文件格式的有效性
         let vb = unsafe {
             candle_nn::VarBuilder::from_mmaped_safetensors(
                 &[&weights_path],

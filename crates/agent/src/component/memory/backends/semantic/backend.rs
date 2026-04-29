@@ -8,7 +8,6 @@ use crate::component::memory::types::MemoryEntry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -30,8 +29,6 @@ pub struct SemanticMemoryBackend {
     episodic_conn: Mutex<rusqlite::Connection>,
     embedder: Arc<EmbedderService>,
     use_vector: Mutex<bool>,
-    /// 索引是否需要重建（AtomicBool 允许无锁检查，避免每次 search 都加锁）
-    needs_rebuild: Arc<AtomicBool>,
 }
 
 impl SemanticMemoryBackend {
@@ -72,7 +69,6 @@ impl SemanticMemoryBackend {
             episodic_conn: Mutex::new(episodic_conn),
             embedder,
             use_vector: Mutex::new(use_vector),
-            needs_rebuild: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -115,35 +111,27 @@ impl SemanticMemoryBackend {
             return Ok(Vec::new());
         }
 
-        if self.is_vector_mode() {
-            match self.embedder.embed(&params.query).await {
-                Ok(vector) => {
-                    // 通过 AtomicBool 检查是否需要重建（无需获取锁）
-                    let rebuild = self.needs_rebuild.load(Ordering::SeqCst);
+        // 尝试 embed：懒加载 embedder，成功则自动升级到 vector 模式
+        match self.embedder.embed(&params.query).await {
+            Ok(vector) => {
+                if !self.is_vector_mode() {
+                    self.try_upgrade_to_vector();
+                }
 
-                    if rebuild {
-                        self.needs_rebuild.store(false, Ordering::SeqCst);
-                        // rebuild_index 是 CPU 密集操作
-                        // AtomicBool 标记确保 rebuild 只触发一次（后续 search 直接返回）
-                        let mut vector_store = self.vector_store.lock().unwrap();
-                        vector_store.rebuild_index();
-                        drop(vector_store);
+                // HnswVectorStore::search() 内部处理 rebuild，无需重复
+                let mut vector_store = self.vector_store.lock().unwrap();
+                match vector_store.search(&vector, params.limit) {
+                    Ok(results) => {
+                        tracing::debug!("Vector search returned {} results", results.len());
+                        return Ok(results);
                     }
-
-                    let mut vector_store = self.vector_store.lock().unwrap();
-                    match vector_store.search(&vector, params.limit) {
-                        Ok(results) => {
-                            tracing::debug!("Vector search returned {} results", results.len());
-                            return Ok(results);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Vector search failed: {}, falling back to FTS", e);
-                        }
+                    Err(e) => {
+                        tracing::warn!("Vector search failed: {}, falling back to FTS", e);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to embed query: {}, falling back to FTS", e);
-                }
+            }
+            Err(e) => {
+                tracing::debug!("Embedding unavailable: {}, using FTS fallback", e);
             }
         }
 
@@ -208,12 +196,10 @@ impl MemoryBackend for SemanticMemoryBackend {
             .context("Failed to write embedding to episodic DB")?;
         }
 
-        // 添加到 HNSW 内存索引，并标记需要重建
+        // 添加到 HNSW 内存索引
         {
             let mut vs = self.vector_store.lock().unwrap();
             vs.add(mem_id, embedding)?;
-            self.needs_rebuild
-                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
 
         // 标记使用向量模式
@@ -252,37 +238,38 @@ impl SearchableBackend for SemanticMemoryBackend {
 #[async_trait]
 impl SemanticSearchable for SemanticMemoryBackend {
     async fn search_similar(&mut self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
-        let use_vector = self.is_vector_mode();
-
-        if use_vector {
-            if let Ok(query_vector) = self.embedder.embed(query).await {
-                let results = self
-                    .vector_store
-                    .lock()
-                    .unwrap()
-                    .search(&query_vector, limit);
-
-                match results {
-                    Ok(results) if !results.is_empty() => {
-                        tracing::debug!("Vector search returned {} results", results.len());
-                        let fts = self.fts_fallback.lock().unwrap();
-                        let ids: Vec<i64> = results.into_iter().map(|(id, _)| id).collect();
-                        let memories = fts.get_memories_by_ids(&ids)?;
-                        return Ok(memories
-                            .into_iter()
-                            .map(Self::client_memory_to_entry)
-                            .collect());
-                    }
-                    Ok(_) => {
-                        tracing::debug!("Vector search returned empty, falling back to FTS");
-                    }
-                    Err(e) => {
-                        tracing::warn!("Vector search failed: {}, falling back to FTS", e);
-                    }
-                }
-            } else {
-                tracing::warn!("Vector embedding failed, falling back to FTS");
+        // 尝试 embed：懒加载 embedder，成功则自动升级到 vector 模式
+        if let Ok(query_vector) = self.embedder.embed(query).await {
+            if !self.is_vector_mode() {
+                self.try_upgrade_to_vector();
             }
+
+            let results = self
+                .vector_store
+                .lock()
+                .unwrap()
+                .search(&query_vector, limit);
+
+            match results {
+                Ok(results) if !results.is_empty() => {
+                    tracing::info!("Vector search returned {} results", results.len());
+                    let fts = self.fts_fallback.lock().unwrap();
+                    let ids: Vec<i64> = results.into_iter().map(|(id, _)| id).collect();
+                    let memories = fts.get_memories_by_ids(&ids)?;
+                    return Ok(memories
+                        .into_iter()
+                        .map(Self::client_memory_to_entry)
+                        .collect());
+                }
+                Ok(_) => {
+                    tracing::debug!("Vector search returned empty, falling back to FTS");
+                }
+                Err(e) => {
+                    tracing::warn!("Vector search failed: {}, falling back to FTS", e);
+                }
+            }
+        } else {
+            tracing::debug!("Embedding unavailable, using FTS fallback");
         }
 
         let fts = self.fts_fallback.lock().unwrap();
