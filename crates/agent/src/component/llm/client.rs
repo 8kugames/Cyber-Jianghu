@@ -813,7 +813,7 @@ impl FallbackLlmClient {
             let idx = (start + offset) % self.clients.len();
             let client = self.clients[idx].clone();
 
-            match f(client).await {
+            match f(client.clone()).await {
                 Ok(stream) => {
                     if offset > 0 {
                         tracing::warn!(
@@ -983,14 +983,21 @@ impl LlmClient for FallbackLlmClient {
         Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
     > {
         Box::pin(async move {
+            use super::direct_client::LlmProvider;
+
             let system = system.to_string();
             let prompt = prompt.to_string();
-            self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let (stream, provider_str, model) = self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                 let system = system.clone();
                 let prompt = prompt.clone();
                 async move { client.complete_streaming(&system, &prompt).await }
             })
-            .await
+            .await?;
+
+            let provider = LlmProvider::parse(&provider_str)
+                .unwrap_or(LlmProvider::OpenClaw);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(stream, provider, model);
+            Ok(tracking_stream.into_llm_stream())
         })
     }
 
@@ -1004,11 +1011,13 @@ impl LlmClient for FallbackLlmClient {
         Box<dyn std::future::Future<Output = Result<super::streaming::LlmStream>> + Send + 'a>,
     > {
         Box::pin(async move {
+            use super::direct_client::LlmProvider;
+
             let system = system.to_string();
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
-            self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let (stream, provider_str, model) = self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                 let system = system.clone();
                 let summary = summary_owned.clone();
                 let turns = turns.clone();
@@ -1024,7 +1033,12 @@ impl LlmClient for FallbackLlmClient {
                         .await
                 }
             })
-            .await
+            .await?;
+
+            let provider = LlmProvider::parse(&provider_str)
+                .unwrap_or(LlmProvider::OpenClaw);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(stream, provider, model);
+            Ok(tracking_stream.into_llm_stream())
         })
     }
 }
