@@ -101,6 +101,16 @@ impl super::Agent {
             };
 
             // 记录事件（使用实体名称而非 UUID 字符串）
+            // 预加载所有已知关系名字，避免循环内逐个查 DB
+            let known_names: std::collections::HashMap<String, String> = match store.get_all_relationships() {
+                Ok(rels) => rels
+                    .into_iter()
+                    .filter(|r| !r.target_name.is_empty() && r.target_name != "陌生人")
+                    .map(|r| (r.target_agent_id.to_string(), r.target_name))
+                    .collect(),
+                Err(_) => std::collections::HashMap::new(),
+            };
+
             for (i, event) in social_events.iter().enumerate() {
                 let Some(meta) = event.metadata.as_object() else {
                     continue;
@@ -129,11 +139,16 @@ impl super::Agent {
                 };
 
                 let delta = deltas.get(&(i + 1)).copied().unwrap_or(0);
-                let other_name = name_map.get(id_str).map(|s| s.as_str()).unwrap_or("陌生人");
+                // 名字解析：当前在线实体 → 已知关系存储 → "陌生人"
+                let other_name = name_map
+                    .get(id_str)
+                    .cloned()
+                    .or_else(|| known_names.get(id_str).cloned())
+                    .unwrap_or_else(|| "陌生人".to_string());
 
                 if let Err(e) = store.record_social_event(
                     other_id,
-                    other_name,
+                    &other_name,
                     event.tick_id,
                     resolved_action,
                     &event.description,
