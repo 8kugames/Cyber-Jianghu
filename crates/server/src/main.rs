@@ -496,19 +496,21 @@ async fn main() -> Result<()> {
         // Agent 每日摘要 API
         .route(
             "/api/dashboard/agent-daily-summaries",
-            get(handlers::agent_daily_summaries::list_summaries)
-                .layer(axum::middleware::from_fn_with_state(
+            get(handlers::agent_daily_summaries::list_summaries).layer(
+                axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
-                )),
+                ),
+            ),
         )
         .route(
             "/api/dashboard/agent-daily-summaries/{agent_id}",
-            get(handlers::agent_daily_summaries::get_by_agent)
-                .layer(axum::middleware::from_fn_with_state(
+            get(handlers::agent_daily_summaries::get_by_agent).layer(
+                axum::middleware::from_fn_with_state(
                     state.clone(),
                     handlers::auth::require_read_token,
-                )),
+                ),
+            ),
         )
         // Config API (List/Get 需要 Read 权限, Update 需要 Write 权限)
         .route(

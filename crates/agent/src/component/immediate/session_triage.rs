@@ -97,8 +97,9 @@ impl SessionTriageEngine {
 
     /// 主循环（tokio::spawn 为后台任务）
     ///
-    /// 监听 Notify 信号 + 兜底轮询 → debounce → 批量 triage
-    pub async fn run(mut self) {
+    /// 监听 Notify 信号 + 兜底轮询 → debounce → 批量 triage。
+    /// 游戏日结束时返回当日摘要，由 lifecycle 负责存储和提交。
+    pub async fn run(mut self) -> Option<String> {
         let poll_interval = Duration::from_secs(self.config.poll_interval_secs);
         let debounce = Duration::from_secs(self.config.debounce_secs);
         let llm_timeout = Duration::from_millis(self.config.triage_llm_timeout_ms);
@@ -111,6 +112,8 @@ impl SessionTriageEngine {
             self.config.poll_interval_secs,
             self.config.debounce_secs
         );
+
+        let mut summary = None;
 
         loop {
             // 阶段 1：等待唤醒信号，或兜底轮询
@@ -133,7 +136,8 @@ impl SessionTriageEngine {
 
             if pending.is_empty() {
                 // 阶段 5：游戏日结束检查
-                if self.check_game_day_ended().await {
+                if let Some(s) = self.check_game_day_ended().await {
+                    summary = Some(s);
                     break;
                 }
                 continue;
@@ -175,22 +179,24 @@ impl SessionTriageEngine {
             }
 
             // 阶段 5：游戏日结束检查
-            if self.check_game_day_ended().await {
+            if let Some(s) = self.check_game_day_ended().await {
+                summary = Some(s);
                 break;
             }
         }
 
         info!(
-            "SessionTriageEngine 退出: agent={}, game_day={}",
-            self.agent_name, self.game_day
+            "SessionTriageEngine 退出: agent={}, game_day={}, has_summary={}",
+            self.agent_name, self.game_day, summary.is_some()
         );
+
+        summary
     }
 
-    /// 检查游戏日是否已翻页
-    async fn check_game_day_ended(&self) -> bool {
+    /// 检查游戏日是否已翻页，返回摘要（若已翻页）
+    async fn check_game_day_ended(&self) -> Option<String> {
         let latest_day = *self.current_game_day.read().await;
         if latest_day != self.game_day {
-            // 游戏日已翻页，生成当日摘要
             match self.produce_daily_summary().await {
                 Ok(summary) => {
                     info!(
@@ -198,17 +204,18 @@ impl SessionTriageEngine {
                         self.game_day,
                         summary.len()
                     );
+                    Some(summary)
                 }
                 Err(e) => {
                     error!(
                         "游戏日 {} 摘要生成失败: {}，事件保留在 DB 中待清理",
                         self.game_day, e
                     );
+                    None
                 }
             }
-            true
         } else {
-            false
+            None
         }
     }
 

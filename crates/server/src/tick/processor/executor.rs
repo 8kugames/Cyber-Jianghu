@@ -731,6 +731,7 @@ mod tests {
             },
             status: StatusComponent {
                 collection: hunger_collection,
+                max_modifiers: Default::default(),
             },
             node_id: "test".to_string(),
             is_alive: true,

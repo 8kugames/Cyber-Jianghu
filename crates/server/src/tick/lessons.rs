@@ -88,13 +88,11 @@ pub async fn record_death_lesson(
             let avg = avg_opt.unwrap_or(-1);
             let lesson_text = build_lesson_text(cause, count, avg, cause_map);
 
-            if let Err(e) = sqlx::query(
-                "UPDATE public_lessons SET lesson = $1 WHERE cause = $2",
-            )
-            .bind(&lesson_text)
-            .bind(cause)
-            .execute(db_pool)
-            .await
+            if let Err(e) = sqlx::query("UPDATE public_lessons SET lesson = $1 WHERE cause = $2")
+                .bind(&lesson_text)
+                .bind(cause)
+                .execute(db_pool)
+                .await
             {
                 error!("[lesson] 更新教训文本失败: cause={}, error={}", cause, e);
             } else if count >= threshold as i32 {
