@@ -27,6 +27,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
             // 回退：如果注册表未初始化（如测试环境），创建空组件
             StatusComponent {
                 collection: AttributeCollection::new_collection(),
+                max_modifiers: Default::default(),
             }
         };
 
@@ -86,6 +87,14 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
                     }
                 }
             }
+        }
+
+        // 恢复 max_modifiers（从 JSONB _max_modifiers 键读取）
+        if let Some(modifiers) = attributes_json
+            .get("_max_modifiers")
+            .and_then(|v| serde_json::from_value::<std::collections::HashMap<String, i32>>(v.clone()).ok())
+        {
+            status.max_modifiers = modifiers;
         }
 
         Ok(Self {

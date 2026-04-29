@@ -127,6 +127,26 @@ impl StateMutator for AttributeMutator {
                     Ok(false)
                 }
             }
+            StateChange::AttributeMaxChanged {
+                agent_id,
+                attribute,
+                delta,
+            } => {
+                if let Some(state) = states.iter_mut().find(|s| s.agent_id == *agent_id) {
+                    if let Ok(new_max) = state.status.apply_max_change(attribute, *delta) {
+                        tracing::info!(
+                            "Agent {} 属性 {} 上限提升 +{} (new effective max includes +{})",
+                            agent_id,
+                            attribute,
+                            delta,
+                            new_max
+                        );
+                    }
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
             _ => Ok(false), // 其他类型不处理
         }
     }

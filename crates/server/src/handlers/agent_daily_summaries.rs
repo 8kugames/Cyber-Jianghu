@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
 use axum::Json;
+use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -50,13 +50,18 @@ pub async fn list_summaries(
         .and_then(|s| Uuid::parse_str(s).ok());
     let game_day = params.game_day;
 
-    let summaries =
-        db::list_agent_daily_summaries(&state.db_pool, agent_id, game_day, Some(limit as i64), Some(offset as i64))
-            .await
-            .map_err(|e| {
-                tracing::error!("查询 agent_daily_summaries 列表失败: {}", e);
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let summaries = db::list_agent_daily_summaries(
+        &state.db_pool,
+        agent_id,
+        game_day,
+        Some(limit as i64),
+        Some(offset as i64),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("查询 agent_daily_summaries 列表失败: {}", e);
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let total = db::count_agent_daily_summaries(&state.db_pool, agent_id, game_day)
         .await
@@ -86,9 +91,8 @@ pub async fn get_by_agent(
     Path(params): Path<AgentIdPath>,
     Query(params_q): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, axum::http::StatusCode> {
-    let agent_id = Uuid::parse_str(&params.agent_id).map_err(|_| {
-        axum::http::StatusCode::BAD_REQUEST
-    })?;
+    let agent_id =
+        Uuid::parse_str(&params.agent_id).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
 
     let page = params_q.page.unwrap_or(1).max(1);
     let limit = params_q.limit.unwrap_or(20).clamp(1, 100) as i64;

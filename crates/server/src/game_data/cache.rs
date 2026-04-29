@@ -53,9 +53,10 @@ impl GameDataCache {
     /// 适用于 async fn 中需要跨 .await 访问配置的场景。
     /// 返回的是当前数据的深拷贝，不会阻塞写操作。
     pub fn snapshot(&self) -> Arc<GameData> {
-        let guard = self.data.read().unwrap_or_else(|e| {
-            panic!("配置缓存被污染: {}", e)
-        });
+        let guard = self
+            .data
+            .read()
+            .unwrap_or_else(|e| panic!("配置缓存被污染: {}", e));
         Arc::new(guard.clone())
     }
 

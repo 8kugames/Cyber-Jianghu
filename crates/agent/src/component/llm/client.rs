@@ -105,6 +105,20 @@ pub trait LlmClient: Send + Sync {
         // 默认不做任何操作
     }
 
+    /// 获取 provider 名称（用于 token 统计）
+    ///
+    /// 默认实现返回 "unknown"。
+    fn provider_name(&self) -> String {
+        "unknown".to_string()
+    }
+
+    /// 获取模型名称（用于 token 统计）
+    ///
+    /// 默认实现返回 "unknown"。
+    fn model_name(&self) -> String {
+        "unknown".to_string()
+    }
+
     /// 使用 tool calling 的多轮对话
     ///
     /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
@@ -487,19 +501,25 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         let stream = self.complete_streaming(system, prompt).await?;
         let mut acc = super::streaming::StreamAccumulator::new();
         let mut stream = std::pin::pin!(stream);
+        let mut json_complete = false;
 
+        // 必须完全耗尽流以确保 Done chunk (含 usage) 被处理
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            acc.push(chunk);
-            if acc.is_json_complete() {
-                break;
+            // JSON 完成后仍继续累积，确保收到 Done chunk
+            if !json_complete {
+                json_complete = acc.is_json_complete();
             }
+            acc.push(chunk);
         }
 
-        let (pt, ct) = acc.token_stats();
+        let (pt, ct, has_real) = acc.token_stats();
         if pt > 0 || ct > 0 {
             tracing::debug!(
-                "Streaming JSON token usage: prompt={}, completion={}", pt, ct
+                "Streaming JSON token usage: prompt={}, completion={}, real={}",
+                pt,
+                ct,
+                has_real
             );
         }
 
@@ -520,19 +540,25 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             .await?;
         let mut acc = super::streaming::StreamAccumulator::new();
         let mut stream = std::pin::pin!(stream);
+        let mut json_complete = false;
 
+        // 必须完全耗尽流以确保 Done chunk (含 usage) 被处理
         while let Some(chunk_result) = stream.next().await {
             let chunk = chunk_result?;
-            acc.push(chunk);
-            if acc.is_json_complete() {
-                break;
+            // JSON 完成后仍继续累积，确保收到 Done chunk
+            if !json_complete {
+                json_complete = acc.is_json_complete();
             }
+            acc.push(chunk);
         }
 
-        let (pt, ct) = acc.token_stats();
+        let (pt, ct, has_real) = acc.token_stats();
         if pt > 0 || ct > 0 {
             tracing::debug!(
-                "Streaming JSON conv token usage: prompt={}, completion={}", pt, ct
+                "Streaming JSON conv token usage: prompt={}, completion={}, real={}",
+                pt,
+                ct,
+                has_real
             );
         }
 
@@ -748,7 +774,8 @@ impl FallbackLlmClient {
                     let should = Self::should_fallback(&e);
                     tracing::warn!("LLM 客户端 #{} 调用失败 (fallback={}: {}", idx, should, e);
                     let err_msg = format!("{:#}", &e);
-                    if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long") {
+                    if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long")
+                    {
                         tracing::warn!(
                             "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
                         );
@@ -770,10 +797,11 @@ impl FallbackLlmClient {
     ///
     /// 连接阶段失败（如 403/超时）自动切换到下一个 provider。
     /// 流中途失败直接返回 Err（无法中途切换）。
+    /// 返回 (stream, provider_name, model_name)
     async fn call_streaming_with_fallback<F, Fut>(
         &self,
         f: F,
-    ) -> Result<super::streaming::LlmStream>
+    ) -> Result<(super::streaming::LlmStream, String, String)>
     where
         F: Fn(Arc<dyn LlmClient>) -> Fut,
         Fut: std::future::Future<Output = Result<super::streaming::LlmStream>>,
@@ -795,7 +823,7 @@ impl FallbackLlmClient {
                         );
                         self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
                     }
-                    return Ok(stream);
+                    return Ok((stream, client.provider_name(), client.model_name()));
                 }
                 Err(e) => {
                     let should = Self::should_fallback(&e);
@@ -845,6 +873,14 @@ impl LlmClient for FallbackLlmClient {
 
     fn supports_tool_calling(&self) -> bool {
         self.active_client().supports_tool_calling()
+    }
+
+    fn provider_name(&self) -> String {
+        self.active_client().provider_name()
+    }
+
+    fn model_name(&self) -> String {
+        self.active_client().model_name()
     }
 
     async fn complete_with_tools(
