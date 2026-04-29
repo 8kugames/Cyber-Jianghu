@@ -11,6 +11,59 @@ let allCharacters = [];
 let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
 let _expLoadSeq = 0; // 经历日志请求序号，防竞态
 
+// 每日摘要
+let summaryPage = 1;
+let hasMoreSummary = false;
+
+function switchExpSubTab(sub) {
+  document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.sub-tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.sub-tab-btn[data-sub-tab="${sub}"]`).classList.add('active');
+  document.getElementById('exp-sub-' + sub).classList.add('active');
+  if (sub === 'summary') {
+    loadDailySummaries();
+  }
+}
+
+async function loadDailySummaries(page = 1) {
+  const listEl = document.getElementById('daily-summaries');
+  const loadMoreEl = document.getElementById('load-more-summary');
+  if (page === 1) {
+    listEl.innerHTML = '<p class="loading-text">加载中...</p>';
+  }
+  try {
+    const data = await apiGet(`/api/v1/memory/daily-summaries?page=${page}&limit=${PAGE_LIMIT}`);
+    hasMoreSummary = data.has_more;
+    summaryPage = page;
+    if (page === 1) listEl.innerHTML = '';
+    if (data.summaries && data.summaries.length > 0) {
+      data.summaries.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'summary-item';
+        const tickId = s.tick_id || '-';
+        const content = s.summary || '';
+        const time = s.created_at ? formatRealTime(s.created_at) : '';
+        div.innerHTML = `
+          <div class="summary-item-header">
+            <span class="summary-item-day">Tick ${tickId}</span>
+            <span class="summary-item-time">${escapeHtml(time)}</span>
+          </div>
+          <div class="summary-item-content">${escapeHtml(content)}</div>`;
+        listEl.appendChild(div);
+      });
+    } else if (page === 1) {
+      listEl.innerHTML = '<p class="no-data">暂无每日摘要</p>';
+    }
+    setVisible(loadMoreEl, hasMoreSummary);
+  } catch (err) {
+    listEl.innerHTML = `<p class="error-text">加载失败: ${err.message}</p>`;
+  }
+}
+
+function loadMoreDailySummaries() {
+  loadDailySummaries(summaryPage + 1);
+}
+
 const STATUS_MAP = {
   alive: { label: "存活", treeLabel: "存活", tag: "" },
   dead: { label: "死亡", treeLabel: "已故", tag: " [已故]" },
@@ -962,53 +1015,15 @@ function loadMoreExperiences() {
   loadExperiences(currentPage + 1);
 }
 
-// 加载关系列表
+// 加载关系列表（紧凑卡片）
 async function loadRelationships() {
   const relEl = document.getElementById("relationships");
   relEl.innerHTML = '<p class="loading-text">加载中...</p>';
   try {
     const data = await apiGet("/api/v1/relationship/list");
     if (data.relationships && data.relationships.length > 0) {
-      relEl.innerHTML = data.relationships
-        .map((rel, idx) => {
-          const fav = rel.favorability ?? 0;
-          const level = rel.relationship_level || "neutral";
-          const label = rel.relationship_label || "陌生人";
-          const pct = Math.max(
-            0,
-            Math.min(100, Math.round(((fav + 100) / 200) * 100)),
-          );
-          return `
-                <div class="rel-item" data-rel-id="${rel.target_agent_id || idx}">
-                    <div class="rel-item-left">
-                        <span class="rel-name">${escapeHtml(rel.target_name || rel.target_agent_id || "未知")}</span>
-                        <div class="rel-meta">
-                            <span class="rel-label ${level}">${escapeHtml(label)}</span>
-                        </div>
-                    </div>
-                    <div class="rel-right">
-                        <div class="rel-favor-bar">
-                            <div class="rel-favor-fill ${level}" style="width:${pct}%"></div>
-                        </div>
-                        <span class="rel-favor-value">${fav}</span>
-                    </div>
-                </div>`;
-        })
-        .join("");
-
-      // 缓存关系数据供抽屉使用
       relEl._relationships = data.relationships;
-
-      // 绑定点击事件
-      relEl.querySelectorAll(".rel-item").forEach((item) => {
-        item.addEventListener("click", () => {
-          const id = item.dataset.relId;
-          const rel = relEl._relationships.find(
-            (r) => (r.target_agent_id || "") === id,
-          );
-          if (rel) openRelationshipDrawer(rel);
-        });
-      });
+      renderRelationshipCards(relEl, data.relationships);
     } else {
       relEl.innerHTML = '<p class="no-data">暂无关系记录</p>';
     }
@@ -1017,8 +1032,60 @@ async function loadRelationships() {
   }
 }
 
-// 打开关系详情抽屉
-function openRelationshipDrawer(rel) {
+// 统一名字解析：卡片和 Modal 共用
+function resolveDisplayName(rel) {
+  const name = rel.target_name || "";
+  const label = rel.relationship_label || "陌生人";
+  const isGeneric = !name || name === "陌生人" || name === "未知";
+  const labelIsStranger = label === "陌生人" || label === "未知";
+  if (!isGeneric) return name;
+  if (labelIsStranger) {
+    return rel.target_agent_id
+      ? "陌生人 " + String(rel.target_agent_id).substring(0, 8)
+      : "未知";
+  }
+  return rel.target_agent_id
+    ? String(rel.target_agent_id).substring(0, 8) + "..."
+    : "未知";
+}
+
+function renderRelationshipCards(container, rels) {
+  container.innerHTML = rels
+    .map((rel, idx) => {
+      const fav = rel.favorability ?? 0;
+      const level = rel.relationship_level || "neutral";
+      const label = rel.relationship_label || "陌生人";
+      const pct = Math.max(0, Math.min(100, Math.round(((fav + 100) / 200) * 100)));
+      const displayName = resolveDisplayName(rel);
+      const initial = (rel.target_name && rel.target_name !== "陌生人" && rel.target_name !== "未知")
+        ? rel.target_name.charAt(0) : "?";
+      return `
+        <div class="rel-card" data-rel-id="${rel.target_agent_id || idx}">
+            <div class="rel-card-avatar ${level}">${escapeHtml(initial)}</div>
+            <div class="rel-card-name" title="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>
+            <span class="rel-card-label ${level}">${escapeHtml(label)}</span>
+            <div class="rel-card-favor">
+                <div class="rel-card-favor-bar">
+                    <div class="rel-card-favor-fill ${level}" style="width:${pct}%"></div>
+                </div>
+                <span class="rel-card-favor-value">${fav}</span>
+            </div>
+        </div>`;
+    }).join("");
+
+  container.querySelectorAll(".rel-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      const id = card.dataset.relId;
+      const rel = container._relationships.find(
+        (r) => (r.target_agent_id || "") === id,
+      );
+      if (rel) openRelationshipModal(rel);
+    });
+  });
+}
+
+// 打开关系详情 Modal
+async function openRelationshipModal(rel) {
   if (!rel) return;
 
   const fav = rel.favorability ?? 0;
@@ -1026,26 +1093,33 @@ function openRelationshipDrawer(rel) {
   const label = rel.relationship_label || "陌生人";
   const pct = Math.max(0, Math.min(100, Math.round(((fav + 100) / 200) * 100)));
 
-  document.getElementById("drawer-name").textContent =
-    rel.target_name || rel.target_agent_id || "未知";
-
-  const labelEl = document.getElementById("drawer-label");
+  // 基本信息
+  document.getElementById("modal-rel-name").textContent = resolveDisplayName(rel);
+  const labelEl = document.getElementById("modal-rel-label");
   labelEl.textContent = label;
   labelEl.className = "drawer-label " + level;
 
-  const fillEl = document.getElementById("drawer-favorability-fill");
+  // Agent ID
+  const agentIdEl = document.getElementById("modal-rel-agent-id");
+  agentIdEl.textContent = rel.target_agent_id || "-";
+
+  // 好感度
+  const fillEl = document.getElementById("modal-rel-favor-fill");
   fillEl.style.width = pct + "%";
   fillEl.className = "favorability-fill " + level;
-  document.getElementById("drawer-favorability-value").textContent = fav;
+  document.getElementById("modal-rel-favor-value").textContent = fav;
 
-  document.getElementById("drawer-description").textContent =
+  // 关系描述
+  document.getElementById("modal-rel-description").textContent =
     rel.self_description || "暂无描述";
 
-  // 渲染关键事件
-  const eventsEl = document.getElementById("drawer-events");
+  // 沟通记录：从 soul-cycles 提取 whisper/speak 针对该目标的内容
+  await loadDialogueHistory(rel.target_agent_id);
+
+  // 关键事件
+  const eventsEl = document.getElementById("modal-rel-events");
   const events = rel.key_events || [];
   if (events.length > 0) {
-    // 按时间倒序
     const sorted = [...events].sort(
       (a, b) => (b.tick_id || 0) - (a.tick_id || 0),
     );
@@ -1070,18 +1144,81 @@ function openRelationshipDrawer(rel) {
     eventsEl.innerHTML = '<p class="no-data">暂无关键事件</p>';
   }
 
-  // 打开抽屉
-  const drawer = document.getElementById("relationship-drawer");
-  const overlay = document.getElementById("relationship-drawer-overlay");
-  drawer.classList.add("open");
-  overlay.classList.add("open");
+  // 打开 Modal
+  document.getElementById("relationship-modal-overlay").classList.add("open");
 }
 
-function closeRelationshipDrawer() {
-  const drawer = document.getElementById("relationship-drawer");
-  const overlay = document.getElementById("relationship-drawer-overlay");
-  drawer.classList.remove("open");
-  overlay.classList.remove("open");
+// 从 soul-cycles 提取与某目标的沟通记录（whisper/speak）
+async function loadDialogueHistory(targetAgentId) {
+  const section = document.getElementById("modal-dialogue-section");
+  const listEl = document.getElementById("modal-dialogue-list");
+  if (!targetAgentId) {
+    section.style.display = "none";
+    return;
+  }
+
+  listEl.innerHTML = '<p class="loading-text">加载中...</p>';
+  section.style.display = "";
+
+  try {
+    const data = await apiGet(
+      "/api/v1/character/soul-cycles?page=1&limit=200"
+    );
+    const recordsMap = data.records || {};
+    const tickIds = Object.keys(recordsMap).sort((a, b) => Number(b) - Number(a));
+
+    const dialogues = [];
+    tickIds.forEach((tickId) => {
+      const attempts = recordsMap[tickId];
+      attempts.forEach((a) => {
+        // 检查最终行动中的 whisper/speak
+        if (a.final_intent) {
+          const at = a.final_intent.action_type;
+          const ad = (a.final_intent.action_data && typeof a.final_intent.action_data === "object")
+            ? a.final_intent.action_data : {};
+          const content = ad.content || "";
+          const tid = ad.target_agent_id;
+
+          // whisper 必须匹配 target_agent_id；speak 是公共说话，无 target，不纳入二人沟通记录
+          if (at === "whisper" && tid === targetAgentId) {
+            dialogues.push({
+              tick_id: tickId,
+              action_type: at,
+              content,
+              direction: "sent",
+            });
+          }
+        }
+
+        // 也检查即时意图
+        // (immediate_intents 单独返回，此处暂不处理)
+      });
+    });
+
+    if (dialogues.length > 0) {
+      listEl.innerHTML = dialogues.slice(0, 50).map((d) => {
+        const actionLabel = d.action_type === "whisper" ? "密语" : "说话";
+        return `
+          <div class="dialogue-item">
+            <div class="dialogue-item-header">
+              <span class="dialogue-tick">T${d.tick_id}</span>
+              <span class="dialogue-action">${escapeHtml(actionLabel)}</span>
+            </div>
+            <div class="dialogue-content">${escapeHtml(d.content)}</div>
+          </div>`;
+      }).join("");
+    } else {
+      listEl.innerHTML = '<p class="no-data">暂无沟通记录</p>';
+      section.style.display = "none";
+    }
+  } catch (err) {
+    listEl.innerHTML = '<p class="no-data">暂无沟通记录</p>';
+    section.style.display = "none";
+  }
+}
+
+function closeRelationshipModal() {
+  document.getElementById("relationship-modal-overlay").classList.remove("open");
 }
 
 // 加载近期记忆
@@ -1152,6 +1289,21 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         showError("角色已死亡");
         showDeathModal(null);
+      }
+      // 同步更新世界树中当前角色的状态
+      const currentChar = allCharacters.find((c) => c.is_current);
+      if (currentChar) {
+        currentChar.status = "dead";
+        const card = document.querySelector(
+          `.world-tree-card[data-agent-id="${currentChar.agent_id || ""}"]`,
+        );
+        if (card) {
+          const statusEl = card.querySelector(".char-status");
+          if (statusEl) {
+            statusEl.className = "char-status dead";
+            statusEl.textContent = "已故";
+          }
+        }
       }
     });
     deathEventSource.addEventListener("heartbeat", () => {
@@ -1254,13 +1406,15 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("character-select")
     .addEventListener("change", switchCharacter);
 
-  // 关系抽屉关闭事件
+  // 关系 Modal 关闭事件
   document
-    .getElementById("drawer-close")
-    .addEventListener("click", closeRelationshipDrawer);
+    .getElementById("modal-rel-close")
+    .addEventListener("click", closeRelationshipModal);
   document
-    .getElementById("relationship-drawer-overlay")
-    .addEventListener("click", closeRelationshipDrawer);
+    .getElementById("relationship-modal-overlay")
+    .addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) closeRelationshipModal();
+    });
 
   // 角色抽屉关闭事件
   document
@@ -1283,10 +1437,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ESC 关闭所有抽屉
+  // ESC 关闭所有抽屉/Modal
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      closeRelationshipDrawer();
+      closeRelationshipModal();
       closeCharacterDrawer();
     }
   });
@@ -1390,6 +1544,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  document.getElementById('load-more-summary-btn').addEventListener('click', loadMoreDailySummaries);
 
   // 转生按钮
   const rebirthBtn = document.getElementById("rebirth-btn");
@@ -1606,46 +1762,8 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      relEl.innerHTML = rels
-        .map((rel, idx) => {
-          const fav = rel.favorability ?? 0;
-          const level = rel.relationship_level || "neutral";
-          const label = rel.relationship_label || "陌生人";
-          const pct = Math.max(
-            0,
-            Math.min(100, Math.round(((fav + 100) / 200) * 100)),
-          );
-          return `
-                <div class="rel-item" data-rel-id="${rel.target_agent_id || idx}">
-                    <div class="rel-item-left">
-                        <span class="rel-name">${escapeHtml(rel.target_name || rel.target_agent_id || "未知")}</span>
-                        <div class="rel-meta">
-                            <span class="rel-label ${level}">${escapeHtml(label)}</span>
-                        </div>
-                    </div>
-                    <div class="rel-right">
-                        <div class="rel-favor-bar">
-                            <div class="rel-favor-fill ${level}" style="width:${pct}%"></div>
-                        </div>
-                        <span class="rel-favor-value">${fav}</span>
-                    </div>
-                </div>`;
-        })
-        .join("");
-
-      // 缓存关系数据供抽屉使用
       relEl._relationships = rels;
-
-      // 绑定点击事件
-      relEl.querySelectorAll(".rel-item").forEach((item) => {
-        item.addEventListener("click", () => {
-          const id = item.dataset.relId;
-          const rel = relEl._relationships.find(
-            (r) => (r.target_agent_id || "") === id,
-          );
-          if (rel) openRelationshipDrawer(rel);
-        });
-      });
+      renderRelationshipCards(relEl, rels);
     } catch (err) {
       // 忽略错误
     }
