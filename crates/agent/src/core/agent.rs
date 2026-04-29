@@ -126,6 +126,8 @@ pub struct Agent {
 
     /// Session Triage Engine 后台任务句柄（每游戏日重生）
     pub(crate) session_triage_handle: Option<tokio::task::JoinHandle<Option<String>>>,
+    /// 引擎对应的游戏日（摘要提交时需用此值，非当前 game_day）
+    pub(crate) session_triage_game_day: Option<i64>,
 
     /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
     pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,
@@ -204,6 +206,7 @@ impl Agent {
             server_assigned_name: None,
             immediate_handler: None,
             session_triage_handle: None,
+            session_triage_game_day: None,
             server_error_feedback: Arc::new(Mutex::new(None)),
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
