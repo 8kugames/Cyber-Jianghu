@@ -39,6 +39,9 @@ pub(super) fn serialize_attributes_with_skills(state: &AgentState) -> Result<ser
         json["_skills"] = serde_json::to_value(&state.skills)
             .map_err(|e| anyhow::anyhow!("Agent {} skills 序列化失败: {}", state.agent_id, e))?;
     }
+    if !state.status.max_modifiers.is_empty() {
+        json["_max_modifiers"] = serde_json::to_value(&state.status.max_modifiers)?;
+    }
     Ok(json)
 }
 

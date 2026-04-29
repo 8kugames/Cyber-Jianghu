@@ -28,10 +28,97 @@ pub enum StreamChunk {
         prompt_tokens: u64,
         completion_tokens: u64,
     },
+    /// 流结束，但服务端未返回 usage（需要估算）
+    DoneEstimation {
+        completion_chars: u64,
+    },
 }
 
 /// SSE 流类型
 pub type LlmStream = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>;
+
+/// 包装流，自动记录 token 用量
+///
+/// 当流产出 `Done` 或 `DoneEstimation` chunk 时，自动调用 `record_token_usage`。
+pub struct UsageTrackingStream {
+    inner: LlmStream,
+    provider: super::direct_client::LlmProvider,
+    model: String,
+    recorded: bool,
+}
+
+impl UsageTrackingStream {
+    pub fn new(inner: LlmStream, provider: super::direct_client::LlmProvider, model: String) -> Self {
+        Self {
+            inner,
+            provider,
+            model,
+            recorded: false,
+        }
+    }
+}
+
+impl Stream for UsageTrackingStream {
+    type Item = Result<StreamChunk>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        use std::pin::Pin as PinAlias;
+        use futures_core::Stream as StreamTrait;
+
+        let stream = PinAlias::new(&mut self.as_mut().get_mut().inner);
+        match StreamTrait::poll_next(stream, cx) {
+            Poll::Ready(Some(result)) => {
+                match &result {
+                    Ok(chunk) => {
+                        match chunk {
+                            StreamChunk::Done { prompt_tokens, completion_tokens } => {
+                                if !self.recorded {
+                                    self.recorded = true;
+                                    super::token_tracking::record_token_usage(
+                                        &self.provider,
+                                        &self.model,
+                                        *prompt_tokens,
+                                        *completion_tokens,
+                                    );
+                                    tracing::debug!(
+                                        "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
+                                        self.provider.as_str(),
+                                        self.model,
+                                        prompt_tokens,
+                                        completion_tokens
+                                    );
+                                }
+                            }
+                            StreamChunk::DoneEstimation { completion_chars } => {
+                                if !self.recorded {
+                                    self.recorded = true;
+                                    let est_tokens = (completion_chars / 3).max(1);
+                                    super::token_tracking::record_token_usage(
+                                        &self.provider,
+                                        &self.model,
+                                        0,
+                                        est_tokens,
+                                    );
+                                    tracing::debug!(
+                                        "UsageTrackingStream recorded (est): provider={}, model={}, completion_est={}",
+                                        self.provider.as_str(),
+                                        self.model,
+                                        est_tokens
+                                    );
+                                }
+                            }
+                            StreamChunk::Delta(_) => {}
+                        }
+                    }
+                    Err(_) => {}
+                }
+                Poll::Ready(Some(result))
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
 
 // ============================================================================
 // 流累积器
@@ -42,6 +129,8 @@ pub struct StreamAccumulator {
     content: String,
     prompt_tokens: u64,
     completion_tokens: u64,
+    /// 是否已收到实际 usage 数据
+    has_real_usage: bool,
 }
 
 impl Default for StreamAccumulator {
@@ -56,6 +145,7 @@ impl StreamAccumulator {
             content: String::new(),
             prompt_tokens: 0,
             completion_tokens: 0,
+            has_real_usage: false,
         }
     }
 
@@ -69,6 +159,14 @@ impl StreamAccumulator {
             } => {
                 self.prompt_tokens = prompt_tokens;
                 self.completion_tokens = completion_tokens;
+                self.has_real_usage = true;
+            }
+            StreamChunk::DoneEstimation { completion_chars } => {
+                // 服务端未返回 usage，基于字符数估算
+                // 估算规则：中文 ~2 chars/token，英文/代码 ~4 chars/token
+                // 简单混合估算：~3 chars/token
+                self.completion_tokens = (completion_chars / 3).max(1);
+                self.has_real_usage = false;
             }
         }
     }
@@ -90,9 +188,9 @@ impl StreamAccumulator {
         self.content
     }
 
-    /// 获取 token 用量 (prompt_tokens, completion_tokens)
-    pub fn token_stats(&self) -> (u64, u64) {
-        (self.prompt_tokens, self.completion_tokens)
+    /// 获取 token 用量 (prompt_tokens, completion_tokens, has_real_usage)
+    pub fn token_stats(&self) -> (u64, u64, bool) {
+        (self.prompt_tokens, self.completion_tokens, self.has_real_usage)
     }
 }
 
@@ -105,6 +203,8 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
     let stream = async_stream::stream! {
         let mut buffer = String::new();
         let mut stream = response.bytes_stream();
+        let mut last_usage: Option<(u64, u64)> = None;
+        let mut completion_content = String::new();
 
         while let Some(chunk_result) = futures_util::StreamExt::next(&mut stream).await {
             let bytes = match chunk_result {
@@ -131,10 +231,18 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                     let data = &line[6..];
 
                     if data == "[DONE]" {
-                        yield Ok(StreamChunk::Done {
-                            prompt_tokens: 0,
-                            completion_tokens: 0,
-                        });
+                        // [DONE] 不携带 usage，使用最后记录的 usage
+                        if let Some((pt, ct)) = last_usage {
+                            yield Ok(StreamChunk::Done {
+                                prompt_tokens: pt,
+                                completion_tokens: ct,
+                            });
+                        } else {
+                            // 服务端从未返回 usage，基于已累积的内容估算
+                            yield Ok(StreamChunk::DoneEstimation {
+                                completion_chars: completion_content.len() as u64,
+                            });
+                        }
                         return;
                     }
 
@@ -144,22 +252,13 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                                 if let Some(ref content) = choice.delta.content
                                     && !content.is_empty()
                                 {
+                                    completion_content.push_str(content);
                                     yield Ok(StreamChunk::Delta(content.clone()));
                                 }
                             }
-                            // 最后一个 chunk 可能包含 usage
-                            if let Some(ref usage) = resp.usage
-                                && (resp.choices.is_empty()
-                                    || resp
-                                        .choices
-                                        .last()
-                                        .map(|c| c.finish_reason.is_some())
-                                        .unwrap_or(false))
-                            {
-                                yield Ok(StreamChunk::Done {
-                                    prompt_tokens: usage.prompt_tokens,
-                                    completion_tokens: usage.completion_tokens,
-                                });
+                            // 记录 usage（即使不是最后一个 chunk）
+                            if let Some(ref usage) = resp.usage {
+                                last_usage = Some((usage.prompt_tokens, usage.completion_tokens));
                             }
                         }
                         Err(e) => {
@@ -232,6 +331,24 @@ mod tests {
             completion_tokens: 5,
         });
         assert_eq!(acc.content(), "hello world");
+        let (pt, ct, has_real) = acc.token_stats();
+        assert_eq!(pt, 10);
+        assert_eq!(ct, 5);
+        assert!(has_real);
+    }
+
+    #[test]
+    fn test_accumulator_estimation() {
+        let mut acc = StreamAccumulator::new();
+        acc.push(StreamChunk::Delta("hello world".to_string()));
+        acc.push(StreamChunk::DoneEstimation {
+            completion_chars: 11,
+        });
+        assert_eq!(acc.content(), "hello world");
+        let (pt, ct, has_real) = acc.token_stats();
+        assert_eq!(pt, 0); // prompt_tokens 未记录
+        assert_eq!(ct, 11 / 3); // ~3 chars/token
+        assert!(!has_real);
     }
 
     #[test]

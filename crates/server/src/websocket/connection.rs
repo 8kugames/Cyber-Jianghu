@@ -25,6 +25,7 @@ pub type ConnectionManager = Arc<RwLock<HashMap<Uuid, Connection>>>;
 
 #[derive(Debug, Clone)]
 pub struct Connection {
+    pub connection_id: Uuid,
     pub agent_id: Uuid,
     pub device_id: Uuid,
     pub agent_name: String,
@@ -40,6 +41,7 @@ impl Connection {
         sender: tokio::sync::mpsc::Sender<Message>,
     ) -> Self {
         Self {
+            connection_id: Uuid::new_v4(),
             agent_id,
             device_id,
             agent_name,
@@ -55,7 +57,8 @@ impl Connection {
         if self.sender.try_send(msg).is_err() {
             tracing::warn!(
                 "[ws] channel full, message dropped: agent_id={:?}, agent_name={}",
-                self.agent_id, self.agent_name
+                self.agent_id,
+                self.agent_name
             );
             return Err("Channel full or closed".into());
         }

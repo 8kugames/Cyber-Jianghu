@@ -834,7 +834,9 @@ impl IntentWorker {
                 let threshold = lesson_cfg.map(|c| c.threshold).unwrap_or(
                     crate::game_data::types::unified_config::LessonConfig::DEFAULT_THRESHOLD,
                 );
-                let cause_map = lesson_cfg.map(|c| c.cause_advice_map.clone()).unwrap_or_default();
+                let cause_map = lesson_cfg
+                    .map(|c| c.cause_advice_map.clone())
+                    .unwrap_or_default();
                 super::lessons::record_death_lesson(
                     &self.db_pool,
                     &notif.cause,

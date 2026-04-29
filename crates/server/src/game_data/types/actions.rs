@@ -286,6 +286,7 @@ impl ActionRequirement {
 #[allow(dead_code)]
 impl ActionEffect {
     pub const EFFECT_TYPE_ATTRIBUTE_CHANGE: &str = "attribute_change";
+    pub const EFFECT_TYPE_ATTRIBUTE_MAX_CHANGE: &str = "attribute_max_change";
     pub const EFFECT_TYPE_ADD_ITEM: &str = "add_item";
     pub const EFFECT_TYPE_REMOVE_ITEM: &str = "remove_item";
     pub const EFFECT_TYPE_TELEPORT: &str = "teleport";

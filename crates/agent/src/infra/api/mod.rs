@@ -742,7 +742,9 @@ pub fn create_http_state(
             Err(e) => {
                 tracing::error!(
                     "[soul_cycle] 预注册失败: agent={}, path={:?}, error={}",
-                    current_agent_id, db_path, e
+                    current_agent_id,
+                    db_path,
+                    e
                 );
             }
         }

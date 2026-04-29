@@ -155,7 +155,10 @@ impl StatusComponentExt for StatusComponent {
             collection.attributes.insert(name.clone(), attr);
         }
 
-        Self { collection }
+        Self {
+            collection,
+            max_modifiers: Default::default(),
+        }
     }
 
     fn get_attr(&self, name: &str) -> Option<&Attribute> {

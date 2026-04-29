@@ -86,8 +86,7 @@ pub fn cognitive_decision_with_chain(
                         // 避免工作记忆（环境观察/紧急事件）伪装成对话历史
                         let ws_summary = format!(
                             "Tick {} @ {}",
-                            world_state.tick_id,
-                            &world_state.location.node_id,
+                            world_state.tick_id, &world_state.location.node_id,
                         );
                         engine.push_conversation_turn(
                             world_state.tick_id,

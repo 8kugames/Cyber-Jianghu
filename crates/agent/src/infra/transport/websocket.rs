@@ -516,11 +516,7 @@ impl WebSocketClient {
     }
 
     /// 发送每日 LLM 日志摘要到服务器
-    pub async fn send_daily_summary(
-        &self,
-        game_day: i64,
-        summary: &str,
-    ) -> Result<()> {
+    pub async fn send_daily_summary(&self, game_day: i64, summary: &str) -> Result<()> {
         let msg = ClientMessage::DailySummary {
             game_day,
             summary: summary.to_string(),
@@ -533,9 +529,7 @@ impl WebSocketClient {
                 .context("Not connected to server")?
                 .clone()
         };
-        tx.send(msg)
-            .await
-            .context("Failed to send daily summary")?;
+        tx.send(msg).await.context("Failed to send daily summary")?;
         Ok(())
     }
 
@@ -1002,11 +996,7 @@ impl AgentClient {
     }
 
     /// 发送每日 LLM 日志摘要
-    pub async fn send_daily_summary(
-        &self,
-        game_day: i64,
-        summary: &str,
-    ) -> Result<()> {
+    pub async fn send_daily_summary(&self, game_day: i64, summary: &str) -> Result<()> {
         let client = self.client.read().await;
         client.send_daily_summary(game_day, summary).await
     }

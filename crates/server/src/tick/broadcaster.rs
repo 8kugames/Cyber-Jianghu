@@ -178,15 +178,16 @@ impl Broadcaster {
         let mut sent_count = 0;
 
         // 跨 Agent 传承 Layer 2: 批量加载教训（所有 Agent 共享同一份）
-        let lessons = {
-            let (threshold, limit) = gd.game_rules.data.lesson.as_ref()
+        let lessons =
+            {
+                let (threshold, limit) = gd.game_rules.data.lesson.as_ref()
                 .map(|c| (c.threshold, c.max_broadcast))
                 .unwrap_or((
                     crate::game_data::types::unified_config::LessonConfig::DEFAULT_THRESHOLD,
                     crate::game_data::types::unified_config::LessonConfig::DEFAULT_MAX_BROADCAST,
                 ));
-            super::lessons::fetch_lessons_for_broadcast(db_pool, threshold, limit).await
-        };
+                super::lessons::fetch_lessons_for_broadcast(db_pool, threshold, limit).await
+            };
 
         for agent_state in agent_states {
             let events = event_manager
@@ -338,11 +339,7 @@ impl Broadcaster {
             });
 
             if !has_death_event {
-                let death_message = game_data
-                    .display_messages
-                    .notifications
-                    .death
-                    .clone();
+                let death_message = game_data.display_messages.notifications.death.clone();
                 events.push(WorldEvent {
                     event_type: WorldEventType::SystemNotification,
                     tick_id,
@@ -843,11 +840,7 @@ pub fn build_initial_world_state(
     // 死亡状态事件
     let mut events = Vec::new();
     if !agent_state.is_alive {
-        let death_message = game_data
-            .display_messages
-            .notifications
-            .death
-            .clone();
+        let death_message = game_data.display_messages.notifications.death.clone();
         events.push(WorldEvent {
             event_type: WorldEventType::SystemNotification,
             tick_id,

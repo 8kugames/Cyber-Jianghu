@@ -459,6 +459,22 @@ pub struct RebirthRulesData {
     /// 重生地点 (空字符串 = 使用 spawn_location)
     #[serde(default)]
     pub spawn_location: String,
+
+    /// 重生重试最大次数
+    #[serde(default = "default_rebirth_retry_max")]
+    pub retry_max_attempts: u32,
+
+    /// 重生重试间隔（秒）
+    #[serde(default = "default_rebirth_retry_interval")]
+    pub retry_interval_secs: u64,
+}
+
+fn default_rebirth_retry_max() -> u32 {
+    3
+}
+
+fn default_rebirth_retry_interval() -> u64 {
+    30
 }
 
 impl Default for RebirthRulesData {
@@ -467,6 +483,8 @@ impl Default for RebirthRulesData {
             delay_ticks: 0,
             reset_attributes: true,
             spawn_location: String::new(),
+            retry_max_attempts: default_rebirth_retry_max(),
+            retry_interval_secs: default_rebirth_retry_interval(),
         }
     }
 }

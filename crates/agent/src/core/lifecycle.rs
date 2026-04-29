@@ -512,8 +512,8 @@ impl super::Agent {
                             if let Some(old_handle) = self.session_triage_handle.take() {
                                 match old_handle.await {
                                     Ok(summary_opt) => {
-                                        // 游戏日结束，摘要写入 episodic memory
-                                        if let Some(summary) = summary_opt {
+                                        if let Some(ref summary) = summary_opt {
+                                            // 写入 episodic memory
                                             if let Some(ref mm) = self.memory_manager {
                                                 let importance = self.config.game_rules
                                                     .as_ref()
@@ -541,8 +541,6 @@ impl super::Agent {
                                                         warn!("游戏日摘要写入 episodic memory 失败: {}", e);
                                                     }
                                                 }
-                                            } else {
-                                                warn!("游戏日摘要生成但 MemoryManager 未初始化，摘要丢弃");
                                             }
 
                                             // 提交每日摘要到 Server（重试 + 指数退避）
@@ -554,7 +552,7 @@ impl super::Agent {
 
                                             let mut submitted = false;
                                             for attempt in 0..max_retries {
-                                                match self.client.send_daily_summary(game_day, &summary).await {
+                                                match self.client.send_daily_summary(game_day, summary).await {
                                                     Ok(()) => {
                                                         info!(
                                                             "游戏日 {} 摘要已提交 Server (attempt {})",
@@ -576,8 +574,8 @@ impl super::Agent {
                                                 }
                                             }
                                             if !submitted {
-                                                error!(
-                                                    "游戏日 {} 摘要提交 Server 最终失败（已重试 {} 次），摘要保留在本地",
+                                                warn!(
+                                                    "游戏日 {} 摘要提交 Server 最终失败（已重试 {} 次）",
                                                     game_day, max_retries
                                                 );
                                             }

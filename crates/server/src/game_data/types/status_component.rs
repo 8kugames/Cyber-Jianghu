@@ -17,6 +17,11 @@ use serde::{Deserialize, Serialize};
 pub struct StatusComponent {
     /// 属性集合
     pub collection: AttributeCollection,
+
+    /// 属性上限永久修正值（attribute_name → bonus）
+    /// 叠加在 max_value_formula 计算结果之上，持久化到 DB
+    #[serde(default)]
+    pub max_modifiers: std::collections::HashMap<String, i32>,
 }
 
 impl StatusComponent {
@@ -49,7 +54,10 @@ impl StatusComponent {
             collection.add(attribute);
         }
 
-        Self { collection }
+        Self {
+            collection,
+            max_modifiers: std::collections::HashMap::new(),
+        }
     }
 
     /// 获取属性值
@@ -169,7 +177,10 @@ impl StatusComponent {
             });
         }
 
-        Self { collection }
+        Self {
+            collection,
+            max_modifiers: std::collections::HashMap::new(),
+        }
     }
 
     /// 辅助方法：解析最大值公式
@@ -205,7 +216,8 @@ impl StatusComponent {
         let current = attr.value.get();
         let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
         let max_value =
-            Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context) as i32;
+            Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context) as i32
+                + self.max_modifiers.get(name).copied().unwrap_or(0);
 
         let new_value = (current + delta).clamp(min_value, max_value);
         attr.value.set(new_value);
@@ -219,6 +231,27 @@ impl StatusComponent {
             .attributes
             .get(name)
             .and_then(|attr| attr.metadata.decay_per_tick)
+    }
+
+    /// 永久提升属性上限
+    ///
+    /// 将 delta 叠加到 max_modifiers 中，并立即将 current 提升至新上限
+    pub fn apply_max_change(&mut self, name: &str, delta: i32) -> Result<i32, i32> {
+        if !self.collection.attributes.contains_key(name) {
+            return Err(0);
+        }
+
+        *self
+            .max_modifiers
+            .entry(name.to_string())
+            .or_insert(0) += delta;
+
+        // 同时将当前值提升 delta（修炼获得的上限提升应立即生效）
+        let attr = self.collection.attributes.get_mut(name).unwrap();
+        let current = attr.value.get();
+        let new_current = current + delta;
+        attr.value.set(new_current);
+        Ok(new_current)
     }
 
     /// 检查指定属性是否满足死亡条件

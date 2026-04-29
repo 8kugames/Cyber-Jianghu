@@ -225,6 +225,15 @@ impl ActionExecutor {
                             });
                         }
                     }
+                    ActionEffect::EFFECT_TYPE_ATTRIBUTE_MAX_CHANGE => {
+                        let attribute = effect.get_str("attribute").unwrap_or("unknown");
+                        let value = effect.get_i32("value").unwrap_or(0);
+                        result.add_change(StateChange::AttributeMaxChanged {
+                            agent_id: intent.agent_id,
+                            attribute: attribute.to_string(),
+                            delta: value,
+                        });
+                    }
                     _ => {}
                 }
             }

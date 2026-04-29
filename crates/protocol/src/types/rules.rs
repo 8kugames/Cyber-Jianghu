@@ -39,8 +39,12 @@ use super::entities::{AvailableAction, InitialItem};
 ///
 /// 天道无为：survival_threshold / critical_attack_threshold / hp_critical / hp_force_flee
 /// 等干预字段已移除。Agent 通过 WorldState.attribute_descriptions（体感叙事）自主感知状态。
-fn default_rebirth_retry_max() -> u32 { 3 }
-fn default_rebirth_retry_interval() -> u64 { 30 }
+fn default_rebirth_retry_max() -> u32 {
+    3
+}
+fn default_rebirth_retry_interval() -> u64 {
+    30
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameRules {

@@ -159,7 +159,12 @@ pub fn persist_and_reset() {
                 return;
             }
             if let Err(e) = fs::rename(&tmp_path, &path) {
-                tracing::warn!("[token_tracking] rename 失败: {} -> {:?}: {}", tmp_path.display(), path, e);
+                tracing::warn!(
+                    "[token_tracking] rename 失败: {} -> {:?}: {}",
+                    tmp_path.display(),
+                    path,
+                    e
+                );
             }
         }
     }

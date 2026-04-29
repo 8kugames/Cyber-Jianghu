@@ -84,6 +84,10 @@ data:
         attribute: sanity
         operation: add
         value: 3
+      - effect_type: attribute_change
+        attribute: hp
+        operation: add
+        value: 1
 
   使用:
     name: "使用"
@@ -118,6 +122,11 @@ data:
         attribute: stamina
         min: 1
         cost: 1
+    effects:
+      - effect_type: attribute_change
+        attribute: hp
+        operation: add
+        value: 1
 
   饮水:
     name: "饮水"
@@ -389,6 +398,9 @@ data:
         min: 5
         cost: 0
     effects:
+      - effect_type: attribute_max_change
+        attribute: qi
+        value: 1
       - effect_type: attribute_change
         attribute: qi
         operation: add
@@ -397,11 +409,15 @@ data:
         attribute: sanity
         operation: add
         value: 5
+      - effect_type: attribute_change
+        attribute: hp
+        operation: add
+        value: 3
 
   修炼:
     name: "修炼"
     aliases: ["练功", "练习", "练", "practice", "train", "training"]
-    description: "通过练习提升武功技能进度。必须指定技能 ID（skill_id）。消耗体力，当前无实际技能系统，修炼仅验证 skill_id 有效后返回成功。"
+    description: "通过修炼提升内力上限。消耗体力，永久提升内力（qi）上限值。"
     category: martial
     ooc_risk: low
     skill_progress: 5
@@ -413,8 +429,12 @@ data:
     requirements:
       - requirement_type: attribute
         attribute: stamina
-        min: 15
-        cost: 10
+        min: 8
+        cost: 5
+    effects:
+      - effect_type: attribute_max_change
+        attribute: qi
+        value: 5
 
   # ==========================================================================
   # 社交

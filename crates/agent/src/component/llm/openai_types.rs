@@ -28,6 +28,10 @@ pub(crate) struct OpenAIRequest {
     /// 启用 SSE 流式响应
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// 流式响应选项（用于请求包含 usage 数据）
+    /// 设置 `{"include_usage": true}` 可在流式响应的最后一块获取 token 用量
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<serde_json::Value>,
 }
 
 /// 聊天消息

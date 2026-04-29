@@ -189,8 +189,20 @@ pub async fn agent_register(
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
             crate::websocket::types::SurvivalConfig {
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
-                rebirth_retry_max_attempts: gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts,
-                rebirth_retry_interval_secs: gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs,
+                rebirth_retry_max_attempts: gd
+                    .game_rules
+                    .data
+                    .agent_state
+                    .survival
+                    .rebirth
+                    .retry_max_attempts,
+                rebirth_retry_interval_secs: gd
+                    .game_rules
+                    .data
+                    .agent_state
+                    .survival
+                    .rebirth
+                    .retry_interval_secs,
             },
             gd.game_rules.version.clone(),
             gd.game_rules.data.immediate_events.clone(),
@@ -429,13 +441,11 @@ pub async fn agent_auto_rebirth(
     let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
 
     // 执行转世重生（单事务）
-    let result = db::auto_rebirth_as_new(
+    let result = db::auto_rebirth_agent(
         &state.db_pool,
         payload.old_agent_id,
-        payload.device_id,
-        &payload.name,
-        &payload.system_prompt,
         &spawn_location,
+        true,
         &initial_items_data,
         starting_age_ticks,
     )
@@ -459,30 +469,34 @@ pub async fn agent_auto_rebirth(
 
     // 更新 DashMap（内存缓存）— 旧条目在 death 时已移除
     let new_state = crate::models::AgentState::new(
-        result.new_agent_id,
+        result.agent_id,
         crate::db::get_current_world_tick_id(&state.db_pool)
             .await
             .unwrap_or(0),
     );
-    state.agent_state_cache.insert(result.new_agent_id, new_state);
+    state
+        .agent_state_cache
+        .insert(result.agent_id, new_state);
 
     // 更新 agent_to_device_map
     {
         let mut map = state.agent_to_device_map.write().await;
-        map.remove(&result.old_agent_id);
-        map.insert(result.new_agent_id, payload.device_id);
+        map.insert(result.agent_id, payload.device_id);
     }
 
     info!(
-        "Agent 转世重生成功: old={}, new={}, name={}, spawn={}",
-        result.old_agent_id, result.new_agent_id, result.name, result.spawn_location
+        "Agent 转世重生成功: agent={}, name={}, spawn={}",
+        result.agent_id, result.name, result.spawn_location
     );
 
     Ok(Json(AutoRebirthResponse {
         success: true,
-        message: format!("角色 '{}' 已转世重生到 {}", result.name, result.spawn_location),
-        new_agent_id: result.new_agent_id.to_string(),
-        old_agent_id: result.old_agent_id.to_string(),
+        message: format!(
+            "角色 '{}' 已转世重生到 {}",
+            result.name, result.spawn_location
+        ),
+        new_agent_id: result.agent_id.to_string(),
+        old_agent_id: payload.old_agent_id.to_string(),
         spawn_location: result.spawn_location,
     }))
 }

@@ -472,7 +472,10 @@ impl DirectLlmClient {
         let model = self.config.get_model_with_default();
         if let Some(ref actual_model) = response_data.model {
             if actual_model != &model {
-                info!("[llm] model fallback: requested={}, actual={}", model, actual_model);
+                info!(
+                    "[llm] model fallback: requested={}, actual={}",
+                    model, actual_model
+                );
             }
         }
         if let Some(ref usage) = response_data.usage {
@@ -515,7 +518,7 @@ impl DirectLlmClient {
             }
         }
 
-        let (pt, ct) = acc.token_stats();
+        let (pt, ct, has_real) = acc.token_stats();
         let content = acc.into_content();
 
         // 记录流式 token 用量
@@ -527,10 +530,27 @@ impl DirectLlmClient {
                 ct,
             );
             debug!(
-                "Stream token usage: provider={}, model={}, prompt={}, completion={}",
+                "Stream token usage: provider={}, model={}, prompt={}, completion={}, real_usage={}",
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
-                pt, ct
+                pt,
+                ct,
+                has_real
+            );
+        } else if !has_real {
+            // 服务端未返回 usage，使用估算值
+            let est_ct = (content.len() as u64 / 3).max(1);
+            record_token_usage(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+                0,
+                est_ct,
+            );
+            debug!(
+                "Stream token usage (estimated): provider={}, model={}, prompt=0, completion={}",
+                self.config.provider.as_str(),
+                self.config.get_model_with_default(),
+                est_ct
             );
         }
 
@@ -567,9 +587,11 @@ impl DirectLlmClient {
                 request_builder.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        // 设置 stream: true（clone request 避免修改原请求）
+        // 设置 stream: true 和 stream_options: {"include_usage": true}
+        // 这使得服务端在流式响应的最后一块返回 usage 数据
         let mut stream_request = request.clone();
         stream_request.stream = Some(true);
+        stream_request.stream_options = Some(serde_json::json!({"include_usage": true}));
 
         let response = request_builder.json(&stream_request).send().await?;
 
@@ -608,6 +630,7 @@ impl DirectLlmClient {
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
             stream: None,
+            stream_options: None,
         };
         self.send_streaming_request(&request).await
     }
@@ -632,6 +655,7 @@ impl DirectLlmClient {
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
             stream: None,
+            stream_options: None,
         };
         self.send_streaming_request(&request).await
     }
@@ -650,6 +674,7 @@ impl DirectLlmClient {
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
             stream: None,
+            stream_options: None,
         };
 
         let response_data = self.send_request(&request).await?;
@@ -693,6 +718,7 @@ impl DirectLlmClient {
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
             stream: None,
+            stream_options: None,
         };
 
         debug!("Calling OpenAI-compatible API (system+user)");
@@ -777,6 +803,7 @@ impl DirectLlmClient {
                 tool_choice: Some(serde_json::json!("auto")),
                 enable_thinking: Self::extra_body_for_model(&model),
                 stream: None,
+                stream_options: None,
             };
 
             let response_data = self.send_request(&request).await?;
@@ -852,6 +879,7 @@ impl DirectLlmClient {
             tool_choice: None,
             enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
             stream: None,
+            stream_options: None,
         };
 
         debug!(
@@ -915,6 +943,14 @@ impl LlmClient for DirectLlmClient {
 
     fn supports_tool_calling(&self) -> bool {
         true
+    }
+
+    fn provider_name(&self) -> String {
+        self.config.provider.as_str().to_string()
+    }
+
+    fn model_name(&self) -> String {
+        self.config.get_model_with_default()
     }
 
     async fn complete_with_tools(

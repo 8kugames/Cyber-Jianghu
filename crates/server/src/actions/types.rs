@@ -241,4 +241,14 @@ pub enum StateChange {
         /// 技能 ID（如 martial/sword-basic）
         skill_id: String,
     },
+
+    /// 属性上限变更（永久提升）
+    AttributeMaxChanged {
+        /// Agent ID
+        agent_id: Uuid,
+        /// 属性名
+        attribute: String,
+        /// 变化值
+        delta: i32,
+    },
 }
