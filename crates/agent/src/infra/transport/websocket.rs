@@ -514,6 +514,31 @@ impl WebSocketClient {
             .context("Failed to send soul cycle report")?;
         Ok(())
     }
+
+    /// 发送每日 LLM 日志摘要到服务器
+    pub async fn send_daily_summary(
+        &self,
+        game_day: i64,
+        summary: &str,
+    ) -> Result<()> {
+        let msg = ClientMessage::DailySummary {
+            game_day,
+            summary: summary.to_string(),
+        };
+        let tx = {
+            let state = self.state.read().await;
+            state
+                .intent_tx
+                .as_ref()
+                .context("Not connected to server")?
+                .clone()
+        };
+        tx.send(msg)
+            .await
+            .context("Failed to send daily summary")?;
+        Ok(())
+    }
+
     pub fn game_rules(&self) -> Option<GameRules> {
         self.state.try_read().ok()?.game_rules.clone()
     }
@@ -974,6 +999,16 @@ impl AgentClient {
     ) -> Result<()> {
         let client = self.client.read().await;
         client.send_soul_cycle_report(tick_id, metadata).await
+    }
+
+    /// 发送每日 LLM 日志摘要
+    pub async fn send_daily_summary(
+        &self,
+        game_day: i64,
+        summary: &str,
+    ) -> Result<()> {
+        let client = self.client.read().await;
+        client.send_daily_summary(game_day, summary).await
     }
 
     pub async fn is_connected(&self) -> bool {

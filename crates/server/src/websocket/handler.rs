@@ -90,71 +90,33 @@ pub async fn websocket_handler(
     }
 
     // 3. 获取该设备的角色信息（从数据库查询）
-    let agent_id = if let Some(req_agent_id) = query.agent_id {
-        // 客户端指定了 agent_id，校验其归属并允许热切换
-        match crate::db::get_agent_by_id(&state.db_pool, req_agent_id).await {
-            Ok(agent) if agent.device_id == query.device_id => {
-                if agent.retired_at.is_some() {
-                    info!(
-                        "Device {} requested retired agent {}, waiting for new registration",
-                        query.device_id, agent.agent_id
-                    );
-                    uuid::Uuid::nil()
-                } else {
-                    info!(
-                        "Device {} explicitly switched to agent '{}' ({})",
-                        query.device_id, agent.name, agent.agent_id
-                    );
-                    agent.agent_id
-                }
-            }
-            Ok(_) => {
-                warn!(
-                    "Device {} tried to access agent belonging to another device",
-                    query.device_id
+    // 统一通过 device_id 查找最新角色，避免指定 retired agent_id 导致 nil
+    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
+        Ok(Some(agent)) => {
+            if agent.retired_at.is_some() {
+                info!(
+                    "Device {} has retired agent {}, waiting for new registration",
+                    query.device_id, agent.agent_id
                 );
                 uuid::Uuid::nil()
-            }
-            Err(e) => {
-                warn!(
-                    "Failed to query explicitly requested agent {}: {}",
-                    req_agent_id, e
+            } else {
+                info!(
+                    "Device {} has agent '{}' ({})",
+                    query.device_id, agent.name, agent.agent_id
                 );
-                uuid::Uuid::nil()
+                agent.agent_id
             }
         }
-    } else {
-        // 回退逻辑：取设备下最新活跃/死亡角色
-        match crate::db::get_agent_by_device_id(&state.db_pool, query.device_id).await {
-            Ok(Some(agent)) => {
-                // 检查角色是否已死亡（但允许连接，供后续重生）
-                if agent.retired_at.is_some() {
-                    // 角色已归隐，视作无有效角色（返回 nil）
-                    info!(
-                        "Device {} has retired agent {}, waiting for new registration",
-                        query.device_id, agent.agent_id
-                    );
-                    uuid::Uuid::nil()
-                } else {
-                    info!(
-                        "Device {} has agent '{}' ({})",
-                        query.device_id, agent.name, agent.agent_id
-                    );
-                    agent.agent_id
-                }
-            }
-            Ok(None) => {
-                // 设备验证通过但没有角色，允许连接但标记为待注册状态
-                info!(
-                    "Device {} connected without agent, waiting for character registration",
-                    query.device_id
-                );
-                uuid::Uuid::nil()
-            }
-            Err(e) => {
-                warn!("Failed to query agent by device_id: {}", e);
-                uuid::Uuid::nil()
-            }
+        Ok(None) => {
+            info!(
+                "Device {} connected without agent, waiting for character registration",
+                query.device_id
+            );
+            uuid::Uuid::nil()
+        }
+        Err(e) => {
+            warn!("Failed to query agent by device_id: {}", e);
+            uuid::Uuid::nil()
         }
     };
 
@@ -227,19 +189,22 @@ async fn handle_websocket(
 
     // 添加到连接管理器（使用 device_id 作为 key）
     // 重连时：先移除旧连接，确保旧 send_task 收到通道关闭信号并退出
-    {
+    let my_connection_id = {
         let mut connections = state.connection_manager.write().await;
         // 如果该 device_id 已有连接，先移除（触发旧 send_task 退出）
         connections.remove(&device_id);
         let connection = Connection::new(agent_id, device_id, agent_name.clone(), tx.clone());
+        let conn_id = connection.connection_id;
         connections.insert(device_id, connection);
         info!(
-            "Agent '{}' added to online list (device={}). Total online: {}",
+            "Agent '{}' added to online list (device={}, conn={}). Total online: {}",
             agent_name,
             device_id,
+            conn_id,
             connections.len()
         );
-    }
+        conn_id
+    };
 
     // 更新 agent_id → device_id 反向映射（用于 WebSocket 广播）
     // 重要：WebSocket 重连时需要更新映射，因为 agent_register 只在首次注册时调用
@@ -271,6 +236,8 @@ async fn handle_websocket(
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
         let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
+        let rebirth_retry_max_attempts = gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts;
+        let rebirth_retry_interval_secs = gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
         let intent_batch = gd.game_rules.data.intent_batch.clone();
@@ -278,6 +245,8 @@ async fn handle_websocket(
 
         let survival = super::types::SurvivalConfig {
             rebirth_delay_ticks,
+            rebirth_retry_max_attempts,
+            rebirth_retry_interval_secs,
         };
         let game_rules = build_game_rules_from_config(
             tick_duration_secs,
@@ -331,6 +300,8 @@ async fn handle_websocket(
             tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
             survival = super::types::SurvivalConfig {
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
+                rebirth_retry_max_attempts: gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts,
+                rebirth_retry_interval_secs: gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs,
             };
             game_rules_version = gd.game_rules.version.clone();
             immediate_events = gd.game_rules.data.immediate_events.clone();
@@ -754,20 +725,32 @@ async fn handle_websocket(
         _ = heartbeat_task => {},
     }
 
-    // 清理连接
+    // 清理连接：仅删除自己创建的连接（新连接可能已接管同一 device_id）
     {
         let mut connections = state.connection_manager.write().await;
-        connections.remove(&device_id);
-        info!(
-            "Agent '{}' disconnected. Total online: {}",
-            agent_name,
-            connections.len()
-        );
+        let should_remove = connections
+            .get(&device_id)
+            .map(|c| c.connection_id == my_connection_id)
+            .unwrap_or(false);
+        if should_remove {
+            connections.remove(&device_id);
+            info!(
+                "Agent '{}' disconnected (conn={}). Total online: {}",
+                agent_name,
+                my_connection_id,
+                connections.len()
+            );
+        } else {
+            info!(
+                "Agent '{}' handler exiting, new connection already took over (device={}). Total online: {}",
+                agent_name,
+                device_id,
+                connections.len()
+            );
+        }
     }
 
-    // 清理 agent_to_device_map（避免死亡通知发送到已断连设备）
-    // 交叉验证：如果 connection_manager 中该 device_id 仍有活跃连接，
-    // 说明新连接已接管，跳过删除以避免竞态
+    // 清理 agent_to_device_map：仅在没有活跃连接时删除
     if agent_id != uuid::Uuid::nil() {
         let has_active_connection = {
             let connections = state.connection_manager.read().await;
@@ -829,6 +812,9 @@ async fn handle_client_message(
             agent_id: msg_agent_id,
             metadata,
         } => handle_soul_cycle_report(device_id, msg_agent_id, tick_id, &metadata, state).await,
+        ClientMessage::DailySummary { game_day, summary } => {
+            handle_daily_summary(device_id, game_day, &summary, state).await
+        }
     }
 }
 
@@ -1330,6 +1316,52 @@ async fn handle_soul_cycle_report(
             agent_id, tick_id, e
         );
     }
+
+    Ok(())
+}
+
+/// 处理每日 LLM 日志摘要上报
+///
+/// Agent 通过 WebSocket DailySummary 消息上报游戏日结束时的 LLM 事件摘要。
+/// Server 注入 created_at 时间戳（服务器权威时间），然后 UPSERT 到数据库。
+async fn handle_daily_summary(
+    device_id: uuid::Uuid,
+    game_day: i64,
+    summary: &str,
+    state: &Arc<crate::state::AppState>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 通过 device_id 查找当前 agent
+    let agent_id = match crate::db::get_agent_by_device_id(&state.db_pool, device_id).await {
+        Ok(Some(agent)) => agent.agent_id,
+        Ok(None) => return Err("无关联角色".into()),
+        Err(e) => return Err(format!("查询角色失败: {}", e).into()),
+    };
+
+    // Server 注入时间戳（服务器权威时间，非客户端）
+    let created_at = chrono::Utc::now().timestamp_millis();
+
+    debug!(
+        "收到每日摘要：agent_id={}, game_day={}, summary_len={}",
+        agent_id,
+        game_day,
+        summary.len()
+    );
+
+    if let Err(e) =
+        crate::db::upsert_agent_daily_summary(&state.db_pool, agent_id, game_day, summary, created_at)
+            .await
+    {
+        error!(
+            "写入每日摘要失败: agent_id={}, game_day={}, err={}",
+            agent_id, game_day, e
+        );
+        return Err(format!("写入每日摘要失败: {}", e).into());
+    }
+
+    info!(
+        "每日摘要已存储: agent_id={}, game_day={}",
+        agent_id, game_day
+    );
 
     Ok(())
 }

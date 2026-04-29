@@ -196,6 +196,44 @@ async fn collect_agents(
         })
         .collect();
 
+    // 批量查询：每日 LLM 日志摘要（agent_daily_summaries）
+    // LEFT JOIN，agent 在本周期无摘要时不影响主查询
+    let ticks_per_hour = get_ticks_per_hour().await.unwrap_or(1);
+    let period_game_days = (
+        (period_start / (ticks_per_hour * 24)) as i64,
+        (period_end / (ticks_per_hour * 24)) as i64,
+    );
+
+    let daily_summary_rows = sqlx::query(
+        r#"
+        SELECT ads.agent_id, ads.game_day, ads.summary
+        FROM agent_daily_summaries ads
+        INNER JOIN agents a ON ads.agent_id = a.agent_id
+        WHERE ads.game_day BETWEEN $1 AND $2
+        ORDER BY ads.agent_id, ads.game_day ASC
+        "#,
+    )
+    .bind(period_game_days.0)
+    .bind(period_game_days.1)
+    .fetch_all(db_pool)
+    .await
+    .context("查询每日摘要失败")?;
+
+    // 按 agent_id 分组，所有 game_day 摘要拼接为一个字符串
+    let daily_summaries_map: std::collections::HashMap<uuid::Uuid, String> = daily_summary_rows
+        .iter()
+        .fold(std::collections::HashMap::new(), |mut acc, row| {
+            let agent_id: uuid::Uuid = row.get("agent_id");
+            let game_day: i64 = row.get("game_day");
+            let summary: String = row.get("summary");
+            acc.entry(agent_id)
+                .and_modify(|s| {
+                    *s += &format!("\n[游戏日 {}] {}", game_day, summary);
+                })
+                .or_insert_with(|| format!("[游戏日 {}] {}", game_day, summary));
+            acc
+        });
+
     // 批量查询：死亡状态（使用窗口函数）
     let death_rows = sqlx::query(
         r#"
@@ -238,11 +276,16 @@ async fn collect_agents(
                 .map(|(k, v)| (k, v as i32))
                 .collect();
 
-            let narratives: Vec<String> = narratives_map
-                .get(&agent_id)
-                .cloned()
-                .map(|n| vec![n])
-                .unwrap_or_default();
+            // 优先使用每日摘要（agent_daily_summaries），fallback 到 per-tick narratives
+            let narratives: Vec<String> = if let Some(daily) = daily_summaries_map.get(&agent_id) {
+                vec![daily.clone()]
+            } else {
+                narratives_map
+                    .get(&agent_id)
+                    .cloned()
+                    .map(|n| vec![n])
+                    .unwrap_or_default()
+            };
 
             let died_this_period = death_agents.contains(&agent_id);
 

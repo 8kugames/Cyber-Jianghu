@@ -38,10 +38,10 @@ pub use common::init_db_pool;
 
 // 导出公共API - Agent操作
 pub use agent_ops::{
-    AutoRebirthResult, DeviceConnectResult, RebirthResult, auto_rebirth_agent, connect_device,
-    get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
-    rebirth_agent, register_agent_transactional, update_agent_location, update_agent_online,
-    update_device_last_seen, verify_device_token,
+    AutoRebirthAsNewResult, DeviceConnectResult, RebirthResult, auto_rebirth_as_new,
+    connect_device, get_agent_by_device_id, get_agent_by_id, get_all_agents,
+    get_intent_timeout_stats, rebirth_agent, register_agent_transactional, update_agent_location,
+    update_agent_online, update_device_last_seen, verify_device_token,
 };
 
 // 导出公共API - AgentState操作
@@ -54,7 +54,7 @@ pub use state_ops::{
 pub use state_ops::{create_tick_log, update_tick_log};
 
 // 导出公共API - Agent动作日志操作
-pub use state_ops::{batch_insert_action_logs, update_soul_cycle_metadata};
+pub use state_ops::{batch_insert_action_logs, update_soul_cycle_metadata, upsert_agent_daily_summary};
 
 // 导出公共API - 涌现：跨 tick 动作观察
 pub use state_ops::get_recent_actions_batch;
