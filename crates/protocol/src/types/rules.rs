@@ -39,7 +39,10 @@ use super::entities::{AvailableAction, InitialItem};
 ///
 /// 天道无为：survival_threshold / critical_attack_threshold / hp_critical / hp_force_flee
 /// 等干预字段已移除。Agent 通过 WorldState.attribute_descriptions（体感叙事）自主感知状态。
+fn default_rebirth_retry_max() -> u32 { 3 }
+fn default_rebirth_retry_interval() -> u64 { 30 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GameRules {
     /// Tick 周期（秒）
     pub tick_duration_secs: u64,
@@ -77,6 +80,14 @@ pub struct GameRules {
     #[serde(default)]
     pub rebirth_delay_ticks: i32,
 
+    /// 自动重生重试次数
+    #[serde(default = "default_rebirth_retry_max")]
+    pub rebirth_retry_max_attempts: u32,
+
+    /// 自动重生重试间隔（秒）
+    #[serde(default = "default_rebirth_retry_interval")]
+    pub rebirth_retry_interval_secs: u64,
+
     /// 寿命配置（可选，不配置则使用 LifespanRules 默认值）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifespan: Option<LifespanRules>,
@@ -84,6 +95,51 @@ pub struct GameRules {
     /// 日历配置（可选，从 time.yaml 下发，Agent 用于计算 game_day）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calendar: Option<CalendarConfig>,
+
+    /// 每日 LLM 日志摘要提交配置
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_summary: Option<DailySummaryConfig>,
+}
+
+/// 每日摘要提交配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DailySummaryConfig {
+    /// 发送失败时的最大重试次数
+    pub max_retries: u32,
+    /// 超过此 tick 数后丢弃（防止跨 game_day 重试）
+    pub ttl_ticks: i64,
+}
+
+impl Default for DailySummaryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            ttl_ticks: 10080, // 7 游戏日 × 24h × 60m = 10080 ticks（假设 ticks_per_hour=1）
+        }
+    }
+}
+
+impl Default for GameRules {
+    fn default() -> Self {
+        Self {
+            tick_duration_secs: 60,
+            available_actions: Vec::new(),
+            initial_items: Vec::new(),
+            survival_actions: Vec::new(),
+            version: "0.0.1".into(),
+            last_updated: chrono::Utc::now().to_rfc3339(),
+            intent_batch: None,
+            reflector_narrative: None,
+            immediate_events: None,
+            rebirth_delay_ticks: 0,
+            rebirth_retry_max_attempts: default_rebirth_retry_max(),
+            rebirth_retry_interval_secs: default_rebirth_retry_interval(),
+            lifespan: None,
+            calendar: None,
+            daily_summary: None,
+        }
+    }
 }
 
 /// 日历配置（数据驱动，从 time.yaml 下发）
@@ -398,6 +454,14 @@ pub struct EventTriageConfig {
 
     /// 保留最近 N 个游戏日的事件
     pub retention_game_days: u32,
+
+    /// 每日摘要写入 episodic memory 的 importance 值
+    #[serde(default = "default_daily_summary_importance")]
+    pub daily_summary_importance: f64,
+}
+
+fn default_daily_summary_importance() -> f64 {
+    0.8
 }
 
 impl Default for EventTriageConfig {
@@ -410,6 +474,7 @@ impl Default for EventTriageConfig {
             pre_filter: EventTriagePreFilter::default(),
             context: EventTriageContext::default(),
             retention_game_days: 3,
+            daily_summary_importance: default_daily_summary_importance(),
         }
     }
 }

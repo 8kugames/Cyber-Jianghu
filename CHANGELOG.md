@@ -9,6 +9,12 @@
 
 ### Fixed
 
+- **Agent**: SemanticMemory embedding 修复 — candle 升级 0.9.2 → 0.10.2（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
+- **Agent**: Session Triage 每日摘要写入 episodic memory（之前仅日志输出，未持久化）
+- **Agent**: auto-rebirth spawn 增加重试机制（最多 3 次，间隔 30s），最终失败走 120s 超时兜底 reconnect
+- **Server+Agent**: auto-rebirth 重构 — 转世重生创建新 agent_id，旧 agent 保持 dead 状态（死亡/归隐语义分离）
+- **Protocol**: `EventTriageConfig` 新增 `daily_summary_importance` 字段（数据驱动，消除硬编码）
+
 - **Server**: multi-intent pipeline 失败通知修复
   - Subsequent intent 执行失败时正确发送 `ExecutionResult(success=false)`
   - Subsequent intent persist 失败时正确发送 `ExecutionResult(success=false)`（之前静默丢失通知）
@@ -27,6 +33,13 @@
 
 - **Protocol**: `ServerMessage::AgentDied` 新增 `metadata: Option<Value>` 字段（跨Agent传承 Layer 1）
   - 携带死亡时属性快照（hp/hunger/thirst/sanity）、birth_tick、survival_ticks、death_tick、cause
+
+- **Agent+Server**: 每日 LLM 日志摘要提交 Server 存档
+  - Protocol: `ClientMessage::DailySummary { game_day, summary }`
+  - Server: `agent_daily_summaries` 表（迁移 `016_agent_daily_summaries.sql`），UPSERT，Server 注入 `created_at` 时间戳
+  - Chronicle: `collector.rs` LEFT JOIN `agent_daily_summaries`，每日摘要拼接注入 `AgentSummary.narrative`
+  - Agent: lifecycle 调用 `client.send_daily_summary()`，指数退避重试（`max_retries`，默认 3）
+  - 配置: `game_rules.yaml daily_summary.max_retries` / `daily_summary.ttl_ticks`（默认 10080 = 7 游戏日）
   - `#[serde(skip_serializing_if = "Option::is_none")]` 兼容旧客户端
   - Claw 模式 `DownstreamMessage::AgentDied` 同步透传 metadata
 
@@ -42,6 +55,10 @@
 - **Agent**: bge-small-zh-v1.5 嵌入模型 Docker 集成（Semantic Memory Docker Plan A）
   - Agent Dockerfile 运行阶段自动下载模型三文件（~100MB）
   - 使用 hf-mirror.com（可通过 `--build-arg HF_MIRROR=` 覆盖）
+
+### Breaking Changes
+
+- **`POST /api/v1/agent/auto-rebirth`**: 请求体从 `{ agent_id }` 变更为 `{ device_id, auth_token, old_agent_id, name, system_prompt }`。响应新增 `new_agent_id`、`old_agent_id`。auto-rebirth 现在创建新 agent_id 而非重置旧 agent_id，旧 agent 保持 dead 状态。
 
 ### Fixed
 

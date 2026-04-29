@@ -102,6 +102,11 @@ pub struct DialogueSession {
 ///     reflector_narrative: None,
 ///     immediate_events: None,
 ///     rebirth_delay_ticks: 0,
+///     rebirth_retry_max_attempts: 3,
+///     rebirth_retry_interval_secs: 30,
+///     lifespan: None,
+///     calendar: None,
+///     daily_summary: None,
 /// };
 ///
 /// let msg = ServerMessage::Registered {
@@ -312,6 +317,17 @@ pub enum ClientMessage {
         /// 三魂循环完整元数据
         metadata: SoulCycleMetadata,
     },
+
+    /// 每日 LLM 日志摘要上报（agent → server）
+    ///
+    /// 游戏日结束时由 SessionTriageEngine 生成，提交给 Server 存档。
+    /// Server 接收时注入 created_at 时间戳（服务器权威时间，非客户端）。
+    DailySummary {
+        /// 游戏日编号
+        game_day: i64,
+        /// 格式化摘要内容（由 session_triage.rs 的 produce_daily_summary 生成）
+        summary: String,
+    },
 }
 
 /// 三魂循环元数据
@@ -488,8 +504,11 @@ mod tests {
             intent_batch: None,
             reflector_narrative: None,
             immediate_events: None,
+            rebirth_retry_max_attempts: 3,
+            rebirth_retry_interval_secs: 30,
             lifespan: None,
             calendar: None,
+            daily_summary: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -667,8 +686,11 @@ mod tests {
             intent_batch: None,
             reflector_narrative: None,
             immediate_events: None,
+            rebirth_retry_max_attempts: 3,
+            rebirth_retry_interval_secs: 30,
             lifespan: None,
             calendar: None,
+            daily_summary: None,
         };
         let world_rules = WorldBuildingRules::default();
 

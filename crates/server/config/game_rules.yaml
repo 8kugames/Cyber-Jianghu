@@ -47,6 +47,10 @@ data:
         reset_attributes: true
         # 重生地点 (空字符串 = 使用 spawn_location)
         spawn_location: ""
+        # 自动重生重试次数
+        retry_max_attempts: 3
+        # 自动重生重试间隔（秒）
+        retry_interval_secs: 30
 
     # 出生点配置
     location:
@@ -147,6 +151,8 @@ data:
         max_batch_summary_chars: 500
       # 保留最近 N 个游戏日的事件
       retention_game_days: 3
+      # 每日摘要写入 episodic memory 的 importance (0.0-1.0)
+      daily_summary_importance: 0.8
 
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述
@@ -188,6 +194,13 @@ data:
     death_threshold: 10
     # 离线多久（天）的 Agent 会被清理脚本删除
     offline_cleanup_days: 30
+
+  # 每日 LLM 日志摘要提交配置
+  daily_summary:
+    # 发送失败时的最大重试次数
+    max_retries: 3
+    # 超过此 tick 数后丢弃（防止跨 game_day 重试）
+    ttl_ticks: 10080
 
   # 群像传记配置
   chronicle:

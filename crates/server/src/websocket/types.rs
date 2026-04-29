@@ -34,6 +34,8 @@ pub struct WebSocketQuery {
 /// 天道无为：干预阈值已移除，仅保留重生配置
 pub struct SurvivalConfig {
     pub rebirth_delay_ticks: i32,
+    pub rebirth_retry_max_attempts: u32,
+    pub rebirth_retry_interval_secs: u64,
 }
 
 /// 构建游戏规则（从配置注册表）
@@ -124,6 +126,8 @@ pub fn build_game_rules_from_config(
         reflector_narrative: None,
         immediate_events,
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
+        rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,
+        rebirth_retry_interval_secs: survival.rebirth_retry_interval_secs,
         lifespan: None, // ConfigUpdate 路径不含 lifespan，由注册时下发
         calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {
             cyber_jianghu_protocol::CalendarConfig {
@@ -131,6 +135,7 @@ pub fn build_game_rules_from_config(
                 seasons_per_year: tc.seasons_per_year as u32,
             }
         }),
+        daily_summary: None,
     }
 }
 

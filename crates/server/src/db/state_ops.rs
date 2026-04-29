@@ -439,6 +439,45 @@ pub async fn update_soul_cycle_metadata(
 }
 
 // ============================================================================
+// Agent 每日摘要存档
+// ============================================================================
+
+/// UPSERT agent 每日 LLM 日志摘要
+///
+/// 由 Agent 通过 WebSocket DailySummary 消息上报，游戏日结束时生成。
+/// Server 注入 created_at 时间戳（服务器权威时间）。
+pub async fn upsert_agent_daily_summary(
+    pool: &PgPool,
+    agent_id: uuid::Uuid,
+    game_day: i64,
+    summary: &str,
+    created_at: i64,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO agent_daily_summaries (agent_id, game_day, summary, created_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (agent_id, game_day) DO UPDATE SET
+            summary = EXCLUDED.summary,
+            created_at = EXCLUDED.created_at
+        "#,
+    )
+    .bind(agent_id)
+    .bind(game_day)
+    .bind(summary)
+    .bind(created_at)
+    .execute(pool)
+    .await
+    .context("UPSERT agent_daily_summary 失败")?;
+
+    debug!(
+        "agent_daily_summaries upserted: agent_id={}, game_day={}",
+        agent_id, game_day
+    );
+    Ok(())
+}
+
+// ============================================================================
 // 涌现：跨 tick 动作观察
 // ============================================================================
 
