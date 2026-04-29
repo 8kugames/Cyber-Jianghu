@@ -125,7 +125,7 @@ pub struct Agent {
     pub(crate) immediate_handler: Option<Arc<ImmediateEventHandler>>,
 
     /// Session Triage Engine 后台任务句柄（每游戏日重生）
-    pub(crate) session_triage_handle: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) session_triage_handle: Option<tokio::task::JoinHandle<Option<String>>>,
 
     /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
     pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,

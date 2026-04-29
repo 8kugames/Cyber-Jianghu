@@ -185,8 +185,9 @@ impl AgentState {
                 &attr.metadata.max_value_formula,
                 255.0,
                 &context,
-            );
-            attributes.insert(format!("{}_max", name), max_value as i32);
+            ) as i32
+                + self.status.max_modifiers.get(name).copied().unwrap_or(0);
+            attributes.insert(format!("{}_max", name), max_value);
         }
 
         // 从 AttributeComponent 收集所有先天属性

@@ -891,7 +891,10 @@ pub async fn get_agent_details(
     } else {
         None
     };
-    let max_age = state.game_data.get_lifespan_config().map(|(m, _, _)| m as i64);
+    let max_age = state
+        .game_data
+        .get_lifespan_config()
+        .map(|(m, _, _)| m as i64);
 
     Ok(Json(AgentDetail {
         id: agent_row.get("agent_id"),

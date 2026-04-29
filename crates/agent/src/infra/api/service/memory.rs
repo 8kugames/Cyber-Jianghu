@@ -55,7 +55,9 @@ impl<'a> MemoryService<'a> {
 
     /// 获取每日摘要记忆
     pub fn get_daily_summaries(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
-        self.manager.episodic().get_by_event_type("daily_summary", limit)
+        self.manager
+            .episodic()
+            .get_by_event_type("daily_summary", limit)
     }
 }
 
