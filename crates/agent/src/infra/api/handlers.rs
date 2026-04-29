@@ -843,9 +843,9 @@ pub(super) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> i
 pub(super) async fn get_recent_memory_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let manager_arc = state.memory_manager.read().unwrap().clone();
-    let manager = match manager_arc.as_ref() {
-        Some(m) => m,
+    let guard = state.memory_manager.read().await;
+    let mm = match guard.as_ref() {
+        Some(mm) => mm,
         None => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -855,7 +855,7 @@ pub(super) async fn get_recent_memory_handler(
         }
     };
 
-    let mut mgr = manager.lock().await;
+    let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
     let memories = service.get_recent();
 
@@ -866,9 +866,9 @@ pub(super) async fn get_recent_memory_handler(
 pub(super) async fn get_daily_summaries_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let manager_arc = state.memory_manager.read().unwrap().clone();
-    let manager = match manager_arc.as_ref() {
-        Some(m) => m,
+    let guard = state.memory_manager.read().await;
+    let mm = match guard.as_ref() {
+        Some(mm) => mm,
         None => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -878,7 +878,7 @@ pub(super) async fn get_daily_summaries_handler(
         }
     };
 
-    let mut mgr = manager.lock().await;
+    let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
 
     match service.get_daily_summaries(50) {
@@ -917,9 +917,9 @@ pub(super) async fn search_memory_handler(
     State(state): State<HttpApiState>,
     Json(request): Json<super::dto::MemorySearchRequest>,
 ) -> impl IntoResponse {
-    let manager_arc = state.memory_manager.read().unwrap().clone();
-    let manager = match manager_arc.as_ref() {
-        Some(m) => m,
+    let guard = state.memory_manager.read().await;
+    let mm = match guard.as_ref() {
+        Some(mm) => mm,
         None => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -929,7 +929,7 @@ pub(super) async fn search_memory_handler(
         }
     };
 
-    let mut mgr = manager.lock().await;
+    let mut mgr = mm.write().await;
     let mut service = MemoryService::new(&mut mgr);
     let limit = request.limit.unwrap_or(10);
 
@@ -951,9 +951,9 @@ pub(super) async fn store_memory_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<super::dto::MemoryStoreRequest>,
 ) -> impl IntoResponse {
-    let manager_arc = state.memory_manager.read().unwrap().clone();
-    let manager = match manager_arc.as_ref() {
-        Some(m) => m,
+    let guard = state.memory_manager.read().await;
+    let mm = match guard.as_ref() {
+        Some(mm) => mm,
         None => {
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -971,7 +971,7 @@ pub(super) async fn store_memory_handler(
         .map(|s| s.tick_id)
         .unwrap_or(0);
     let agent_id = *state.agent_id.read().await;
-    let mut mgr = manager.lock().await;
+    let mut mgr = mm.write().await;
     let mut service = MemoryService::new(&mut mgr);
 
     match service
@@ -1679,6 +1679,8 @@ pub(super) async fn register_character_handler(
                                 error!("保存 narrative_config 失败: {}", e);
                             } else {
                                 info!("已保存 narrative_config 到 {:?}", config_path);
+                                // 同步更新内存中的 narrative_config，避免重启后数据不一致
+                                *state.narrative_config.write().await = result.narrative_config.clone();
                             }
                         }
                         Err(e) => error!("序列化 narrative_config 失败: {}", e),
@@ -2131,15 +2133,57 @@ pub struct AttributeMetaResponse {
 pub(super) async fn get_attribute_meta_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let narrative_guard = state.narrative_config.read().await;
-    let narrative = narrative_guard.as_ref();
+    // 1. 优先从内存读取
+    let narrative = {
+        let guard = state.narrative_config.read().await;
+        guard.clone()
+    };
+
+    // 2. 内存为空时，尝试从磁盘加载
+    let narrative = if narrative.is_none() {
+        if let Some(home) = dirs::home_dir() {
+            let path = home
+                .join(".cyber-jianghu")
+                .join("config")
+                .join("narrative_config.json");
+            if path.exists() {
+                match tokio::fs::read_to_string(&path).await {
+                    Ok(content) => {
+                        match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(&content) {
+                            Ok(cfg) => {
+                                info!("从磁盘加载 narrative_config: {:?}", path);
+                                // 回填内存，供后续请求使用
+                                *state.narrative_config.write().await = Some(cfg.clone());
+                                Some(cfg)
+                            }
+                            Err(e) => {
+                                warn!("解析磁盘 narrative_config 失败: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("读取磁盘 narrative_config 失败: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        narrative
+    };
 
     let categories = narrative
+        .as_ref()
         .map(|c| c.attribute_categories.clone())
         .unwrap_or_default();
 
     let mut display_names = HashMap::new();
-    if let Some(n) = narrative {
+    if let Some(n) = narrative.as_ref() {
         for (key, attr) in &n.attributes {
             display_names.insert(key.clone(), attr.display_name.clone());
         }
@@ -3370,7 +3414,7 @@ pub(super) async fn switch_character_handler(
             config.db_dir = data_dir.clone();
 
             let new_mem = match crate::component::memory::MemoryManager::new(config) {
-                Ok(manager) => Some(std::sync::Arc::new(tokio::sync::Mutex::new(manager))),
+                Ok(manager) => Some(std::sync::Arc::new(tokio::sync::RwLock::new(manager))),
                 Err(e) => {
                     tracing::error!("切换角色失败: 无法初始化 MemoryManager - {}", e);
                     return (
@@ -3384,7 +3428,7 @@ pub(super) async fn switch_character_handler(
                         .into_response();
                 }
             };
-            *state.memory_manager.write().unwrap() = new_mem;
+            *state.memory_manager.write().await = new_mem;
         }
 
         // 4. Dream Store (按需加载，从文件读取)

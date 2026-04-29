@@ -1013,6 +1013,17 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         info!("LLM container 已注入 HttpApiState（支持热重载）");
     }
 
+    // 注入 MemoryManager 到 HttpApiState（与 Agent 共享同一实例）
+    if let Some(mm) = agent.memory_manager() {
+        // mm is Arc<tokio::sync::RwLock<MemoryManager>>
+        // Clone the Arc to share with HttpApiState
+        let mm = Arc::clone(&mm);
+        *api_state.memory_manager.write().await = Some(mm);
+        info!("MemoryManager 已注入 HttpApiState（与 Agent 共享）");
+    } else {
+        info!("Agent 未创建 MemoryManager");
+    }
+
     // 死亡事件回调：Cognitive 模式通过 lifecycle 处理死亡标记
     if let Some(death_tx) = cognitive_death_event_tx {
         let death_tx_clone = death_tx.clone();

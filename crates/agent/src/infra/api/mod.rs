@@ -152,8 +152,8 @@ pub struct HttpApiState {
     pub relationship_store: Arc<std::sync::RwLock<Option<Arc<RelationshipStore>>>>,
     /// 寿命计算器，计算年龄和老化效果
     /// 记忆管理器，管理工作记忆、情景记忆和语义记忆
-    /// 需要 Mutex 支持异步操作
-    pub memory_manager: Arc<std::sync::RwLock<Option<Arc<Mutex<MemoryManager>>>>>,
+    /// 与 Agent 共享同一 Arc<RwLock<MemoryManager>> 实例
+    pub memory_manager: Arc<tokio::sync::RwLock<Option<Arc<tokio::sync::RwLock<MemoryManager>>>>>,
     /// 记忆管理器基础配置模板（用于热切角色）
     pub memory_config_template: Option<crate::component::memory::MemoryManagerConfig>,
     /// 意图验证器，验证意图是否符合人设
@@ -686,8 +686,8 @@ pub fn create_http_state(
     };
     let memory_manager = MemoryManager::new(memory_config_template.clone())
         .ok()
-        .map(|m| Arc::new(Mutex::new(m)));
-    let memory_manager = Arc::new(std::sync::RwLock::new(memory_manager));
+        .map(|m| Arc::new(tokio::sync::RwLock::new(m)));
+    let memory_manager = Arc::new(tokio::sync::RwLock::new(memory_manager));
 
     // 初始化对话客户端（使用空操作处理器）
     // 实际对话事件处理由外部系统通过 API 完成
@@ -825,7 +825,7 @@ impl HttpApiState {
 
     /// 设置记忆管理器
     pub fn with_memory_manager(mut self, manager: MemoryManager) -> Self {
-        self.memory_manager = Arc::new(std::sync::RwLock::new(Some(Arc::new(Mutex::new(manager)))));
+        self.memory_manager = Arc::new(tokio::sync::RwLock::new(Some(Arc::new(tokio::sync::RwLock::new(manager)))));
         self
     }
 

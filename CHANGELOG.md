@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Agent**: MemoryManager 在 Agent 生命周期与 HTTP API handlers 间共享（之前各自创建独立实例，导致 `/api/v1/memory/recent` 等接口始终返回空）
 - **Agent**: 社交事件名字解析修复 — `social.rs` 名字解析链路 `name_map → RelationshipStore → "陌生人"`，防止非附近实体的已有真名被覆写回"陌生人"（根因：`entities` 仅含当前在线附近实体，离线/不在范围内时直接 fallback "陌生人"）
 - **Agent Panel**: 关系列表从全宽条改为紧凑卡片网格，详情从侧边抽屉改为居中 Modal
 - **Agent Panel**: Modal 新增 target Agent ID 展示（可选中复制）和密语沟通记录（从 soul-cycles 提取）
