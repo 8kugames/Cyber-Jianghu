@@ -377,7 +377,7 @@ event_id 必须是以下值之一：{event_ids}"#,
             batch_desc.join("；"),
         );
 
-        // TODO: 写入 episodic memory（需要 MemoryManager 支持 summary 类存储）
+        // 摘要通过 run() 返回值交给 lifecycle 处理（episodic 存储 + server 提交）
         info!("游戏日 {} 摘要: {}", self.game_day, summary);
 
         // 清理过期事件
