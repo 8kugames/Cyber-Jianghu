@@ -589,14 +589,6 @@ async fn main() -> Result<()> {
         // Auth is enforced client-side: frontend stores token in localStorage,
         // sends it via Bearer header on API calls. API routes have their own middleware.
         .route("/admin/", get(serve_admin_index))
-        .route(
-            "/admin/chronicles",
-            get(|| async { serve_admin_file("chronicles.html") }),
-        )
-        .route(
-            "/admin/agent-daily-summaries",
-            get(|| async { serve_admin_file("agent-daily-summaries.html") }),
-        )
         .route("/admin/{*path}", get(serve_admin))
         // Redirect /admin to /admin/
         .route(

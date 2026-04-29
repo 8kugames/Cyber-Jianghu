@@ -1,0 +1,1231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史记录 | Cyber-Jianghu</title>
+    <link rel="stylesheet" href="css/dashboard.css" />
+    <style>
+        body {
+            background: var(--bg-base);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .page-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
+        }
+
+        .page-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .page-header h1 span {
+            color: var(--accent);
+        }
+
+        .back-btn {
+            padding: 8px 16px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+
+        .back-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* Top-level tab nav */
+        .top-tab-nav {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 4px;
+            width: fit-content;
+        }
+
+        .top-tab-btn {
+            padding: 8px 20px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s;
+            font-family: var(--font-family);
+        }
+
+        .top-tab-btn.active {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .top-tab-btn:not(.active):hover {
+            background: var(--bg-level-2);
+            color: var(--text-primary);
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* ========== Chronicles panel ========== */
+        .chr-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .search-input {
+            padding: 8px 14px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            min-width: 240px;
+            outline: none;
+            transition: all 0.15s;
+            font-family: var(--font-family);
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-muted);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-subtle);
+        }
+
+        .chronicles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            gap: 16px;
+        }
+
+        .chronicle-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 18px;
+            cursor: pointer;
+            transition: all 0.2s var(--ease-out);
+            box-shadow: var(--card-shadow);
+        }
+
+        .chronicle-card:hover {
+            border-color: var(--accent);
+            box-shadow: var(--card-shadow-hover);
+            transform: translateY(-2px);
+        }
+
+        .chronicle-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .chronicle-id {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .chronicle-season {
+            padding: 3px 9px;
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid rgba(20, 184, 166, 0.2);
+        }
+
+        .chronicle-period {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .chronicle-stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: var(--bg-level-2);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .chr-stat-item {
+            text-align: center;
+        }
+
+        .chr-stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .chr-stat-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .chronicle-preview {
+            color: var(--text-secondary);
+            font-size: 12px;
+            line-height: 1.6;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .chronicle-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .status-template { background: var(--warning-muted); color: var(--warning); }
+        .status-llm { background: var(--accent-muted); color: var(--accent); }
+        .status-both { background: var(--success-muted); color: var(--success); }
+        .status-generating { background: var(--accent-muted); color: var(--accent); animation: subtle-pulse 1.5s ease-in-out infinite; }
+
+        @keyframes subtle-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* ========== Experiences panel ========== */
+        .exp-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .filter-select, .filter-input {
+            padding: 8px 12px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            outline: none;
+            font-family: var(--font-family);
+        }
+
+        .filter-select:focus, .filter-input:focus {
+            border-color: var(--accent);
+        }
+
+        .tick-range {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tick-range-sep {
+            color: var(--text-secondary);
+        }
+
+        .exp-table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .exp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .exp-table th {
+            background: var(--bg-level-1);
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        .exp-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            vertical-align: top;
+        }
+
+        .exp-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .exp-table tr:hover td {
+            background: var(--bg-level-1);
+        }
+
+        .tick-badge {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--accent);
+        }
+
+        .mono-text {
+            font-family: monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .exp-action-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: var(--bg-level-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .exp-narrative-full {
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        .exp-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .exp-pagination button {
+            padding: 8px 14px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: var(--font-family);
+        }
+
+        .exp-pagination button:hover:not(:disabled) {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .exp-pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .page-size-select {
+            padding: 8px 12px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            cursor: pointer;
+            font-family: var(--font-family);
+        }
+
+        .page-info {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* ========== Daily Summaries panel ========== */
+        .summaries-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .summaries-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 16px;
+        }
+
+        .summary-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-lg);
+            padding: 18px;
+            transition: all 0.2s var(--ease-out);
+            box-shadow: var(--card-shadow);
+        }
+
+        .summary-card:hover {
+            border-color: var(--accent);
+            box-shadow: var(--card-shadow-hover);
+            transform: translateY(-2px);
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .summary-agent {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .summary-game-day {
+            padding: 3px 9px;
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid rgba(20, 184, 166, 0.2);
+        }
+
+        .summary-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .summary-content {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            background: var(--bg-level-2);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+
+        /* ========== Shared ========== */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.4;
+        }
+
+        .empty-state p {
+            font-size: 15px;
+            margin: 0;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            max-width: 860px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .close-btn {
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            line-height: 1;
+        }
+
+        .close-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 20px;
+        }
+
+        .detail-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 12px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .detail-item {
+            padding: 10px 12px;
+            background: var(--bg-level-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+        }
+
+        .detail-item .label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .detail-item .value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 4px;
+        }
+
+        .detail-tab-nav {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .detail-tab-btn {
+            padding: 6px 14px;
+            background: var(--bg-level-1);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-family);
+        }
+
+        .detail-tab-btn.active {
+            background: var(--accent-muted);
+            color: var(--accent);
+            border-color: rgba(20, 184, 166, 0.3);
+        }
+
+        .detail-tab-content {
+            display: none;
+        }
+
+        .detail-tab-content.active {
+            display: block;
+        }
+
+        .narrative {
+            background: var(--bg-level-2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.8;
+            max-height: 400px;
+            overflow-y: auto;
+            color: var(--text-primary);
+        }
+
+        .highlight-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .highlight-item {
+            display: flex;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--bg-level-2);
+            border-radius: var(--radius-sm);
+            align-items: flex-start;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .highlight-type {
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
+        }
+
+        .type-death { background: var(--error-muted); color: var(--error); }
+        .type-dialogue { background: var(--accent-muted); color: var(--accent); }
+        .type-combat { background: var(--warning-muted); color: var(--warning); }
+        .type-social { background: var(--success-muted); color: var(--success); }
+
+        .highlight-desc {
+            flex: 1;
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .agent-card {
+            padding: 12px;
+            background: var(--bg-level-2);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .agent-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+
+        .agent-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .agent-died {
+            color: var(--error);
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .chronicles-grid,
+            .summaries-grid {
+                grid-template-columns: 1fr;
+            }
+            .detail-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-header">
+        <h1>历史<span>记录</span></h1>
+        <a href="index.html" class="back-btn">← 返回仪表盘</a>
+    </div>
+
+    <!-- Top-level tab navigation -->
+    <div class="top-tab-nav">
+        <button class="top-tab-btn active" data-tab="chronicles" onclick="switchTopTab('chronicles')">群像传记</button>
+        <button class="top-tab-btn" data-tab="experiences" onclick="switchTopTab('experiences')">经历日志</button>
+        <button class="top-tab-btn" data-tab="summaries" onclick="switchTopTab('summaries')">每日摘要</button>
+    </div>
+
+    <!-- ========== Chronicles Panel ========== -->
+    <div id="panel-chronicles" class="tab-panel active">
+        <div class="chr-controls">
+            <input type="text" class="search-input" placeholder="搜索传记内容..." id="chr-search-input" oninput="filterChronicles()">
+            <button class="btn btn-primary" onclick="generateChronicle()">手动生成</button>
+            <button class="btn btn-secondary" onclick="loadChronicles()">刷新</button>
+        </div>
+
+        <div id="chronicles-container" class="chronicles-grid">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- ========== Experiences Panel ========== -->
+    <div id="panel-experiences" class="tab-panel">
+        <div class="exp-controls">
+            <div class="filter-group">
+                <select id="filter-agent" class="filter-select">
+                    <option value="">所有角色</option>
+                </select>
+                <select id="filter-location" class="filter-select">
+                    <option value="">所有位置</option>
+                </select>
+                <select id="filter-action" class="filter-select">
+                    <option value="">所有动作</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <span class="filter-label" style="color: var(--text-secondary); font-size: 12px;">Tick:</span>
+                <div class="tick-range">
+                    <input type="number" id="filter-from-tick" class="filter-input" placeholder="from" style="width:80px;">
+                    <span class="tick-range-sep">-</span>
+                    <input type="number" id="filter-to-tick" class="filter-input" placeholder="to" style="width:80px;">
+                </div>
+            </div>
+            <button class="btn btn-secondary" onclick="resetExpFilters()">重置</button>
+            <button class="btn btn-primary" onclick="loadExperiences()">刷新</button>
+        </div>
+
+        <div class="exp-table-wrap">
+            <table class="exp-table">
+                <thead>
+                    <tr>
+                        <th>Tick</th>
+                        <th>角色</th>
+                        <th>Agent ID</th>
+                        <th>位置</th>
+                        <th>动作</th>
+                        <th>叙事</th>
+                    </tr>
+                </thead>
+                <tbody id="experiences-tbody">
+                    <!-- Rows injected by JS -->
+                </tbody>
+            </table>
+        </div>
+        <div id="exp-loading" class="loading" style="display:none;">加载中...</div>
+        <div id="exp-empty" class="empty-state" style="display:none;">
+            <p>暂无符合条件的经历记录</p>
+        </div>
+
+        <div id="exp-pagination" class="exp-pagination" style="display:none;">
+            <button id="exp-prev-btn" onclick="changeExpPage(-1)">上一页</button>
+            <select id="exp-page-size" class="page-size-select" onchange="changeExpPageSize()">
+                <option value="20">20条/页</option>
+                <option value="50">50条/页</option>
+                <option value="100">100条/页</option>
+            </select>
+            <span id="exp-page-info" class="page-info"></span>
+            <button id="exp-next-btn" onclick="changeExpPage(1)">下一页</button>
+        </div>
+    </div>
+
+    <!-- ========== Daily Summaries Panel ========== -->
+    <div id="panel-summaries" class="tab-panel">
+        <div class="summaries-controls">
+            <input type="text" class="search-input" placeholder="搜索摘要内容..." id="sum-search-input" oninput="filterSummaries()">
+            <select id="sum-agent-filter" class="filter-select">
+                <option value="">所有角色</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadSummaries()">刷新</button>
+        </div>
+
+        <div id="summaries-container" class="summaries-grid">
+            <div class="loading">加载中...</div>
+        </div>
+
+        <div id="sum-pagination" class="exp-pagination" style="display:none;">
+            <button id="sum-prev-btn" onclick="changeSumPage(-1)">上一页</button>
+            <span id="sum-page-info" class="page-info"></span>
+            <button id="sum-next-btn" onclick="changeSumPage(1)">下一页</button>
+        </div>
+    </div>
+
+    <!-- Detail Modal (for chronicles) -->
+    <div id="detail-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">群像传记详情</h2>
+                <span class="close-btn" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modal-body" class="modal-body">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <script src="js/js-yaml.min.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/agents.js"></script>
+    <script>
+        // ============================================================
+        // Top-level tab switching
+        // ============================================================
+        function switchTopTab(tab) {
+            document.querySelectorAll('.top-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelector(`.top-tab-btn[data-tab="${tab}"]`).classList.add('active');
+            document.getElementById(`panel-${tab}`).classList.add('active');
+
+            // Lazy load data on first tab switch
+            if (tab === 'experiences' && experiences.length === 0) initExpFilters().then(() => loadExperiences());
+            if (tab === 'summaries' && summariesData.length === 0) loadSummaries();
+        }
+
+        // ============================================================
+        // ========== Chronicles Panel ==========
+        // ============================================================
+        let chronicles = [];
+
+        async function loadChronicles() {
+            const container = document.getElementById('chronicles-container');
+            container.innerHTML = '<div class="loading">加载中...</div>';
+            try {
+                const [chrRes, pendingRes] = await Promise.all([
+                    apiFetch(API.BASE + '/chronicles'),
+                    apiFetch(API.BASE + '/chronicles/pending').catch(() => ({ ok: false }))
+                ]);
+                const chrData = await chrRes.json();
+                chronicles = chrData.chronicles || [];
+
+                let pendingMap = {};
+                if (pendingRes.ok) {
+                    const pendingData = await pendingRes.json();
+                    for (const t of (pendingData.tasks || [])) {
+                        pendingMap[t.chronicle_id] = t;
+                    }
+                }
+                chronicles = chronicles.map(c => ({ ...c, _pending: pendingMap[c.chronicle_id] || null }));
+                renderChronicles(chronicles);
+            } catch (e) {
+                if (e.name !== 'ApiError') {
+                    container.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+                }
+            }
+        }
+
+        function renderChronicles(list) {
+            const container = document.getElementById('chronicles-container');
+            if (!list.length) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+                        </svg>
+                        <p>暂无群像传记</p>
+                        <p style="font-size: 12px; margin-top: 8px; color: var(--text-subtle)">每7个游戏日会自动生成</p>
+                    </div>`;
+                return;
+            }
+            container.innerHTML = list.map(c => `
+                <div class="chronicle-card" onclick="openChronicle(${JSON.stringify(c.chronicle_id).replace(/"/g, '&quot;')})">
+                    <div class="chronicle-header">
+                        <span class="chronicle-id">${escapeHtml(c.chronicle_id)}</span>
+                        <span class="chronicle-season">${escapeHtml(c.season)}</span>
+                    </div>
+                    <div class="chronicle-period">第${c.game_day_start}日 - 第${c.game_day_end}日</div>
+                    <div class="chronicle-stats">
+                        <div class="chr-stat-item"><div class="chr-stat-value">${c.agent_count}</div><div class="chr-stat-label">江湖儿女</div></div>
+                        <div class="chr-stat-item"><div class="chr-stat-value">${c.actions_count}</div><div class="chr-stat-label">行动次数</div></div>
+                        <div class="chr-stat-item"><div class="chr-stat-value">${c.deaths}</div><div class="chr-stat-label">陨落</div></div>
+                        <div class="chr-stat-item"><div class="chr-stat-value">${c.births}</div><div class="chr-stat-label">新生</div></div>
+                    </div>
+                    <div class="chronicle-preview">${escapeHtml(c.summary_preview || '')}</div>
+                    <span class="chronicle-status status-${getChrStatus(c)}">${escapeHtml(getChrStatusText(c))}</span>
+                </div>
+            `).join('');
+        }
+
+        function getChrStatus(c) {
+            if (c._pending) {
+                const t = c._pending;
+                if (t.supplement_status === 'generating' || t.supplement_status === 'pending') return 'generating';
+            }
+            return c.status;
+        }
+
+        function getChrStatusText(c) {
+            if (c._pending) {
+                const t = c._pending;
+                if (t.supplement_status === 'generating') return 'LLM 生成中';
+                if (t.supplement_status === 'pending') return '等待生成';
+            }
+            return { template: '模板生成', llm: 'LLM 版本', both: '完整版' }[c.status] || c.status;
+        }
+
+        function filterChronicles() {
+            const q = document.getElementById('chr-search-input').value.toLowerCase();
+            if (!q) { renderChronicles(chronicles); return; }
+            renderChronicles(chronicles.filter(c =>
+                (c.summary_preview || '').toLowerCase().includes(q) ||
+                (c.chronicle_id || '').toLowerCase().includes(q) ||
+                (c.season || '').toLowerCase().includes(q)
+            ));
+        }
+
+        async function openChronicle(id) {
+            try {
+                const res = await apiFetch(API.BASE + '/chronicles/' + id);
+                if (!res.ok) throw new Error('加载失败');
+                showChrModal(await res.json());
+            } catch (e) {
+                if (e.name !== 'ApiError') alert('详情加载失败: ' + e.message);
+            }
+        }
+
+        function showChrModal(c) {
+            document.getElementById('modal-title').textContent = `${c.chronicle_id} · ${c.season}季`;
+            document.getElementById('modal-body').innerHTML = `
+                <div class="detail-section">
+                    <h3>基本统计</h3>
+                    <div class="detail-grid">
+                        <div class="detail-item"><div class="label">周期</div><div class="value">第${c.game_day_start} - ${c.game_day_end}日</div></div>
+                        <div class="detail-item"><div class="label">江湖儿女</div><div class="value">${c.agent_count}</div></div>
+                        <div class="detail-item"><div class="label">行动次数</div><div class="value">${c.actions_count}</div></div>
+                        <div class="detail-item"><div class="label">陨落人数</div><div class="value">${c.deaths}</div></div>
+                        <div class="detail-item"><div class="label">新生人数</div><div class="value">${c.births}</div></div>
+                        <div class="detail-item"><div class="label">状态</div><div class="value">${getChrStatusText(c)}</div></div>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-tab-nav">
+                        <button class="detail-tab-btn active" onclick="switchDetailTab('template')">模板版本</button>
+                        ${c.summary_llm ? '<button class="detail-tab-btn" onclick="switchDetailTab(\\'llm\\')">LLM 版本</button>' : ''}
+                    </div>
+                    <div id="dt-template" class="detail-tab-content active">
+                        <div class="narrative">${escapeHtml(c.summary || '')}</div>
+                    </div>
+                    ${c.summary_llm ? `<div id="dt-llm" class="detail-tab-content"><div class="narrative">${escapeHtml(c.summary_llm)}</div></div>` : ''}
+                </div>
+                ${c.highlights && c.highlights.length ? `
+                <div class="detail-section">
+                    <h3>关键事件</h3>
+                    <div class="highlight-list">
+                        ${c.highlights.map(h => `<div class="highlight-item"><span class="highlight-type type-${escapeHtml(h.event_type || '')}">${escapeHtml({death:'陨落',dialogue:'对话',combat:'战斗',social:'交际'}[h.event_type] || h.event_type || '')}</span><span class="highlight-desc">${escapeHtml(h.description || '')}</span></div>`).join('')}
+                    </div>
+                </div>` : ''}
+                ${c.agent_summaries && c.agent_summaries.length ? `
+                <div class="detail-section">
+                    <h3>江湖群像</h3>
+                    <div class="agents-grid">
+                        ${c.agent_summaries.map(a => `<div class="agent-card"><div class="agent-name">${escapeHtml(a.name || '')}</div><div class="agent-info"><div>位置: ${escapeHtml(a.location || '-')}</div><div>行动: ${a.actions_count || 0}次</div>${a.died_this_period ? '<div class="agent-died">已于本周期陨落</div>' : ''}</div></div>`).join('')}
+                    </div>
+                </div>` : ''}
+            `;
+            document.getElementById('detail-modal').classList.add('show');
+        }
+
+        function switchDetailTab(tab) {
+            document.querySelectorAll('.detail-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.detail-tab-btn[onclick*="${tab}"]`).classList.add('active');
+            document.getElementById(`dt-${tab}`).classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.remove('show');
+        }
+
+        async function generateChronicle() {
+            if (!confirm('确定要手动生成一份群像传记吗？')) return;
+            const btn = document.querySelector('.chr-controls .btn-primary');
+            btn.disabled = true; btn.textContent = '生成中...';
+            try {
+                const res = await apiFetch(API.BASE + '/chronicles/generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+                if (res.ok) { alert('生成成功'); loadChronicles(); }
+                else alert('生成失败: ' + await res.text());
+            } catch (e) { if (e.name !== 'ApiError') alert('生成失败: ' + e.message); }
+            finally { btn.disabled = false; btn.textContent = '手动生成'; }
+        }
+
+        // ============================================================
+        // ========== Experiences Panel ==========
+        // ============================================================
+        let experiences = [];
+        let expTotal = 0, expPage = 1, expPageSize = 20;
+
+        async function initExpFilters() {
+            try {
+                const agentsRes = await apiFetch(API.BASE + '/agents');
+                if (agentsRes.ok) {
+                    const agents = await agentsRes.json();
+                    const sel = document.getElementById('filter-agent');
+                    agents.forEach(a => {
+                        const opt = document.createElement('option');
+                        opt.value = a.id; opt.textContent = a.name;
+                        sel.appendChild(opt);
+                    });
+                }
+                const actRes = await apiFetch(API.BASE + '/actions-map');
+                if (actRes.ok) {
+                    const actMap = await actRes.json();
+                    const sel = document.getElementById('filter-action');
+                    Object.entries(actMap).forEach(([k, v]) => {
+                        const opt = document.createElement('option');
+                        opt.value = k; opt.textContent = v;
+                        sel.appendChild(opt);
+                    });
+                }
+            } catch (e) { if (e.name !== 'ApiError') console.warn('加载过滤器失败:', e); }
+        }
+
+        async function loadExperiences() {
+            const loading = document.getElementById('exp-loading');
+            const empty = document.getElementById('exp-empty');
+            const tbody = document.getElementById('experiences-tbody');
+            loading.style.display = 'flex'; empty.style.display = 'none';
+            tbody.innerHTML = '';
+
+            const params = new URLSearchParams();
+            params.set('page', expPage); params.set('limit', expPageSize);
+            const aid = document.getElementById('filter-agent').value;
+            const loc = document.getElementById('filter-location').value;
+            const act = document.getElementById('filter-action').value;
+            const from = document.getElementById('filter-from-tick').value;
+            const to = document.getElementById('filter-to-tick').value;
+            if (aid) params.set('agent_id', aid);
+            if (loc) params.set('location', loc);
+            if (act) params.set('action_type', act);
+            if (from) params.set('from_tick', from);
+            if (to) params.set('to_tick', to);
+
+            try {
+                const data = await (await apiFetch(API.BASE + '/experiences?' + params)).json();
+                experiences = data.entries || [];
+                expTotal = data.total || 0;
+                renderExpTable();
+                updateExpPagination();
+            } catch (e) {
+                if (e.name !== 'ApiError') {
+                    loading.style.display = 'none';
+                    tbody.innerHTML = `<tr><td colspan="6" class="empty-state"><p>加载失败</p></td></tr>`;
+                }
+            }
+        }
+
+        function renderExpTable() {
+            const loading = document.getElementById('exp-loading');
+            const empty = document.getElementById('exp-empty');
+            const tbody = document.getElementById('experiences-tbody');
+            loading.style.display = experiences.length ? 'none' : 'flex';
+            if (!experiences.length) { empty.style.display = experiences.length ? 'none' : 'flex'; return; }
+            empty.style.display = 'none';
+            tbody.innerHTML = experiences.map(e => `
+                <tr>
+                    <td><span class="tick-badge">T${e.tick_id || '-'}</span></td>
+                    <td>${escapeHtml(e.agent_name || '-')}</td>
+                    <td><span class="mono-text">${(e.agent_id || '').substring(0, 8)}</span></td>
+                    <td>${escapeHtml(e.location || '-')}</td>
+                    <td><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || '-')}</span></td>
+                    <td><div class="exp-narrative-full">${escapeHtml(e.narrative || '-')}</div></td>
+                </tr>
+            `).join('');
+        }
+
+        function updateExpPagination() {
+            const totalPages = Math.ceil(expTotal / expPageSize);
+            const pg = document.getElementById('exp-pagination');
+            const info = document.getElementById('exp-page-info');
+            if (expTotal === 0) { pg.style.display = 'none'; return; }
+            pg.style.display = 'flex';
+            info.textContent = `第 ${expPage} / ${totalPages} 页，共 ${expTotal} 条`;
+            document.getElementById('exp-prev-btn').disabled = expPage <= 1;
+            document.getElementById('exp-next-btn').disabled = expPage >= totalPages;
+            document.getElementById('exp-page-size').value = expPageSize;
+        }
+
+        function changeExpPage(delta) {
+            expPage = Math.max(1, expPage + delta);
+            loadExperiences();
+        }
+
+        function changeExpPageSize() {
+            expPageSize = parseInt(document.getElementById('exp-page-size').value);
+            expPage = 1;
+            loadExperiences();
+        }
+
+        function resetExpFilters() {
+            document.getElementById('filter-agent').value = '';
+            document.getElementById('filter-location').value = '';
+            document.getElementById('filter-action').value = '';
+            document.getElementById('filter-from-tick').value = '';
+            document.getElementById('filter-to-tick').value = '';
+            expPage = 1;
+            loadExperiences();
+        }
+
+        // ============================================================
+        // ========== Daily Summaries Panel ==========
+        // ============================================================
+        let summariesData = [];
+        let sumTotal = 0, sumPage = 1, sumPageSize = 20;
+
+        async function loadSummaries() {
+            const container = document.getElementById('summaries-container');
+            container.innerHTML = '<div class="loading">加载中...</div>';
+
+            const params = new URLSearchParams();
+            params.set('page', sumPage);
+            params.set('limit', sumPageSize);
+
+            try {
+                const res = await apiFetch(API.BASE + '/agent-daily-summaries?' + params);
+                const data = await res.json();
+                summariesData = data.summaries || [];
+                sumTotal = data.total || 0;
+                renderSummaries(summariesData);
+                updateSumPagination();
+            } catch (e) {
+                if (e.name !== 'ApiError') {
+                    container.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+                }
+            }
+        }
+
+        function renderSummaries(list) {
+            const container = document.getElementById('summaries-container');
+            if (!list.length) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                        </svg>
+                        <p>暂无每日摘要</p>
+                        <p style="font-size: 12px; margin-top: 8px; color: var(--text-subtle)">游戏日结束后自动生成</p>
+                    </div>`;
+                return;
+            }
+            container.innerHTML = list.map(s => {
+                const d = new Date(s.created_at);
+                const dateStr = d.toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+                return `
+                    <div class="summary-card">
+                        <div class="summary-header">
+                            <span class="summary-agent">Agent ${escapeHtml((s.agent_id||'').substring(0,8))}...</span>
+                            <span class="summary-game-day">第${s.game_day}日</span>
+                        </div>
+                        <div class="summary-meta">存档时间: ${dateStr}</div>
+                        <div class="summary-content">${escapeHtml(s.summary || '')}</div>
+                    </div>`;
+            }).join('');
+        }
+
+        function filterSummaries() {
+            const q = document.getElementById('sum-search-input').value.toLowerCase();
+            if (!q) { renderSummaries(summariesData); return; }
+            renderSummaries(summariesData.filter(s =>
+                (s.summary||'').toLowerCase().includes(q) ||
+                (s.agent_id||'').toLowerCase().includes(q)
+            ));
+        }
+
+        function updateSumPagination() {
+            const totalPages = Math.ceil(sumTotal / sumPageSize);
+            const pg = document.getElementById('sum-pagination');
+            const info = document.getElementById('sum-page-info');
+            if (sumTotal === 0) { pg.style.display = 'none'; return; }
+            pg.style.display = 'flex';
+            info.textContent = `第 ${sumPage} / ${totalPages} 页，共 ${sumTotal} 条`;
+            document.getElementById('sum-prev-btn').disabled = sumPage <= 1;
+            document.getElementById('sum-next-btn').disabled = sumPage >= totalPages;
+        }
+
+        function changeSumPage(delta) {
+            const totalPages = Math.ceil(sumTotal / sumPageSize);
+            sumPage = Math.max(1, Math.min(totalPages, sumPage + delta));
+            loadSummaries();
+        }
+
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+        // Load chronicles on init (default tab)
+        loadChronicles();
+    </script>
+</body>
+</html>
