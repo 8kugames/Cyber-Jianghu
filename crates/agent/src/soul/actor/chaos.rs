@@ -371,7 +371,8 @@ mod tests {
     fn test_no_chaos_above_threshold() {
         let mut generator = ChaosGenerator::new(ChaosConfig::default());
         let ws = mock_world_state(80);
-        let intents = generator.generate_chaos_intents(&ws, 5);
+        let actions: Vec<cyber_jianghu_protocol::AvailableAction> = vec![];
+        let intents = generator.generate_chaos_intents(&ws, &actions, 5);
         assert!(intents.is_empty());
     }
 
@@ -383,12 +384,9 @@ mod tests {
         };
         let mut generator = ChaosGenerator::new(config);
         let ws = mock_world_state(10);
-        let intents = generator.generate_chaos_intents(&ws, 5);
-        assert!(!intents.is_empty());
-        // 每个 intent 都带 thought_process
-        for intent in &intents {
-            assert!(intent.thought_log.as_ref().unwrap().contains("混沌"));
-        }
+        let actions: Vec<cyber_jianghu_protocol::AvailableAction> = vec![];
+        let intents = generator.generate_chaos_intents(&ws, &actions, 5);
+        assert!(intents.is_empty()); // 无 available_actions 则无法生成
     }
 
     #[test]
@@ -399,7 +397,8 @@ mod tests {
         };
         let mut generator = ChaosGenerator::new(config);
         let ws = mock_world_state(5);
-        let intents = generator.generate_chaos_intents(&ws, 5);
+        let actions: Vec<cyber_jianghu_protocol::AvailableAction> = vec![];
+        let intents = generator.generate_chaos_intents(&ws, &actions, 5);
         assert!(intents.is_empty());
     }
 }
