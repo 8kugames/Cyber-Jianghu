@@ -11,10 +11,21 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
+
+/// Agent 每日摘要存档（数据库行结构）
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct AgentDailySummary {
+    pub id: i64,
+    pub agent_id: uuid::Uuid,
+    pub game_day: i64,
+    pub summary: String,
+    pub created_at: i64,
+}
 
 /// 序列化属性为 JSONB，包含 _skills 数组
 ///
@@ -475,6 +486,98 @@ pub async fn upsert_agent_daily_summary(
         agent_id, game_day
     );
     Ok(())
+}
+
+/// 列出 Agent 每日摘要（支持分页和过滤）
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - agent_id: 可选，按 Agent ID 过滤
+/// - game_day: 可选，按游戏日过滤
+/// - limit: 返回条数限制，默认 50
+/// - offset: 偏移量，默认 0
+///
+/// # 返回
+/// - Ok(Vec<AgentDailySummary>): 符合条件的摘要列表
+pub async fn list_agent_daily_summaries(
+    pool: &PgPool,
+    agent_id: Option<uuid::Uuid>,
+    game_day: Option<i64>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<AgentDailySummary>> {
+    let limit = limit.unwrap_or(50).min(200);
+    let offset = offset.unwrap_or(0);
+
+    let mut query = "SELECT id, agent_id, game_day, summary, created_at FROM agent_daily_summaries WHERE 1=1".to_string();
+    let mut param_idx = 1;
+
+    if agent_id.is_some() {
+        query.push_str(&format!(" AND agent_id = ${}", param_idx));
+        param_idx += 1;
+    }
+    if game_day.is_some() {
+        query.push_str(&format!(" AND game_day = ${}", param_idx));
+        param_idx += 1;
+    }
+
+    query.push_str(&format!(" ORDER BY game_day DESC, agent_id ASC LIMIT ${}", param_idx));
+    param_idx += 1;
+    query.push_str(&format!(" OFFSET ${}", param_idx));
+
+    let mut q = sqlx::query_as::<_, AgentDailySummary>(&query);
+    if let Some(aid) = agent_id {
+        q = q.bind(aid);
+    }
+    if let Some(gd) = game_day {
+        q = q.bind(gd);
+    }
+    q = q.bind(limit).bind(offset);
+
+    q.fetch_all(pool)
+        .await
+        .context("查询 agent_daily_summaries 失败")
+}
+
+/// 获取指定 Agent 的每日摘要列表
+pub async fn get_agent_daily_summaries_by_agent(
+    pool: &PgPool,
+    agent_id: uuid::Uuid,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<AgentDailySummary>> {
+    list_agent_daily_summaries(pool, Some(agent_id), None, limit, offset).await
+}
+
+/// 统计 Agent 每日摘要总数（支持过滤）
+pub async fn count_agent_daily_summaries(
+    pool: &PgPool,
+    agent_id: Option<uuid::Uuid>,
+    game_day: Option<i64>,
+) -> Result<i64> {
+    let mut query = "SELECT COUNT(*) FROM agent_daily_summaries WHERE 1=1".to_string();
+    let mut bind_idx = 1;
+
+    if agent_id.is_some() {
+        query.push_str(&format!(" AND agent_id = ${}", bind_idx));
+        bind_idx += 1;
+    }
+    if game_day.is_some() {
+        query.push_str(&format!(" AND game_day = ${}", bind_idx));
+        // bind_idx incremented but not used further (query construction done)
+    }
+
+    let mut q = sqlx::query_scalar::<_, i64>(&query);
+    if let Some(aid) = agent_id {
+        q = q.bind(aid);
+    }
+    if let Some(gd) = game_day {
+        q = q.bind(gd);
+    }
+
+    q.fetch_one(pool)
+        .await
+        .context("统计 agent_daily_summaries 数量失败")
 }
 
 // ============================================================================

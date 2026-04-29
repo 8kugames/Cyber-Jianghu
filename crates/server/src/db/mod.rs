@@ -56,6 +56,9 @@ pub use state_ops::{create_tick_log, update_tick_log};
 // 导出公共API - Agent动作日志操作
 pub use state_ops::{batch_insert_action_logs, update_soul_cycle_metadata, upsert_agent_daily_summary};
 
+// 导出公共API - Agent每日摘要查询
+pub use state_ops::{list_agent_daily_summaries, get_agent_daily_summaries_by_agent, count_agent_daily_summaries, AgentDailySummary};
+
 // 导出公共API - 涌现：跨 tick 动作观察
 pub use state_ops::get_recent_actions_batch;
 

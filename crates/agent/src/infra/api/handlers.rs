@@ -278,6 +278,18 @@ pub(super) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
             response_example: None,
         },
         ApiEndpoint {
+            path: "/api/v1/memory/daily-summaries".to_string(),
+            method: "GET".to_string(),
+            description: "获取每日摘要记忆".to_string(),
+            request_example: None,
+            response_example: Some(serde_json::json!({
+                "summaries": [
+                    { "id": 1, "tick_id": 123, "content": "游戏日 1 摘要...", "importance": 0.8, "created_at": "2026-04-29T12:00:00Z" }
+                ],
+                "count": 1
+            })),
+        },
+        ApiEndpoint {
             path: "/api/v1/memory/search".to_string(),
             method: "POST".to_string(),
             description: "语义搜索记忆".to_string(),
@@ -848,6 +860,56 @@ pub(super) async fn get_recent_memory_handler(
     let memories = service.get_recent();
 
     Json(memories_to_json_response(&memories)).into_response()
+}
+
+/// 获取每日摘要记忆
+pub(super) async fn get_daily_summaries_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let manager_arc = state.memory_manager.read().unwrap().clone();
+    let manager = match manager_arc.as_ref() {
+        Some(m) => m,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Memory manager not initialized",
+            )
+                .into_response();
+        }
+    };
+
+    let mut mgr = manager.lock().await;
+    let service = MemoryService::new(&mut mgr);
+
+    match service.get_daily_summaries(50) {
+        Ok(memories) => {
+            let results: Vec<serde_json::Value> = memories
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "tick_id": m.tick_id,
+                        "content": m.content,
+                        "importance": m.importance_score,
+                        "created_at": m.created_at.to_rfc3339(),
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({
+                "summaries": results,
+                "count": results.len(),
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            error!("[http] Failed to get daily summaries: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get daily summaries: {}", e),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// 搜索记忆
