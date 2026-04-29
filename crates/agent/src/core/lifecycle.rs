@@ -1194,6 +1194,7 @@ impl super::Agent {
                                         .map(|g| g.available_actions.clone())
                                         .unwrap_or_default();
                                     let llm_chaos = generator.generate_llm_chaos_intents(&world_state, &actions, remaining);
+                                    tracing::info!("LLM chaos: generated {} intents from {} actions", llm_chaos.len(), actions.len());
                                     intents.extend(llm_chaos);
                                 }
                             }
