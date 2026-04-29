@@ -189,6 +189,8 @@ pub async fn agent_register(
             gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64,
             crate::websocket::types::SurvivalConfig {
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
+                rebirth_retry_max_attempts: gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts,
+                rebirth_retry_interval_secs: gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs,
             },
             gd.game_rules.version.clone(),
             gd.game_rules.data.immediate_events.clone(),
@@ -213,6 +215,8 @@ pub async fn agent_register(
         last_updated: chrono::Utc::now().to_rfc3339(),
         intent_batch,
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
+        rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,
+        rebirth_retry_interval_secs: survival.rebirth_retry_interval_secs,
         reflector_narrative: None,
         immediate_events,
         lifespan,
@@ -222,6 +226,7 @@ pub async fn agent_register(
                 seasons_per_year: tc.seasons_per_year as u32,
             }
         }),
+        daily_summary: None,
     };
 
     // 8. 获取叙事化配置（用于属性描述转换）
@@ -317,39 +322,83 @@ pub async fn agent_rebirth(
 }
 
 // ============================================================================
-// Agent 自动重生 API（死亡后自动恢复）
+// Agent 自动重生 API（转世：dead → retired + new agent_id）
 // ============================================================================
 
-/// 自动重生请求
+/// 自动重生请求（转世）
 #[derive(Debug, serde::Deserialize)]
 pub struct AutoRebirthRequest {
-    /// Agent ID
-    pub agent_id: uuid::Uuid,
+    /// 设备 ID（连接身份）
+    pub device_id: uuid::Uuid,
+    /// 认证令牌
+    pub auth_token: String,
+    /// 旧 Agent ID（已死亡的角色）
+    pub old_agent_id: uuid::Uuid,
+    /// 角色名称
+    pub name: String,
+    /// 系统提示词
+    pub system_prompt: String,
 }
 
-/// 自动重生响应
+/// 自动重生响应（转世）
 #[derive(Debug, serde::Serialize)]
 pub struct AutoRebirthResponse {
     pub success: bool,
     pub message: String,
-    pub agent_id: String,
+    /// 新 Agent ID
+    pub new_agent_id: String,
+    /// 旧 Agent ID（已 retired）
+    pub old_agent_id: String,
     pub spawn_location: String,
 }
 
-/// Agent 自动重生接口
+/// Agent 自动重生接口（转世）
 ///
 /// POST /api/v1/agent/auto-rebirth
 ///
-/// Agent 端在等待 rebirth_delay_ticks 后调用此接口完成重生。
-/// 服务端重置属性到初始值、清空背包、重置位置、更新 DashMap。
+/// Agent 端在等待 rebirth_delay_ticks 后调用此接口完成转世重生。
+/// 服务端在单一事务中：创建全新 agent_id + 初始状态 + 初始物品。旧 agent 保持 dead 状态。
 pub async fn agent_auto_rebirth(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AutoRebirthRequest>,
 ) -> Result<Json<AutoRebirthResponse>, (StatusCode, Json<AutoRebirthResponse>)> {
-    info!("自动重生请求: agent_id={}", payload.agent_id);
+    info!(
+        "自动转世重生请求: old_agent={}, device={}",
+        payload.old_agent_id, payload.device_id
+    );
 
-    // 从配置读取重生参数（必须在 await 之前提取，RwLockReadGuard 不是 Send）
-    let (spawn_location, reset_attributes, initial_items_data) = {
+    // 验证设备认证
+    let valid = verify_device_token(&state.db_pool, payload.device_id, &payload.auth_token)
+        .await
+        .map_err(|e| {
+            error!("设备认证失败: device_id={}, error={}", payload.device_id, e);
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(AutoRebirthResponse {
+                    success: false,
+                    message: "设备认证失败".to_string(),
+                    new_agent_id: String::new(),
+                    old_agent_id: payload.old_agent_id.to_string(),
+                    spawn_location: String::new(),
+                }),
+            )
+        })?;
+
+    if !valid {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(AutoRebirthResponse {
+                success: false,
+                message: "认证令牌无效".to_string(),
+                new_agent_id: String::new(),
+                old_agent_id: payload.old_agent_id.to_string(),
+                spawn_location: String::new(),
+            }),
+        ));
+    }
+
+    // 从配置读取重生参数
+    let (spawn_location, initial_items_data) = {
         let gd = state.game_data.get();
         let rebirth_config = &gd.game_rules.data.agent_state.survival.rebirth;
         let spawn_location = if rebirth_config.spawn_location.is_empty() {
@@ -362,7 +411,6 @@ pub async fn agent_auto_rebirth(
         } else {
             rebirth_config.spawn_location.clone()
         };
-        let reset_attributes = rebirth_config.reset_attributes;
         let initial_items = game_data::InitialInventoryRegistry::items();
         let initial_items_data: Vec<(String, String, i32, String)> = initial_items
             .iter()
@@ -375,53 +423,66 @@ pub async fn agent_auto_rebirth(
                 )
             })
             .collect();
-        (spawn_location, reset_attributes, initial_items_data)
+        (spawn_location, initial_items_data)
     };
 
-    // 计算 starting_age 对应的 tick 偏移
     let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
 
-    // 执行重生
-    let result = db::auto_rebirth_agent(
+    // 执行转世重生（单事务）
+    let result = db::auto_rebirth_as_new(
         &state.db_pool,
-        payload.agent_id,
+        payload.old_agent_id,
+        payload.device_id,
+        &payload.name,
+        &payload.system_prompt,
         &spawn_location,
-        reset_attributes,
         &initial_items_data,
         starting_age_ticks,
     )
     .await
     .map_err(|e| {
-        error!("自动重生失败: agent_id={}, error={}", payload.agent_id, e);
+        error!(
+            "转世重生失败: old_agent={}, error={}",
+            payload.old_agent_id, e
+        );
         (
             StatusCode::BAD_REQUEST,
             Json(AutoRebirthResponse {
                 success: false,
-                message: format!("重生失败: {}", e),
-                agent_id: payload.agent_id.to_string(),
+                message: format!("转世重生失败: {}", e),
+                new_agent_id: String::new(),
+                old_agent_id: payload.old_agent_id.to_string(),
                 spawn_location: String::new(),
             }),
         )
     })?;
 
-    // 更新 DashMap（内存缓存）
+    // 更新 DashMap（内存缓存）— 旧条目在 death 时已移除
     let new_state = crate::models::AgentState::new(
-        result.agent_id,
+        result.new_agent_id,
         crate::db::get_current_world_tick_id(&state.db_pool)
             .await
             .unwrap_or(0),
     );
-    state.agent_state_cache.insert(result.agent_id, new_state);
+    state.agent_state_cache.insert(result.new_agent_id, new_state);
+
+    // 更新 agent_to_device_map
+    {
+        let mut map = state.agent_to_device_map.write().await;
+        map.remove(&result.old_agent_id);
+        map.insert(result.new_agent_id, payload.device_id);
+    }
 
     info!(
-        "Agent 自动重生成功: {} ({}) → {}",
-        result.name, result.agent_id, result.spawn_location
+        "Agent 转世重生成功: old={}, new={}, name={}, spawn={}",
+        result.old_agent_id, result.new_agent_id, result.name, result.spawn_location
     );
 
     Ok(Json(AutoRebirthResponse {
         success: true,
-        message: format!("角色 '{}' 已重生到 {}", result.name, result.spawn_location),
-        agent_id: result.agent_id.to_string(),
+        message: format!("角色 '{}' 已转世重生到 {}", result.name, result.spawn_location),
+        new_agent_id: result.new_agent_id.to_string(),
+        old_agent_id: result.old_agent_id.to_string(),
         spawn_location: result.spawn_location,
     }))
 }
