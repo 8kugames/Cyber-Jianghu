@@ -509,10 +509,12 @@ impl super::Agent {
                         };
                         if need_spawn {
                             // take 旧 handle 并检查退出原因
+                            let prev_game_day = self.session_triage_game_day.take();
                             if let Some(old_handle) = self.session_triage_handle.take() {
                                 match old_handle.await {
                                     Ok(summary_opt) => {
                                         if let Some(ref summary) = summary_opt {
+                                            let summary_game_day = prev_game_day.unwrap_or(game_day);
                                             // 写入 episodic memory
                                             if let Some(ref mm) = self.memory_manager {
                                                 let importance = self.config.game_rules
@@ -534,7 +536,7 @@ impl super::Agent {
                                                     Ok(_) => {
                                                         info!(
                                                             "游戏日 {} 摘要已存储到 episodic memory (importance={:.1})",
-                                                            game_day, importance
+                                                            summary_game_day, importance
                                                         );
                                                     }
                                                     Err(e) => {
@@ -552,11 +554,11 @@ impl super::Agent {
 
                                             let mut submitted = false;
                                             for attempt in 0..max_retries {
-                                                match self.client.send_daily_summary(game_day, summary).await {
+                                                match self.client.send_daily_summary(summary_game_day, summary).await {
                                                     Ok(()) => {
                                                         info!(
                                                             "游戏日 {} 摘要已提交 Server (attempt {})",
-                                                            game_day, attempt + 1
+                                                            summary_game_day, attempt + 1
                                                         );
                                                         submitted = true;
                                                         break;
@@ -564,7 +566,7 @@ impl super::Agent {
                                                     Err(e) => {
                                                         warn!(
                                                             "游戏日 {} 摘要提交 Server 失败 (attempt {}/{}): {}",
-                                                            game_day, attempt + 1, max_retries, e
+                                                            summary_game_day, attempt + 1, max_retries, e
                                                         );
                                                         if attempt + 1 < max_retries {
                                                             let delay = base_delay_ms * (1 << attempt);
@@ -576,7 +578,7 @@ impl super::Agent {
                                             if !submitted {
                                                 warn!(
                                                     "游戏日 {} 摘要提交 Server 最终失败（已重试 {} 次）",
-                                                    game_day, max_retries
+                                                    summary_game_day, max_retries
                                                 );
                                             }
                                         }
@@ -603,6 +605,7 @@ impl super::Agent {
                                     handler.current_game_day(),
                                 );
                                 self.session_triage_handle = Some(tokio::spawn(engine.run()));
+                                self.session_triage_game_day = Some(game_day);
                                 info!(
                                     "SessionTriageEngine 已 spawn: agent={}, game_day={}",
                                     self.character_name(), game_day

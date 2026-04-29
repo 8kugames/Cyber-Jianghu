@@ -350,6 +350,7 @@ impl AgentBuilder {
             server_assigned_name: None,
             immediate_handler: self.immediate_handler,
             session_triage_handle: None,
+            session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
