@@ -35,8 +35,8 @@ impl EmbedderService {
         }
     }
 
-    /// 初始化服务（懒加载本地模型）
-    pub fn initialize(&self) -> Result<()> {
+    /// 初始化服务（加载本地模型）
+    fn initialize(&self) -> Result<()> {
         if self.initialized.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -64,6 +64,9 @@ impl EmbedderService {
     }
 
     /// 生成单个文本的嵌入向量
+    ///
+    /// CPU 密集型 BERT 推理通过 spawn_blocking 卸载到阻塞线程池，
+    /// 避免阻塞 tokio worker 线程。
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         self.initialize()?;
 
@@ -72,12 +75,17 @@ impl EmbedderService {
             return Err(anyhow::anyhow!("Embedder service unavailable"));
         }
 
-        let guard = self.local_embedder.lock().unwrap();
-        if let Some(embedder) = guard.as_ref() {
-            embedder.embed(text)
-        } else {
-            Err(anyhow::anyhow!("Local embedder not available"))
-        }
+        let embedder = self.local_embedder.clone();
+        let text = text.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let guard = embedder.lock().unwrap();
+            match guard.as_ref() {
+                Some(e) => e.embed(&text),
+                None => Err(anyhow::anyhow!("Local embedder not available")),
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?
     }
 
     /// 批量生成嵌入向量
@@ -89,12 +97,18 @@ impl EmbedderService {
             return Err(anyhow::anyhow!("Embedder service unavailable"));
         }
 
-        let guard = self.local_embedder.lock().unwrap();
-        if let Some(embedder) = guard.as_ref() {
-            embedder.embed_batch(texts)
-        } else {
-            Err(anyhow::anyhow!("Local embedder not available"))
-        }
+        let embedder = self.local_embedder.clone();
+        let texts: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
+        tokio::task::spawn_blocking(move || {
+            let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+            let guard = embedder.lock().unwrap();
+            match guard.as_ref() {
+                Some(e) => e.embed_batch(&refs),
+                None => Err(anyhow::anyhow!("Local embedder not available")),
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking panicked: {}", e))?
     }
 
     /// 获取当前状态
@@ -137,7 +151,6 @@ mod tests {
     async fn test_status_unavailable_without_model() {
         let service = EmbedderService::new();
         let _ = service.initialize();
-        // 状态应该是 Unavailable（测试环境没有本地模型）
         assert_eq!(service.status(), EmbedderStatus::Unavailable);
     }
 
