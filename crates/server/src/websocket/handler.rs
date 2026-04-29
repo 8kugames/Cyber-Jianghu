@@ -236,8 +236,20 @@ async fn handle_websocket(
         let gd = state.game_data.get();
         let tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
         let rebirth_delay_ticks = gd.game_rules.data.agent_state.survival.rebirth.delay_ticks;
-        let rebirth_retry_max_attempts = gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts;
-        let rebirth_retry_interval_secs = gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs;
+        let rebirth_retry_max_attempts = gd
+            .game_rules
+            .data
+            .agent_state
+            .survival
+            .rebirth
+            .retry_max_attempts;
+        let rebirth_retry_interval_secs = gd
+            .game_rules
+            .data
+            .agent_state
+            .survival
+            .rebirth
+            .retry_interval_secs;
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
         let intent_batch = gd.game_rules.data.intent_batch.clone();
@@ -300,8 +312,20 @@ async fn handle_websocket(
             tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
             survival = super::types::SurvivalConfig {
                 rebirth_delay_ticks: gd.game_rules.data.agent_state.survival.rebirth.delay_ticks,
-                rebirth_retry_max_attempts: gd.game_rules.data.agent_state.survival.rebirth.retry_max_attempts,
-                rebirth_retry_interval_secs: gd.game_rules.data.agent_state.survival.rebirth.retry_interval_secs,
+                rebirth_retry_max_attempts: gd
+                    .game_rules
+                    .data
+                    .agent_state
+                    .survival
+                    .rebirth
+                    .retry_max_attempts,
+                rebirth_retry_interval_secs: gd
+                    .game_rules
+                    .data
+                    .agent_state
+                    .survival
+                    .rebirth
+                    .retry_interval_secs,
             };
             game_rules_version = gd.game_rules.version.clone();
             immediate_events = gd.game_rules.data.immediate_events.clone();
@@ -894,7 +918,10 @@ async fn handle_intent(
     // 速率限制检查
     if !crate::state::check_rate_limit(&state.rate_limiter, agent_id).await {
         warn!("Rate limit exceeded for agent {}", agent_id);
-        return reject_and_notify("Rate limit exceeded. Please wait before sending another intent.".into()).await;
+        return reject_and_notify(
+            "Rate limit exceeded. Please wait before sending another intent.".into(),
+        )
+        .await;
     }
 
     // Agent 存活检查：从 DashMap 内存缓存读取（实时模式，不再查 DB）
@@ -941,7 +968,8 @@ async fn handle_intent(
             subsequent_intents.len(),
             max_subsequent
         );
-        return reject_and_notify(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent)).await;
+        return reject_and_notify(format!("Pipeline 过长: 最多 {} 个后续动作", max_subsequent))
+            .await;
     }
 
     // 递归拒绝：只允许单层 pipeline
@@ -951,7 +979,10 @@ async fn handle_intent(
                 "嵌套 pipeline 拒绝: agent={} subsequent[{}] 含嵌套 intents",
                 agent_id, i
             );
-            return reject_and_notify("不支持嵌套 pipeline，subsequent intents 不可再包含 subsequent".into()).await;
+            return reject_and_notify(
+                "不支持嵌套 pipeline，subsequent intents 不可再包含 subsequent".into(),
+            )
+            .await;
         }
     }
 
@@ -977,6 +1008,7 @@ async fn handle_intent(
         priority,
         observer_thought: None,
         narrative: None,
+        chaos_marker: None,
         already_broadcast: false,
         session_id: None,
         subsequent_intents,
@@ -1347,9 +1379,14 @@ async fn handle_daily_summary(
         summary.len()
     );
 
-    if let Err(e) =
-        crate::db::upsert_agent_daily_summary(&state.db_pool, agent_id, game_day, summary, created_at)
-            .await
+    if let Err(e) = crate::db::upsert_agent_daily_summary(
+        &state.db_pool,
+        agent_id,
+        game_day,
+        summary,
+        created_at,
+    )
+    .await
     {
         error!(
             "写入每日摘要失败: agent_id={}, game_day={}, err={}",

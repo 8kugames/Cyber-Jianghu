@@ -187,6 +187,11 @@ impl StateProcessor {
             observer_thought: intent.observer_thought.clone(),
             narrative: intent.narrative.clone(),
             soul_cycle_metadata: None,
+            chaos_marker: intent
+                .chaos_marker
+                .as_ref()
+                .map(|m| serde_json::to_value(m).ok())
+                .flatten(),
             created_at: chrono::Utc::now(),
         };
 

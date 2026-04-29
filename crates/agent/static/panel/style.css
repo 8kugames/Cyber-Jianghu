@@ -1531,6 +1531,13 @@ button[type="button"]:disabled {
     color: var(--text-secondary);
 }
 
+.chaos-badge { margin-top: 4px; }
+.chaos-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+    background: rgba(231, 76, 60, 0.15); color: #e74c3c; border: 1px solid #e74c3c;
+}
+
 .soul-reason::before {
     content: "reason: ";
     font-weight: 500;

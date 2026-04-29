@@ -48,6 +48,13 @@
   - 重生角色 age 从 0 改为配置的 starting_age，避免天魂误判"婴儿"
   - `compute_starting_age_ticks()` 函数从 game_rules.yaml 读取并 clamp
 
+- **Agent+Server+Protocol**: 混沌降级结构化标记
+  - Protocol: `ChaosMarker` 枚举（`Sanity { sanity }` / `LlmQuotaExhausted { consecutive_failures }`），`Intent.chaos_marker: Option<ChaosMarker>`
+  - Agent: chaos 生成器数据驱动重构（从 `available_actions` + `required_fields` 解析，不再硬编码 action_weights）
+  - Agent: `llm_chaos_active` 时抑制认知 fallback "休息"，纯用 chaos intents
+  - Server: `agent_action_logs.chaos_marker` JSONB 列（迁移 `017_chaos_marker.sql`），结算时序列化 `intent.chaos_marker`
+  - 前端: agent-web + server-web 渲染红色"陷入混乱"徽章（`cm.type === 'Sanity'` / `'LlmQuotaExhausted'`）
+
 - **Agent**: 社交事件扩展 — `process_social_events()` 支持 PublicMessage 和 PrivateDialogue
   - 之前仅 SocialInteraction（物品转移）触发好感度更新
   - 现在说话（speak）和密语（whisper）也纳入 LLM 好感度评估

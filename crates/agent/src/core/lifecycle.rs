@@ -359,18 +359,30 @@ impl super::Agent {
                 if let ServerMessage::Dialogue { message, .. } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
                     let (desc, from_id) = match message {
-                        DialogueMessage::Request { opening_remark, from_agent_id, .. } => {
-                            (format!("收到密语请求: {}", opening_remark), Some(*from_agent_id))
-                        }
-                        DialogueMessage::Content { content, from_agent_id, .. } => {
-                            (format!("密语内容: {}", content), Some(*from_agent_id))
-                        }
+                        DialogueMessage::Request {
+                            opening_remark,
+                            from_agent_id,
+                            ..
+                        } => (
+                            format!("收到密语请求: {}", opening_remark),
+                            Some(*from_agent_id),
+                        ),
+                        DialogueMessage::Content {
+                            content,
+                            from_agent_id,
+                            ..
+                        } => (format!("密语内容: {}", content), Some(*from_agent_id)),
                         DialogueMessage::Accept { from_agent_id, .. } => {
                             ("密语对话已接受".to_string(), Some(*from_agent_id))
                         }
-                        DialogueMessage::Reject { reason, from_agent_id, .. } => {
-                            (format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")), Some(*from_agent_id))
-                        }
+                        DialogueMessage::Reject {
+                            reason,
+                            from_agent_id,
+                            ..
+                        } => (
+                            format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")),
+                            Some(*from_agent_id),
+                        ),
                         DialogueMessage::End { from_agent_id, .. } => {
                             ("密语对话已结束".to_string(), Some(*from_agent_id))
                         }
@@ -1163,7 +1175,12 @@ impl super::Agent {
                         // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
                         let all_raw_intents: Vec<Intent> = {
-                            let mut intents = vec![raw_intent.clone()];
+                            // llm_chaos_active 时排除认知 fallback（"休息"），仅使用混沌 intents
+                            let mut intents: Vec<Intent> = if self.llm_chaos_active {
+                                Vec::new()
+                            } else {
+                                vec![raw_intent.clone()]
+                            };
                             if let Some(ref chain) = _cognitive_chain
                                 && let Some(ref multi) = chain.multi_intents
                             {
@@ -1193,7 +1210,7 @@ impl super::Agent {
                                         .as_ref()
                                         .map(|g| g.available_actions.clone())
                                         .unwrap_or_default();
-                                    let llm_chaos = generator.generate_llm_chaos_intents(&world_state, &actions, remaining);
+                                    let llm_chaos = generator.generate_llm_chaos_intents(&world_state, &actions, remaining, self.consecutive_llm_failures as usize);
                                     tracing::info!("LLM chaos: generated {} intents from {} actions", llm_chaos.len(), actions.len());
                                     intents.extend(llm_chaos);
                                 }

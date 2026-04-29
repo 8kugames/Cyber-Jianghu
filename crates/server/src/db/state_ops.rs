@@ -360,7 +360,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, chaos_marker) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
@@ -374,7 +374,8 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
             .push_bind(&action.thought_log)
             .push_bind(&action.observer_thought)
             .push_bind(&action.narrative)
-            .push_bind(&action.soul_cycle_metadata);
+            .push_bind(&action.soul_cycle_metadata)
+            .push_bind(&action.chaos_marker);
     });
 
     // UPSERT: SoulCycleReport 可能先到达创建占位行，此处覆盖
@@ -387,7 +388,8 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
          result_message = EXCLUDED.result_message, \
          thought_log = EXCLUDED.thought_log, \
          observer_thought = EXCLUDED.observer_thought, \
-         narrative = EXCLUDED.narrative",
+         narrative = EXCLUDED.narrative, \
+         chaos_marker = EXCLUDED.chaos_marker",
     );
 
     query_builder
@@ -509,7 +511,9 @@ pub async fn list_agent_daily_summaries(
     let limit = limit.unwrap_or(50).min(200);
     let offset = offset.unwrap_or(0);
 
-    let mut query = "SELECT id, agent_id, game_day, summary, created_at FROM agent_daily_summaries WHERE 1=1".to_string();
+    let mut query =
+        "SELECT id, agent_id, game_day, summary, created_at FROM agent_daily_summaries WHERE 1=1"
+            .to_string();
     let mut param_idx = 1;
 
     if agent_id.is_some() {
@@ -521,7 +525,10 @@ pub async fn list_agent_daily_summaries(
         param_idx += 1;
     }
 
-    query.push_str(&format!(" ORDER BY game_day DESC, agent_id ASC LIMIT ${}", param_idx));
+    query.push_str(&format!(
+        " ORDER BY game_day DESC, agent_id ASC LIMIT ${}",
+        param_idx
+    ));
     param_idx += 1;
     query.push_str(&format!(" OFFSET ${}", param_idx));
 

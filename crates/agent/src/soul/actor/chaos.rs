@@ -2,18 +2,17 @@
 // Chaos Generator — Sanity 混沌硬逻辑
 // ============================================================================
 //
-// 当 Agent 理智值低于阈值时，代码生成随机 intents（仍经 ReflectorSoul 审核）。
-// 与 LLM 正常 intent 合并为 multi-intent pipeline。
+// 当 Agent 理智值低于阈值时，从 available_actions 中随机选取生成 intents。
+// 零硬编码：所有动作、权重、字段均来自 game_rules 数据驱动。
 // ============================================================================
 
-use cyber_jianghu_protocol::{Intent, WorldState};
+use cyber_jianghu_protocol::{AvailableAction, ChaosMarker, Intent, WorldState};
 use rand::RngExt;
-use rand::distr::Distribution;
-use rand::distr::weighted::WeightedIndex;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
+use uuid::Uuid;
 
-/// 混沌配置（使用硬编码默认值，未来可从 YAML 配置加载）
+/// 混沌配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChaosConfig {
     /// 触发阈值（sanity <= 此值时激活）
@@ -25,12 +24,6 @@ pub struct ChaosConfig {
     /// 最大混沌 intent 数
     #[serde(default = "default_max")]
     pub max_chaos_intents: usize,
-    /// 动作权重（action_type → weight）
-    #[serde(default = "default_action_weights")]
-    pub action_weights: std::collections::HashMap<String, f64>,
-    /// LLM 失败时使用的动作权重（生存优先）
-    #[serde(default = "default_llm_failure_weights")]
-    pub llm_failure_weights: std::collections::HashMap<String, f64>,
 }
 
 fn default_threshold() -> i32 {
@@ -42,29 +35,6 @@ fn default_probability() -> f64 {
 fn default_max() -> usize {
     3
 }
-fn default_action_weights() -> std::collections::HashMap<String, f64> {
-    let mut m = std::collections::HashMap::new();
-    m.insert("攻击".into(), 0.25);
-    m.insert("丢弃".into(), 0.20);
-    m.insert("给予".into(), 0.15);
-    m.insert("移动".into(), 0.20);
-    m.insert("进食".into(), 0.10);
-    m.insert("饮水".into(), 0.10);
-    m
-}
-
-fn default_llm_failure_weights() -> std::collections::HashMap<String, f64> {
-    let mut m = std::collections::HashMap::new();
-    m.insert("进食".into(), 0.25);
-    m.insert("饮水".into(), 0.20);
-    m.insert("拾取".into(), 0.15);
-    m.insert("采集".into(), 0.15);
-    m.insert("移动".into(), 0.10);
-    m.insert("说话".into(), 0.05);
-    m.insert("打坐".into(), 0.05);
-    m.insert("攻击".into(), 0.05);
-    m
-}
 
 impl Default for ChaosConfig {
     fn default() -> Self {
@@ -72,8 +42,6 @@ impl Default for ChaosConfig {
             activation_threshold: default_threshold(),
             activation_probability: default_probability(),
             max_chaos_intents: default_max(),
-            action_weights: default_action_weights(),
-            llm_failure_weights: default_llm_failure_weights(),
         }
     }
 }
@@ -95,6 +63,7 @@ impl ChaosGenerator {
     pub fn generate_chaos_intents(
         &mut self,
         world_state: &WorldState,
+        available_actions: &[AvailableAction],
         max_total: usize,
     ) -> Vec<Intent> {
         let sanity = world_state
@@ -120,198 +89,201 @@ impl ChaosGenerator {
         }
 
         let max_chaos = self.config.max_chaos_intents.min(max_total);
-        let action_types: Vec<&String> = self.config.action_weights.keys().collect();
 
-        if action_types.is_empty() {
-            return Vec::new();
-        }
-
-        // 构建加权选择
-        let weights: Vec<f64> = action_types
-            .iter()
-            .map(|at| *self.config.action_weights.get(*at).unwrap_or(&0.1))
-            .collect();
-
-        let dist = match WeightedIndex::new(&weights) {
-            Ok(d) => d,
-            Err(_) => return Vec::new(),
-        };
-
+        // 优先使用 available_actions（数据驱动）
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
-        let mut intents = Vec::new();
+        let thought = format!("[低理智混沌: sanity={}]", sanity);
+        let marker = ChaosMarker::Sanity { sanity };
 
-        let count: usize = rng.random_range(1..=max_chaos);
-        for _ in 0..count {
-            let idx = dist.sample(&mut rng);
-            let action_type = action_types[idx].as_str();
-            let action_data = Self::build_action_data(action_type, world_state, &mut rng);
-
-            intents.push(
-                Intent::new(agent_id, tick_id, action_type, action_data)
-                    .with_thought(format!("[混沌行为: sanity={}]", sanity)),
-            );
-        }
+        let intents = Self::select_resolvable_intents(
+            available_actions,
+            world_state,
+            agent_id,
+            tick_id,
+            max_chaos,
+            &thought,
+            Some(marker),
+            &mut rng,
+        );
 
         info!(
-            "Chaos: sanity={}, threshold={}, remaining={}, generated {} chaos intents",
+            "Chaos: sanity={}, threshold={}, generated {} chaos intents from {} available actions",
             sanity,
             self.config.activation_threshold,
-            max_total,
-            intents.len()
+            intents.len(),
+            available_actions.len()
         );
         intents
     }
 
-    /// LLM 失败触发的 chaos — 不检查 sanity，使用配置的 llm_failure_weights
-    ///
-    /// 当 LLM 连续失败超过阈值时，生成生存导向的随机 intents。
-    /// 不检查 sanity 和概率，100% 触发。
+    /// LLM 失败触发的 chaos — 不检查 sanity，100% 触发
     pub fn generate_llm_chaos_intents(
         &mut self,
         world_state: &WorldState,
+        available_actions: &[AvailableAction],
         max_total: usize,
+        consecutive_failures: usize,
     ) -> Vec<Intent> {
-        let action_types: Vec<&String> = self.config.llm_failure_weights.keys().collect();
-        if action_types.is_empty() {
+        let max_chaos = self.config.max_chaos_intents.min(max_total);
+        if available_actions.is_empty() || max_chaos == 0 {
             return Vec::new();
         }
 
-        let weights: Vec<f64> = action_types
-            .iter()
-            .map(|at| *self.config.llm_failure_weights.get(*at).unwrap_or(&0.1))
-            .collect();
-
-        let dist = match WeightedIndex::new(&weights) {
-            Ok(d) => d,
-            Err(_) => return Vec::new(),
-        };
-
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
-        let mut intents = Vec::new();
-
-        let max_chaos = self.config.max_chaos_intents.min(max_total);
+        let thought = "[LLM 配额耗尽: 自动生存模式]".to_owned();
+        let marker = ChaosMarker::LlmQuotaExhausted {
+            consecutive_failures,
+        };
         let mut rng = rand::rng();
-        let count: usize = rng.random_range(1..=max_chaos);
 
-        for _ in 0..count {
-            let idx = dist.sample(&mut rng);
-            let action_type = action_types[idx].as_str();
-
-            // 扩展的动作数据构建（包含采集/说话/打坐/拾取）
-            let action_data = match action_type {
-                "采集" => {
-                    // 采集当前位置的资源
-                    if world_state.location.gatherable_items.is_empty() {
-                        continue;
-                    }
-                    let items = &world_state.location.gatherable_items;
-                    let item = &items[rng.random_range(0..items.len())];
-                    Some(serde_json::json!({
-                        "item_id": item.item_id,
-                    }))
-                }
-                "拾取" => {
-                    // 拾取附近的地面物品
-                    if world_state.nearby_items.is_empty() {
-                        continue;
-                    }
-                    let items = &world_state.nearby_items;
-                    let item = &items[rng.random_range(0..items.len())];
-                    Some(serde_json::json!({
-                        "item_id": item.item_id,
-                    }))
-                }
-                "说话" => {
-                    // 对附近的人说随机话
-                    Some(serde_json::json!({
-                        "content": "...",
-                    }))
-                }
-                "打坐" => Some(serde_json::json!({})),
-                _ => Self::build_action_data(action_type, world_state, &mut rng),
-            };
-
-            if let Some(data) = action_data {
-                intents.push(
-                    Intent::new(agent_id, tick_id, action_type, Some(data))
-                        .with_thought("[LLM 配额耗尽: 自动生存模式]".into()),
-                );
-            }
-        }
+        let intents = Self::select_resolvable_intents(
+            available_actions,
+            world_state,
+            agent_id,
+            tick_id,
+            max_chaos,
+            &thought,
+            Some(marker),
+            &mut rng,
+        );
 
         debug!("LLM Chaos: generated {} survival intents", intents.len());
         intents
     }
 
-    /// 构建动作数据（基于 WorldState 中可用的实体）
+    /// 随机选取 action 并解析 required_fields，跳过字段无法满足的 action
+    ///
+    /// 每个槽位最多重试 `MAX_RESOLVE_RETRIES` 次以找到字段可解析的 action。
+    const MAX_RESOLVE_RETRIES: usize = 6;
+
+    fn select_resolvable_intents(
+        available_actions: &[AvailableAction],
+        world_state: &WorldState,
+        agent_id: Uuid,
+        tick_id: i64,
+        max_chaos: usize,
+        thought: &str,
+        marker: Option<ChaosMarker>,
+        rng: &mut impl rand::RngExt,
+    ) -> Vec<Intent> {
+        let count: usize = rng.random_range(1..=max_chaos);
+        let mut intents = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            for _ in 0..Self::MAX_RESOLVE_RETRIES {
+                let idx = rng.random_range(0..available_actions.len());
+                let action = &available_actions[idx];
+
+                match Self::build_action_data(
+                    &action.action,
+                    &action.required_fields,
+                    world_state,
+                    rng,
+                ) {
+                    Some(data) => {
+                        let mut intent =
+                            Intent::new(agent_id, tick_id, action.action.as_str(), Some(data))
+                                .with_thought(thought.to_owned());
+                        if let Some(ref m) = marker {
+                            intent = intent.with_chaos_marker(m.clone());
+                        }
+                        intents.push(intent);
+                        break;
+                    }
+                    None => {
+                        debug!(
+                            "Chaos: action '{}' skipped — required_fields unresolvable: {:?}",
+                            action.action, action.required_fields
+                        );
+                    }
+                }
+            }
+        }
+
+        intents
+    }
+
+    /// 根据 required_fields 从 WorldState 动态构建 action_data
+    ///
+    /// 所有 required_fields 必须成功解析才返回 Some，否则返回 None。
+    /// 未在 WorldState 中提供的字段（如 recipe_id）会导致整个 action 被跳过。
     fn build_action_data(
-        action_type: &str,
+        _action_type: &str,
+        required_fields: &[String],
         world_state: &WorldState,
         rng: &mut impl rand::RngExt,
     ) -> Option<serde_json::Value> {
-        match action_type {
-            "攻击" => {
-                // 攻击附近的随机实体
-                if world_state.entities.is_empty() {
-                    return None;
-                }
-                let target = &world_state.entities[rng.random_range(0..world_state.entities.len())];
-                Some(serde_json::json!({
-                    "target_id": target.id.to_string(),
-                }))
-            }
-            "丢弃" => {
-                // 丢弃背包中的随机物品
-                if world_state.self_state.inventory.is_empty() {
-                    return None;
-                }
-                let items = &world_state.self_state.inventory;
-                let item = &items[rng.random_range(0..items.len())];
-                Some(serde_json::json!({
-                    "item_id": item.item_id,
-                    "quantity": 1,
-                }))
-            }
-            "给予" => {
-                // 给附近随机实体随机物品
-                if world_state.entities.is_empty() || world_state.self_state.inventory.is_empty() {
-                    return None;
-                }
-                let target = &world_state.entities[rng.random_range(0..world_state.entities.len())];
-                let items = &world_state.self_state.inventory;
-                let item = &items[rng.random_range(0..items.len())];
-                Some(serde_json::json!({
-                    "target_id": target.id.to_string(),
-                    "item_id": item.item_id,
-                    "quantity": 1,
-                }))
-            }
-            "移动" => {
-                // 移动到随机可达地点
-                if world_state.location.adjacent_nodes.is_empty() {
-                    return None;
-                }
-                let nodes = &world_state.location.adjacent_nodes;
-                let node = &nodes[rng.random_range(0..nodes.len())];
-                Some(serde_json::json!({
-                    "target_location": node.node_id,
-                }))
-            }
-            "进食" | "饮水" => {
-                // 随机吃/喝背包中的物品
-                if world_state.self_state.inventory.is_empty() {
-                    return None;
-                }
-                let items = &world_state.self_state.inventory;
-                let item = &items[rng.random_range(0..items.len())];
-                Some(serde_json::json!({
-                    "item_id": item.item_id,
-                }))
-            }
-            _ => None,
+        if required_fields.is_empty() {
+            return Some(serde_json::json!({}));
         }
+
+        let mut map = serde_json::Map::new();
+
+        for field in required_fields {
+            let resolved = match field.as_str() {
+                // 目标 Agent — 从附近实体中随机选
+                "target_agent_id" | "target_id" => {
+                    if world_state.entities.is_empty() {
+                        None
+                    } else {
+                        let target =
+                            &world_state.entities[rng.random_range(0..world_state.entities.len())];
+                        map.insert(
+                            field.clone(),
+                            serde_json::Value::String(target.id.to_string()),
+                        );
+                        Some(())
+                    }
+                }
+                // 地面物品 — 从附近物品中随机选
+                "item_id" => {
+                    if world_state.nearby_items.is_empty() {
+                        None
+                    } else {
+                        let item = &world_state.nearby_items
+                            [rng.random_range(0..world_state.nearby_items.len())];
+                        map.insert(
+                            field.clone(),
+                            serde_json::Value::String(item.item_id.clone()),
+                        );
+                        Some(())
+                    }
+                }
+                // 位置节点 — 从可达节点中随机选
+                "target_location" | "node_id" => {
+                    if world_state.location.adjacent_nodes.is_empty() {
+                        None
+                    } else {
+                        let node = &world_state.location.adjacent_nodes
+                            [rng.random_range(0..world_state.location.adjacent_nodes.len())];
+                        map.insert(
+                            field.clone(),
+                            serde_json::Value::String(node.node_id.clone()),
+                        );
+                        Some(())
+                    }
+                }
+                // 数量 — 随机 1~3
+                "quantity" => {
+                    let qty: u32 = rng.random_range(1..=3);
+                    map.insert(field.clone(), serde_json::Value::Number(qty.into()));
+                    Some(())
+                }
+                // 动作内容 — 混沌状态使用 "..."
+                "content" => {
+                    map.insert(field.clone(), serde_json::Value::String("...".into()));
+                    Some(())
+                }
+                _ => None,
+            };
+            if resolved.is_none() {
+                return None;
+            }
+        }
+
+        Some(serde_json::Value::Object(map))
     }
 }
 
