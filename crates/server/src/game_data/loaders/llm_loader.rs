@@ -25,6 +25,20 @@ pub struct LlmConfig {
     pub temperature: f64,
     /// 最大 token 数
     pub max_tokens: i32,
+    /// HTTP 请求超时（秒）
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    /// HTTP 连接超时（秒）
+    #[serde(default = "default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+}
+
+fn default_request_timeout_secs() -> u64 {
+    120
+}
+
+fn default_connect_timeout_secs() -> u64 {
+    30
 }
 
 /// 完整 LLM 配置包装（与 config_llm.rs 中的 LlmConfigWrapper 保持一致）
@@ -52,6 +66,8 @@ impl Default for LlmConfig {
             model: "gpt-4o-mini".to_string(),
             temperature: 0.8,
             max_tokens: 2000,
+            request_timeout_secs: 120,
+            connect_timeout_secs: 30,
         }
     }
 }

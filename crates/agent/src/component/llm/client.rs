@@ -320,8 +320,14 @@ fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
 fn extract_json_str(response: &str) -> std::borrow::Cow<'_, str> {
     // 先剥离 thinking tags
     let cleaned = strip_thinking_tags(response);
-
     let response = cleaned.as_ref();
+
+    let normalized = if response.contains("{{") {
+        std::borrow::Cow::Owned(response.replace("{{", "{").replace("}}", "}"))
+    } else {
+        std::borrow::Cow::Borrowed(response)
+    };
+    let response = normalized.as_ref();
 
     if let Some(start) = response.find("```json") {
         let after_marker = start + 7;
@@ -531,7 +537,15 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
-        parse_json_response::<D>(acc.content())
+        let content = acc.content();
+        if content.trim().is_empty() {
+            anyhow::bail!(
+                "LLM API error: response content is empty (streaming_json, prompt_tokens={}, completion_tokens={})",
+                pt, ct
+            );
+        }
+
+        parse_json_response::<D>(content)
     }
 
     async fn complete_json_streaming_with_conversation<D: DeserializeOwned + Send>(
@@ -570,7 +584,15 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
-        parse_json_response::<D>(acc.content())
+        let content = acc.content();
+        if content.trim().is_empty() {
+            anyhow::bail!(
+                "LLM API error: response content is empty (streaming_json_conv, prompt_tokens={}, completion_tokens={})",
+                pt, ct
+            );
+        }
+
+        parse_json_response::<D>(content)
     }
 }
 

@@ -150,7 +150,12 @@ async fn main() -> Result<()> {
     info!("配置验证通过");
 
     // 5. 初始化数据库连接池
-    let db_pool = init_db_pool(&config.database.url).await?;
+    let db_pool = init_db_pool(
+        &config.database.url,
+        config.database.max_retries,
+        config.database.retry_delay_secs,
+    )
+    .await?;
     info!("数据库连接池初始化成功");
 
     // 6. 加载游戏数据配置

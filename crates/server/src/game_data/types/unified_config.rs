@@ -510,10 +510,18 @@ pub struct LocationRulesData {
     /// parent-child 隐式连接的默认 travel_cost
     #[serde(default = "default_implicit_travel_cost")]
     pub default_implicit_travel_cost: u32,
+
+    /// 移动体力消耗倍率（stamina_cost = travel_cost * 此值）
+    #[serde(default = "default_travel_stamina_multiplier")]
+    pub travel_stamina_multiplier: i32,
 }
 
 fn default_implicit_travel_cost() -> u32 {
     1
+}
+
+fn default_travel_stamina_multiplier() -> i32 {
+    2
 }
 
 /// 游戏时间规则数据（用于计算 tick_id）
