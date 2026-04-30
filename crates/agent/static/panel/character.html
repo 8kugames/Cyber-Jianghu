@@ -42,9 +42,15 @@
                         </button>
                         <button
                             class="vertical-tab"
-                            data-vertical-tab="memories"
+                            data-vertical-tab="recent-memories"
                         >
-                            记忆关系
+                            近期记忆
+                        </button>
+                        <button
+                            class="vertical-tab"
+                            data-vertical-tab="relationships"
+                        >
+                            已知关系
                         </button>
                         <button
                             class="vertical-tab"
@@ -274,14 +280,14 @@
                             </section>
                         </div>
 
-                        <!-- 记忆关系 Tab -->
+                        <!-- 近期记忆 Tab -->
                         <div
-                            id="vertical-tab-memories"
+                            id="vertical-tab-recent-memories"
                             class="vertical-tab-content"
                         >
                             <section class="form-section">
                                 <h2>近期记忆</h2>
-                                <div id="memories" class="memory-list"></div>
+                                <div id="memories" class="memory-list memory-scrollable"></div>
                                 <div
                                     id="load-more-memories"
                                     class="load-more hidden"
@@ -294,7 +300,13 @@
                                     </button>
                                 </div>
                             </section>
+                        </div>
 
+                        <!-- 已知关系 Tab -->
+                        <div
+                            id="vertical-tab-relationships"
+                            class="vertical-tab-content"
+                        >
                             <section class="form-section">
                                 <h2>已知关系</h2>
                                 <div

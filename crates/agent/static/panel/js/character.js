@@ -41,12 +41,13 @@ async function loadDailySummaries(page = 1) {
         const div = document.createElement('div');
         div.className = 'summary-item';
         const tickId = s.tick_id || '-';
-        const content = s.summary || '';
-        const time = s.created_at ? formatRealTime(s.created_at) : '';
+        const content = s.content || '';
+        // 从内容中提取游戏日（如 "游戏日 505 摘要：" -> "505"）
+        const dayMatch = content.match(/游戏日\s*(\d+)/);
+        const gameDay = dayMatch ? `第${dayMatch[1]}日` : '';
         div.innerHTML = `
           <div class="summary-item-header">
-            <span class="summary-item-day">Tick ${tickId}</span>
-            <span class="summary-item-time">${escapeHtml(time)}</span>
+            <span class="summary-item-day">${gameDay} Tick ${tickId}</span>
           </div>
           <div class="summary-item-content">${escapeHtml(content)}</div>`;
         listEl.appendChild(div);
@@ -1538,8 +1539,12 @@ document.addEventListener("DOMContentLoaded", () => {
         .getElementById("vertical-tab-" + targetTab)
         .classList.add("active");
 
-      // 切换到记忆关系 tab 时刷新关系数据
-      if (targetTab === "memories") {
+      // 切换到近期记忆 tab 时刷新记忆数据
+      if (targetTab === "recent-memories") {
+        loadMemories();
+      }
+      // 切换到已知关系 tab 时刷新关系数据
+      if (targetTab === "relationships") {
         loadRelationships();
       }
     });
