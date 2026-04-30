@@ -7,8 +7,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use regex::Regex;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -19,41 +18,6 @@ use cyber_jianghu_protocol::WorldBuildingRules;
 
 use super::prompt::ObserverPrompt;
 use super::types::{LlmValidationResponse, PersonaInfo, ValidationRequest, ValidationResult};
-
-// ============================================================================
-// Numeric Leak Detection
-// ============================================================================
-
-/// 检测叙事文本中是否包含数字泄露
-///
-/// 匹配任意数字字符（0-9），用于防止 LLM 在叙事中泄露数值如"HP=47"。
-/// 返回 Some(泄露的数字) 或 None。
-fn extract_leaked_numbers(narrative: &str) -> Option<String> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"\d+").unwrap());
-    let matches: Vec<&str> = re.find_iter(narrative).map(|m| m.as_str()).collect();
-    if matches.is_empty() {
-        None
-    } else {
-        Some(matches.join(", "))
-    }
-}
-
-/// 检测叙事中是否包含数字泄露，若泄露则返回带更强约束的 prompt 后缀
-fn leak_guard_prompt_suffix(narrative: &str, attempt: u32) -> Option<String> {
-    if let Some(numbers) = extract_leaked_numbers(narrative) {
-        warn!(
-            "天魂生成执行叙事含数字泄露 (attempt {}): 发现数字 [{}]",
-            attempt, numbers
-        );
-        Some(format!(
-            "\n\n## 严重警告\n你刚才的输出包含了数字: {}。导致「数字泄露」。\n请立即重写，确保输出中不出现任何阿拉伯数字字符（0-9）。",
-            numbers
-        ))
-    } else {
-        None
-    }
-}
 
 // ============================================================================
 // 验证器 Trait（类型擦除）
@@ -72,20 +36,6 @@ pub trait Validator: Send + Sync {
 
     /// 更新世界观规则
     async fn update_rules(&self, rules: WorldBuildingRules);
-
-    /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
-    ///
-    /// `first_tick` 为 true 时表示这是本轮首次生成叙事（无历史数据）。
-    /// 默认返回 None（不生成叙事）。
-    async fn generate_execution_narrative(
-        &self,
-        last_intents: &[crate::models::Intent],
-        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
-        first_tick: bool,
-    ) -> Result<Option<String>> {
-        let _ = (last_intents, execution_summary, first_tick);
-        Ok(None)
-    }
 }
 
 /// 为 ReflectorSoul 实现 Validator trait
@@ -102,16 +52,6 @@ impl Validator for ReflectorSoul {
     async fn update_rules(&self, rules: WorldBuildingRules) {
         self.update_rules(rules).await
     }
-
-    async fn generate_execution_narrative(
-        &self,
-        last_intents: &[crate::models::Intent],
-        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
-        first_tick: bool,
-    ) -> Result<Option<String>> {
-        self.generate_execution_narrative_impl(last_intents, execution_summary, first_tick)
-            .await
-    }
 }
 
 /// ReflectorSoul — 意图审查引擎
@@ -125,8 +65,6 @@ pub struct ReflectorSoul {
     llm_container: LlmClientContainer,
     /// 观察者 prompt 模板
     observer_prompt: ObserverPrompt,
-    /// 天魂叙事化开关（关闭时 prompt 不要求 narrative 字段）
-    reflector_narrative: bool,
 }
 
 impl ReflectorSoul {
@@ -136,19 +74,7 @@ impl ReflectorSoul {
             rules: Arc::new(RwLock::new(rules)),
             llm_container,
             observer_prompt: ObserverPrompt::new(),
-            reflector_narrative: false,
         }
-    }
-
-    /// 设置天魂叙事化开关（同时切换 prompt 模板）
-    pub fn with_reflector_narrative(mut self, enabled: bool) -> Self {
-        self.reflector_narrative = enabled;
-        self.observer_prompt = if enabled {
-            ObserverPrompt::with_narrative()
-        } else {
-            ObserverPrompt::without_narrative()
-        };
-        self
     }
 
     /// 验证意图
@@ -227,12 +153,6 @@ impl ReflectorSoul {
     pub async fn validate_persona(&self, persona: &PersonaInfo) -> Result<ValidationResult> {
         let rules = self.rules.read().await.clone();
 
-        let narrative_instruction = if self.reflector_narrative {
-            "如果是 approved，生成一段简短的人设描述"
-        } else {
-            ""
-        };
-
         let prompt = format!(
             r#"## 世界观规则
 
@@ -259,8 +179,7 @@ impl ReflectorSoul {
 {{
   "result": "approved" | "rejected",
   "reason": "通过/驳回的原因",
-  "rejection_type": "era_violation" | "other",
-  "narrative": "{}"
+  "rejection_type": "era_violation" | "other"
 }}"#,
             rules.era.name,
             rules.era.tech_level,
@@ -270,7 +189,6 @@ impl ReflectorSoul {
             persona.age,
             persona.personality.join("、"),
             persona.values.join("、"),
-            narrative_instruction,
         );
 
         let llm_client = self.llm_container.read().await.clone();
@@ -280,147 +198,7 @@ impl ReflectorSoul {
 
         Ok(response.into_validation_result())
     }
-
-    /// 基于上轮 submitted intents + server ExecutionSummary 生成叙事化经历
-    ///
-    /// 在收到 server WorldState（包含 last_execution_summary）后调用。
-    /// 生成「上轮你做了什么，结果如何」的第一人称叙事。
-    ///
-    /// `first_tick` 为 true 时表示这是本轮首次生成叙事（无历史数据），应生成「初入江湖」类叙事。
-    async fn generate_execution_narrative_impl(
-        &self,
-        last_intents: &[crate::models::Intent],
-        execution_summary: &cyber_jianghu_protocol::ExecutionSummary,
-        first_tick: bool,
-    ) -> Result<Option<String>> {
-        // 构建 intents 描述（空列表也能正常处理）
-        let intents_desc: Vec<String> = last_intents
-            .iter()
-            .map(|i| {
-                let data_str = i
-                    .action_data
-                    .as_ref()
-                    .map(|d| serde_json::to_string(d).unwrap_or_default())
-                    .unwrap_or_default();
-                format!("- {}: {}", i.action_type, data_str)
-            })
-            .collect();
-
-        // 根据是否首 tick 选择不同的 prompt
-        let prompt = if first_tick {
-            // 首 tick：生成「初入江湖」类叙事
-            format!(
-                r#"你是叙事生成器。这是本轮首次叙事，生成一段简短的第一人称叙事，描述「你踏入江湖的第一感受」。
-
-## 上轮提交的意图
-{}
-
-## 执行结果
-- 总计: {} 个意图
-- 成功: {}
-- 部分成功: {}
-- 失败: {}
-- 跳过: {}
-
-## 要求
-1. 用武侠风格的第一人称叙事
-2. 不要提及具体数字或百分比
-3. 不要提及「意图」「执行」「成功」等游戏术语
-4. 生成「初入江湖，踌躇满志」类叙事
-5. 简洁，一段话即可
-
-## 输出格式
-直接输出叙事文本，不要加引号或任何格式标记。"#,
-                intents_desc.join("\n"),
-                execution_summary.total,
-                execution_summary.succeeded,
-                execution_summary.partial,
-                execution_summary.failed,
-                execution_summary.skipped
-            )
-        } else {
-            // 非首 tick：生成上轮经历叙事
-            format!(
-                r#"你是叙事生成器。基于以下上轮意图和执行结果，生成一段简短的第一人称叙事，描述「上轮你做了什么，结果如何」。
-
-## 上轮提交的意图
-{}
-
-## 执行结果
-- 总计: {} 个意图
-- 成功: {}
-- 部分成功: {}
-- 失败: {}
-- 跳过: {}
-
-## 要求
-1. 用武侠风格的第一人称叙事（如「我拾起了馒头」「我喝了几口水」）
-2. 不要提及具体数字或百分比
-3. 不要提及「意图」「执行」「成功」等游戏术语
-4. 生成的叙事应该让人魂能够理解上轮行动的效果
-5. 如果所有意图都失败或跳过，生成「似乎什么都没发生」类的叙事
-6. 简洁，一段话即可
-
-## 输出格式
-直接输出叙事文本，不要加引号或任何格式标记。"#,
-                intents_desc.join("\n"),
-                execution_summary.total,
-                execution_summary.succeeded,
-                execution_summary.partial,
-                execution_summary.failed,
-                execution_summary.skipped
-            )
-        };
-
-        // 重试机制：最多 2 次（不含 leak guard retry）
-        let max_retries = 2;
-        let original_prompt = prompt; // 保存原始 prompt 克隆，避免 leak guard suffix 累积
-        let mut current_prompt = original_prompt.clone();
-        for attempt in 1..=max_retries {
-            let llm_client = self.llm_container.read().await.clone();
-            match llm_client.complete(&current_prompt).await {
-                Ok(n) => {
-                    let narrative = n.trim().to_string();
-                    if narrative.is_empty() {
-                        warn!(
-                            "天魂生成执行叙事返回空 (attempt {}/{})",
-                            attempt, max_retries
-                        );
-                        continue;
-                    }
-                    // Numeric Leak Detection：检测叙事中是否包含数字
-                    if let Some(suffix) = leak_guard_prompt_suffix(&narrative, attempt as u32) {
-                        // 泄露数字 → 重置为原始 prompt 再追加 leak guard，避免 suffix 累积
-                        current_prompt = original_prompt.clone();
-                        current_prompt.push_str(&suffix);
-                        warn!(
-                            "天魂叙事含数字泄露，注入 leak guard 重试 (attempt {}/{})",
-                            attempt, max_retries
-                        );
-                        continue;
-                    }
-                    // 无泄露且非空 → 通过
-                    return Ok(Some(narrative));
-                }
-                Err(e) => {
-                    warn!(
-                        "天魂生成执行叙事失败 (attempt {}/{}): {}",
-                        attempt, max_retries, e
-                    );
-                }
-            }
-            // 错误或空响应，继续重试（不注入 leak guard）
-        }
-
-        // 所有重试都失败
-        warn!("天魂生成执行叙事重试耗尽，跳过本轮叙事");
-        Ok(None)
-    }
 }
-
-// ============================================================================
-// 分级审核辅助
-// ============================================================================
 
 // ============================================================================
 // LLM 响应转换
