@@ -235,6 +235,11 @@ impl MemoryManager {
         self.episodic.search_archived(query, limit).await
     }
 
+    /// 按时间倒序回忆近期被遗忘的事件（跳过语义搜索）
+    pub async fn recall_recent_archived(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
+        self.episodic.search_archived("", limit).await
+    }
+
     /// 构建 LLM 上下文
     pub async fn build_llm_context(&self) -> String {
         let working_context = self.working.build_context();

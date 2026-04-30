@@ -246,6 +246,54 @@ impl ConversationHistory {
         Ok(())
     }
 
+    /// summary 生成失败时的降级路径：直接截断到 keep_recent_turns
+    ///
+    /// 避免对话轮次因 summary LLM 调用持续失败而无限堆积。
+    /// 同步清理 SQLite 中被截断的 turns 行。
+    pub fn force_truncate_to_recent(&mut self) -> Result<()> {
+        if self.turns.len() <= self.keep_recent_turns {
+            return Ok(());
+        }
+
+        let turns_to_compress = self.turns.len().saturating_sub(self.keep_recent_turns);
+
+        // 找到要删除的最大 ID
+        let replaces_up_to: i64 = self
+            .conn
+            .query_row(
+                "SELECT id FROM conv_turns ORDER BY id ASC LIMIT 1 OFFSET ?1",
+                rusqlite::params![turns_to_compress.saturating_sub(1)],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if replaces_up_to > 0 {
+            self.conn.execute(
+                "DELETE FROM conv_turns WHERE id <= ?1",
+                rusqlite::params![replaces_up_to],
+            )?;
+        }
+
+        // 保留最近 N 轮
+        let kept: Vec<ConversationTurn> = self.turns.drain(turns_to_compress..).collect();
+        self.turns = kept;
+
+        // 保留已有 summary 或设置降级标记
+        self.summary = self
+            .summary
+            .take()
+            .or_else(|| Some("[历史对话因压缩失败被截断，仅保留近期对话]".to_string()));
+        self.token_count = self.estimate_tokens();
+
+        info!(
+            "对话历史强制截断: 保留 {} 轮, tokens≈{}",
+            self.turns.len(),
+            self.token_count,
+        );
+
+        Ok(())
+    }
+
     /// 更新 system message (persona 变更时调用)
     pub fn update_system_message(&mut self, msg: &str) {
         self.system_message = msg.to_string();

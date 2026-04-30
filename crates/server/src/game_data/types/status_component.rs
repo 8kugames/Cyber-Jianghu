@@ -215,9 +215,9 @@ impl StatusComponent {
 
         let current = attr.value.get();
         let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
-        let max_value =
-            Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context) as i32
-                + self.max_modifiers.get(name).copied().unwrap_or(0);
+        let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context)
+            as i32
+            + self.max_modifiers.get(name).copied().unwrap_or(0);
 
         let new_value = (current + delta).clamp(min_value, max_value);
         attr.value.set(new_value);
@@ -241,10 +241,7 @@ impl StatusComponent {
             return Err(0);
         }
 
-        *self
-            .max_modifiers
-            .entry(name.to_string())
-            .or_insert(0) += delta;
+        *self.max_modifiers.entry(name.to_string()).or_insert(0) += delta;
 
         // 同时将当前值提升 delta（修炼获得的上限提升应立即生效）
         let attr = self.collection.attributes.get_mut(name).unwrap();

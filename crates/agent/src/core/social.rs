@@ -102,14 +102,15 @@ impl super::Agent {
 
             // 记录事件（使用实体名称而非 UUID 字符串）
             // 预加载所有已知关系名字，避免循环内逐个查 DB
-            let known_names: std::collections::HashMap<String, String> = match store.get_all_relationships() {
-                Ok(rels) => rels
-                    .into_iter()
-                    .filter(|r| !r.target_name.is_empty() && r.target_name != "陌生人")
-                    .map(|r| (r.target_agent_id.to_string(), r.target_name))
-                    .collect(),
-                Err(_) => std::collections::HashMap::new(),
-            };
+            let known_names: std::collections::HashMap<String, String> =
+                match store.get_all_relationships() {
+                    Ok(rels) => rels
+                        .into_iter()
+                        .filter(|r| !r.target_name.is_empty() && r.target_name != "陌生人")
+                        .map(|r| (r.target_agent_id.to_string(), r.target_name))
+                        .collect(),
+                    Err(_) => std::collections::HashMap::new(),
+                };
 
             for (i, event) in social_events.iter().enumerate() {
                 let Some(meta) = event.metadata.as_object() else {
