@@ -450,7 +450,7 @@ impl DirectLlmClient {
 
             // 400 + "stream"：模型强制要求流式，自动用流式重试
             if status.as_u16() == 400 && error_body.contains("stream") {
-                tracing::info!("模型要求流式调用，自动切换到 streaming 重试");
+                info!("模型要求流式调用，自动切换到 streaming 重试");
                 return self.send_request_via_stream(request).await;
             }
 
@@ -470,13 +470,13 @@ impl DirectLlmClient {
         })?;
 
         let model = self.config.get_model_with_default();
-        if let Some(ref actual_model) = response_data.model {
-            if actual_model != &model {
-                info!(
-                    "[llm] model fallback: requested={}, actual={}",
-                    model, actual_model
-                );
-            }
+        if let Some(ref actual_model) = response_data.model
+            && actual_model != &model
+        {
+            info!(
+                "[llm] model fallback: requested={}, actual={}",
+                model, actual_model
+            );
         }
         if let Some(ref usage) = response_data.usage {
             record_token_usage(
@@ -491,6 +491,28 @@ impl DirectLlmClient {
                 model,
                 usage.prompt_tokens,
                 usage.completion_tokens
+            );
+        } else {
+            // API 未返回 usage，按字符长度估算（中文 ~1.5 char/token，英文 ~4 char/token，取中间值 3）
+            let prompt_chars: usize = request
+                .messages
+                .iter()
+                .filter_map(|m| m.content.as_ref().map(|c| c.len()))
+                .sum();
+            let est_pt = (prompt_chars as u64 / 3).max(1);
+            let est_ct = response_data
+                .choices
+                .first()
+                .and_then(|c| c.message.content.as_ref())
+                .map(|s| (s.len() as u64 / 3).max(1))
+                .unwrap_or(0);
+            record_token_usage(&self.config.provider, &model, est_pt, est_ct);
+            debug!(
+                "Token usage (estimated): provider={}, model={}, prompt~{}, completion~{}",
+                self.config.provider.as_str(),
+                model,
+                est_pt,
+                est_ct
             );
         }
 
@@ -792,7 +814,10 @@ impl DirectLlmClient {
         let mut messages = messages;
 
         for round in 0..max_rounds {
-            debug!("Tool calling round {}/{}", round + 1, max_rounds);
+            if round == 0 {
+                let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
+                info!("[地魂] Tool loop 开始, tools={:?}, max_rounds={}", tool_names, max_rounds);
+            }
 
             let request = OpenAIRequest {
                 model: model.clone(),
@@ -822,27 +847,25 @@ impl DirectLlmClient {
 
             if !has_tool_calls {
                 let content = msg.content.clone().unwrap_or_default();
-                debug!(
-                    "Tool calling completed after {} rounds, response length: {} chars",
-                    round + 1,
-                    content.len()
-                );
+                info!("[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars)", content.len());
                 return Ok(content);
             }
 
             let tool_calls = msg.tool_calls.as_ref().unwrap();
-            debug!("LLM requested {} tool calls", tool_calls.len());
+            let call_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
+            info!("[地魂] LLM 请求调用 {} 个 tool: {:?}", tool_calls.len(), call_names);
 
             messages.push(msg.clone());
 
             for tc in tool_calls {
                 let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
+                info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
                 let result = executor
                     .execute(&tc.function.name, &args)
                     .await
                     .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-                debug!("Tool {} result: {}", tc.function.name, result);
+                info!("[地魂] Tool {} 结果: {}", tc.function.name, result);
 
                 messages.push(ChatMessage::tool_result(
                     &tc.id,
@@ -953,6 +976,10 @@ impl LlmClient for DirectLlmClient {
         self.config.get_model_with_default()
     }
 
+    fn provider_info(&self) -> (LlmProvider, String) {
+        (self.config.provider, self.config.get_model_with_default())
+    }
+
     async fn complete_with_tools(
         &self,
         system: &str,
@@ -994,7 +1021,10 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
-            self.complete_streaming(system, prompt).await
+            let stream = self.complete_streaming(system, prompt).await?;
+            let tracking =
+                super::streaming::UsageTrackingStream::new(stream, self.config.provider, self.config.get_model_with_default());
+            Ok(tracking.into_llm_stream())
         })
     }
 
@@ -1011,8 +1041,10 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
-            self.complete_conversation_streaming(system, summary, turns, current_prompt)
-                .await
+            let stream = self.complete_conversation_streaming(system, summary, turns, current_prompt).await?;
+            let tracking =
+                super::streaming::UsageTrackingStream::new(stream, self.config.provider, self.config.get_model_with_default());
+            Ok(tracking.into_llm_stream())
         })
     }
 }

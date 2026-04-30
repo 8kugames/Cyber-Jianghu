@@ -190,8 +190,7 @@ impl StateProcessor {
             chaos_marker: intent
                 .chaos_marker
                 .as_ref()
-                .map(|m| serde_json::to_value(m).ok())
-                .flatten(),
+                .and_then(|m| serde_json::to_value(m).ok()),
             created_at: chrono::Utc::now(),
         };
 

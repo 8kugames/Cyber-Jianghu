@@ -414,6 +414,14 @@ pub struct ClawConfig {}
 const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
 const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+
+/// 单个模型的独立配置（允许 per-model max_tokens）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FallbackModelConfig {
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+}
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
@@ -444,6 +452,9 @@ pub struct LlmConfig {
     /// 备用模型列表（同 provider/api_key，主模型 403/超时时自动降级）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fallback_models: Vec<String>,
+    /// 模型独立配置列表（优先于 fallback_models，允许 per-model max_tokens）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<FallbackModelConfig>,
     /// 连续 idle tick 数达到此阈值后主动切换到下一个模型
     #[serde(default = "default_idle_rotate_threshold")]
     pub idle_rotate_threshold: u32,
@@ -564,6 +575,7 @@ impl Default for LlmConfig {
             temperature: DEFAULT_LLM_TEMPERATURE,
             max_tokens: DEFAULT_LLM_MAX_TOKENS,
             fallback_models: Vec::new(),
+            models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
             max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -605,6 +617,7 @@ impl LlmConfig {
                         .collect()
                 })
                 .unwrap_or_default(),
+            models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
             max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,

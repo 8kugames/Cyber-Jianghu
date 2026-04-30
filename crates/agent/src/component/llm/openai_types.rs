@@ -135,6 +135,7 @@ pub(crate) struct OpenAIStreamResponse {
 pub(crate) struct OpenAIStreamChoice {
     pub delta: OpenAIDelta,
     #[serde(default)]
+    #[allow(dead_code)]
     pub finish_reason: Option<String>,
 }
 

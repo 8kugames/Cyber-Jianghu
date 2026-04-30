@@ -26,44 +26,71 @@ use tracing::{info, warn};
 /// 根据 LlmConfig 构建 FallbackLlmClient（含主模型 + fallback 模型）
 ///
 /// 用于启动时和热重载时统一构建逻辑。
+/// 支持 `models`（per-model 配置）和 `fallback_models`（共享配置）两种格式。
 pub fn build_fallback_client(
     llm_config: &crate::config::LlmConfig,
     prefer_stream: bool,
 ) -> Result<Arc<dyn LlmClient>> {
     let mut llm_clients: Vec<Arc<dyn LlmClient>> = Vec::new();
 
-    // 主模型
-    match build_direct_client(llm_config, llm_config.model.as_deref(), prefer_stream) {
-        Ok(client) => {
-            info!(
-                "主模型: {}",
-                llm_config.model.as_deref().unwrap_or("default")
-            );
-            llm_clients.push(Arc::new(client));
+    // 优先使用 models（per-model 配置），否则回退到 fallback_models
+    if !llm_config.models.is_empty() {
+        for (i, mc) in llm_config.models.iter().enumerate() {
+            let max_tokens = mc.max_tokens.unwrap_or(llm_config.max_tokens);
+            match build_direct_client_with_max_tokens(
+                llm_config,
+                Some(mc.model.as_str()),
+                prefer_stream,
+                max_tokens,
+            ) {
+                Ok(client) => {
+                    info!(
+                        "模型 #{}: {} (max_tokens={})",
+                        i + 1,
+                        mc.model,
+                        max_tokens
+                    );
+                    llm_clients.push(Arc::new(client));
+                }
+                Err(e) => {
+                    warn!("模型 #{} ({}) 创建失败: {}", i + 1, mc.model, e);
+                }
+            }
         }
-        Err(e) => {
-            warn!(
-                "主模型 ({}) 创建失败: {}",
-                llm_config.model.as_deref().unwrap_or("default"),
-                e
-            );
-        }
-    }
-
-    // Fallback 模型
-    for (i, fallback_model) in llm_config.fallback_models.iter().enumerate() {
-        match build_direct_client(llm_config, Some(fallback_model.as_str()), prefer_stream) {
+    } else {
+        // 主模型（旧格式 fallback_models）
+        match build_direct_client(llm_config, llm_config.model.as_deref(), prefer_stream) {
             Ok(client) => {
-                info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
+                info!(
+                    "主模型: {}",
+                    llm_config.model.as_deref().unwrap_or("default")
+                );
                 llm_clients.push(Arc::new(client));
             }
             Err(e) => {
                 warn!(
-                    "Fallback 模型 #{} ({}) 创建失败: {}",
-                    i + 1,
-                    fallback_model,
+                    "主模型 ({}) 创建失败: {}",
+                    llm_config.model.as_deref().unwrap_or("default"),
                     e
                 );
+            }
+        }
+
+        // Fallback 模型
+        for (i, fallback_model) in llm_config.fallback_models.iter().enumerate() {
+            match build_direct_client(llm_config, Some(fallback_model.as_str()), prefer_stream) {
+                Ok(client) => {
+                    info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
+                    llm_clients.push(Arc::new(client));
+                }
+                Err(e) => {
+                    warn!(
+                        "Fallback 模型 #{} ({}) 创建失败: {}",
+                        i + 1,
+                        fallback_model,
+                        e
+                    );
+                }
             }
         }
     }
@@ -83,11 +110,21 @@ pub fn build_fallback_client(
     Ok(llm_arc)
 }
 
-/// 构建 DirectLlmClient
+/// 构建 DirectLlmClient（共享全局 max_tokens）
 fn build_direct_client(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
     prefer_stream: bool,
+) -> Result<DirectLlmClient> {
+    build_direct_client_with_max_tokens(llm_config, model, prefer_stream, llm_config.max_tokens)
+}
+
+/// 构建 DirectLlmClient（指定 max_tokens）
+fn build_direct_client_with_max_tokens(
+    llm_config: &crate::config::LlmConfig,
+    model: Option<&str>,
+    prefer_stream: bool,
+    max_tokens: u32,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
@@ -103,7 +140,7 @@ fn build_direct_client(
     }
     client_config = client_config
         .with_temperature(llm_config.temperature)
-        .with_max_tokens(llm_config.max_tokens);
+        .with_max_tokens(max_tokens);
 
     DirectLlmClient::new(client_config)
 }

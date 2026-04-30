@@ -327,7 +327,10 @@ fn init_tracing() -> Result<()> {
     let thinking_log_path = thinking_log::init_thinking_log(&config_dir)?;
 
     tracing_subscriber::fmt()
-        .with_max_level(Level::INFO)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .with_writer(std::io::stderr)
         .init();
 
@@ -1017,7 +1020,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     if let Some(mm) = agent.memory_manager() {
         // mm is Arc<tokio::sync::RwLock<MemoryManager>>
         // Clone the Arc to share with HttpApiState
-        let mm = Arc::clone(&mm);
+        let mm = Arc::clone(mm);
         *api_state.memory_manager.write().await = Some(mm);
         info!("MemoryManager 已注入 HttpApiState（与 Agent 共享）");
     } else {

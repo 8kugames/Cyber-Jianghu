@@ -119,6 +119,14 @@ pub trait LlmClient: Send + Sync {
         "unknown".to_string()
     }
 
+    /// 获取 (provider, model) 元组（用于 token 统计兜底记录）
+    fn provider_info(&self) -> (super::direct_client::LlmProvider, String) {
+        (
+            super::direct_client::LlmProvider::OpenClaw,
+            "unknown".to_string(),
+        )
+    }
+
     /// 使用 tool calling 的多轮对话
     ///
     /// 如果 LLM 返回 tool_calls，调用 executor 执行后继续对话，
@@ -881,6 +889,10 @@ impl LlmClient for FallbackLlmClient {
 
     fn model_name(&self) -> String {
         self.active_client().model_name()
+    }
+
+    fn provider_info(&self) -> (super::direct_client::LlmProvider, String) {
+        self.active_client().provider_info()
     }
 
     async fn complete_with_tools(

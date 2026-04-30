@@ -113,6 +113,7 @@ impl SessionTriageEngine {
             self.config.debounce_secs
         );
 
+        #[allow(unused_assignments)]
         let mut summary = None;
 
         loop {
