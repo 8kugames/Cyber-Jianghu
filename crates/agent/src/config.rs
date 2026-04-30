@@ -433,7 +433,7 @@ const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
 const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
 const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 3;
 const DEFAULT_ENABLE_STREAMING: bool = true;
-const DEFAULT_REFLECTOR_NARRATIVE: bool = false;
+const DEFAULT_REFLECTOR_NARRATIVE: bool = true;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
