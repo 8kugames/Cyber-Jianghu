@@ -124,8 +124,10 @@
     - [x] 内置低 San 值混沌行为注入器，模拟精神崩溃时的非理性行为（如发疯、喃喃自语）。
   - [x] **地魂 (EarthSoul)**：对接物理世界的“工具执行池”。
     - [x] 负责将人魂意图转换为系统 API 调用，并在决策中途按需获取外部数据。
-    - [x] 记忆检索工具 (`search_memory`, `recall_archived`)：供 LLM 检索工作记忆与情景/语义记忆。
-    - [x] 技能查阅工具 (`skill_view`)：供 LLM 按需获取武功等长文本技能详情，避免撑爆 System Prompt。
+    - [x] 记忆检索工具 (`search_memory`, `recall_archived`)：供 LLM 检索工作记忆与情景/语义记忆。`recall_archived` 已去重为独立的时间倒序路径
+    - [x] 技能查阅工具 (`skill_view`)：供 LLM 按需获取武功等长文本技能详情
+    - [x] 关系查询工具 (`get_relationship`, `list_relationships`)：供 LLM 查询人际关系（UUID/名字查找，好感度过滤）
+    - [x] 社交事件记录工具 (`record_social_event`)：供 LLM 主动记录社交互动和好感度变化，避免撑爆 System Prompt。
   - [x] **天魂 (ReflectorSoul)**：三段式“自我审查官”。
     - [x] Layer 1 动作校验：基础 ActionType 与参数合法性验证。
     - [x] Layer 2 物理规则审查 (RuleEngine)：YAML 配置驱动的世界观刚性规则和物理可行性检验（如禁止穿墙、禁止使用不存在的物品）。

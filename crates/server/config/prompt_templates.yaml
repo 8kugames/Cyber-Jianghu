@@ -67,7 +67,7 @@ templates:
 
       # Progressive disclosure：tool-calling 启用时，技能索引 header
       skill_index_header: |
-        ## 已掌握技能（使用 skill_view 工具查看详情）
+        ## 已掌握技能（使用 skill_view 工具查看详情和行为指引）
 
       # 降级路径：非 tool-calling 时，完整技能 header
       skill_full_header: |
@@ -76,11 +76,11 @@ templates:
       # Progressive disclosure：可用工具提示 header
       tool_hints_header: |
         ## 可用工具
-        你可以调用以下工具获取更多信息：
+        调用以下工具获取决策所需信息：
 
       output_format: |
-        ## 输出格式
-        严格输出以下 JSON（不要添加任何额外文本）：
+        {tool_calling_guidance}
+        {{
         {{
           "self_status": "你的状态简述 (30字以内)",
           "environment": "环境描述 (30字以内)",
@@ -124,6 +124,7 @@ templates:
       planning_description: 100
       content_hint: 30
       summary_window: 50
+      tool_calling_history_turns: 8
 
   # RuleEngine reject 反馈模板
   # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正

@@ -141,6 +141,14 @@ impl RelationshipStore {
         )
         .ok();
 
+        // 按名称查找的索引
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relationships_target_name
+             ON relationships(target_name)",
+            [],
+        )
+        .ok();
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_key_events_tick
              ON key_events(tick_id DESC)",
@@ -423,6 +431,74 @@ impl RelationshipStore {
         Ok(count as usize)
     }
 
+    /// 按目标名称查找关系（SQL 层过滤，非全表扫描）
+    pub fn find_relationship(&self, target_name: &str) -> Result<Option<RelationshipMemory>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
+
+        let target_agent_id_str: String = match conn.query_row(
+            "SELECT target_agent_id FROM relationships WHERE target_name = ? LIMIT 1",
+            params![target_name],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        let target_agent_id = Uuid::parse_str(&target_agent_id_str)
+            .map_err(|e| anyhow::anyhow!("Invalid UUID: {}", e))?;
+
+        // 释放锁后委托给 get_relationship（它会自己获取锁）
+        drop(conn);
+        self.get_relationship(target_agent_id)
+    }
+
+    /// 按好感度范围过滤关系（SQL 层过滤）
+    pub fn list_relationships_filtered(
+        &self,
+        min_favorability: Option<i32>,
+        max_favorability: Option<i32>,
+    ) -> Result<Vec<RelationshipMemory>> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire lock: {}", e))?;
+
+        let sql = match (min_favorability, max_favorability) {
+            (Some(min), Some(max)) => format!(
+                "SELECT target_agent_id FROM relationships WHERE favorability >= {min} AND favorability <= {max} ORDER BY updated_at DESC"
+            ),
+            (Some(min), None) => format!(
+                "SELECT target_agent_id FROM relationships WHERE favorability >= {min} ORDER BY updated_at DESC"
+            ),
+            (None, Some(max)) => format!(
+                "SELECT target_agent_id FROM relationships WHERE favorability <= {max} ORDER BY updated_at DESC"
+            ),
+            (None, None) => return self.get_all_relationships(),
+        };
+
+        let mut stmt = conn.prepare(&sql)?;
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        drop(stmt);
+        drop(conn);
+
+        let mut result = Vec::with_capacity(ids.len());
+        for id_str in ids {
+            if let Ok(uuid) = Uuid::parse_str(&id_str)
+                && let Some(rel) = self.get_relationship(uuid)?
+            {
+                result.push(rel);
+            }
+        }
+        Ok(result)
+    }
+
     /// 获取数据库路径
     pub fn db_path(&self) -> &Path {
         &self.db_path
@@ -484,7 +560,8 @@ impl RelationshipStore {
 
         // 名字保护：传入泛化名（"陌生人"）但已有真名时，保留真名不被覆写
         let is_generic = target_name == "陌生人" || target_name.is_empty();
-        let resolved_name = if is_generic && !existing_name.is_empty() && existing_name != "陌生人" {
+        let resolved_name = if is_generic && !existing_name.is_empty() && existing_name != "陌生人"
+        {
             &existing_name
         } else {
             target_name

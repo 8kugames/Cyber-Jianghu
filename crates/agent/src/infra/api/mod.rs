@@ -825,7 +825,9 @@ impl HttpApiState {
 
     /// 设置记忆管理器
     pub fn with_memory_manager(mut self, manager: MemoryManager) -> Self {
-        self.memory_manager = Arc::new(tokio::sync::RwLock::new(Some(Arc::new(tokio::sync::RwLock::new(manager)))));
+        self.memory_manager = Arc::new(tokio::sync::RwLock::new(Some(Arc::new(
+            tokio::sync::RwLock::new(manager),
+        ))));
         self
     }
 

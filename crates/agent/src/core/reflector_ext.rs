@@ -274,18 +274,34 @@ impl super::Agent {
 
         // Layer 1: action_type
         match self.validate_action_type(&intent) {
-            Ok(()) => layers.push(LayerResult { layer: "layer1", passed: true, detail: None }),
+            Ok(()) => layers.push(LayerResult {
+                layer: "layer1",
+                passed: true,
+                detail: None,
+            }),
             Err(e) => {
-                layers.push(LayerResult { layer: "layer1", passed: false, detail: Some(e.clone()) });
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
                 return Ok(ReflectorResult::Rejected { reason: e, layers });
             }
         }
 
         // Layer 2: RuleEngine
         match self.validate_with_rule_engine(&intent, world_state).await {
-            Ok(()) => layers.push(LayerResult { layer: "layer2", passed: true, detail: None }),
+            Ok(()) => layers.push(LayerResult {
+                layer: "layer2",
+                passed: true,
+                detail: None,
+            }),
             Err(e) => {
-                layers.push(LayerResult { layer: "layer2", passed: false, detail: Some(e.clone()) });
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: false,
+                    detail: Some(e.clone()),
+                });
                 return Ok(ReflectorResult::Rejected { reason: e, layers });
             }
         }

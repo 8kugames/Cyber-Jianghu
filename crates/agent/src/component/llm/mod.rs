@@ -44,12 +44,7 @@ pub fn build_fallback_client(
                 max_tokens,
             ) {
                 Ok(client) => {
-                    info!(
-                        "模型 #{}: {} (max_tokens={})",
-                        i + 1,
-                        mc.model,
-                        max_tokens
-                    );
+                    info!("模型 #{}: {} (max_tokens={})", i + 1, mc.model, max_tokens);
                     llm_clients.push(Arc::new(client));
                 }
                 Err(e) => {
