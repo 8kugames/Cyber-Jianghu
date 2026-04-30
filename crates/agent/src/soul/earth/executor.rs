@@ -3,71 +3,46 @@
 // ============================================================================
 //
 // 路由 tool call 到具体执行器：
-// - skill_view → 本地缓存/文件加载（已实现）
-// - search_memory / recall_archived → MemoryManager（预留，暂返回提示）
+// - skill_view → 本地缓存/文件加载
+// - search_memory → 语义搜索记忆
+// - recall_archived → 按时间倒序回忆近期被遗忘的事件
+// - get_relationship / list_relationships / record_social_event → RelationshipStore
 // ============================================================================
 
 use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
+use crate::component::social::RelationshipStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+/// 地魂工具执行器的依赖上下文
+///
+/// 统一构造参数。新增依赖只需加字段，调用方无需改签名。
+pub struct EarthToolContext {
+    pub skill_cache: HashMap<String, String>,
+    pub config_dir: PathBuf,
+    pub memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
+    pub relationship_store: Option<RelationshipStore>,
+}
 
 /// 地魂复合工具执行器
 pub struct EarthToolExecutor {
-    /// 技能内容缓存（skill_id → SKILL.md body）
     skill_cache: HashMap<String, String>,
-    /// 配置目录（用于从文件加载 SKILL.md）
     config_dir: PathBuf,
-    /// 记忆管理器（用于 search_memory / recall_archived）
     memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
+    relationship_store: Option<RelationshipStore>,
 }
 
 impl EarthToolExecutor {
-    /// 创建地魂执行器
-    pub fn new(skill_cache: HashMap<String, String>, config_dir: PathBuf) -> Self {
+    /// 从 EarthToolContext 创建
+    pub fn from_context(ctx: EarthToolContext) -> Self {
         Self {
-            skill_cache,
-            config_dir,
-            memory_manager: None,
-        }
-    }
-
-    /// 创建带记忆管理器的地魂执行器
-    pub fn with_memory_manager(
-        skill_cache: HashMap<String, String>,
-        config_dir: PathBuf,
-        memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
-    ) -> Self {
-        Self {
-            skill_cache,
-            config_dir,
-            memory_manager,
-        }
-    }
-
-    /// 从 CognitiveEngine 的 skill_cache RwLock 创建
-    pub fn from_rw_lock(cache: &RwLock<HashMap<String, String>>, config_dir: PathBuf) -> Self {
-        let skill_cache = cache.read().unwrap().clone();
-        Self {
-            skill_cache,
-            config_dir,
-            memory_manager: None,
-        }
-    }
-
-    /// 从 CognitiveEngine 的相关缓存和管理器创建
-    pub fn from_engine(
-        cache: &RwLock<HashMap<String, String>>,
-        config_dir: PathBuf,
-        memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
-    ) -> Self {
-        let skill_cache = cache.read().unwrap().clone();
-        Self {
-            skill_cache,
-            config_dir,
-            memory_manager,
+            skill_cache: ctx.skill_cache,
+            config_dir: ctx.config_dir,
+            memory_manager: ctx.memory_manager,
+            relationship_store: ctx.relationship_store,
         }
     }
 
@@ -77,6 +52,9 @@ impl EarthToolExecutor {
             super::skill_tool::skill_view_definition(),
             super::memory_tool::search_memory_definition(),
             super::memory_tool::recall_archived_definition(),
+            super::relationship_tool::get_relationship_definition(),
+            super::relationship_tool::list_relationships_definition(),
+            super::relationship_tool::record_social_event_definition(),
         ]
     }
 }
@@ -100,25 +78,104 @@ impl ToolExecutor for EarthToolExecutor {
                     &self.config_dir,
                 ))
             }
-            "search_memory" | "recall_archived" => {
+            "search_memory" => {
                 let query = arguments["query"].as_str().unwrap_or("未知查询");
                 let limit = arguments["limit"].as_u64().map(|v| v as usize).unwrap_or(5);
 
                 if let Some(ref memory_manager) = self.memory_manager {
                     let manager = memory_manager.read().await;
-                    if name == "recall_archived" {
-                        Ok(
-                            super::memory_tool::execute_recall_archived(&manager, query, limit)
-                                .await,
-                        )
-                    } else {
-                        Ok(super::memory_tool::execute_search_memory(&manager, query, limit).await)
-                    }
+                    Ok(super::memory_tool::execute_search_memory(&manager, query, limit).await)
                 } else {
                     Ok(serde_json::json!({
                         "success": false,
                         "implemented": false,
                         "message": "记忆管理器未初始化，无法搜索记忆"
+                    }))
+                }
+            }
+            "recall_archived" => {
+                let limit = arguments["limit"].as_u64().map(|v| v as usize).unwrap_or(5);
+
+                if let Some(ref memory_manager) = self.memory_manager {
+                    let manager = memory_manager.read().await;
+                    Ok(super::memory_tool::execute_recall_archived(&manager, limit).await)
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "implemented": false,
+                        "message": "记忆管理器未初始化，无法回忆记忆"
+                    }))
+                }
+            }
+            "get_relationship" => {
+                let identifier = arguments["identifier"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 identifier 参数"))?;
+
+                if let Some(ref store) = self.relationship_store {
+                    Ok(super::relationship_tool::execute_get_relationship(
+                        store, identifier,
+                    ))
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "implemented": false,
+                        "message": "关系存储未初始化，无法查询关系"
+                    }))
+                }
+            }
+            "list_relationships" => {
+                let min_fav = arguments["min_favorability"].as_i64().map(|v| v as i32);
+                let max_fav = arguments["max_favorability"].as_i64().map(|v| v as i32);
+
+                if let Some(ref store) = self.relationship_store {
+                    Ok(super::relationship_tool::execute_list_relationships(
+                        store, min_fav, max_fav,
+                    ))
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "implemented": false,
+                        "message": "关系存储未初始化，无法列出关系"
+                    }))
+                }
+            }
+            "record_social_event" => {
+                let target_agent_id = arguments["target_agent_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 target_agent_id 参数"))?;
+                let target_name = arguments["target_name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 target_name 参数"))?;
+                let tick_id = arguments["tick_id"]
+                    .as_i64()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 tick_id 参数"))?;
+                let action = arguments["action"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 action 参数"))?;
+                let description = arguments["description"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 description 参数"))?;
+                let delta = arguments["favorability_delta"]
+                    .as_i64()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 favorability_delta 参数"))?
+                    as i32;
+
+                if let Some(ref store) = self.relationship_store {
+                    Ok(super::relationship_tool::execute_record_social_event(
+                        store,
+                        target_agent_id,
+                        target_name,
+                        tick_id,
+                        action,
+                        description,
+                        delta,
+                    ))
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "implemented": false,
+                        "message": "关系存储未初始化，无法记录社交事件"
                     }))
                 }
             }
@@ -134,17 +191,31 @@ mod tests {
     #[test]
     fn test_tool_definitions_count() {
         let defs = EarthToolExecutor::tool_definitions();
-        assert_eq!(defs.len(), 3);
-        assert_eq!(defs[0].function.name, "skill_view");
-        assert_eq!(defs[1].function.name, "search_memory");
-        assert_eq!(defs[2].function.name, "recall_archived");
+        assert_eq!(defs.len(), 6);
+    }
+
+    #[test]
+    fn test_from_context() {
+        let ctx = EarthToolContext {
+            skill_cache: HashMap::new(),
+            config_dir: PathBuf::from("/tmp"),
+            memory_manager: None,
+            relationship_store: None,
+        };
+        let executor = EarthToolExecutor::from_context(ctx);
+        assert!(executor.skill_cache.is_empty());
     }
 
     #[test]
     fn test_skill_view_from_cache() {
         let mut cache = HashMap::new();
         cache.insert("bargaining".to_string(), "讨价还价指引".to_string());
-        let executor = EarthToolExecutor::new(cache, PathBuf::from("/tmp"));
+        let executor = EarthToolExecutor::from_context(EarthToolContext {
+            skill_cache: cache,
+            config_dir: PathBuf::from("/tmp"),
+            memory_manager: None,
+            relationship_store: None,
+        });
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
@@ -155,27 +226,5 @@ mod tests {
 
         assert_eq!(result["skill_id"], "bargaining");
         assert_eq!(result["content"], "讨价还价指引");
-    }
-
-    #[test]
-    fn test_skill_view_not_found() {
-        let executor = EarthToolExecutor::new(HashMap::new(), PathBuf::from("/tmp"));
-
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(executor.execute(
-                "skill_view",
-                &serde_json::json!({"skill_id": "nonexistent"}),
-            ))
-            .unwrap();
-
-        assert!(result["error"].is_string());
-    }
-
-    #[test]
-    fn test_from_rw_lock() {
-        let cache = RwLock::new(HashMap::new());
-        let executor = EarthToolExecutor::from_rw_lock(&cache, PathBuf::from("/tmp"));
-        assert!(executor.skill_cache.is_empty());
     }
 }

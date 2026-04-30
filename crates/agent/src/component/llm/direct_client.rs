@@ -426,6 +426,22 @@ impl DirectLlmClient {
 
         debug!("Calling OpenAI-compatible API: {}", url);
         debug!("Request model: {}", request.model);
+        // 地魂诊断：确认 tools 字段是否在请求中
+        if request.tools.is_some() {
+            info!(
+                "[地魂] 发送请求: url={}, model={}, tools={}, tool_choice={}, stream={:?}, prefer_stream={}",
+                url,
+                request.model,
+                request.tools.as_ref().map(|t| t.len()).unwrap_or(0),
+                request
+                    .tool_choice
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "None".to_string()),
+                request.stream,
+                self.config.prefer_stream,
+            );
+        }
 
         let mut request_builder = client.post(&url).header("Content-Type", "application/json");
 
@@ -440,14 +456,20 @@ impl DirectLlmClient {
                 Ok(r) => r,
                 Err(e) if e.is_connect() || e.is_timeout() || e.is_request() => {
                     tracing::warn!("LLM 请求发送失败（网络错误），立即重试一次: {}", e);
-                    request_builder.json(&request).send().await
+                    request_builder
+                        .json(&request)
+                        .send()
+                        .await
                         .context("LLM API request failed after 1 retry")?
                 }
                 Err(e) => return Err(e).context("Failed to send request to LLM API"),
             },
             None => {
                 // 无法 clone，直接请求
-                request_builder.json(&request).send().await
+                request_builder
+                    .json(&request)
+                    .send()
+                    .await
                     .context("Failed to send request to LLM API")?
             }
         };
@@ -474,14 +496,20 @@ impl DirectLlmClient {
         }
 
         // DEBUG: 工具调用时打印原始响应 body 的 tool_calls 部分
-        let raw_body = response.text().await.context("Failed to read response body")?;
+        let raw_body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
                 &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
             } else {
                 "tool_calls field NOT FOUND in response"
             };
-            debug!("[地魂] 原始 API 响应 (tool_calls 片段): {}", tool_calls_preview);
+            debug!(
+                "[地魂] 原始 API 响应 (tool_calls 片段): {}",
+                tool_calls_preview
+            );
         }
         let response_data: OpenAIResponse = serde_json::from_str(&raw_body).map_err(|e| {
             super::token_tracking::record_failure(
@@ -642,15 +670,24 @@ impl DirectLlmClient {
             Some(rb1) => match rb1.json(&stream_request).send().await {
                 Ok(r) => r,
                 Err(e) if e.is_connect() || e.is_timeout() || e.is_request() => {
-                    tracing::warn!("LLM streaming 请求发送失败（网络错误），立即重试一次: {}", e);
-                    request_builder.json(&stream_request).send().await
+                    tracing::warn!(
+                        "LLM streaming 请求发送失败（网络错误），立即重试一次: {}",
+                        e
+                    );
+                    request_builder
+                        .json(&stream_request)
+                        .send()
+                        .await
                         .context("LLM streaming API request failed after 1 retry")?
                 }
                 Err(e) => return Err(e).context("Failed to send request to LLM streaming API"),
             },
             None => {
                 // 无法 clone，直接请求
-                request_builder.json(&stream_request).send().await
+                request_builder
+                    .json(&stream_request)
+                    .send()
+                    .await
                     .context("Failed to send request to LLM streaming API")?
             }
         };
@@ -853,8 +890,12 @@ impl DirectLlmClient {
 
         for round in 0..max_rounds {
             if round == 0 {
-                let tool_names: Vec<&str> = tools.iter().map(|t| t.function.name.as_str()).collect();
-                info!("[地魂] Tool loop 开始, tools={:?}, max_rounds={}", tool_names, max_rounds);
+                let tool_names: Vec<&str> =
+                    tools.iter().map(|t| t.function.name.as_str()).collect();
+                info!(
+                    "[地魂] Tool loop 开始, tools={:?}, max_rounds={}",
+                    tool_names, max_rounds
+                );
             }
 
             let request = OpenAIRequest {
@@ -880,9 +921,20 @@ impl DirectLlmClient {
             // DEBUG: 检查 tool_calls 字段是否存在于原始响应
             debug!(
                 "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
-                msg.tool_calls.as_ref().map(|tc| format!("{:?}", tc.iter().map(|t| t.function.name.clone()).collect::<Vec<_>>())).unwrap_or_else(|| "None".to_string()),
+                msg.tool_calls
+                    .as_ref()
+                    .map(|tc| format!(
+                        "{:?}",
+                        tc.iter()
+                            .map(|t| t.function.name.clone())
+                            .collect::<Vec<_>>()
+                    ))
+                    .unwrap_or_else(|| "None".to_string()),
                 msg.content.as_ref().map(|c| c.len()).unwrap_or(0),
-                msg.content.as_ref().map(|c| c.chars().take(100).collect::<String>()).unwrap_or_default(),
+                msg.content
+                    .as_ref()
+                    .map(|c| c.chars().take(100).collect::<String>())
+                    .unwrap_or_default(),
             );
 
             let has_tool_calls = msg
@@ -893,13 +945,23 @@ impl DirectLlmClient {
 
             if !has_tool_calls {
                 let content = msg.content.clone().unwrap_or_default();
-                info!("[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars)", content.len());
+                info!(
+                    "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars)",
+                    content.len()
+                );
                 return Ok(content);
             }
 
             let tool_calls = msg.tool_calls.as_ref().unwrap();
-            let call_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
-            info!("[地魂] LLM 请求调用 {} 个 tool: {:?}", tool_calls.len(), call_names);
+            let call_names: Vec<&str> = tool_calls
+                .iter()
+                .map(|tc| tc.function.name.as_str())
+                .collect();
+            info!(
+                "[地魂] LLM 请求调用 {} 个 tool: {:?}",
+                tool_calls.len(),
+                call_names
+            );
 
             messages.push(msg.clone());
 
@@ -1068,8 +1130,11 @@ impl LlmClient for DirectLlmClient {
                 anyhow::bail!("LLM 调用已被停止");
             }
             let stream = self.complete_streaming(system, prompt).await?;
-            let tracking =
-                super::streaming::UsageTrackingStream::new(stream, self.config.provider, self.config.get_model_with_default());
+            let tracking = super::streaming::UsageTrackingStream::new(
+                stream,
+                self.config.provider,
+                self.config.get_model_with_default(),
+            );
             Ok(tracking.into_llm_stream())
         })
     }
@@ -1087,9 +1152,14 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
-            let stream = self.complete_conversation_streaming(system, summary, turns, current_prompt).await?;
-            let tracking =
-                super::streaming::UsageTrackingStream::new(stream, self.config.provider, self.config.get_model_with_default());
+            let stream = self
+                .complete_conversation_streaming(system, summary, turns, current_prompt)
+                .await?;
+            let tracking = super::streaming::UsageTrackingStream::new(
+                stream,
+                self.config.provider,
+                self.config.get_model_with_default(),
+            );
             Ok(tracking.into_llm_stream())
         })
     }

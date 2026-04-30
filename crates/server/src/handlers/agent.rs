@@ -474,9 +474,7 @@ pub async fn agent_auto_rebirth(
             .await
             .unwrap_or(0),
     );
-    state
-        .agent_state_cache
-        .insert(result.agent_id, new_state);
+    state.agent_state_cache.insert(result.agent_id, new_state);
 
     // 更新 agent_to_device_map
     {

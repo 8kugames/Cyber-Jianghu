@@ -32,7 +32,7 @@ pub fn search_memory_definition() -> ToolDefinition {
 pub fn recall_archived_definition() -> ToolDefinition {
     ToolDefinition::new(
         "recall_archived",
-        "努力回忆已模糊的记忆。用于回忆很久以前的事情。",
+        "按时间倒序回忆近期被遗忘的事件。不需要提供查询词。",
         Some(serde_json::json!({
             "type": "object",
             "properties": {
@@ -46,7 +46,7 @@ pub fn recall_archived_definition() -> ToolDefinition {
                     "default": 5
                 }
             },
-            "required": ["query"]
+            "required": []
         })),
     )
 }
@@ -89,12 +89,39 @@ pub(super) async fn execute_search_memory(
     }
 }
 
-/// 执行 recall_archived（与 search_memory 共享底层实现）
+/// 执行 recall_archived（按时间倒序，跳过语义搜索）
 pub(super) async fn execute_recall_archived(
     memory_manager: &MemoryManager,
-    query: &str,
     limit: usize,
 ) -> serde_json::Value {
-    // recall_archived 和 search_memory 走同一个 recall_archived 路径
-    execute_search_memory(memory_manager, query, limit).await
+    match memory_manager.recall_recent_archived(limit).await {
+        Ok(memories) => {
+            if memories.is_empty() {
+                return serde_json::json!({
+                    "success": true,
+                    "message": "没有近期被遗忘的事件",
+                    "memories": []
+                });
+            }
+            let entries: Vec<serde_json::Value> = memories
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "content": m.content,
+                        "tick_id": m.tick_id,
+                        "importance": m.importance_score
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "success": true,
+                "message": format!("回忆起 {} 条近期被遗忘的事件", entries.len()),
+                "memories": entries
+            })
+        }
+        Err(e) => serde_json::json!({
+            "success": false,
+            "error": format!("回忆记忆失败: {}", e)
+        }),
+    }
 }

@@ -999,16 +999,17 @@ impl LlmClient for FallbackLlmClient {
 
             let system = system.to_string();
             let prompt = prompt.to_string();
-            let (stream, provider_str, model) = self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
-                let system = system.clone();
-                let prompt = prompt.clone();
-                async move { client.complete_streaming(&system, &prompt).await }
-            })
-            .await?;
+            let (stream, provider_str, model) = self
+                .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+                    let system = system.clone();
+                    let prompt = prompt.clone();
+                    async move { client.complete_streaming(&system, &prompt).await }
+                })
+                .await?;
 
-            let provider = LlmProvider::parse(&provider_str)
-                .unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream = super::streaming::UsageTrackingStream::new(stream, provider, model);
+            let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
+            let tracking_stream =
+                super::streaming::UsageTrackingStream::new(stream, provider, model);
             Ok(tracking_stream.into_llm_stream())
         })
     }
@@ -1029,27 +1030,28 @@ impl LlmClient for FallbackLlmClient {
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
-            let (stream, provider_str, model) = self.call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
-                let system = system.clone();
-                let summary = summary_owned.clone();
-                let turns = turns.clone();
-                let current_prompt = current_prompt.clone();
-                async move {
-                    client
-                        .complete_conversation_streaming(
-                            &system,
-                            summary.as_deref(),
-                            &turns,
-                            &current_prompt,
-                        )
-                        .await
-                }
-            })
-            .await?;
+            let (stream, provider_str, model) = self
+                .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
+                    let system = system.clone();
+                    let summary = summary_owned.clone();
+                    let turns = turns.clone();
+                    let current_prompt = current_prompt.clone();
+                    async move {
+                        client
+                            .complete_conversation_streaming(
+                                &system,
+                                summary.as_deref(),
+                                &turns,
+                                &current_prompt,
+                            )
+                            .await
+                    }
+                })
+                .await?;
 
-            let provider = LlmProvider::parse(&provider_str)
-                .unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream = super::streaming::UsageTrackingStream::new(stream, provider, model);
+            let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
+            let tracking_stream =
+                super::streaming::UsageTrackingStream::new(stream, provider, model);
             Ok(tracking_stream.into_llm_stream())
         })
     }
