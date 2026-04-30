@@ -747,6 +747,9 @@ function generateAttributesHtml(attributes, derivedAttributes) {
         if (keys.includes(key)) return cat;
       }
     }
+    if (!attributeMeta) {
+      console.warn("[renderAttributes] attributeMeta 未加载，属性将落入'其他属性'分组");
+    }
     return null;
   };
 
@@ -1332,9 +1335,13 @@ document.addEventListener("DOMContentLoaded", () => {
     deathEventSource.addEventListener("tick_update", () => {
       // 防抖：避免短时间内多次刷新
       if (window._tickRefreshTimer) clearTimeout(window._tickRefreshTimer);
-      window._tickRefreshTimer = setTimeout(() => {
-        loadCharacter();
-        loadRelationships();
+      window._tickRefreshTimer = setTimeout(async () => {
+        // 确保 attributeMeta 已加载（防止 SSE reconnect 期间竞态）
+        if (!attributeMeta) {
+          await loadAttributeMeta();
+        }
+        await loadCharacter();
+        await loadRelationships();
       }, 1000);
     });
     deathEventSource.onerror = () => {
@@ -1405,12 +1412,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // 仅对存活角色建立 SSE 连接
     connectDeathEvents();
 
-    // 角色数据通过 HTTP API 获取，立即可用
-    loadCharacter();
-    loadRelationships();
-    loadMemories();
-    loadDreamStatus();
-    loadDreamRecords();
+    // 角色数据通过 HTTP API 获取，需等待 attributeMeta 就绪后再渲染属性
+    await loadCharacter();
+    await loadRelationships();
+    await loadMemories();
+    await loadDreamStatus();
+    await loadDreamRecords();
   });
 
   document
