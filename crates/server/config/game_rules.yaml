@@ -58,6 +58,8 @@ data:
       # parent-child 隐式连接的默认 travel_cost
       # 节点可在 locations.yaml 中通过 implicit_travel_cost 覆盖
       default_implicit_travel_cost: 1
+      # 移动体力消耗倍率（stamina_cost = travel_cost * 此值）
+      travel_stamina_multiplier: 2
 
     # 游戏纪元（用于计算 tick_id）
     game_time:

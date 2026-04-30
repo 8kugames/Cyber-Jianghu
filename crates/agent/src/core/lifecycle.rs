@@ -845,8 +845,8 @@ impl super::Agent {
                     // 2.5 社交事件 → 自动更新关系（非阻塞，spawn 后台任务）
                     self.process_social_events(&world_state.events_log, &world_state.entities);
 
-                    // 3. 每 FORGETTING_INTERVAL_TICKS tick 运行遗忘机制
-                    if world_state.tick_id % super::FORGETTING_INTERVAL_TICKS == 0
+                    // 3. 遗忘机制（间隔由 memory.forgetting_interval_ticks 配置）
+                    if world_state.tick_id % self.config.memory.forgetting_interval_ticks == 0
                         && let Err(e) = self.run_forgetting(world_state.tick_id).await {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }

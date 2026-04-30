@@ -4,13 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Cyber-Jianghu (赛博江湖)** is a Rust workspace implementing an MMO-MAS game where every character is an AI agent. The architecture follows **data-driven COI (Composition Over Inheritance)** principles.
+**Cyber-Jianghu (赛博江湖)** is an AI-driven MMO-MAS (Massive Multiplayer Online Multi-Agent Simulation) martial arts sandbox. Every character is an autonomous AI agent with independent personality, memory, and goals. No scripts, no NPCs — only harsh physics and survival pressure. Characters hunger, fight, form alliances, and hold grudges — all emergent from thousands of AI agents.
 
 ### Core Philosophy: Body-Mind Separation (身心分离)
 
-- **Server ("天道" / Physics Engine)**: Objective world state, authoritative game logic, tick-based time progression
-- **Agent ("众生" / Consciousness)**: Subjective AI decision-making with memory, persona, and cognitive capabilities
+- **Server ("天道" / Physics Engine)**: Objective world state, authoritative game logic, data-driven rules via YAML hot-reload
+- **Agent ("众生" / Consciousness)**: Subjective AI decision-making with unified cognitive architecture — only LLM location differs (Cognitive built-in vs Claw external via OpenClaw)
 - **"天道无为，万物自化"**: The server provides objective physics; agents create emergent behavior through autonomous decisions
+
+### Key Features
+
+- **Three-Soul Architecture**: ActorSoul (action) → Earth Soul (tool calling) → ReflectorSoul (guardian/validation)
+- **Multi-Intent Pipeline**: Single tick can submit multiple Intents, executed in order with rollback on failure
+- **Survival-Driven Emergence**: Hunger, resource scarcity, permanent death — pressure drives complex social structures
+- **Device-Character Separation**: Supports rebirth, one device manages multiple characters
+- **Built-in Admin Web Panel**: Character creation, state inspection, dream injection, and more
 
 See [Readme.md](Readme.md) for full project description and architecture diagrams.
 
@@ -105,8 +113,9 @@ crates/
 ├── server/          # Game server ("天道" - physics engine)
 └── agent/           # Agent SDK (unified cognitive architecture, two runtime modes)
 
-docs/                # Architecture docs and whitepapers
+docs/WHITEPAPER/     # Whitepapers
 scripts/             # Utility scripts
+integration/openclaw # OpenClaw plugin integration
 ```
 
 **OpenClaw Integration**: See separate repository [8kugames/Cyber-Jianghu-Openclaw](https://github.com/8kugames/Cyber-Jianghu-Openclaw)
@@ -147,6 +156,12 @@ TickScheduler (每 N 秒):
 
 **Conflict Resolution**: FIFO via single IntentWorker (zero race conditions)
 
+**Multi-Intent Pipeline**:
+- Single tick can submit multiple Intents, executed in order
+- `IntentBatchConfig`: `max_intents_per_tick`, `max_retries`, `pipeline_execution_enabled`
+- `GradedValidationConfig`: Always (force)/Adaptive (dynamic)/Skip (skip) three strategies
+- Failed Intent triggers Saga rollback
+
 Key server modules:
 - `src/tick/scheduler.rs` - Pure clock scheduler (decay + broadcast)
 - `src/tick/realtime.rs` - IntentWorker (real-time intent processing engine)
@@ -164,7 +179,7 @@ The agent crate implements a **unified Agent SDK** with cognitive engine, memory
 
 > **CRITICAL: WebSocket is REQUIRED for intent submission**
 >
-> `POST /api/v1/intent` is **disabled**. All intent submission goes through WebSocket.
+> `POST /api/v1/intent` is **not implemented** (route absent). All intent submission goes through WebSocket.
 
 #### Runtime Modes
 
@@ -183,12 +198,12 @@ The agent crate implements a **unified Agent SDK** with cognitive engine, memory
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
   直连 WorldState    三层审查
-  地魂 tool calling 工具池
+  地魂 tool calling 工具池（独立模块）
 ```
 
-- **ActorSoul** (人魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain
-- **地魂**: tool calling 工具池，行动落地层 (embedded in ActorSoul)
-- **ReflectorSoul** (天魂): Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM)
+- **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain, driven by CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
+- **地魂** (能力之魂): tool calling 工具池，行动落地层（独立模块 `soul/earth/`）
+- **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type validation) → Layer 2 (RuleEngine validation) → Layer 3 (LLM intent review). Rejection feedback is narrative-化, ActorSoul only sees natural language
 
 #### Decision Context Pipeline
 
@@ -223,6 +238,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
 - `src/soul/actor/summary_window.rs` - Sliding context window for action history
 - `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
+- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
 - `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
@@ -318,8 +334,8 @@ use super::builder::AgentBuilder;
 5. **File size limit**: Keep .rs files under 800 lines
 6. **No emoji** in code or documentation
 7. **No backwards compatibility**: Make breaking changes freely
-8. **Write paths restricted**: Only use relative paths under `./` for all write operations, including tmp files (`./tmp`)。
-9. 本项目归属"Cyber-Jianghu-MMO-MAS"，不是"Cyber-Jianghu-MOO-MAS"。
+8. **Write paths restricted**: Only use relative paths under `./` for all write operations, including tmp files (`./tmp`)
+9. 本项目归属"Cyber-Jianghu-MMO-MAS"，不是"Cyber-Jianghu-MOO-MAS"
 
 ## Key Dependencies
 
@@ -352,25 +368,57 @@ use super::builder::AgentBuilder;
 - `POST /api/v1/agent/connect` - Connect device
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
 - `POST /api/v1/agent/rebirth` - Delete agent
+- `POST /api/v1/agent/auto-rebirth` - Auto rebirth
+- `GET /api/v1/agent/{id}/context` - Get agent context
 - `WS /ws?token={auth_token}` - WebSocket connection
+- Admin API: `/api/admin/reload-config`, `/api/admin/login`, `/api/admin/logout`, `/api/admin/session`
 
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
+
+**Core** (WebSocket primary, HTTP auxiliary):
 - `GET /api/v1/state` - Get current WorldState
 - `GET /api/v1/context` - Get narrative context + DecisionContextSnapshot enrichment
-- `POST /api/v1/intent` - **Disabled** (use WebSocket)
+
+**Character**:
 - `GET /api/v1/character` - Get character info
 - `GET /api/v1/character/soul-cycles` - Get soul cycle records (paginated)
+- `GET /api/v1/character/dream/records` - Get dream records
 - `POST /api/v1/character/dream` - Inject dream (consumed by lifecycle, peeked by context handler)
 - `POST /api/v1/character/rebirth` - Rebirth character
+
+**Attributes & Status**:
+- `GET /api/v1/attributes` - Get attribute values
+- `GET /api/v1/tick` - Get tick status
+- `GET /api/v1/lifespan` - Get lifespan status
+- `GET /api/v1/cognitive` - Get structured cognitive context
+
+**Relationships & Memory**:
 - `GET /api/v1/relationship/list` - Get all relationships
 - `GET /api/v1/memory/recent` - Get recent memories
 - `POST /api/v1/memory/search` - Search memories
 
+**Characters (Multi-character, 设备与角色分离)**:
+- `GET /api/v1/characters` - List all characters
+- `POST /api/v1/characters/switch` - Switch current character
+- `GET /api/v1/characters/{agent_id}` - Get character by ID
+
+**Validation & Review**:
+- `POST /api/v1/validate` - Validate intent
+- `GET /api/v1/review/pending` - Get pending reviews
+- `POST /api/v1/review/{intent_id}` - Submit review
+- `GET /api/v1/review/{intent_id}/status` - Get review status
+
+**Events & Config**:
+- `GET /api/v1/events` - Death events SSE stream
+- `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
+- `POST /api/v1/config/reload` - Hot reload config
+- `GET /api/v1/setup/status` - Get setup status
+- `GET /api/v1/config/llm/providers` - Get LLM providers
+- `GET /api/v1/config/llm/usage` - Get LLM token usage
+
 ### Admin Web Panel
 - `GET /admin/` - Main dashboard
-- `GET /welcome.html` - Home page
-- `GET /create.html` - Character creation
-- `GET /character.html` - Character info
+- `GET /admin/{*path}` - Admin panel routes (served from `crates/server/src/admin/`)
 
 ## Quick Start Guides
 

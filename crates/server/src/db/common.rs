@@ -31,17 +31,16 @@ use rand::RngExt;
 ///
 /// # #[tokio::main]
 /// # async fn main() -> anyhow::Result<()> {
-/// let pool = init_db_pool("postgres://user:pass@localhost/db").await?;
+/// let pool = init_db_pool("postgres://user:pass@localhost/db", 5, 2).await?;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn init_db_pool(database_url: &str) -> Result<PgPool> {
+pub async fn init_db_pool(database_url: &str, max_retries: u32, retry_delay_secs: u64) -> Result<PgPool> {
     // 隐藏密码用于日志输出
     let safe_url = database_url.split('@').next_back().unwrap_or("unknown");
     info!("初始化数据库连接池: {}", safe_url);
 
-    let max_retries = 5;
-    let retry_delay = Duration::from_secs(2);
+    let retry_delay = Duration::from_secs(retry_delay_secs);
 
     for attempt in 1..=max_retries {
         match PgPool::connect(database_url).await {
@@ -122,7 +121,7 @@ mod tests {
         // 使用环境变量 DATABASE_URL，便于 CI/CD 和本地测试
         let database_url =
             std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable must be set");
-        let result = init_db_pool(&database_url).await;
+        let result = init_db_pool(&database_url, 5, 2).await;
         assert!(result.is_ok());
     }
 

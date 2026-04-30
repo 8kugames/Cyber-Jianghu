@@ -37,11 +37,13 @@ pub fn build_fallback_client(
     if !llm_config.models.is_empty() {
         for (i, mc) in llm_config.models.iter().enumerate() {
             let max_tokens = mc.max_tokens.unwrap_or(llm_config.max_tokens);
+            let enable_thinking = mc.enable_thinking.or(llm_config.enable_thinking);
             match build_direct_client_with_max_tokens(
                 llm_config,
                 Some(mc.model.as_str()),
                 prefer_stream,
                 max_tokens,
+                enable_thinking,
             ) {
                 Ok(client) => {
                     info!("模型 #{}: {} (max_tokens={})", i + 1, mc.model, max_tokens);
@@ -105,21 +107,28 @@ pub fn build_fallback_client(
     Ok(llm_arc)
 }
 
-/// 构建 DirectLlmClient（共享全局 max_tokens）
+/// 构建 DirectLlmClient（共享全局 max_tokens + enable_thinking）
 fn build_direct_client(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
     prefer_stream: bool,
 ) -> Result<DirectLlmClient> {
-    build_direct_client_with_max_tokens(llm_config, model, prefer_stream, llm_config.max_tokens)
+    build_direct_client_with_max_tokens(
+        llm_config,
+        model,
+        prefer_stream,
+        llm_config.max_tokens,
+        llm_config.enable_thinking,
+    )
 }
 
-/// 构建 DirectLlmClient（指定 max_tokens）
+/// 构建 DirectLlmClient（指定 max_tokens + enable_thinking）
 fn build_direct_client_with_max_tokens(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
     prefer_stream: bool,
     max_tokens: u32,
+    enable_thinking: Option<bool>,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
@@ -135,7 +144,8 @@ fn build_direct_client_with_max_tokens(
     }
     client_config = client_config
         .with_temperature(llm_config.temperature)
-        .with_max_tokens(max_tokens);
+        .with_max_tokens(max_tokens)
+        .with_enable_thinking(enable_thinking);
 
     DirectLlmClient::new(client_config)
 }
