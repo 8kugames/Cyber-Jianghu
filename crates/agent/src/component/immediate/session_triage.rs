@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use cyber_jianghu_protocol::{EventTriageConfig, EventTriagePreFilter};
+use cyber_jianghu_protocol::{EventTriageConfig, EventTriagePreFilter, WorldTime};
 
 use crate::component::llm::LlmClientExt;
 use crate::runtime::claw::LlmClientContainer;
@@ -70,10 +70,14 @@ pub struct SessionTriageEngine {
 
     /// batch_id 计数器
     next_batch_id: i64,
+
+    /// 世界时间（用于天道历日期格式化）
+    world_time: Option<WorldTime>,
 }
 
 impl SessionTriageEngine {
     /// 创建新的 Session Triage Engine
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         event_store: Arc<EventStore>,
         llm_container: LlmClientContainer,
@@ -82,6 +86,7 @@ impl SessionTriageEngine {
         config: EventTriageConfig,
         game_day: i64,
         current_game_day: Arc<RwLock<i64>>,
+        world_time: Option<WorldTime>,
     ) -> Self {
         Self {
             event_store,
@@ -92,6 +97,7 @@ impl SessionTriageEngine {
             game_day,
             current_game_day,
             next_batch_id: 1,
+            world_time,
         }
     }
 
@@ -381,41 +387,73 @@ event_id 必须是以下值之一：{event_ids}"#,
 
         let total_count = triaged.urgent.len() + triaged.batch.len();
 
+        // 日期格式化：使用天道历
+        let date_str = self
+            .world_time
+            .as_ref()
+            .map(|wt| wt.to_chinese())
+            .unwrap_or_else(|| format!("游戏日 {}", self.game_day));
+
         if total_count == 0 {
-            return Ok(format!("游戏日 {}：平静无事。", self.game_day));
+            return Ok(format!("{}：平静无事。", date_str));
         }
 
-        // 构建摘要
-        let urgent_desc: Vec<&str> = triaged
+        // 构建事件描述
+        let urgent_events: Vec<&str> = triaged
             .urgent
             .iter()
             .map(|e| e.description.as_str())
             .collect();
-        let batch_desc: Vec<&str> = triaged
+        let batch_events: Vec<&str> = triaged
             .batch
             .iter()
             .map(|e| e.description.as_str())
-            .take(10) // 最多取 10 条
+            .take(10)
             .collect();
 
-        let summary = format!(
-            "游戏日 {} 摘要：{} 条紧急事件（{}），{} 条一般事件（{}...）",
-            self.game_day,
-            triaged.urgent.len(),
-            urgent_desc.join("；"),
-            triaged.batch.len(),
-            batch_desc.join("；"),
+        // LLM生成叙事化摘要
+        let prompt = format!(r#"你是{agent_name}的史官，为{date_str}撰写江湖起居注。
+
+当日他人交互：
+紧急事件（{urgent_count}条）：{urgent_events}
+一般事件（{batch_count}条）：{batch_events}
+
+要求：
+1. 以"我"为中心视角
+2. 语言古朴典雅，武侠风格
+3. 400-600字，纯叙事散文
+4. 叙事化整合，不要事件计数
+
+返回JSON：{{"narrative": "..."}}"#,
+            agent_name = self.agent_name,
+            date_str = date_str,
+            urgent_count = triaged.urgent.len(),
+            urgent_events = urgent_events.join("；"),
+            batch_count = triaged.batch.len(),
+            batch_events = batch_events.join("；")
         );
 
-        // 摘要通过 run() 返回值交给 lifecycle 处理（episodic 存储 + server 提交）
-        info!("游戏日 {} 摘要: {}", self.game_day, summary);
+        let llm = self.llm_container.read().await;
+        let llm_ref = llm.clone();
+        drop(llm);
+
+        let result: serde_json::Value = llm_ref
+            .complete_json_with_system(&format!("你是{agent_name}的史官，为{date_str}撰写江湖起居注。", agent_name = self.agent_name, date_str = date_str), &prompt)
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM摘要生成失败: {}", e))?;
+
+        let narrative = result
+            .get("narrative")
+            .and_then(|v| v.as_str())
+            .unwrap_or("摘要生成失败")
+            .to_string();
 
         // 清理过期事件
         if let Err(e) = self.event_store.cleanup_old_async(self.game_day).await {
             warn!("清理过期事件失败: {}", e);
         }
 
-        Ok(summary)
+        Ok(narrative)
     }
 }
 

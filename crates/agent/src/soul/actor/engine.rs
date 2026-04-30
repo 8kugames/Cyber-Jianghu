@@ -94,6 +94,12 @@ struct DirectCognitiveResponse {
     /// 单 action_data 格式（旧，向后兼容）
     #[serde(default)]
     action_data: Option<serde_json::Value>,
+    /// 是否应写入记忆（人魂判断）
+    #[serde(default)]
+    should_remember: Option<bool>,
+    /// 要写入记忆的内容（人魂判断，should_remember=true时必填）
+    #[serde(default)]
+    memory_content: Option<String>,
 }
 
 impl DirectCognitiveResponse {
@@ -791,6 +797,8 @@ impl CognitiveEngine {
         );
         chain.add_stage(decision);
         chain.final_intent = intents[0].clone();
+        chain.should_remember = response.should_remember;
+        chain.memory_content = response.memory_content;
 
         thinking_log::log_llm(&agent_name, tick_id, "Direct", &prompt, &response_json);
 
@@ -948,6 +956,8 @@ impl CognitiveEngine {
         );
         chain.add_stage(decision);
         chain.final_intent = intent.clone();
+        chain.should_remember = response.should_remember;
+        chain.memory_content = response.memory_content;
 
         thinking_log::log_llm(&agent_name, tick_id, "Legacy", &prompt, &response_json);
 

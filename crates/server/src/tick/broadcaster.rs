@@ -352,30 +352,6 @@ impl Broadcaster {
             }
         }
 
-        // 注入环境事件（天气 + 季节描述，全部数据驱动）
-        let weather_key =
-            crate::game_data::registry::time_registry::TimeRegistry::get_weather_key(tick_id);
-        {
-            if let Some(desc) = game_data.display_messages.weather_events.get(&weather_key) {
-                events.push(WorldEvent {
-                    event_type: WorldEventType::EnvironmentalChange,
-                    tick_id,
-                    description: desc.clone(),
-                    metadata: serde_json::json!({"weather": weather_key}),
-                });
-            }
-        }
-        if let Some(season) =
-            crate::game_data::registry::time_registry::TimeRegistry::get_current_season(tick_id)
-        {
-            events.push(WorldEvent {
-                event_type: WorldEventType::EnvironmentalChange,
-                tick_id,
-                description: format!("{}：{}", season.name, season.description),
-                metadata: serde_json::json!({"season": season.id}),
-            });
-        }
-
         // 获取显示消息配置（数据驱动）
         let (entity_state_alive, entity_state_dead) = (
             game_data.display_messages.entity_states.alive.clone(),
