@@ -434,11 +434,23 @@ impl DirectLlmClient {
                 request_builder.header("Authorization", format!("Bearer {}", api_key));
         }
 
-        let response = request_builder
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send request to LLM API")?;
+        // 网络错误时立即重试一次（无等待，避免积压）
+        let response = match request_builder.try_clone() {
+            Some(rb1) => match rb1.json(&request).send().await {
+                Ok(r) => r,
+                Err(e) if e.is_connect() || e.is_timeout() || e.is_request() => {
+                    tracing::warn!("LLM 请求发送失败（网络错误），立即重试一次: {}", e);
+                    request_builder.json(&request).send().await
+                        .context("LLM API request failed after 1 retry")?
+                }
+                Err(e) => return Err(e).context("Failed to send request to LLM API"),
+            },
+            None => {
+                // 无法 clone，直接请求
+                request_builder.json(&request).send().await
+                    .context("Failed to send request to LLM API")?
+            }
+        };
 
         if !response.status().is_success() {
             let status = response.status();
@@ -461,7 +473,17 @@ impl DirectLlmClient {
             anyhow::bail!("LLM API error {}: {}", status, error_body);
         }
 
-        let response_data: OpenAIResponse = response.json().await.map_err(|e| {
+        // DEBUG: 工具调用时打印原始响应 body 的 tool_calls 部分
+        let raw_body = response.text().await.context("Failed to read response body")?;
+        if request.tools.is_some() {
+            let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
+                &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
+            } else {
+                "tool_calls field NOT FOUND in response"
+            };
+            debug!("[地魂] 原始 API 响应 (tool_calls 片段): {}", tool_calls_preview);
+        }
+        let response_data: OpenAIResponse = serde_json::from_str(&raw_body).map_err(|e| {
             super::token_tracking::record_failure(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
@@ -615,7 +637,23 @@ impl DirectLlmClient {
         stream_request.stream = Some(true);
         stream_request.stream_options = Some(serde_json::json!({"include_usage": true}));
 
-        let response = request_builder.json(&stream_request).send().await?;
+        // 网络错误时立即重试一次（无等待，避免积压）
+        let response = match request_builder.try_clone() {
+            Some(rb1) => match rb1.json(&stream_request).send().await {
+                Ok(r) => r,
+                Err(e) if e.is_connect() || e.is_timeout() || e.is_request() => {
+                    tracing::warn!("LLM streaming 请求发送失败（网络错误），立即重试一次: {}", e);
+                    request_builder.json(&stream_request).send().await
+                        .context("LLM streaming API request failed after 1 retry")?
+                }
+                Err(e) => return Err(e).context("Failed to send request to LLM streaming API"),
+            },
+            None => {
+                // 无法 clone，直接请求
+                request_builder.json(&stream_request).send().await
+                    .context("Failed to send request to LLM streaming API")?
+            }
+        };
 
         let status = response.status();
         if !status.is_success() {
@@ -838,6 +876,14 @@ impl DirectLlmClient {
                 .first()
                 .ok_or_else(|| anyhow::anyhow!("LLM returned empty response"))?;
             let msg = &choice.message;
+
+            // DEBUG: 检查 tool_calls 字段是否存在于原始响应
+            debug!(
+                "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
+                msg.tool_calls.as_ref().map(|tc| format!("{:?}", tc.iter().map(|t| t.function.name.clone()).collect::<Vec<_>>())).unwrap_or_else(|| "None".to_string()),
+                msg.content.as_ref().map(|c| c.len()).unwrap_or(0),
+                msg.content.as_ref().map(|c| c.chars().take(100).collect::<String>()).unwrap_or_default(),
+            );
 
             let has_tool_calls = msg
                 .tool_calls
