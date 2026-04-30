@@ -53,6 +53,10 @@ pub struct ActionConfigEntry {
     /// 逃跑成功率公式（flee）
     pub flee_success_formula: Option<String>,
 
+    /// 逃跑默认成功率（公式不存在或公式计算失败时使用）
+    #[serde(default = "default_flee_success_rate")]
+    pub default_flee_success_rate: f64,
+
     /// 最大内容长度（speak）
     pub max_content_length: Option<i32>,
 
@@ -79,6 +83,10 @@ pub struct ActionConfigEntry {
 
 fn default_ooc_risk() -> String {
     "low".to_string()
+}
+
+fn default_flee_success_rate() -> f64 {
+    0.5
 }
 
 // ============================================================================

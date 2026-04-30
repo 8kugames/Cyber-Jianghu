@@ -45,6 +45,14 @@ impl ActionRegistry {
         })
     }
 
+    /// 获取指定 action 的某个字段值（f64 类型）
+    pub fn get_f64(action_name: &str, field: ActionField) -> Option<f64> {
+        Self::get(action_name).and_then(|config| match field {
+            ActionField::DefaultFleeSuccessRate => Some(config.default_flee_success_rate),
+            _ => None,
+        })
+    }
+
     /// 获取所有已配置的 action 名称
     pub fn all_action_names() -> Vec<String> {
         registry()
@@ -100,6 +108,7 @@ pub enum ActionField {
     BaseDamage,
     DamageFormula,
     FleeSuccessFormula,
+    DefaultFleeSuccessRate,
     WeaponBonus,
     WeaponBonusMultiplier,
     SuccessRate,

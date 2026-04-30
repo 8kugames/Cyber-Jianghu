@@ -22,9 +22,6 @@ use zeroize::Zeroize;
 
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldTime};
 
-/// 支持的 LLM Provider
-pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "openclaw", "openai_compatible"];
-
 // ============================================================================
 // 每服务器设备身份配置（device.yaml）
 // ============================================================================
@@ -421,6 +418,9 @@ pub struct FallbackModelConfig {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
+    /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
 }
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
@@ -503,6 +503,11 @@ pub struct LlmConfig {
     /// 开启时天魂审批通过后生成第一人称叙事文本
     #[serde(default = "default_reflector_narrative")]
     pub reflector_narrative: bool,
+
+    /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
+    /// per-model 配置优先于此全局值
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
 }
 
 fn default_idle_rotate_threshold() -> u32 {
@@ -588,6 +593,7 @@ impl Default for LlmConfig {
             narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
             enable_streaming: DEFAULT_ENABLE_STREAMING,
             reflector_narrative: DEFAULT_REFLECTOR_NARRATIVE,
+            enable_thinking: None,
         }
     }
 }
@@ -630,46 +636,10 @@ impl LlmConfig {
             narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
             enable_streaming: DEFAULT_ENABLE_STREAMING,
             reflector_narrative: DEFAULT_REFLECTOR_NARRATIVE,
+            enable_thinking: None,
         }
     }
 
-    /// 不推荐模型列表（基于 5h 11-Agent 联调测试数据）
-    ///
-    /// 联调测试报告: logs/测试报告/联调测试.260412.docker.002.md
-    const NOT_RECOMMENDED: &[(&str, &str)] = &[
-        (
-            "dashscope",
-            "qwen-plus 系列 JSON 格式遵循差（idle 率高），建议改用 MiniMax M2.7-highspeed",
-        ),
-        (
-            "longcat",
-            "LongCat-Flash JSON 解析错误频繁，建议改用 MiniMax M2.7-highspeed",
-        ),
-    ];
-
-    /// 检查是否为不推荐模型，打印警告
-    pub fn check_model_recommendation(&self) {
-        for (provider, reason) in Self::NOT_RECOMMENDED {
-            if self.provider == *provider {
-                tracing::warn!("模型不推荐: provider='{}'。原因: {}", self.provider, reason);
-            }
-        }
-    }
-
-    /// API Key 格式验证
-    pub fn validate_api_key(provider: &str, api_key: &str) -> Result<()> {
-        if api_key.is_empty() {
-            return Ok(());
-        }
-        match provider {
-            "ollama" | "openclaw" => {}
-            "openai_compatible" => {
-                // OpenAI Compatible 通常需要 API Key，但不强制格式
-            }
-            _ => {}
-        }
-        Ok(())
-    }
 }
 
 impl Drop for LlmConfig {
@@ -698,6 +668,11 @@ pub struct MemoryConfig {
     /// 情景记忆保存阈值（重要性 >= 此值的事件会被保存）
     #[serde(default = "default_episodic_threshold")]
     pub episodic_threshold: f32,
+
+    /// 遗忘机制运行间隔（tick 数）
+    /// 基于 tick_duration=60s 时，84 ticks ≈ 84 分钟
+    #[serde(default = "default_forgetting_interval_ticks")]
+    pub forgetting_interval_ticks: i64,
 }
 
 fn default_memory_enabled() -> bool {
@@ -712,12 +687,17 @@ fn default_episodic_threshold() -> f32 {
     0.5
 }
 
+fn default_forgetting_interval_ticks() -> i64 {
+    84
+}
+
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             enabled: true,
             working_memory_size: 20,
             episodic_threshold: 0.5,
+            forgetting_interval_ticks: 84,
         }
     }
 }
