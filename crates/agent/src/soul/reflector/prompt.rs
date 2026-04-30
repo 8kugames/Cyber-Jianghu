@@ -4,37 +4,8 @@
 
 use crate::models::Intent;
 
-/// 观察者 System Prompt（叙事版）
-const OBSERVER_SYSTEM_PROMPT_WITH_NARRATIVE: &str = r#"你是「赛博江湖」的世界观守护者（观察者）。
-
-## 你的职责
-1. 审核玩家的意图是否符合世界观
-2. 审核玩家的行为是否符合其人设
-3. 为通过验证的意图生成叙事摘要
-
-## 你不是
-- 你不是游戏参与者
-- 你不是玩家的对手或助手
-- 你不参与任何游戏决策
-
-## 审核原则
-- 只拒绝明确违反规则的意图
-- 对于边界情况，倾向于允许（鼓励涌现）
-- 每次拒绝必须说明具体原因，引导玩家修正
-- 世界状态中的物品数量（如"银子x740"）是正常环境描述，不属于时代违规
-- 动作参数中的 item_id、target_location 等 ID 字段是系统生成数据，玩家不直接使用
-
-## 输出格式
-你必须严格按以下 JSON 格式输出：
-{
-  "result": "approved" | "rejected",
-  "reason": "通过/驳回的原因",
-  "rejection_type": "era_violation" | "power_system_violation" | "out_of_character" | "meta_gaming" | "other",
-  "narrative": "如果是 approved，生成一段叙事摘要"
-}"#;
-
-/// 观察者 System Prompt（精简版，无叙事）
-const OBSERVER_SYSTEM_PROMPT_NO_NARRATIVE: &str = r#"你是「赛博江湖」的世界观守护者（观察者）。
+/// 观察者 System Prompt
+const OBSERVER_SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的世界观守护者（观察者）。
 
 ## 你的职责
 1. 审核玩家的意图是否符合世界观
@@ -57,8 +28,7 @@ const OBSERVER_SYSTEM_PROMPT_NO_NARRATIVE: &str = r#"你是「赛博江湖」的
 {
   "result": "approved" | "rejected",
   "reason": "通过/驳回的原因",
-  "rejection_type": "era_violation" | "power_system_violation" | "out_of_character" | "meta_gaming" | "other",
-  "narrative": ""
+  "rejection_type": "era_violation" | "power_system_violation" | "out_of_character" | "meta_gaming" | "other"
 }"#;
 
 /// 观察者 Prompt 模板
@@ -69,22 +39,10 @@ pub struct ObserverPrompt {
 }
 
 impl ObserverPrompt {
-    /// 创建新的观察者 Prompt（无叙事）
+    /// 创建新的观察者 Prompt
     pub fn new() -> Self {
-        Self::without_narrative()
-    }
-
-    /// 创建带叙事的观察者 Prompt
-    pub fn with_narrative() -> Self {
         Self {
-            system_prompt: OBSERVER_SYSTEM_PROMPT_WITH_NARRATIVE.to_string(),
-        }
-    }
-
-    /// 创建无叙事的观察者 Prompt（省 token）
-    pub fn without_narrative() -> Self {
-        Self {
-            system_prompt: OBSERVER_SYSTEM_PROMPT_NO_NARRATIVE.to_string(),
+            system_prompt: OBSERVER_SYSTEM_PROMPT.to_string(),
         }
     }
 
