@@ -1680,7 +1680,8 @@ pub(super) async fn register_character_handler(
                             } else {
                                 info!("已保存 narrative_config 到 {:?}", config_path);
                                 // 同步更新内存中的 narrative_config，避免重启后数据不一致
-                                *state.narrative_config.write().await = result.narrative_config.clone();
+                                *state.narrative_config.write().await =
+                                    result.narrative_config.clone();
                             }
                         }
                         Err(e) => error!("序列化 narrative_config 失败: {}", e),
@@ -2149,7 +2150,9 @@ pub(super) async fn get_attribute_meta_handler(
             if path.exists() {
                 match tokio::fs::read_to_string(&path).await {
                     Ok(content) => {
-                        match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(&content) {
+                        match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(
+                            &content,
+                        ) {
                             Ok(cfg) => {
                                 info!("从磁盘加载 narrative_config: {:?}", path);
                                 // 回填内存，供后续请求使用

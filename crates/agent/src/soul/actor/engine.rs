@@ -23,6 +23,7 @@ use super::translation::{ActionAliasMap, EntityTranslationRegistry, FieldAliasMa
 use crate::component::llm::conversation::ConversationHistory;
 use crate::component::llm::{ConversationInput, ConversationTurn, LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
+use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
 use crate::models::Intent;
@@ -157,6 +158,8 @@ pub struct CognitiveEngine {
     pub(super) memory_manager: std::sync::RwLock<
         Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     >,
+    /// 关系存储（用于地魂 get_relationship / list_relationships / record_social_event）
+    pub(super) relationship_store: std::sync::RwLock<Option<RelationshipStore>>,
 }
 
 impl CognitiveEngine {
@@ -188,6 +191,7 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
+            relationship_store: std::sync::RwLock::new(None),
         }
     }
 
@@ -266,6 +270,7 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
+            relationship_store: std::sync::RwLock::new(None),
         }
     }
 
@@ -370,6 +375,11 @@ impl CognitiveEngine {
     }
 
     /// 设置对话历史（由 lifecycle 在注册后注入）
+    pub fn set_relationship_store(&self, store: RelationshipStore) {
+        let mut guard = self.relationship_store.write().unwrap();
+        *guard = Some(store);
+    }
+
     pub fn set_conversation_history(&mut self, history: ConversationHistory) {
         info!(
             "对话历史已注入: {} 轮, tokens≈{}",
@@ -411,6 +421,16 @@ impl CognitiveEngine {
             return Some(prompt);
         }
         None
+    }
+
+    /// summary 生成失败时降级为强制截断
+    pub fn conversation_force_truncate(&self) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+            && let Err(e) = h.force_truncate_to_recent()
+        {
+            tracing::error!("对话历史强制截断失败: {}", e);
+        }
     }
 
     /// 执行 summary 压缩
@@ -559,15 +579,26 @@ impl CognitiveEngine {
             if use_tool_calling {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
                 let memory_manager = self.memory_manager.read().unwrap().clone();
-                let executor = super::super::earth::EarthToolExecutor::from_engine(
-                    &self.skill_cache,
-                    self.config_dir.clone(),
-                    memory_manager,
+                let executor = super::super::earth::EarthToolExecutor::from_context(
+                    super::super::earth::EarthToolContext {
+                        skill_cache: self.skill_cache.read().unwrap().clone(),
+                        config_dir: self.config_dir.clone(),
+                        memory_manager,
+                        relationship_store: self.relationship_store.read().unwrap().clone(),
+                    },
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
 
                 match conv_data {
                     Some((turns, system, summary)) => {
+                        // tool-calling 模式下限制历史轮次（配置驱动，避免模式惯性）
+                        let max_tool_turns = self.truncation("tool_calling_history_turns", 8);
+                        let turns: Vec<_> = if turns.len() > max_tool_turns {
+                            turns.into_iter().rev().take(max_tool_turns).rev().collect()
+                        } else {
+                            turns
+                        };
+
                         // Tool-calling + 对话历史（正常部署路径）
                         self.llm_client
                             .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(

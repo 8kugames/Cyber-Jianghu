@@ -30,9 +30,7 @@ pub enum StreamChunk {
         completion_tokens: u64,
     },
     /// 流结束，但服务端未返回 usage（需要估算）
-    DoneEstimation {
-        completion_chars: u64,
-    },
+    DoneEstimation { completion_chars: u64 },
 }
 
 /// SSE 流类型
@@ -49,7 +47,11 @@ pub struct UsageTrackingStream {
 }
 
 impl UsageTrackingStream {
-    pub fn new(inner: LlmStream, provider: super::direct_client::LlmProvider, model: String) -> Self {
+    pub fn new(
+        inner: LlmStream,
+        provider: super::direct_client::LlmProvider,
+        model: String,
+    ) -> Self {
         Self {
             inner,
             provider,
@@ -74,7 +76,11 @@ impl Stream for UsageTrackingStream {
             Poll::Ready(Some(result)) => {
                 // 只在第一个 Done/DoneEstimation 时记录
                 if !self.recorded {
-                    if let Ok(StreamChunk::Done { prompt_tokens, completion_tokens }) = &result {
+                    if let Ok(StreamChunk::Done {
+                        prompt_tokens,
+                        completion_tokens,
+                    }) = &result
+                    {
                         self.recorded = true;
                         super::token_tracking::record_token_usage(
                             &self.provider,
@@ -184,7 +190,11 @@ impl StreamAccumulator {
 
     /// 获取 token 用量 (prompt_tokens, completion_tokens, has_real_usage)
     pub fn token_stats(&self) -> (u64, u64, bool) {
-        (self.prompt_tokens, self.completion_tokens, self.has_real_usage)
+        (
+            self.prompt_tokens,
+            self.completion_tokens,
+            self.has_real_usage,
+        )
     }
 }
 

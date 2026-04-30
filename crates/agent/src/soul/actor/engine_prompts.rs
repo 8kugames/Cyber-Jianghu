@@ -48,6 +48,13 @@ impl super::CognitiveEngine {
         let skill_instructions =
             self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
 
+        // 地魂引导：tool-calling 时替换输出格式指令，消除 "严格输出 JSON" 与 "先调用工具" 的矛盾
+        let tool_calling_guidance = if use_tool_calling {
+            "## 决策流程\n你必须按以下顺序完成决策：\n1. 先调用 skill_view 工具查看你掌握的技能行为指引\n2. 如需了解人际关系，调用 get_relationship 或 list_relationships\n3. 如需搜索记忆，调用 search_memory\n4. 工具调用完成后，按以下 JSON 格式输出决策\n".to_string()
+        } else {
+            "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
+        };
+
         // 尝试使用模板配置
         if let Some(ref template_config) = self.prompt_template
             && let Some(tmpl) = template_config.get_template("actor_direct")
@@ -63,6 +70,7 @@ impl super::CognitiveEngine {
             vars.insert("action_field_hints".to_string(), action_field_hints);
             vars.insert("outcome_section".to_string(), outcome_section);
             vars.insert("skill_instructions".to_string(), skill_instructions);
+            vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
 
             return tmpl.render_all(&vars);
         }
@@ -78,6 +86,7 @@ impl super::CognitiveEngine {
             &outcome_section,
             &action_descriptions,
             &action_field_hints,
+            &tool_calling_guidance,
         )
     }
 
@@ -209,6 +218,7 @@ impl super::CognitiveEngine {
         outcome_section: &str,
         action_descriptions: &str,
         action_field_hints: &str,
+        tool_calling_guidance: &str,
     ) -> String {
         format!(
             r#"{feedback_section}你是 {agent_name}。
@@ -249,8 +259,7 @@ impl super::CognitiveEngine {
 ## 可做之事（参考）
 {action_descriptions}
 
-## 输出格式
-严格输出以下 JSON（不要添加任何额外文本）：
+{tool_calling_guidance}
 {{
   "self_status": "你的状态简述 (30字以内)",
   "environment": "环境描述 (30字以内)",
@@ -280,6 +289,7 @@ impl super::CognitiveEngine {
             feedback_section = feedback_section,
             action_descriptions = action_descriptions,
             action_field_hints = action_field_hints,
+            tool_calling_guidance = tool_calling_guidance,
         )
     }
 
@@ -455,20 +465,22 @@ impl super::CognitiveEngine {
         }
 
         if index_only {
-            // Progressive disclosure：只输出索引 + 可用工具提示
+            // Progressive disclosure：不列出技能名，强制 LLM 调用 skill_view 获取详情
             let header = self
                 .render_template_section("skill_index_header")
-                .unwrap_or_else(|| "## 已掌握技能（使用 skill_view 工具查看详情）".to_string());
+                .unwrap_or_else(|| {
+                    format!(
+                        "## 已掌握技能（共 {} 项，使用 skill_view 工具查看详情和行为指引）",
+                        skills.len()
+                    )
+                });
 
             let mut lines = vec![header];
-            for skill in skills {
-                lines.push(format!("- {} ({})", skill.name, skill.skill_id));
-            }
             lines.push(String::new());
 
             let tool_header = self
                 .render_template_section("tool_hints_header")
-                .unwrap_or_else(|| "## 可用工具\n你可以调用以下工具获取更多信息：".to_string());
+                .unwrap_or_else(|| "## 可用工具\n调用以下工具获取决策所需信息：".to_string());
             lines.push(tool_header);
 
             // 从 ToolDefinition 动态构建工具描述（单一数据源，无硬编码）

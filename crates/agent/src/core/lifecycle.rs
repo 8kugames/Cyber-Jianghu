@@ -1730,7 +1730,8 @@ impl super::Agent {
                                     engine.conversation_replace_with_summary(summary);
                                     info!("对话历史 summary 压缩完成");
                                 } else {
-                                    tracing::warn!("对话历史 summary 生成失败");
+                                    tracing::warn!("对话历史 summary 生成失败，降级为强制截断");
+                                    engine.conversation_force_truncate();
                                 }
                             }
                         }

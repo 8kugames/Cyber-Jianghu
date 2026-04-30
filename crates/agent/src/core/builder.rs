@@ -330,6 +330,12 @@ impl AgentBuilder {
             engine.set_memory_manager(mm.clone());
         }
 
+        if let Some(engine) = self.cognitive_engine.as_ref()
+            && let Some(ref store) = self.relationship_store
+        {
+            engine.set_relationship_store(store.clone());
+        }
+
         Agent {
             config: self.config,
             client,

@@ -7,7 +7,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Agent**: 地魂工具池扩展至 6 个工具（3 个新增关系工具）
+  - `get_relationship`: 查询与特定角色的关系记忆（支持 UUID 或名字查找，SQL 层过滤）
+  - `list_relationships`: 列出所有关系概览，可选好感度范围过滤（SQL 层 WHERE）
+  - `record_social_event`: 主动记录社交互动和好感度变化（delta clamp [-50, 50]）
+  - `RelationshipStore` 新增 `find_relationship()` / `list_relationships_filtered()` 方法 + `target_name` 索引
+  - `EarthToolContext` struct 替代 `from_engine()` 签名膨胀模式
+
 ### Fixed
+
+- **Agent**: 地魂 tool-calling 不触发 — 三层根因修复
+  - summary LLM 调用失败时降级为 `force_truncate_to_recent()`（避免 227 轮对话历史无限堆积）
+  - tool-calling 模式下历史轮次限制走 `truncation("tool_calling_history_turns", 8)` 配置驱动
+  - 删除 `tool_system_suffix` 硬编码，统一到 `tool_calling_guidance` 单条数据驱动路径
+- **Agent**: `search_memory` 与 `recall_archived` 实现去重
+  - `recall_archived` 改用 `recall_recent_archived()` 跳过语义搜索，按时间倒序返回
+  - `recall_archived` 工具 `query` 参数改为 optional
 
 - **Agent**: Token 统计全零修复 — 单模型场景 `DirectLlmClient` 流式路径缺少 `UsageTrackingStream` 包装，导致 `token_cost_count.tmp` 始终全零
   - `DirectLlmClient` trait impl 的 `complete_streaming` / `complete_conversation_streaming` 加入 `UsageTrackingStream` 包装
