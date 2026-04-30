@@ -45,7 +45,7 @@ data:
       - attribute: "hunger"
         operation: "add"
         value: 60
-    description: "热腾腾的馒头，吃了不饿。恢复30点饥饿值。"
+    description: "热腾腾的馒头，吃了不饿。恢复60点饥饿值。"
     stack_size: 10
     aliases: ["mantou"]
 

@@ -28,6 +28,12 @@ pub struct CognitiveChain {
     /// multi-intent 后续 actions（由 engine 填充，供 lifecycle 读取）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_intents: Option<Vec<Intent>>,
+    /// 是否应写入记忆（人魂判断）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub should_remember: Option<bool>,
+    /// 要写入记忆的内容（人魂判断，should_remember=true时必填）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_content: Option<String>,
 }
 
 impl CognitiveChain {
@@ -46,6 +52,8 @@ impl CognitiveChain {
             ),
             duration_ms: 0,
             multi_intents: None,
+            should_remember: None,
+            memory_content: None,
         }
     }
 
@@ -64,6 +72,8 @@ impl CognitiveChain {
             ),
             duration_ms: 0,
             multi_intents: None,
+            should_remember: None,
+            memory_content: None,
         }
     }
 
