@@ -228,13 +228,21 @@ impl AgentBuilder {
         use tokio::sync::Notify;
 
         // 从配置中获取 event_triage 配置
-        let triage_config = self
+        let triage_config = match self
             .config
             .game_rules
             .as_ref()
             .and_then(|g| g.immediate_events.as_ref())
             .and_then(|e| e.event_triage.clone())
-            .unwrap_or_default();
+        {
+            Some(c) => c,
+            None => return self,
+        };
+
+        if triage_config.pre_filter.fallback_thresholds().is_err() {
+            tracing::error!("event_triage.pre_filter 阈值无效，即时事件处理不可用");
+            return self;
+        }
 
         let notify = Arc::new(Notify::new());
 

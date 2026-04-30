@@ -495,6 +495,22 @@ pub struct EventTriagePreFilter {
 
     /// SQL ORDER BY 权重（仅用于预筛排序）
     pub event_type_priority: HashMap<WorldEventType, i32>,
+
+    /// 兜底分流：urgent 阈值（priority >= threshold）
+    #[serde(default = "default_fallback_urgent_cutoff_priority")]
+    pub fallback_urgent_cutoff_priority: i32,
+
+    /// 兜底分流：ignored 阈值（priority < threshold）
+    #[serde(default = "default_fallback_ignore_cutoff_priority")]
+    pub fallback_ignore_cutoff_priority: i32,
+}
+
+fn default_fallback_urgent_cutoff_priority() -> i32 {
+    80
+}
+
+fn default_fallback_ignore_cutoff_priority() -> i32 {
+    20
 }
 
 impl Default for EventTriagePreFilter {
@@ -514,7 +530,38 @@ impl Default for EventTriagePreFilter {
             max_events_per_triage: 50,
             default_priority: 0,
             event_type_priority: priorities,
+            fallback_urgent_cutoff_priority: default_fallback_urgent_cutoff_priority(),
+            fallback_ignore_cutoff_priority: default_fallback_ignore_cutoff_priority(),
         }
+    }
+}
+
+impl EventTriagePreFilter {
+    pub fn fallback_thresholds(&self) -> Result<(i32, i32), String> {
+        let urgent = self.fallback_urgent_cutoff_priority;
+        let ignore = self.fallback_ignore_cutoff_priority;
+        if ignore >= urgent {
+            return Err(format!(
+                "invalid fallback thresholds: ignore_cutoff={} must be < urgent_cutoff={}",
+                ignore, urgent
+            ));
+        }
+        Ok((urgent, ignore))
+    }
+}
+
+#[cfg(test)]
+mod triage_fallback_threshold_tests {
+    use super::EventTriagePreFilter;
+
+    #[test]
+    fn fallback_thresholds_reject_invalid_order() {
+        let pre = EventTriagePreFilter {
+            fallback_urgent_cutoff_priority: 10,
+            fallback_ignore_cutoff_priority: 20,
+            ..Default::default()
+        };
+        assert!(pre.fallback_thresholds().is_err());
     }
 }
 

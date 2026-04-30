@@ -32,6 +32,7 @@
 ### P2 体验增强
 
 - [x] **[即时事件广播 (ImmediateEvent)](../../crates/protocol/docs/architecture/p2_enhancement/immediate_event.md)**: 绕过 Tick 时钟周期的即时消息通道，专用于处理需要立刻感知的说话或耳语。
+  - [x] Session triage LLM 兜底分流改为配置阈值驱动三段式（urgent/batch/ignored），未配置 event_triage 或阈值无效时禁用即时事件处理
 - [x] **[分级 LLM 验证机制](../../crates/protocol/docs/architecture/p2_enhancement/graded_llm_validation.md)**: 根据行为的 OOC（出戏）风险等级（总是、自适应、跳过）决定是否触发大模型审核。
 - [x] **[自然语言状态映射](../../crates/protocol/docs/architecture/p2_enhancement/nl_state_mapping.md)**: 自动将饥饿、口渴、血量等数值状态转化为中文描述文本，便于直接喂给 LLM。
 - [x] **[数值泄漏防护 (Numeric Leak)](../../crates/protocol/docs/architecture/p2_enhancement/numeric_leak_guard.md)**: 通过后置正则检测阻止 LLM 在输出文本中直接暴漏系统数值（如“扣除 10 点 HP”），并利用 Guard Prompt 自动重试。
