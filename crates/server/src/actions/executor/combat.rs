@@ -300,6 +300,8 @@ impl CombatActionExecutor {
         }
 
         // 公式计算成功率
+        let default_rate =
+            ActionRegistry::get_f64("逃跑", ActionField::DefaultFleeSuccessRate).unwrap_or(0.5);
         let success = if let Some(formula) =
             ActionRegistry::get_string("逃跑", ActionField::FleeSuccessFormula)
         {
@@ -312,10 +314,10 @@ impl CombatActionExecutor {
             let engine = crate::game_data::formula_engine::FormulaEngine::new();
             match engine.evaluate(&formula, &f64_context) {
                 Ok(chance) => rand::random::<f64>() < chance.clamp(0.0, 1.0),
-                Err(_) => rand::random::<f64>() < 0.5,
+                Err(_) => rand::random::<f64>() < default_rate,
             }
         } else {
-            rand::random::<f64>() < 0.5
+            rand::random::<f64>() < default_rate
         };
 
         if !success {

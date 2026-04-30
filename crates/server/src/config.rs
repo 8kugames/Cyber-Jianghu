@@ -62,6 +62,22 @@ pub struct DatabaseConfig {
     /// PostgreSQL连接URL
     /// 格式: postgres://用户名:密码@主机:端口/数据库名
     pub url: String,
+
+    /// 连接重试次数
+    #[serde(default = "default_db_max_retries")]
+    pub max_retries: u32,
+
+    /// 重试间隔（秒）
+    #[serde(default = "default_db_retry_delay_secs")]
+    pub retry_delay_secs: u64,
+}
+
+fn default_db_max_retries() -> u32 {
+    5
+}
+
+fn default_db_retry_delay_secs() -> u64 {
+    2
 }
 
 // ============================================================================
@@ -107,6 +123,14 @@ impl Config {
         let database = DatabaseConfig {
             url: std::env::var("DATABASE_URL")
                 .context("DATABASE_URL environment variable must be set")?,
+            max_retries: std::env::var("DB_MAX_RETRIES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5),
+            retry_delay_secs: std::env::var("DB_RETRY_DELAY_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2),
         };
 
         Ok(Config { server, database })
@@ -167,6 +191,8 @@ impl Default for Config {
             },
             database: DatabaseConfig {
                 url: "postgres://postgres:changeme@localhost:5432/cyber_jianghu".to_string(),
+                max_retries: 5,
+                retry_delay_secs: 2,
             },
         }
     }

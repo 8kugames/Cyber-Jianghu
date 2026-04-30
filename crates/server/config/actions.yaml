@@ -313,6 +313,7 @@ data:
     category: combat
     ooc_risk: low
     flee_success_formula: "agility * 0.03"
+    default_flee_success_rate: 0.5
     validation:
       required_fields:
         - target_location

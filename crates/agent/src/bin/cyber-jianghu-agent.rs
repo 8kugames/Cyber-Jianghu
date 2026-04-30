@@ -542,7 +542,6 @@ fn create_llm_client(
 ) -> Result<Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>> {
     match runtime_mode {
         RuntimeMode::Cognitive => {
-            config.llm.check_model_recommendation();
             Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
                 &config.llm,
                 config.llm.enable_streaming,

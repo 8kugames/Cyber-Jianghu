@@ -98,11 +98,12 @@ impl BasicActionExecutor {
             );
         }
 
-        // 获取 travel_cost 并计算体力消耗 = travel_cost * 2
+        // 获取 travel_cost 并计算体力消耗
         let travel_cost = location_registry
             .get_travel_cost(current_location, &data.target_location)
             .unwrap_or(1);
-        let stamina_cost = travel_cost as i32 * 2;
+        let stamina_multiplier = registry.get().game_rules.data.agent_state.location.travel_stamina_multiplier;
+        let stamina_cost = travel_cost as i32 * stamina_multiplier;
 
         let mut result = ActionExecutionResult::success(
             format!(
@@ -113,7 +114,7 @@ impl BasicActionExecutor {
             Some(intent.intent_id),
         );
 
-        // 添加体力消耗（travel_cost * 2）
+        // 添加体力消耗
         result.add_change(StateChange::StaminaChanged {
             agent_id: intent.agent_id,
             delta: -stamina_cost,

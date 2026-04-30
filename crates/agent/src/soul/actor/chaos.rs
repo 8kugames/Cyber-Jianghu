@@ -24,6 +24,9 @@ pub struct ChaosConfig {
     /// 最大混沌 intent 数
     #[serde(default = "default_max")]
     pub max_chaos_intents: usize,
+    /// 生存优先阈值（hunger/thirst 低于此值时优先选 survival category action）
+    #[serde(default = "default_survival_threshold")]
+    pub survival_threshold: i32,
 }
 
 fn default_threshold() -> i32 {
@@ -35,6 +38,9 @@ fn default_probability() -> f64 {
 fn default_max() -> usize {
     3
 }
+fn default_survival_threshold() -> i32 {
+    30
+}
 
 impl Default for ChaosConfig {
     fn default() -> Self {
@@ -42,6 +48,7 @@ impl Default for ChaosConfig {
             activation_threshold: default_threshold(),
             activation_probability: default_probability(),
             max_chaos_intents: default_max(),
+            survival_threshold: default_survival_threshold(),
         }
     }
 }
@@ -110,6 +117,7 @@ impl ChaosGenerator {
             &thought,
             Some(marker),
             &mut rng,
+            self.config.survival_threshold,
         );
 
         info!(
@@ -152,6 +160,7 @@ impl ChaosGenerator {
             &thought,
             Some(marker),
             &mut rng,
+            self.config.survival_threshold,
         );
 
         debug!("LLM Chaos: generated {} survival intents", intents.len());
@@ -173,22 +182,75 @@ impl ChaosGenerator {
         thought: &str,
         marker: Option<ChaosMarker>,
         rng: &mut impl rand::RngExt,
+        survival_threshold: i32,
     ) -> Vec<Intent> {
         let count: usize = rng.random_range(1..=max_chaos);
         let mut intents = Vec::with_capacity(count);
 
-        for _ in 0..count {
-            for _ in 0..Self::MAX_RESOLVE_RETRIES {
-                let idx = rng.random_range(0..available_actions.len());
-                let action = &available_actions[idx];
+        // 生存优先：hunger/thirst 低于阈值时，先从 survival category 中选取
+        // survival 都不可用时 fallback 到全部 actions（数据驱动，category 来自 actions.yaml）
+        let hunger = world_state
+            .self_state
+            .attributes
+            .get("hunger")
+            .copied()
+            .unwrap_or(100);
+        let thirst = world_state
+            .self_state
+            .attributes
+            .get("thirst")
+            .copied()
+            .unwrap_or(100);
 
-                match Self::build_action_data(
-                    &action.action,
-                    &action.required_fields,
-                    world_state,
-                    rng,
-                ) {
-                    Some(data) => {
+        let survival_actions: Vec<&AvailableAction> = if hunger < survival_threshold
+            || thirst < survival_threshold
+        {
+            available_actions
+                .iter()
+                .filter(|a| a.category == "survival")
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for _ in 0..count {
+            let mut resolved = false;
+
+            // 阶段 1：优先尝试 survival actions
+            if !survival_actions.is_empty() {
+                for _ in 0..Self::MAX_RESOLVE_RETRIES {
+                    let idx = rng.random_range(0..survival_actions.len());
+                    let action = survival_actions[idx];
+                    if let Some(data) = Self::build_action_data(
+                        &action.action,
+                        &action.required_fields,
+                        world_state,
+                        rng,
+                    ) {
+                        let mut intent =
+                            Intent::new(agent_id, tick_id, action.action.as_str(), Some(data))
+                                .with_thought(thought.to_owned());
+                        if let Some(ref m) = marker {
+                            intent = intent.with_chaos_marker(m.clone());
+                        }
+                        intents.push(intent);
+                        resolved = true;
+                        break;
+                    }
+                }
+            }
+
+            // 阶段 2：survival 全部失败时 fallback 到全部 actions
+            if !resolved {
+                for _ in 0..Self::MAX_RESOLVE_RETRIES {
+                    let idx = rng.random_range(0..available_actions.len());
+                    let action = &available_actions[idx];
+                    if let Some(data) = Self::build_action_data(
+                        &action.action,
+                        &action.required_fields,
+                        world_state,
+                        rng,
+                    ) {
                         let mut intent =
                             Intent::new(agent_id, tick_id, action.action.as_str(), Some(data))
                                 .with_thought(thought.to_owned());
@@ -197,8 +259,7 @@ impl ChaosGenerator {
                         }
                         intents.push(intent);
                         break;
-                    }
-                    None => {
+                    } else {
                         debug!(
                             "Chaos: action '{}' skipped — required_fields unresolvable: {:?}",
                             action.action, action.required_fields

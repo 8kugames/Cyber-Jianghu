@@ -151,6 +151,22 @@ impl LlmProvider {
         matches!(self, Self::OpenAICompatible)
     }
 
+    /// 所有 Provider 变体（用于 UI 下拉等枚举场景）
+    pub const ALL: &[LlmProvider] = &[
+        LlmProvider::Ollama,
+        LlmProvider::OpenClaw,
+        LlmProvider::OpenAICompatible,
+    ];
+
+    /// UI 显示标签
+    pub fn display_label(&self) -> &str {
+        match self {
+            Self::Ollama => "Ollama",
+            Self::OpenClaw => "OpenClaw Gateway",
+            Self::OpenAICompatible => "OpenAI Compatible",
+        }
+    }
+
     /// 是否从配置文件读取
     pub fn reads_from_config(&self) -> bool {
         matches!(self, Self::OpenClaw)
@@ -174,6 +190,8 @@ pub struct DirectLlmClientConfig {
     pub max_tokens: u32,
     /// 优先使用流式调用（避免对只支持 streaming 的模型浪费 400 降级）
     pub prefer_stream: bool,
+    /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
+    pub enable_thinking: Option<bool>,
 }
 
 impl DirectLlmClientConfig {
@@ -197,6 +215,7 @@ impl DirectLlmClientConfig {
             temperature: 0.7,
             max_tokens: 4096,
             prefer_stream: false,
+            enable_thinking: None,
         }
     }
 
@@ -241,6 +260,12 @@ impl DirectLlmClientConfig {
     /// 设置最大 tokens
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = max_tokens;
+        self
+    }
+
+    /// 设置 enable_thinking 参数（DashScope/Kimi 等模型需要）
+    pub fn with_enable_thinking(mut self, enable_thinking: Option<bool>) -> Self {
+        self.enable_thinking = enable_thinking;
         self
     }
 
@@ -386,26 +411,6 @@ impl DirectLlmClient {
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .context("Failed to build HTTP client")
-    }
-
-    /// 根据模型名称返回 enable_thinking 参数
-    ///
-    /// - qwen3-thinking 系列：DashScope 强制要求 `enable_thinking: true`
-    /// - 其他 qwen/kimi 系列：非流式调用必须 `enable_thinking: false`
-    fn extra_body_for_model(model: &str) -> Option<bool> {
-        let lower = model.to_ascii_lowercase();
-        // qwen3-thinking 系列强制要求 enable_thinking=true
-        if lower.contains("thinking") {
-            Some(true)
-        } else if lower.contains("kimi")
-            || lower.contains("qwen")
-            || lower.contains("qwq")
-            || lower.contains("qvq")
-        {
-            Some(false)
-        } else {
-            None
-        }
     }
 
     /// 发送 OpenAI 兼容 API 请求（公共 HTTP 逻辑）
@@ -593,6 +598,20 @@ impl DirectLlmClient {
         let (pt, ct, has_real) = acc.token_stats();
         let content = acc.into_content();
 
+        // 空内容检测：SSE 流正常完成但 delta content 为空（content filtering 等）
+        // 错误消息包含 "response content is empty" 以匹配 should_fallback() 的检测逻辑
+        if content.trim().is_empty() {
+            if pt > 0 {
+                record_token_usage(&self.config.provider, &self.config.get_model_with_default(), pt, 0);
+            }
+            anyhow::bail!(
+                "LLM API error: response content is empty (streaming, provider={}, model={}, prompt_tokens={}, completion_tokens={})",
+                self.config.provider.as_str(),
+                self.config.get_model_with_default(),
+                pt, ct
+            );
+        }
+
         // 记录流式 token 用量
         if pt > 0 || ct > 0 {
             record_token_usage(
@@ -725,7 +744,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
         };
@@ -750,7 +769,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
         };
@@ -769,7 +788,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
         };
@@ -813,7 +832,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
         };
@@ -905,7 +924,7 @@ impl DirectLlmClient {
                 max_tokens: Some(self.config.max_tokens),
                 tools: Some(tools.to_vec()),
                 tool_choice: Some(serde_json::json!("auto")),
-                enable_thinking: Self::extra_body_for_model(&model),
+                enable_thinking: self.config.enable_thinking,
                 stream: None,
                 stream_options: None,
             };
@@ -1008,7 +1027,7 @@ impl DirectLlmClient {
             max_tokens: Some(self.config.max_tokens),
             tools: None,
             tool_choice: None,
-            enable_thinking: Self::extra_body_for_model(&self.config.get_model_with_default()),
+            enable_thinking: self.config.enable_thinking,
             stream: None,
             stream_options: None,
         };

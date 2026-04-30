@@ -209,6 +209,7 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
         let mut stream = response.bytes_stream();
         let mut last_usage: Option<(u64, u64)> = None;
         let mut completion_content = String::new();
+        let mut chunk_count: u64 = 0;
 
         while let Some(chunk_result) = futures_util::StreamExt::next(&mut stream).await {
             let bytes = match chunk_result {
@@ -252,13 +253,24 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
 
                     match serde_json::from_str::<OpenAIStreamResponse>(data) {
                         Ok(resp) => {
+                            chunk_count += 1;
+                            let mut has_content = false;
                             for choice in &resp.choices {
                                 if let Some(ref content) = choice.delta.content
                                     && !content.is_empty()
                                 {
+                                    has_content = true;
                                     completion_content.push_str(content);
                                     yield Ok(StreamChunk::Delta(content.clone()));
                                 }
+                            }
+                            if !has_content {
+                                tracing::debug!(
+                                    "SSE chunk #{}: no delta content (total_content={} chars, raw={})",
+                                    chunk_count,
+                                    completion_content.len(),
+                                    &data[..data.len().min(200)]
+                                );
                             }
                             // 记录 usage（即使不是最后一个 chunk）
                             if let Some(ref usage) = resp.usage {

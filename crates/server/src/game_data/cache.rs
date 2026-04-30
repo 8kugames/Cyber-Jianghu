@@ -316,6 +316,7 @@ mod tests {
                         location: LocationRulesData {
                             spawn_location: "龙门客栈".to_string(),
                             default_implicit_travel_cost: 1,
+                            travel_stamina_multiplier: 2,
                         },
                         game_time: GameTimeRulesData {
                             start_date: "2024-01-01".to_string(),

@@ -301,10 +301,10 @@ pub async fn generate_llm(data: &CollectedData) -> Result<String> {
         "temperature": config.temperature
     });
 
-    // 使用带超时的 client
+    // 使用带超时的 client（超时时间从 llm.yaml 配置读取）
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120)) // 120秒超时
-        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
+        .connect_timeout(std::time::Duration::from_secs(config.connect_timeout_secs))
         .build()
         .context("构建 HTTP 客户端失败")?;
 

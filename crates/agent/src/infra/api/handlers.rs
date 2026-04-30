@@ -2688,7 +2688,17 @@ pub(super) async fn rebirth_character_handler(
     let body = response.text().await.unwrap_or_default();
     let skip_retire = body.contains("没有活跃的角色") || body.contains("无需归隐");
 
-    if !status.is_success() && !skip_retire {
+    if status.is_success() {
+        info!(
+            "[rebirth] Server 端角色已归隐: agent_id={}, status={}, body={}",
+            agent_id, status, &body[..body.len().min(200)]
+        );
+    } else if skip_retire {
+        info!(
+            "[rebirth] Server 端无活跃角色（已 dead），跳过归隐: agent_id={}, status={}, body={}",
+            agent_id, status, &body[..body.len().min(200)]
+        );
+    } else {
         error!("服务器转生请求失败: {} - {}", status, body);
         return (
             StatusCode::BAD_GATEWAY,
@@ -2739,6 +2749,7 @@ pub(super) async fn rebirth_character_handler(
     }
 
     // 8. 触发重连，让主循环重新注册新角色
+    // reconnect() 会先调用 client.close() 关闭旧 WebSocket
     if let Some(ref tx) = state.reconnect_tx {
         let server_ws_url = state.server_ws_url.read().await.clone();
         let reconnect_req = super::ReconnectRequest {
@@ -2748,7 +2759,7 @@ pub(super) async fn rebirth_character_handler(
         if let Err(e) = tx.send(reconnect_req) {
             error!("发送重连请求失败: {}", e);
         } else {
-            info!("转生后触发 WebSocket 重连");
+            info!("[rebirth] 转生后触发 WebSocket 重连");
         }
     }
 
@@ -4042,45 +4053,41 @@ pub(super) async fn set_server_handler(
 
 /// GET /api/v1/config/llm/providers - 返回支持的 LLM Provider 列表
 ///
-/// 注意：此接口不读取 OpenClaw 配置内容，仅检查配置文件是否存在。
-/// 遵循"仅当用户选择 openclaw provider 时读取一次"的原则。
-/// 如果 OpenClaw 配置文件不存在，则禁选该 Provider。
+/// 从 LlmProvider 枚举自动派生，新增 Provider 时无需手动维护此列表。
+/// OpenClaw 特殊处理：检查配置文件是否存在，不存在则禁选。
 pub(super) async fn get_llm_providers_handler() -> impl IntoResponse {
-    // 仅检查 OpenClaw 配置文件是否存在，不读取内容
-    // 遵循"仅当用户选择 openclaw provider 时读取一次"的原则
+    use crate::component::llm::LlmProvider;
+
     let openclaw_config_path = crate::component::llm::direct_client::OpenClawConfig::config_path();
     let has_openclaw_config = openclaw_config_path
         .as_ref()
         .is_ok_and(|path| path.exists());
 
-    let providers = vec![
-        dto::LlmProviderInfo {
-            value: "ollama".to_string(),
-            label: "Ollama".to_string(),
-            requires_base_url: false,
-            disabled: None,
-            disabled_reason: None,
-        },
-        dto::LlmProviderInfo {
-            value: "openclaw".to_string(),
-            label: "OpenClaw Gateway".to_string(),
-            requires_base_url: false,
-            // 如果配置文件不存在，禁选该 Provider
-            disabled: Some(!has_openclaw_config),
-            disabled_reason: if !has_openclaw_config {
-                Some("OpenClaw 不存在".to_string())
+    let providers: Vec<dto::LlmProviderInfo> = LlmProvider::ALL
+        .iter()
+        .map(|p| {
+            let (disabled, disabled_reason) = if matches!(p, LlmProvider::OpenClaw) {
+                (
+                    Some(!has_openclaw_config),
+                    if !has_openclaw_config {
+                        Some("OpenClaw 不存在".to_string())
+                    } else {
+                        None
+                    },
+                )
             } else {
-                None
-            },
-        },
-        dto::LlmProviderInfo {
-            value: "openai_compatible".to_string(),
-            label: "OpenAI Compatible".to_string(),
-            requires_base_url: true,
-            disabled: None,
-            disabled_reason: None,
-        },
-    ];
+                (None, None)
+            };
+            dto::LlmProviderInfo {
+                value: p.as_str().to_string(),
+                label: p.display_label().to_string(),
+                requires_base_url: p.requires_base_url(),
+                disabled,
+                disabled_reason,
+            }
+        })
+        .collect();
+
     Json(dto::LlmProvidersResponse { providers })
 }
 
@@ -4166,23 +4173,26 @@ fn validate_llm_config(
     base_url: Option<&str>,
     api_key: Option<&str>,
 ) -> anyhow::Result<()> {
-    // 验证 provider
-    if !crate::config::SUPPORTED_PROVIDERS.contains(&provider) {
-        anyhow::bail!("不支持的 Provider: {}", provider);
-    }
+    use crate::component::llm::LlmProvider;
+
+    // 验证 provider（通过 enum parse 代替硬编码字符串列表）
+    let parsed = LlmProvider::parse(provider)
+        .ok_or_else(|| anyhow::anyhow!("不支持的 Provider: {}", provider))?;
 
     // 验证 model
     if model.is_empty() {
         anyhow::bail!("model 不能为空");
     }
 
-    // 验证 API Key 格式
-    if let Some(key) = api_key {
-        crate::config::LlmConfig::validate_api_key(provider, key)?;
+    // 验证 API Key 非空（仅提示，不强制格式）
+    if let Some(key) = api_key
+        && key.is_empty()
+    {
+        anyhow::bail!("api_key 不能为空字符串");
     }
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
-    if provider == "openai_compatible"
+    if parsed.requires_base_url()
         && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty()))
     {
         anyhow::bail!("{} 需要提供 base_url", provider);
@@ -4362,6 +4372,7 @@ pub(super) async fn update_llm_config_handler(
         narrative_window_size: config.llm.narrative_window_size,
         enable_streaming: config.llm.enable_streaming,
         reflector_narrative: config.llm.reflector_narrative,
+        enable_thinking: config.llm.enable_thinking,
     };
 
     // 更新 reflector 配置
@@ -4393,6 +4404,7 @@ pub(super) async fn update_llm_config_handler(
             narrative_window_size: config.llm.narrative_window_size,
             enable_streaming: config.llm.enable_streaming,
             reflector_narrative: config.llm.reflector_narrative,
+            enable_thinking: config.llm.enable_thinking,
         });
     }
 
