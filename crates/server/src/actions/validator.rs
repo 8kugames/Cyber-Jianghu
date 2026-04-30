@@ -450,6 +450,7 @@ mod tests {
             already_broadcast: false,
             session_id: None,
             subsequent_intents: vec![],
+            chaos_marker: None,
         }
     }
 

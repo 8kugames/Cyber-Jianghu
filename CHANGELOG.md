@@ -9,6 +9,15 @@
 
 ### Fixed
 
+- **Agent**: Token 统计全零修复 — 单模型场景 `DirectLlmClient` 流式路径缺少 `UsageTrackingStream` 包装，导致 `token_cost_count.tmp` 始终全零
+  - `DirectLlmClient` trait impl 的 `complete_streaming` / `complete_conversation_streaming` 加入 `UsageTrackingStream` 包装
+  - 非流式 `send_request_once` 当 API 不返回 usage 时用字符长度估算 token
+- **Agent**: max_tokens 自适应 — API 返回 400 且错误体包含 max_tokens 限制时自动学习并重试
+  - `LEARNED_MODEL_LIMITS` 全局状态持久化到 `~/.cyber-jianghu/model_limits.json`
+  - 正则提取 4 种错误格式（NVIDIA NIM / DashScope 中英文 / OpenAI / Anthropic）
+  - 安全约束：单次重试（无递归）、限制必须 < 配置值、范围 [100, 200000]
+- **Agent**: 新增 `FallbackModelConfig`（per-model max_tokens）支持同一 provider 下不同模型独立配置
+- **Agent**: `LlmClient` trait 新增 `provider_info()` 方法（统一 provider + model 信息获取）
 - **Agent**: MemoryManager 在 Agent 生命周期与 HTTP API handlers 间共享（之前各自创建独立实例，导致 `/api/v1/memory/recent` 等接口始终返回空）
 - **Agent**: 社交事件名字解析修复 — `social.rs` 名字解析链路 `name_map → RelationshipStore → "陌生人"`，防止非附近实体的已有真名被覆写回"陌生人"（根因：`entities` 仅含当前在线附近实体，离线/不在范围内时直接 fallback "陌生人"）
 - **Agent Panel**: 关系列表从全宽条改为紧凑卡片网格，详情从侧边抽屉改为居中 Modal

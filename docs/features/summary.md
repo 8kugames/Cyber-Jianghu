@@ -154,6 +154,9 @@
 
 - [x] **[模型网关与调度](../../crates/agent/docs/architecture/p1_major/model_gateway.md)**: 统一的 LLM 客户端池，支持主备模型无缝切换及 Token 消耗监控。
   - [x] `prefer_stream` 全局流式优化：支持流式的模型跳过 400 降级，直接走 streaming。
+  - [x] Token 统计修复：单模型场景 `UsageTrackingStream` 包装 + 非 streaming 路径估算兜底。
+  - [x] max_tokens 自适应：API 400 错误中提取 per-model 限制，运行时学习并持久化。
+  - [x] `FallbackModelConfig` 支持 per-model 独立 max_tokens 配置。
 - [x] **[经验结果记忆 (Outcome Memory)](../../crates/agent/docs/architecture/p1_major/outcome_memory.md)**: Agent 对动作结果的经验学习池，用于优化未来决策。
 - [x] **[动态角色演化 (DynamicPersona)](../../crates/agent/docs/architecture/p1_major/dynamic_persona.md)**: 允许 Agent 经历特定事件后获得新性格标签（Trait），实现性格随阅历成长。
 

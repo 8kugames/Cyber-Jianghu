@@ -90,6 +90,11 @@ impl ChaosGenerator {
 
         let max_chaos = self.config.max_chaos_intents.min(max_total);
 
+        // 无可用动作则无法生成 chaos intents
+        if available_actions.is_empty() {
+            return Vec::new();
+        }
+
         // 优先使用 available_actions（数据驱动）
         let agent_id = world_state.agent_id.unwrap_or_default();
         let tick_id = world_state.tick_id;
@@ -158,6 +163,7 @@ impl ChaosGenerator {
     /// 每个槽位最多重试 `MAX_RESOLVE_RETRIES` 次以找到字段可解析的 action。
     const MAX_RESOLVE_RETRIES: usize = 6;
 
+    #[allow(clippy::too_many_arguments)]
     fn select_resolvable_intents(
         available_actions: &[AvailableAction],
         world_state: &WorldState,
@@ -278,9 +284,7 @@ impl ChaosGenerator {
                 }
                 _ => None,
             };
-            if resolved.is_none() {
-                return None;
-            }
+            resolved?;
         }
 
         Some(serde_json::Value::Object(map))
