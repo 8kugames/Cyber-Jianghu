@@ -12,6 +12,7 @@
 - **Agent**: Token 统计全零修复 — 单模型场景 `DirectLlmClient` 流式路径缺少 `UsageTrackingStream` 包装，导致 `token_cost_count.tmp` 始终全零
   - `DirectLlmClient` trait impl 的 `complete_streaming` / `complete_conversation_streaming` 加入 `UsageTrackingStream` 包装
   - 非流式 `send_request_once` 当 API 不返回 usage 时用字符长度估算 token
+- **Agent+Protocol**: Session triage LLM 兜底分流修复 — 由硬编码二段式改为配置阈值驱动的三段式（urgent/batch/ignored），并区分“超时/调用失败”的兜底 reason；未配置 event_triage 或阈值无效时禁用即时事件处理
 - **Agent**: max_tokens 自适应 — API 返回 400 且错误体包含 max_tokens 限制时自动学习并重试
   - `LEARNED_MODEL_LIMITS` 全局状态持久化到 `~/.cyber-jianghu/model_limits.json`
   - 正则提取 4 种错误格式（NVIDIA NIM / DashScope 中英文 / OpenAI / Anthropic）
