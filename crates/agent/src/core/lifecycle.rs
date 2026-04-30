@@ -7,7 +7,7 @@
 // ============================================================================
 
 use anyhow::Result;
-use cyber_jianghu_protocol::{CalendarConfig, ExecutionSummary, ServerMessage, WorldTime};
+use cyber_jianghu_protocol::{CalendarConfig, ServerMessage, WorldTime};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -962,56 +962,11 @@ impl super::Agent {
                             None
                         };
 
-                        // 天魂生成上一轮执行叙事（受 reflector_narrative 开关控制）
-                        let first_tick = world_state.last_execution_summary.is_none();
-                        let execution_narrative = if self.config.llm.reflector_narrative {
-                            if let Some(ref validator) = self.validator {
-                                match validator
-                                    .generate_execution_narrative(
-                                        &last_intents,
-                                        world_state.last_execution_summary.as_ref().unwrap_or(&ExecutionSummary {
-                                            total: 0,
-                                            succeeded: 0,
-                                            partial: 0,
-                                            failed: 0,
-                                            skipped: 0,
-                                        }),
-                                        first_tick,
-                                    )
-                                    .await
-                                {
-                                    Ok(n) => n,
-                                    Err(e) => {
-                                        warn!("天魂生成执行叙事错误: {}", e);
-                                        None
-                                    }
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        // 将 execution_narrative 持久化到上一轮的 soul_cycle_record
-                        if let Some(ref narrative) = execution_narrative
-                            && world_state.tick_id > 1
-                            && let Some(recorder) = self.soul_recorder().await
-                            && let Some(prev_tick) = recorder.get_last_recorded_tick(world_state.tick_id).await
-                        {
-                            recorder.update_previous_round_narrative(prev_tick, narrative).await;
-                        }
-
                         // 上一轮行动结果注入 memory_context
                         if let Some(ref summary) = last_action_summary {
                             memory_context.push_str(&format!(
                                 "\n### 上一轮行动结果\n{}\n",
                                 summary
-                            ));
-                        } else if let Some(ref exec_narr) = execution_narrative {
-                            memory_context.push_str(&format!(
-                                "\n### 上一轮行动结果\n{}\n",
-                                exec_narr
                             ));
                         }
                     }
