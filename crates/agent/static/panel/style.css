@@ -1357,6 +1357,31 @@ button[type="button"]:disabled {
     gap: 10px;
 }
 
+.memory-scrollable {
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #ccc #f5f5f5;
+}
+
+.memory-scrollable::-webkit-scrollbar {
+    width: 6px;
+}
+
+.memory-scrollable::-webkit-scrollbar-track {
+    background: #f5f5f5;
+    border-radius: 3px;
+}
+
+.memory-scrollable::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+.memory-scrollable::-webkit-scrollbar-thumb:hover {
+    background: #aaa;
+}
+
 .mem-item {
     padding: 14px 16px;
     background: #fff;
