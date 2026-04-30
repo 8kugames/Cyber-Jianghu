@@ -83,11 +83,11 @@ data:
       - effect_type: attribute_change
         attribute: sanity
         operation: add
-        value: 3
+        value: 5
       - effect_type: attribute_change
         attribute: hp
         operation: add
-        value: 1
+        value: 2
 
   使用:
     name: "使用"
@@ -144,6 +144,11 @@ data:
         attribute: stamina
         min: 1
         cost: 1
+    effects:
+      - effect_type: attribute_change
+        attribute: hp
+        operation: add
+        value: 1
 
   拾取:
     name: "拾取"
@@ -398,9 +403,6 @@ data:
         min: 5
         cost: 0
     effects:
-      - effect_type: attribute_max_change
-        attribute: qi
-        value: 1
       - effect_type: attribute_change
         attribute: qi
         operation: add
@@ -412,7 +414,7 @@ data:
       - effect_type: attribute_change
         attribute: hp
         operation: add
-        value: 3
+        value: 2
 
   修炼:
     name: "修炼"
@@ -434,7 +436,11 @@ data:
     effects:
       - effect_type: attribute_max_change
         attribute: qi
-        value: 5
+        value: 3
+      - effect_type: attribute_change
+        attribute: qi
+        operation: add
+        value: 10
 
   # ==========================================================================
   # 社交
@@ -477,7 +483,7 @@ data:
         content: ["内容", "消息", "话语", "message"]
     requirements:
       - requirement_type: attribute
-        attribute: stamina
+        attribute: qi
         min: 0
         cost: 1
 

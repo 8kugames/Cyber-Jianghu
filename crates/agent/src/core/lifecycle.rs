@@ -13,6 +13,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::reconnect::{save_character_config_to_fs, should_log_retry};
+use crate::component::memory::backend::MemoryBackend;
 use crate::config::CharacterStatus;
 use crate::infra::transport::ConnectError;
 use crate::models::Intent;
@@ -603,6 +604,7 @@ impl super::Agent {
                                     triage_config,
                                     game_day,
                                     handler.current_game_day(),
+                                    Some(world_state.world_time.clone()),
                                 );
                                 self.session_triage_handle = Some(tokio::spawn(engine.run()));
                                 self.session_triage_game_day = Some(game_day);
@@ -1218,6 +1220,27 @@ impl super::Agent {
                             }
                             intents
                         };
+
+                        // 处理人魂判断的重要记忆固化
+                        #[allow(clippy::collapsible_if)]
+                        if let Some(ref chain) = _cognitive_chain
+                            && chain.should_remember == Some(true)
+                            && let Some(ref content) = chain.memory_content
+                            && let Some(ref mm) = self.memory_manager
+                        {
+                                let entry = crate::component::memory::types::MemoryEntry::new(
+                                    world_state.agent_id.unwrap_or_default(),
+                                    world_state.tick_id,
+                                    content.clone(),
+                                )
+                                .with_importance(1.0);
+                                let mut mm_guard = mm.write().await;
+                                if let Err(e) = mm_guard.episodic_mut().add(&mut entry.clone()).await {
+                                    warn!("重要记忆固化失败: {}", e);
+                                } else {
+                                    info!("重要记忆已固化: {}", content);
+                                }
+                        }
 
                         for intent in all_raw_intents {
                             // 分级决策：Chaos intent 跳过 LLM（降级行为不需要语义审核）

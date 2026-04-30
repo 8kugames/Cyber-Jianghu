@@ -267,10 +267,19 @@ impl super::CognitiveEngine {
   "primary_drive": "当前主要驱动力",
   "drive_intensity": 5,
   "thought_process": "完整思考过程 (200字以内)",
+  "should_remember": false,
+  "memory_content": "",
   "actions": [
     {{"action_type": "动作类型", "action_data": {{}}}}
   ]
 }}
+
+### 记忆判定：
+如果你认为当前情境中的某些事件值得长期记忆（如：关键NPC交互、目标达成、重大发现），设置：
+- "should_remember": true
+- "memory_content": 用简洁的第一人称描述要记忆的内容（必须是真实发生的事件，不允许虚构）
+
+否则设置 "should_remember": false。
 
 ### actions 规则：
 - actions 数组包含 1-3 个按顺序执行的动作
@@ -406,10 +415,20 @@ impl super::CognitiveEngine {
   "primary_drive": "当前主要驱动力",
   "drive_intensity": 5,
   "thought_process": "完整思考过程 (200字以内)",
+  "should_remember": false,
+  "memory_content": "",
   "actions": [
     {{"action_type": "动作类型", "action_data": {{}}}}
   ]
 }}
+
+### 记忆判定：
+如果你认为当前情境中的某些事件值得长期记忆（如：关键NPC交互、目标达成、重大发现），设置：
+- "should_remember": true
+- "memory_content": 用简洁的第一人称描述要记忆的内容（必须是真实发生的事件，不允许虚构）
+
+否则设置 "should_remember": false。
+
 - actions 数组 1-3 个，按顺序执行，后续依赖前一个成功"#,
             tick_id = tick_id,
             agent_name = agent_name,
