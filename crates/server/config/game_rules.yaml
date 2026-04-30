@@ -135,6 +135,8 @@ data:
       pre_filter:
         max_events_per_triage: 50
         default_priority: 0
+        fallback_urgent_cutoff_priority: 80
+        fallback_ignore_cutoff_priority: 20
         event_type_priority:
           death_notification: 100
           private_dialogue: 80
