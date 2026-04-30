@@ -40,6 +40,8 @@
 - **Agent**: 社交事件名字解析修复 — `social.rs` 名字解析链路 `name_map → RelationshipStore → "陌生人"`，防止非附近实体的已有真名被覆写回"陌生人"（根因：`entities` 仅含当前在线附近实体，离线/不在范围内时直接 fallback "陌生人"）
 - **Agent Panel**: 关系列表从全宽条改为紧凑卡片网格，详情从侧边抽屉改为居中 Modal
 - **Agent Panel**: Modal 新增 target Agent ID 展示（可选中复制）和密语沟通记录（从 soul-cycles 提取）
+- **Agent Panel**: 三个"加载更多"按钮追加分页时添加 disabled + loading 文字反馈
+- **Agent Panel**: SSE `agent_died` 事件触发后立即关闭连接并停止重连，避免死亡后重复弹窗
 
 ### Added — candle 升级 0.9.2 → 0.10.2（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
 - **Agent**: Session Triage 每日摘要写入 episodic memory（之前仅日志输出，未持久化）

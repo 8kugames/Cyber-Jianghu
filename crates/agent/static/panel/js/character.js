@@ -62,7 +62,11 @@ async function loadDailySummaries(page = 1) {
 }
 
 function loadMoreDailySummaries() {
-  loadDailySummaries(summaryPage + 1);
+  const btn = document.getElementById('load-more-summary-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中...'; }
+  loadDailySummaries(summaryPage + 1).finally(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+  });
 }
 
 const STATUS_MAP = {
@@ -1013,7 +1017,11 @@ function renderSoulInline(label, data, type) {
 }
 
 function loadMoreExperiences() {
-  loadExperiences(currentPage + 1);
+  const btn = document.getElementById('load-more-experiences-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中...'; }
+  loadExperiences(currentPage + 1).finally(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+  });
 }
 
 // 加载关系列表（紧凑卡片）
@@ -1265,7 +1273,11 @@ async function loadMemories(page = 1) {
 }
 
 function loadMoreMemories() {
-  loadMemories(memoryPage + 1);
+  const btn = document.getElementById('load-more-memories-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '加载中...'; }
+  loadMemories(memoryPage + 1).finally(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '加载更多'; }
+  });
 }
 
 function loadMoreDreamRecords() {
@@ -1283,6 +1295,13 @@ document.addEventListener("DOMContentLoaded", () => {
       // SSE 连接成功
     });
     deathEventSource.addEventListener("agent_died", (e) => {
+      // 死亡后立即关闭 SSE，停止重连
+      deathEventSource.close();
+      deathEventSource = null;
+      if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
+      // 停止周期性刷新
+      stopRefreshTimer();
+
       try {
         const data = JSON.parse(e.data);
         showError("角色已死亡：" + (data.description || "你已经死亡"));
