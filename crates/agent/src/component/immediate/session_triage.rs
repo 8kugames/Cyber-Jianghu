@@ -156,14 +156,14 @@ impl SessionTriageEngine {
                     Ok(Ok(decisions)) => decisions,
                     Ok(Err(e)) => {
                         warn!("Session triage LLM 调用失败: {}，使用规则兜底", e);
-                        Self::fallback_priority_split(&pending, &self.config.pre_filter)
+                        Self::fallback_priority_split_error(&pending, &self.config.pre_filter)
                     }
                     Err(_) => {
                         warn!(
                             "Session triage LLM 超时（{}ms），使用规则兜底",
                             self.config.triage_llm_timeout_ms
                         );
-                        Self::fallback_priority_split(&pending, &self.config.pre_filter)
+                        Self::fallback_priority_split_timeout(&pending, &self.config.pre_filter)
                     }
                 };
 
@@ -188,7 +188,9 @@ impl SessionTriageEngine {
 
         info!(
             "SessionTriageEngine 退出: agent={}, game_day={}, has_summary={}",
-            self.agent_name, self.game_day, summary.is_some()
+            self.agent_name,
+            self.game_day,
+            summary.is_some()
         );
 
         summary
@@ -317,13 +319,34 @@ event_id 必须是以下值之一：{event_ids}"#,
         }
     }
 
-    /// 超时兜底：按 priority 分流
-    ///
-    /// priority >= 80 → urgent，其余 → batch
     pub fn fallback_priority_split(
         events: &[StoredEvent],
         config: &EventTriagePreFilter,
     ) -> Vec<TriageDecision> {
+        Self::fallback_priority_split_timeout(events, config)
+    }
+
+    pub fn fallback_priority_split_timeout(
+        events: &[StoredEvent],
+        config: &EventTriagePreFilter,
+    ) -> Vec<TriageDecision> {
+        Self::fallback_priority_split_with_label(events, config, "LLM超时-规则兜底")
+    }
+
+    pub fn fallback_priority_split_error(
+        events: &[StoredEvent],
+        config: &EventTriagePreFilter,
+    ) -> Vec<TriageDecision> {
+        Self::fallback_priority_split_with_label(events, config, "LLM失败-规则兜底")
+    }
+
+    fn fallback_priority_split_with_label(
+        events: &[StoredEvent],
+        config: &EventTriagePreFilter,
+        label: &str,
+    ) -> Vec<TriageDecision> {
+        let urgent_cutoff = config.fallback_urgent_cutoff_priority;
+        let ignore_cutoff = config.fallback_ignore_cutoff_priority;
         events
             .iter()
             .map(|e| {
@@ -332,11 +355,17 @@ event_id 必须是以下值之一：{event_ids}"#,
                     .get(&e.event_type)
                     .copied()
                     .unwrap_or(config.default_priority);
-                let decision = if priority >= 80 { "urgent" } else { "batch" };
+                let decision = if priority >= urgent_cutoff {
+                    "urgent"
+                } else if priority < ignore_cutoff {
+                    "ignored"
+                } else {
+                    "batch"
+                };
                 TriageDecision {
                     event_id: e.event_id.clone(),
                     decision: decision.to_string(),
-                    reason: format!("LLM超时-规则兜底(priority={})", priority),
+                    reason: format!("{}(priority={})", label, priority),
                 }
             })
             .collect()
@@ -387,5 +416,72 @@ event_id 必须是以下值之一：{event_ids}"#,
         }
 
         Ok(summary)
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::SessionTriageEngine;
+    use crate::component::immediate::event_store::StoredEvent;
+    use cyber_jianghu_protocol::{EventTriagePreFilter, WorldEventType};
+
+    fn mk_event(event_id: &str, event_type: WorldEventType) -> StoredEvent {
+        StoredEvent {
+            id: 1,
+            event_id: event_id.to_string(),
+            event_type,
+            from_agent_id: None,
+            from_agent_name: None,
+            description: "x".to_string(),
+            metadata: "{}".to_string(),
+            received_at_tick: 1,
+            game_day: 1,
+            triage_status: "pending".to_string(),
+            triage_reason: None,
+            triage_batch_id: None,
+            processed_at_tick: None,
+        }
+    }
+
+    #[test]
+    fn fallback_priority_split_three_way() {
+        let pre = EventTriagePreFilter {
+            fallback_urgent_cutoff_priority: 80,
+            fallback_ignore_cutoff_priority: 20,
+            ..Default::default()
+        };
+
+        let events = vec![
+            mk_event("e1", WorldEventType::PrivateDialogue),
+            mk_event("e2", WorldEventType::SocialInteraction),
+            mk_event("e3", WorldEventType::TimeUpdate),
+        ];
+
+        let decisions = SessionTriageEngine::fallback_priority_split(&events, &pre);
+        let mut map = std::collections::HashMap::new();
+        for d in decisions {
+            map.insert(d.event_id, d.decision);
+        }
+
+        assert_eq!(map.get("e1").unwrap(), "urgent");
+        assert_eq!(map.get("e2").unwrap(), "batch");
+        assert_eq!(map.get("e3").unwrap(), "ignored");
+    }
+
+    #[test]
+    fn fallback_reason_distinguishes_error_and_timeout() {
+        let pre = EventTriagePreFilter {
+            fallback_urgent_cutoff_priority: 80,
+            fallback_ignore_cutoff_priority: 20,
+            ..Default::default()
+        };
+
+        let events = vec![mk_event("e1", WorldEventType::TimeUpdate)];
+
+        let err = SessionTriageEngine::fallback_priority_split_error(&events, &pre);
+        assert!(err[0].reason.starts_with("LLM失败-规则兜底("));
+
+        let to = SessionTriageEngine::fallback_priority_split_timeout(&events, &pre);
+        assert!(to[0].reason.starts_with("LLM超时-规则兜底("));
     }
 }
