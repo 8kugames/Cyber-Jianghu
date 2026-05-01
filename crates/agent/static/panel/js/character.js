@@ -392,6 +392,12 @@ async function loadCharacterIntoDrawer(char) {
         </div>
     `;
 
+  // 传记：已死亡/归隐角色展示纪传体传记
+  const isDeadOrRetired = charData.status === "dead" || charData.status === "retired";
+  if (isDeadOrRetired) {
+    html += await loadBiographySection(char.agent_id);
+  }
+
   if (charData.appearance || charData.identity) {
     html += `
             <section class="drawer-section">
@@ -546,6 +552,56 @@ async function loadCharacterIntoDrawer(char) {
   }
 
   body.innerHTML = html;
+}
+
+// 加载传记区块 HTML（用于 drawer 中 dead/retired 角色）
+async function loadBiographySection(agentId) {
+  const placeholder = `
+    <section class="drawer-section biography-section" id="biography-section">
+      <div class="drawer-section-title">传记</div>
+      <div class="biography-loading">
+        <span class="biography-loading-dot"></span>
+        <span class="biography-loading-dot"></span>
+        <span class="biography-loading-dot"></span>
+        <span style="margin-left:8px;color:var(--text-muted);font-size:12px;">正在撰写传记...</span>
+      </div>
+    </section>
+  `;
+
+  // 先返回占位，异步填充
+  loadBiographyAsync(agentId);
+  return placeholder;
+}
+
+// 异步加载/生成传记并更新 DOM
+async function loadBiographyAsync(agentId) {
+  const section = document.getElementById("biography-section");
+  if (!section) return;
+
+  try {
+    // 先尝试获取缓存
+    let data = await apiGet(`/api/v1/character/biography?agent_id=${agentId}`);
+    if (!data.biography) {
+      // 无缓存，触发生成
+      try {
+        data = await apiPost(`/api/v1/character/biography?agent_id=${agentId}`, {});
+      } catch (genErr) {
+        section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">传记生成失败：${escapeHtml(genErr.message)}</p>`;
+        return;
+      }
+    }
+
+    if (data.biography) {
+      section.innerHTML = `
+        <div class="drawer-section-title">传记</div>
+        <div class="biography-content">${escapeHtml(data.biography)}</div>
+      `;
+    } else {
+      section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">暂无传记数据</p>`;
+    }
+  } catch (err) {
+    section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">传记加载失败</p>`;
+  }
 }
 
 // 切换角色
@@ -1577,6 +1633,24 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.getElementById('load-more-summary-btn').addEventListener('click', loadMoreDailySummaries);
+
+  // 自动重生 toggle
+  (async () => {
+    const cb = document.getElementById('auto-rebirth-toggle');
+    const desc = document.getElementById('auto-rebirth-desc');
+    if (!cb) return;
+    try {
+      const data = await apiGet('/api/v1/config/auto-rebirth');
+      cb.checked = !!data.auto_rebirth;
+      if (desc) desc.textContent = cb.checked ? '角色死亡后将自动转世重生' : '自动重生已关闭，角色死亡后需手动操作';
+    } catch (_) { /* keep default */ }
+    cb.addEventListener('change', async () => {
+      try {
+        await apiPost('/api/v1/config/auto-rebirth', { auto_rebirth: cb.checked });
+        if (desc) desc.textContent = cb.checked ? '角色死亡后将自动转世重生' : '自动重生已关闭，角色死亡后需手动操作';
+      } catch (_) { cb.checked = !cb.checked; }
+    });
+  })();
 
   // 转生按钮
   const rebirthBtn = document.getElementById("rebirth-btn");

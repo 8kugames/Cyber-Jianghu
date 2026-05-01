@@ -689,6 +689,8 @@ pub struct AgentDetail {
     pub age: Option<i64>,
     /// 寿元上限（游戏年），NULL = 无上限
     pub max_age: Option<i64>,
+    /// 纪传体传记（死亡/归隐时生成）
+    pub biography: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -916,6 +918,7 @@ pub async fn get_agent_details(
         attributes: attributes_map,
         age,
         max_age,
+        biography: agent_row.get("biography"),
     }))
 }
 
