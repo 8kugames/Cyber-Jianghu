@@ -95,8 +95,7 @@ templates:
 
       output_format: |
         {tool_calling_guidance}
-        {{
-        {{
+        {
           "self_status": "你的状态简述 (30字以内)",
           "environment": "环境描述 (30字以内)",
           "key_observations": ["观察1", "观察2"],
@@ -106,9 +105,9 @@ templates:
           "should_remember": false,
           "memory_content": "",
           "actions": [
-            {{"action_type": "动作类型（中文）", "action_data": {{}}}}
+            {"action_type": "动作类型（中文）", "action_data": {}}
           ]
-        }}
+        }
 
         ### 记忆判定：
         如果你认为当前情境中的某些事件值得长期记忆（如：关键NPC交互、目标达成、重大发现），设置：
@@ -126,19 +125,19 @@ templates:
 
         ### 示例（请严格参考格式）：
         单动作 - 说话：
-        {{"actions": [{{"action_type": "说话", "action_data": {{"内容": "各位好汉，在下有礼了。"}}}}]}}
+        {"actions": [{"action_type": "说话", "action_data": {"内容": "各位好汉，在下有礼了。"}}]}
 
         单动作 - 移动：
-        {{"actions": [{{"action_type": "移动", "action_data": {{"目标地点": "龙门厨房"}}}}]}}
+        {"actions": [{"action_type": "移动", "action_data": {"目标地点": "龙门厨房"}}]}
 
         单动作 - 进食：
-        {{"actions": [{{"action_type": "进食", "action_data": {{"物品ID": "馒头"}}}}]}}
+        {"actions": [{"action_type": "进食", "action_data": {"物品ID": "馒头"}}]}
 
         多动作 - 拾取后进食：
-        {{"actions": [
-          {{"action_type": "拾取", "action_data": {{"物品ID": "馒头"}}}},
-          {{"action_type": "进食", "action_data": {{"物品ID": "馒头"}}}}
-        ]}}
+        {"actions": [
+          {"action_type": "拾取", "action_data": {"物品ID": "馒头"}},
+          {"action_type": "进食", "action_data": {"物品ID": "馒头"}}
+        ]}
 
         ### action_data 字段要求：
         {action_field_hints}
