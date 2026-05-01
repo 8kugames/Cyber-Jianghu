@@ -188,6 +188,10 @@ pub struct HttpApiState {
     pub rebirth_delay_ticks: std::sync::Arc<std::sync::atomic::AtomicI32>,
     /// 重生完成通知：auto-rebirth 成功后 notify，唤醒 tick 循环 select!
     pub rebirth_notify: std::sync::Arc<tokio::sync::Notify>,
+    /// auto-rebirth 产出的 new_agent_id（task 写入，main loop 读取）
+    pub pending_rebirth_agent_id: Arc<RwLock<Option<uuid::Uuid>>>,
+    /// 自动重生开关（运行时可热切换）
+    pub auto_rebirth: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// HTTP API 服务器实际端口（用于 Web 面板链接）
     pub actual_port: u16,
     /// LLM Client 容器（支持热重载时重建）
@@ -490,6 +494,14 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/config/llm-disabled",
             post(handlers::set_llm_disabled_handler),
         ) // 设置 LLM 停止状态
+        .route(
+            "/api/v1/config/auto-rebirth",
+            get(handlers::get_auto_rebirth_handler),
+        ) // 获取自动重生开关
+        .route(
+            "/api/v1/config/auto-rebirth",
+            post(handlers::set_auto_rebirth_handler),
+        ) // 设置自动重生开关
         .route("/api/v1/actions", get(handlers::get_actions_handler)) // 获取动作类型映射
         .route("/api/v1/metrics", get(handlers::get_metrics_handler)) // LLM 性能指标
         .route(
@@ -574,7 +586,7 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
         local_addr.port()
     );
     info!(
-        "[http] - Management:      http://127.0.0.1:{}/manage.html",
+        "[http] - Settings:        http://127.0.0.1:{}/settings.html",
         local_addr.port()
     );
 
@@ -795,6 +807,10 @@ pub fn create_http_state(
         is_dead: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         rebirth_delay_ticks: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
         rebirth_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
+        pending_rebirth_agent_id: Arc::new(RwLock::new(None)),
+        auto_rebirth: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            config.runtime.auto_rebirth,
+        )),
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
