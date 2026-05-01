@@ -477,7 +477,10 @@ impl RelationshipStore {
             (None, Some(max)) => format!(
                 "SELECT target_agent_id FROM relationships WHERE favorability <= {max} ORDER BY updated_at DESC"
             ),
-            (None, None) => return self.get_all_relationships(),
+            (None, None) => {
+                drop(conn);
+                return self.get_all_relationships();
+            }
         };
 
         let mut stmt = conn.prepare(&sql)?;

@@ -14,7 +14,7 @@ pub fn skill_view_definition() -> ToolDefinition {
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "技能ID，如 bargaining、first-aid、stealth"
+                    "description": "技能ID（支持简写），如 social/bargaining、stealth、first-aid"
                 }
             },
             "required": ["skill_id"]
@@ -28,7 +28,7 @@ pub fn execute_skill_view(
     skill_cache: &std::collections::HashMap<String, String>,
     config_dir: &std::path::Path,
 ) -> serde_json::Value {
-    // 1. 查缓存
+    // 1. 精确匹配缓存
     if let Some(body) = skill_cache.get(skill_id) {
         return serde_json::json!({
             "skill_id": skill_id,
@@ -36,7 +36,20 @@ pub fn execute_skill_view(
         });
     }
 
-    // 2. 从本地文件加载
+    // 2. 尾部模糊匹配：LLM 可能传 "bargaining"，但 cache key 是 "social/bargaining"
+    let fuzzy_key = skill_cache
+        .keys()
+        .find(|k| k.ends_with(&format!("/{skill_id}")) || k.as_str() == skill_id);
+    if let Some(key) = fuzzy_key
+        && let Some(body) = skill_cache.get(key)
+    {
+        return serde_json::json!({
+            "skill_id": key,
+            "content": body
+        });
+    }
+
+    // 3. 从本地文件加载
     let skill_path = config_dir.join("skills").join(skill_id).join("SKILL.md");
     if let Ok(content) = std::fs::read_to_string(&skill_path) {
         let body = extract_skill_body(&content);
@@ -48,8 +61,11 @@ pub fn execute_skill_view(
         }
     }
 
+    // 4. 未找到，返回可用技能列表帮助 LLM 纠正
+    let available: Vec<&str> = skill_cache.keys().map(|k| k.as_str()).collect();
     serde_json::json!({
-        "error": format!("技能 {} 未找到", skill_id)
+        "error": format!("技能 {} 未找到", skill_id),
+        "available_skills": available
     })
 }
 
