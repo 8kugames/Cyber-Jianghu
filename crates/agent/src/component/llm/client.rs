@@ -313,6 +313,18 @@ fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// Normalize LLM 输出中错误转义的双花括号
+///
+/// 部分 LLM（如 LongCat-2.0-Preview）将 JSON 结构中的 `{` 输出为 `{{`。
+/// 在本项目领域（游戏动作 JSON）中，字符串值内不会出现 `{{`，因此全局替换安全。
+pub(super) fn normalize_double_braces(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.contains("{{") || s.contains("}}") {
+        std::borrow::Cow::Owned(s.replace("{{", "{").replace("}}", "}"))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
 /// 从 LLM 响应中提取 JSON 字符串
 ///
 /// 使用大括号计数找第一个完整 JSON 对象，避免 LLM 在 JSON 后输出额外内容
@@ -322,11 +334,7 @@ fn extract_json_str(response: &str) -> std::borrow::Cow<'_, str> {
     let cleaned = strip_thinking_tags(response);
     let response = cleaned.as_ref();
 
-    let normalized = if response.contains("{{") {
-        std::borrow::Cow::Owned(response.replace("{{", "{").replace("}}", "}"))
-    } else {
-        std::borrow::Cow::Borrowed(response)
-    };
+    let normalized = normalize_double_braces(response);
     let response = normalized.as_ref();
 
     if let Some(start) = response.find("```json") {
