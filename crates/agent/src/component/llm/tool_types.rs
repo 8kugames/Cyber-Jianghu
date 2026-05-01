@@ -74,7 +74,89 @@ impl ToolCall {
         if self.function.arguments.is_empty() {
             return Ok(serde_json::json!({}));
         }
-        Ok(serde_json::from_str(&self.function.arguments)?)
+        let normalized = super::client::normalize_double_braces(&self.function.arguments);
+        match serde_json::from_str(normalized.as_ref()) {
+            Ok(v) => Ok(v),
+            Err(first_err) => {
+                tracing::warn!(
+                    "Tool arguments parse failed, raw preview: {}",
+                    self.function.arguments.chars().take(200).collect::<String>()
+                );
+                Err(first_err.into())
+            }
+        }
+    }
+}
+
+/// 流式 SSE tool_calls 增量 chunk
+///
+/// 首个 chunk: `{id: "call_xxx", index: 0, type: "function", function: {name: "skill_view", arguments: ""}}`
+/// 后续 chunk: `{id: null, index: 0, type: "function", function: {name: "", arguments: "fragment"}}`
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamToolCallDelta {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub index: u32,
+    #[serde(rename = "type", default)]
+    pub call_type: Option<String>,
+    #[serde(default)]
+    pub function: StreamToolCallFunctionDelta,
+}
+
+/// 流式 tool_calls function 增量
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct StreamToolCallFunctionDelta {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub arguments: String,
+}
+
+/// 流式 tool_calls 累积器 — 按 index 合并增量 chunk 为完整 ToolCall
+pub struct StreamToolCallAccumulator {
+    calls: std::collections::HashMap<u32, (String, String, String)>, // index → (id, name, arguments)
+}
+
+impl StreamToolCallAccumulator {
+    pub fn new() -> Self {
+        Self {
+            calls: std::collections::HashMap::new(),
+        }
+    }
+
+    /// 追加一个增量 chunk
+    pub fn push(&mut self, delta: &StreamToolCallDelta) {
+        let entry = self.calls.entry(delta.index).or_default();
+        if let Some(ref id) = delta.id
+            && !id.is_empty()
+        {
+            entry.0 = id.clone();
+        }
+        if !delta.function.name.is_empty() {
+            entry.1 = delta.function.name.clone();
+        }
+        entry.2.push_str(&delta.function.arguments);
+    }
+
+    /// 消费累积器，返回完整的 ToolCall 列表（按 index 排序）
+    pub fn into_tool_calls(self) -> Vec<ToolCall> {
+        let mut indexed: Vec<(u32, (String, String, String))> = self.calls.into_iter().collect();
+        indexed.sort_by_key(|(i, _)| *i);
+        indexed
+            .into_iter()
+            .map(|(_, (id, name, arguments))| ToolCall {
+                id,
+                call_type: "function".to_string(),
+                function: ToolCallFunction { name, arguments },
+            })
+            .collect()
+    }
+}
+
+impl Default for StreamToolCallAccumulator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
