@@ -24,6 +24,8 @@ use super::openai_types::OpenAIStreamResponse;
 pub enum StreamChunk {
     /// 文本增量
     Delta(String),
+    /// tool_calls 增量（SSE delta.tool_calls 中的单项）
+    ToolCallDelta(super::tool_types::StreamToolCallDelta),
     /// 流结束（含 token 用量）
     Done {
         prompt_tokens: u64,
@@ -131,6 +133,10 @@ pub struct StreamAccumulator {
     completion_tokens: u64,
     /// 是否已收到实际 usage 数据
     has_real_usage: bool,
+    /// 流式 tool_calls 累积器
+    tool_call_acc: super::tool_types::StreamToolCallAccumulator,
+    /// 是否收到过 tool_calls delta
+    has_tool_calls: bool,
 }
 
 impl Default for StreamAccumulator {
@@ -146,6 +152,8 @@ impl StreamAccumulator {
             prompt_tokens: 0,
             completion_tokens: 0,
             has_real_usage: false,
+            tool_call_acc: super::tool_types::StreamToolCallAccumulator::new(),
+            has_tool_calls: false,
         }
     }
 
@@ -153,6 +161,10 @@ impl StreamAccumulator {
     pub fn push(&mut self, chunk: StreamChunk) {
         match chunk {
             StreamChunk::Delta(text) => self.content.push_str(&text),
+            StreamChunk::ToolCallDelta(delta) => {
+                self.has_tool_calls = true;
+                self.tool_call_acc.push(&delta);
+            }
             StreamChunk::Done {
                 prompt_tokens,
                 completion_tokens,
@@ -195,6 +207,28 @@ impl StreamAccumulator {
             self.completion_tokens,
             self.has_real_usage,
         )
+    }
+
+    /// 追加一个流式 tool_call delta
+    pub fn push_tool_call_delta(&mut self, delta: &super::tool_types::StreamToolCallDelta) {
+        self.has_tool_calls = true;
+        self.tool_call_acc.push(delta);
+    }
+
+    /// 是否收到过 tool_calls
+    pub fn has_tool_calls(&self) -> bool {
+        self.has_tool_calls
+    }
+
+    /// 消费累积器，返回完整的 tool_calls 列表
+    pub fn into_tool_calls(self) -> Vec<super::tool_types::ToolCall> {
+        self.tool_call_acc.into_tool_calls()
+    }
+
+    /// 同时消费 content 和 tool_calls
+    pub fn into_parts(self) -> (String, Vec<super::tool_types::ToolCall>) {
+        let tool_calls = self.tool_call_acc.into_tool_calls();
+        (self.content, tool_calls)
     }
 }
 
@@ -255,6 +289,9 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                         Ok(resp) => {
                             chunk_count += 1;
                             let mut has_content = false;
+                            let has_tool_calls = resp.choices.iter().any(|c| {
+                                c.delta.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty())
+                            });
                             for choice in &resp.choices {
                                 if let Some(ref content) = choice.delta.content
                                     && !content.is_empty()
@@ -263,13 +300,17 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                                     completion_content.push_str(content);
                                     yield Ok(StreamChunk::Delta(content.clone()));
                                 }
+                                if let Some(ref tool_calls) = choice.delta.tool_calls {
+                                    for tc in tool_calls {
+                                        yield Ok(StreamChunk::ToolCallDelta(tc.clone()));
+                                    }
+                                }
                             }
-                            if !has_content {
+                            if !has_content && !has_tool_calls {
                                 tracing::debug!(
-                                    "SSE chunk #{}: no delta content (total_content={} chars, raw={})",
+                                    "SSE chunk #{}: no delta content (total_content={} chars)",
                                     chunk_count,
                                     completion_content.len(),
-                                    &data[..data.len().min(200)]
                                 );
                             }
                             // 记录 usage（即使不是最后一个 chunk）
