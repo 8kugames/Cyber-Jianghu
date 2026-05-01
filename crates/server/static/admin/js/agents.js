@@ -290,6 +290,9 @@ async function openAgentModal(agentId) {
       document.getElementById("modal-tab-experiences").innerHTML =
         '<div style="text-align: center; padding: 20px; color: var(--text-subtle);">无法加载经历日志</div>';
     }
+
+    // 传记 tab
+    renderBiographyTab(agent);
   } catch (e) {
     if (e.name !== "ApiError") {
       console.error("Failed to load agent details", e);
@@ -1145,5 +1148,31 @@ async function deleteRefillRule(agentId, itemId) {
     if (e.name !== "ApiError") {
       showToast("网络请求失败", "error");
     }
+  }
+}
+
+// ============================================================================
+// Biography Tab
+// ============================================================================
+
+function renderBiographyTab(agent) {
+  var container = document.getElementById("modal-tab-biography");
+  if (!container) return;
+
+  if (agent.biography) {
+    container.innerHTML =
+      '<div style="padding: 20px;">' +
+        '<div style="font-size: 12px; color: var(--text-subtle); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">纪传体传记</div>' +
+        '<div style="font-size: 14px; line-height: 2; white-space: pre-wrap; word-break: break-word; padding: 16px; background: rgba(229,192,123,0.06); border-left: 3px solid #e5c07b; border-radius: 8px; color: var(--text-primary); max-height: 60vh; overflow-y: auto;">' +
+          escapeHtml(agent.biography) +
+        '</div>' +
+      '</div>';
+  } else {
+    var statusText = agent.is_alive ? '存活' : (agent.status || '非存活');
+    container.innerHTML =
+      '<div style="text-align: center; padding: 40px 20px; color: var(--text-subtle);">' +
+        '<div style="font-size: 14px; margin-bottom: 8px;">暂无传记</div>' +
+        '<div style="font-size: 12px;">角色' + statusText + '状态，传记将在死亡或归隐后由 AI 撰写</div>' +
+      '</div>';
   }
 }
