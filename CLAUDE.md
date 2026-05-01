@@ -370,6 +370,7 @@ use super::builder::AgentBuilder;
 - `POST /api/v1/agent/rebirth` - Delete agent
 - `POST /api/v1/agent/auto-rebirth` - Auto rebirth
 - `GET /api/v1/agent/{id}/context` - Get agent context
+- `POST /api/v1/agent/biography` - Receive biography from agent (body: `{agent_id, biography}`)
 - `WS /ws?token={auth_token}` - WebSocket connection
 - Admin API: `/api/admin/reload-config`, `/api/admin/login`, `/api/admin/logout`, `/api/admin/session`
 
@@ -402,6 +403,10 @@ use super::builder::AgentBuilder;
 - `POST /api/v1/characters/switch` - Switch current character
 - `GET /api/v1/characters/{agent_id}` - Get character by ID
 
+**Biography**:
+- `GET /api/v1/character/biography` - Get cached biography (query: `agent_id`)
+- `POST /api/v1/character/biography` - Generate biography from soul cycles + daily summaries (query: `agent_id`)
+
 **Validation & Review**:
 - `POST /api/v1/validate` - Validate intent
 - `GET /api/v1/review/pending` - Get pending reviews
@@ -411,6 +416,7 @@ use super::builder::AgentBuilder;
 **Events & Config**:
 - `GET /api/v1/events` - Death events SSE stream
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
+- `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle
 - `POST /api/v1/config/reload` - Hot reload config
 - `GET /api/v1/setup/status` - Get setup status
 - `GET /api/v1/config/llm/providers` - Get LLM providers

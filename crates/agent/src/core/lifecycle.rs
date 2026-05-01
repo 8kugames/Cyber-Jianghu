@@ -446,7 +446,7 @@ impl super::Agent {
                     continue;
                 }
 
-                // 重生完成通知（BUG-4b 修复：auto-rebirth 成功后唤醒 tick 循环）
+                // 重生完成通知（auto-rebirth 成功后唤醒 tick 循环）
                 _ = async {
                     if let Some(ref api_state) = self.http_api_state {
                         api_state.rebirth_notify.notified().await;
@@ -458,24 +458,45 @@ impl super::Agent {
                         .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
                         .unwrap_or(false);
                     if is_rebirth_done && self.death_reported {
-                        info!(
-                            "Agent '{}' 自动重生完成（notify 路径），触发重连",
-                            self.character_name()
-                        );
                         self.death_reported = false;
                         self.death_tick_id = None;
-                        if let Some(ref mut char_cfg) = self.character_config {
-                            char_cfg.status = crate::config::CharacterStatus::Alive;
+
+                        // 读取 auto-rebirth 产出的 new_agent_id
+                        let new_agent_id = if let Some(ref api_state) = self.http_api_state {
+                            api_state.pending_rebirth_agent_id.write().await.take()
+                        } else {
+                            None
+                        };
+
+                        if let Some(new_id) = new_agent_id {
+                            // P2 fix: 更新 HttpApiState.agent_id
                             if let Some(ref api_state) = self.http_api_state {
-                                let characters_dir = api_state.character_dir.read().await.clone();
-                                if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
-                                    warn!("Failed to persist rebirth status: {}", e);
+                                *api_state.agent_id.write().await = new_id;
+                            }
+
+                            // 更新本地 character_config：复用旧角色信息，仅换 agent_id + 状态
+                            if let Some(ref mut char_cfg) = self.character_config {
+                                char_cfg.agent_id = Some(new_id);
+                                char_cfg.status = crate::config::CharacterStatus::Alive;
+                                if let Some(ref api_state) = self.http_api_state {
+                                    let dir = api_state.character_dir.read().await.clone();
+                                    if let Err(e) = save_character_config_to_fs(char_cfg, &dir) {
+                                        warn!("自动重生: 保存角色配置失败: {}", e);
+                                    }
                                 }
                             }
+
+                            info!(
+                                "Agent '{}' 自动转世完成: new_agent_id={}",
+                                self.character_name(), new_id
+                            );
+                            // 用 new_agent_id reconnect
+                            self.client.set_agent_id(Some(new_id)).await;
+                        } else {
+                            // fallback: 无 pending agent_id 时走 nil reconnect
+                            self.client.set_agent_id(None).await;
                         }
-                        // 清除旧 agent_id：rebirth 后 agent_id 已变更，重连时由 server 通过 device_id 重新分配
-                        self.client.set_agent_id(None).await;
-                        // 重连接：断开旧 WS，走完整 connect → register → tick 流程
+
                         self.reconnect().await?;
                     }
                     continue;
@@ -689,7 +710,11 @@ impl super::Agent {
                             }
 
                             // 自动重生：调度延迟后的转世重生 API 调用
-                            if self.rebirth_delay_ticks > 0 {
+                            let auto_rebirth_enabled = self.http_api_state
+                                .as_ref()
+                                .map(|s| s.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed))
+                                .unwrap_or(true);
+                            if self.rebirth_delay_ticks > 0 && auto_rebirth_enabled {
                                 let delay_ticks = self.rebirth_delay_ticks;
                                 let tick_secs = self.get_tick_duration().await.as_secs();
                                 let delay_ms = delay_ticks as u64 * tick_secs * 1000;
@@ -705,7 +730,7 @@ impl super::Agent {
                                 let device_id = device_cfg.device_id;
                                 let auth_token = device_cfg.auth_token.clone();
 
-                                // 提取 name + system_prompt
+                                // 复用旧角色 name + system_prompt（转世：同角色新 agent_id）
                                 let (name, system_prompt) = self.character_config
                                     .as_ref()
                                     .map(|cc| (cc.name.clone(), cc.system_prompt.clone().unwrap_or_default()))
@@ -745,8 +770,20 @@ impl super::Agent {
                                     for attempt in 0..retry_max {
                                         match client.post(&url).json(&body).send().await {
                                             Ok(resp) if resp.status().is_success() => {
-                                                info!("自动转世重生成功: old_agent={}", old_agent_id);
+                                                // 解析响应，提取 new_agent_id
+                                                let data: serde_json::Value = resp.json().await.unwrap_or_default();
+                                                let new_id = data["new_agent_id"]
+                                                    .as_str()
+                                                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
+                                                    .unwrap_or(uuid::Uuid::nil());
+
+                                                info!(
+                                                    "自动转世重生成功: old_agent={} → new_agent={}",
+                                                    old_agent_id, new_id
+                                                );
+
                                                 if let Some(ref api_state) = api_state {
+                                                    *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
                                                     api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
                                                     api_state.rebirth_notify.notify_waiters();
                                                 }
@@ -1470,7 +1507,11 @@ impl super::Agent {
                                                 }
 
                                                 // 调度 auto-rebirth（转世重生，含重试）
-                                                if self.rebirth_delay_ticks > 0 {
+                                                let auto_rebirth_enabled = self.http_api_state
+                                                    .as_ref()
+                                                    .map(|s| s.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed))
+                                                    .unwrap_or(true);
+                                                if self.rebirth_delay_ticks > 0 && auto_rebirth_enabled {
                                                     let delay_ticks = self.rebirth_delay_ticks;
                                                     let tick_secs = self.get_tick_duration().await.as_secs();
                                                     let delay_ms = delay_ticks as u64 * tick_secs * 1000;
@@ -1481,6 +1522,7 @@ impl super::Agent {
                                                     if let Some(device_cfg) = self.device_config.as_ref() {
                                                         let device_id = device_cfg.device_id;
                                                         let auth_token = device_cfg.auth_token.clone();
+                                                        // 复用旧角色 name + system_prompt（转世：同角色新 agent_id）
                                                         let (name, system_prompt) = self.character_config
                                                             .as_ref()
                                                             .map(|cc| (cc.name.clone(), cc.system_prompt.clone().unwrap_or_default()))
@@ -1519,8 +1561,18 @@ impl super::Agent {
                                                         for attempt in 0..retry_max {
                                                             match client.post(&url).json(&body).send().await {
                                                                 Ok(resp) if resp.status().is_success() => {
-                                                                    info!("自动转世重生成功: old_agent={}", old_agent_id);
+                                                                    let data: serde_json::Value = resp.json().await.unwrap_or_default();
+                                                                    let new_id = data["new_agent_id"]
+                                                                        .as_str()
+                                                                        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+                                                                        .unwrap_or(uuid::Uuid::nil());
+
+                                                                    info!(
+                                                                        "自动转世重生成功: old_agent={} → new_agent={}",
+                                                                        old_agent_id, new_id
+                                                                    );
                                                                     if let Some(ref api_state) = api_state {
+                                                                        *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
                                                                         api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
                                                                         api_state.rebirth_notify.notify_waiters();
                                                                     }

@@ -318,10 +318,10 @@ async fn main() -> Result<()> {
             "/api/v1/agent/register",
             post(handlers::agent::agent_register),
         )
-        // 角色转生（Phase 4）- 删除角色，保留设备身份
+        // 角色归隐 - 将活跃角色标记为 retired，允许创建新角色
         .route(
-            "/api/v1/agent/rebirth",
-            post(handlers::agent::agent_rebirth),
+            "/api/v1/agent/retire",
+            post(handlers::agent::agent_retire),
         )
         // 自动重生 - Agent 死亡后延迟调用
         .route(
@@ -335,6 +335,11 @@ async fn main() -> Result<()> {
                 state.clone(),
                 handlers::auth::require_write_token,
             )),
+        )
+        // 传记回传 - Agent 端死亡/归隐时将纪传体传记回传 server
+        .route(
+            "/api/v1/agent/biography",
+            post(handlers::agent::update_biography),
         )
         // Vendor 补货规则管理
         .route(
