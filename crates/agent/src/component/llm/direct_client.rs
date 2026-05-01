@@ -596,11 +596,14 @@ impl DirectLlmClient {
         }
 
         let (pt, ct, has_real) = acc.token_stats();
-        let content = acc.into_content();
+        let (content, tool_calls) = acc.into_parts();
+
+        // tool_calls 存在时不算空响应
+        let has_tool_calls = !tool_calls.is_empty();
 
         // 空内容检测：SSE 流正常完成但 delta content 为空（content filtering 等）
-        // 错误消息包含 "response content is empty" 以匹配 should_fallback() 的检测逻辑
-        if content.trim().is_empty() {
+        // 当 LLM 返回 tool_calls 而非 content 时，不应视为空响应
+        if content.trim().is_empty() && !has_tool_calls {
             if pt > 0 {
                 record_token_usage(&self.config.provider, &self.config.get_model_with_default(), pt, 0);
             }
@@ -609,6 +612,15 @@ impl DirectLlmClient {
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
                 pt, ct
+            );
+        }
+
+        if has_tool_calls {
+            let call_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
+            debug!(
+                "[地魂] 流式 tool_calls 累积完成: {} calls, names={:?}",
+                tool_calls.len(),
+                call_names
             );
         }
 
@@ -650,8 +662,8 @@ impl DirectLlmClient {
             choices: vec![super::openai_types::OpenAIChoice {
                 message: super::openai_types::ChatMessage {
                     role: "assistant".to_string(),
-                    content: Some(content),
-                    tool_calls: None,
+                    content: if content.trim().is_empty() { None } else { Some(content) },
+                    tool_calls: if has_tool_calls { Some(tool_calls) } else { None },
                     tool_call_id: None,
                     name: None,
                 },

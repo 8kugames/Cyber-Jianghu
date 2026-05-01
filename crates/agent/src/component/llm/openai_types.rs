@@ -144,4 +144,43 @@ pub(crate) struct OpenAIStreamChoice {
 pub(crate) struct OpenAIDelta {
     #[serde(default)]
     pub content: Option<String>,
+    /// 流式 tool_calls 增量（首个 chunk 含 id/name，后续 chunk 含 arguments 片段）
+    #[serde(default)]
+    pub tool_calls: Option<Vec<super::tool_types::StreamToolCallDelta>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_openai_delta_with_tool_calls() {
+        let json = r#"{"role":"assistant","content":"","tool_calls":[{"id":"call_abc","index":0,"type":"function","function":{"name":"skill_view","arguments":""}}]}"#;
+        let delta: OpenAIDelta = serde_json::from_str(json).unwrap();
+        assert!(delta.tool_calls.is_some(), "tool_calls should be present");
+        let tc = delta.tool_calls.unwrap();
+        assert_eq!(tc.len(), 1);
+        assert_eq!(tc[0].id.as_deref(), Some("call_abc"));
+        assert_eq!(tc[0].index, 0);
+        assert_eq!(tc[0].function.name, "skill_view");
+    }
+
+    #[test]
+    fn test_openai_stream_response_with_tool_calls() {
+        let json = r#"{"id":"test","object":"chat.completion.chunk","created":1,"model":"test","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_abc","index":0,"type":"function","function":{"name":"skill_view","arguments":""}}]},"finish_reason":null}]}"#;
+        let resp: OpenAIStreamResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.choices.len(), 1);
+        let delta = &resp.choices[0].delta;
+        assert!(delta.tool_calls.is_some(), "tool_calls should be present in stream response");
+        let tc = delta.tool_calls.as_ref().unwrap();
+        assert_eq!(tc[0].function.name, "skill_view");
+    }
+
+    #[test]
+    fn test_openai_delta_content_only() {
+        let json = r#"{"role":"assistant","content":"hello"}"#;
+        let delta: OpenAIDelta = serde_json::from_str(json).unwrap();
+        assert_eq!(delta.content.as_deref(), Some("hello"));
+        assert!(delta.tool_calls.is_none());
+    }
 }
