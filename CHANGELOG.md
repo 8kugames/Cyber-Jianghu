@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- **Agent**: auto-rebirth 闭环修复 — spawn task 解析 `new_agent_id` 传入 main loop，rebirth_notify handler 用 new_id reconnect（之前 nil reconnect 导致永久挂起）；同步更新 `HttpApiState.agent_id`（P2 修复）
 - **Agent**: 地魂 tool-calling 不触发 — 三层根因修复
   - summary LLM 调用失败时降级为 `force_truncate_to_recent()`（避免 227 轮对话历史无限堆积）
   - tool-calling 模式下历史轮次限制走 `truncation("tool_calling_history_turns", 8)` 配置驱动
@@ -43,7 +44,9 @@
 - **Agent Panel**: 三个"加载更多"按钮追加分页时添加 disabled + loading 文字反馈
 - **Agent Panel**: SSE `agent_died` 事件触发后立即关闭连接并停止重连，避免死亡后重复弹窗
 
-### Added — candle 升级 0.9.2 → 0.10.2（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
+### Added — candle 升级 0.9.2 → 0.10.2
+
+- **Agent**: auto-rebirth 配置开关 — `RuntimeConfig.auto_rebirth: bool`（默认 true），运行时可通过 `GET/POST /api/v1/config/auto-rebirth` 热切换，Web 面板 create.html / character.html 提供 toggle UI（解决 CPU 后端 `index_select` 不支持 F32 的运行时错误），DType 恢复 F32 原生精度；消除懒加载死锁（search/search_similar 先尝试 embed 触发初始化）
 - **Agent**: Session Triage 每日摘要写入 episodic memory（之前仅日志输出，未持久化）
 - **Agent**: auto-rebirth spawn 增加重试机制（最多 3 次，间隔 30s），最终失败走 120s 超时兜底 reconnect
 - **Server+Agent**: auto-rebirth 重构 — 转世重生创建新 agent_id，旧 agent 保持 dead 状态（死亡/归隐语义分离）

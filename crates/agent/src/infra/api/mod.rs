@@ -23,6 +23,8 @@
 // - GET  /api/v1/review/pending    - 获取待审查意图列表（Player Agent 提供）
 // - POST /api/v1/review/{intent_id} - 提交审查结果（Observer Agent 调用）
 // - GET  /api/v1/review/{intent_id}/status - 获取审查状态
+// - GET/POST /api/v1/config/llm-disabled  - LLM 停止状态
+// - GET/POST /api/v1/config/auto-rebirth  - 自动重生开关
 //
 // 架构设计：
 // - 数据驱动 COI 原则：AI 组件都是可选注入，按需初始化
@@ -447,6 +449,14 @@ pub fn create_api_router() -> Router<HttpApiState> {
             get(handlers::get_soul_cycles_handler),
         ) // 获取三魂循环完整记录（本地内存）
         .route(
+            "/api/v1/character/biography",
+            get(handlers::get_biography_handler),
+        ) // 获取角色传记（缓存）
+        .route(
+            "/api/v1/character/biography",
+            post(handlers::generate_biography_handler),
+        ) // 生成角色传记（LLM 纪传体）
+        .route(
             "/api/v1/character/rebirth",
             post(handlers::rebirth_character_handler),
         ) // 转生（强制归隐重新注册）
@@ -763,6 +773,10 @@ pub fn create_http_state(
     }
     let data_dir_clone = data_dir.clone();
 
+    let auto_rebirth_init = crate::config::Config::from_file(&config_path)
+        .map(|c| c.runtime.auto_rebirth)
+        .unwrap_or(true);
+
     let api_state = HttpApiState {
         current_state: Arc::new(RwLock::new(None)),
         last_state_update: Arc::new(RwLock::new(None)),
@@ -808,9 +822,7 @@ pub fn create_http_state(
         rebirth_delay_ticks: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
         rebirth_notify: std::sync::Arc::new(tokio::sync::Notify::new()),
         pending_rebirth_agent_id: Arc::new(RwLock::new(None)),
-        auto_rebirth: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-            config.runtime.auto_rebirth,
-        )),
+        auto_rebirth: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(auto_rebirth_init)),
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),

@@ -257,76 +257,91 @@ pub async fn agent_register(
 }
 
 // ============================================================================
-// Agent 转生 API（Phase 4 - 归隐重生）
+// Agent 归隐 API
 // ============================================================================
 
-/// 转生请求
+/// 归隐请求
 #[derive(Debug, serde::Deserialize)]
-pub struct RebirthRequest {
+pub struct RetireRequest {
     /// 设备 ID
     pub device_id: uuid::Uuid,
     /// 认证令牌
     pub auth_token: String,
 }
 
-/// 转生响应
+/// 归隐响应
 #[derive(Debug, serde::Serialize)]
-pub struct RebirthResponse {
+pub struct RetireResponse {
     /// 是否成功
     pub success: bool,
     /// 消息
     pub message: String,
     /// 归隐的角色 ID
     pub retired_agent_id: Option<String>,
+    /// 是否执行了归隐操作（false = 角色已是 dead/retired 终态）
+    pub action_taken: bool,
 }
 
-/// Agent 转生接口
+/// Agent 归隐接口
 ///
-/// POST /api/v1/agent/rebirth
+/// POST /api/v1/agent/retire
 ///
-/// 将当前设备的角色标记为归隐状态，保留设备身份和历史数据，允许重新创建新角色。
-/// - 角色状态从 active 变为 retired
-/// - 保留所有历史数据（agent_states, agent_inventory）
-/// - 可通过 Web 面板查看历史角色
-pub async fn agent_rebirth(
+/// 幂等操作：将当前设备的活跃角色标记为归隐状态。
+/// 如果角色已是 dead/retired 终态，返回成功但 action_taken=false。
+pub async fn agent_retire(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<RebirthRequest>,
-) -> Result<Json<RebirthResponse>, (StatusCode, Json<RebirthResponse>)> {
-    info!("Agent 转生请求: device_id={}", payload.device_id);
+    Json(payload): Json<RetireRequest>,
+) -> Result<Json<RetireResponse>, (StatusCode, Json<RetireResponse>)> {
+    info!("Agent 归隐请求: device_id={}", payload.device_id);
 
-    // 调用数据库操作
-    match db::rebirth_agent(&state.db_pool, payload.device_id, &payload.auth_token).await {
+    match db::retire_agent(&state.db_pool, payload.device_id, &payload.auth_token).await {
         Ok(result) => {
-            info!(
-                "Agent 转生成功: {} ({}) 已归隐",
-                result.retired_name, result.retired_agent_id
-            );
-            Ok(Json(RebirthResponse {
-                success: true,
-                message: format!("角色 '{}' 已归隐，可以创建新角色", result.retired_name),
-                retired_agent_id: Some(result.retired_agent_id.to_string()),
-            }))
+            if result.action_taken {
+                info!(
+                    "Agent 归隐成功: {} ({}) 已归隐",
+                    result.retired_name.as_ref().unwrap_or(&"-".to_string()),
+                    result.retired_agent_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default()
+                );
+                Ok(Json(RetireResponse {
+                    success: true,
+                    message: format!(
+                        "角色 '{}' 已归隐，可以创建新角色",
+                        result.retired_name.as_ref().unwrap_or(&"-".to_string())
+                    ),
+                    retired_agent_id: result
+                        .retired_agent_id
+                        .map(|id| id.to_string()),
+                    action_taken: true,
+                }))
+            } else {
+                info!("Agent 归隐：无活跃角色需要归隐");
+                Ok(Json(RetireResponse {
+                    success: true,
+                    message: "无活跃角色需要归隐".to_string(),
+                    retired_agent_id: None,
+                    action_taken: false,
+                }))
+            }
         }
         Err(e) => {
             let error_msg = format!("{}", e);
-            error!("Agent 转生失败: {}", error_msg);
+            error!("Agent 归隐失败: {}", error_msg);
 
-            // 根据错误类型确定状态码
             let status = if error_msg.contains("认证失败") || error_msg.contains("auth") {
                 StatusCode::UNAUTHORIZED
-            } else if error_msg.contains("没有活跃的角色") || error_msg.contains("无需归隐")
-            {
-                StatusCode::NOT_FOUND
             } else {
                 StatusCode::BAD_REQUEST
             };
 
             Err((
                 status,
-                Json(RebirthResponse {
+                Json(RetireResponse {
                     success: false,
                     message: error_msg,
                     retired_agent_id: None,
+                    action_taken: false,
                 }),
             ))
         }
@@ -649,4 +664,43 @@ pub async fn agent_grant_items(
         message: format!("成功注入 {} 个物品", granted),
         granted_count: granted,
     }))
+}
+
+// ============================================================================
+// 传记回传 API
+// ============================================================================
+
+#[derive(serde::Deserialize)]
+pub struct BiographyRequest {
+    pub agent_id: uuid::Uuid,
+    pub biography: String,
+}
+
+/// POST /api/v1/agent/biography
+///
+/// Agent 端在角色死亡/归隐时调用，将 LLM 生成的纪传体传记回传到 server
+pub async fn update_biography(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<BiographyRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    if payload.biography.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "biography must not be empty"})),
+        ));
+    }
+
+    match db::update_agent_biography(&state.db_pool, payload.agent_id, &payload.biography).await {
+        Ok(()) => {
+            info!("[biography] 传记已保存: agent={}", payload.agent_id);
+            Ok(Json(serde_json::json!({"success": true})))
+        }
+        Err(e) => {
+            error!("[biography] 传记保存失败: agent={}, err={}", payload.agent_id, e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("保存失败: {}", e)})),
+            ))
+        }
+    }
 }

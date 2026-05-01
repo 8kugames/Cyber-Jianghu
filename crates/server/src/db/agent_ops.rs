@@ -284,6 +284,17 @@ pub async fn update_agent_location(pool: &PgPool, agent_id: Uuid, node_id: &str)
     Ok(())
 }
 
+/// 更新 Agent 传记（纪传体）
+pub async fn update_agent_biography(pool: &PgPool, agent_id: Uuid, biography: &str) -> Result<()> {
+    sqlx::query("UPDATE agents SET biography = $1 WHERE agent_id = $2")
+        .bind(biography)
+        .bind(agent_id)
+        .execute(pool)
+        .await
+        .context("更新 Agent 传记失败")?;
+    Ok(())
+}
+
 /// 意图超时统计
 #[derive(Debug, Clone)]
 pub struct IntentTimeoutStats {
@@ -513,42 +524,31 @@ pub async fn register_agent_transactional(
 }
 
 // ============================================================================
-// Agent 转生（归隐）
+// Agent 归隐（retire）
 // ============================================================================
 
-/// 转生结果
+/// 归隐结果
 #[derive(Debug)]
-pub struct RebirthResult {
-    /// 被删除的 Agent ID
-    pub retired_agent_id: Uuid,
-    /// 被删除的 Agent 名称
-    pub retired_name: String,
+pub struct RetireResult {
+    /// 被归隐的 Agent ID（无活跃角色时为 None）
+    pub retired_agent_id: Option<Uuid>,
+    /// 被归隐的 Agent 名称（无活跃角色时为 None）
+    pub retired_name: Option<String>,
+    /// 是否执行了归隐操作（false = 角色已是 dead/retired 终态）
+    pub action_taken: bool,
 }
 
-/// 转生（归隐）- 删除当前设备的 Agent
+/// 归隐当前设备的活跃角色
 ///
-/// # 参数
-/// - pool: 数据库连接池
-/// - device_id: 设备 UUID
-/// - auth_token: 认证令牌
-///
-/// # 返回
-/// - Ok(RebirthResult): 转生成功
-/// - Err: 数据库错误或认证失败
-///
-/// # 注意
-/// 转生时标记 Agent 为归隐状态，保留历史记录：
-/// - agent_states 表中的所有状态记录保留
-/// - agent_inventory 表中的所有物品记录保留
-/// - 归隐后可查看历史角色
-pub async fn rebirth_agent(
+/// 幂等操作：如果设备没有活跃角色（已 dead/retired/none），返回成功但 action_taken=false。
+/// 如果有活跃角色，标记为 retired 并插入 is_alive=false 快照防止 Tick 处理。
+pub async fn retire_agent(
     pool: &PgPool,
     device_id: Uuid,
     auth_token: &str,
-) -> Result<RebirthResult> {
-    debug!("Agent 转生请求: device_id={}", device_id);
+) -> Result<RetireResult> {
+    debug!("Agent 归隐请求: device_id={}", device_id);
 
-    // 1. 验证设备认证
     let valid = verify_device_token(pool, device_id, auth_token).await?;
     if !valid {
         anyhow::bail!("设备认证失败");
@@ -571,7 +571,12 @@ pub async fn rebirth_agent(
     let (agent_id, name) = match agent_info {
         Some(info) => info,
         None => {
-            anyhow::bail!("该设备没有活跃的角色，无需归隐");
+            info!("设备无活跃角色（已 dead/retired/none），无需归隐");
+            return Ok(RetireResult {
+                retired_agent_id: None,
+                retired_name: None,
+                action_taken: false,
+            });
         }
     };
 
@@ -624,9 +629,10 @@ pub async fn rebirth_agent(
         agent_id
     );
 
-    Ok(RebirthResult {
-        retired_agent_id: agent_id,
-        retired_name: name,
+    Ok(RetireResult {
+        retired_agent_id: Some(agent_id),
+        retired_name: Some(name),
+        action_taken: true,
     })
 }
 

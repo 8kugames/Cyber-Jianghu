@@ -1735,6 +1735,7 @@ pub(super) async fn register_character_handler(
                 server_url: Some(server_http_url.clone()),
                 last_connected_real_time: None,
                 last_connected_world_time: None,
+                biography: None,
             };
 
             if let Err(e) = save_character(&new_character, &state.character_dir.read().await) {
@@ -2584,14 +2585,14 @@ pub(super) async fn get_soul_cycles_handler(
     }
 }
 
-/// 转生请求
+/// 重生请求
 #[derive(Debug, Deserialize)]
 pub struct RebirthRequest {
-    /// 确认转生
+    /// 确认重生
     pub confirm: bool,
 }
 
-/// 转生响应
+/// 重生响应
 #[derive(Debug, Serialize)]
 pub struct RebirthResponse {
     /// 是否成功
@@ -2600,11 +2601,14 @@ pub struct RebirthResponse {
     pub message: String,
 }
 
-/// 转生（强制归隐重新注册）
+/// 重生：从终态（dead/retired/active）创建新角色
 ///
 /// POST /api/v1/character/rebirth
 ///
-/// 删除当前角色，保留设备身份，允许重新创建新角色
+/// 流程：
+/// 1. 调用 server /api/v1/agent/retire（幂等：active→retired，dead/retired→no-op）
+/// 2. 清理本地状态（文件系统 + 内存）
+/// 3. 触发 WebSocket 重连 → 进入角色创建流程
 pub(super) async fn rebirth_character_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<RebirthRequest>,
@@ -2616,13 +2620,13 @@ pub(super) async fn rebirth_character_handler(
             StatusCode::BAD_REQUEST,
             Json(RebirthResponse {
                 success: false,
-                message: "请确认转生操作 (confirm: true)".to_string(),
+                message: "请确认重生操作 (confirm: true)".to_string(),
             }),
         )
             .into_response();
     }
 
-    // 1. 检查设备身份
+    // 1. 获取设备身份
     let (device_id, auth_token) = match get_device_id(&state).await {
         Ok(id) => id,
         Err(e) => {
@@ -2637,34 +2641,21 @@ pub(super) async fn rebirth_character_handler(
         }
     };
 
-    // 2. 获取当前 agent_id
     let agent_id = *state.agent_id.read().await;
-    if agent_id.is_nil() {
-        return (
-            StatusCode::PRECONDITION_FAILED,
-            Json(RebirthResponse {
-                success: false,
-                message: "当前没有已注册的角色".to_string(),
-            }),
-        )
-            .into_response();
-    }
+    info!("[rebirth] 角色重生: agent_id={}, device_id={}", agent_id, device_id);
 
-    info!("角色转生: agent_id={}", agent_id);
-
-    // 3. 通知 Server 删除角色（POST /api/v1/agent/rebirth）
+    // 2. 调用 server 归隐（幂等：active→retired，dead/retired→success with action_taken=false）
     let client = reqwest::Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
-    let server_url = format!("{}/api/v1/agent/rebirth", server_http_url);
+    let server_url = format!("{}/api/v1/agent/retire", server_http_url);
 
-    // 构造请求体
     #[derive(Serialize)]
-    struct ServerRebirthRequest {
+    struct ServerRetireRequest {
         device_id: Uuid,
         auth_token: String,
     }
 
-    let request_body = ServerRebirthRequest {
+    let request_body = ServerRetireRequest {
         device_id,
         auth_token,
     };
@@ -2672,7 +2663,7 @@ pub(super) async fn rebirth_character_handler(
     let response = match client.post(&server_url).json(&request_body).send().await {
         Ok(resp) => resp,
         Err(e) => {
-            error!("连接服务器失败: {}", e);
+            error!("[rebirth] 连接服务器失败: {}", e);
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(RebirthResponse {
@@ -2686,70 +2677,67 @@ pub(super) async fn rebirth_character_handler(
 
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    let skip_retire = body.contains("没有活跃的角色") || body.contains("无需归隐");
 
-    if status.is_success() {
-        info!(
-            "[rebirth] Server 端角色已归隐: agent_id={}, status={}, body={}",
-            agent_id, status, &body[..body.len().min(200)]
-        );
-    } else if skip_retire {
-        info!(
-            "[rebirth] Server 端无活跃角色（已 dead），跳过归隐: agent_id={}, status={}, body={}",
-            agent_id, status, &body[..body.len().min(200)]
-        );
-    } else {
-        error!("服务器转生请求失败: {} - {}", status, body);
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        error!("[rebirth] 服务器认证失败: {}", body);
         return (
             StatusCode::BAD_GATEWAY,
             Json(RebirthResponse {
                 success: false,
-                message: format!("服务器拒绝转生: {}", body),
+                message: format!("服务器认证失败: {}", body),
             }),
         )
             .into_response();
     }
-    let is_dead_character = skip_retire;
 
+    if status.is_success() {
+        info!(
+            "[rebirth] Server 归隐响应: status={}, body={}",
+            status,
+            &body[..body.len().min(200)]
+        );
+    } else {
+        // 非 401 错误：仍继续本地清理（server 可能暂时不可达，但本地状态需清理）
+        warn!(
+            "[rebirth] Server 归隐非预期状态: status={}, body={}，继续本地清理",
+            status,
+            &body[..body.len().min(200)]
+        );
+    }
+
+    // 3. 清理本地文件系统：扫描 characters/ 目录，将 Alive 角色标记为 Retired
+    let characters_dir = state.character_dir.read().await.clone();
+    if let Ok(entries) = std::fs::read_dir(&characters_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let char_yaml = entry.path().join("character.yaml");
+            if let Ok(mut config) = CharacterConfig::from_file(&char_yaml)
+                && config.status == CharacterStatus::Alive
+            {
+                config.status = CharacterStatus::Retired;
+                if let Err(e) = config.save_to_file(&char_yaml) {
+                    error!("[rebirth] 保存角色配置失败: {}", e);
+                } else {
+                    info!("[rebirth] 角色 '{}' 已标记为 Retired", config.name);
+                }
+            }
+        }
+    }
+
+    // 4. 清理内存状态
     {
         let mut agent_id_guard = state.agent_id.write().await;
         *agent_id_guard = Uuid::nil();
     }
-
-    // 6. 清理本地 WorldState
     {
         let mut current = state.current_state.write().await;
         *current = None;
     }
+    // is_dead 保持 true，reconnect 成功后由注册流程设为 false
 
-    // 7. 更新文件系统中的角色配置：标记为 Retired
-    if !is_dead_character {
-        // 正常归隐：读取角色配置，标记为 Retired
-        let character_dir = state.character_dir.read().await.clone();
-        let char_dir = character_dir.join(agent_id.to_string());
-        let char_yaml = char_dir.join("character.yaml");
-        if char_yaml.exists() {
-            match CharacterConfig::from_file(&char_yaml) {
-                Ok(mut char_config) => {
-                    char_config.status = CharacterStatus::Retired;
-                    if let Err(e) = char_config.save_to_file(&char_yaml) {
-                        error!("保存角色配置失败: {}", e);
-                    } else {
-                        info!("角色已归隐，配置已更新: {:?}", char_yaml);
-                    }
-                }
-                Err(e) => {
-                    error!("读取角色配置失败: {}", e);
-                }
-            }
-        }
-    } else {
-        // 死亡角色：配置已经是 Dead 状态，无需修改
-        info!("死亡角色已清理本地状态");
-    }
-
-    // 8. 触发重连，让主循环重新注册新角色
-    // reconnect() 会先调用 client.close() 关闭旧 WebSocket
+    // 5. 触发 WebSocket 重连
     if let Some(ref tx) = state.reconnect_tx {
         let server_ws_url = state.server_ws_url.read().await.clone();
         let reconnect_req = super::ReconnectRequest {
@@ -2757,15 +2745,15 @@ pub(super) async fn rebirth_character_handler(
             agent_id: None,
         };
         if let Err(e) = tx.send(reconnect_req) {
-            error!("发送重连请求失败: {}", e);
+            error!("[rebirth] 发送重连请求失败: {}", e);
         } else {
-            info!("[rebirth] 转生后触发 WebSocket 重连");
+            info!("[rebirth] 重生完成，触发 WebSocket 重连");
         }
     }
 
     Json(RebirthResponse {
         success: true,
-        message: "转生成功，请重新创建角色".to_string(),
+        message: "重生成功，请创建新角色".to_string(),
     })
     .into_response()
 }
@@ -3634,6 +3622,59 @@ pub(super) async fn set_llm_disabled_handler(
         "success": true,
         "llm_disabled": disabled,
         "message": if disabled { "LLM 调用已停止" } else { "LLM 调用已恢复" }
+    }))
+    .into_response()
+}
+
+/// 获取自动重生开关状态
+///
+/// GET /api/v1/config/auto-rebirth
+pub(super) async fn get_auto_rebirth_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
+    let enabled = state.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed);
+    Json(serde_json::json!({"auto_rebirth": enabled}))
+}
+
+/// 设置自动重生开关
+///
+/// POST /api/v1/config/auto-rebirth
+pub(super) async fn set_auto_rebirth_handler(
+    State(state): State<HttpApiState>,
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let enabled = req
+        .get("auto_rebirth")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    state
+        .auto_rebirth
+        .store(enabled, std::sync::atomic::Ordering::Relaxed);
+
+    let config_path = state.config_path.clone();
+    let config_enabled = enabled;
+    tokio::spawn(async move {
+        let mut config = match crate::config::Config::from_file(&config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("[auto-rebirth] 读取配置失败: {}", e);
+                return;
+            }
+        };
+        config.runtime.auto_rebirth = config_enabled;
+        if let Err(e) = config.save_to_file(&config_path) {
+            tracing::error!("[auto-rebirth] 保存配置失败: {}", e);
+        }
+    });
+
+    if enabled {
+        tracing::info!("[auto-rebirth] 自动重生已开启");
+    } else {
+        tracing::warn!("[auto-rebirth] 自动重生已关闭");
+    }
+
+    Json(serde_json::json!({
+        "success": true,
+        "auto_rebirth": enabled,
     }))
     .into_response()
 }
@@ -4656,4 +4697,336 @@ pub async fn get_metrics_handler() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "llm": models,
     }))
+}
+
+// ============================================================================
+// 传记端点
+// ============================================================================
+
+/// GET /api/v1/character/biography?agent_id=xxx
+///
+/// 返回已缓存的纪传体传记（不触发生成）
+pub(super) async fn get_biography_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let agent_id = match resolve_biography_agent_id(&state, &params).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    let character_dir = state.character_dir.read().await.clone();
+    let character = match get_character_by_id_sync(&character_dir, agent_id) {
+        Ok(Some(c)) => c,
+        _ => {
+            return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "character not found"}))).into_response();
+        }
+    };
+
+    match &character.biography {
+        Some(bio) if !bio.is_empty() => Json(serde_json::json!({"biography": bio})).into_response(),
+        _ => Json(serde_json::json!({"biography": null})).into_response(),
+    }
+}
+
+/// POST /api/v1/character/biography?agent_id=xxx
+///
+/// 从三魂循环 + 每日摘要生成纪传体传记，写入 character.yaml
+pub(super) async fn generate_biography_handler(
+    State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    use crate::component::llm::LlmClientExt;
+
+    let agent_id = match resolve_biography_agent_id(&state, &params).await {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    let character_dir = state.character_dir.read().await.clone();
+    let mut character = match get_character_by_id_sync(&character_dir, agent_id) {
+        Ok(Some(c)) => c,
+        _ => {
+            return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "character not found"}))).into_response();
+        }
+    };
+
+    // 已有传记直接返回
+    if let Some(ref bio) = character.biography {
+        if !bio.is_empty() {
+            return Json(serde_json::json!({"biography": bio})).into_response();
+        }
+    }
+
+    // 1. 收集三魂循环数据
+    let timeline = match collect_soul_cycle_timeline(&state, agent_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("[biography] 收集经历日志失败: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("收集经历失败: {}", e)}))).into_response();
+        }
+    };
+
+    // 2. 从 server 获取每日摘要
+    let daily_summaries = match fetch_daily_summaries(&state, agent_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("[biography] 获取每日摘要失败（非致命，继续）: {}", e);
+            String::new()
+        }
+    };
+
+    if timeline.is_empty() && daily_summaries.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "无经历数据，无法生成传记"}))).into_response();
+    }
+
+    // 3. 构建 prompt
+    let char_info = format!(
+        "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
+        character.name,
+        character.age,
+        character.gender,
+        character.identity.as_deref().unwrap_or("未知"),
+        character.personality.join("、"),
+        character.values.join("、"),
+    );
+
+    let daily_section = if daily_summaries.is_empty() {
+        String::new()
+    } else {
+        format!("\n## 每日摘要（按游戏日排列）\n{}", daily_summaries)
+    };
+
+    let prompt = format!(
+        r#"你是一位精通中国古典文学的传记作家。请根据以下角色的经历日志和每日摘要，以「纪传体」风格撰写一篇角色传记。
+
+## 角色信息
+{char_info}
+
+## 经历日志（按时间顺序）
+{timeline}
+{daily_section}
+
+## 撰写要求
+1. 以第三人称叙述，开头简述角色籍贯出身（可合理虚构）
+2. 按时间顺序叙述角色的关键经历：重要行动、人际交往、生死抉择
+3. 语言风格：半文半白的武侠叙事，典雅凝练
+4. 结尾以"论曰"或"太史公曰"附一段简短评语
+5. 总字数：不少于100字，不超过2000字
+6. 只输出传记正文，不要标题、不要标注字数、不要其他格式
+
+请直接输出传记正文："#,
+        char_info = char_info,
+        timeline = timeline,
+        daily_section = daily_section,
+    );
+
+    // 4. 获取共享 LLM 客户端（Cognitive/Claw 统一）
+    let llm_client: std::sync::Arc<dyn crate::component::llm::LlmClient> = {
+        let guard = state.llm_container.read().await;
+        match guard.as_ref() {
+            Some(container) => container.read().await.clone(),
+            None => {
+                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "LLM 未初始化，无法生成传记"}))).into_response();
+            }
+        }
+    };
+
+    // 5. 调用 LLM（用 complete_json 解析输出）
+    #[derive(Debug, serde::Deserialize)]
+    struct BiographyOutput {
+        biography: String,
+    }
+
+    let json_prompt = format!(
+        "{}\n\n请严格输出 JSON 格式：{{\"biography\": \"传记正文\"}}",
+        prompt
+    );
+
+    match llm_client.complete_json::<BiographyOutput>(&json_prompt).await {
+        Ok(output) => {
+            let bio = output.biography.trim().to_string();
+            if bio.chars().count() < 10 {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "生成的传记过短（少于10字）"}))).into_response();
+            }
+            let bio: String = if bio.chars().count() > 2000 {
+                info!("[biography] 传记超长({}字)，截断至2000字", bio.chars().count());
+                bio.chars().take(2000).collect()
+            } else {
+                bio
+            };
+
+            // 6. 存入 character.yaml
+            character.biography = Some(bio.clone());
+            if let Err(e) = save_character(&character, &character_dir) {
+                error!("[biography] 保存传记失败: {}", e);
+            }
+
+            info!("[biography] 传记生成成功: {} ({}字)", character.name, bio.chars().count());
+
+            // 回传传记到 server（fire-and-forget，不阻塞响应）
+            let server_http_url = state.server_http_url.read().await.clone();
+            let bio_for_send = bio.clone();
+            let agent_id_for_send = agent_id;
+            tokio::spawn(async move {
+                let url = format!("{}/api/v1/agent/biography", server_http_url);
+                let client = reqwest::Client::new();
+                let body = serde_json::json!({
+                    "agent_id": agent_id_for_send.to_string(),
+                    "biography": bio_for_send,
+                });
+                match client.post(&url).json(&body).timeout(std::time::Duration::from_secs(10)).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        info!("[biography] 传记已回传 server");
+                    }
+                    Ok(resp) => {
+                        warn!("[biography] 传记回传 server 失败: status={}", resp.status());
+                    }
+                    Err(e) => {
+                        warn!("[biography] 传记回传 server 网络错误: {}", e);
+                    }
+                }
+            });
+            Json(serde_json::json!({"biography": bio})).into_response()
+        }
+        Err(e) => {
+            error!("[biography] LLM 生成失败: {}", e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error": format!("传记生成失败: {}", e)})),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// 从 query params 解析 agent_id（优先取参数，否则取当前角色）
+async fn resolve_biography_agent_id(
+    state: &HttpApiState,
+    params: &std::collections::HashMap<String, String>,
+) -> Result<Uuid, axum::response::Response> {
+    if let Some(id_str) = params.get("agent_id") {
+        uuid::Uuid::parse_str(id_str).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid agent_id"})),
+            )
+                .into_response()
+        })
+    } else {
+        Ok(*state.agent_id.read().await)
+    }
+}
+
+/// 收集三魂循环数据，格式化为可读时间线（倒序 → 正序输出）
+async fn collect_soul_cycle_timeline(
+    state: &HttpApiState,
+    agent_id: Uuid,
+) -> anyhow::Result<String> {
+    let recorder = state
+        .soul_recorder_for(agent_id)
+        .await
+        .context("soul cycle recorder not found")?;
+
+    // 获取全部 tick_id 列表
+    let (tick_ids, _total) = recorder.get_tick_ids_page(1, 1000).await;
+    let all_records = recorder.get_by_ticks(&tick_ids).await;
+
+    let mut lines: Vec<String> = Vec::new();
+    // 按 tick_id 正序排列（原始是倒序）
+    let mut sorted = tick_ids;
+    sorted.sort();
+
+    for tick_id in sorted {
+        let records: Vec<_> = all_records
+            .iter()
+            .filter(|r| r.tick_id == tick_id)
+            .collect();
+        if records.is_empty() {
+            continue;
+        }
+
+        let first = &records[0];
+        let wt = first.world_time.as_deref().unwrap_or("-");
+        lines.push(format!("\n--- Tick {} ({}) ---", tick_id, wt));
+
+        for rec in &records {
+            // 行动摘要
+            if let Some(ref action_type) = rec.final_action_type {
+                let action_desc = if let Some(ref data_str) = rec.final_action_data {
+                    // 尝试解析 action_data 提取 content
+                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(data_str) {
+                        let content = data.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        if action_type == "speak" || action_type == "whisper" || action_type == "shout" {
+                            format!("{}：{}", action_type, content)
+                        } else {
+                            format!("{}", action_type)
+                        }
+                    } else {
+                        format!("{}", action_type)
+                    }
+                } else {
+                    format!("{}", action_type)
+                };
+                lines.push(format!("  行动：{}", action_desc));
+            }
+
+            // 人魂叙事（简短摘要）
+            if let Some(ref narrative) = rec.renhun_narrative {
+                let truncated: String = narrative.chars().take(150).collect();
+                let ellipsis = if narrative.chars().count() > 150 { "..." } else { "" };
+                lines.push(format!("  感知：{}{}", truncated, ellipsis));
+            }
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+/// 从 server Dashboard API 获取角色的每日摘要
+async fn fetch_daily_summaries(
+    state: &HttpApiState,
+    agent_id: Uuid,
+) -> anyhow::Result<String> {
+    let server_http_url = state.server_http_url.read().await.clone();
+    let url = format!(
+        "{}/api/dashboard/agent-daily-summaries/{}?limit=100",
+        server_http_url, agent_id
+    );
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .context("请求每日摘要 API 超时或失败")?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("server 返回 {}", resp.status());
+    }
+
+    let body: serde_json::Value = resp.json().await.context("解析每日摘要响应失败")?;
+    let summaries = body
+        .get("summaries")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if summaries.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    for s in &summaries {
+        let game_day = s.get("game_day").and_then(|d| d.as_i64()).unwrap_or(0);
+        let summary = s
+            .get("summary")
+            .and_then(|t| t.as_str())
+            .unwrap_or("");
+        if !summary.is_empty() {
+            lines.push(format!("--- 第{}日 ---\n{}", game_day, summary));
+        }
+    }
+
+    Ok(lines.join("\n\n"))
 }

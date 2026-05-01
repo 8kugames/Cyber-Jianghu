@@ -104,6 +104,21 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTagSelection('values-tags', 'values');
     setupTagSelection('speech-patterns-tags', 'speech_patterns');
 
+    // 自动重生 toggle
+    (async () => {
+        const cb = document.getElementById('auto-rebirth');
+        if (!cb) return;
+        try {
+            const data = await apiGet('/api/v1/config/auto-rebirth');
+            cb.checked = !!data.auto_rebirth;
+        } catch (_) { /* keep default checked */ }
+        cb.addEventListener('change', async () => {
+            try {
+                await apiPost('/api/v1/config/auto-rebirth', { auto_rebirth: cb.checked });
+            } catch (_) { cb.checked = !cb.checked; }
+        });
+    })();
+
     document.getElementById('generate-btn').addEventListener('click', generateCharacter);
 
     document.getElementById('character-form').addEventListener('submit', async (e) => {

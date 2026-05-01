@@ -248,6 +248,10 @@ pub struct CharacterConfig {
     /// 角色状态
     #[serde(default)]
     pub status: CharacterStatus,
+
+    /// 纪传体传记（死亡/归隐时由 LLM 生成，汇总经历日志）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub biography: Option<String>,
 }
 
 fn default_age() -> u8 {
@@ -369,6 +373,10 @@ impl std::fmt::Display for RuntimeMode {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// 运行时配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
@@ -384,6 +392,10 @@ pub struct RuntimeConfig {
     /// 停止 LLM 调用
     #[serde(default)]
     pub llm_disabled: bool,
+
+    /// 自动重生开关：角色死亡后自动转世重生（复用角色信息）
+    #[serde(default = "default_true")]
+    pub auto_rebirth: bool,
 }
 
 impl Default for RuntimeConfig {
@@ -392,6 +404,7 @@ impl Default for RuntimeConfig {
             mode: RuntimeMode::Cognitive,
             port: 0,
             llm_disabled: false,
+            auto_rebirth: true,
         }
     }
 }
@@ -902,6 +915,7 @@ impl Config {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(0),
             llm_disabled: false,
+            auto_rebirth: true,
         };
 
         Ok(Config {
