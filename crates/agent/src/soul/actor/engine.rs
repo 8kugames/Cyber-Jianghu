@@ -148,8 +148,8 @@ pub struct CognitiveEngine {
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
     /// 对话历史（长窗口，SQLite 持久化）
     conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
-    /// Prompt 模板配置（从 YAML 加载，None 时 fail-fast）
-    pub(super) prompt_template: Option<PromptTemplateConfig>,
+    /// Prompt 模板配置（从 YAML 加载，启动时 fail-fast）
+    pub(super) prompt_template: PromptTemplateConfig,
     /// 行动结果记忆（Hermes 模式）
     pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
     /// action_type 别名映射（中文/别名 → 英文 canonical）
@@ -296,9 +296,8 @@ impl CognitiveEngine {
     /// 2. ~/.cyber-jianghu/config/prompt_templates.yaml
     /// 3. 内置默认路径（编译时嵌入或同级 config/）
     ///
-    /// Fail-fast: 配置文件存在但格式错误时 panic。
-    /// 不存在时使用硬编码模板（向后兼容旧部署）。
-    fn load_prompt_template() -> Option<PromptTemplateConfig> {
+    /// Fail-fast: 配置文件存在但格式错误时 panic。找不到文件也 panic。
+    fn load_prompt_template() -> PromptTemplateConfig {
         let search_paths = [
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
@@ -318,7 +317,7 @@ impl CognitiveEngine {
                 match PromptTemplateConfig::load_from_file(path) {
                     Ok(config) => {
                         info!("已加载 prompt 模板: {:?}", path);
-                        return Some(config);
+                        return config;
                     }
                     Err(e) => {
                         panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
@@ -326,21 +325,23 @@ impl CognitiveEngine {
                 }
             }
         }
-        info!("未找到 prompt_templates.yaml，使用内置模板");
-        None
+        panic!(
+            "未找到 prompt_templates.yaml，搜索路径: {:?}",
+            search_paths
+                .iter()
+                .filter_map(|p| p.as_ref().map(|x| x.display().to_string()))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// 获取 Prompt 模板配置的引用
-    pub fn prompt_template(&self) -> Option<&PromptTemplateConfig> {
-        self.prompt_template.as_ref()
+    pub fn prompt_template(&self) -> &PromptTemplateConfig {
+        &self.prompt_template
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
     fn truncation(&self, key: &str, default: usize) -> usize {
-        self.prompt_template
-            .as_ref()
-            .map(|c| c.truncation("actor_direct", key, default))
-            .unwrap_or(default)
+        self.prompt_template.truncation("actor_direct", key, default)
     }
 
     /// 加载动作列表（用于缓存 + 别名映射）
