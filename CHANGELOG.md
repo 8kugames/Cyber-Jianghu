@@ -27,9 +27,6 @@
   - `record_social_event`: 主动记录社交互动和好感度变化（delta clamp [-50, 50]）
   - `RelationshipStore` 新增 `find_relationship()` / `list_relationships_filtered()` 方法 + `target_name` 索引
   - `EarthToolContext` struct 替代 `from_engine()` 签名膨胀模式
-
-### Fixed
-
 - **Agent**: auto-rebirth 闭环修复 — spawn task 解析 `new_agent_id` 传入 main loop，rebirth_notify handler 用 new_id reconnect（之前 nil reconnect 导致永久挂起）；同步更新 `HttpApiState.agent_id`（P2 修复）
 - **Agent**: 地魂 tool-calling 不触发 — 三层根因修复
   - summary LLM 调用失败时降级为 `force_truncate_to_recent()`（避免 227 轮对话历史无限堆积）
