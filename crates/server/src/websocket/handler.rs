@@ -925,11 +925,44 @@ async fn handle_intent(
     }
 
     // Agent 存活检查：从 DashMap 内存缓存读取（实时模式，不再查 DB）
+    // 防御性：如果 DashMap 缺失 entry（auto-rebirth 后 WS 重连竞态），从 DB 回补
     let is_alive = state
         .agent_state_cache
         .get(&agent_id)
         .map(|r| r.value().is_alive)
-        .unwrap_or(false);
+        .unwrap_or_else(|| {
+            // DashMap 缺失，尝试从 DB 加载（防御 auto-rebirth race condition）
+            warn!("Agent {} not in DashMap, attempting DB fallback", agent_id);
+            false
+        });
+
+    // 如果 DashMap 没有命中，尝试从 DB 防御性加载
+    if !is_alive
+        && !state.agent_state_cache.contains_key(&agent_id)
+        && let Ok(db_state) = crate::db::get_latest_agent_state(&state.db_pool, agent_id).await
+        && db_state.is_alive
+    {
+        let current_tick = state
+            .current_accepting_tick_id
+            .load(std::sync::atomic::Ordering::Acquire);
+        // 保留 DB 原始 tick_id，让 decay 引擎根据差值补算衰减
+        state.agent_state_cache.insert(agent_id, db_state.clone());
+        info!(
+            "DashMap miss → DB defensive load: agent {} (db_tick={}, current_tick={})",
+            agent_id, db_state.tick_id, current_tick
+        );
+    }
+
+    // 二次检查：防御性加载后重新读 DashMap
+    let is_alive = if !is_alive {
+        state
+            .agent_state_cache
+            .get(&agent_id)
+            .map(|r| r.value().is_alive)
+            .unwrap_or(false)
+    } else {
+        true
+    };
 
     if !is_alive {
         warn!(

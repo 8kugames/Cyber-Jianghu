@@ -9,15 +9,24 @@
 
 ### Added
 
+- **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数
+
+### Changed
+
+- **[BREAKING] Server**: `auto_rebirth_agent()` 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 旧 agent dead→retired，新 agent 全新 UUID + 初始状态 + 初始物品。事务包裹保证原子性
+- **Agent**: rebirth 恢复时重新 open RelationshipStore（新 agent_id → 新 DB 文件），同步更新 CognitiveEngine 内部引用
+- **Agent**: `max_tool_rounds` 外部化到 `prompt_templates.yaml` 的 `llm_parameters` 段，消除硬编码
+
+### Fixed
+
+- **Agent**: skill_view tool description 加强 skill_id 选择指引，引导 LLM 从已掌握技能列表选择
+- **Server**: auto-rebirth handler 清理 agent_to_device_map 旧映射 + DashMap 旧缓存，防止幽灵映射
 - **Agent**: 地魂工具池扩展至 6 个工具（3 个新增关系工具）
   - `get_relationship`: 查询与特定角色的关系记忆（支持 UUID 或名字查找，SQL 层过滤）
   - `list_relationships`: 列出所有关系概览，可选好感度范围过滤（SQL 层 WHERE）
   - `record_social_event`: 主动记录社交互动和好感度变化（delta clamp [-50, 50]）
   - `RelationshipStore` 新增 `find_relationship()` / `list_relationships_filtered()` 方法 + `target_name` 索引
   - `EarthToolContext` struct 替代 `from_engine()` 签名膨胀模式
-
-### Fixed
-
 - **Agent**: auto-rebirth 闭环修复 — spawn task 解析 `new_agent_id` 传入 main loop，rebirth_notify handler 用 new_id reconnect（之前 nil reconnect 导致永久挂起）；同步更新 `HttpApiState.agent_id`（P2 修复）
 - **Agent**: 地魂 tool-calling 不触发 — 三层根因修复
   - summary LLM 调用失败时降级为 `force_truncate_to_recent()`（避免 227 轮对话历史无限堆积）

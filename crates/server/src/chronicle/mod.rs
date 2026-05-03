@@ -112,20 +112,37 @@ impl Default for ChronicleConfig {
 
 impl ChronicleConfig {
     /// 从 time.yaml + game_rules.yaml 计算周期 tick 数
+    /// tick_id 是真实秒数，需乘以 real_seconds_per_tick 转换
     fn calculate_period_ticks() -> i64 {
         let time_config = crate::game_data::registry::TimeRegistry::get_config();
         let chronicle_config = crate::game_data::registry::ChronicleRegistry::get_config();
+        let registry = crate::game_data::registry_or_error()
+            .inspect_err(|e| {
+                tracing::warn!("calculate_period_ticks: registry 不可用，使用默认值: {}", e)
+            })
+            .ok();
+
+        // game_rules.yaml agent_state.tick.real_seconds_per_tick 默认值 60
+        let real_seconds_per_tick = registry
+            .map(|r| {
+                r.get()
+                    .game_rules
+                    .data
+                    .agent_state
+                    .tick
+                    .real_seconds_per_tick as i64
+            })
+            .unwrap_or(60);
 
         match (time_config, chronicle_config) {
             (Some(c), Some(chronicle)) => {
-                let days_per_period = chronicle.days_per_period;
-                (days_per_period * c.hours_per_day * c.ticks_per_hour) as i64
+                (chronicle.days_per_period * c.hours_per_day * c.ticks_per_hour) as i64
+                    * real_seconds_per_tick
             }
             (Some(c), None) => {
-                // 回退：使用默认 7 日
-                (7 * c.hours_per_day * c.ticks_per_hour) as i64
+                (7 * c.hours_per_day * c.ticks_per_hour) as i64 * real_seconds_per_tick
             }
-            _ => 168, // 回退值
+            _ => 5040, // 7 * 12 * 1 * 60 — 与默认配置一致
         }
     }
 
@@ -376,4 +393,18 @@ pub async fn generate_and_store(
 pub fn calculate_period_start(tick_id: i64) -> i64 {
     let period_ticks = ChronicleConfig::default().period_ticks;
     ((tick_id.saturating_sub(1)) / period_ticks) * period_ticks + 1
+}
+
+/// 截断文本（正确处理 UTF-8 字符边界）
+pub(crate) fn truncate_text(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        return s.to_string();
+    }
+    // 确保截断点在字符边界上
+    let end = s
+        .char_indices()
+        .nth(max_len.saturating_sub(3))
+        .map(|(idx, _)| idx)
+        .unwrap_or(s.len());
+    format!("{}...", &s[..end])
 }

@@ -652,7 +652,6 @@ impl LlmConfig {
             enable_thinking: None,
         }
     }
-
 }
 
 impl Drop for LlmConfig {

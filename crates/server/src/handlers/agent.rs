@@ -300,7 +300,8 @@ pub async fn agent_retire(
                 info!(
                     "Agent 归隐成功: {} ({}) 已归隐",
                     result.retired_name.as_ref().unwrap_or(&"-".to_string()),
-                    result.retired_agent_id
+                    result
+                        .retired_agent_id
                         .map(|id| id.to_string())
                         .unwrap_or_default()
                 );
@@ -310,9 +311,7 @@ pub async fn agent_retire(
                         "角色 '{}' 已归隐，可以创建新角色",
                         result.retired_name.as_ref().unwrap_or(&"-".to_string())
                     ),
-                    retired_agent_id: result
-                        .retired_agent_id
-                        .map(|id| id.to_string()),
+                    retired_agent_id: result.retired_agent_id.map(|id| id.to_string()),
                     action_taken: true,
                 }))
             } else {
@@ -460,7 +459,6 @@ pub async fn agent_auto_rebirth(
         &state.db_pool,
         payload.old_agent_id,
         &spawn_location,
-        true,
         &initial_items_data,
         starting_age_ticks,
     )
@@ -482,7 +480,8 @@ pub async fn agent_auto_rebirth(
         )
     })?;
 
-    // 更新 DashMap（内存缓存）— 旧条目在 death 时已移除
+    // 更新 DashMap（内存缓存）— 移除旧 agent 缓存
+    state.agent_state_cache.remove(&payload.old_agent_id);
     let new_state = crate::models::AgentState::new(
         result.agent_id,
         crate::db::get_current_world_tick_id(&state.db_pool)
@@ -491,9 +490,10 @@ pub async fn agent_auto_rebirth(
     );
     state.agent_state_cache.insert(result.agent_id, new_state);
 
-    // 更新 agent_to_device_map
+    // 更新 agent_to_device_map（清理旧映射 + 建立新映射）
     {
         let mut map = state.agent_to_device_map.write().await;
+        map.remove(&payload.old_agent_id);
         map.insert(result.agent_id, payload.device_id);
     }
 
@@ -696,7 +696,10 @@ pub async fn update_biography(
             Ok(Json(serde_json::json!({"success": true})))
         }
         Err(e) => {
-            error!("[biography] 传记保存失败: agent={}, err={}", payload.agent_id, e);
+            error!(
+                "[biography] 传记保存失败: agent={}, err={}",
+                payload.agent_id, e
+            );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("保存失败: {}", e)})),

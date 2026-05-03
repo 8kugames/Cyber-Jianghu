@@ -1,6 +1,6 @@
 # Cyber-Jianghu 功能架构
 
-**日期**: 2026-04-24
+**日期**: 2026-05-03
 
 ## 核心定位
 
@@ -50,6 +50,7 @@
   - [x] 处理 HP、体力、饥饿、口渴等生理状态随时间的自然衰减。
   - [x] 寿终正寝检查：超龄自动清零 HP。
   - [x] 触发 TickBoundary 事件，如每 7 个游戏日触发传记生成。
+  - [x] `[BREAKING]` auto-rebirth 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 旧 agent dead→retired，新 agent 全新 UUID + 初始状态 + 初始物品，事务包裹保证原子性。
 - [x] **[实时 Intent 处理管道 (Real-time Pipeline)](../../crates/server/docs/architecture/p0_core/realtime_pipeline.md)**: 零并发冲突的单线程意图调度器。
   - [x] **单消费者 MPSC 队列**：彻底消除写锁竞争和数据资源冲突。
   - [x] **同地广播 (Co-located Broadcast)**：发生动作后仅向处于同一 `node_id` 的周围 Agent 广播事件（如说话、攻击），避免全局风暴。
@@ -89,6 +90,7 @@
 - [x] **[群像传记生成 (Chronicle)](../../crates/server/docs/architecture/p2_enhancement/chronicle.md)**: 自动编纂世界历史记录的史官系统。
   - [x] 每 7 个游戏日聚合 Agent 数据（击杀、高光时刻、生死等）。
   - [x] 结合模板规则与异步 LLM 生成长篇传记，并支持失败降级。
+  - [x] 数据采集缺陷修复：location_stats 去重统计、top_actions 累加修复、时间公式与 TimeRegistry 对齐（`real_seconds_per_game_day()` Fail Fast）、传记触发周期从 84 秒修正为 5040 秒。
 - [x] **[跨 Agent 传承 (Lessons)]()**: 基于集体死亡经验的共享教训库（Layer 1-2）。
   - [x] Layer 1: AgentDied.metadata 携带属性快照/存活时间/死因，broadcast 透传。
   - [x] Layer 2: public_lessons 表按死因聚合教训，WorldState.lessons_learned 下发，Agent DecisionContext 注入。
@@ -98,7 +100,7 @@
     - [x] /admin/* — 管理面板 (带 Read/Write Token 鉴权)
     - [x] /api/v1/agent/* — Agent 管理 (包含 Vendor 补货规则配置)
     - [x] /api/config/* + /api/admin/reload-config — 热重载配置
-    - [x] /api/config/llm/* — LLM 服务在线测试与切换
+    - [x] `/api/config/llm/*` — LLM 服务在线测试与切换（API key 不返回前端，仅返回 `has_api_key` 布尔值）
     - [x] /api/dashboard/chronicles — 传记查询
     - [x] /health — 节点存活与 Tick 周期探针
   - [x] 管理后台前端 UI (Server Admin Dashboard)
@@ -111,6 +113,7 @@
     - [x] LLM 服务配置面板 (Ollama/OpenAI 兼容接口在线测试与切换)
     - [x] 全局经历日志流查询 (Experiences Stream)
     - [x] 世界传记检阅器 (Chronicles Viewer)
+    - [x] Admin XSS 加固 + 事件委托重构（`escapeHtml` + data-attribute 冒泡，消除 innerHTML 注入风险）
 
 ---
 
@@ -175,6 +178,7 @@
   - [x] 摘要本地存储：lifecycle 接收摘要后写入 Episodic Memory（importance 可配置）。
   - [x] 摘要 Server 提交：通过 WebSocket `ClientMessage::DailySummary` 提交，支持指数退避重试。
   - [x] Server 入库：`agent_daily_summaries` 表 UPSERT（agent_id + game_day），Admin 端可查询。
+  - [x] 纪传体传记自动生成：角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。`max_tool_rounds` 外部化到 `prompt_templates.yaml`，消除硬编码。
 - [x] **[人际社交网络 (RelationshipStore)](../../crates/agent/docs/architecture/p2_enhancement/relationship_store.md)**: 记录并量化 Agent 间的互动历史与好感度阶梯，影响其社交决策。
   - [x] 支持物品转移（SocialInteraction）、公开说话（PublicMessage）、密语（PrivateDialogue）三种事件类型触发好感度更新。
   - [x] 名字解析链路 `name_map → store → "陌生人"`，防止已有真名被覆写。

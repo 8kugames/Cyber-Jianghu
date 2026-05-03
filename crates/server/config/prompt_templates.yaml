@@ -149,6 +149,10 @@ templates:
       summary_window: 50
       tool_calling_history_turns: 8
 
+    # LLM 调用参数配置（独立于 truncation，语义分离）
+    llm_parameters:
+      max_tool_rounds: 3
+
   # RuleEngine reject 反馈模板
   # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正
   reject_feedback:

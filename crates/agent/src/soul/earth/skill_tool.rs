@@ -8,7 +8,7 @@ use crate::component::llm::tool_types::ToolDefinition;
 pub fn skill_view_definition() -> ToolDefinition {
     ToolDefinition::new(
         "skill_view",
-        "查看已掌握技能的详细行为指引。当你的场景匹配某个已掌握技能时调用此工具。",
+        "查看已掌握技能的详细行为指引。当你的场景匹配某个已掌握技能时调用此工具。注意：skill_id 必须从已掌握技能列表中选择。如果你不知道 skill_id 说明你不掌握你期望使用的技能",
         Some(serde_json::json!({
             "type": "object",
             "properties": {

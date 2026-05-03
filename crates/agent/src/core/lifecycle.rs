@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use super::reconnect::{save_character_config_to_fs, should_log_retry};
 use crate::component::memory::backend::MemoryBackend;
+use crate::component::social::RelationshipStore;
 use crate::config::CharacterStatus;
 use crate::infra::transport::ConnectError;
 use crate::models::Intent;
@@ -486,6 +487,25 @@ impl super::Agent {
                                 }
                             }
 
+                            // 转世重生：重新 open RelationshipStore（新 agent_id → 新 DB 文件）
+                            if let Some(ref api_state) = self.http_api_state {
+                                let new_rel_path = api_state.data_dir.join(format!("relationships_{}.db", new_id));
+                                match RelationshipStore::open(new_id, &new_rel_path) {
+                                    Ok(new_store) => {
+                                        // 更新 Agent 级别引用
+                                        self.relationship_store = Some(new_store.clone());
+                                        // 同步更新 CognitiveEngine 内部引用
+                                        if let Some(ref engine) = self.cognitive_engine {
+                                            engine.set_relationship_store(new_store);
+                                        }
+                                        info!("转世重生: RelationshipStore 已重初始化 (new_id={})", new_id);
+                                    }
+                                    Err(e) => {
+                                        warn!("转世重生: RelationshipStore 重初始化失败: {}", e);
+                                    }
+                                }
+                            }
+
                             info!(
                                 "Agent '{}' 自动转世完成: new_agent_id={}",
                                 self.character_name(), new_id
@@ -707,6 +727,19 @@ impl super::Agent {
                                         warn!("Failed to persist death status: {}", e);
                                     }
                                 }
+                            }
+
+                            // 死亡时触发传记生成（fire-and-forget，不阻塞 rebirth 调度）
+                            if let Some(ref api_state) = self.http_api_state {
+                                let state = api_state.clone();
+                                let dead_agent_id = world_state.agent_id.unwrap_or_default();
+                                tokio::spawn(async move {
+                                    info!("[biography] 死亡触发传记生成: agent={}", dead_agent_id);
+                                    match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
+                                        Ok(bio) => info!("[biography] 死亡传记生成成功: {}字", bio.chars().count()),
+                                        Err(e) => warn!("[biography] 死亡传记生成失败（非致命）: {}", e),
+                                    }
+                                });
                             }
 
                             // 自动重生：调度延迟后的转世重生 API 调用
@@ -1356,33 +1389,49 @@ impl super::Agent {
                             }
 
                             if attempt >= max_retries {
-                                warn!("Tick {} 达到最大重试次数 {}，提交 idle", world_state.tick_id, max_retries);
-                                final_intent = Some(Intent::new(agent_id, world_state.tick_id, "休息", None)
-                                    .with_thought(format!("意图多次被驳回: {}", reason)));
+                                warn!("Tick {} 达到最大重试次数 {}，使用 chaos fallback", world_state.tick_id, max_retries);
+                                final_intent = Some(self.chaos_fallback_intent(&world_state, agent_id, format!("意图多次被驳回: {}", reason)));
                                 break;
                             }
                         }
                     }
 
-                    let final_intent = match final_intent {
+                    let mut final_intent = match final_intent {
                         Some(intent) => intent,
                         None => {
-                            warn!("Tick {} 无有效 intent（超时或被驳回耗尽），发送 idle", world_state.tick_id);
+                            warn!("Tick {} 无有效 intent（超时或被驳回耗尽），使用 chaos fallback", world_state.tick_id);
                             self.consecutive_idle_count += 1;
                             self.consecutive_follow_count = 0;
                             self.maybe_rotate_model().await;
-                            // 构造 idle intent 并继续发送+上报（保证 server-web 经历日志完整）
-                            Intent::new(agent_id, world_state.tick_id, "休息", None)
-                                .with_thought("三魂循环未产出有效意图".to_string())
+                            self.chaos_fallback_intent(&world_state, agent_id, "三魂循环未产出有效意图".to_string())
                         }
                     };
 
-                    // LLM 失败追踪：检测是否为 LLM 不可用导致的 fallback idle
-                    let is_llm_failure = final_intent.action_type.as_str() == "休息"
+                    // 后置 chaos 替换：如果 callback（engine/binary 层）返回了认知失败标记的休息，
+                    // 用 chaos 生存 intent 替换，避免"认知失败 → 固定休息 → 饿死"死循环
+                    if final_intent.action_type.as_str() == "休息"
                         && final_intent.thought_log.as_ref()
+                            .map(|t| t.contains("认知失败") || t.contains("忽然心神不宁"))
+                            .unwrap_or(false)
+                    {
+                        let chaos_intent = self.chaos_fallback_intent(
+                            &world_state, agent_id,
+                            final_intent.thought_log.clone().unwrap_or_default(),
+                        );
+                        info!(
+                            "认知失败休息 → chaos 替换: action={}",
+                            chaos_intent.action_type
+                        );
+                        final_intent = chaos_intent;
+                    }
+
+                    // LLM 失败追踪：检测是否为 LLM 不可用导致的 fallback（chaos 或 idle）
+                    let is_llm_failure = final_intent.chaos_marker.is_some()
+                        || final_intent.thought_log.as_ref()
                             .map(|t| t.contains("意图多次被驳回")
                                 || t.contains("三魂循环未产出有效意图")
-                                || t.contains("认知失败"))
+                                || t.contains("认知失败")
+                                || t.contains("[LLM 配额耗尽"))
                             .unwrap_or(false);
                     if is_llm_failure {
                         self.consecutive_llm_failures += 1;
@@ -1822,6 +1871,45 @@ impl super::Agent {
     /// 格式化游戏内时间（WorldTime → 中文武侠风格字符串）
     fn format_world_time(wt: &WorldTime) -> String {
         wt.to_chinese()
+    }
+
+    /// LLM 失败时的 chaos fallback：尝试生成生存导向 intent，失败则退回休息
+    fn chaos_fallback_intent(
+        &mut self,
+        world_state: &cyber_jianghu_protocol::WorldState,
+        agent_id: Uuid,
+        fallback_thought: String,
+    ) -> Intent {
+        if let Some(ref mut generator) = self.chaos_generator {
+            let actions: Vec<_> = self
+                .config
+                .game_rules
+                .as_ref()
+                .map(|g| g.available_actions.clone())
+                .unwrap_or_default();
+            if !actions.is_empty() {
+                let chaos_intents = generator.generate_llm_chaos_intents(
+                    world_state,
+                    &actions,
+                    1,
+                    self.consecutive_llm_failures as usize,
+                );
+                if let Some(intent) = chaos_intents.into_iter().next() {
+                    info!(
+                        "Chaos fallback: agent={}, action={}",
+                        self.character_name(),
+                        intent.action_type
+                    );
+                    return intent;
+                }
+            }
+        }
+        // chaos 不可用 → 绝对兜底休息
+        warn!(
+            "Chaos fallback 不可用，退回休息: agent={}",
+            self.character_name()
+        );
+        Intent::new(agent_id, world_state.tick_id, "休息", None).with_thought(fallback_thought)
     }
 
     /// 将 action_type + action_data 生成可读简述
