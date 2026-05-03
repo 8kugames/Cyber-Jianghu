@@ -945,12 +945,11 @@ async fn handle_intent(
         let current_tick = state
             .current_accepting_tick_id
             .load(std::sync::atomic::Ordering::Acquire);
-        let mut state_for_cache = db_state.clone();
-        state_for_cache.tick_id = current_tick;
-        state.agent_state_cache.insert(agent_id, state_for_cache);
+        // 保留 DB 原始 tick_id，让 decay 引擎根据差值补算衰减
+        state.agent_state_cache.insert(agent_id, db_state.clone());
         info!(
-            "DashMap miss → DB defensive load: agent {} (tick={})",
-            agent_id, current_tick
+            "DashMap miss → DB defensive load: agent {} (db_tick={}, current_tick={})",
+            agent_id, db_state.tick_id, current_tick
         );
     }
 
