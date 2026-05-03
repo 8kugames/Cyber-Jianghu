@@ -1881,24 +1881,35 @@ impl super::Agent {
         fallback_thought: String,
     ) -> Intent {
         if let Some(ref mut generator) = self.chaos_generator {
-            let actions: Vec<_> = self.config.game_rules
+            let actions: Vec<_> = self
+                .config
+                .game_rules
                 .as_ref()
                 .map(|g| g.available_actions.clone())
                 .unwrap_or_default();
             if !actions.is_empty() {
                 let chaos_intents = generator.generate_llm_chaos_intents(
-                    world_state, &actions, 1, self.consecutive_llm_failures as usize,
+                    world_state,
+                    &actions,
+                    1,
+                    self.consecutive_llm_failures as usize,
                 );
                 if let Some(intent) = chaos_intents.into_iter().next() {
-                    info!("Chaos fallback: agent={}, action={}", self.character_name(), intent.action_type);
+                    info!(
+                        "Chaos fallback: agent={}, action={}",
+                        self.character_name(),
+                        intent.action_type
+                    );
                     return intent;
                 }
             }
         }
         // chaos 不可用 → 绝对兜底休息
-        warn!("Chaos fallback 不可用，退回休息: agent={}", self.character_name());
-        Intent::new(agent_id, world_state.tick_id, "休息", None)
-            .with_thought(fallback_thought)
+        warn!(
+            "Chaos fallback 不可用，退回休息: agent={}",
+            self.character_name()
+        );
+        Intent::new(agent_id, world_state.tick_id, "休息", None).with_thought(fallback_thought)
     }
 
     /// 将 action_type + action_data 生成可读简述

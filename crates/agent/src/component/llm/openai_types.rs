@@ -171,7 +171,10 @@ mod tests {
         let resp: OpenAIStreamResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.choices.len(), 1);
         let delta = &resp.choices[0].delta;
-        assert!(delta.tool_calls.is_some(), "tool_calls should be present in stream response");
+        assert!(
+            delta.tool_calls.is_some(),
+            "tool_calls should be present in stream response"
+        );
         let tc = delta.tool_calls.as_ref().unwrap();
         assert_eq!(tc[0].function.name, "skill_view");
     }

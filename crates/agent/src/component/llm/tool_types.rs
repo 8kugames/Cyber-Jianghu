@@ -80,7 +80,11 @@ impl ToolCall {
             Err(first_err) => {
                 tracing::warn!(
                     "Tool arguments parse failed, raw preview: {}",
-                    self.function.arguments.chars().take(200).collect::<String>()
+                    self.function
+                        .arguments
+                        .chars()
+                        .take(200)
+                        .collect::<String>()
                 );
                 Err(first_err.into())
             }
