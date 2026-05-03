@@ -44,14 +44,21 @@ if (urlParams.has("token")) {
 // Utility Functions
 // ============================================================================
 function escapeHtml(text) {
-    if (!text) return '';
+    if (text === null || text === undefined) return '';
     var div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = String(text);
     return div.innerHTML;
 }
+
 function showToast(message, type) {
     type = type || "success";
     var toast = document.getElementById("toast");
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "toast";
+        toast.className = "toast";
+        document.body.appendChild(toast);
+    }
     toast.textContent = message;
     toast.className = "toast toast-" + type + " show";
     setTimeout(function () {
