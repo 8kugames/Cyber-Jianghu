@@ -49,7 +49,7 @@ pub async fn collect(
     period_start: i64,
     period_end: i64,
 ) -> Result<CollectedData> {
-    let game_days = calculate_game_days(db_pool, period_start, period_end).await?;
+    let game_days = calculate_game_days(period_start, period_end)?;
     let season = get_season(db_pool, period_end).await?;
     let agents = collect_agents(db_pool, period_start, period_end).await?;
     let highlights = collect_highlights(db_pool, period_start, period_end).await?;
@@ -72,18 +72,25 @@ pub async fn collect(
     })
 }
 
+/// 1 游戏日对应的真实秒数
+/// 公式: real_seconds_per_tick * ticks_per_hour * hours_per_day
+/// 与 TimeRegistry::get_current_season() 保持一致 (time_registry.rs:37-45)
+fn real_seconds_per_game_day() -> Result<i64> {
+    let time_config = crate::game_data::registry::TimeRegistry::get_config()
+        .context("时间配置不可用")?;
+    let registry = crate::game_data::registry_or_error()
+        .map_err(|e| anyhow::anyhow!("游戏配置不可用: {}", e))?;
+    let rsp = registry.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+    let rspgd = rsp * time_config.ticks_per_hour as i64 * time_config.hours_per_day as i64;
+    Ok(rspgd)
+}
+
 /// 计算游戏日范围
-async fn calculate_game_days(
-    _db_pool: &crate::db::DbPool,
-    period_start: i64,
-    period_end: i64,
-) -> Result<(i32, i32)> {
-    let ticks_per_hour = get_ticks_per_hour().await.unwrap_or(1);
-
-    let start_day = (period_start / (ticks_per_hour * 24)) + 1;
-    let end_day = (period_end / (ticks_per_hour * 24)) + 1;
-
-    Ok((start_day as i32, end_day as i32))
+fn calculate_game_days(period_start: i64, period_end: i64) -> Result<(i32, i32)> {
+    let rspgd = real_seconds_per_game_day()?;
+    let start_day = (period_start / rspgd + 1) as i32;
+    let end_day = (period_end / rspgd + 1) as i32;
+    Ok((start_day, end_day))
 }
 
 /// 获取季节
@@ -134,7 +141,6 @@ async fn collect_agents(
         r#"
         SELECT
             agent_id,
-            COUNT(*) as actions_count,
             action_type,
             COUNT(*) as type_count
         FROM agent_action_logs
@@ -155,20 +161,18 @@ async fn collect_agents(
 
     for row in action_stats_rows {
         let agent_id: uuid::Uuid = row.get("agent_id");
-        // COUNT(*) returns BIGINT in PostgreSQL, use i64
-        let actions_count: i64 = row.get("actions_count");
         let action_type: String = row.get("action_type");
         let type_count: i64 = row.get("type_count");
 
         agent_actions
             .entry(agent_id)
-            .and_modify(|(cnt, types)| {
-                *cnt = actions_count;
+            .and_modify(|(total, types)| {
+                *total += type_count;
                 if types.len() < 5 {
                     types.push((action_type.clone(), type_count));
                 }
             })
-            .or_insert_with(|| (actions_count, vec![(action_type, type_count)]));
+            .or_insert_with(|| (type_count, vec![(action_type, type_count)]));
     }
 
     // 批量查询：叙事描述
@@ -198,10 +202,10 @@ async fn collect_agents(
 
     // 批量查询：每日 LLM 日志摘要（agent_daily_summaries）
     // LEFT JOIN，agent 在本周期无摘要时不影响主查询
-    let ticks_per_hour = get_ticks_per_hour().await.unwrap_or(1);
+    let rspgd = real_seconds_per_game_day()?;
     let period_game_days = (
-        (period_start / (ticks_per_hour * 24)) as i64,
-        (period_end / (ticks_per_hour * 24)) as i64,
+        period_start / rspgd,
+        period_end / rspgd,
     );
 
     let daily_summary_rows = sqlx::query(
@@ -393,7 +397,7 @@ async fn collect_highlights(
                 Highlight {
                     tick_id,
                     event_type: "dialogue".to_string(),
-                    description: truncate_string(&narrative, 100),
+                    description: super::truncate_text(&narrative, 100),
                     agent_id: Some(agent_id),
                     agent_name: Some(agent_name),
                 }
@@ -436,10 +440,12 @@ async fn collect_highlights(
     // 打乱后取前 N（用 tick_id 作为伪随机种子避免每次生成不同结果）
     let shuffle_and_take = |v: Vec<Highlight>, n: usize| {
         let mut shuffled = v;
-        // 简单的 Fisher-Yates 变体，使用 period_start 作为种子
-        let seed = period_start as usize;
-        for i in 0..shuffled.len() {
-            let j = (i + seed + i * 17) % shuffled.len();
+        // Knuth LCG (TAOCP Vol 2, 3.2.1.2, Table 1, line 26) + 标准 Fisher-Yates
+        let seed = period_start as u64;
+        let mut rng_state = seed;
+        for i in (1..shuffled.len()).rev() {
+            rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let j = ((rng_state >> 33) as usize) % (i + 1);
             shuffled.swap(i, j);
         }
         shuffled.into_iter().take(n).collect::<Vec<_>>()
@@ -506,7 +512,7 @@ async fn collect_stats(
     // 地点分布
     let location_rows = sqlx::query(
         r#"
-        SELECT node_id, COUNT(*) as cnt
+        SELECT node_id, COUNT(DISTINCT agent_id) as cnt
         FROM agent_states
         WHERE tick_id BETWEEN $1 AND $2 AND is_alive = true
         GROUP BY node_id
@@ -607,21 +613,3 @@ async fn collect_births(
     Ok(count as i32)
 }
 
-/// 获取 ticks_per_hour 配置
-async fn get_ticks_per_hour() -> Option<i64> {
-    crate::game_data::registry::TimeRegistry::get_config().map(|c| c.ticks_per_hour as i64)
-}
-
-/// 截断字符串（正确处理 UTF-8 字符边界）
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        return s.to_string();
-    }
-    // 确保截断点在字符边界上
-    let end = s
-        .char_indices()
-        .nth(max_len.saturating_sub(3))
-        .map(|(idx, _)| idx)
-        .unwrap_or(s.len());
-    format!("{}...", &s[..end])
-}
