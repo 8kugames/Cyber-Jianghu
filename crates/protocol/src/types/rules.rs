@@ -72,10 +72,6 @@ pub struct GameRules {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent_batch: Option<IntentBatchConfig>,
 
-    /// 天魂（ReflectorSoul）叙事生成配置
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reflector_narrative: Option<ReflectorNarrativeConfig>,
-
     /// 即时事件处理配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub immediate_events: Option<ImmediateEventConfig>,
@@ -134,7 +130,6 @@ impl Default for GameRules {
             version: "0.0.1".into(),
             last_updated: chrono::Utc::now().to_rfc3339(),
             intent_batch: None,
-            reflector_narrative: None,
             immediate_events: None,
             rebirth_delay_ticks: 0,
             rebirth_retry_max_attempts: default_rebirth_retry_max(),
@@ -305,70 +300,10 @@ fn default_adaptive_field_mapping() -> std::collections::HashMap<String, String>
     .into()
 }
 
-/// 天魂（ReflectorSoul）叙事生成配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReflectorNarrativeConfig {
-    /// 是否启用 LLM 生成（false 时使用空 NarrativeContext）
-    #[serde(default = "default_true")]
-    pub enable_llm_generation: bool,
-
-    /// 是否启用语义缓存
-    #[serde(default = "default_true")]
-    pub cache_enabled: bool,
-
-    /// 缓存大小
-    #[serde(default = "default_cache_size")]
-    pub cache_size: usize,
-
-    /// 缓存 TTL（秒）
-    #[serde(default = "default_cache_ttl")]
-    pub cache_ttl_seconds: i64,
-
-    /// 是否使用 few-shot 示例
-    #[serde(default = "default_true")]
-    pub few_shot_examples: bool,
-
-    /// 数值泄露检测配置
-    #[serde(default)]
-    pub leak_detection: LeakDetectionConfig,
-}
-
-/// 数值泄露检测配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LeakDetectionConfig {
-    /// 是否启用泄露检测
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
-    /// 高风险阈值（>=此分数触发重试）
-    #[serde(default = "default_suspicion_threshold")]
-    pub suspicion_threshold: u8,
-
-    /// 最大重试次数
-    #[serde(default = "default_max_retry")]
-    pub max_retry: usize,
-}
-
 // Default helpers
 
 fn default_true() -> bool {
     true
-}
-
-fn default_cache_size() -> usize {
-    1000
-}
-
-fn default_cache_ttl() -> i64 {
-    300
-}
-
-fn default_suspicion_threshold() -> u8 {
-    65
-}
-
-fn default_max_retry() -> usize {
-    2
 }
 
 fn default_minimum_per_tick() -> usize {
@@ -385,29 +320,6 @@ impl Default for GradedValidationConfig {
             restricted_area_keywords: default_restricted_area_keywords(),
             high_value_item_keywords: default_high_value_item_keywords(),
             adaptive_field_mapping: default_adaptive_field_mapping(),
-        }
-    }
-}
-
-impl Default for LeakDetectionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            suspicion_threshold: default_suspicion_threshold(),
-            max_retry: default_max_retry(),
-        }
-    }
-}
-
-impl Default for ReflectorNarrativeConfig {
-    fn default() -> Self {
-        Self {
-            enable_llm_generation: true,
-            cache_enabled: true,
-            cache_size: 1000,
-            cache_ttl_seconds: 300,
-            few_shot_examples: true,
-            leak_detection: LeakDetectionConfig::default(),
         }
     }
 }
