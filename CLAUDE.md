@@ -364,15 +364,54 @@ use super::builder::AgentBuilder;
 ## API Endpoints
 
 ### Server (port 23333)
-- `GET /health` - Health check
+
+**Agent Lifecycle**:
 - `POST /api/v1/agent/connect` - Connect device
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
-- `POST /api/v1/agent/rebirth` - Delete agent
-- `POST /api/v1/agent/auto-rebirth` - Auto rebirth
+- `POST /api/v1/agent/retire` - Retire active character (mark as retired)
+- `POST /api/v1/agent/auto-rebirth` - Auto rebirth (INSERT new agent, old agent dead→retired)
 - `GET /api/v1/agent/{id}/context` - Get agent context
 - `POST /api/v1/agent/biography` - Receive biography from agent (body: `{agent_id, biography}`)
+- `POST /api/v1/agent/grant-items` - Admin inventory injection (requires write_token)
+- `POST /api/v1/validate-action` - Validate action parameters
+
+**WebSocket**:
 - `WS /ws?token={auth_token}` - WebSocket connection
-- Admin API: `/api/admin/reload-config`, `/api/admin/login`, `/api/admin/logout`, `/api/admin/session`
+
+**Dashboard (Read Token)**:
+- `GET /api/dashboard/agents` - List all agents
+- `GET /api/dashboard/agents/offline` - Offline agents
+- `GET /api/dashboard/agents/dead` - Dead agents
+- `GET /api/dashboard/agent/{id}` - Agent details
+- `GET /api/dashboard/agent/{id}/experiences` - Agent experiences
+- `GET /api/dashboard/agent/{id}/vendor-refill` - Vendor refill rules
+- `GET /api/dashboard/agent-daily-summaries` - All daily summaries
+- `GET /api/dashboard/agent-daily-summaries/{agent_id}` - Agent daily summaries
+- `GET /api/dashboard/stats` - Dashboard statistics
+- `GET /api/dashboard/experiences` - Experience stream
+- `GET /api/dashboard/chronicles` - List chronicles
+- `GET /api/dashboard/chronicles/{id}` - Get chronicle
+- `GET /api/dashboard/chronicles/llm-stats` - LLM token stats
+- `GET /api/dashboard/chronicles/pending` - Pending generation tasks
+- `GET /api/dashboard/actions-map` - Actions mapping
+- `GET /api/dashboard/items` - List items
+- `GET /api/dashboard/status-configs` - Status configurations
+
+**Dashboard (Write Token)**:
+- `POST /api/dashboard/agents/cleanup` - Cleanup offline agents
+- `POST /api/dashboard/chronicles/generate` - Generate chronicle
+- `PUT /api/dashboard/agent/{id}/vendor-refill` - Set vendor refill rules
+- `DELETE /api/dashboard/agent/{id}/vendor-refill/{item_id}` - Delete vendor refill rule
+- `GET/PUT /api/config/{filename}` - Get/update config file content
+- `POST /api/config/llm` - Save LLM config
+- `GET/POST /api/config/llm/enabled` - LLM enabled flag
+
+**Admin Auth**:
+- `POST /api/admin/login` - Admin login
+- `POST /api/admin/logout` - Admin logout
+- `GET /api/admin/session` - Check admin session
+- `POST /api/admin/reload-config` - Reload game config
+- `GET /health` - Health check
 
 ### Agent HTTP API (port 23340-23999, auxiliary to WebSocket)
 
@@ -382,13 +421,20 @@ use super::builder::AgentBuilder;
 
 **Character**:
 - `GET /api/v1/character` - Get character info
+- `POST /api/v1/character/generate` - LLM one-click character generation
+- `POST /api/v1/character/register` - Register new character (forwards to Server)
+- `POST /api/v1/character/rebirth` - Rebirth character
 - `GET /api/v1/character/soul-cycles` - Get soul cycle records (paginated)
 - `GET /api/v1/character/dream/records` - Get dream records
-- `POST /api/v1/character/dream` - Inject dream (consumed by lifecycle, peeked by context handler)
-- `POST /api/v1/character/rebirth` - Rebirth character
+- `GET/POST /api/v1/character/dream` - Dream injection (sustained n-turn thought injection)
+
+**Biography**:
+- `GET /api/v1/character/biography` - Get cached biography (query: `agent_id`)
+- `POST /api/v1/character/biography` - Generate biography from soul cycles + daily summaries (query: `agent_id`)
 
 **Attributes & Status**:
 - `GET /api/v1/attributes` - Get attribute values
+- `GET /api/v1/attribute-meta` - Attribute categories
 - `GET /api/v1/tick` - Get tick status
 - `GET /api/v1/lifespan` - Get lifespan status
 - `GET /api/v1/cognitive` - Get structured cognitive context
@@ -396,16 +442,14 @@ use super::builder::AgentBuilder;
 **Relationships & Memory**:
 - `GET /api/v1/relationship/list` - Get all relationships
 - `GET /api/v1/memory/recent` - Get recent memories
-- `POST /api/v1/memory/search` - Search memories
+- `GET /api/v1/memory/daily-summaries` - Get daily summaries
+- `POST /api/v1/memory/search` - Search memories (semantic)
+- `POST /api/v1/memory` - Store memory
 
 **Characters (Multi-character, 设备与角色分离)**:
 - `GET /api/v1/characters` - List all characters
 - `POST /api/v1/characters/switch` - Switch current character
 - `GET /api/v1/characters/{agent_id}` - Get character by ID
-
-**Biography**:
-- `GET /api/v1/character/biography` - Get cached biography (query: `agent_id`)
-- `POST /api/v1/character/biography` - Generate biography from soul cycles + daily summaries (query: `agent_id`)
 
 **Validation & Review**:
 - `POST /api/v1/validate` - Validate intent
@@ -417,10 +461,14 @@ use super::builder::AgentBuilder;
 - `GET /api/v1/events` - Death events SSE stream
 - `GET/POST /api/v1/config/llm-disabled` - LLM disable toggle
 - `GET/POST /api/v1/config/auto-rebirth` - Auto-rebirth toggle
-- `POST /api/v1/config/reload` - Hot reload config
-- `GET /api/v1/setup/status` - Get setup status
+- `GET/POST /api/v1/config/llm` - Get/update LLM config
 - `GET /api/v1/config/llm/providers` - Get LLM providers
 - `GET /api/v1/config/llm/usage` - Get LLM token usage
+- `POST /api/v1/config/reload` - Hot reload config
+- `POST /api/v1/config/server` - Set server address
+- `GET /api/v1/setup/status` - Get setup status
+- `GET /api/v1/actions` - Get action type mapping
+- `GET /api/v1/metrics` - LLM performance metrics
 
 ### Admin Web Panel
 - `GET /admin/` - Main dashboard
