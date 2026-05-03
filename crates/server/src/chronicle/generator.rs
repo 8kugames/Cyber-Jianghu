@@ -487,7 +487,7 @@ mod tests {
             agents: vec![AgentInfo {
                 agent_id: uuid::Uuid::new_v4(),
                 name: "张三".to_string(),
-                location: " village_center".to_string(),
+                location: "village_center".to_string(),
                 actions_count: 50,
                 top_actions: vec![("移动".to_string(), 20), ("采集".to_string(), 15)],
                 narratives: vec!["在江湖中行走，感受春风".to_string()],

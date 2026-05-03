@@ -225,7 +225,7 @@ pub async fn list_chronicles(
             game_day_start: r.get("game_day_start"),
             game_day_end: r.get("game_day_end"),
             season: r.get("season"),
-            summary_preview: truncate_text(&r.get::<String, _>("summary"), 200),
+            summary_preview: super::truncate_text(&r.get::<String, _>("summary"), 200),
             agent_count: r.get("agent_count"),
             actions_count: r.get("actions_count"),
             deaths: r.get("deaths"),
@@ -355,20 +355,6 @@ async fn generate_chronicle_id(db_pool: &crate::db::DbPool) -> Result<String> {
     .map_err(|e| anyhow::anyhow!("生成 chronicle_id 失败: {}", e))?;
 
     Ok(format!("C-{:03}", max_id + 1))
-}
-
-/// 截断文本（正确处理 UTF-8 字符边界）
-fn truncate_text(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        return s.to_string();
-    }
-    // 确保截断点在字符边界上
-    let end = s
-        .char_indices()
-        .nth(max_len.saturating_sub(3))
-        .map(|(idx, _)| idx)
-        .unwrap_or(s.len());
-    format!("{}...", &s[..end])
 }
 
 /// Chronicle 列表元数据
