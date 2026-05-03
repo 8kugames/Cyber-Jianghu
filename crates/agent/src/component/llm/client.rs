@@ -498,39 +498,112 @@ fn normalize_llm_json(json_str: &str) -> String {
 /// 解析 LLM 响应为结构化类型（带归一化预处理）
 ///
 /// 流程：extract_json_str → normalize_llm_json → serde_json::from_str
-/// 归一化在首次解析前执行，而非解析失败后补救。
+/// 严格解析失败后，尝试渐进式括号修补（从最小修补量开始）。
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
     let raw_json = extract_json_str(response);
     let json_str = normalize_llm_json(&raw_json);
 
-    match serde_json::from_str::<D>(&json_str) {
-        Ok(parsed) => Ok(parsed),
-        Err(e) => {
-            // 错误位置附近的实际内容，方便定位根因
-            let error_offset = json_str
-                .lines()
-                .take(e.line().saturating_sub(1))
-                .map(|l| l.len() + 1)
-                .sum::<usize>()
-                + e.column().saturating_sub(1);
-            let error_context = json_str
-                .chars()
-                .skip(error_offset.saturating_sub(50))
-                .take(100)
-                .collect::<String>();
+    // 第一轮：严格解析
+    if let Ok(parsed) = serde_json::from_str::<D>(&json_str) {
+        return Ok(parsed);
+    }
+
+    // 第二轮：渐进式括号修补
+    // LLM 常见错误：漏掉对象闭合的 }，导致 [] 和 {} 嵌套错位
+    // 策略：在 JSON 末尾逐步插入 }，每次尝试解析为 Value
+    if let Some(fixed) = try_progressive_brace_repair(&json_str)
+        && let Ok(parsed) = serde_json::from_str::<D>(&fixed) {
+            tracing::warn!("JSON repaired via progressive brace fix");
+            return Ok(parsed);
+        }
+
+    // 第三轮：在 ] 前补 }
+    if let Some(fixed) = try_repair_missing_brace_before_bracket(&json_str)
+        && let Ok(parsed) = serde_json::from_str::<D>(&fixed) {
+            tracing::warn!("JSON repaired via bracket-prefix brace fix");
+            return Ok(parsed);
+        }
+
+    // 全部失败，输出诊断信息
+    let strict_err = match serde_json::from_str::<D>(&json_str) {
+        Ok(_) => unreachable!(),
+        Err(e) => e,
+    };
+            let error_line = strict_err.line();
+            let lines: Vec<&str> = json_str.lines().collect();
+            let start = error_line.saturating_sub(4);
+            let end = (error_line + 2).min(lines.len());
+            let error_snippet: String = lines[start..end]
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let line_num = start + i + 1;
+                    let marker = if line_num == error_line { ">>>" } else { "   " };
+                    format!("{} {:4}: {}", marker, line_num, l)
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
             tracing::error!(
-                error_type = ?e.classify(),
-                error_msg = %e,
-                line = e.line(),
-                column = e.column(),
+                error_type = ?strict_err.classify(),
+                error_msg = %strict_err,
+                line = error_line,
+                column = strict_err.column(),
                 json_len = json_str.len(),
-                error_context = %error_context,
-                "JSON parse failed after normalization"
+                "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
             );
-            Err(e.into())
+            Err(strict_err.into())
+}
+
+/// 渐进式括号修补：在 JSON 末尾逐步插入 } 直到解析为合法 JSON Value
+///
+/// 场景：LLM 漏掉内层对象的闭合 }，导致外层多出一个 }。
+/// 此时简单追加 } 无法修复（因为外层已经平衡但内层不平衡）。
+/// 但很多时候追加 1-3 个 } 就能让 serde 接受。
+fn try_progressive_brace_repair(json_str: &str) -> Option<String> {
+    let mut candidate = json_str.trim_end().to_string();
+    // 先移除末尾多余的 }（可能是 normalize 补错的）
+    while candidate.ends_with('}') {
+        candidate.pop();
+        // 尝试解析
+        if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
+            return Some(candidate);
         }
     }
+    // 再逐步加回 }
+    for _ in 0..3 {
+        candidate.push('}');
+        if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// 修复 ] 前缺少 } 的情况
+///
+/// LLM 常见模式：
+///   {"action_type": "说话", "action_data": {"内容": "..."}   ← 缺少 }
+///   ]
+/// 在每个 ] 前尝试插入 }
+fn try_repair_missing_brace_before_bracket(json_str: &str) -> Option<String> {
+    // 找所有 ] 前面不是 } 的位置
+    let bytes = json_str.as_bytes();
+    let mut result = json_str.to_string();
+    let mut offset = 0isize;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b']' && i > 0 && bytes[i - 1] != b'}' {
+            let pos = (i as isize + offset) as usize;
+            result.insert(pos, '}');
+            offset += 1;
+        }
+    }
+
+    if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
+        return Some(result);
+    }
+    None
 }
 
 #[async_trait]
