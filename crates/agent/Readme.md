@@ -72,16 +72,31 @@ cyber-jianghu-agent run --mode claw
 
 详见 `docs/architecture/`
 
+### P0 核心
+
 | 文档 | 说明 |
 |------|------|
-| 01_概述.md | 概述和设计原则 |
-| 02_模块结构.md | 模块结构 |
-| 03_通信协议.md | 通信协议 |
-| 04_认知架构.md | 认知架构、ActorSoul + ReflectorSoul |
-| 05_生命周期.md | 生命周期 |
-| 06_规划.md | 规划中的功能 |
+| [three_soul.md](docs/architecture/p0_core/three_soul.md) | 三魂架构 |
+| [cognitive_engine.md](docs/architecture/p0_core/cognitive_engine.md) | 认知流转引擎 |
+| [memory_system.md](docs/architecture/p0_core/memory_system.md) | 三级记忆系统 |
+| [dual_mode.md](docs/architecture/p0_core/dual_mode.md) | 双栖运行模式 |
 
-## API 端口
+### P1 重要特性
+
+| 文档 | 说明 |
+|------|------|
+| [model_gateway.md](docs/architecture/p1_major/model_gateway.md) | 模型网关与调度 |
+| [outcome_memory.md](docs/architecture/p1_major/outcome_memory.md) | 经验结果记忆 (Hermes) |
+| [dynamic_persona.md](docs/architecture/p1_major/dynamic_persona.md) | 动态角色演化 |
+
+### P2 体验增强
+
+| 文档 | 说明 |
+|------|------|
+| [session_triage.md](docs/architecture/p2_enhancement/session_triage.md) | 异步即时事件引擎 |
+| [relationship_store.md](docs/architecture/p2_enhancement/relationship_store.md) | 人际社交网络 |
+| [agent_control_panel.md](docs/architecture/p2_enhancement/agent_control_panel.md) | 玩家控制台 |
+| [cli.md](docs/architecture/p2_enhancement/cli.md) | 命令行工具 |
 
 ### WebSocket (主通道)
 
@@ -89,12 +104,52 @@ cyber-jianghu-agent run --mode claw
 
 ### HTTP API (辅助功能)
 
+**核心**:
 - `GET /api/v1/state` - 获取当前世界状态
-- `GET /api/v1/context` - 获取 LLM 上下文
-- `GET /api/v1/memory/recent` - 获取近期记忆
-- `POST /api/v1/character/dream` - 托梦注入
-- `GET /api/v1/review/pending` - 查看待审查意图
+- `GET /api/v1/context` - 获取叙事上下文 + DecisionContextSnapshot
+- `GET /api/v1/cognitive` - 结构化认知上下文
+
+**角色管理**:
+- `GET /api/v1/character` - 角色信息
+- `POST /api/v1/character/generate` - LLM 一键生成角色
+- `POST /api/v1/character/register` - 注册新角色
+- `POST /api/v1/character/rebirth` - 角色转世重生
+- `GET /api/v1/character/soul-cycles` - 灵魂循环记录
+- `GET /api/v1/character/biography` - 获取纪传体传记
+- `POST /api/v1/character/biography` - LLM 生成传记
+- `GET/POST /api/v1/character/dream` - 梦境注入（持续 N 轮思想注入）
+
+**多角色**:
+- `GET /api/v1/characters` - 列出所有角色
+- `POST /api/v1/characters/switch` - 切换当前角色
+- `GET /api/v1/characters/{agent_id}` - 按 ID 获取角色
+
+**记忆与关系**:
+- `GET /api/v1/memory/recent` - 近期记忆
+- `GET /api/v1/memory/daily-summaries` - 每日摘要
+- `POST /api/v1/memory/search` - 语义搜索记忆
+- `GET /api/v1/relationship/list` - 所有人际关系
+
+**属性与状态**:
+- `GET /api/v1/attributes` - 属性值
+- `GET /api/v1/tick` - Tick 状态
+- `GET /api/v1/lifespan` - 寿命状态
+
+**审查与验证**:
+- `POST /api/v1/validate` - 验证意图
+- `GET /api/v1/review/pending` - 待审查意图
 - `POST /api/v1/review/{id}` - 提交审查结果
+
+**配置**:
+- `GET/POST /api/v1/config/llm` - LLM 配置
+- `GET /api/v1/config/llm/providers` - 支持的 LLM 提供商
+- `GET /api/v1/config/llm/usage` - Token 累计用量
+- `GET/POST /api/v1/config/llm-disabled` - LLM 开关
+- `GET/POST /api/v1/config/auto-rebirth` - 自动重生开关
+- `POST /api/v1/config/reload` - 热重载配置
+
+**事件流**:
+- `GET /api/v1/events` - 死亡事件 SSE 流
 
 ## 许可证
 

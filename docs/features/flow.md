@@ -1,7 +1,7 @@
 # Cyber-Jianghu 架构与数据流
 
-**日期**: 2026-04-23
-**版本**: v0.5
+**日期**: 2026-05-03
+**版本**: v0.6
 
 ---
 
@@ -44,7 +44,7 @@ graph TB
         Calc["calculate_tick_id()"]
         Boundary["发送 TickBoundary<br/>到 IntentWorker"]
         Broadcast["广播 WorldState<br/>(持续开单)"]
-        Chronicle["群像传记<br/>(每168 tick)"]
+        Chronicle["群像传记<br/>(每5040秒=7游戏日)"]
     end
 
     subgraph IntentWorker["IntentWorker (实时处理 Intent)"]
@@ -95,7 +95,7 @@ graph TB
     end
 
     subgraph Earth["EarthSoul 地魂 (soul/earth/)"]
-        Tools["skill_view (已实现)<br/>search_memory / recall_archived (预留)"]
+        Tools["skill_view (已实现)<br/>search_memory / recall_archived (已实现)<br/>get_relationship / list_relationships (已实现)<br/>record_social_event (已实现)"]
     end
 
     subgraph Reflector["ReflectorSoul 天魂"]
@@ -320,7 +320,7 @@ graph TB
     actor --> chain["chain.rs"]
     actor --> stages["stages.rs"]
     actor --> tools["tools.rs"]
-    actor --> prompts["prompt_cache.rs<br/>engine_prompts.rs"]
+    actor --> prompts["prompt_cache.rs<br/>prompt_template.rs"]
     actor --> summary["summary_window.rs"]
     actor --> chaos["chaos.rs"]
     actor --> translation["translation.rs"]
@@ -433,4 +433,4 @@ sequenceDiagram
 
 ---
 
-*文档生成时间: 2026-04-23*
+*文档生成时间: 2026-05-03*
