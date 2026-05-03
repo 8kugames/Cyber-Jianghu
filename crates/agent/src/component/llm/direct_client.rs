@@ -482,8 +482,9 @@ impl DirectLlmClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response
-                .text()
+                .bytes()
                 .await
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
                 .unwrap_or_else(|_| "Unable to read error body".to_string());
             error!("LLM API error {}: {}", status, error_body);
 
@@ -501,10 +502,12 @@ impl DirectLlmClient {
         }
 
         // DEBUG: 工具调用时打印原始响应 body 的 tool_calls 部分
-        let raw_body = response
-            .text()
+        let raw_bytes = response
+            .bytes()
             .await
             .context("Failed to read response body")?;
+        let raw_body = String::from_utf8(raw_bytes.to_vec())
+            .context("LLM response body is not valid UTF-8")?;
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
                 &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
@@ -742,7 +745,7 @@ impl DirectLlmClient {
 
         let status = response.status();
         if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
+            let error_body = response.bytes().await.map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
             super::token_tracking::record_failure(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
