@@ -562,18 +562,17 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
     Err(strict_err.into())
 }
 
-/// 括号平衡修复：确定性扫描 + 自动补全
+/// 括号平衡修复：确定性深度追踪 + 自动补全
 ///
 /// 逐字符追踪 {}[] 嵌套深度（跳过字符串和转义序列），
-/// 当遇到 ] 或 } 但栈顶不匹配时，自动补入缺失的闭合符号。
-/// 扫描结束后，补全栈中残留的未闭合符号。
-///
-/// 这不是猜测 — 是根据 JSON 文法做确定性的结构修正。
+/// 核心逻辑：遇到 `}` 时只弹出一个 `{`（不跨类型），遇到 `]` 时只弹出一个 `[`。
+/// 栈空时遇到闭合符号 → 丢弃（LLM 多余输出）。
+/// 额外修复：当 `}` 后跟随 `,` + `{`，如果栈深度表明当前对象未闭合，立即补 `}`。
 fn balance_braces(json: &str) -> String {
     let bytes = json.as_bytes();
     let len = bytes.len();
-    let mut result = String::with_capacity(len + 16);
-    let mut stack: Vec<u8> = Vec::new(); // b'{' or b'['
+    let mut result = String::with_capacity(len + 32);
+    let mut stack: Vec<u8> = Vec::new();
     let mut in_string = false;
     let mut i = 0;
 
@@ -602,7 +601,6 @@ fn balance_braces(json: &str) -> String {
                 result.push(c as char);
             }
             b'}' => {
-                // 弹出栈顶直到遇到 {，补全中间缺失的 ]
                 if stack.is_empty() {
                     i += 1;
                     continue;
@@ -616,9 +614,27 @@ fn balance_braces(json: &str) -> String {
                     result.push(']');
                 }
                 result.push('}');
+
+                // }, { 模式：action_data 的 } 关闭后，紧跟 ,{ 表示下一个元素
+                // 如果 action 对象的 { 仍在栈中（未闭合），立即补 }
+                let mut peek = i + 1;
+                while peek < len && matches!(bytes[peek], b' ' | b'\t' | b'\n' | b'\r') {
+                    peek += 1;
+                }
+                if peek < len && bytes[peek] == b',' {
+                    peek += 1;
+                    while peek < len && matches!(bytes[peek], b' ' | b'\t' | b'\n' | b'\r') {
+                        peek += 1;
+                    }
+                    if peek < len && bytes[peek] == b'{' {
+                        while stack.last() == Some(&b'{') {
+                            stack.pop();
+                            result.push('}');
+                        }
+                    }
+                }
             }
             b']' => {
-                // 弹出栈顶直到遇到 [，补全中间缺失的 }
                 if stack.is_empty() {
                     i += 1;
                     continue;
@@ -640,7 +656,6 @@ fn balance_braces(json: &str) -> String {
         i += 1;
     }
 
-    // 补全栈中残留的未闭合符号（从内到外）
     while let Some(top) = stack.pop() {
         result.push(if top == b'{' { '}' } else { ']' });
     }
