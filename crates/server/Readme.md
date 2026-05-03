@@ -18,20 +18,30 @@
 
 详见 docs/architecture/
 
+### P0 核心
+
 | 文档 | 说明 |
 |------|------|
-| 01_概述.md | 概述和设计原则 |
-| 02_模块结构.md | 模块结构 |
-| 03_通信协议.md | 通信协议 |
-| 04_Tick引擎.md | Tick 引擎 |
-| 05_数据驱动.md | 数据驱动设计 |
-| 06_Agent生命周期.md | Agent 生命周期 |
-| 07_动作系统.md | 动作系统 |
-| 08_物品系统.md | 物品系统 |
-| 09_对话系统.md | 对话系统 |
-| 10_错误处理.md | 错误处理 |
-| 11_数据库.md | 数据库设计 |
-| 12_规划.md | 规划中的功能 |
+| [tick_scheduler.md](docs/architecture/p0_core/tick_scheduler.md) | Tick 调度引擎 |
+| [realtime_pipeline.md](docs/architecture/p0_core/realtime_pipeline.md) | 实时 Intent 处理管道 |
+| [state_processor.md](docs/architecture/p0_core/state_processor.md) | 状态处理器 |
+| [action_system.md](docs/architecture/p0_core/action_system.md) | 动作执行体系 |
+| [high_performance_state.md](docs/architecture/p0_core/high_performance_state.md) | 高性能状态管理 |
+
+### P1 重要特性
+
+| 文档 | 说明 |
+|------|------|
+| [connection_session.md](docs/architecture/p1_major/connection_session.md) | 连接与会话控制 |
+| [game_data_driven.md](docs/architecture/p1_major/game_data_driven.md) | 游戏数据驱动系统 |
+| [procedural_skills.md](docs/architecture/p1_major/procedural_skills.md) | AI 过程性技能系统 |
+
+### P2 体验增强
+
+| 文档 | 说明 |
+|------|------|
+| [chronicle.md](docs/architecture/p2_enhancement/chronicle.md) | 群像传记生成 |
+| [http_api_admin.md](docs/architecture/p2_enhancement/http_api_admin.md) | HTTP API 与管理后台 |
 
 ## 许可证
 
