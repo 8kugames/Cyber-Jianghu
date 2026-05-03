@@ -508,6 +508,7 @@ impl DirectLlmClient {
             .context("Failed to read response body")?;
         let raw_body = String::from_utf8(raw_bytes.to_vec())
             .context("LLM response body is not valid UTF-8")?;
+        debug!("[地魂] raw_body 前200字符: {}", raw_body.chars().take(200).collect::<String>());
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
                 &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
@@ -585,6 +586,7 @@ impl DirectLlmClient {
         use super::streaming::StreamAccumulator;
         use futures_util::StreamExt;
 
+        info!("[地魂] send_request_via_stream 入口（流式路径）");
         let mut stream = self.send_streaming_request(request).await?;
         let mut acc = StreamAccumulator::new();
 
@@ -600,6 +602,22 @@ impl DirectLlmClient {
 
         let (pt, ct, has_real) = acc.token_stats();
         let (content, tool_calls) = acc.into_parts();
+
+        // 诊断：检测 content 中的 UTF-8 mojibake（Latin-1 双重编码）
+        if content.contains("Ã") || content.contains("Â") {
+            let mojibake_positions: Vec<usize> = content
+                .match_indices("Ã")
+                .chain(content.match_indices("Â"))
+                .take(5)
+                .map(|(i, _)| i)
+                .collect();
+            tracing::warn!(
+                "[地魂] UTF-8 mojibake detected in stream content! positions={:?}, snippet={:?}",
+                mojibake_positions,
+                &content[mojibake_positions.first().copied().unwrap_or(0)
+                    ..content.len().min(mojibake_positions.first().copied().unwrap_or(0) + 50)]
+            );
+        }
 
         // tool_calls 存在时不算空响应
         let has_tool_calls = !tool_calls.is_empty();
@@ -997,8 +1015,9 @@ impl DirectLlmClient {
             if !has_tool_calls {
                 let content = msg.content.clone().unwrap_or_default();
                 info!(
-                    "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars)",
-                    content.len()
+                    "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars), preview: {}",
+                    content.len(),
+                    content.chars().take(200).collect::<String>()
                 );
                 return Ok(content);
             }
