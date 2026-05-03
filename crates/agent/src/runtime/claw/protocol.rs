@@ -926,7 +926,6 @@ mod tests {
                 "version": "0.0.6",
                 "last_updated": "2024-03-22T12:00:00Z",
                 "intent_batch": null,
-                "reflector_narrative": null,
                 "immediate_events": null,
             }),
             updated_items: vec![],

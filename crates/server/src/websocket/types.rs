@@ -123,7 +123,6 @@ pub fn build_game_rules_from_config(
         version,
         last_updated: Utc::now().to_rfc3339(),
         intent_batch: Some(intent_batch),
-        reflector_narrative: None,
         immediate_events,
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
         rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,

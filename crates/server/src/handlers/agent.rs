@@ -229,7 +229,6 @@ pub async fn agent_register(
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
         rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,
         rebirth_retry_interval_secs: survival.rebirth_retry_interval_secs,
-        reflector_narrative: None,
         immediate_events,
         lifespan,
         calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {

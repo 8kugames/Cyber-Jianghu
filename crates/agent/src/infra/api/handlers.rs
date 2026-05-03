@@ -4417,7 +4417,6 @@ pub(super) async fn update_llm_config_handler(
         soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
         narrative_window_size: config.llm.narrative_window_size,
         enable_streaming: config.llm.enable_streaming,
-        reflector_narrative: config.llm.reflector_narrative,
         enable_thinking: config.llm.enable_thinking,
     };
 
@@ -4449,7 +4448,6 @@ pub(super) async fn update_llm_config_handler(
             soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
             narrative_window_size: config.llm.narrative_window_size,
             enable_streaming: config.llm.enable_streaming,
-            reflector_narrative: config.llm.reflector_narrative,
             enable_thinking: config.llm.enable_thinking,
         });
     }
