@@ -506,10 +506,13 @@ fn normalize_llm_json(json_str: &str) -> String {
     fixed
 }
 
-/// 解析 LLM 响应为结构化类型（带归一化预处理）
+/// 解析 LLM 响应为结构化类型（带归一化预处理 + 括号平衡修复）
 ///
-/// 流程：extract_json_str → normalize_llm_json → serde_json::from_str
-/// 严格解析失败后，尝试渐进式括号修补（从最小修补量开始）。
+/// 流程：extract_json_str → normalize_llm_json → 括号平衡修复 → serde 解析
+///
+/// 括号平衡修复：逐字符追踪 {}[] 嵌套深度（跳过字符串内部），
+/// 当遇到 ] 或 } 试图闭合但深度不匹配时，自动补全缺失的闭合符号。
+/// 这是确定性的 — 不猜测，直接修正嵌套错误。
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
     let raw_json = extract_json_str(response);
     let json_str = normalize_llm_json(&raw_json);
@@ -519,115 +522,124 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
         return Ok(parsed);
     }
 
-    // 第二轮：渐进式括号修补
-    // LLM 常见错误：漏掉对象闭合的 }，导致 [] 和 {} 嵌套错位
-    // 策略：在 JSON 末尾逐步插入 }，每次尝试解析为 Value
-    if let Some(fixed) = try_progressive_brace_repair(&json_str)
-        && let Ok(parsed) = serde_json::from_str::<D>(&fixed) {
-            tracing::warn!("JSON repaired via progressive brace fix");
-            return Ok(parsed);
-        }
-
-    // 第三轮：在 ] 前补 }
-    if let Some(fixed) = try_repair_missing_brace_before_bracket(&json_str)
-        && let Ok(parsed) = serde_json::from_str::<D>(&fixed) {
-            tracing::warn!("JSON repaired via bracket-prefix brace fix");
-            return Ok(parsed);
-        }
+    // 第二轮：括号平衡修复
+    let balanced = balance_braces(&json_str);
+    if balanced != json_str
+        && let Ok(parsed) = serde_json::from_str::<D>(&balanced)
+    {
+        tracing::warn!("JSON repaired via brace balancing");
+        return Ok(parsed);
+    }
 
     // 全部失败，输出诊断信息
     let strict_err = match serde_json::from_str::<D>(&json_str) {
         Ok(_) => unreachable!(),
         Err(e) => e,
     };
-            let error_line = strict_err.line();
-            let lines: Vec<&str> = json_str.lines().collect();
-            let start = error_line.saturating_sub(4);
-            let end = (error_line + 2).min(lines.len());
-            let error_snippet: String = lines[start..end]
-                .iter()
-                .enumerate()
-                .map(|(i, l)| {
-                    let line_num = start + i + 1;
-                    let marker = if line_num == error_line { ">>>" } else { "   " };
-                    format!("{} {:4}: {}", marker, line_num, l)
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+    let error_line = strict_err.line();
+    let lines: Vec<&str> = json_str.lines().collect();
+    let start = error_line.saturating_sub(4);
+    let end = (error_line + 2).min(lines.len());
+    let error_snippet: String = lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let line_num = start + i + 1;
+            let marker = if line_num == error_line { ">>>" } else { "   " };
+            format!("{} {:4}: {}", marker, line_num, l)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
-            tracing::error!(
-                error_type = ?strict_err.classify(),
-                error_msg = %strict_err,
-                line = error_line,
-                column = strict_err.column(),
-                json_len = json_str.len(),
-                "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
-            );
-            Err(strict_err.into())
+    tracing::error!(
+        error_type = ?strict_err.classify(),
+        error_msg = %strict_err,
+        line = error_line,
+        column = strict_err.column(),
+        json_len = json_str.len(),
+        "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
+    );
+    Err(strict_err.into())
 }
 
-/// 渐进式括号修补：在 JSON 末尾逐步插入 } 直到解析为合法 JSON Value
+/// 括号平衡修复：确定性扫描 + 自动补全
 ///
-/// 场景：LLM 漏掉内层对象的闭合 }，导致外层多出一个 }。
-/// 此时简单追加 } 无法修复（因为外层已经平衡但内层不平衡）。
-/// 但很多时候追加 1-3 个 } 就能让 serde 接受。
-fn try_progressive_brace_repair(json_str: &str) -> Option<String> {
-    let mut candidate = json_str.trim_end().to_string();
-    // 先移除末尾多余的 }（可能是 normalize 补错的）
-    while candidate.ends_with('}') {
-        candidate.pop();
-        // 尝试解析
-        if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
-            return Some(candidate);
-        }
-    }
-    // 再逐步加回 }
-    for _ in 0..3 {
-        candidate.push('}');
-        if serde_json::from_str::<serde_json::Value>(&candidate).is_ok() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-/// 修复 ] 前缺少 } 的情况
+/// 逐字符追踪 {}[] 嵌套深度（跳过字符串和转义序列），
+/// 当遇到 ] 或 } 但栈顶不匹配时，自动补入缺失的闭合符号。
+/// 扫描结束后，补全栈中残留的未闭合符号。
 ///
-/// LLM 常见模式：
-///   {"action_type": "说话", "action_data": {"内容": "..."}   ← 缺少 }
-///   ]
-/// 在每个 ] 前跳过空白，如果最后一个非空白字符不是 }，则补 }
-fn try_repair_missing_brace_before_bracket(json_str: &str) -> Option<String> {
-    let bytes = json_str.as_bytes();
-    let mut insert_positions = Vec::new();
+/// 这不是猜测 — 是根据 JSON 文法做确定性的结构修正。
+fn balance_braces(json: &str) -> String {
+    let bytes = json.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len + 16);
+    let mut stack: Vec<u8> = Vec::new(); // b'{' or b'['
+    let mut in_string = false;
+    let mut i = 0;
 
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b']' {
-            // 跳过空白，找 ] 前最后一个非空白字符
-            let mut j = i;
-            while j > 0 && matches!(bytes[j - 1], b' ' | b'\t' | b'\n' | b'\r') {
-                j -= 1;
+    while i < len {
+        let c = bytes[i];
+
+        if in_string {
+            result.push(c as char);
+            if c == b'\\' && i + 1 < len {
+                i += 1;
+                result.push(bytes[i] as char);
+            } else if c == b'"' {
+                in_string = false;
             }
-            if j > 0 && bytes[j - 1] != b'}' {
-                insert_positions.push(j);
+            i += 1;
+            continue;
+        }
+
+        match c {
+            b'"' => {
+                in_string = true;
+                result.push('"');
+            }
+            b'{' | b'[' => {
+                stack.push(c);
+                result.push(c as char);
+            }
+            b'}' => {
+                // 弹出栈顶直到遇到 {，补全中间缺失的 ]
+                while let Some(&top) = stack.last() {
+                    if top == b'{' {
+                        stack.pop();
+                        break;
+                    }
+                    // 栈顶是 [，但遇到了 } — 先闭合 [
+                    stack.pop();
+                    result.push(']');
+                }
+                result.push('}');
+            }
+            b']' => {
+                // 弹出栈顶直到遇到 [，补全中间缺失的 }
+                while let Some(&top) = stack.last() {
+                    if top == b'[' {
+                        stack.pop();
+                        break;
+                    }
+                    // 栈顶是 {，但遇到了 ] — 先闭合 {
+                    stack.pop();
+                    result.push('}');
+                }
+                result.push(']');
+            }
+            _ => {
+                result.push(c as char);
             }
         }
+        i += 1;
     }
 
-    if insert_positions.is_empty() {
-        return None;
+    // 补全栈中残留的未闭合符号（从内到外）
+    while let Some(top) = stack.pop() {
+        result.push(if top == b'{' { '}' } else { ']' });
     }
 
-    let mut result = json_str.to_string();
-    // 从后往前插入，避免偏移
-    for pos in insert_positions.into_iter().rev() {
-        result.insert(pos, '}');
-    }
-
-    if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
-        return Some(result);
-    }
-    None
+    result
 }
 
 #[async_trait]
