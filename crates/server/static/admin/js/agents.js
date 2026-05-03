@@ -157,9 +157,19 @@ function renderAgents() {
             var val = attrs[k];
             var maxVal = attrs[k + "_max"];
             if (maxVal !== undefined) {
-              parts.push('"' + name + '": "' + val + "/" + maxVal + '"');
+              parts.push(
+                '"' +
+                  escapeHtml(name) +
+                  '": "' +
+                  escapeHtml(val) +
+                  "/" +
+                  escapeHtml(maxVal) +
+                  '"',
+              );
             } else {
-              parts.push('"' + name + '": "' + val + '"');
+              parts.push(
+                '"' + escapeHtml(name) + '": "' + escapeHtml(val) + '"',
+              );
             }
           });
         return parts.length > 0 ? "{ " + parts.join(", ") + " }" : "-";
@@ -174,9 +184,7 @@ function renderAgents() {
       return (
         '<div class="agent-item" data-agent-id="' +
         escapeHtml(agent.id) +
-        '" onclick="openAgentModal(\'' +
-        escapeHtml(agent.id) +
-        "')\">" +
+        '">' +
         '<div class="device-id">' +
         deviceIdShort +
         "</div>" +
@@ -195,13 +203,13 @@ function renderAgents() {
         escapeHtml(getStatusText(agent.status)) +
         "</span></div>" +
         '<div class="last-active">' +
-        formatLastActive(agent.last_active) +
+        escapeHtml(formatLastActive(agent.last_active)) +
         "</div>" +
         '<div class="last-tick">' +
         escapeHtml(agent.last_tick_id || "-") +
         "</div>" +
         '<div class="created-at">' +
-        formatCreatedAt(agent.created_at) +
+        escapeHtml(formatCreatedAt(agent.created_at)) +
         "</div>" +
         '<div class="status-attrs">' +
         statusText +
@@ -325,6 +333,31 @@ window.onclick = function (event) {
   if (event.target == modal) closeAgentModal();
 };
 
+document.addEventListener("click", function (event) {
+  var agentItem = event.target.closest(".agent-item[data-agent-id]");
+  if (agentItem) {
+    openAgentModal(agentItem.dataset.agentId);
+    return;
+  }
+
+  var grantRemoveBtn = event.target.closest(".grant-remove-btn[data-grant-index]");
+  if (grantRemoveBtn) {
+    removeGrantItem(parseInt(grantRemoveBtn.dataset.grantIndex, 10));
+    return;
+  }
+
+  var refillAddBtn = event.target.closest(".refill-add-btn[data-agent-id]");
+  if (refillAddBtn) {
+    addRefillRule(refillAddBtn.dataset.agentId);
+    return;
+  }
+
+  var refillDeleteBtn = event.target.closest(".refill-delete-btn[data-agent-id][data-item-id]");
+  if (refillDeleteBtn) {
+    deleteRefillRule(refillDeleteBtn.dataset.agentId, refillDeleteBtn.dataset.itemId);
+  }
+});
+
 function renderBasicInfo(agent) {
   // 数据驱动：渲染属性列表
   // attrs: agent.attributes 对象
@@ -343,22 +376,22 @@ function renderBasicInfo(agent) {
         var display = maxVal !== undefined ? val + "/" + maxVal : val;
         items.push(
           '<div class="detail-item"><span class="detail-label">' +
-            name +
+            escapeHtml(name) +
             ":</span> " +
-            display +
+            escapeHtml(display) +
             "</div>",
         );
       });
     if (items.length === 0) {
       return (
         '<div class="detail-section"><div class="detail-title">' +
-        title +
+        escapeHtml(title) +
         '</div><div style="color: var(--text-subtle); font-size: 13px;">暂无数据</div></div>'
       );
     }
     return (
       '<div class="detail-section"><div class="detail-title">' +
-      title +
+      escapeHtml(title) +
       '</div><div class="detail-grid">' +
       items.join("") +
       "</div></div>"
@@ -373,7 +406,7 @@ function renderBasicInfo(agent) {
     "</span></div>" +
     '<div class="detail-grid">' +
     '<div class="detail-item"><span class="detail-label">位置:</span> ' +
-    getLocationName(agent.location) +
+    escapeHtml(getLocationName(agent.location)) +
     "</div>" +
     '<div class="detail-item"><span class="detail-label">状态:</span> <span class="status-badge ' +
     (agent.is_alive ? "status-alive" : "status-dead") +
@@ -381,18 +414,18 @@ function renderBasicInfo(agent) {
     (agent.is_alive ? "存活" : "死亡") +
     "</span></div>" +
     '<div class="detail-item"><span class="detail-label">创建时间:</span> ' +
-    new Date(agent.created_at).toLocaleString() +
+    escapeHtml(new Date(agent.created_at).toLocaleString()) +
     "</div>" +
     '<div class="detail-item"><span class="detail-label">最后活跃:</span> ' +
     (agent.last_active
-      ? new Date(agent.last_active).toLocaleString()
+      ? escapeHtml(new Date(agent.last_active).toLocaleString())
       : "从未") +
     "</div>" +
     (agent.age !== null && agent.age !== undefined
       ? '<div class="detail-item"><span class="detail-label">年龄:</span> ' +
-        agent.age +
+        escapeHtml(agent.age) +
         " / " +
-        (agent.max_age || "∞") +
+        escapeHtml(agent.max_age || "∞") +
         " 岁" +
         "</div>"
       : "") +
@@ -418,7 +451,7 @@ function renderExperiences(data) {
     .map(function (exp) {
       var time = exp.created_at
         ? new Date(exp.created_at).toLocaleString()
-        : "Tick #" + exp.tick_id;
+        : "Tick #" + escapeHtml(exp.tick_id || "-");
       var metadata = exp.soul_cycle_metadata;
 
       // 优先使用三魂完整链路渲染（cycles 数组存在且非空）
@@ -448,7 +481,7 @@ function renderExperiences(data) {
         escapeHtml(exp.tick_id || "-") +
         "</span>" +
         '<span class="tick-real-time">' +
-        time +
+        escapeHtml(time) +
         "</span>" +
         "</div>";
 
@@ -474,7 +507,11 @@ function renderExperiences(data) {
       var tianhunHtml = "";
       if (exp.result) {
         tianhunHtml +=
-          '<div class="soul-result ' + resultCls + '">' + resultText + "</div>";
+          '<div class="soul-result ' +
+          resultCls +
+          '">' +
+          escapeHtml(resultText) +
+          "</div>";
       }
       if (tianhunHtml)
         html +=
@@ -719,7 +756,7 @@ async function renderInventoryManage(agent) {
               escapeHtml(item.name) +
               "</div>" +
               '<div style="font-weight: 600; color: var(--text-secondary);">x' +
-              item.count +
+              escapeHtml(item.count) +
               "</div></div>"
             );
           })
@@ -836,11 +873,11 @@ function renderGrantItemsBuffer() {
           '<span style="font-size: 13px;">' +
           escapeHtml(item.name) +
           " x" +
-          item.quantity +
+          escapeHtml(item.quantity) +
           "</span>" +
-          '<button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="removeGrantItem(' +
+          '<button class="btn btn-secondary grant-remove-btn" style="padding: 2px 8px; font-size: 11px;" data-grant-index="' +
           idx +
-          ')">移除</button>' +
+          '">移除</button>' +
           "</div>"
         );
       })
@@ -985,24 +1022,24 @@ async function renderVendorRefillSection(agentId) {
         escapeHtml(itemName) +
         "</td>" +
         '<td style="text-align:center; padding:4px;">' +
-        r.threshold +
+        escapeHtml(r.threshold) +
         "</td>" +
         '<td style="text-align:center; padding:4px;">' +
-        r.refill_to +
+        escapeHtml(r.refill_to) +
         "</td>" +
         '<td style="text-align:center; padding:4px;">' +
-        r.budget_ratio +
+        escapeHtml(r.budget_ratio) +
         "%</td>" +
         '<td style="text-align:center; padding:4px;">' +
         (r.enabled ? "启用" : "停用") +
         "</td>" +
         (isWrite
           ? '<td style="text-align:center; padding:4px;">' +
-            '<button class="btn btn-secondary" style="padding:2px 6px; font-size:11px;" onclick="deleteRefillRule(\'' +
-            agentId +
-            "','" +
+            '<button class="btn btn-secondary refill-delete-btn" style="padding:2px 6px; font-size:11px;" data-agent-id="' +
+            escapeHtml(agentId) +
+            '" data-item-id="' +
             escapeHtml(r.item_id) +
-            "')\">删除</button>" +
+            '">删除</button>' +
             "</td>"
           : "") +
         "</tr>";
@@ -1049,9 +1086,9 @@ async function renderVendorRefillSection(agentId) {
       '<div style="width:70px;">' +
       '<label style="font-size:11px; color:var(--text-secondary); display:block; margin-bottom:2px;">预算%</label>' +
       '<input type="number" id="refill-budget" class="form-input" value="50" min="1" max="100" style="width:100%;" /></div>' +
-      '<button class="btn btn-success" style="padding:4px 12px;" onclick="addRefillRule(\'' +
-      agentId +
-      "')\">添加</button>" +
+      '<button class="btn btn-success refill-add-btn" style="padding:4px 12px;" data-agent-id="' +
+      escapeHtml(agentId) +
+      '">添加</button>' +
       "</div>";
   }
 
@@ -1168,11 +1205,11 @@ function renderBiographyTab(agent) {
         '</div>' +
       '</div>';
   } else {
-    var statusText = agent.is_alive ? '存活' : (agent.status || '非存活');
+    var statusText = agent.is_alive ? "存活" : (agent.status || "非存活");
     container.innerHTML =
       '<div style="text-align: center; padding: 40px 20px; color: var(--text-subtle);">' +
         '<div style="font-size: 14px; margin-bottom: 8px;">暂无传记</div>' +
-        '<div style="font-size: 12px;">角色' + statusText + '状态，传记将在死亡或归隐后由 AI 撰写</div>' +
+        '<div style="font-size: 12px;">角色' + escapeHtml(statusText) + '状态，传记将在死亡或归隐后由 AI 撰写</div>' +
       '</div>';
   }
 }

@@ -234,11 +234,10 @@
                     config.data?.provider ?? "ollama";
                 document.getElementById("llm-base-url").value =
                     config.data?.base_url ?? "";
-                const apiKey = config.data?.api_key ?? "";
                 const apiKeyInput = document.getElementById("llm-api-key");
-                if (apiKey) {
+                if (config.data?.has_api_key) {
                     apiKeyInput.placeholder = "已填写（修改请输入新值）";
-                    apiKeyInput.value = maskApiKey(apiKey);
+                    apiKeyInput.value = "••••••••";
                 } else {
                     apiKeyInput.placeholder = "API 密钥";
                     apiKeyInput.value = "";
@@ -287,9 +286,7 @@
                 btn.textContent = "保存中...";
 
                 const apiKeyInput = document.getElementById("llm-api-key").value;
-                const apiKey = isMasked(apiKeyInput)
-                    ? (originalConfig?.data?.api_key ?? "")
-                    : apiKeyInput;
+                const apiKey = isMasked(apiKeyInput) ? "" : apiKeyInput;
 
                 const config = {
                     version: "0.0.1",
