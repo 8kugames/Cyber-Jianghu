@@ -726,13 +726,13 @@
 
     <!-- Top-level tab navigation -->
     <div class="top-tab-nav">
-        <button class="top-tab-btn active" data-tab="chronicles" onclick="switchTopTab('chronicles')">群像传记</button>
-        <button class="top-tab-btn" data-tab="experiences" onclick="switchTopTab('experiences')">经历日志</button>
+        <button class="top-tab-btn active" data-tab="experiences" onclick="switchTopTab('experiences')">经历日志</button>
         <button class="top-tab-btn" data-tab="summaries" onclick="switchTopTab('summaries')">每日摘要</button>
+        <button class="top-tab-btn" data-tab="chronicles" onclick="switchTopTab('chronicles')">群像传记</button>
     </div>
 
     <!-- ========== Chronicles Panel ========== -->
-    <div id="panel-chronicles" class="tab-panel active">
+    <div id="panel-chronicles" class="tab-panel">
         <div class="chr-controls">
             <input type="text" class="search-input" placeholder="搜索传记内容..." id="chr-search-input" oninput="filterChronicles()">
             <button class="btn btn-primary" onclick="generateChronicle()">手动生成</button>
@@ -745,7 +745,7 @@
     </div>
 
     <!-- ========== Experiences Panel ========== -->
-    <div id="panel-experiences" class="tab-panel">
+    <div id="panel-experiences" class="tab-panel active">
         <div class="exp-controls">
             <div class="filter-group">
                 <select id="filter-agent" class="filter-select">
@@ -853,14 +853,25 @@
             document.getElementById(`panel-${tab}`).classList.add('active');
 
             // Lazy load data on first tab switch
-            if (tab === 'experiences' && experiences.length === 0) initExpFilters().then(() => loadExperiences());
-            if (tab === 'summaries' && summariesData.length === 0) loadSummaries();
+            loadHistoryTab(tab);
+        }
+
+        function loadHistoryTab(tab) {
+            if (tab === 'experiences') return ensureExperiencesLoaded();
+            if (tab === 'summaries' && !summariesLoaded) return loadSummaries();
+            if (tab === 'chronicles' && !chroniclesLoaded) return loadChronicles();
+        }
+
+        function loadActiveHistoryTab() {
+            const activeBtn = document.querySelector('.top-tab-btn.active');
+            loadHistoryTab(activeBtn ? activeBtn.dataset.tab : 'experiences');
         }
 
         // ============================================================
         // ========== Chronicles Panel ==========
         // ============================================================
         let chronicles = [];
+        let chroniclesLoaded = false;
 
         async function loadChronicles() {
             const container = document.getElementById('chronicles-container');
@@ -881,6 +892,7 @@
                     }
                 }
                 chronicles = chronicles.map(c => ({ ...c, _pending: pendingMap[c.chronicle_id] || null }));
+                chroniclesLoaded = true;
                 renderChronicles(chronicles);
             } catch (e) {
                 if (e.name !== 'ApiError') {
@@ -974,8 +986,8 @@
                 </div>
                 <div class="detail-section">
                     <div class="detail-tab-nav">
-                        <button class="detail-tab-btn active" onclick="switchDetailTab('template')">模板版本</button>
-                        ${c.summary_llm ? '<button class="detail-tab-btn" onclick="switchDetailTab(\\'llm\\')">LLM 版本</button>' : ''}
+                        <button class="detail-tab-btn active" data-detail-tab="template" onclick="switchDetailTab('template')">模板版本</button>
+                        ${c.summary_llm ? '<button class="detail-tab-btn" data-detail-tab="llm" onclick="switchDetailTab(\'llm\')">LLM 版本</button>' : ''}
                     </div>
                     <div id="dt-template" class="detail-tab-content active">
                         <div class="narrative">${escapeHtml(c.summary || '')}</div>
@@ -1003,7 +1015,7 @@
         function switchDetailTab(tab) {
             document.querySelectorAll('.detail-tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelector(`.detail-tab-btn[onclick*="${tab}"]`).classList.add('active');
+            document.querySelector(`.detail-tab-btn[data-detail-tab="${tab}"]`).classList.add('active');
             document.getElementById(`dt-${tab}`).classList.add('active');
         }
 
@@ -1028,8 +1040,16 @@
         // ============================================================
         let experiences = [];
         let expTotal = 0, expPage = 1, expPageSize = 20;
+        let expFiltersLoaded = false;
+        let experiencesLoaded = false;
+
+        async function ensureExperiencesLoaded() {
+            if (!expFiltersLoaded) await initExpFilters();
+            if (!experiencesLoaded) await loadExperiences();
+        }
 
         async function initExpFilters() {
+            if (expFiltersLoaded) return;
             try {
                 const agentsRes = await apiFetch(API.BASE + '/agents');
                 if (agentsRes.ok) {
@@ -1051,6 +1071,7 @@
                         sel.appendChild(opt);
                     });
                 }
+                expFiltersLoaded = true;
             } catch (e) { if (e.name !== 'ApiError') console.warn('加载过滤器失败:', e); }
         }
 
@@ -1078,6 +1099,7 @@
                 const data = await (await apiFetch(API.BASE + '/experiences?' + params)).json();
                 experiences = data.entries || [];
                 expTotal = data.total || 0;
+                experiencesLoaded = true;
                 renderExpTable();
                 updateExpPagination();
             } catch (e) {
@@ -1145,6 +1167,7 @@
         // ============================================================
         let summariesData = [];
         let sumTotal = 0, sumPage = 1, sumPageSize = 20;
+        let summariesLoaded = false;
 
         async function loadSummaries() {
             const container = document.getElementById('summaries-container');
@@ -1159,6 +1182,7 @@
                 const data = await res.json();
                 summariesData = data.summaries || [];
                 sumTotal = data.total || 0;
+                summariesLoaded = true;
                 renderSummaries(summariesData);
                 updateSumPagination();
             } catch (e) {
@@ -1224,8 +1248,8 @@
 
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-        // Load chronicles on init (default tab)
-        loadChronicles();
+        // Load experiences on init (default tab)
+        ensureExperiencesLoaded();
     </script>
 </body>
 </html>

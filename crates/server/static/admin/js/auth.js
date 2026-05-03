@@ -117,6 +117,8 @@ async function submitAuthToken() {
                     loadStats();
                 } else if (configListEl && typeof loadConfigList === "function") {
                     loadConfigList();
+                } else if (typeof loadActiveHistoryTab === "function") {
+                    loadActiveHistoryTab();
                 } else if (typeof loadChronicles === "function") {
                     loadChronicles();
                 } else if (typeof loadExperiences === "function") {
