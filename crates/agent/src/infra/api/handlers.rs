@@ -1189,7 +1189,7 @@ pub struct CharacterRegisterRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
-pub(super) struct LanguageStyleRequest {
+pub(crate) struct LanguageStyleRequest {
     #[serde(default)]
     tone: Option<String>,
     #[serde(default)]
@@ -1197,7 +1197,7 @@ pub(super) struct LanguageStyleRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
-pub(super) struct GoalsRequest {
+pub(crate) struct GoalsRequest {
     #[serde(default)]
     short_term: Option<String>,
     #[serde(default)]
@@ -4736,166 +4736,24 @@ pub(super) async fn generate_biography_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
-    use crate::component::llm::LlmClientExt;
-
     let agent_id = match resolve_biography_agent_id(&state, &params).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };
 
-    let character_dir = state.character_dir.read().await.clone();
-    let mut character = match get_character_by_id_sync(&character_dir, agent_id) {
-        Ok(Some(c)) => c,
-        _ => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "character not found"}))).into_response();
-        }
-    };
-
-    // 已有传记直接返回
-    if let Some(ref bio) = character.biography {
-        if !bio.is_empty() {
-            return Json(serde_json::json!({"biography": bio})).into_response();
-        }
-    }
-
-    // 1. 收集三魂循环数据
-    let timeline = match collect_soul_cycle_timeline(&state, agent_id).await {
-        Ok(t) => t,
+    match generate_biography_for_agent(&state, agent_id).await {
+        Ok(bio) => Json(serde_json::json!({"biography": bio})).into_response(),
         Err(e) => {
-            warn!("[biography] 收集经历日志失败: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("收集经历失败: {}", e)}))).into_response();
-        }
-    };
-
-    // 2. 从 server 获取每日摘要
-    let daily_summaries = match fetch_daily_summaries(&state, agent_id).await {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("[biography] 获取每日摘要失败（非致命，继续）: {}", e);
-            String::new()
-        }
-    };
-
-    if timeline.is_empty() && daily_summaries.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "无经历数据，无法生成传记"}))).into_response();
-    }
-
-    // 3. 构建 prompt
-    let char_info = format!(
-        "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
-        character.name,
-        character.age,
-        character.gender,
-        character.identity.as_deref().unwrap_or("未知"),
-        character.personality.join("、"),
-        character.values.join("、"),
-    );
-
-    let daily_section = if daily_summaries.is_empty() {
-        String::new()
-    } else {
-        format!("\n## 每日摘要（按游戏日排列）\n{}", daily_summaries)
-    };
-
-    let prompt = format!(
-        r#"你是一位精通中国古典文学的传记作家。请根据以下角色的经历日志和每日摘要，以「纪传体」风格撰写一篇角色传记。
-
-## 角色信息
-{char_info}
-
-## 经历日志（按时间顺序）
-{timeline}
-{daily_section}
-
-## 撰写要求
-1. 以第三人称叙述，开头简述角色籍贯出身（可合理虚构）
-2. 按时间顺序叙述角色的关键经历：重要行动、人际交往、生死抉择
-3. 语言风格：半文半白的武侠叙事，典雅凝练
-4. 结尾以"论曰"或"太史公曰"附一段简短评语
-5. 总字数：不少于100字，不超过2000字
-6. 只输出传记正文，不要标题、不要标注字数、不要其他格式
-
-请直接输出传记正文："#,
-        char_info = char_info,
-        timeline = timeline,
-        daily_section = daily_section,
-    );
-
-    // 4. 获取共享 LLM 客户端（Cognitive/Claw 统一）
-    let llm_client: std::sync::Arc<dyn crate::component::llm::LlmClient> = {
-        let guard = state.llm_container.read().await;
-        match guard.as_ref() {
-            Some(container) => container.read().await.clone(),
-            None => {
-                return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "LLM 未初始化，无法生成传记"}))).into_response();
-            }
-        }
-    };
-
-    // 5. 调用 LLM（用 complete_json 解析输出）
-    #[derive(Debug, serde::Deserialize)]
-    struct BiographyOutput {
-        biography: String,
-    }
-
-    let json_prompt = format!(
-        "{}\n\n请严格输出 JSON 格式：{{\"biography\": \"传记正文\"}}",
-        prompt
-    );
-
-    match llm_client.complete_json::<BiographyOutput>(&json_prompt).await {
-        Ok(output) => {
-            let bio = output.biography.trim().to_string();
-            if bio.chars().count() < 10 {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "生成的传记过短（少于10字）"}))).into_response();
-            }
-            let bio: String = if bio.chars().count() > 2000 {
-                info!("[biography] 传记超长({}字)，截断至2000字", bio.chars().count());
-                bio.chars().take(2000).collect()
+            let msg = e.to_string();
+            let status = if msg.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else if msg.contains("LLM") || msg.contains("无经历数据") {
+                StatusCode::BAD_REQUEST
             } else {
-                bio
+                StatusCode::INTERNAL_SERVER_ERROR
             };
-
-            // 6. 存入 character.yaml
-            character.biography = Some(bio.clone());
-            if let Err(e) = save_character(&character, &character_dir) {
-                error!("[biography] 保存传记失败: {}", e);
-            }
-
-            info!("[biography] 传记生成成功: {} ({}字)", character.name, bio.chars().count());
-
-            // 回传传记到 server（fire-and-forget，不阻塞响应）
-            let server_http_url = state.server_http_url.read().await.clone();
-            let bio_for_send = bio.clone();
-            let agent_id_for_send = agent_id;
-            tokio::spawn(async move {
-                let url = format!("{}/api/v1/agent/biography", server_http_url);
-                let client = reqwest::Client::new();
-                let body = serde_json::json!({
-                    "agent_id": agent_id_for_send.to_string(),
-                    "biography": bio_for_send,
-                });
-                match client.post(&url).json(&body).timeout(std::time::Duration::from_secs(10)).send().await {
-                    Ok(resp) if resp.status().is_success() => {
-                        info!("[biography] 传记已回传 server");
-                    }
-                    Ok(resp) => {
-                        warn!("[biography] 传记回传 server 失败: status={}", resp.status());
-                    }
-                    Err(e) => {
-                        warn!("[biography] 传记回传 server 网络错误: {}", e);
-                    }
-                }
-            });
-            Json(serde_json::json!({"biography": bio})).into_response()
-        }
-        Err(e) => {
-            error!("[biography] LLM 生成失败: {}", e);
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": format!("传记生成失败: {}", e)})),
-            )
-                .into_response()
+            error!("[biography] 生成失败: {}", msg);
+            (status, Json(serde_json::json!({"error": msg}))).into_response()
         }
     }
 }
@@ -4960,13 +4818,13 @@ async fn collect_soul_cycle_timeline(
                         if action_type == "speak" || action_type == "whisper" || action_type == "shout" {
                             format!("{}：{}", action_type, content)
                         } else {
-                            format!("{}", action_type)
+                            action_type.to_string()
                         }
                     } else {
-                        format!("{}", action_type)
+                        action_type.to_string()
                     }
                 } else {
-                    format!("{}", action_type)
+                    action_type.to_string()
                 };
                 lines.push(format!("  行动：{}", action_desc));
             }
@@ -5029,4 +4887,161 @@ async fn fetch_daily_summaries(
     }
 
     Ok(lines.join("\n\n"))
+}
+
+// ============================================================================
+// 传记生成核心逻辑（HTTP handler + lifecycle 共用）
+// ============================================================================
+
+/// 为指定 agent 生成纪传体传记
+///
+/// 核心逻辑：收集三魂循环 + 每日摘要 → LLM 生成 → 保存 character.yaml → 回传 server。
+/// HTTP handler 和 lifecycle 死亡回调共用此函数。
+pub(crate) async fn generate_biography_for_agent(
+    state: &HttpApiState,
+    agent_id: Uuid,
+) -> anyhow::Result<String> {
+    use crate::component::llm::LlmClientExt;
+
+    let character_dir = state.character_dir.read().await.clone();
+    let mut character = match get_character_by_id_sync(&character_dir, agent_id)? {
+        Some(c) => c,
+        None => anyhow::bail!("character not found: {}", agent_id),
+    };
+
+    // 已有传记直接返回
+    if let Some(ref bio) = character.biography
+        && !bio.is_empty()
+    {
+        return Ok(bio.clone());
+    }
+
+    // 1. 收集三魂循环数据
+    let timeline = collect_soul_cycle_timeline(state, agent_id).await?;
+
+    // 2. 从 server 获取每日摘要
+    let daily_summaries = match fetch_daily_summaries(state, agent_id).await {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("[biography] 获取每日摘要失败（非致命）: {}", e);
+            String::new()
+        }
+    };
+
+    if timeline.is_empty() && daily_summaries.is_empty() {
+        anyhow::bail!("无经历数据，无法生成传记");
+    }
+
+    // 3. 构建 prompt
+    let char_info = format!(
+        "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
+        character.name,
+        character.age,
+        character.gender,
+        character.identity.as_deref().unwrap_or("未知"),
+        character.personality.join("、"),
+        character.values.join("、"),
+    );
+
+    let daily_section = if daily_summaries.is_empty() {
+        String::new()
+    } else {
+        format!("\n## 每日摘要（按游戏日排列）\n{}", daily_summaries)
+    };
+
+    let prompt = format!(
+        r#"你是一位精通中国古典文学的传记作家。请根据以下角色的经历日志和每日摘要，以「纪传体」风格撰写一篇角色传记。
+
+## 角色信息
+{char_info}
+
+## 经历日志（按时间顺序）
+{timeline}
+{daily_section}
+
+## 撰写要求
+1. 以第三人称叙述，开头简述角色籍贯出身（可合理虚构）
+2. 按时间顺序叙述角色的关键经历：重要行动、人际交往、生死抉择
+3. 语言风格：半文半白的武侠叙事，典雅凝练
+4. 结尾以"论曰"或"太史公曰"附一段简短评语
+5. 总字数：不少于100字，不超过2000字
+6. 只输出传记正文，不要标题、不要标注字数、不要其他格式
+
+请直接输出传记正文："#,
+        char_info = char_info,
+        timeline = timeline,
+        daily_section = daily_section,
+    );
+
+    // 4. 获取共享 LLM 客户端
+    let llm_client: std::sync::Arc<dyn crate::component::llm::LlmClient> = {
+        let guard = state.llm_container.read().await;
+        match guard.as_ref() {
+            Some(container) => container.read().await.clone(),
+            None => anyhow::bail!("LLM 未初始化，无法生成传记"),
+        }
+    };
+
+    // 5. 调用 LLM
+    #[derive(Debug, serde::Deserialize)]
+    struct BiographyOutput {
+        biography: String,
+    }
+
+    let json_prompt = format!(
+        "{}\n\n请严格输出 JSON 格式：{{\"biography\": \"传记正文\"}}",
+        prompt
+    );
+
+    let output = llm_client.complete_json::<BiographyOutput>(&json_prompt).await?;
+    let bio = output.biography.trim().to_string();
+
+    // 来源：LLM prompt 要求"不少于100字不超过2000字"，10 为容低下限
+    const BIOGRAPHY_MIN_CHARS: usize = 10;
+    // 来源：LLM prompt 要求"不超过2000字"
+    const BIOGRAPHY_MAX_CHARS: usize = 2000;
+
+    if bio.chars().count() < BIOGRAPHY_MIN_CHARS {
+        anyhow::bail!("生成的传记过短（少于{}字）", BIOGRAPHY_MIN_CHARS);
+    }
+    let bio: String = if bio.chars().count() > BIOGRAPHY_MAX_CHARS {
+        info!("[biography] 传记超长({}字)，截断至{}字", bio.chars().count(), BIOGRAPHY_MAX_CHARS);
+        bio.chars().take(BIOGRAPHY_MAX_CHARS).collect()
+    } else {
+        bio
+    };
+
+    // 6. 存入 character.yaml
+    character.biography = Some(bio.clone());
+    if let Err(e) = save_character(&character, &character_dir) {
+        error!("[biography] 保存传记失败: {}", e);
+    }
+
+    info!("[biography] 传记生成成功: {} ({}字)", character.name, bio.chars().count());
+
+    // 7. 回传传记到 server（fire-and-forget）
+    let server_http_url = state.server_http_url.read().await.clone();
+    let bio_for_send = bio.clone();
+    let agent_id_for_send = agent_id;
+    tokio::spawn(async move {
+        let url = format!("{}/api/v1/agent/biography", server_http_url);
+        let client = reqwest::Client::new();
+        let body = serde_json::json!({
+            "agent_id": agent_id_for_send.to_string(),
+            "biography": bio_for_send,
+        });
+        match client.post(&url).json(&body).timeout(std::time::Duration::from_secs(10)).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                info!("[biography] 传记已回传 server");
+            }
+            Ok(resp) => {
+                warn!("[biography] 传记回传 server 失败: status={}", resp.status());
+            }
+            Err(e) => {
+                warn!("[biography] 传记回传 server 网络错误: {}", e);
+            }
+        }
+    });
+
+    Ok(bio)
 }
