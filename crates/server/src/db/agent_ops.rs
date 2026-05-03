@@ -707,7 +707,10 @@ pub async fn auto_rebirth_agent(
     initial_items: &[(String, String, i32, String)],
     starting_age_ticks: i64,
 ) -> Result<AutoRebirthResult> {
-    debug!("自动转世重生: old_agent={}, spawn={}", old_agent_id, spawn_location);
+    debug!(
+        "自动转世重生: old_agent={}, spawn={}",
+        old_agent_id, spawn_location
+    );
 
     // 开始事务
     let mut tx = pool.begin().await.context("开始转世事务失败")?;
@@ -729,13 +732,11 @@ pub async fn auto_rebirth_agent(
     };
 
     // 2. 旧 agent dead → retired（与 get_agent_by_device_id 排除逻辑对齐）
-    sqlx::query(
-        "UPDATE agents SET status = 'retired', retired_at = NOW() WHERE agent_id = $1",
-    )
-    .bind(old_agent_id)
-    .execute(&mut *tx)
-    .await
-    .context("退役旧 Agent 失败")?;
+    sqlx::query("UPDATE agents SET status = 'retired', retired_at = NOW() WHERE agent_id = $1")
+        .bind(old_agent_id)
+        .execute(&mut *tx)
+        .await
+        .context("退役旧 Agent 失败")?;
 
     // 3. 获取当前 tick_id（用于 birth_tick 计算）
     let current_tick: i64 = sqlx::query_scalar(

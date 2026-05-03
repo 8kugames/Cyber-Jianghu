@@ -40,7 +40,7 @@ pub use common::init_db_pool;
 pub use agent_ops::{
     AutoRebirthResult, DeviceConnectResult, RetireResult, auto_rebirth_agent, connect_device,
     get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
-    retire_agent, register_agent_transactional, update_agent_biography, update_agent_location,
+    register_agent_transactional, retire_agent, update_agent_biography, update_agent_location,
     update_agent_online, update_device_last_seen, verify_device_token,
 };
 
