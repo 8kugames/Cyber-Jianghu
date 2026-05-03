@@ -239,7 +239,7 @@ impl StreamAccumulator {
 /// 将 reqwest Response 的 bytes_stream 解析为 LlmStream
 pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
     let stream = async_stream::stream! {
-        let mut buffer = String::new();
+        let mut raw_buffer: Vec<u8> = Vec::with_capacity(4096);
         let mut stream = response.bytes_stream();
         let mut last_usage: Option<(u64, u64)> = None;
         let mut completion_content = String::new();
@@ -254,12 +254,14 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                 }
             };
 
-            buffer.push_str(&String::from_utf8_lossy(&bytes));
+            raw_buffer.extend_from_slice(&bytes);
 
-            // 按换行拆分 SSE 事件
-            while let Some(pos) = buffer.find("\n\n") {
-                let event_text = buffer[..pos].to_string();
-                buffer = buffer[pos + 2..].to_string();
+            // 按字节序列 b"\n\n" 拆分 SSE 事件
+            let sep = b"\n\n";
+            while let Some(pos) = raw_buffer.windows(sep.len()).position(|w| w == sep) {
+                let event_bytes: Vec<u8> = raw_buffer.drain(..pos + sep.len()).collect();
+                // 丢弃尾部 \n\n，只保留事件内容
+                let event_text = String::from_utf8_lossy(&event_bytes[..event_bytes.len().saturating_sub(sep.len())]);
 
                 // 处理事件内的每一行
                 for line in event_text.lines() {
