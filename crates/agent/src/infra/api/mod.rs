@@ -34,7 +34,7 @@
 pub mod cognitive_context;
 mod context;
 mod dto;
-mod handlers;
+pub(crate) mod handlers;
 pub mod intent_history;
 pub mod service;
 pub mod soul_cycle_recorder;

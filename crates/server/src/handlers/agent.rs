@@ -460,7 +460,6 @@ pub async fn agent_auto_rebirth(
         &state.db_pool,
         payload.old_agent_id,
         &spawn_location,
-        true,
         &initial_items_data,
         starting_age_ticks,
     )
@@ -482,7 +481,8 @@ pub async fn agent_auto_rebirth(
         )
     })?;
 
-    // 更新 DashMap（内存缓存）— 旧条目在 death 时已移除
+    // 更新 DashMap（内存缓存）— 移除旧 agent 缓存
+    state.agent_state_cache.remove(&payload.old_agent_id);
     let new_state = crate::models::AgentState::new(
         result.agent_id,
         crate::db::get_current_world_tick_id(&state.db_pool)
@@ -491,9 +491,10 @@ pub async fn agent_auto_rebirth(
     );
     state.agent_state_cache.insert(result.agent_id, new_state);
 
-    // 更新 agent_to_device_map
+    // 更新 agent_to_device_map（清理旧映射 + 建立新映射）
     {
         let mut map = state.agent_to_device_map.write().await;
+        map.remove(&payload.old_agent_id);
         map.insert(result.agent_id, payload.device_id);
     }
 

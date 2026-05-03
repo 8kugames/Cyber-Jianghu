@@ -36,6 +36,9 @@ pub struct TemplateDef {
     /// 截断长度配置
     #[serde(default)]
     pub truncation: HashMap<String, usize>,
+    /// LLM 调用参数配置（独立于 truncation）
+    #[serde(default)]
+    pub llm_parameters: HashMap<String, usize>,
 }
 
 // ============================================================================
@@ -84,6 +87,15 @@ impl PromptTemplateConfig {
         self.templates
             .get(template_name)
             .and_then(|t| t.truncation.get(key))
+            .copied()
+            .unwrap_or(default)
+    }
+
+    /// 获取 LLM 调用参数配置
+    pub fn llm_param(&self, template_name: &str, key: &str, default: usize) -> usize {
+        self.templates
+            .get(template_name)
+            .and_then(|t| t.llm_parameters.get(key))
             .copied()
             .unwrap_or(default)
     }

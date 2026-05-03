@@ -36,6 +36,26 @@ pub struct LlmConfigWrapper {
     pub data: LlmConfig,
 }
 
+/// 前端表单读取响应。不要把真实 API key 返回给浏览器。
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmConfigResponse {
+    pub version: String,
+    pub description: String,
+    pub meta: LlmMeta,
+    pub data: LlmConfigPublic,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmConfigPublic {
+    pub enabled: bool,
+    pub provider: String,
+    pub base_url: String,
+    pub has_api_key: bool,
+    pub model: String,
+    pub temperature: f32,
+    pub max_tokens: i32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmMeta {
     created_at: String,
@@ -64,27 +84,52 @@ impl Default for LlmConfigWrapper {
     }
 }
 
-/// GET /api/config/llm - 读取 LLM 配置
-pub async fn get_llm_config() -> Result<Json<LlmConfigWrapper>, StatusCode> {
+fn read_llm_config_raw() -> Result<LlmConfigWrapper, StatusCode> {
     let config_path = crate::paths::get_config_dir().join("llm.yaml");
-    let wrapper = if config_path.exists() {
+    if config_path.exists() {
         let content =
             fs::read_to_string(&config_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        serde_yaml::from_str(&content).unwrap_or_default()
+        Ok(serde_yaml::from_str(&content).unwrap_or_default())
     } else {
-        LlmConfigWrapper::default()
-    };
+        Ok(LlmConfigWrapper::default())
+    }
+}
 
-    Ok(Json(wrapper))
+fn public_llm_config(config: LlmConfigWrapper) -> LlmConfigResponse {
+    LlmConfigResponse {
+        version: config.version,
+        description: config.description,
+        meta: config.meta,
+        data: LlmConfigPublic {
+            enabled: config.data.enabled,
+            provider: config.data.provider,
+            base_url: config.data.base_url,
+            has_api_key: !config.data.api_key.is_empty(),
+            model: config.data.model,
+            temperature: config.data.temperature,
+            max_tokens: config.data.max_tokens,
+        },
+    }
+}
+
+/// GET /api/config/llm - 读取 LLM 配置
+pub async fn get_llm_config() -> Result<Json<LlmConfigResponse>, StatusCode> {
+    Ok(Json(public_llm_config(read_llm_config_raw()?)))
 }
 
 /// POST /api/config/llm - 保存 LLM 配置
 pub async fn save_llm_config(
-    Json(config): Json<LlmConfigWrapper>,
+    Json(mut config): Json<LlmConfigWrapper>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let config_dir = crate::paths::get_config_dir();
     fs::create_dir_all(&config_dir).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let config_path = config_dir.join("llm.yaml");
+
+    if config.data.api_key.is_empty()
+        && let Ok(existing) = read_llm_config_raw()
+    {
+        config.data.api_key = existing.data.api_key;
+    }
 
     let yaml = serde_yaml::to_string(&config).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     fs::write(&config_path, yaml).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -99,8 +144,8 @@ pub async fn save_llm_config(
 
 /// GET /api/config/llm/status - 检测 LLM 连接状态
 pub async fn get_llm_status() -> Json<serde_json::Value> {
-    let config_wrapper = match get_llm_config().await {
-        Ok(axum::Json(c)) => c,
+    let config_wrapper = match read_llm_config_raw() {
+        Ok(c) => c,
         Err(_) => {
             return Json(serde_json::json!({
                 "enabled": false,
@@ -170,7 +215,7 @@ pub async fn get_llm_status() -> Json<serde_json::Value> {
 
 /// GET /api/config/llm/enabled - 获取 LLM 启用状态
 pub async fn get_llm_enabled() -> Json<serde_json::Value> {
-    let config = get_llm_config().await.unwrap_or_default();
+    let config = read_llm_config_raw().unwrap_or_default();
     Json(serde_json::json!({
         "enabled": config.data.enabled
     }))
@@ -186,8 +231,8 @@ pub async fn set_llm_enabled(
         .unwrap_or(false);
 
     // 读取现有配置
-    let config_wrapper = match get_llm_config().await {
-        Ok(axum::Json(c)) => c,
+    let config_wrapper = match read_llm_config_raw() {
+        Ok(c) => c,
         Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
     let mut config = config_wrapper;

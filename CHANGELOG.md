@@ -9,6 +9,18 @@
 
 ### Added
 
+- **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数
+
+### Changed
+
+- **[BREAKING] Server**: `auto_rebirth_agent()` 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 旧 agent dead→retired，新 agent 全新 UUID + 初始状态 + 初始物品。事务包裹保证原子性
+- **Agent**: rebirth 恢复时重新 open RelationshipStore（新 agent_id → 新 DB 文件），同步更新 CognitiveEngine 内部引用
+- **Agent**: `max_tool_rounds` 外部化到 `prompt_templates.yaml` 的 `llm_parameters` 段，消除硬编码
+
+### Fixed
+
+- **Agent**: skill_view tool description 加强 skill_id 选择指引，引导 LLM 从已掌握技能列表选择
+- **Server**: auto-rebirth handler 清理 agent_to_device_map 旧映射 + DashMap 旧缓存，防止幽灵映射
 - **Agent**: 地魂工具池扩展至 6 个工具（3 个新增关系工具）
   - `get_relationship`: 查询与特定角色的关系记忆（支持 UUID 或名字查找，SQL 层过滤）
   - `list_relationships`: 列出所有关系概览，可选好感度范围过滤（SQL 层 WHERE）

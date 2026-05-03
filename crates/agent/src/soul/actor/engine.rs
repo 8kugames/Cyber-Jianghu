@@ -344,6 +344,11 @@ impl CognitiveEngine {
         self.prompt_template.truncation("actor_direct", key, default)
     }
 
+    /// 获取 LLM 调用参数配置（数据驱动替代硬编码参数）
+    fn llm_param(&self, key: &str, default: usize) -> usize {
+        self.prompt_template.llm_param("actor_direct", key, default)
+    }
+
     /// 加载动作列表（用于缓存 + 别名映射）
     fn load_actions_list() -> (String, String, ActionAliasMap, FieldAliasMap) {
         let available_actions = load_available_actions_from_file();
@@ -617,7 +622,7 @@ impl CognitiveEngine {
                                 },
                                 &tools,
                                 &executor,
-                                3,
+                                self.llm_param("max_tool_rounds", 3),
                             )
                             .await?
                     }
@@ -629,7 +634,7 @@ impl CognitiveEngine {
                                 &prompt,
                                 &tools,
                                 &executor,
-                                3,
+                                self.llm_param("max_tool_rounds", 3),
                             )
                             .await?
                     }
