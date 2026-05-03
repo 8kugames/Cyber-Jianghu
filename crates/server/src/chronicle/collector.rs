@@ -76,11 +76,17 @@ pub async fn collect(
 /// 公式: real_seconds_per_tick * ticks_per_hour * hours_per_day
 /// 与 TimeRegistry::get_current_season() 保持一致 (time_registry.rs:37-45)
 fn real_seconds_per_game_day() -> Result<i64> {
-    let time_config = crate::game_data::registry::TimeRegistry::get_config()
-        .context("时间配置不可用")?;
+    let time_config =
+        crate::game_data::registry::TimeRegistry::get_config().context("时间配置不可用")?;
     let registry = crate::game_data::registry_or_error()
         .map_err(|e| anyhow::anyhow!("游戏配置不可用: {}", e))?;
-    let rsp = registry.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
+    let rsp = registry
+        .get()
+        .game_rules
+        .data
+        .agent_state
+        .tick
+        .real_seconds_per_tick as i64;
     let rspgd = rsp * time_config.ticks_per_hour as i64 * time_config.hours_per_day as i64;
     Ok(rspgd)
 }
@@ -203,10 +209,7 @@ async fn collect_agents(
     // 批量查询：每日 LLM 日志摘要（agent_daily_summaries）
     // LEFT JOIN，agent 在本周期无摘要时不影响主查询
     let rspgd = real_seconds_per_game_day()?;
-    let period_game_days = (
-        period_start / rspgd,
-        period_end / rspgd,
-    );
+    let period_game_days = (period_start / rspgd, period_end / rspgd);
 
     let daily_summary_rows = sqlx::query(
         r#"
@@ -444,7 +447,9 @@ async fn collect_highlights(
         let seed = period_start as u64;
         let mut rng_state = seed;
         for i in (1..shuffled.len()).rev() {
-            rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            rng_state = rng_state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             let j = ((rng_state >> 33) as usize) % (i + 1);
             shuffled.swap(i, j);
         }
@@ -612,4 +617,3 @@ async fn collect_births(
 
     Ok(count as i32)
 }
-

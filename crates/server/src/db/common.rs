@@ -35,7 +35,11 @@ use rand::RngExt;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn init_db_pool(database_url: &str, max_retries: u32, retry_delay_secs: u64) -> Result<PgPool> {
+pub async fn init_db_pool(
+    database_url: &str,
+    max_retries: u32,
+    retry_delay_secs: u64,
+) -> Result<PgPool> {
     // 隐藏密码用于日志输出
     let safe_url = database_url.split('@').next_back().unwrap_or("unknown");
     info!("初始化数据库连接池: {}", safe_url);

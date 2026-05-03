@@ -300,7 +300,8 @@ pub async fn agent_retire(
                 info!(
                     "Agent 归隐成功: {} ({}) 已归隐",
                     result.retired_name.as_ref().unwrap_or(&"-".to_string()),
-                    result.retired_agent_id
+                    result
+                        .retired_agent_id
                         .map(|id| id.to_string())
                         .unwrap_or_default()
                 );
@@ -310,9 +311,7 @@ pub async fn agent_retire(
                         "角色 '{}' 已归隐，可以创建新角色",
                         result.retired_name.as_ref().unwrap_or(&"-".to_string())
                     ),
-                    retired_agent_id: result
-                        .retired_agent_id
-                        .map(|id| id.to_string()),
+                    retired_agent_id: result.retired_agent_id.map(|id| id.to_string()),
                     action_taken: true,
                 }))
             } else {
@@ -697,7 +696,10 @@ pub async fn update_biography(
             Ok(Json(serde_json::json!({"success": true})))
         }
         Err(e) => {
-            error!("[biography] 传记保存失败: agent={}, err={}", payload.agent_id, e);
+            error!(
+                "[biography] 传记保存失败: agent={}, err={}",
+                payload.agent_id, e
+            );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": format!("保存失败: {}", e)})),

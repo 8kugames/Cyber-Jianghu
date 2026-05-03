@@ -2642,7 +2642,10 @@ pub(super) async fn rebirth_character_handler(
     };
 
     let agent_id = *state.agent_id.read().await;
-    info!("[rebirth] 角色重生: agent_id={}, device_id={}", agent_id, device_id);
+    info!(
+        "[rebirth] 角色重生: agent_id={}, device_id={}",
+        agent_id, device_id
+    );
 
     // 2. 调用 server 归隐（幂等：active→retired，dead/retired→success with action_taken=false）
     let client = reqwest::Client::new();
@@ -3629,8 +3632,12 @@ pub(super) async fn set_llm_disabled_handler(
 /// 获取自动重生开关状态
 ///
 /// GET /api/v1/config/auto-rebirth
-pub(super) async fn get_auto_rebirth_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
-    let enabled = state.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed);
+pub(super) async fn get_auto_rebirth_handler(
+    State(state): State<HttpApiState>,
+) -> impl IntoResponse {
+    let enabled = state
+        .auto_rebirth
+        .load(std::sync::atomic::Ordering::Relaxed);
     Json(serde_json::json!({"auto_rebirth": enabled}))
 }
 
@@ -4233,9 +4240,7 @@ fn validate_llm_config(
     }
 
     // 检查 requires_base_url 的 provider 是否提供了 base_url
-    if parsed.requires_base_url()
-        && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty()))
-    {
+    if parsed.requires_base_url() && (base_url.is_none() || base_url.is_none_or(|u| u.is_empty())) {
         anyhow::bail!("{} 需要提供 base_url", provider);
     }
 
@@ -4719,7 +4724,11 @@ pub(super) async fn get_biography_handler(
     let character = match get_character_by_id_sync(&character_dir, agent_id) {
         Ok(Some(c)) => c,
         _ => {
-            return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "character not found"}))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "character not found"})),
+            )
+                .into_response();
         }
     };
 
@@ -4815,7 +4824,10 @@ async fn collect_soul_cycle_timeline(
                     // 尝试解析 action_data 提取 content
                     if let Ok(data) = serde_json::from_str::<serde_json::Value>(data_str) {
                         let content = data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        if action_type == "speak" || action_type == "whisper" || action_type == "shout" {
+                        if action_type == "speak"
+                            || action_type == "whisper"
+                            || action_type == "shout"
+                        {
                             format!("{}：{}", action_type, content)
                         } else {
                             action_type.to_string()
@@ -4832,7 +4844,11 @@ async fn collect_soul_cycle_timeline(
             // 人魂叙事（简短摘要）
             if let Some(ref narrative) = rec.renhun_narrative {
                 let truncated: String = narrative.chars().take(150).collect();
-                let ellipsis = if narrative.chars().count() > 150 { "..." } else { "" };
+                let ellipsis = if narrative.chars().count() > 150 {
+                    "..."
+                } else {
+                    ""
+                };
                 lines.push(format!("  感知：{}{}", truncated, ellipsis));
             }
         }
@@ -4842,10 +4858,7 @@ async fn collect_soul_cycle_timeline(
 }
 
 /// 从 server Dashboard API 获取角色的每日摘要
-async fn fetch_daily_summaries(
-    state: &HttpApiState,
-    agent_id: Uuid,
-) -> anyhow::Result<String> {
+async fn fetch_daily_summaries(state: &HttpApiState, agent_id: Uuid) -> anyhow::Result<String> {
     let server_http_url = state.server_http_url.read().await.clone();
     let url = format!(
         "{}/api/dashboard/agent-daily-summaries/{}?limit=100",
@@ -4877,10 +4890,7 @@ async fn fetch_daily_summaries(
     let mut lines: Vec<String> = Vec::new();
     for s in &summaries {
         let game_day = s.get("game_day").and_then(|d| d.as_i64()).unwrap_or(0);
-        let summary = s
-            .get("summary")
-            .and_then(|t| t.as_str())
-            .unwrap_or("");
+        let summary = s.get("summary").and_then(|t| t.as_str()).unwrap_or("");
         if !summary.is_empty() {
             lines.push(format!("--- 第{}日 ---\n{}", game_day, summary));
         }
@@ -4993,7 +5003,9 @@ pub(crate) async fn generate_biography_for_agent(
         prompt
     );
 
-    let output = llm_client.complete_json::<BiographyOutput>(&json_prompt).await?;
+    let output = llm_client
+        .complete_json::<BiographyOutput>(&json_prompt)
+        .await?;
     let bio = output.biography.trim().to_string();
 
     // 来源：LLM prompt 要求"不少于100字不超过2000字"，10 为容低下限
@@ -5005,7 +5017,11 @@ pub(crate) async fn generate_biography_for_agent(
         anyhow::bail!("生成的传记过短（少于{}字）", BIOGRAPHY_MIN_CHARS);
     }
     let bio: String = if bio.chars().count() > BIOGRAPHY_MAX_CHARS {
-        info!("[biography] 传记超长({}字)，截断至{}字", bio.chars().count(), BIOGRAPHY_MAX_CHARS);
+        info!(
+            "[biography] 传记超长({}字)，截断至{}字",
+            bio.chars().count(),
+            BIOGRAPHY_MAX_CHARS
+        );
         bio.chars().take(BIOGRAPHY_MAX_CHARS).collect()
     } else {
         bio
@@ -5017,7 +5033,11 @@ pub(crate) async fn generate_biography_for_agent(
         error!("[biography] 保存传记失败: {}", e);
     }
 
-    info!("[biography] 传记生成成功: {} ({}字)", character.name, bio.chars().count());
+    info!(
+        "[biography] 传记生成成功: {} ({}字)",
+        character.name,
+        bio.chars().count()
+    );
 
     // 7. 回传传记到 server（fire-and-forget）
     let server_http_url = state.server_http_url.read().await.clone();
@@ -5030,7 +5050,13 @@ pub(crate) async fn generate_biography_for_agent(
             "agent_id": agent_id_for_send.to_string(),
             "biography": bio_for_send,
         });
-        match client.post(&url).json(&body).timeout(std::time::Duration::from_secs(10)).send().await {
+        match client
+            .post(&url)
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 info!("[biography] 传记已回传 server");
             }

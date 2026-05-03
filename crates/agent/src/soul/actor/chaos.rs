@@ -202,16 +202,15 @@ impl ChaosGenerator {
             .copied()
             .unwrap_or(100);
 
-        let survival_actions: Vec<&AvailableAction> = if hunger < survival_threshold
-            || thirst < survival_threshold
-        {
-            available_actions
-                .iter()
-                .filter(|a| a.category == "survival")
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let survival_actions: Vec<&AvailableAction> =
+            if hunger < survival_threshold || thirst < survival_threshold {
+                available_actions
+                    .iter()
+                    .filter(|a| a.category == "survival")
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
         for _ in 0..count {
             let mut resolved = false;

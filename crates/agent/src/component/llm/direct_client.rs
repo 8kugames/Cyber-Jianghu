@@ -605,18 +605,27 @@ impl DirectLlmClient {
         // 当 LLM 返回 tool_calls 而非 content 时，不应视为空响应
         if content.trim().is_empty() && !has_tool_calls {
             if pt > 0 {
-                record_token_usage(&self.config.provider, &self.config.get_model_with_default(), pt, 0);
+                record_token_usage(
+                    &self.config.provider,
+                    &self.config.get_model_with_default(),
+                    pt,
+                    0,
+                );
             }
             anyhow::bail!(
                 "LLM API error: response content is empty (streaming, provider={}, model={}, prompt_tokens={}, completion_tokens={})",
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
-                pt, ct
+                pt,
+                ct
             );
         }
 
         if has_tool_calls {
-            let call_names: Vec<&str> = tool_calls.iter().map(|tc| tc.function.name.as_str()).collect();
+            let call_names: Vec<&str> = tool_calls
+                .iter()
+                .map(|tc| tc.function.name.as_str())
+                .collect();
             debug!(
                 "[地魂] 流式 tool_calls 累积完成: {} calls, names={:?}",
                 tool_calls.len(),
@@ -662,8 +671,16 @@ impl DirectLlmClient {
             choices: vec![super::openai_types::OpenAIChoice {
                 message: super::openai_types::ChatMessage {
                     role: "assistant".to_string(),
-                    content: if content.trim().is_empty() { None } else { Some(content) },
-                    tool_calls: if has_tool_calls { Some(tool_calls) } else { None },
+                    content: if content.trim().is_empty() {
+                        None
+                    } else {
+                        Some(content)
+                    },
+                    tool_calls: if has_tool_calls {
+                        Some(tool_calls)
+                    } else {
+                        None
+                    },
                     tool_call_id: None,
                     name: None,
                 },

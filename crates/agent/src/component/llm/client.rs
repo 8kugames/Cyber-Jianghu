@@ -549,7 +549,8 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         if content.trim().is_empty() {
             anyhow::bail!(
                 "LLM API error: response content is empty (streaming_json, prompt_tokens={}, completion_tokens={})",
-                pt, ct
+                pt,
+                ct
             );
         }
 
@@ -596,7 +597,8 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         if content.trim().is_empty() {
             anyhow::bail!(
                 "LLM API error: response content is empty (streaming_json_conv, prompt_tokens={}, completion_tokens={})",
-                pt, ct
+                pt,
+                ct
             );
         }
 

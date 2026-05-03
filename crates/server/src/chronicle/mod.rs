@@ -117,12 +117,21 @@ impl ChronicleConfig {
         let time_config = crate::game_data::registry::TimeRegistry::get_config();
         let chronicle_config = crate::game_data::registry::ChronicleRegistry::get_config();
         let registry = crate::game_data::registry_or_error()
-            .inspect_err(|e| tracing::warn!("calculate_period_ticks: registry 不可用，使用默认值: {}", e))
+            .inspect_err(|e| {
+                tracing::warn!("calculate_period_ticks: registry 不可用，使用默认值: {}", e)
+            })
             .ok();
 
-        // game_rules.yaml 默认值
+        // game_rules.yaml agent_state.tick.real_seconds_per_tick 默认值 60
         let real_seconds_per_tick = registry
-            .map(|r| r.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64)
+            .map(|r| {
+                r.get()
+                    .game_rules
+                    .data
+                    .agent_state
+                    .tick
+                    .real_seconds_per_tick as i64
+            })
             .unwrap_or(60);
 
         match (time_config, chronicle_config) {

@@ -412,7 +412,8 @@ event_id 必须是以下值之一：{event_ids}"#,
             .collect();
 
         // LLM生成叙事化摘要
-        let prompt = format!(r#"你是{agent_name}的史官，为{date_str}撰写江湖起居注。
+        let prompt = format!(
+            r#"你是{agent_name}的史官，为{date_str}撰写江湖起居注。
 
 当日他人交互：
 紧急事件（{urgent_count}条）：{urgent_events}
@@ -438,7 +439,14 @@ event_id 必须是以下值之一：{event_ids}"#,
         drop(llm);
 
         let result: serde_json::Value = llm_ref
-            .complete_json_with_system(&format!("你是{agent_name}的史官，为{date_str}撰写江湖起居注。", agent_name = self.agent_name, date_str = date_str), &prompt)
+            .complete_json_with_system(
+                &format!(
+                    "你是{agent_name}的史官，为{date_str}撰写江湖起居注。",
+                    agent_name = self.agent_name,
+                    date_str = date_str
+                ),
+                &prompt,
+            )
             .await
             .map_err(|e| anyhow::anyhow!("LLM摘要生成失败: {}", e))?;
 

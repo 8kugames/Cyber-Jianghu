@@ -541,12 +541,10 @@ fn create_llm_client(
     shared_state: Option<Arc<WsSharedState>>,
 ) -> Result<Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>> {
     match runtime_mode {
-        RuntimeMode::Cognitive => {
-            Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
-                &config.llm,
-                config.llm.enable_streaming,
-            )?)
-        }
+        RuntimeMode::Cognitive => Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
+            &config.llm,
+            config.llm.enable_streaming,
+        )?),
         RuntimeMode::Claw => {
             let upstream_tx = shared_state
                 .expect("Claw mode needs shared_state")
