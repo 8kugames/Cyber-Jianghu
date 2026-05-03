@@ -405,57 +405,44 @@ fn find_first_json_end(s: &str) -> Option<usize> {
 /// 4. 未闭合引号/括号 → 修补
 fn normalize_llm_json(json_str: &str) -> String {
     let mut result = String::with_capacity(json_str.len());
-
-    let bytes = json_str.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
+    let mut chars = json_str.chars().peekable();
     let mut in_string = false;
 
-    while i < len {
-        let c = bytes[i];
-
+    while let Some(c) = chars.next() {
         if in_string {
-            // 字符串内：保留转义序列原样
-            if c == b'\\' && i + 1 < len {
-                result.push(bytes[i] as char);
-                result.push(bytes[i + 1] as char);
-                i += 2;
+            if c == '\\' {
+                result.push('\\');
+                if let Some(next) = chars.next() {
+                    result.push(next);
+                }
                 continue;
             }
-            if c == b'"' {
+            if c == '"' {
                 in_string = false;
             }
-            result.push(c as char);
-            i += 1;
+            result.push(c);
             continue;
         }
 
-        // 非字符串内处理
         match c {
-            b'"' => {
+            '"' => {
                 in_string = true;
                 result.push('"');
-                i += 1;
             }
-            // 中文左引号 \xe2\x80\x9c → "
-            0xe2 if i + 2 < len && bytes[i + 1] == 0x80 && bytes[i + 2] == 0x9c => {
+            // 中文左/右引号 → "
+            '\u{201c}' | '\u{201d}' => {
                 result.push('"');
-                i += 3;
-            }
-            // 中文右引号 \xe2\x80\x9d → "
-            0xe2 if i + 2 < len && bytes[i + 1] == 0x80 && bytes[i + 2] == 0x9d => {
-                result.push('"');
-                i += 3;
             }
             // 单行注释 // ... \n → 移除到行尾
-            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
-                while i < len && bytes[i] != b'\n' {
-                    i += 1;
+            '/' if chars.peek() == Some(&'/') => {
+                for nc in chars.by_ref() {
+                    if nc == '\n' {
+                        break;
+                    }
                 }
             }
             _ => {
-                result.push(c as char);
-                i += 1;
+                result.push(c);
             }
         }
     }
@@ -569,22 +556,22 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
 /// 栈空时遇到闭合符号 → 丢弃（LLM 多余输出）。
 /// 额外修复：当 `}` 后跟随 `,` + `{`，如果栈深度表明当前对象未闭合，立即补 `}`。
 fn balance_braces(json: &str) -> String {
-    let bytes = json.as_bytes();
-    let len = bytes.len();
-    let mut result = String::with_capacity(len + 32);
-    let mut stack: Vec<u8> = Vec::new();
+    let chars: Vec<char> = json.chars().collect();
+    let len = chars.len();
+    let mut result = String::with_capacity(json.len() + 32);
+    let mut stack: Vec<char> = Vec::new();
     let mut in_string = false;
     let mut i = 0;
 
     while i < len {
-        let c = bytes[i];
+        let c = chars[i];
 
         if in_string {
-            result.push(c as char);
-            if c == b'\\' && i + 1 < len {
+            result.push(c);
+            if c == '\\' && i + 1 < len {
                 i += 1;
-                result.push(bytes[i] as char);
-            } else if c == b'"' {
+                result.push(chars[i]);
+            } else if c == '"' {
                 in_string = false;
             }
             i += 1;
@@ -592,21 +579,21 @@ fn balance_braces(json: &str) -> String {
         }
 
         match c {
-            b'"' => {
+            '"' => {
                 in_string = true;
                 result.push('"');
             }
-            b'{' | b'[' => {
+            '{' | '[' => {
                 stack.push(c);
-                result.push(c as char);
+                result.push(c);
             }
-            b'}' => {
+            '}' => {
                 if stack.is_empty() {
                     i += 1;
                     continue;
                 }
                 while let Some(&top) = stack.last() {
-                    if top == b'{' {
+                    if top == '{' {
                         stack.pop();
                         break;
                     }
@@ -616,31 +603,30 @@ fn balance_braces(json: &str) -> String {
                 result.push('}');
 
                 // }, { 模式：action_data 的 } 关闭后，紧跟 ,{ 表示下一个元素
-                // 如果 action 对象的 { 仍在栈中（未闭合），立即补 }
                 let mut peek = i + 1;
-                while peek < len && matches!(bytes[peek], b' ' | b'\t' | b'\n' | b'\r') {
+                while peek < len && chars[peek].is_whitespace() {
                     peek += 1;
                 }
-                if peek < len && bytes[peek] == b',' {
+                if peek < len && chars[peek] == ',' {
                     peek += 1;
-                    while peek < len && matches!(bytes[peek], b' ' | b'\t' | b'\n' | b'\r') {
+                    while peek < len && chars[peek].is_whitespace() {
                         peek += 1;
                     }
-                    if peek < len && bytes[peek] == b'{' {
-                        while stack.last() == Some(&b'{') {
+                    if peek < len && chars[peek] == '{' {
+                        while stack.last() == Some(&'{') {
                             stack.pop();
                             result.push('}');
                         }
                     }
                 }
             }
-            b']' => {
+            ']' => {
                 if stack.is_empty() {
                     i += 1;
                     continue;
                 }
                 while let Some(&top) = stack.last() {
-                    if top == b'[' {
+                    if top == '[' {
                         stack.pop();
                         break;
                     }
@@ -650,14 +636,14 @@ fn balance_braces(json: &str) -> String {
                 result.push(']');
             }
             _ => {
-                result.push(c as char);
+                result.push(c);
             }
         }
         i += 1;
     }
 
     while let Some(top) = stack.pop() {
-        result.push(if top == b'{' { '}' } else { ']' });
+        result.push(if top == '{' { '}' } else { ']' });
     }
 
     result
