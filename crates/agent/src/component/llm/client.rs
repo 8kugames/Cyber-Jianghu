@@ -603,12 +603,15 @@ fn balance_braces(json: &str) -> String {
             }
             b'}' => {
                 // 弹出栈顶直到遇到 {，补全中间缺失的 ]
+                if stack.is_empty() {
+                    i += 1;
+                    continue;
+                }
                 while let Some(&top) = stack.last() {
                     if top == b'{' {
                         stack.pop();
                         break;
                     }
-                    // 栈顶是 [，但遇到了 } — 先闭合 [
                     stack.pop();
                     result.push(']');
                 }
@@ -616,12 +619,15 @@ fn balance_braces(json: &str) -> String {
             }
             b']' => {
                 // 弹出栈顶直到遇到 [，补全中间缺失的 }
+                if stack.is_empty() {
+                    i += 1;
+                    continue;
+                }
                 while let Some(&top) = stack.last() {
                     if top == b'[' {
                         stack.pop();
                         break;
                     }
-                    // 栈顶是 {，但遇到了 ] — 先闭合 {
                     stack.pop();
                     result.push('}');
                 }
