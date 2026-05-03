@@ -48,7 +48,7 @@ impl super::CognitiveEngine {
             self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
 
         let tool_calling_guidance = if use_tool_calling {
-            "## 决策流程\n你必须按以下顺序完成决策：\n1. 先调用 skill_view 工具查看你掌握的技能行为指引\n2. 如需了解人际关系，调用 get_relationship 或 list_relationships\n3. 如需搜索记忆，调用 search_memory\n4. 工具调用完成后，按以下 JSON 格式输出决策\n".to_string()
+            "## 输出格式\n直接输出以下 JSON。工具调用是可选的——大多数情况下你不需要调用任何工具，直接根据已有信息决策即可。\n仅在确实需要查阅技能行为指引时才调用 skill_view，或需要确认人际关系/搜索记忆时才调用对应工具。\n你最多可以调用 1 次工具，调用后必须立即输出 JSON。\n".to_string()
         } else {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
         };
@@ -334,7 +334,7 @@ impl super::CognitiveEngine {
                 .render_template_section("skill_index_header")
                 .unwrap_or_else(|| {
                     format!(
-                        "## 已掌握技能（共 {} 项，使用 skill_view 工具查看详情和行为指引）",
+                        "## 已掌握技能（共 {} 项，可选：调用 skill_view 查看行为指引）",
                         skills.len()
                     )
                 });
@@ -344,7 +344,7 @@ impl super::CognitiveEngine {
 
             let tool_header = self
                 .render_template_section("tool_hints_header")
-                .unwrap_or_else(|| "## 可用工具\n调用以下工具获取决策所需信息：".to_string());
+                .unwrap_or_else(|| "## 可用工具（可选，仅在需要时调用）".to_string());
             lines.push(tool_header);
 
             for tool in super::super::earth::EarthToolExecutor::tool_definitions() {

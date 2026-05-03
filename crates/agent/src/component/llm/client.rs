@@ -393,17 +393,87 @@ fn find_first_json_end(s: &str) -> Option<usize> {
     None
 }
 
-/// 尝试修复截断的 JSON 字符串
-fn try_fix_truncated_json(json_str: &str) -> String {
-    let mut fixed = json_str.trim_end().to_string();
+/// LLM JSON 归一化预处理
+///
+/// 确定性文本变换，将 LLM 输出的常见非标 JSON 模式归一化为合法 JSON。
+/// 在 serde_json::from_str 之前调用，消除因模型输出质量导致的解析失败。
+///
+/// 处理范围：
+/// 1. 中文全角引号 "" → ""
+/// 2. 单行注释 // ... → 移除
+/// 3. 尾部逗号 → 移除
+/// 4. 未闭合引号/括号 → 修补
+fn normalize_llm_json(json_str: &str) -> String {
+    let mut result = String::with_capacity(json_str.len());
 
-    // 移除尾部逗号
-    if fixed.ends_with(',') {
-        fixed.pop();
+    let bytes = json_str.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut in_string = false;
+
+    while i < len {
+        let c = bytes[i];
+
+        if in_string {
+            // 字符串内：保留转义序列原样
+            if c == b'\\' && i + 1 < len {
+                result.push(bytes[i] as char);
+                result.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == b'"' {
+                in_string = false;
+            }
+            result.push(c as char);
+            i += 1;
+            continue;
+        }
+
+        // 非字符串内处理
+        match c {
+            b'"' => {
+                in_string = true;
+                result.push('"');
+                i += 1;
+            }
+            // 中文左引号 \xe2\x80\x9c → "
+            0xe2 if i + 2 < len && bytes[i + 1] == 0x80 && bytes[i + 2] == 0x9c => {
+                result.push('"');
+                i += 3;
+            }
+            // 中文右引号 \xe2\x80\x9d → "
+            0xe2 if i + 2 < len && bytes[i + 1] == 0x80 && bytes[i + 2] == 0x9d => {
+                result.push('"');
+                i += 3;
+            }
+            // 单行注释 // ... \n → 移除到行尾
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            _ => {
+                result.push(c as char);
+                i += 1;
+            }
+        }
     }
 
-    // 修复截断的字符串值（未闭合的引号）
-    // 检查最后一个 `"` 之后是否有奇数个引号，如果有则补一个
+    // 尾部清理
+    let mut fixed = result.trim_end().to_string();
+
+    // 移除尾部逗号（在 } 或 ] 前的）
+    while let Some(last) = fixed.chars().last() {
+        if last == ',' {
+            fixed.pop();
+            fixed = fixed.trim_end().to_string();
+        } else {
+            break;
+        }
+    }
+
+    // 修复未闭合引号（奇数个 "）
     let quote_count = fixed.chars().filter(|&c| c == '"').count();
     if quote_count % 2 != 0 {
         fixed.push('"');
@@ -425,33 +495,40 @@ fn try_fix_truncated_json(json_str: &str) -> String {
     fixed
 }
 
-/// 解析 LLM 响应为结构化类型（带截断修复）
+/// 解析 LLM 响应为结构化类型（带归一化预处理）
+///
+/// 流程：extract_json_str → normalize_llm_json → serde_json::from_str
+/// 归一化在首次解析前执行，而非解析失败后补救。
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
-    let json_str = extract_json_str(response);
+    let raw_json = extract_json_str(response);
+    let json_str = normalize_llm_json(&raw_json);
 
     match serde_json::from_str::<D>(&json_str) {
         Ok(parsed) => Ok(parsed),
-        Err(first_err) => {
-            let fixed = try_fix_truncated_json(&json_str);
+        Err(e) => {
+            // 错误位置附近的实际内容，方便定位根因
+            let error_offset = json_str
+                .lines()
+                .take(e.line().saturating_sub(1))
+                .map(|l| l.len() + 1)
+                .sum::<usize>()
+                + e.column().saturating_sub(1);
+            let error_context = json_str
+                .chars()
+                .skip(error_offset.saturating_sub(50))
+                .take(100)
+                .collect::<String>();
 
-            match serde_json::from_str::<D>(&fixed) {
-                Ok(parsed) => {
-                    tracing::warn!("JSON was truncated, auto-fixed");
-                    Ok(parsed)
-                }
-                Err(e) => {
-                    tracing::error!(
-                        error_type = ?e.classify(),
-                        error_msg = %e,
-                        line = e.line(),
-                        column = e.column(),
-                        json_len = json_str.len(),
-                        response_preview = %response.chars().take(200).collect::<String>(),
-                        "JSON parse failed (even after truncation fix)"
-                    );
-                    Err(first_err.into())
-                }
-            }
+            tracing::error!(
+                error_type = ?e.classify(),
+                error_msg = %e,
+                line = e.line(),
+                column = e.column(),
+                json_len = json_str.len(),
+                error_context = %error_context,
+                "JSON parse failed after normalization"
+            );
+            Err(e.into())
         }
     }
 }
