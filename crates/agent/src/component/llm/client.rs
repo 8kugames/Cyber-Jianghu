@@ -463,6 +463,17 @@ fn normalize_llm_json(json_str: &str) -> String {
     // 尾部清理
     let mut fixed = result.trim_end().to_string();
 
+    // 移除数组/对象闭合后的多余引号：]" → ], }" → }
+    let bytes = fixed.as_bytes();
+    let len = bytes.len();
+    if len >= 2 {
+        let last = bytes[len - 1];
+        let prev = bytes[len - 2];
+        if last == b'"' && (prev == b']' || prev == b'}') {
+            fixed.pop();
+        }
+    }
+
     // 移除尾部逗号（在 } 或 ] 前的）
     while let Some(last) = fixed.chars().last() {
         if last == ',' {
@@ -585,19 +596,32 @@ fn try_progressive_brace_repair(json_str: &str) -> Option<String> {
 /// LLM 常见模式：
 ///   {"action_type": "说话", "action_data": {"内容": "..."}   ← 缺少 }
 ///   ]
-/// 在每个 ] 前尝试插入 }
+/// 在每个 ] 前跳过空白，如果最后一个非空白字符不是 }，则补 }
 fn try_repair_missing_brace_before_bracket(json_str: &str) -> Option<String> {
-    // 找所有 ] 前面不是 } 的位置
     let bytes = json_str.as_bytes();
-    let mut result = json_str.to_string();
-    let mut offset = 0isize;
+    let mut insert_positions = Vec::new();
 
     for (i, &b) in bytes.iter().enumerate() {
-        if b == b']' && i > 0 && bytes[i - 1] != b'}' {
-            let pos = (i as isize + offset) as usize;
-            result.insert(pos, '}');
-            offset += 1;
+        if b == b']' {
+            // 跳过空白，找 ] 前最后一个非空白字符
+            let mut j = i;
+            while j > 0 && matches!(bytes[j - 1], b' ' | b'\t' | b'\n' | b'\r') {
+                j -= 1;
+            }
+            if j > 0 && bytes[j - 1] != b'}' {
+                insert_positions.push(j);
+            }
         }
+    }
+
+    if insert_positions.is_empty() {
+        return None;
+    }
+
+    let mut result = json_str.to_string();
+    // 从后往前插入，避免偏移
+    for pos in insert_positions.into_iter().rev() {
+        result.insert(pos, '}');
     }
 
     if serde_json::from_str::<serde_json::Value>(&result).is_ok() {
