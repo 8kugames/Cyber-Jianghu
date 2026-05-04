@@ -3810,6 +3810,17 @@ pub(super) async fn reload_config_handler(
     let config_path = state.config_path.clone();
     match crate::config::Config::from_file(&config_path) {
         Ok(config) => {
+            // Fail Fast: 校验 EarthSoul 配置
+            if let Err(e) = config.earth_soul.validate() {
+                tracing::error!("[config] earth_soul 配置校验失败: {}（保留旧配置）", e);
+                return Json(ConfigReloadResponse {
+                    success: false,
+                    message: format!("earth_soul 配置校验失败: {}", e),
+                    config: None,
+                })
+                .into_response();
+            }
+
             // 更新 server URLs
             {
                 let mut http_url = state.server_http_url.write().await;
