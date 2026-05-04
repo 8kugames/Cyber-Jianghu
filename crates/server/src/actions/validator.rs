@@ -52,10 +52,9 @@ pub async fn validate_action(
     // 验证通用需求
     validate_generic_requirements(intent, agent_state, db_pool).await?;
 
-    // TODO BUG-2: 动作冷却检查
-    // 需要：1) actions.yaml 中添加 cooldown 字段
-    //       2) AgentState 中添加 last_action_ticks: HashMap<String, i64>
-    //       3) 此处检查 current_tick - last_action_ticks[action_type] >= cooldown
+    // 动作冷却检查 — 需要 actions.yaml 添加 cooldown 字段
+    // + AgentState.last_action_ticks: HashMap<String, i64>
+    // + current_tick - last_action_ticks[action_type] >= cooldown
 
     // 数据驱动验证：根据配置中的 validation 规则进行验证
     if let Some(validation) = &config.validation {
