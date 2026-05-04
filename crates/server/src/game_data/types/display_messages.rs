@@ -84,39 +84,4 @@ fn default_rebirth() -> String {
     "大侠已转世重生。".to_string()
 }
 
-impl Default for DisplayMessagesConfig {
-    fn default() -> Self {
-        Self::builtin()
-    }
-}
 
-impl DisplayMessagesConfig {
-    /// 创建内置默认配置
-    pub fn builtin() -> Self {
-        let mut weather_events = std::collections::HashMap::new();
-        weather_events.insert("sunny".to_string(), "天朗气清".to_string());
-        weather_events.insert("cloudy".to_string(), "阴云密布".to_string());
-        weather_events.insert("rainy".to_string(), "细雨绵绵".to_string());
-        weather_events.insert("stormy".to_string(), "雷暴来袭".to_string());
-
-        Self {
-            version: "0.0.1-builtin".to_string(),
-            description: "内置默认显示消息配置".to_string(),
-            entity_states: EntityStatesConfig {
-                alive: "存活".to_string(),
-                dead: "死亡，请大侠转世重来".to_string(),
-            },
-            weather: WeatherConfig {
-                sunny: "晴".to_string(),
-                cloudy: "多云".to_string(),
-                rainy: "雨".to_string(),
-                stormy: "暴风雨".to_string(),
-            },
-            weather_events,
-            notifications: NotificationsConfig {
-                death: "你已经死亡。".to_string(),
-                rebirth: "大侠已转世重生。".to_string(),
-            },
-        }
-    }
-}
