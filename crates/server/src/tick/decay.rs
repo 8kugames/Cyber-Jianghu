@@ -270,7 +270,7 @@ pub fn apply_decay_and_environmental_damage(
 
     // 处理物品耐久度自然衰减
     // 异步操作需要 db_pool，这里先收集需要处理的物品 ID
-    // TODO: 实现物品自然损坏逻辑 (Phase 2)
+    // Phase 2: 物品自然损坏（需耐久度系统支持）
 
     (agent_states, dead_agents, events, death_notifications)
 }

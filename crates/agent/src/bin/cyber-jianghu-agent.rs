@@ -612,6 +612,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         Config::from_env().unwrap_or_default()
     });
 
+    // Fail Fast: 校验 EarthSoul 配置
+    config.earth_soul.validate().context("earth_soul 配置校验失败")?;
+
     // Ensure servers_dir is set (#[serde(default)] means it's empty after from_file)
     // 优先级：CYBER_JIANGHU_DATA_DIR 环境变量 > ~/.cyber-jianghu/servers
     if config.servers_dir.as_os_str().is_empty() {
