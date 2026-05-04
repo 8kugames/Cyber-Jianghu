@@ -49,7 +49,7 @@ async function loadServerVersion() {
         var res = await apiFetch(API.HEALTH);
         if (!res.ok) return;
         var data = await res.json();
-        var badge = document.getElementById("server-version-badge");
+        var badge = document.getElementById("server-version");
         if (badge && data.version) {
             badge.textContent = "v" + data.version;
             badge.title = "Build: " + (data.build_timestamp || "Unknown");
