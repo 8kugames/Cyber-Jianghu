@@ -341,6 +341,7 @@ impl DirectLlmClientConfig {
 #[derive(Clone, Debug)]
 pub struct DirectLlmClient {
     config: DirectLlmClientConfig,
+    earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 }
 
 impl DirectLlmClient {
@@ -352,7 +353,19 @@ impl DirectLlmClient {
         }
         // 验证配置
         config.validate()?;
-        Ok(Self { config })
+        Ok(Self {
+            config,
+            earth_soul_config: None,
+        })
+    }
+
+    /// 设置 EarthSoul 配置（由 AgentBuilder 调用）
+    pub fn with_earth_soul_config(
+        mut self,
+        config: crate::soul::earth::config::EarthSoulConfig,
+    ) -> Self {
+        self.earth_soul_config = Some(config);
+        self
     }
 
     /// 获取当前使用的模型名称
@@ -956,6 +969,7 @@ impl DirectLlmClient {
     /// Tool-calling 循环核心逻辑
     ///
     /// 接收预构建的消息列表，执行多轮 tool-calling 直到 LLM 返回文本或超时。
+    /// 集成 ToolResultBudget（F1）、LoopGuard（F2）、Error Signaling（F3）。
     async fn run_tool_loop(
         &self,
         messages: Vec<ChatMessage>,
@@ -966,7 +980,30 @@ impl DirectLlmClient {
         let model = self.config.get_model_with_default();
         let mut messages = messages;
 
+        // 仅在 enabled == true 时创建 budget 和 guard
+        let mut budget = self
+            .earth_soul_config
+            .as_ref()
+            .filter(|c| c.tool_budget.enabled)
+            .map(|c| crate::soul::earth::budget::ToolResultBudget::new(&c.tool_budget));
+        let mut guard = self
+            .earth_soul_config
+            .as_ref()
+            .filter(|c| c.loop_guard.enabled)
+            .map(|c| crate::soul::earth::loop_guard::LoopGuard::new(&c.loop_guard));
+
         for round in 0..max_rounds {
+            // Pre-check: budget exhausted
+            if let Some(ref b) = budget
+                && b.is_exhausted()
+            {
+                warn!(
+                    "[地魂] Tool result 预算耗尽 ({} chars), 提前退出",
+                    b.used_chars()
+                );
+                return self.forced_text_exit(&model, messages).await;
+            }
+
             if round == 0 {
                 let tool_names: Vec<&str> =
                     tools.iter().map(|t| t.function.name.as_str()).collect();
@@ -996,7 +1033,6 @@ impl DirectLlmClient {
                 .ok_or_else(|| anyhow::anyhow!("LLM returned empty response"))?;
             let msg = &choice.message;
 
-            // DEBUG: 检查 tool_calls 字段是否存在于原始响应
             debug!(
                 "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
                 msg.tool_calls
@@ -1045,31 +1081,80 @@ impl DirectLlmClient {
             messages.push(msg.clone());
 
             for tc in tool_calls {
+                // Loop guard check (F2)
+                if let Some(ref mut g) = guard {
+                    match g.check(&tc.function.name) {
+                        crate::soul::earth::loop_guard::LoopGuardAction::Terminate => {
+                            warn!("[地魂] Loop guard 终止: tool={}", tc.function.name);
+                            return self.forced_text_exit(&model, messages).await;
+                        }
+                        crate::soul::earth::loop_guard::LoopGuardAction::Warn(_) => {
+                            warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
+                        }
+                        crate::soul::earth::loop_guard::LoopGuardAction::Proceed => {}
+                    }
+                }
+
+                // Execute + error signaling (F3)
                 let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
                 info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
-                let result = executor
-                    .execute(&tc.function.name, &args)
-                    .await
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
 
-                info!("[地魂] Tool {} 结果: {}", tc.function.name, result);
+                let mut raw_result = match executor.execute(&tc.function.name, &args).await {
+                    Ok(val) => val.to_string(),
+                    Err(e) => {
+                        warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
+                        format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e)
+                    }
+                };
+
+                // 将 LoopGuard Warn 作为 tool result 前缀注入（不改变消息序列）
+                if let Some(ref mut g) = guard
+                    && let Some(warning) = g.take_pending_warning()
+                {
+                    raw_result = format!("[系统提示] {}\n{}", warning, raw_result);
+                }
+
+                // Budget truncation (F1)
+                let truncated = match &mut budget {
+                    Some(b) => {
+                        if b.is_exhausted() {
+                            crate::soul::earth::budget::ToolResultBudget::exhausted_message()
+                                .to_string()
+                        } else {
+                            b.truncate(&tc.function.name, &raw_result)
+                        }
+                    }
+                    None => raw_result,
+                };
+
+                info!(
+                    "[地魂] Tool {} 结果: {}",
+                    tc.function.name,
+                    truncated.chars().take(200).collect::<String>()
+                );
 
                 messages.push(ChatMessage::tool_result(
                     &tc.id,
                     &tc.function.name,
-                    &result.to_string(),
+                    &truncated,
                 ));
             }
         }
 
-        // 强制文本退出：不发送 tool 定义，迫使模型基于已积累上下文输出文本决策
+        // Max rounds exhausted → forced text exit
         warn!(
             "[地魂] Tool loop 耗尽 max_rounds ({}), 执行强制文本退出",
             max_rounds
         );
+        self.forced_text_exit(&model, messages).await
+    }
 
-        let final_request = OpenAIRequest {
-            model,
+    /// 强制文本退出：不发送 tool 定义，迫使模型基于已积累上下文输出文本决策
+    async fn forced_text_exit(&self, model: &str, messages: Vec<ChatMessage>) -> Result<String> {
+        warn!("[地魂] 执行强制文本退出");
+
+        let request = OpenAIRequest {
+            model: model.to_string(),
             messages,
             temperature: Some(self.config.temperature),
             max_tokens: Some(self.config.max_tokens),
@@ -1080,7 +1165,7 @@ impl DirectLlmClient {
             stream_options: None,
         };
 
-        let response_data = self.send_request(&final_request).await?;
+        let response_data = self.send_request(&request).await?;
         let content = response_data
             .choices
             .first()

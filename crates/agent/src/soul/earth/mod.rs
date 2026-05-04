@@ -11,10 +11,16 @@
 // 设计原则：progressive disclosure — prompt 只注入索引，LLM 自主判断何时加载详情。
 // ============================================================================
 
+pub mod budget;
+pub mod config;
 mod executor;
+pub mod loop_guard;
 mod memory_tool;
 mod relationship_tool;
 mod skill_tool;
 
+pub use budget::ToolResultBudget;
+pub use config::{EarthSoulConfig, LoopGuardConfig, ToolBudgetConfig};
 pub use executor::{EarthToolContext, EarthToolExecutor};
+pub use loop_guard::{LoopGuard, LoopGuardAction};
 pub(crate) use skill_tool::extract_skill_body;
