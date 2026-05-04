@@ -17,7 +17,7 @@ use std::path::Path;
 /// - `config_dir`: 配置文件目录
 ///
 /// # 返回
-/// 叙事化配置，如果文件不存在则返回默认配置
+/// 叙事化配置，配置缺失时返回 `Err`（Fail-Fast）
 pub fn load_narrative(config_dir: &Path) -> Result<NarrativeConfig> {
     // 优先尝试 YAML 格式
     let yaml_path = config_dir.join("narrative_config.yaml");
