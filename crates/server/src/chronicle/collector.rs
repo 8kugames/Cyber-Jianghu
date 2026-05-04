@@ -184,11 +184,11 @@ async fn collect_agents(
     // 批量查询：叙事描述
     let narrative_rows = sqlx::query(
         r#"
-        SELECT DISTINCT ON (agent_id) agent_id, narrative
+        SELECT agent_id, string_agg(narrative, E'\n' ORDER BY tick_id, pipe_seq) as narrative
         FROM agent_action_logs
         WHERE tick_id BETWEEN $1 AND $2
         AND narrative IS NOT NULL
-        ORDER BY agent_id, tick_id
+        GROUP BY agent_id
         "#,
     )
     .bind(period_start)

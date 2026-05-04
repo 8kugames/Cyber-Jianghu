@@ -643,6 +643,7 @@ pub(super) async fn submit_intent_handler(
         history
             .record_intent(
                 tick_id,
+                0,
                 intent.intent_id,
                 action_type_str,
                 req.thought_log.clone(),

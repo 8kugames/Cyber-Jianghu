@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// 全局 LLM 停止标志
 static LLM_DISABLED: AtomicBool = AtomicBool::new(false);
@@ -508,7 +508,10 @@ impl DirectLlmClient {
             .context("Failed to read response body")?;
         let raw_body = String::from_utf8(raw_bytes.to_vec())
             .context("LLM response body is not valid UTF-8")?;
-        debug!("[地魂] raw_body 前200字符: {}", raw_body.chars().take(200).collect::<String>());
+        debug!(
+            "[地魂] raw_body 前200字符: {}",
+            raw_body.chars().take(200).collect::<String>()
+        );
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
                 &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
@@ -615,7 +618,9 @@ impl DirectLlmClient {
                 "[地魂] UTF-8 mojibake detected in stream content! positions={:?}, snippet={:?}",
                 mojibake_positions,
                 &content[mojibake_positions.first().copied().unwrap_or(0)
-                    ..content.len().min(mojibake_positions.first().copied().unwrap_or(0) + 50)]
+                    ..content
+                        .len()
+                        .min(mojibake_positions.first().copied().unwrap_or(0) + 50)]
             );
         }
 
@@ -763,7 +768,11 @@ impl DirectLlmClient {
 
         let status = response.status();
         if !status.is_success() {
-            let error_body = response.bytes().await.map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+            let error_body = response
+                .bytes()
+                .await
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
             super::token_tracking::record_failure(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
@@ -1053,8 +1062,36 @@ impl DirectLlmClient {
             }
         }
 
-        debug!("Tool calling reached max rounds ({})", max_rounds);
-        anyhow::bail!("Tool calling exceeded max rounds ({})", max_rounds)
+        // 强制文本退出：不发送 tool 定义，迫使模型基于已积累上下文输出文本决策
+        warn!(
+            "[地魂] Tool loop 耗尽 max_rounds ({}), 执行强制文本退出",
+            max_rounds
+        );
+
+        let final_request = OpenAIRequest {
+            model,
+            messages,
+            temperature: Some(self.config.temperature),
+            max_tokens: Some(self.config.max_tokens),
+            tools: None,
+            tool_choice: None,
+            enable_thinking: self.config.enable_thinking,
+            stream: None,
+            stream_options: None,
+        };
+
+        let response_data = self.send_request(&final_request).await?;
+        let content = response_data
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
+            .unwrap_or_default();
+
+        if content.is_empty() {
+            warn!("[地魂] 强制文本退出返回空内容，agent 本轮可能无决策");
+        }
+
+        Ok(content)
     }
 
     /// 使用对话历史完成调用（长窗口）

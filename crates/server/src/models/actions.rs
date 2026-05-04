@@ -65,6 +65,9 @@ pub struct AgentAction {
 
     /// 记录时间
     pub created_at: DateTime<Utc>,
+
+    /// Pipeline 内序号（0=主 Intent，1+=后续 Intent）
+    pub pipe_seq: i32,
 }
 
 /// 动作执行结果

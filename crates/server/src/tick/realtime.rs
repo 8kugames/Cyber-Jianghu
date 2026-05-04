@@ -164,7 +164,7 @@ impl IntentWorker {
         let pre_node_id = agent_state.node_id.clone();
         let result = match self
             .state_processor
-            .process_single_intent(tick_id, agent_state, &intent, &all_states)
+            .process_single_intent(tick_id, agent_state, &intent, &all_states, 0)
             .await
         {
             Ok(r) => r,
@@ -253,18 +253,19 @@ impl IntentWorker {
         );
 
         // 10. 处理 subsequent_intents（按顺序，任一失败则中断）
-        for subsequent in &intent.subsequent_intents {
+        for (seq, subsequent) in intent.subsequent_intents.iter().enumerate() {
+            let pipe_seq = (seq + 1) as i32;
             debug!(
-                "处理 subsequent Intent: agent={}, action={}",
-                agent_id, subsequent.action_type
+                "处理 subsequent Intent: agent={}, action={}, pipe_seq={}",
+                agent_id, subsequent.action_type, pipe_seq
             );
             if let Err(e) = self
-                .process_single_subsequent(subsequent, agent_id, tick_id)
+                .process_single_subsequent(subsequent, agent_id, tick_id, pipe_seq)
                 .await
             {
                 warn!(
-                    "Subsequent intent 失败，中断 pipeline: agent={}, action={}, error={}",
-                    agent_id, subsequent.action_type, e
+                    "Subsequent intent 失败，中断 pipeline: agent={}, action={}, pipe_seq={}, error={}",
+                    agent_id, subsequent.action_type, pipe_seq, e
                 );
                 break;
             }
@@ -286,6 +287,7 @@ impl IntentWorker {
         intent: &cyber_jianghu_protocol::Intent,
         agent_id: uuid::Uuid,
         tick_id: i64,
+        pipe_seq: i32,
     ) -> Result<()> {
         // 从 DashMap 读取最新状态（前一个 intent 已更新）
         let agent_state = self
@@ -311,7 +313,7 @@ impl IntentWorker {
 
         let result = self
             .state_processor
-            .process_single_intent(tick_id, agent_state, intent, &all_states)
+            .process_single_intent(tick_id, agent_state, intent, &all_states, pipe_seq)
             .await;
 
         let (updated_state, event_tuples) = match result {

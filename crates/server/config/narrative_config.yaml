@@ -89,10 +89,10 @@ attributes:
           description: "肚子有些饿了，该考虑找点东西吃"
         - min: 20
           max: 39
-          description: "饥肠辘辘，胃在剧烈绞痛，四肢无力"
+          description: "饥肠辘辘，急需寻找食物充饥，四肢无力"
         - min: 0
           max: 19
-          description: "饿得头昏眼花，意识逐渐模糊，生命正在消逝"
+          description: "饥肠辘辘，急需进食，生命正在消逝"
 
     thirst:
       name: thirst
@@ -110,10 +110,10 @@ attributes:
           description: "口渴明显，嗓子发干，该找水喝了"
         - min: 20
           max: 39
-          description: "口渴难耐，喉咙如火烧，嘴唇干裂出血"
+          description: "口渴难耐，急需饮水，喉咙如火烧"
         - min: 0
           max: 19
-          description: "脱水严重，视线模糊，意识在消散"
+          description: "脱水严重，急需饮水，视线模糊，生命垂危"
 
     stamina:
       name: stamina

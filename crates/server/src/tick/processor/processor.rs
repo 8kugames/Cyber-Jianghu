@@ -59,12 +59,14 @@ impl StateProcessor {
     /// 处理单条 Intent（实时模式）
     ///
     /// 单个 Agent + 单条 Intent，保留 Sagas 快照/回滚机制。
+    /// pipeline 的 subsequent 逐条处理由 realtime.rs 在每次 DashMap 刷新后调用。
     pub async fn process_single_intent(
         &self,
         tick_id: i64,
         mut agent_state: AgentState,
         intent: &Intent,
         all_states: &[AgentState],
+        pipe_seq: i32,
     ) -> Result<SingleProcessingResult> {
         let executor = ActionExecutor::new(self.db_pool.clone());
         let mut events: Vec<(uuid::Uuid, WorldEvent)> = Vec::new();
@@ -74,43 +76,27 @@ impl StateProcessor {
             warn!("更新 Agent {} 在线时间失败: {}", intent.agent_id, e);
         }
 
-        // 构建 Pipeline
-        let pipeline_intents = intent.as_pipeline();
-        let mut pipeline_failed = false;
-
         // Sagas: 快照
         let agent_state_snapshot = agent_state.clone();
         let events_len_before = events.len();
+        let mut execution_failed = false;
 
-        for (pipe_idx, pipe_intent) in pipeline_intents.iter().enumerate() {
-            if pipeline_failed {
-                break;
-            }
+        // 验证（传入所有 Agent 状态，支持跨 Agent 校验如 attack/trade）
+        if let Err(e) = self
+            .resolver
+            .validate_intent(intent, &agent_state, all_states)
+            .await
+        {
+            warn!(
+                "Intent 验证失败: agent={}, error={}",
+                intent.agent_id, e
+            );
+            execution_failed = true;
+        }
 
-            // Pipeline 完整性校验
-            if pipe_idx > 0
-                && (pipe_intent.agent_id != intent.agent_id || pipe_intent.tick_id != tick_id)
-            {
-                pipeline_failed = true;
-                continue;
-            }
-
-            // 验证（传入所有 Agent 状态，支持跨 Agent 校验如 attack/trade）
-            if let Err(e) = self
-                .resolver
-                .validate_intent(pipe_intent, &agent_state, all_states)
-                .await
-            {
-                warn!(
-                    "Pipeline intent {} 验证失败: agent={}, error={}",
-                    pipe_idx, pipe_intent.agent_id, e
-                );
-                pipeline_failed = true;
-                continue;
-            }
-
-            // 执行
-            let result = executor.execute(pipe_intent, &mut agent_state);
+        // 执行
+        if !execution_failed {
+            let result = executor.execute(intent, &mut agent_state);
 
             if result.success {
                 let mut all_applied = true;
@@ -118,7 +104,6 @@ impl StateProcessor {
                     let mut ctx =
                         MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
 
-                    // 构造单 Agent 的 slice 供 mutator 使用
                     let mut single_states = vec![agent_state.clone()];
                     let mut applied = false;
                     for mutator in &self.mutators {
@@ -152,20 +137,20 @@ impl StateProcessor {
                 }
 
                 if !all_applied {
-                    pipeline_failed = true;
+                    execution_failed = true;
                 }
             } else {
-                pipeline_failed = true;
+                execution_failed = true;
             }
         }
 
         // Sagas: 回滚
-        if pipeline_failed {
+        if execution_failed {
             agent_state = agent_state_snapshot;
             events.truncate(events_len_before);
         }
 
-        // 记录 action log（异步，不阻塞主流程）
+        // 单条 Action log
         let action_type = ActionType::new(intent.action_type.as_str());
         let action_log = AgentAction {
             id: 0,
@@ -177,7 +162,7 @@ impl StateProcessor {
             )
             .map(|config| config.name.clone()),
             action_data: intent.action_data.clone(),
-            result: if pipeline_failed {
+            result: if execution_failed {
                 ActionResult::Failed
             } else {
                 ActionResult::Success
@@ -192,6 +177,7 @@ impl StateProcessor {
                 .as_ref()
                 .and_then(|m| serde_json::to_value(m).ok()),
             created_at: chrono::Utc::now(),
+            pipe_seq,
         };
 
         let pool = self.db_pool.clone();

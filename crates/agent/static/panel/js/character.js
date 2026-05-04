@@ -568,8 +568,8 @@ async function loadBiographySection(agentId) {
     </section>
   `;
 
-  // 先返回占位，异步填充
-  loadBiographyAsync(agentId);
+  // 先返回占位，延迟异步填充（占位 HTML 尚未挂载 DOM，需等渲染后执行）
+  requestAnimationFrame(function () { loadBiographyAsync(agentId); });
   return placeholder;
 }
 

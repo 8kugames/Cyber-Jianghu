@@ -735,10 +735,27 @@ impl super::Agent {
                                 let dead_agent_id = world_state.agent_id.unwrap_or_default();
                                 tokio::spawn(async move {
                                     info!("[biography] 死亡触发传记生成: agent={}", dead_agent_id);
-                                    match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
-                                        Ok(bio) => info!("[biography] 死亡传记生成成功: {}字", bio.chars().count()),
-                                        Err(e) => warn!("[biography] 死亡传记生成失败（非致命）: {}", e),
+                                    // 最多重试 3 次，间隔 30s（LLM 瞬断/rate limit 等临时错误可恢复）
+                                    const MAX_RETRIES: u32 = 3;
+                                    const RETRY_DELAY_SECS: u64 = 30;
+                                    for attempt in 0..MAX_RETRIES {
+                                        match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
+                                            Ok(bio) => {
+                                                info!("[biography] 死亡传记生成成功: {}字", bio.chars().count());
+                                                return;
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    "[biography] 死亡传记生成失败 (attempt {}/{}): {}",
+                                                    attempt + 1, MAX_RETRIES, e
+                                                );
+                                                if attempt + 1 < MAX_RETRIES {
+                                                    tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
+                                                }
+                                            }
+                                        }
                                     }
+                                    warn!("[biography] 死亡传记生成最终失败: agent={}", dead_agent_id);
                                 });
                             }
 
@@ -1461,6 +1478,7 @@ impl super::Agent {
                             history
                                 .record_intent(
                                     final_intent.tick_id,
+                                    0,
                                     final_intent.intent_id,
                                     final_intent.action_type.to_string(),
                                     final_intent.thought_log.clone(),
