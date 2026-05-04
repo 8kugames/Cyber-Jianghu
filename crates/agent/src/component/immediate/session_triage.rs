@@ -491,10 +491,23 @@ mod fallback_tests {
 
     #[test]
     fn fallback_priority_split_three_way() {
+        let mut event_type_priority = std::collections::HashMap::new();
+        event_type_priority.insert(WorldEventType::DeathNotification, 100);
+        event_type_priority.insert(WorldEventType::PrivateDialogue, 80);
+        event_type_priority.insert(WorldEventType::SocialInteraction, 60);
+        event_type_priority.insert(WorldEventType::StateChange, 50);
+        event_type_priority.insert(WorldEventType::ActionResult, 40);
+        event_type_priority.insert(WorldEventType::PublicMessage, 20);
+        event_type_priority.insert(WorldEventType::EnvironmentalChange, 10);
+        event_type_priority.insert(WorldEventType::SystemNotification, 10);
+        event_type_priority.insert(WorldEventType::TimeUpdate, 5);
+
         let pre = EventTriagePreFilter {
             fallback_urgent_cutoff_priority: 80,
             fallback_ignore_cutoff_priority: 20,
-            ..Default::default()
+            max_events_per_triage: 50,
+            default_priority: 0,
+            event_type_priority,
         };
 
         let events = vec![
@@ -516,10 +529,23 @@ mod fallback_tests {
 
     #[test]
     fn fallback_reason_distinguishes_error_and_timeout() {
+        let mut event_type_priority = std::collections::HashMap::new();
+        event_type_priority.insert(WorldEventType::DeathNotification, 100);
+        event_type_priority.insert(WorldEventType::PrivateDialogue, 80);
+        event_type_priority.insert(WorldEventType::SocialInteraction, 60);
+        event_type_priority.insert(WorldEventType::StateChange, 50);
+        event_type_priority.insert(WorldEventType::ActionResult, 40);
+        event_type_priority.insert(WorldEventType::PublicMessage, 20);
+        event_type_priority.insert(WorldEventType::EnvironmentalChange, 10);
+        event_type_priority.insert(WorldEventType::SystemNotification, 10);
+        event_type_priority.insert(WorldEventType::TimeUpdate, 5);
+
         let pre = EventTriagePreFilter {
             fallback_urgent_cutoff_priority: 80,
             fallback_ignore_cutoff_priority: 20,
-            ..Default::default()
+            max_events_per_triage: 50,
+            default_priority: 0,
+            event_type_priority,
         };
 
         let events = vec![mk_event("e1", WorldEventType::TimeUpdate)];

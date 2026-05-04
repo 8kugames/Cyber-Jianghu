@@ -153,7 +153,7 @@ impl AgentBuilder {
         llm_client: Arc<dyn LlmClient>,
         rules: Option<WorldBuildingRules>,
     ) -> Self {
-        let rules = rules.unwrap_or_default();
+        let rules = rules.expect("WorldBuildingRules 必须由 server 下发，配置缺失请联系管理员");
         // 复用已有 container 或创建新的，确保 ActorSoul 和 ReflectorSoul 共享
         let container = self
             .llm_container

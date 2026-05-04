@@ -25,8 +25,11 @@ pub fn load_display_messages(config_dir: &Path) -> Result<DisplayMessagesConfig>
         return load_from_path(&json_path, ConfigFormat::Json);
     }
 
-    tracing::info!("[display_messages_loader] Config file not found, using builtin config");
-    Ok(DisplayMessagesConfig::builtin())
+    Err(anyhow::anyhow!(
+        "[display_messages_loader] 显示消息配置文件不存在: {:?} 或 {:?}",
+        yaml_path,
+        json_path
+    ))
 }
 
 fn load_from_path(path: &Path, format: ConfigFormat) -> Result<DisplayMessagesConfig> {
@@ -41,12 +44,10 @@ fn load_from_path(path: &Path, format: ConfigFormat) -> Result<DisplayMessagesCo
             );
             Ok(config)
         }
-        Err(e) => {
-            tracing::warn!(
-                "[display_messages_loader] Failed to parse config: {}, using builtin",
-                e
-            );
-            Ok(DisplayMessagesConfig::builtin())
-        }
+        Err(e) => Err(anyhow::anyhow!(
+            "[display_messages_loader] 解析配置文件失败: {}，路径: {:?}",
+            e,
+            path
+        )),
     }
 }

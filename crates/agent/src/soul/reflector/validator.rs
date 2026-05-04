@@ -249,6 +249,22 @@ mod tests {
         Arc::new(RwLock::new(Arc::new(client)))
     }
 
+    fn test_world_building_rules() -> WorldBuildingRules {
+        use cyber_jianghu_protocol::EraSettings;
+        WorldBuildingRules {
+            version: "0.0.1-test".to_string(),
+            era: EraSettings {
+                name: "武侠架空世界".to_string(),
+                tech_level: "冷兵器时代".to_string(),
+                social_structure: "封建帝制".to_string(),
+            },
+            allowed_concepts: vec!["内力".to_string(), "轻功".to_string()],
+            forbidden_concepts: vec!["魔法".to_string()],
+            narrative_rules: "测试叙事规则".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn test_validate_approved() {
         let mock_client = MockLlmClient::with_response(
@@ -260,7 +276,7 @@ mod tests {
         );
 
         let validator =
-            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
@@ -291,7 +307,7 @@ mod tests {
         );
 
         let validator =
-            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
 
         let request = ValidationRequest {
             intent: crate::models::Intent::new(uuid::Uuid::new_v4(), 1, "休息", None),
@@ -324,10 +340,10 @@ mod tests {
         );
 
         let validator =
-            ReflectorSoul::new(WorldBuildingRules::default(), mock_container(mock_client));
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
 
         // Test that update_rules doesn't panic
-        let new_rules = WorldBuildingRules::default();
+        let new_rules = test_world_building_rules();
         validator.update_rules(new_rules).await;
     }
 }

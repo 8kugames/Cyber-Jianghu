@@ -8,7 +8,7 @@
 //! ```
 
 use cyber_jianghu_agent::{LlmClient, PersonaInfo, ReflectorSoul, Validator};
-use cyber_jianghu_protocol::WorldBuildingRules;
+use cyber_jianghu_protocol::{EraSettings, WorldBuildingRules};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -49,8 +49,19 @@ async fn main() -> anyhow::Result<()> {
 
     println!("=== ReflectorSoul 示例 ===\n");
 
-    // 1. 创建 WorldBuildingRules
-    let world_rules = WorldBuildingRules::default();
+    // 1. 创建 WorldBuildingRules（示例配置）
+    let world_rules = WorldBuildingRules {
+        version: "0.0.1-example".to_string(),
+        era: EraSettings {
+            name: "武侠架空世界".to_string(),
+            tech_level: "冷兵器时代".to_string(),
+            social_structure: "封建帝制".to_string(),
+        },
+        allowed_concepts: vec!["内力".to_string(), "轻功".to_string()],
+        forbidden_concepts: vec!["魔法".to_string(), "仙术".to_string()],
+        narrative_rules: "示例叙事规则".to_string(),
+        last_updated: "2026-01-01T00:00:00Z".to_string(),
+    };
     println!("世界观规则版本: {}", world_rules.version);
     println!("   时代: {}", world_rules.era.name);
     println!("   技术水平: {}", world_rules.era.tech_level);

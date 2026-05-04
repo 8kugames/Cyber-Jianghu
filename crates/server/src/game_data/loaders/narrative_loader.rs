@@ -31,8 +31,10 @@ pub fn load_narrative(config_dir: &Path) -> Result<NarrativeConfig> {
         return load_narrative_from_path(&json_path, ConfigFormat::Json);
     }
 
-    tracing::info!("[narrative_loader] Config file not found, using builtin config");
-    Ok(NarrativeConfig::builtin())
+    Err(anyhow::anyhow!(
+        "[narrative_loader] 叙事化配置文件不存在: {:?}",
+        yaml_path
+    ))
 }
 
 fn load_narrative_from_path(path: &Path, format: ConfigFormat) -> Result<NarrativeConfig> {
@@ -66,12 +68,10 @@ fn load_narrative_from_path(path: &Path, format: ConfigFormat) -> Result<Narrati
             );
             Ok(config)
         }
-        Err(e) => {
-            tracing::warn!(
-                "[narrative_loader] Failed to parse narrative config: {}, using builtin",
-                e
-            );
-            Ok(NarrativeConfig::builtin())
-        }
+        Err(e) => Err(anyhow::anyhow!(
+            "[narrative_loader] 解析叙事化配置文件失败: {} from {:?}",
+            e,
+            path
+        )),
     }
 }

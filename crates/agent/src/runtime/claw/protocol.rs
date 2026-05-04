@@ -925,6 +925,8 @@ mod tests {
                 "rebirth_delay_ticks": 0,
                 "version": "0.0.6",
                 "last_updated": "2024-03-22T12:00:00Z",
+                "rebirth_retry_max_attempts": 3,
+                "rebirth_retry_interval_secs": 30,
                 "intent_batch": null,
                 "immediate_events": null,
             }),
