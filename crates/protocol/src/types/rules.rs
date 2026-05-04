@@ -147,29 +147,6 @@ pub struct IntentBatchConfig {
     pub llm_chaos_threshold: u32,
 }
 
-impl Default for IntentBatchConfig {
-    fn default() -> Self {
-        // Bypass 配置：当 game_rules.yaml 未指定 intent_batch 时使用
-        // always_types/adaptive_types/skip_types 由 ooc_risk 动态生成后会覆盖此处空值
-        Self {
-            max_intents_per_tick: 5,
-            max_retries: 3,
-            pipeline_execution_enabled: true,
-            partial_execution_enabled: true,
-            llm_validation: GradedValidationConfig {
-                always_types: Vec::new(),
-                adaptive_types: Vec::new(),
-                skip_types: Vec::new(),
-                minimum_per_tick: 1,
-                restricted_area_keywords: Vec::new(),
-                high_value_item_keywords: Vec::new(),
-                adaptive_field_mapping: std::collections::HashMap::new(),
-            },
-            llm_chaos_threshold: 12,
-        }
-    }
-}
-
 /// 分级审核配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GradedValidationConfig {
