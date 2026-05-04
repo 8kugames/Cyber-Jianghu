@@ -156,6 +156,27 @@ impl super::Agent {
                             {
                                 let s_dir = self.config.server_dir(&self.config.server.ws_url);
                                 let chars_dir = s_dir.join("characters");
+
+                                // 转世后旧角色 yaml 可能未被标记为 dead（断连期间死亡未处理）
+                                if let Some(ref old_cfg) = self.character_config
+                                    && old_cfg.agent_id != Some(agent_id)
+                                    && old_cfg.status != CharacterStatus::Dead
+                                {
+                                    let mut dead_cfg = old_cfg.clone();
+                                    dead_cfg.status = CharacterStatus::Dead;
+                                    if let Err(e) =
+                                        save_character_config_to_fs(&dead_cfg, &chars_dir)
+                                    {
+                                        warn!("Failed to mark old character as dead: {}", e);
+                                    } else {
+                                        info!(
+                                            "已标记旧角色为死亡: {} → {}",
+                                            dead_cfg.name,
+                                            dead_cfg.agent_id.unwrap_or_default()
+                                        );
+                                    }
+                                }
+
                                 let c_dir = chars_dir.join(agent_id.to_string());
                                 let c_yaml = c_dir.join("character.yaml");
 
@@ -199,6 +220,17 @@ impl super::Agent {
                             // 调用注册回调（更新外部状态如 HTTP API 的 agent_id）
                             if let Some(ref callback) = self.registration_callback {
                                 callback(agent_id);
+                            }
+
+                            // 后台对账：同步所有旧角色 yaml 状态（修复断连期间死亡未持久化的问题）
+                            if let Some(ref api_state) = self.http_api_state {
+                                let server_url = self.config.server.http_url.clone();
+                                let chars_dir = api_state.character_dir.read().await.clone();
+                                let current_id = agent_id;
+                                tokio::spawn(async move {
+                                    reconcile_stale_characters(&server_url, &chars_dir, current_id)
+                                        .await;
+                                });
                             }
 
                             // 更新游戏规则
@@ -385,4 +417,87 @@ pub(crate) fn save_character_config_to_fs(
     let dir = characters_dir.join(&agent_id);
     std::fs::create_dir_all(&dir)?;
     config.save_to_file(dir.join("character.yaml"))
+}
+
+/// 后台对账：查询 server 获取非当前角色的权威状态，修复断连期间死亡未持久化的 yaml
+///
+/// 调用 `/api/v1/agent/{id}/context`（无需认证）检查每个非当前、yaml 状态为 alive 的角色。
+/// 若 server 返回 404 或 is_alive=false，将 yaml 更新为 dead。
+async fn reconcile_stale_characters(
+    server_http_url: &str,
+    characters_dir: &std::path::Path,
+    current_agent_id: Uuid,
+) {
+    use std::path::Path;
+
+    if !characters_dir.exists() {
+        return;
+    }
+
+    let client = reqwest::Client::new();
+    let mut reconciled = 0u32;
+
+    let entries = match std::fs::read_dir(characters_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let yaml_path = entry.path().join("character.yaml");
+        if !yaml_path.exists() {
+            continue;
+        }
+
+        let mut char_cfg = match CharacterConfig::from_file(&yaml_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // 只处理非当前、且 yaml 声称 alive 的角色
+        let Some(agent_id) = char_cfg.agent_id else {
+            continue;
+        };
+        if agent_id == current_agent_id || char_cfg.status != CharacterStatus::Alive {
+            continue;
+        }
+
+        // 查询 server 权威状态
+        let url = format!("{}/api/v1/agent/{}/context", server_http_url, agent_id);
+        let is_alive = match client
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                // 200 = agent 存在且 alive（该端点只返回 alive agent）
+                true
+            }
+            Ok(_) => {
+                // 404 或其他非成功 = agent 不存在或已死
+                false
+            }
+            Err(_) => {
+                // 网络错误，跳过（不修改 yaml）
+                continue;
+            }
+        };
+
+        if !is_alive {
+            char_cfg.status = CharacterStatus::Dead;
+            if let Err(e) = save_character_config_to_fs(&char_cfg, Path::new(characters_dir)) {
+                warn!("reconcile: 保存失败: {}", e);
+            } else {
+                info!("reconcile: {} ({}) 已更新为 dead", char_cfg.name, agent_id);
+                reconciled += 1;
+            }
+        }
+    }
+
+    if reconciled > 0 {
+        info!("reconcile: 共同步 {} 个旧角色状态", reconciled);
+    }
 }
