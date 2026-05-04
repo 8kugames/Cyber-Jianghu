@@ -49,7 +49,7 @@ use cyber_jianghu_agent::{
     },
     soul::actor::{CognitiveEngine, CognitiveEngineConfig},
 };
-use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
+use cyber_jianghu_protocol::{EraSettings, Intent, ServerMessage, WorldBuildingRules, WorldState};
 
 // ============================================================================
 // CLI 定义
@@ -544,6 +544,7 @@ fn create_llm_client(
         RuntimeMode::Cognitive => Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
             &config.llm,
             config.llm.enable_streaming,
+            Some(config.earth_soul.clone()),
         )?),
         RuntimeMode::Claw => {
             let upstream_tx = shared_state
@@ -983,7 +984,21 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .with_decision_chain(decision_with_chain)
         .with_decision_memory(decision_with_memory)
         .with_llm_container(llm_container.clone())
-        .with_llm_client(llm_client.clone(), None)
+        .with_llm_client(
+            llm_client.clone(),
+            Some(WorldBuildingRules {
+                version: String::new(),
+                era: EraSettings {
+                    name: String::new(),
+                    tech_level: String::new(),
+                    social_structure: String::new(),
+                },
+                allowed_concepts: Vec::new(),
+                forbidden_concepts: Vec::new(),
+                narrative_rules: String::new(),
+                last_updated: String::new(),
+            }),
+        )
         .with_http_api_state(api_state.clone())
         .with_reconnect_rx(reconnect_rx)
         .cognitive_engine(cognitive_engine.clone());

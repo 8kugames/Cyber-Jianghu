@@ -59,179 +59,7 @@ pub struct NarrativeConfig {
     pub status_effects: HashMap<String, StatusEffectConfig>,
 }
 
-impl Default for NarrativeConfig {
-    fn default() -> Self {
-        Self::builtin()
-    }
-}
-
 impl NarrativeConfig {
-    /// 创建内置的默认配置（当无法加载外部配置时使用）
-    pub fn builtin() -> Self {
-        let mut attributes = HashMap::new();
-
-        // HP 叙事配置
-        attributes.insert(
-            "hp".to_string(),
-            NarrativeAttributeConfig {
-                name: "hp".to_string(),
-                display_name: "生命值".to_string(),
-                thresholds: vec![
-                    NarrativeThreshold {
-                        min: 90,
-                        max: 100,
-                        description: "身体状况极佳，精力充沛".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 70,
-                        max: 89,
-                        description: "身体状态良好，虽有轻微疲惫".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 50,
-                        max: 69,
-                        description: "身体状况一般，能感受到明显疲劳".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 30,
-                        max: 49,
-                        description: "身体虚弱，伤痛明显".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 10,
-                        max: 29,
-                        description: "身受重伤，意识模糊".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 0,
-                        max: 9,
-                        description: "生命垂危".to_string(),
-                    },
-                ],
-                note: None,
-            },
-        );
-
-        // 饥饿叙事配置
-        attributes.insert(
-            "hunger".to_string(),
-            NarrativeAttributeConfig {
-                name: "hunger".to_string(),
-                display_name: "饥饿".to_string(),
-                thresholds: vec![
-                    NarrativeThreshold {
-                        min: 80,
-                        max: 100,
-                        description: "肚子很饱，完全没有饥饿感".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 60,
-                        max: 79,
-                        description: "肚子还算饱，暂时不需要进食".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 40,
-                        max: 59,
-                        description: "肚子有些饿了，该考虑找东西吃".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 20,
-                        max: 39,
-                        description: "肚子很饿，饥肠辘辘".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 0,
-                        max: 19,
-                        description: "饥饿难耐，已饿得头昏眼花".to_string(),
-                    },
-                ],
-                note: Some("值越高表示越饱".to_string()),
-            },
-        );
-
-        // 口渴叙事配置
-        attributes.insert(
-            "thirst".to_string(),
-            NarrativeAttributeConfig {
-                name: "thirst".to_string(),
-                display_name: "口渴".to_string(),
-                thresholds: vec![
-                    NarrativeThreshold {
-                        min: 80,
-                        max: 100,
-                        description: "完全不渴".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 60,
-                        max: 79,
-                        description: "略有口渴".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 40,
-                        max: 59,
-                        description: "口渴明显".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 20,
-                        max: 39,
-                        description: "非常口渴".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 0,
-                        max: 19,
-                        description: "渴得难以忍受".to_string(),
-                    },
-                ],
-                note: Some("值越高表示越不渴".to_string()),
-            },
-        );
-
-        // 体力叙事配置
-        attributes.insert(
-            "stamina".to_string(),
-            NarrativeAttributeConfig {
-                name: "stamina".to_string(),
-                display_name: "体力".to_string(),
-                thresholds: vec![
-                    NarrativeThreshold {
-                        min: 80,
-                        max: 100,
-                        description: "体力充沛，精力旺盛".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 60,
-                        max: 79,
-                        description: "体力尚可，虽有些疲惫".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 40,
-                        max: 59,
-                        description: "体力有些不支".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 20,
-                        max: 39,
-                        description: "精疲力竭".to_string(),
-                    },
-                    NarrativeThreshold {
-                        min: 0,
-                        max: 19,
-                        description: "体力耗尽".to_string(),
-                    },
-                ],
-                note: None,
-            },
-        );
-
-        NarrativeConfig {
-            version: "0.0.1-builtin".to_string(),
-            description: "内置默认叙事配置".to_string(),
-            attribute_categories: HashMap::new(),
-            attributes,
-            status_effects: HashMap::new(),
-        }
-    }
-
     /// 根据属性值获取叙事描述
     pub fn get_description(&self, attr_name: &str, value: i32) -> Option<&str> {
         self.attributes.get(attr_name).and_then(|config| {
@@ -392,17 +220,69 @@ pub struct NarrativeContext {
 mod tests {
     use super::*;
 
+    fn make_test_narrative_config() -> NarrativeConfig {
+        let mut attributes = HashMap::new();
+        attributes.insert(
+            "hp".to_string(),
+            NarrativeAttributeConfig {
+                name: "hp".to_string(),
+                display_name: "生命值".to_string(),
+                thresholds: vec![
+                    NarrativeThreshold {
+                        min: 90,
+                        max: 100,
+                        description: "身体状况极佳".to_string(),
+                    },
+                    NarrativeThreshold {
+                        min: 50,
+                        max: 89,
+                        description: "身体状况一般".to_string(),
+                    },
+                ],
+                note: None,
+            },
+        );
+        attributes.insert(
+            "hunger".to_string(),
+            NarrativeAttributeConfig {
+                name: "hunger".to_string(),
+                display_name: "饥饿".to_string(),
+                thresholds: vec![
+                    NarrativeThreshold {
+                        min: 80,
+                        max: 100,
+                        description: "肚子很饱".to_string(),
+                    },
+                    NarrativeThreshold {
+                        min: 0,
+                        max: 79,
+                        description: "有些饿".to_string(),
+                    },
+                ],
+                note: None,
+            },
+        );
+        NarrativeConfig {
+            version: "0.0.1-test".to_string(),
+            description: "测试配置".to_string(),
+            attribute_categories: HashMap::new(),
+            attributes,
+            status_effects: HashMap::new(),
+        }
+    }
+
     #[test]
-    fn test_narrative_config_builtin() {
-        let config = NarrativeConfig::builtin();
-        assert!(!config.attributes.is_empty());
-        assert!(config.attributes.contains_key("hp"));
-        assert!(config.attributes.contains_key("hunger"));
+    fn test_narrative_config_serde() {
+        let config = make_test_narrative_config();
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: NarrativeConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.version, "0.0.1-test");
+        assert!(parsed.attributes.contains_key("hp"));
     }
 
     #[test]
     fn test_get_description() {
-        let config = NarrativeConfig::builtin();
+        let config = make_test_narrative_config();
         let desc = config.get_description("hp", 95);
         assert!(desc.is_some());
         assert!(desc.unwrap().contains("极佳"));
@@ -414,17 +294,9 @@ mod tests {
 
     #[test]
     fn test_get_display_name() {
-        let config = NarrativeConfig::builtin();
+        let config = make_test_narrative_config();
         assert_eq!(config.get_display_name("hp"), Some("生命值"));
         assert_eq!(config.get_display_name("hunger"), Some("饥饿"));
-    }
-
-    #[test]
-    fn test_serde_roundtrip() {
-        let config = NarrativeConfig::builtin();
-        let json = serde_json::to_string(&config).unwrap();
-        let parsed: NarrativeConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(config, parsed);
     }
 
     // --- AgentRecognition 容错反序列化测试 ---

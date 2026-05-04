@@ -649,9 +649,20 @@ mod tests {
 
     #[test]
     fn test_server_message_world_building_rules_update() {
-        use crate::types::WorldBuildingRules;
+        use crate::types::{EraSettings, WorldBuildingRules};
 
-        let rules = WorldBuildingRules::default();
+        let rules = WorldBuildingRules {
+            version: "0.0.1-test".to_string(),
+            era: EraSettings {
+                name: "测试世界".to_string(),
+                tech_level: "测试".to_string(),
+                social_structure: "测试".to_string(),
+            },
+            allowed_concepts: vec!["内力".to_string()],
+            forbidden_concepts: vec!["魔法".to_string()],
+            narrative_rules: "测试叙事规则".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+        };
         let msg = ServerMessage::ConfigUpdate {
             config_type: "world_building_rules".to_string(),
             update_type: "full".to_string(),
@@ -665,12 +676,12 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["type"], "config_update");
         assert_eq!(parsed["config_type"], "world_building_rules");
-        assert_eq!(parsed["version"], "0.0.1");
+        assert_eq!(parsed["version"], "0.0.1-test");
     }
 
     #[test]
     fn test_server_message_registered_with_world_building_rules() {
-        use crate::types::WorldBuildingRules;
+        use crate::types::{EraSettings, WorldBuildingRules};
 
         let agent_id = Uuid::nil();
         let game_rules = GameRules {
@@ -689,7 +700,18 @@ mod tests {
             calendar: None,
             daily_summary: None,
         };
-        let world_rules = WorldBuildingRules::default();
+        let world_rules = WorldBuildingRules {
+            version: "0.0.1-test".to_string(),
+            era: EraSettings {
+                name: "测试世界".to_string(),
+                tech_level: "测试".to_string(),
+                social_structure: "测试".to_string(),
+            },
+            allowed_concepts: vec!["内力".to_string()],
+            forbidden_concepts: vec!["魔法".to_string()],
+            narrative_rules: "测试叙事规则".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+        };
 
         let msg = ServerMessage::Registered {
             agent_id,
