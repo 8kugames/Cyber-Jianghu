@@ -75,7 +75,15 @@ pub fn build_game_rules_from_config(
     let mut llm_validation = intent_batch
         .as_ref()
         .map(|ib| ib.llm_validation.clone())
-        .unwrap_or_default();
+        .unwrap_or_else(|| cyber_jianghu_protocol::GradedValidationConfig {
+            always_types: Vec::new(),
+            adaptive_types: Vec::new(),
+            skip_types: Vec::new(),
+            minimum_per_tick: 1,
+            restricted_area_keywords: Vec::new(),
+            high_value_item_keywords: Vec::new(),
+            adaptive_field_mapping: std::collections::HashMap::new(),
+        });
 
     llm_validation.always_types = always_types;
     llm_validation.adaptive_types = adaptive_types;

@@ -143,12 +143,27 @@ mod tests {
         assert_eq!(sanitized.len(), 500);
     }
 
+    fn test_world_building_rules() -> cyber_jianghu_protocol::WorldBuildingRules {
+        cyber_jianghu_protocol::WorldBuildingRules {
+            version: "0.0.1-test".to_string(),
+            era: cyber_jianghu_protocol::EraSettings {
+                name: "武侠架空世界".to_string(),
+                tech_level: "冷兵器时代".to_string(),
+                social_structure: "封建帝制".to_string(),
+            },
+            allowed_concepts: vec!["内力".to_string()],
+            forbidden_concepts: vec!["魔法".to_string()],
+            narrative_rules: "测试".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn test_build_validation_prompt() {
         let prompt = ObserverPrompt::new();
         let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "休息", None);
         let persona = crate::soul::reflector::PersonaInfo::default();
-        let world_rules = cyber_jianghu_protocol::WorldBuildingRules::default();
+        let world_rules = test_world_building_rules();
         let world_context = "测试世界状态";
 
         let validation_prompt =
