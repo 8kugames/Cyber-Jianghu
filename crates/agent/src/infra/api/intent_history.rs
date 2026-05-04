@@ -99,11 +99,8 @@ impl IntentHistoryStore {
             )
             .context("Failed to add pipe_seq column")?;
             // 旧 PK 为 (tick_id)，需重建索引以支持 (tick_id, pipe_seq)
-            conn.execute(
-                "DROP INDEX IF EXISTS idx_intent_history_tick_id",
-                [],
-            )
-            .ok();
+            conn.execute("DROP INDEX IF EXISTS idx_intent_history_tick_id", [])
+                .ok();
             // SQLite 不支持 ALTER PK，但 CREATE TABLE IF NOT EXISTS 已确保新表有正确 PK
             // 旧表数据通过 DEFAULT 0 兼容
         }

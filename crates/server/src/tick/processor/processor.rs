@@ -87,10 +87,7 @@ impl StateProcessor {
             .validate_intent(intent, &agent_state, all_states)
             .await
         {
-            warn!(
-                "Intent 验证失败: agent={}, error={}",
-                intent.agent_id, e
-            );
+            warn!("Intent 验证失败: agent={}, error={}", intent.agent_id, e);
             execution_failed = true;
         }
 
