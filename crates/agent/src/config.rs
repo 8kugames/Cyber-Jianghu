@@ -834,6 +834,10 @@ pub struct Config {
     /// 默认 ~/.cyber-jianghu/servers/
     #[serde(default)]
     pub servers_dir: PathBuf,
+
+    /// 地魂（EarthSoul）配置 — tool result 预算 & 循环检测
+    #[serde(default)]
+    pub earth_soul: crate::soul::earth::config::EarthSoulConfig,
 }
 
 impl Config {
@@ -908,6 +912,7 @@ impl Config {
             server,
             runtime,
             claw: ClawConfig::default(),
+            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
             llm: LlmConfig::from_env(),
             llm_reflector: None,
             memory: MemoryConfig::default(),

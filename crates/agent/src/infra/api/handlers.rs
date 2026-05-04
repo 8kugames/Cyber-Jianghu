@@ -3834,6 +3834,7 @@ pub(super) async fn reload_config_handler(
                 match crate::component::llm::build_fallback_client(
                     &config.llm,
                     config.llm.enable_streaming,
+                    Some(config.earth_soul.clone()),
                 ) {
                     Ok(new_client) => {
                         *container.write().await = new_client;

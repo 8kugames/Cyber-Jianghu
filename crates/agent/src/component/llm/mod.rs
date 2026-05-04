@@ -30,6 +30,7 @@ use tracing::{info, warn};
 pub fn build_fallback_client(
     llm_config: &crate::config::LlmConfig,
     prefer_stream: bool,
+    earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 ) -> Result<Arc<dyn LlmClient>> {
     let mut llm_clients: Vec<Arc<dyn LlmClient>> = Vec::new();
 
@@ -44,6 +45,7 @@ pub fn build_fallback_client(
                 prefer_stream,
                 max_tokens,
                 enable_thinking,
+                earth_soul_config.clone(),
             ) {
                 Ok(client) => {
                     info!("模型 #{}: {} (max_tokens={})", i + 1, mc.model, max_tokens);
@@ -56,7 +58,12 @@ pub fn build_fallback_client(
         }
     } else {
         // 主模型（旧格式 fallback_models）
-        match build_direct_client(llm_config, llm_config.model.as_deref(), prefer_stream) {
+        match build_direct_client(
+            llm_config,
+            llm_config.model.as_deref(),
+            prefer_stream,
+            earth_soul_config.clone(),
+        ) {
             Ok(client) => {
                 info!(
                     "主模型: {}",
@@ -75,7 +82,12 @@ pub fn build_fallback_client(
 
         // Fallback 模型
         for (i, fallback_model) in llm_config.fallback_models.iter().enumerate() {
-            match build_direct_client(llm_config, Some(fallback_model.as_str()), prefer_stream) {
+            match build_direct_client(
+                llm_config,
+                Some(fallback_model.as_str()),
+                prefer_stream,
+                earth_soul_config.clone(),
+            ) {
                 Ok(client) => {
                     info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
                     llm_clients.push(Arc::new(client));
@@ -112,6 +124,7 @@ fn build_direct_client(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
     prefer_stream: bool,
+    earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 ) -> Result<DirectLlmClient> {
     build_direct_client_with_max_tokens(
         llm_config,
@@ -119,6 +132,7 @@ fn build_direct_client(
         prefer_stream,
         llm_config.max_tokens,
         llm_config.enable_thinking,
+        earth_soul_config,
     )
 }
 
@@ -129,6 +143,7 @@ fn build_direct_client_with_max_tokens(
     prefer_stream: bool,
     max_tokens: u32,
     enable_thinking: Option<bool>,
+    earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
@@ -147,5 +162,9 @@ fn build_direct_client_with_max_tokens(
         .with_max_tokens(max_tokens)
         .with_enable_thinking(enable_thinking);
 
-    DirectLlmClient::new(client_config)
+    let mut client = DirectLlmClient::new(client_config)?;
+    if let Some(esc) = earth_soul_config {
+        client = client.with_earth_soul_config(esc);
+    }
+    Ok(client)
 }
