@@ -17,8 +17,25 @@
 - **Agent**: rebirth 恢复时重新 open RelationshipStore（新 agent_id → 新 DB 文件），同步更新 CognitiveEngine 内部引用
 - **Agent**: `max_tool_rounds` 外部化到 `prompt_templates.yaml` 的 `llm_parameters` 段，消除硬编码
 
+### Added — 数据驱动重构
+
+- **Agent**: EarthSoul tool calling 安全机制 (F1/F2/F3)
+  - F1 ToolResultBudget: per-tool + aggregate 字配额，`.chars().count()` 统一 Unicode 安全截断
+  - F2 LoopGuard: 连续调用检测，Warn→Terminate 升级机制
+  - F3 Error Signaling: 工具执行错误格式化为 `[工具调用失败] 工具: X | 原因: Y`
+  - `EarthSoulConfig` 配置驱动，`#[serde(default)]` 向后兼容，`enabled: true` 默认启用
+  - `validate()` Fail Fast 校验，启动路径 + 热重载路径均调用
+- **Agent**: `IntentBatchConfig` 配置外部化 — `max_intents_per_tick` / `max_retries` / `pipeline_execution_enabled` 从 `game_rules.yaml` 读取，消除硬编码魔法数字
+- **Agent**: EarthSoul `validate()` 启动时 + 热重载时 Fail Fast 校验，非法配置立即拒绝
+
+### Changed — 数据驱动重构
+
+- **[BREAKING] Protocol**: 移除 `IntentBatchConfig::default()` 硬编码默认值，改为从 Server 配置下发。旧 Agent 未收到配置时使用编译期 fallback（不再独立决定批次参数）
+- **[BREAKING] Server**: processor pipeline 展平记录 — 移除嵌套 `Vec<Vec<...>>`，audit log 直接记录扁平 Intent 执行结果
+
 ### Fixed
 
+- **Agent**: 移除 `display_messages` 残留死代码（未使用函数 + 未使用 import）
 - **Agent**: skill_view tool description 加强 skill_id 选择指引，引导 LLM 从已掌握技能列表选择
 - **Server**: auto-rebirth handler 清理 agent_to_device_map 旧映射 + DashMap 旧缓存，防止幽灵映射
 - **Agent**: 地魂工具池扩展至 6 个工具（3 个新增关系工具）
