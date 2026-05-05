@@ -20,7 +20,10 @@ mod mutator;
 #[allow(clippy::module_inception)]
 mod processor;
 mod resolver;
+mod skill_mutator;
 
 // 导出公共API
 #[allow(unused_imports)]
 pub use processor::{SingleProcessingResult, StateProcessor};
+#[allow(unused_imports)]
+pub use skill_mutator::SkillMutator;
