@@ -234,11 +234,17 @@ pub enum StateChange {
         new_location: String,
     },
 
-    /// 技能习得
+    /// LLM 行为指令注入（SKILL.md）
+    ///
+    /// 将 skill_id 注册到 AgentState.skills，使 Agent 在后续 prompt 构建时
+    /// 读取对应 SKILL.md 文件并注入 LLM 上下文。
+    ///
+    /// 注意：这不是 RPG 技能学习，不产生任何数值属性变更。
+    /// 详见 tick/processor/skill_mutator.rs 头部注释。
     SkillLearned {
         /// Agent ID
         agent_id: Uuid,
-        /// 技能 ID（如 martial/sword-basic）
+        /// SKILL.md 的 ID（如 social/bargaining, martial/sword-basic）
         skill_id: String,
     },
 

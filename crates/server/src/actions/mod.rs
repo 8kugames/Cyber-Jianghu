@@ -133,12 +133,6 @@ pub struct CraftData {
     pub recipe_id: String,
 }
 
-/// practice 动作数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PracticeData {
-    pub skill_id: String,
-}
-
 /// attack 动作数据
 ///
 /// 攻击目标 Agent

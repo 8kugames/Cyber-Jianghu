@@ -75,7 +75,12 @@ pub struct AgentState {
     /// 本Tick内是否已清空过背包（防止重复清空）
     pub inventory_cleared_this_tick: bool,
 
-    /// 已掌握的技能 ID 列表
+    /// 已掌握的 LLM 行为指令 ID 列表（对应 SKILL.md 文件）
+    ///
+    /// 持久化到 DB 的 JSONB attributes._skills 字段。
+    /// 通过 WorldState.skills 下发给 Agent，Agent 据此加载对应 SKILL.md 到 prompt。
+    /// 不是 RPG 技能列表，无任何数值属性关联。
+    /// 详见 tick/processor/skill_mutator.rs。
     #[serde(default)]
     pub skills: Vec<String>,
 

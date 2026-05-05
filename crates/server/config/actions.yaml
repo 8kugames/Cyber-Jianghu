@@ -423,12 +423,7 @@ data:
     description: "通过修炼提升内力上限。消耗体力，永久提升内力（qi）上限值。"
     category: martial
     ooc_risk: low
-    skill_progress: 5
-    validation:
-      required_fields:
-        - skill_id
-      field_aliases:
-        skill_id: ["技能ID", "功法", "技能", "skill"]
+    validation: {}
     requirements:
       - requirement_type: attribute
         attribute: stamina

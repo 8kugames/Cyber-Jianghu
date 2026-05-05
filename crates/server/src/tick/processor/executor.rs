@@ -683,7 +683,7 @@ pub async fn apply_state_change(
             }
         }
         // AttributeChanged, HpChanged 由 AttributeMutator 处理
-        // SkillLearned 由 SkillMutator 处理
+        // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入，非 RPG 技能）
         StateChange::SkillLearned { .. } => true,
         _ => true,
     }

@@ -129,54 +129,69 @@ pub struct LifespanRules {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntentBatchConfig {
     /// 每 tick 最大 Intent 数
+    #[serde(default = "default_max_intents_per_tick")]
     pub max_intents_per_tick: usize,
 
     /// 三魂循环最大重试次数
+    #[serde(default = "default_max_retries")]
     pub max_retries: i32,
 
     /// 是否启用 Pipeline 执行
+    #[serde(default = "default_true")]
     pub pipeline_execution_enabled: bool,
 
     /// 是否允许部分执行
+    #[serde(default = "default_true")]
     pub partial_execution_enabled: bool,
 
     /// 分级审核配置
+    #[serde(default)]
     pub llm_validation: GradedValidationConfig,
 
     /// LLM 连续失败多少 tick 后激活 chaos 模式
+    #[serde(default = "default_llm_chaos_threshold")]
     pub llm_chaos_threshold: u32,
 }
 
+fn default_max_intents_per_tick() -> usize { 5 }
+fn default_max_retries() -> i32 { 12 }
+fn default_true() -> bool { true }
+fn default_llm_chaos_threshold() -> u32 { 12 }
+
 /// 分级审核配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GradedValidationConfig {
-    /// 强制 LLM 审核的 action_type（speak/shout/whisper 等）
+    /// 强制 LLM 审核的 action_type（由 ooc_risk=high 动态生成，不从 YAML 读取）
+    #[serde(default)]
     pub always_types: Vec<String>,
 
-    /// 动态审核的 action_type（根据 action_data 判断）
+    /// 动态审核的 action_type（由 ooc_risk=medium 动态生成）
+    #[serde(default)]
     pub adaptive_types: Vec<String>,
 
-    /// 跳过 LLM 审核的 action_type
+    /// 跳过 LLM 审核的 action_type（由 ooc_risk=low/其他 动态生成）
+    #[serde(default)]
     pub skip_types: Vec<String>,
 
     /// 每 tick 至少审核的 Intent 数量
+    #[serde(default = "default_minimum_per_tick")]
     pub minimum_per_tick: usize,
 
     /// 限制区域 node_id 前缀/关键词（move 审核用）
+    #[serde(default)]
     pub restricted_area_keywords: Vec<String>,
 
     /// 高价值物品 item_id 前缀/关键词（trade/steal/give 审核用）
+    #[serde(default)]
     pub high_value_item_keywords: Vec<String>,
 
     /// Adaptive 审核字段映射（数据驱动）
-    ///
-    /// 格式: { "action_type": "action_data_field_name" }
-    /// 例如: { "移动": "target_location", "偷窃": "item_id", "给予": "item_id" }
-    /// 当 action_type 在此映射中时，检查对应字段的值是否匹配对应的关键词列表：
-    /// - "target_location" → 检查 restricted_area_keywords
-    /// - "item_id" → 检查 high_value_item_keywords
-    /// - 其他字段 → 默认需要 LLM 审核
+    #[serde(default)]
     pub adaptive_field_mapping: std::collections::HashMap<String, String>,
+}
+
+fn default_minimum_per_tick() -> usize {
+    1
 }
 
 // ============================================================================

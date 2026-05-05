@@ -12,5 +12,5 @@ DROP INDEX IF EXISTS idx_agent_action_logs_agent_tick_unique;
 ALTER TABLE agent_action_logs ADD COLUMN IF NOT EXISTS pipe_seq INTEGER NOT NULL DEFAULT 0;
 
 -- 新 UNIQUE 约束：(agent_id, tick_id, pipe_seq)
-CREATE UNIQUE INDEX idx_agent_action_logs_agent_tick_pipeseq_unique
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_action_logs_agent_tick_pipeseq_unique
 ON agent_action_logs (agent_id, tick_id, pipe_seq);
