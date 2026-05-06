@@ -254,7 +254,7 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
       '<div class="tick-section"><div class="tick-section-title">行动</div>';
     attempts.forEach((a, idx) => {
       if (attempts.length > 1) {
-        html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+        html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
       }
       html += renderSoulInline("人魂", a.renhun, "renhun");
       html += renderSoulInline("天魂", a.tianhun, "tianhun");
@@ -417,6 +417,16 @@ async function loadCharacterIntoDrawer(char) {
                 <div class="drawer-section-title">性格与价值观</div>
                 ${charData.personality && charData.personality.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.personality.map((p) => `<span class="info-tag">${escapeHtml(p)}</span>`).join("")}</div>` : ""}
                 ${charData.values && charData.values.length > 0 ? `<div class="tag-list" style="margin-top: 8px;">${charData.values.map((v) => `<span class="info-tag">${escapeHtml(v)}</span>`).join("")}</div>` : ""}
+            </section>
+        `;
+  }
+
+  // 已掌握技能
+  if (charData.skills && charData.skills.length > 0) {
+    html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">已习得技能</div>
+                <div class="tag-list" style="margin-top: 8px;">${charData.skills.map((s) => `<span class="info-tag skill-tag" title="${escapeHtml(s.skill_id)}">${escapeHtml(s.name)}</span>`).join("")}</div>
             </section>
         `;
   }
@@ -953,7 +963,7 @@ async function loadExperiences(page = 1) {
 
         attempts.forEach((a, idx) => {
           if (attempts.length > 1) {
-            html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+            html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
           }
 
           // 人魂：感知与思考

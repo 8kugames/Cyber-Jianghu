@@ -38,6 +38,8 @@ pub struct MemoryManagerConfig {
     pub episodic_threshold: f32,
     /// 艾宾浩斯配置
     pub ebbinghaus_config: EbbinghausConfig,
+    /// 叙事合成最小事件数（触发 LLM 调用的最低事件数）
+    pub narrative_min_events: usize,
 }
 
 impl Default for MemoryManagerConfig {
@@ -48,6 +50,7 @@ impl Default for MemoryManagerConfig {
             working_memory_size: 20,
             episodic_threshold: 0.5,
             ebbinghaus_config: EbbinghausConfig::default(),
+            narrative_min_events: 1,
         }
     }
 }
@@ -115,42 +118,86 @@ impl MemoryManager {
     }
 
     /// 处理世界事件
-    pub async fn process_events(&mut self, events: &[WorldEvent]) -> Result<()> {
-        for event in events {
-            // 计算重要性评分
-            let importance =
-                self.scorer
-                    .score(&event.event_type, &event.description, &event.metadata);
+    ///
+    /// - 所有事件写入工作记忆（始终执行，与叙事合成解耦）
+    /// - 高重要性事件（≥ episodic_threshold）经 LLM 叙事合成后写入情景记忆
+    /// - cognitive_engine 可选（不可用时降级为原始描述拼接）
+    pub async fn process_events(
+        &mut self,
+        events: &[WorldEvent],
+        cognitive_engine: Option<&crate::soul::actor::CognitiveEngine>,
+    ) -> Result<()> {
+        // 1. 计算每个事件的 importance_score（owned WorldEvent 用于后续合成）
+        let scored: Vec<(f32, WorldEvent)> = events
+            .iter()
+            .map(|e| {
+                let score = self.scorer.score(&e.event_type, &e.description, &e.metadata);
+                (score, e.clone())
+            })
+            .collect();
 
-            // 创建记忆条目
+        // 2. 所有事件写入工作记忆
+        for (importance, event) in &scored {
             let mut entry = MemoryEntry::new(
                 self.config.agent_id,
                 event.tick_id,
                 event.description.clone(),
             )
             .with_event_type(event.event_type.to_string())
-            .with_importance(importance)
+            .with_importance(*importance)
             .with_metadata(event.metadata.clone());
 
-            // 添加到工作记忆
             self.working.add(&mut entry).await?;
+        }
 
-            // 添加到情景记忆（会根据阈值过滤），成功后 entry.id 会被设置
+        // 3. 高重要性事件：叙事合成写入情景记忆
+        let significant: Vec<WorldEvent> = scored
+            .into_iter()
+            .filter(|(importance, _)| *importance >= self.config.episodic_threshold)
+            .map(|(_, e)| e)
+            .collect();
+
+        if significant.len() >= self.config.narrative_min_events {
+            let narrative = if let Some(engine) = cognitive_engine {
+                let summary = engine.get_summary_context();
+                let outcome = engine.get_outcome_context_public();
+                engine
+                    .synthesize_memory_narrative(&significant, &summary, &outcome)
+                    .await
+            } else {
+                // cognitive_engine 不可用时：显式警告 + 降级拼接
+                tracing::warn!(
+                    "Memory narrative synthesis skipped: cognitive_engine unavailable (agent_id={}, events={})",
+                    self.config.agent_id,
+                    significant.len()
+                );
+                significant
+                    .iter()
+                    .map(|e| e.description.clone())
+                    .collect::<Vec<_>>()
+                    .join("；")
+            };
+
+            let mut entry = MemoryEntry::new(
+                self.config.agent_id,
+                significant[0].tick_id,
+                narrative,
+            )
+            .with_importance(1.0)
+            .with_event_type("synthesized_memory".to_string());
+
             let episodic_id = self.episodic.add(&mut entry).await?;
-
-            // 添加到语义记忆（使用 episodic 设置的 ID 生成 embedding）
-            #[allow(clippy::collapsible_if)]
-            if episodic_id > 0 {
-                if let Some(ref semantic) = self.semantic {
-                    match semantic.lock().await.add(&mut entry).await {
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!(
-                                "SemanticMemory::add() failed for tick {}: {}, embedding not stored",
-                                event.tick_id,
-                                e
-                            );
-                        }
+            if episodic_id > 0
+                && let Some(ref semantic) = self.semantic
+            {
+                match semantic.lock().await.add(&mut entry).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            "SemanticMemory::add() failed for tick {}: {}, embedding not stored",
+                            significant[0].tick_id,
+                            e
+                        );
                     }
                 }
             }
@@ -398,7 +445,7 @@ mod tests {
             },
         ];
 
-        manager.process_events(&events).await.unwrap();
+        manager.process_events(&events, None).await.unwrap();
 
         let stats = manager.stats().await;
         assert_eq!(stats.working_count, 2);
@@ -423,7 +470,7 @@ mod tests {
             metadata: json!({}),
         }];
 
-        manager.process_events(&events).await.unwrap();
+        manager.process_events(&events, None).await.unwrap();
 
         let context = manager.build_llm_context().await;
         assert!(context.contains("你吃了馒头"));

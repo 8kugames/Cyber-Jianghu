@@ -67,6 +67,15 @@ pub(crate) struct DirectCognitiveAction {
     pub action_data: Option<serde_json::Value>,
 }
 
+/// 记忆叙事合成响应
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct MemoryNarrativeResponse {
+    narrative: String,
+}
+
+/// 失败降级文本（用户指定，一字不差）
+const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
+
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
 ///
 /// 支持两种 LLM 输出格式（向后兼容）：
@@ -1117,6 +1126,100 @@ impl CognitiveEngine {
             .as_ref()
             .map(|m| m.to_prompt_context())
             .unwrap_or_default()
+    }
+
+    /// 记忆叙事合成（人魂处理）
+    ///
+    /// 每 Tick 最多调用一次，将高重要性事件批量合成叙事。
+    /// 失败时返回降级文本，不丢弃记忆。
+    ///
+    /// # Arguments
+    /// * `events` - 高重要性事件（已按 importance_score 过滤）
+    /// * `summary_context` - 前X回合行动摘要（来自 NarrativeSummaryWindow）
+    /// * `outcome_context` - 行动结果学习（来自 OutcomeMemory）
+    ///
+    /// # Returns
+    /// 叙事化文本（10-200字），或失败降级文本
+    pub async fn synthesize_memory_narrative(
+        &self,
+        events: &[cyber_jianghu_protocol::WorldEvent],
+        summary_context: &str,
+        outcome_context: &str,
+    ) -> String {
+        // 1. 获取配置（从 prompt_templates.yaml 的 memory_narrative section）
+        let config = match self.prompt_template.get_memory_narrative_config() {
+            Some(c) => c,
+            None => {
+                tracing::warn!("记忆叙事合成配置缺失，降级");
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 2. 限制输入事件数
+        let events_to_process = events.iter().take(config.max_events_per_tick);
+        let events_list = events_to_process
+            .map(|e| format!("- [{}] {}", e.event_type, e.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // 3. 构建 prompt
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("events_list".to_string(), events_list);
+        vars.insert(
+            "summary_context".to_string(),
+            if summary_context.is_empty() {
+                "无近期行动记录".to_string()
+            } else {
+                summary_context.to_string()
+            },
+        );
+        vars.insert(
+            "outcome_context".to_string(),
+            if outcome_context.is_empty() {
+                "无行动结果学习".to_string()
+            } else {
+                outcome_context.to_string()
+            },
+        );
+        vars.insert(
+            "max_narrative_len".to_string(),
+            config.max_narrative_len.to_string(),
+        );
+
+        let prompt = match self.prompt_template.render_memory_narrative(&vars) {
+            Some(p) => p,
+            None => {
+                tracing::warn!("记忆叙事合成 prompt 渲染失败，降级");
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 4. 调用 LLM
+        let response: MemoryNarrativeResponse = match self.llm_client.complete_json(&prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("记忆叙事合成 LLM 调用失败: {}，降级", e);
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 5. 验证输出
+        let narrative = response.narrative.trim().to_string();
+        if narrative.len() < config.min_narrative_len {
+            tracing::warn!(
+                "记忆叙事合成输出过短 ({} < {})，降级",
+                narrative.len(),
+                config.min_narrative_len
+            );
+            return FALLBACK_NARRATIVE.to_string();
+        }
+
+        // 6. 截断超长输出
+        if narrative.len() > config.max_narrative_len {
+            return narrative.chars().take(config.max_narrative_len).collect();
+        }
+
+        narrative
     }
 
     /// 获取 action descriptions 和 field hints（公开接口）

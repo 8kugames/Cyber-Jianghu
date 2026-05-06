@@ -174,3 +174,33 @@ templates:
         移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 移动，目标地点 必须是上述之一。
     truncation:
       max_items: 5
+
+  # 记忆叙事合成配置（data-driven）
+  # 复用 episodic_threshold 作为触发阈值（避免双重魔法数字）
+  memory_narrative:
+    min_events: 1
+    max_events_per_tick: 10
+    max_narrative_len: 200
+    min_narrative_len: 10
+    temperature: 0.3
+    prompt: |
+      ## 任务
+      将以下原始事件转换为叙事性记忆描述。
+
+      ## 原始事件
+      {events_list}
+
+      ## 近期行动背景
+      {summary_context}
+      {outcome_context}
+
+      ## 要求
+      1. 合并同类事件（如连续多次"使用了X"合并为"多次使用X"）
+      2. 补全主语（根据上下文推断"你"指代的具体行为主体）
+      3. 用自然语言描述，不要罗列日志条目
+      4. 体现事件的意义而非事实本身
+      5. 字数控制在 {max_narrative_len} 字以内
+      6. 只描述值得长期记忆的事件，无意义重复直接忽略
+
+      ## 输出格式
+      {"narrative": "..."}

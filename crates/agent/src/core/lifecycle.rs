@@ -496,8 +496,10 @@ impl super::Agent {
                                         self.relationship_store = Some(new_store.clone());
                                         // 同步更新 CognitiveEngine 内部引用
                                         if let Some(ref engine) = self.cognitive_engine {
-                                            engine.set_relationship_store(new_store);
+                                            engine.set_relationship_store(new_store.clone());
                                         }
+                                        // 同步更新 HttpApiState 引用
+                                        *api_state.relationship_store.write().unwrap() = Some(Arc::new(new_store));
                                         info!("转世重生: RelationshipStore 已重初始化 (new_id={})", new_id);
                                     }
                                     Err(e) => {
@@ -919,13 +921,19 @@ impl super::Agent {
                     };
                     if !immediate_events.is_empty() {
                         debug!("消费 {} 个即时事件到工作记忆", immediate_events.len());
-                        if let Err(e) = self.process_events(&immediate_events).await {
+                        // 即时事件不经过叙事合成（直接工作记忆）
+                        if let Err(e) = self.process_events(&immediate_events, None).await {
                             warn!("即时事件写入记忆失败: {}", e);
                         }
                     }
 
-                    // 2. 处理事件并更新记忆
-                    if let Err(e) = self.process_events(&world_state.events_log).await {
+                    // 2. 处理事件并更新记忆（叙事合成）
+                    // 先 clone Arc 让 borrow 立即结束，避免与后续的 &mut self 冲突
+                    let cognitive_engine_ref = self.cognitive_engine.as_ref().cloned();
+                    if let Err(e) = self
+                        .process_events(&world_state.events_log, cognitive_engine_ref.as_deref())
+                        .await
+                    {
                         warn!("Failed to process events into memory: {}", e);
                     }
 

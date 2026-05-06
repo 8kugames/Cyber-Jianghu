@@ -99,6 +99,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
         Ok(Self {
             id: row.try_get("id")?,
             agent_id: row.try_get("agent_id")?,
+            name: row.try_get("name").unwrap_or_default(),
             tick_id: row.try_get("tick_id")?,
             primary_attributes,
             status,

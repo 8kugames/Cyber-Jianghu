@@ -23,6 +23,9 @@ pub struct PromptTemplateConfig {
     #[serde(default)]
     pub description: String,
     pub templates: HashMap<String, TemplateDef>,
+    /// 记忆叙事合成配置（独立于 templates，非标准模板结构）
+    #[serde(default)]
+    pub memory_narrative: Option<MemoryNarrativeConfig>,
 }
 
 /// 单个模板定义
@@ -99,6 +102,49 @@ impl PromptTemplateConfig {
             .copied()
             .unwrap_or(default)
     }
+
+    /// 获取记忆叙事合成配置
+    pub fn get_memory_narrative_config(&self) -> Option<&MemoryNarrativeConfig> {
+        self.memory_narrative.as_ref()
+    }
+
+    /// 渲染记忆叙事合成 prompt
+    pub fn render_memory_narrative(
+        &self,
+        vars: &HashMap<String, String>,
+    ) -> Option<String> {
+        let config = self.get_memory_narrative_config()?;
+        let template = config.prompt.trim();
+        let mut result = template.to_string();
+        for (key, value) in vars {
+            result = result.replace(&format!("{{{}}}", key), value);
+        }
+        Some(result)
+    }
+}
+
+/// 记忆叙事合成配置
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryNarrativeConfig {
+    pub min_events: usize,
+    #[serde(default = "default_max_events_per_tick")]
+    pub max_events_per_tick: usize,
+    pub max_narrative_len: usize,
+    #[serde(default = "default_min_narrative_len")]
+    pub min_narrative_len: usize,
+    #[serde(default = "default_temperature")]
+    pub temperature: f32,
+    pub prompt: String,
+}
+
+fn default_max_events_per_tick() -> usize {
+    10
+}
+fn default_min_narrative_len() -> usize {
+    10
+}
+fn default_temperature() -> f32 {
+    0.3
 }
 
 impl TemplateDef {
