@@ -14,7 +14,6 @@ use crate::component::social::RelationshipStore;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 /// 地魂工具执行器的依赖上下文
@@ -22,7 +21,6 @@ use std::sync::Arc;
 /// 统一构造参数。新增依赖只需加字段，调用方无需改签名。
 pub struct EarthToolContext {
     pub skill_cache: HashMap<String, String>,
-    pub config_dir: PathBuf,
     pub memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     pub relationship_store: Option<RelationshipStore>,
 }
@@ -30,7 +28,6 @@ pub struct EarthToolContext {
 /// 地魂复合工具执行器
 pub struct EarthToolExecutor {
     skill_cache: HashMap<String, String>,
-    config_dir: PathBuf,
     memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     relationship_store: Option<RelationshipStore>,
 }
@@ -40,7 +37,6 @@ impl EarthToolExecutor {
     pub fn from_context(ctx: EarthToolContext) -> Self {
         Self {
             skill_cache: ctx.skill_cache,
-            config_dir: ctx.config_dir,
             memory_manager: ctx.memory_manager,
             relationship_store: ctx.relationship_store,
         }
@@ -75,7 +71,6 @@ impl ToolExecutor for EarthToolExecutor {
                 Ok(super::skill_tool::execute_skill_view(
                     skill_id,
                     &self.skill_cache,
-                    &self.config_dir,
                 ))
             }
             "search_memory" => {
@@ -198,7 +193,6 @@ mod tests {
     fn test_from_context() {
         let ctx = EarthToolContext {
             skill_cache: HashMap::new(),
-            config_dir: PathBuf::from("/tmp"),
             memory_manager: None,
             relationship_store: None,
         };
@@ -212,7 +206,6 @@ mod tests {
         cache.insert("bargaining".to_string(), "讨价还价指引".to_string());
         let executor = EarthToolExecutor::from_context(EarthToolContext {
             skill_cache: cache,
-            config_dir: PathBuf::from("/tmp"),
             memory_manager: None,
             relationship_store: None,
         });
