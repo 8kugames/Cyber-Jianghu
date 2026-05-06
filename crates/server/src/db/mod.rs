@@ -67,6 +67,9 @@ pub use state_ops::{
 // 导出公共API - 涌现：跨 tick 动作观察
 pub use state_ops::get_recent_actions_batch;
 
+// 导出公共API - Agent 每日动作统计
+pub use state_ops::{AgentDailyActionStats, get_agent_daily_action_stats};
+
 // 导出公共API - 地面物品操作
 pub use ground_item_ops::{
     add_ground_item, get_ground_items_by_node, get_ground_items_by_nodes, remove_ground_item,

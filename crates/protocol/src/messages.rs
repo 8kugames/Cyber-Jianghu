@@ -12,6 +12,8 @@
 //! - [`DialogueMessage`] - Agent 间直接对话 (请求、接受、内容、结束)
 //! - [`DialogueSession`] - 服务端维护的对话会话状态
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -154,6 +156,9 @@ pub enum ServerMessage {
         version: String,
         /// 配置内容（JSON 格式）
         content: serde_json::Value,
+        /// SHA256 hex of canonical JSON（用于 skip-optimization）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_hash: Option<String>,
         /// 增量更新的项目 ID 列表（增量时有效）
         #[serde(default)]
         updated_items: Vec<String>,
@@ -234,6 +239,26 @@ pub enum ServerMessage {
         /// 状态变更摘要（如 "吃了馒头, 饱食度+20"）
         #[serde(skip_serializing_if = "Option::is_none")]
         state_change_summary: Option<String>,
+    },
+
+    /// 每日动作日志汇总（server → agent）
+    ///
+    /// 游戏日结束时 Server 主动推送给所有在线 Agent，
+    /// 内容聚合自 agent_action_logs，包含该 Agent 全日的动作统计。
+    /// Agent 收到后存入 episodic memory，供决策上下文使用。
+    DailySummaryData {
+        /// 所属游戏日
+        game_day: i64,
+        /// 动作类型统计（action_type → count）
+        action_counts: HashMap<String, i32>,
+        /// 地点变化历史
+        location_history: Vec<String>,
+        /// 成功动作数
+        success_count: i32,
+        /// 失败动作数
+        failure_count: i32,
+        /// 总动作数
+        total_actions: i32,
     },
 }
 
@@ -672,6 +697,7 @@ mod tests {
             update_type: "full".to_string(),
             version: rules.version.clone(),
             content: serde_json::to_value(&rules).unwrap(),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
