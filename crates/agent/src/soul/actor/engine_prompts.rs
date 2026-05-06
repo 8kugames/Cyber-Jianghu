@@ -295,7 +295,11 @@ impl super::CognitiveEngine {
         tmpl.render_all(&vars)
     }
 
-    /// 从本地配置目录加载技能行为指令（带缓存）
+    /// 从 skill_cache 构建技能行为指令
+    ///
+    /// skill_cache 来源：
+    /// 1. 启动时从 skill_cache.json 加载
+    /// 2. 运行时从 Server ConfigUpdate 推送
     fn build_skill_instructions(
         &self,
         skills: &[cyber_jianghu_protocol::types::entities::SkillInfo],
@@ -303,30 +307,6 @@ impl super::CognitiveEngine {
     ) -> String {
         if skills.is_empty() {
             return String::new();
-        }
-
-        let config_dir = self.config_dir.clone();
-        if config_dir.as_os_str().is_empty() {
-            tracing::warn!("配置目录为空，跳过技能指令加载");
-            return String::new();
-        }
-
-        let skills_dir = config_dir.join("skills");
-
-        if skills_dir.exists() {
-            let mut cache = self.skill_cache.write().unwrap();
-            for skill in skills {
-                if cache.contains_key(&skill.skill_id) {
-                    continue;
-                }
-                let skill_path = skills_dir.join(&skill.skill_id).join("SKILL.md");
-                if let Ok(content) = std::fs::read_to_string(&skill_path) {
-                    let body = super::super::earth::extract_skill_body(&content);
-                    if !body.is_empty() {
-                        cache.insert(skill.skill_id.clone(), body);
-                    }
-                }
-            }
         }
 
         if index_only {

@@ -162,6 +162,7 @@ impl IntentWorker {
         // 4. 通过 StateProcessor 执行
         let tick_id = agent_state.tick_id; // 使用当前 tick_id
         let pre_node_id = agent_state.node_id.clone();
+        let pre_skills = agent_state.skills.clone();
         let result = match self
             .state_processor
             .process_single_intent(tick_id, agent_state, &intent, &all_states, 0)
@@ -221,6 +222,59 @@ impl IntentWorker {
         // 6. 更新 DashMap（persist 成功后）
         self.state_cache
             .insert(agent_id, result.updated_state.clone());
+
+        // 6.5 技能习得推送：检测新增技能，推送 SkillContent 给 Agent
+        let new_skills: Vec<String> = result
+            .updated_state
+            .skills
+            .iter()
+            .filter(|s| !pre_skills.contains(s))
+            .cloned()
+            .collect();
+
+        if !new_skills.is_empty() {
+            let all_skills = crate::game_data::registry::SkillRegistry::all_with_id();
+            let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = all_skills
+                .into_iter()
+                .filter(|s| new_skills.contains(&s.skill_id))
+                .map(|s| cyber_jianghu_protocol::types::SkillContent {
+                    skill_id: s.skill_id,
+                    name: s.definition.name,
+                    body: s.definition.content,
+                })
+                .collect();
+
+            if !skill_contents.is_empty() {
+                let config_update = cyber_jianghu_protocol::ServerMessage::ConfigUpdate {
+                    config_type: "skills".to_string(),
+                    update_type: "incremental".to_string(),
+                    version: "1.0.0".to_string(),
+                    content: serde_json::to_value(&skill_contents).unwrap_or_default(),
+                    updated_items: skill_contents.iter().map(|s| s.skill_id.clone()).collect(),
+                    removed_items: vec![],
+                };
+
+                if let Err(e) = super::send_to_agent(
+                    agent_id,
+                    &config_update,
+                    &self.connection_manager,
+                    &self.agent_to_device_map,
+                )
+                .await
+                {
+                    warn!(
+                        "Skill ConfigUpdate 推送失败: agent={}, error={}",
+                        agent_id, e
+                    );
+                } else {
+                    info!(
+                        "Skill ConfigUpdate 已推送: agent={}, skills={:?}",
+                        agent_id,
+                        skill_contents.iter().map(|s| &s.skill_id).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
 
         // 7. 广播 ExecutionResult 给提交 Agent
         self.send_execution_result(
