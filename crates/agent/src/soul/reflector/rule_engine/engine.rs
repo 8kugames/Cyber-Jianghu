@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 // ============================================================================
 // RuleEngine 错误消息常量
@@ -197,7 +197,7 @@ impl RuleEngine {
                         return Some(Arc::new(config));
                     }
                     Err(e) => {
-                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                        warn!("RuleEngine prompt 模板文件解析失败 ({}): {}，等待 Server 下发", path.display(), e);
                     }
                 }
             }
