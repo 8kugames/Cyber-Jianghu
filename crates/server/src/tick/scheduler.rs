@@ -87,6 +87,9 @@ pub struct TickScheduler {
     /// 上次加载的 world_building_rules.yaml 修改时间
     last_world_building_rules_mtime: Option<std::time::SystemTime>,
 
+    /// 上次加载的 prompt_templates.yaml 修改时间
+    last_prompt_templates_mtime: Option<std::time::SystemTime>,
+
     /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
     vendor_pending_events: crate::models::VendorPendingEvents,
 }
@@ -120,6 +123,7 @@ impl TickScheduler {
             last_skills_mtime: None,
             last_game_rules_mtime: None,
             last_world_building_rules_mtime: None,
+            last_prompt_templates_mtime: None,
             vendor_pending_events,
         }
     }
@@ -328,6 +332,64 @@ impl TickScheduler {
                     broadcast_config_update(config_update, &self.connection_manager).await
                 {
                     warn!("广播世界观规则更新失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 检查 prompt_templates.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_prompt_templates(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let prompt_templates_path = config_dir.join("prompt_templates.yaml");
+
+        if !prompt_templates_path.exists() {
+            return Ok(()); // 文件不存在，跳过
+        }
+
+        let metadata = match fs::metadata(&prompt_templates_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        // 检查是否是新文件或已修改
+        let should_reload = match self.last_prompt_templates_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if should_reload {
+            self.last_prompt_templates_mtime = Some(modified);
+
+            // 读取文件内容
+            match std::fs::read_to_string(&prompt_templates_path) {
+                Ok(content) => {
+                    info!("Prompt 模板已热重载: {} bytes", content.len());
+
+                    // 广播给所有在线 Agent
+                    let config_update = ServerMessage::ConfigUpdate {
+                        config_type: "prompt_templates".to_string(),
+                        update_type: "full".to_string(),
+                        version: "1.0".to_string(), // prompt_templates.yaml 没有 version 字段，用固定值
+                        content: serde_json::to_value(&content)?,
+                        updated_items: vec![],
+                        removed_items: vec![],
+                    };
+
+                    if let Err(e) =
+                        broadcast_config_update(config_update, &self.connection_manager).await
+                    {
+                        warn!("广播 prompt_templates 更新失败: {}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("读取 prompt_templates.yaml 失败: {}", e);
                 }
             }
         }
@@ -628,6 +690,11 @@ impl TickScheduler {
             // 热重载 world_building_rules.yaml
             if let Err(e) = self.check_and_reload_world_building_rules().await {
                 warn!("世界观规则热重载检查失败: {}", e);
+            }
+
+            // 热重载 prompt_templates.yaml
+            if let Err(e) = self.check_and_reload_prompt_templates().await {
+                warn!("Prompt 模板热重载检查失败: {}", e);
             }
 
             // 热重载 skills/

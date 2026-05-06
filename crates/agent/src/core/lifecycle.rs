@@ -91,6 +91,7 @@ impl super::Agent {
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
         let agent_name_for_skills = agent_name_for_callback.clone();
+        let agent_name_for_prompt = agent_name_for_callback.clone();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
@@ -112,6 +113,21 @@ impl super::Agent {
                 );
                 if let Some(ref engine) = cognitive_engine_for_skills {
                     engine.update_skill_cache(skills, removed_items);
+                }
+            }))
+            .await;
+
+        // 设置 Prompt 模板配置更新回调
+        let cognitive_engine_for_prompt = self.cognitive_engine.clone();
+        self.client
+            .set_prompt_template_callback(Arc::new(move |yaml_content| {
+                info!(
+                    "Agent '{}' received prompt_templates config update: {} bytes",
+                    agent_name_for_prompt,
+                    yaml_content.len()
+                );
+                if let Some(ref engine) = cognitive_engine_for_prompt {
+                    engine.update_prompt_template(&yaml_content);
                 }
             }))
             .await;
@@ -1073,14 +1089,17 @@ impl super::Agent {
                     }
 
                     // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）
-                    if let Some(ref api_state) = self.http_api_state
+                    let active_dream: Option<String> = if let Some(ref api_state) = self.http_api_state
                         && let Some(dream_thought) = api_state.consume_dream().await
                     {
                         info!("[dream] 托梦注入决策上下文: {}字", dream_thought.chars().count());
                         memory_context.push_str("\n### 托梦\n");
                         memory_context.push_str(&dream_thought);
                         memory_context.push('\n');
-                    }
+                        Some(dream_thought)
+                    } else {
+                        None
+                    };
 
                     // 4.4b 跨 Agent 传承教训注入
                     if !world_state.lessons_learned.is_empty() {
@@ -1227,7 +1246,7 @@ impl super::Agent {
 
                         // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
-                        let all_raw_intents: Vec<Intent> = {
+                        let mut all_raw_intents: Vec<Intent> = {
                             // llm_chaos_active 时排除认知 fallback（"休息"），仅使用混沌 intents
                             let mut intents: Vec<Intent> = if self.llm_chaos_active {
                                 Vec::new()
@@ -1270,6 +1289,18 @@ impl super::Agent {
                             }
                             intents
                         };
+
+                        // 托梦标记：本 tick 有活跃托梦时，标记所有 intent
+                        if let Some(ref dream) = active_dream {
+                            let summary: String = dream.chars().take(50).collect();
+                            for intent in &mut all_raw_intents {
+                                intent.dream_marker = Some(
+                                    cyber_jianghu_protocol::types::DreamMarker {
+                                        thought: summary.clone(),
+                                    },
+                                );
+                            }
+                        }
 
                         // 处理人魂判断的重要记忆固化
                         #[allow(clippy::collapsible_if)]
@@ -1777,6 +1808,8 @@ impl super::Agent {
                                             intent_id: Some(id),
                                             action_type: r.final_action_type.clone(),
                                             action_data: r.final_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                            chaos_marker: None,
+                                            dream_marker: None,
                                         }),
                                     }
                                 }).collect();
