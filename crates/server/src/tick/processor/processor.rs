@@ -207,6 +207,10 @@ impl StateProcessor {
                 .chaos_marker
                 .as_ref()
                 .and_then(|m| serde_json::to_value(m).ok()),
+            dream_marker: intent
+                .dream_marker
+                .as_ref()
+                .and_then(|m| serde_json::to_value(m).ok()),
             created_at: chrono::Utc::now(),
             pipe_seq,
         };

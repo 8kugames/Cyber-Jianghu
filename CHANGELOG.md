@@ -22,6 +22,16 @@
 
 - **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数
 
+### Added — 托梦显式 Intent 引用
+
+- **Protocol**: `DreamMarker` 结构体 + `Intent.dream_marker` 字段 — 照搬 `chaos_marker` 模式，全链路追踪"此 intent 受托梦影响"
+- **Protocol**: `FinalIntentReport` 补齐 `chaos_marker` + `dream_marker`（修复前端 chaos badge dead code）
+- **Agent**: `lifecycle.rs` 捕获 `consume_dream()` 返回值 → 打标本 tick 全部 `all_raw_intents`
+- **Server**: `AgentAction` + `agent_action_logs` 新增 `dream_marker JSONB` 列，`processor.rs` 提取并持久化
+- **Server**: migration `020_dream_marker.sql`
+- **Frontend**: 两个面板（agent panel + admin dashboard）新增"受托梦影响"紫色 badge 渲染
+- **Config**: `prompt_templates.yaml` 新增 `dream_marker_thought: 50` 截断配置（数据驱动）
+
 ### Added — 记忆叙事合成
 
 - **Agent**: 记忆叙事合成 — 高重要性事件经 LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题

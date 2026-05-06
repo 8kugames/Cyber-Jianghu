@@ -2405,6 +2405,8 @@ struct FinalIntentEntry {
     intent_id: Option<String>,
     action_type: Option<String>,
     action_data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dream_marker: Option<serde_json::Value>,
 }
 
 /// 单条三魂尝试记录
@@ -2502,6 +2504,7 @@ fn record_to_attempt_entry(
             intent_id: Some(id),
             action_type: r.final_action_type,
             action_data,
+            dream_marker: None,
         }),
     }
 }

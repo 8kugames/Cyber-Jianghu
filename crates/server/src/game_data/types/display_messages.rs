@@ -83,5 +83,3 @@ pub struct NotificationsConfig {
 fn default_rebirth() -> String {
     "大侠已转世重生。".to_string()
 }
-
-

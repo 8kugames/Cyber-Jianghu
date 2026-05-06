@@ -153,10 +153,18 @@ pub struct IntentBatchConfig {
     pub llm_chaos_threshold: u32,
 }
 
-fn default_max_intents_per_tick() -> usize { 5 }
-fn default_max_retries() -> i32 { 12 }
-fn default_true() -> bool { true }
-fn default_llm_chaos_threshold() -> u32 { 12 }
+fn default_max_intents_per_tick() -> usize {
+    5
+}
+fn default_max_retries() -> i32 {
+    12
+}
+fn default_true() -> bool {
+    true
+}
+fn default_llm_chaos_threshold() -> u32 {
+    12
+}
 
 /// 分级审核配置
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
