@@ -100,8 +100,11 @@ struct ConnectionState {
     /// 参数: (skills, removed_items)
     skill_update_callback: Option<SkillUpdateCallback>,
     /// Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
-    /// 参数: (raw_yaml_string)
-    prompt_template_callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    /// 参数: (PromptTemplateConfig)
+    prompt_template_callback:
+        Option<Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>>,
+    /// 上次收到的 prompt_templates content_hash（用于 skip-optimization）
+    prompt_template_hash: Option<String>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -136,6 +139,7 @@ impl WebSocketClient {
                 action_update_callback: None,
                 skill_update_callback: None,
                 prompt_template_callback: None,
+                prompt_template_hash: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -336,8 +340,11 @@ impl WebSocketClient {
     }
 
     /// 设置 Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
-    /// 参数: (raw_yaml_string)
-    pub fn set_prompt_template_callback(&self, callback: Arc<dyn Fn(String) + Send + Sync>) {
+    /// 参数: (PromptTemplateConfig)
+    pub fn set_prompt_template_callback(
+        &self,
+        callback: Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>,
+    ) {
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
@@ -694,9 +701,9 @@ async fn websocket_background_task(
                                     ref update_type,
                                     ref version,
                                     ref content,
+                                    ref content_hash,
                                     ref updated_items,
                                     ref removed_items,
-                                    ..
                                 } = msg
                                 {
                                     info!(
@@ -758,14 +765,31 @@ async fn websocket_background_task(
                                         } else {
                                             warn!("Failed to parse world_building_rules content from ConfigUpdate");
                                         }
-                                    // 处理 prompt_templates 配置更新
+                                    // 处理 prompt_templates 配置更新（JSON 格式 + hash skip）
                                     } else if config_type == "prompt_templates" {
-                                        if let Ok(yaml_content) = serde_json::from_value::<String>(content.clone()) {
-                                            if let Some(ref cb) = prompt_template_cb {
-                                                cb(yaml_content);
+                                        // hash skip: 内容未变则跳过更新
+                                        let should_update = {
+                                            let state_guard = state.read().await;
+                                            match (content_hash.as_ref(), state_guard.prompt_template_hash.as_ref()) {
+                                                (Some(new_hash), Some(old_hash)) => new_hash != old_hash,
+                                                _ => true,
+                                            }
+                                        };
+                                        if should_update {
+                                            if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
+                                                // 更新本地 hash 缓存
+                                                if let Some(hash) = content_hash.as_ref() {
+                                                    let mut state_guard = state.write().await;
+                                                    state_guard.prompt_template_hash = Some(hash.clone());
+                                                }
+                                                if let Some(ref cb) = prompt_template_cb {
+                                                    cb(config);
+                                                }
+                                            } else {
+                                                warn!("Failed to parse prompt_templates JSON from ConfigUpdate");
                                             }
                                         } else {
-                                            warn!("Failed to parse prompt_templates content from ConfigUpdate");
+                                            debug!("prompt_templates skip: hash unchanged");
                                         }
                                     }
                                 }
@@ -856,25 +880,31 @@ async fn websocket_background_task(
                             Ok(msg @ ServerMessage::AgentDied { .. }) => {
                                 if let ServerMessage::AgentDied {
                                     agent_id,
-                                    ref cause,
-                                    ref description,
+                                    cause,
+                                    description,
                                     ..
-                                } = msg
+                                } = &msg
                                 {
                                     let current_agent_id = {
                                         let guard = state.read().await;
                                         guard.agent_id
                                     };
-                                    if current_agent_id == Some(agent_id) {
+                                    if current_agent_id == Some(*agent_id) {
                                         warn!("Agent {} died: {} - {}", agent_id, cause, description);
                                         if let Some(ref cb) = server_msg_cb {
-                                            cb(msg);
+                                            cb(msg.clone());
                                         }
                                     }
                                 }
                             }
                             Ok(ServerMessage::Pong { .. }) => {
                                 debug!("Background: Pong received");
+                            }
+                            Ok(ref msg @ ServerMessage::DailySummaryData { .. }) => {
+                                debug!("Background: DailySummaryData received");
+                                if let Some(ref cb) = server_msg_cb {
+                                    cb(msg.clone());
+                                }
                             }
                             Err(e) => {
                                 warn!("Background: Parse error: {}", e);
@@ -1076,8 +1106,11 @@ impl AgentClient {
     }
 
     /// 设置 Prompt 模板配置更新回调
-    /// 参数: (raw_yaml_string)
-    pub async fn set_prompt_template_callback(&self, callback: Arc<dyn Fn(String) + Send + Sync>) {
+    /// 参数: (PromptTemplateConfig)
+    pub async fn set_prompt_template_callback(
+        &self,
+        callback: Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>,
+    ) {
         let client = self.client.read().await;
         client.set_prompt_template_callback(callback);
     }

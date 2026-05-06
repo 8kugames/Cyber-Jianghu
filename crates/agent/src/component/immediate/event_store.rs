@@ -292,25 +292,31 @@ impl EventStore {
     }
 
     /// 查询已 triage 未消费事件（主 tick 用）
-    pub fn query_triaged(&self, context_config: &EventTriageContext) -> Result<TriageResult> {
+    ///
+    /// game_day 参数确保只返回指定游戏日的事件，避免跨日污染。
+    pub fn query_triaged(
+        &self,
+        context_config: &EventTriageContext,
+        game_day: i64,
+    ) -> Result<TriageResult> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| anyhow::anyhow!("SQLite 锁失败: {}", e))?;
 
-        // URGENT: 逐条，top-N
+        // URGENT: 逐条，top-N（按 game_day 过滤）
         let mut urgent_stmt = conn.prepare(
             "SELECT id, event_id, event_type, from_agent_id, from_agent_name,
                     description, metadata, received_at_tick, game_day,
                     triage_status, triage_reason, triage_batch_id, processed_at_tick
              FROM immediate_events
-             WHERE triage_status = 'urgent' AND processed_at_tick IS NULL
+             WHERE triage_status = 'urgent' AND processed_at_tick IS NULL AND game_day = ?1
              ORDER BY received_at_tick DESC
-             LIMIT ?1",
+             LIMIT ?2",
         )?;
 
         let urgent_rows = urgent_stmt
-            .query_map(params![context_config.max_urgent_events], |row| {
+            .query_map(params![game_day, context_config.max_urgent_events], |row| {
                 Self::row_to_stored_event(row)
             })?;
 
@@ -322,17 +328,17 @@ impl EventStore {
             }
         }
 
-        // BATCH: 全部（主 tick 会做摘要）
+        // BATCH: 全部（按 game_day 过滤）
         let mut batch_stmt = conn.prepare(
             "SELECT id, event_id, event_type, from_agent_id, from_agent_name,
                     description, metadata, received_at_tick, game_day,
                     triage_status, triage_reason, triage_batch_id, processed_at_tick
              FROM immediate_events
-             WHERE triage_status = 'batch' AND processed_at_tick IS NULL
+             WHERE triage_status = 'batch' AND processed_at_tick IS NULL AND game_day = ?1
              ORDER BY received_at_tick DESC",
         )?;
 
-        let batch_rows = batch_stmt.query_map([], Self::row_to_stored_event)?;
+        let batch_rows = batch_stmt.query_map(params![game_day], Self::row_to_stored_event)?;
 
         let mut batch = Vec::new();
         for row in batch_rows {
@@ -349,11 +355,13 @@ impl EventStore {
     pub async fn query_triaged_async(
         self: &Arc<Self>,
         context_config: EventTriageContext,
+        game_day: i64,
     ) -> Result<TriageResult> {
         let store = self.clone();
-        let result = tokio::task::spawn_blocking(move || store.query_triaged(&context_config))
-            .await
-            .context("spawn_blocking query_triaged 失败")??;
+        let result =
+            tokio::task::spawn_blocking(move || store.query_triaged(&context_config, game_day))
+                .await
+                .context("spawn_blocking query_triaged 失败")??;
         Ok(result)
     }
 
