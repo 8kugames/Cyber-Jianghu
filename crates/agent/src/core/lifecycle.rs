@@ -119,6 +119,7 @@ impl super::Agent {
 
         // 设置 Prompt 模板配置更新回调
         let cognitive_engine_for_prompt = self.cognitive_engine.clone();
+        let rule_engine_prompt_config = self.rule_engine.prompt_config_handle();
         self.client
             .set_prompt_template_callback(Arc::new(
                 move |config: cyber_jianghu_protocol::PromptTemplateConfig| {
@@ -126,8 +127,14 @@ impl super::Agent {
                         "Agent '{}' received prompt_templates config update: version={}",
                         agent_name_for_prompt, config.version
                     );
+                    // 更新人魂 CognitiveEngine
                     if let Some(ref engine) = cognitive_engine_for_prompt {
-                        engine.update_prompt_template_from_config(config);
+                        engine.update_prompt_template_from_config(config.clone());
+                    }
+                    // 更新天魂 RuleEngine reject 反馈模板
+                    {
+                        let mut guard = rule_engine_prompt_config.write().unwrap();
+                        *guard = Some(std::sync::Arc::new(config));
                     }
                 },
             ))

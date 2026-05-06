@@ -33,7 +33,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use tokio::task::JoinHandle;
-use tracing::{Level, error, info};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 // ============================================================================
@@ -90,6 +90,9 @@ fn start_tick_engine(
     agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
     vendor_pending_events: cyber_jianghu_server::models::VendorPendingEvents,
+    prompt_template_cache: Arc<
+        tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>,
+    >,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -102,6 +105,12 @@ fn start_tick_engine(
             accepting_tick_id,
             vendor_pending_events,
         );
+        tick_scheduler.set_prompt_template_cache(prompt_template_cache);
+
+        // 启动前预加载 prompt_templates 到缓存，确保首个 Agent 连接时即可下发
+        if let Err(e) = tick_scheduler.preload_prompt_templates().await {
+            warn!("启动时预加载 prompt_templates 失败: {}", e);
+        }
 
         info!("启动Tick引擎（后台任务）");
 
@@ -299,6 +308,7 @@ async fn main() -> Result<()> {
         agent_state_cache.clone(),
         accepting_tick_id,
         state.vendor_pending_events.clone(),
+        state.prompt_template_cache.clone(),
     );
 
     // 10.1 启动速率限制器清理任务

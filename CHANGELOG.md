@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Changed — PromptTemplateConfig YAML→JSON 重构
+
+- **[BREAKING] Protocol**: `PromptTemplateConfig` 从 agent crate 迁移至 protocol crate（`cyber_jianghu_protocol::types::prompt_template`）。agent crate 的 `prompt_template.rs` 改为 re-export + 本地 YAML loading fallback
+- **Protocol**: `ConfigUpdate` 新增 `content_hash: Option<String>` 字段，`#[serde(default)]` 向后兼容
+- **Protocol**: `PromptTemplateConfig::to_json_bytes()` 两步序列化保证 canonical JSON（`to_value()` → BTreeMap 自动排序 → `to_vec()`），消除 HashMap 迭代顺序不确定性
+- **Server**: prompt_templates 热重载路径重构 — YAML→`PromptTemplateConfig`→canonical JSON→SHA256 hash→写入 `AppState.prompt_template_cache`→广播 JSON ConfigUpdate
+- **Server**: 启动时预加载 prompt_templates 到缓存（`TickScheduler::preload_prompt_templates()`），消除首个 Agent 连接时缓存为空的时序窗口
+- **Server**: WS 连接时下发 prompt_templates ConfigUpdate（补齐之前 game_rules/world_building_rules/skills 有但 prompt_templates 没有的 gap）
+- **Agent**: WS 接收路径从 YAML 字符串改为 JSON（`from_json_value()`），彻底消除 agent 端 `serde_yaml` 在 Linux Docker 中的解析故障
+- **Agent**: hash skip 优化 — `ConnectionState.prompt_template_hash` 记录已接收 hash，相同内容跳过更新；hash 记录与 JSON 解析结果解耦，防止解析失败时重试风暴
+- **Agent**: RuleEngine `prompt_config` 改为 `Arc<RwLock>` 共享状态（`SharedPromptConfig`），WS 回调同时更新 CognitiveEngine + RuleEngine reject 反馈模板
+- **Agent**: 回调类型从 `Fn(String)` 改为 `Fn(PromptTemplateConfig)`，消除 YAML→String 中间态
+
 ### Changed — SKILL.md 元认知行为框架重构
 
 - **[BREAKING] Server**: SKILL.md 系统推翻重做 — 7 个 RPG 技术技能（sword-basic, unarmed-basic, stealth, qi-meditation, first-aid, herbalism, bargaining）替换为 5 个元认知行为框架（social/trust-reading, social/conflict-navigation, cognitive/risk-assessment, cognitive/resource-planning, survival/situational-awareness）。已掌握旧技能 ID 的 Agent 在 SkillRegistry 中查不到对应定义，broadcaster 静默过滤

@@ -12,7 +12,7 @@
 use anyhow::Result;
 use serde_json;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 use super::chain::CognitiveChain;
@@ -389,7 +389,7 @@ impl CognitiveEngine {
             if let Some(path) = path_opt
                 && path.exists()
             {
-                match PromptTemplateConfig::load_from_file(path) {
+                match super::prompt_template::load_prompt_template_from_file(path) {
                     Ok(config) => {
                         info!("已加载 prompt 模板: {:?}", path);
                         return config;
@@ -420,18 +420,11 @@ impl CognitiveEngine {
         self.prompt_template.clone()
     }
 
-    /// 更新 Prompt 模板配置（来自 Server ConfigUpdate）
-    pub fn update_prompt_template(&self, yaml_content: &str) {
-        match PromptTemplateConfig::load_from_str(yaml_content) {
-            Ok(config) => {
-                let mut guard = self.runtime_prompt_template.write().unwrap();
-                *guard = Some(config);
-                info!("Prompt 模板已从 Server ConfigUpdate 更新");
-            }
-            Err(e) => {
-                warn!("Failed to parse prompt_templates from ConfigUpdate: {}", e);
-            }
-        }
+    /// 从 Server 下发的 PromptTemplateConfig 直接更新（JSON 路径）
+    pub fn update_prompt_template_from_config(&self, config: PromptTemplateConfig) {
+        let mut guard = self.runtime_prompt_template.write().unwrap();
+        *guard = Some(config);
+        info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
