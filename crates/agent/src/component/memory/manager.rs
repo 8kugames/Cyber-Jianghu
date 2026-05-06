@@ -20,6 +20,7 @@ use crate::component::memory::forgetting::ForgettingScheduler;
 use crate::component::memory::scorer::ImportanceScorer;
 use crate::component::memory::types::{EbbinghausConfig, ForgettingReport, MemoryEntry};
 use crate::models::WorldEvent;
+use crate::soul::actor::engine::FALLBACK_NARRATIVE; // 统一降级文本
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -131,7 +132,9 @@ impl MemoryManager {
         let scored: Vec<(f32, WorldEvent)> = events
             .iter()
             .map(|e| {
-                let score = self.scorer.score(&e.event_type, &e.description, &e.metadata);
+                let score = self
+                    .scorer
+                    .score(&e.event_type, &e.description, &e.metadata);
                 (score, e.clone())
             })
             .collect();
@@ -165,26 +168,19 @@ impl MemoryManager {
                     .synthesize_memory_narrative(&significant, &summary, &outcome)
                     .await
             } else {
-                // cognitive_engine 不可用时：显式警告 + 降级拼接
+                // cognitive_engine 不可用时：显式警告 + 统一降级文本
                 tracing::warn!(
                     "Memory narrative synthesis skipped: cognitive_engine unavailable (agent_id={}, events={})",
                     self.config.agent_id,
                     significant.len()
                 );
-                significant
-                    .iter()
-                    .map(|e| e.description.clone())
-                    .collect::<Vec<_>>()
-                    .join("；")
+                FALLBACK_NARRATIVE.to_string()
             };
 
-            let mut entry = MemoryEntry::new(
-                self.config.agent_id,
-                significant[0].tick_id,
-                narrative,
-            )
-            .with_importance(1.0)
-            .with_event_type("synthesized_memory".to_string());
+            let mut entry =
+                MemoryEntry::new(self.config.agent_id, significant[0].tick_id, narrative)
+                    .with_importance(1.0)
+                    .with_event_type("synthesized_memory".to_string());
 
             let episodic_id = self.episodic.add(&mut entry).await?;
             if episodic_id > 0

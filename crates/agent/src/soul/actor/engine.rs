@@ -12,7 +12,7 @@
 use anyhow::Result;
 use serde_json;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::chain::CognitiveChain;
@@ -74,7 +74,7 @@ struct MemoryNarrativeResponse {
 }
 
 /// 失败降级文本（用户指定，一字不差）
-const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
+pub(crate) const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
 
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
 ///
@@ -160,6 +160,9 @@ pub struct CognitiveEngine {
     conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
     /// Prompt 模板配置（从 YAML 加载，启动时 fail-fast）
     pub(super) prompt_template: PromptTemplateConfig,
+    /// 运行时 Prompt 模板配置（来自 Server ConfigUpdate，覆盖 prompt_template）
+    /// Server 下发时非空，启动时为 None
+    runtime_prompt_template: std::sync::RwLock<Option<PromptTemplateConfig>>,
     /// 行动结果记忆（Hermes 模式）
     pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
     /// action_type 别名映射（中文/别名 → 英文 canonical）
@@ -199,6 +202,7 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             conversation_history: None,
             prompt_template,
+            runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
@@ -285,6 +289,7 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             conversation_history: None,
             prompt_template,
+            runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
@@ -404,20 +409,41 @@ impl CognitiveEngine {
         );
     }
 
-    /// 获取 Prompt 模板配置的引用
-    pub fn prompt_template(&self) -> &PromptTemplateConfig {
-        &self.prompt_template
+    /// 获取 Prompt 模板配置（运行时覆盖优先）
+    ///
+    /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 YAML 配置。
+    pub fn prompt_template(&self) -> PromptTemplateConfig {
+        // runtime override 优先
+        if let Some(runtime) = self.runtime_prompt_template.read().unwrap().as_ref() {
+            return runtime.clone();
+        }
+        self.prompt_template.clone()
+    }
+
+    /// 更新 Prompt 模板配置（来自 Server ConfigUpdate）
+    pub fn update_prompt_template(&self, yaml_content: &str) {
+        match PromptTemplateConfig::load_from_str(yaml_content) {
+            Ok(config) => {
+                let mut guard = self.runtime_prompt_template.write().unwrap();
+                *guard = Some(config);
+                info!("Prompt 模板已从 Server ConfigUpdate 更新");
+            }
+            Err(e) => {
+                warn!("Failed to parse prompt_templates from ConfigUpdate: {}", e);
+            }
+        }
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
     fn truncation(&self, key: &str, default: usize) -> usize {
-        self.prompt_template
+        self.prompt_template()
             .truncation("actor_direct", key, default)
     }
 
     /// 获取 LLM 调用参数配置（数据驱动替代硬编码参数）
     fn llm_param(&self, key: &str, default: usize) -> usize {
-        self.prompt_template.llm_param("actor_direct", key, default)
+        self.prompt_template()
+            .llm_param("actor_direct", key, default)
     }
 
     /// 加载动作列表（用于缓存 + 别名映射）
@@ -1147,7 +1173,8 @@ impl CognitiveEngine {
         outcome_context: &str,
     ) -> String {
         // 1. 获取配置（从 prompt_templates.yaml 的 memory_narrative section）
-        let config = match self.prompt_template.get_memory_narrative_config() {
+        let prompt_cfg = self.prompt_template();
+        let config = match prompt_cfg.get_memory_narrative_config() {
             Some(c) => c,
             None => {
                 tracing::warn!("记忆叙事合成配置缺失，降级");
@@ -1186,7 +1213,7 @@ impl CognitiveEngine {
             config.max_narrative_len.to_string(),
         );
 
-        let prompt = match self.prompt_template.render_memory_narrative(&vars) {
+        let prompt = match self.prompt_template().render_memory_narrative(&vars) {
             Some(p) => p,
             None => {
                 tracing::warn!("记忆叙事合成 prompt 渲染失败，降级");

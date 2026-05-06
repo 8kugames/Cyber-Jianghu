@@ -109,10 +109,7 @@ impl PromptTemplateConfig {
     }
 
     /// 渲染记忆叙事合成 prompt
-    pub fn render_memory_narrative(
-        &self,
-        vars: &HashMap<String, String>,
-    ) -> Option<String> {
+    pub fn render_memory_narrative(&self, vars: &HashMap<String, String>) -> Option<String> {
         let config = self.get_memory_narrative_config()?;
         let template = config.prompt.trim();
         let mut result = template.to_string();

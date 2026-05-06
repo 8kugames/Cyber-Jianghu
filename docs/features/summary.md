@@ -158,6 +158,7 @@
   - [x] **情景记忆 (Episodic Memory)**：利用 SQLite 持久化存储带时间戳的事件，包含遗忘曲线与重要度评分机制。
     - [x] 基于艾宾浩斯遗忘曲线的记忆归档机制。
     - [x] 自动基于事件类型与元数据为记忆进行重要性打分。
+    - [x] **记忆叙事合成**: 高重要性事件（≥ episodic_threshold）经人魂（CognitiveEngine）LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题。配置驱动（`prompt_templates.yaml` 的 `memory_narrative` section），失败降级文本: `你一阵恍惚，似乎遗漏了一些重要的记忆。`
   - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。Docker 镜像内建 bge-small-zh-v1.5 嵌入模型（~100MB）。
 - [x] **[双栖运行模式](../../crates/agent/docs/architecture/p0_core/dual_mode.md)**:
   - [x] **Cognitive 模式**：调用内置 LLM 的独立智能体。
