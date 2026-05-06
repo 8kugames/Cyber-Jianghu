@@ -356,13 +356,59 @@ impl TickScheduler {
         Ok(())
     }
 
+    /// 预加载 prompt_templates 到 AppState 缓存（Server 启动时调用一次）
+    pub async fn preload_prompt_templates(&self) -> Result<()> {
+        self.load_prompt_templates_to_cache().await
+    }
+
+    /// 从 YAML 加载 prompt_templates → JSON → hash → 写入缓存
+    async fn load_prompt_templates_to_cache(&self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let path = config_dir.join("prompt_templates.yaml");
+
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let yaml_content = std::fs::read_to_string(&path)
+            .with_context(|| format!("读取 {} 失败", path.display()))?;
+
+        let config: cyber_jianghu_protocol::PromptTemplateConfig = serde_yaml::from_str(&yaml_content)
+            .with_context(|| format!("解析 {} 失败", path.display()))?;
+
+        let version = config.version.clone();
+        let json_bytes = config.to_json_bytes()
+            .context("Prompt 模板 JSON 序列化失败")?;
+        let hash = format!("{:x}", sha2::Sha256::digest(&json_bytes));
+        let content: serde_json::Value = serde_json::from_slice(&json_bytes)
+            .context("Prompt 模板 JSON bytes → Value 反序列化失败")?;
+
+        info!(
+            "Prompt 模板已加载: version={}, {} bytes, hash={}",
+            version,
+            json_bytes.len(),
+            &hash[..12]
+        );
+
+        if let Some(cache) = &self.prompt_template_cache {
+            let mut guard = cache.write().await;
+            *guard = Some(cyber_jianghu_protocol::PromptTemplateCache {
+                json_value: content,
+                hash,
+                version,
+            });
+        }
+
+        Ok(())
+    }
+
     /// 检查 prompt_templates.yaml 是否变更，若变更则重新加载并广播
     async fn check_and_reload_prompt_templates(&mut self) -> Result<()> {
         let config_dir = get_config_dir();
         let prompt_templates_path = config_dir.join("prompt_templates.yaml");
 
         if !prompt_templates_path.exists() {
-            return Ok(()); // 文件不存在，跳过
+            return Ok(());
         }
 
         let metadata = match fs::metadata(&prompt_templates_path) {
@@ -375,76 +421,40 @@ impl TickScheduler {
             Err(_) => return Ok(()),
         };
 
-        // 检查是否是新文件或已修改
         let should_reload = match self.last_prompt_templates_mtime {
             Some(last) => modified > last,
             None => true,
         };
 
-        if should_reload {
-            self.last_prompt_templates_mtime = Some(modified);
+        if !should_reload {
+            return Ok(());
+        }
 
-            // 读取 YAML → 解析为 PromptTemplateConfig → JSON + SHA256 hash
-            match std::fs::read_to_string(&prompt_templates_path) {
-                Ok(yaml_content) => {
-                    match serde_yaml::from_str::<cyber_jianghu_protocol::PromptTemplateConfig>(
-                        &yaml_content,
-                    ) {
-                        Ok(config) => {
-                            let version = config.version.clone();
-                            let json_bytes = match config.to_json_bytes() {
-                                Ok(b) => b,
-                                Err(e) => {
-                                    warn!("Prompt 模板 JSON 序列化失败: {}", e);
-                                    return Ok(());
-                                }
-                            };
-                            let hash = format!("{:x}", sha2::Sha256::digest(&json_bytes));
-                            let content: serde_json::Value =
-                                serde_json::from_slice(&json_bytes).unwrap_or_default();
+        self.last_prompt_templates_mtime = Some(modified);
 
-                            info!(
-                                "Prompt 模板已热重载: version={}, {} bytes, hash={}",
-                                version,
-                                json_bytes.len(),
-                                &hash[..12]
-                            );
+        if let Err(e) = self.load_prompt_templates_to_cache().await {
+            warn!("Prompt 模板热重载失败: {}", e);
+            return Ok(());
+        }
 
-                            // 更新 AppState 缓存
-                            if let Some(cache) = &self.prompt_template_cache {
-                                let mut guard = cache.write().await;
-                                *guard = Some(cyber_jianghu_protocol::PromptTemplateCache {
-                                    json_value: content.clone(),
-                                    hash: hash.clone(),
-                                    version: version.clone(),
-                                });
-                            }
+        // 从缓存读取并广播给在线 Agent
+        if let Some(cache) = &self.prompt_template_cache {
+            let guard = cache.read().await;
+            if let Some(ref pt_cache) = *guard {
+                let config_update = ServerMessage::ConfigUpdate {
+                    config_type: "prompt_templates".to_string(),
+                    update_type: "full".to_string(),
+                    version: pt_cache.version.clone(),
+                    content: pt_cache.json_value.clone(),
+                    content_hash: Some(pt_cache.hash.clone()),
+                    updated_items: vec![],
+                    removed_items: vec![],
+                };
 
-                            // 广播给所有在线 Agent
-                            let config_update = ServerMessage::ConfigUpdate {
-                                config_type: "prompt_templates".to_string(),
-                                update_type: "full".to_string(),
-                                version,
-                                content,
-                                content_hash: Some(hash),
-                                updated_items: vec![],
-                                removed_items: vec![],
-                            };
-
-                            if let Err(e) =
-                                broadcast_config_update(config_update, &self.connection_manager)
-                                    .await
-                            {
-                                warn!("广播 prompt_templates 更新失败: {}", e);
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Prompt 模板 YAML 解析失败: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("读取 prompt_templates.yaml 失败: {}", e);
+                if let Err(e) =
+                    broadcast_config_update(config_update, &self.connection_manager).await
+                {
+                    warn!("广播 prompt_templates 更新失败: {}", e);
                 }
             }
         }
