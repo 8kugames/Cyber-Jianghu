@@ -12,7 +12,7 @@
 use anyhow::Result;
 use serde_json;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::chain::CognitiveChain;
@@ -395,18 +395,25 @@ impl CognitiveEngine {
                         return config;
                     }
                     Err(e) => {
-                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                        warn!("Prompt 模板文件解析失败 ({}): {}，等待 Server WS 下发", path.display(), e);
                     }
                 }
             }
         }
-        panic!(
-            "未找到 prompt_templates.yaml，搜索路径: {:?}",
+        warn!(
+            "未找到 prompt_templates.yaml，搜索路径: {:?}，等待 Server WS 下发",
             search_paths
                 .iter()
                 .filter_map(|p| p.as_ref().map(|x| x.display().to_string()))
                 .collect::<Vec<_>>()
         );
+        // 返回空壳配置，WS 下发后会覆盖
+        PromptTemplateConfig {
+            version: "empty-fallback".to_string(),
+            description: String::new(),
+            templates: std::collections::HashMap::new(),
+            memory_narrative: None,
+        }
     }
 
     /// 获取 Prompt 模板配置（运行时覆盖优先）

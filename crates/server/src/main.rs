@@ -91,7 +91,7 @@ fn start_tick_engine(
     accepting_tick_id: Arc<AtomicI64>,
     vendor_pending_events: cyber_jianghu_server::models::VendorPendingEvents,
     prompt_template_cache: Arc<
-        tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>,
+        tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>,
     >,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {

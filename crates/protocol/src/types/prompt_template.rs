@@ -66,15 +66,17 @@ fn default_temperature() -> f32 {
     0.3
 }
 
-/// Server 端缓存：PromptTemplateConfig JSON + hash
-#[derive(Debug, Clone)]
-pub struct PromptTemplateCache {
-    pub json_value: serde_json::Value,
-    pub hash: String,
-    pub version: String,
-}
-
 impl PromptTemplateConfig {
+    /// 构造最小可用 fallback 配置（无模板时 Agent 仍可运行）
+    pub fn default_fallback() -> Self {
+        Self {
+            version: "fallback-0.0".to_string(),
+            description: String::new(),
+            templates: HashMap::new(),
+            memory_narrative: None,
+        }
+    }
+
     /// 从 JSON Value 构造（Server ConfigUpdate 下发路径）
     pub fn from_json_value(value: serde_json::Value) -> anyhow::Result<Self> {
         let config: Self =
@@ -180,5 +182,177 @@ impl TemplateDef {
         }
 
         parts.join("\n")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_minimal_config() -> serde_json::Value {
+        serde_json::json!({
+            "version": "test-1.0",
+            "templates": {
+                "test_template": {
+                    "required_sections": ["body"],
+                    "sections": {
+                        "body": "Hello {name}, you have {count} items."
+                    },
+                    "truncation": { "max_items": 3 }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn test_from_json_value_valid() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config());
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.version, "test-1.0");
+        assert!(config.templates.contains_key("test_template"));
+    }
+
+    #[test]
+    fn test_from_json_value_missing_version() {
+        let mut val = make_minimal_config();
+        val.as_object_mut().unwrap().remove("version");
+        let result = PromptTemplateConfig::from_json_value(val);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_to_json_bytes_deterministic() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        let bytes1 = config.to_json_bytes().unwrap();
+        let bytes2 = config.to_json_bytes().unwrap();
+        assert_eq!(bytes1, bytes2, "to_json_bytes must produce identical output");
+    }
+
+    #[test]
+    fn test_to_json_bytes_sorted_keys() {
+        // 构造含多个模板的配置，验证 key 排序不影响输出
+        let val = serde_json::json!({
+            "version": "1.0",
+            "templates": {
+                "zebra": { "required_sections": ["x"], "sections": { "x": "z" } },
+                "alpha": { "required_sections": ["x"], "sections": { "x": "a" } },
+                "middle": { "required_sections": ["x"], "sections": { "x": "m" } }
+            }
+        });
+        let config = PromptTemplateConfig::from_json_value(val).unwrap();
+        let bytes = config.to_json_bytes().unwrap();
+        let json_str = String::from_utf8(bytes).unwrap();
+        // BTreeMap 排序: alpha < middle < zebra
+        let alpha_pos = json_str.find("\"alpha\"").unwrap();
+        let middle_pos = json_str.find("\"middle\"").unwrap();
+        let zebra_pos = json_str.find("\"zebra\"").unwrap();
+        assert!(alpha_pos < middle_pos && middle_pos < zebra_pos,
+            "JSON keys must be sorted: alpha < middle < zebra");
+    }
+
+    #[test]
+    fn test_validate_passes() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_missing_required_section() {
+        // 直接构造 struct 绕过 from_json_value 的 validate 调用
+        let config = PromptTemplateConfig {
+            version: "1.0".to_string(),
+            description: String::new(),
+            templates: {
+                let mut map = HashMap::new();
+                map.insert(
+                    "broken".to_string(),
+                    TemplateDef {
+                        required_sections: vec!["body".to_string(), "footer".to_string()],
+                        sections: {
+                            let mut s = HashMap::new();
+                            s.insert("body".to_string(), "text".to_string());
+                            s
+                        },
+                        truncation: HashMap::new(),
+                        llm_parameters: HashMap::new(),
+                    },
+                );
+                map
+            },
+            memory_narrative: None,
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("footer"), "Error should mention missing section 'footer'");
+    }
+
+    #[test]
+    fn test_get_template() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        let tmpl = config.get_template("test_template");
+        assert!(tmpl.is_some());
+        assert!(config.get_template("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_truncation() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        assert_eq!(config.truncation("test_template", "max_items", 99), 3);
+        assert_eq!(config.truncation("test_template", "unknown_key", 42), 42);
+        assert_eq!(config.truncation("nonexistent", "max_items", 7), 7);
+    }
+
+    #[test]
+    fn test_render_section() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        let tmpl = config.get_template("test_template").unwrap();
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), "Alice".to_string());
+        vars.insert("count".to_string(), "5".to_string());
+        let rendered = tmpl.render_section("body", &vars).unwrap();
+        assert_eq!(rendered, "Hello Alice, you have 5 items.");
+    }
+
+    #[test]
+    fn test_render_section_missing_var_keeps_placeholder() {
+        let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
+        let tmpl = config.get_template("test_template").unwrap();
+        let vars = HashMap::new();
+        let rendered = tmpl.render_section("body", &vars).unwrap();
+        assert!(rendered.contains("{name}"), "Unresolved vars should keep placeholder");
+    }
+
+    #[test]
+    fn test_from_json_value_with_memory_narrative() {
+        let val = serde_json::json!({
+            "version": "1.0",
+            "templates": {},
+            "memory_narrative": {
+                "min_events": 3,
+                "max_events_per_tick": 5,
+                "max_narrative_len": 200,
+                "min_narrative_len": 20,
+                "temperature": 0.5,
+                "prompt": "Summarize these events"
+            }
+        });
+        let config = PromptTemplateConfig::from_json_value(val).unwrap();
+        let mn = config.memory_narrative.as_ref().unwrap();
+        assert_eq!(mn.min_events, 3);
+        assert_eq!(mn.max_events_per_tick, 5);
+        assert!((mn.temperature - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_from_json_value_empty_templates() {
+        let val = serde_json::json!({
+            "version": "1.0",
+            "templates": {}
+        });
+        let config = PromptTemplateConfig::from_json_value(val).unwrap();
+        assert!(config.templates.is_empty());
+        assert!(config.memory_narrative.is_none());
     }
 }

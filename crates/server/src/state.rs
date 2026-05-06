@@ -14,6 +14,21 @@ use crate::tick::WorkerMessage;
 use crate::websocket;
 
 // ============================================================================
+// Prompt 模板缓存
+// ============================================================================
+
+/// Server 端缓存：PromptTemplateConfig JSON + hash
+///
+/// Server 启动时或热重载时将 YAML 解析为 PromptTemplateConfig → JSON bytes → SHA256 hash，
+/// 缓存结果供 WS 连接时下发和热重载广播使用。
+#[derive(Debug, Clone)]
+pub struct PromptTemplateCache {
+    pub json_value: serde_json::Value,
+    pub hash: String,
+    pub version: String,
+}
+
+// ============================================================================
 // 速率限制器
 // ============================================================================
 
@@ -179,7 +194,7 @@ pub struct AppState {
 
     /// Prompt 模板 JSON 缓存（Server YAML→JSON 解析后，用于 WS 连接时下发）
     pub prompt_template_cache:
-        Arc<tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>>,
+        Arc<tokio::sync::RwLock<Option<PromptTemplateCache>>>,
 }
 
 impl AppState {
