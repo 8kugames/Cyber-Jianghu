@@ -776,12 +776,12 @@ async fn websocket_background_task(
                                             }
                                         };
                                         if should_update {
+                                            // 无论解析成功与否，先记录 hash，防止相同坏数据反复重试
+                                            if let Some(hash) = content_hash.as_ref() {
+                                                let mut state_guard = state.write().await;
+                                                state_guard.prompt_template_hash = Some(hash.clone());
+                                            }
                                             if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
-                                                // 更新本地 hash 缓存
-                                                if let Some(hash) = content_hash.as_ref() {
-                                                    let mut state_guard = state.write().await;
-                                                    state_guard.prompt_template_hash = Some(hash.clone());
-                                                }
                                                 if let Some(ref cb) = prompt_template_cb {
                                                     cb(config);
                                                 }
