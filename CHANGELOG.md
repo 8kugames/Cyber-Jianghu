@@ -22,6 +22,15 @@
 
 - **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数
 
+### Added — 记忆叙事合成
+
+- **Agent**: 记忆叙事合成 — 高重要性事件经 LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题
+  - `CognitiveEngine::synthesize_memory_narrative()`: 人魂处理叙事合成，每 Tick 最多一次 LLM 调用
+  - `prompt_templates.yaml` 新增 `memory_narrative` section: `min_events`、`max_events_per_tick`、`max_narrative_len`、`min_narrative_len`、`temperature`、`prompt`
+  - `MemoryManager::process_events()` 重构: 所有事件写入工作记忆，高重要性事件（≥ episodic_threshold）经 LLM 叙事加工后写入情景记忆
+  - 失败降级文本: `你一阵恍惚，似乎遗漏了一些重要的记忆。`（一字不差）
+  - 配置驱动: 所有阈值/参数均从 `prompt_templates.yaml` 读取，零硬编码
+
 ### Changed
 
 - **[BREAKING] Server**: `auto_rebirth_agent()` 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 旧 agent dead→retired，新 agent 全新 UUID + 初始状态 + 初始物品。事务包裹保证原子性
