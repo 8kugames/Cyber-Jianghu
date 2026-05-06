@@ -345,6 +345,7 @@ mod tests {
                     chronicle: None,
                     lifespan: None,
                     lesson: None,
+                    skill_acquisition: std::collections::HashMap::new(),
                 },
             },
             items: UnifiedItemsConfig {

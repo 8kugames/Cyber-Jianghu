@@ -109,6 +109,10 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
                 .get("_skills")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
+            action_counts: attributes_json
+                .get("_action_counts")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default(),
             birth_tick: row.try_get("birth_tick").ok().flatten(),
             created_at: row.try_get("created_at")?,
         })

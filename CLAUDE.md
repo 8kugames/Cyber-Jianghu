@@ -261,9 +261,9 @@ The `protocol` crate defines all shared types:
 All game mechanics configured via YAML in `crates/server/config/` (JSON fallback):
 - `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
 - `game_rules.yaml`, `time.yaml`, `inventory.yaml`, `recipes.yaml`
-- `skills/` — AI Procedural Skills (SKILL.md behavioral instructions, see below)
+- `skills/` — AI Procedural Skills (SKILL.md meta-cognitive frameworks, see below)
 
-**AI Procedural Skills**: Skills are SKILL.md files (YAML frontmatter + markdown body) that define behavioral instructions injected into the Agent's LLM context. Not RPG numerical attributes. Path: `config/skills/{category}/{skill_id}/SKILL.md`. Agent reads SKILL.md from `$CYBER_JIANGHU_CONFIG_DIR/skills/` at prompt-build time. Skill acquisition: Agent issues `practice` action → `StateChange::SkillLearned` → `SkillMutator` appends to `AgentState.skills` (JSONB `_skills` key).
+**AI Procedural Skills**: Skills are SKILL.md files (YAML frontmatter + markdown body) that define meta-cognitive behavioral frameworks — not RPG skills, not domain expertise, but "how to think" tools. 5 frameworks: social/trust-reading (识人之明), social/conflict-navigation (进退之道), cognitive/risk-assessment (审时度势), cognitive/resource-planning (未雨绸缪), survival/situational-awareness (见微知著). Path: `config/skills/{category}/{skill_id}/SKILL.md`. Skill acquisition: experience-threshold based — Agent executes actions → `action_counts` by category increments → when threshold met (configured in `game_rules.yaml` `skill_acquisition`), `StateChange::SkillLearned` triggered automatically. Server pushes `SkillContent` via `ConfigUpdate` WebSocket message. Agent persists to `skill_cache.json` locally and reads from memory cache at prompt-build time.
 
 **Formula Engine**: Dynamic calculations use `evalexpr` syntax.
 

@@ -14,7 +14,7 @@ pub fn skill_view_definition() -> ToolDefinition {
             "properties": {
                 "skill_id": {
                     "type": "string",
-                    "description": "技能ID（支持简写），如 social/bargaining、stealth、first-aid"
+                    "description": "技能ID（支持简写），如 trust-reading、conflict-navigation、risk-assessment"
                 }
             },
             "required": ["skill_id"]
@@ -22,11 +22,10 @@ pub fn skill_view_definition() -> ToolDefinition {
     )
 }
 
-/// 执行 skill_view：从缓存或本地文件加载 SKILL.md body
+/// 执行 skill_view：从缓存加载 SKILL.md body
 pub fn execute_skill_view(
     skill_id: &str,
     skill_cache: &std::collections::HashMap<String, String>,
-    config_dir: &std::path::Path,
 ) -> serde_json::Value {
     // 1. 精确匹配缓存
     if let Some(body) = skill_cache.get(skill_id) {
@@ -36,7 +35,7 @@ pub fn execute_skill_view(
         });
     }
 
-    // 2. 尾部模糊匹配：LLM 可能传 "bargaining"，但 cache key 是 "social/bargaining"
+    // 2. 尾部模糊匹配：LLM 可能传 "trust-reading"，但 cache key 是 "social/trust-reading"
     let fuzzy_key = skill_cache
         .keys()
         .find(|k| k.ends_with(&format!("/{skill_id}")) || k.as_str() == skill_id);
@@ -49,19 +48,7 @@ pub fn execute_skill_view(
         });
     }
 
-    // 3. 从本地文件加载
-    let skill_path = config_dir.join("skills").join(skill_id).join("SKILL.md");
-    if let Ok(content) = std::fs::read_to_string(&skill_path) {
-        let body = extract_skill_body(&content);
-        if !body.is_empty() {
-            return serde_json::json!({
-                "skill_id": skill_id,
-                "content": body
-            });
-        }
-    }
-
-    // 4. 未找到，返回可用技能列表帮助 LLM 纠正
+    // 3. 未找到，返回可用技能列表帮助 LLM 纠正
     let available: Vec<&str> = skill_cache.keys().map(|k| k.as_str()).collect();
     serde_json::json!({
         "error": format!("技能 {} 未找到", skill_id),
@@ -69,7 +56,8 @@ pub fn execute_skill_view(
     })
 }
 
-/// 从 SKILL.md 内容中提取 frontmatter 之后的 body
+/// 从 SKILL.md 内容中提取 frontmatter 之后的 body（保留用于测试）
+#[allow(dead_code)]
 ///
 /// 注意: 此逻辑必须与 server 端
 /// `crates/server/src/game_data/types/skills.rs::split_frontmatter()` 保持同步。
@@ -108,7 +96,7 @@ mod tests {
         let mut cache = std::collections::HashMap::new();
         cache.insert("bargaining".to_string(), "讨价还价行为指引...".to_string());
 
-        let result = execute_skill_view("bargaining", &cache, std::path::Path::new("/tmp"));
+        let result = execute_skill_view("bargaining", &cache);
         assert_eq!(result["skill_id"], "bargaining");
         assert!(result["content"].is_string());
     }
@@ -116,7 +104,7 @@ mod tests {
     #[test]
     fn test_execute_skill_view_not_found() {
         let cache = std::collections::HashMap::new();
-        let result = execute_skill_view("nonexistent", &cache, std::path::Path::new("/tmp"));
+        let result = execute_skill_view("nonexistent", &cache);
         assert!(result["error"].is_string());
     }
 

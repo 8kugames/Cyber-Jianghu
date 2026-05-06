@@ -403,11 +403,24 @@ async fn handle_websocket(
     }
 
     // ===== 发送技能配置（ConfigUpdate） =====
-    // Agent 连接后立即下发全量技能内容
+    // Agent 连接后仅下发该 Agent 已掌握的技能内容
     if agent_id != uuid::Uuid::nil() {
-        let skills = crate::game_data::registry::SkillRegistry::all_with_id();
-        let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = skills
+        // 优先从 DashMap 读取（已在内存中）
+        let agent_skills: Vec<String> = match state.agent_state_cache.get(&agent_id) {
+            Some(r) => r.value().skills.clone(),
+            None => {
+                // Fallback: DashMap miss 时查 DB（首连场景）
+                crate::db::get_latest_agent_state(&state.db_pool, agent_id)
+                    .await
+                    .map(|s| s.skills.clone())
+                    .unwrap_or_default()
+            }
+        };
+
+        let all_skills = crate::game_data::registry::SkillRegistry::all_with_id();
+        let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = all_skills
             .into_iter()
+            .filter(|s| agent_skills.contains(&s.skill_id))
             .map(|s| cyber_jianghu_protocol::types::SkillContent {
                 skill_id: s.skill_id,
                 name: s.definition.name,
@@ -420,7 +433,7 @@ async fn handle_websocket(
                 config_type: "skills".to_string(),
                 update_type: "full".to_string(),
                 version: "1.0.0".to_string(),
-                content: serde_json::to_value(skill_contents).unwrap_or_default(),
+                content: serde_json::to_value(&skill_contents).unwrap_or_default(),
                 updated_items: vec![],
                 removed_items: vec![],
             };
@@ -439,8 +452,10 @@ async fn handle_websocket(
                 );
             } else {
                 debug!(
-                    "Sent skills ConfigUpdate to agent '{}' ({})",
-                    agent_name, agent_id
+                    "Sent {} skills ConfigUpdate to agent '{}' ({})",
+                    skill_contents.len(),
+                    agent_name,
+                    agent_id
                 );
             }
         }

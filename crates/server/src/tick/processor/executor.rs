@@ -683,7 +683,7 @@ pub async fn apply_state_change(
             }
         }
         // AttributeChanged, HpChanged 由 AttributeMutator 处理
-        // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入，非 RPG 技能）
+        // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入）
         StateChange::SkillLearned { .. } => true,
         _ => true,
     }
@@ -737,6 +737,7 @@ mod tests {
             is_alive: true,
             inventory_cleared_this_tick: false,
             skills: vec![],
+            action_counts: std::collections::HashMap::new(),
             birth_tick: None,
             created_at: chrono::Utc::now(),
         }

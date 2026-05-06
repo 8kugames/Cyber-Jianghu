@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Changed — SKILL.md 元认知行为框架重构
+
+- **[BREAKING] Server**: SKILL.md 系统推翻重做 — 7 个 RPG 技术技能（sword-basic, unarmed-basic, stealth, qi-meditation, first-aid, herbalism, bargaining）替换为 5 个元认知行为框架（social/trust-reading, social/conflict-navigation, cognitive/risk-assessment, cognitive/resource-planning, survival/situational-awareness）。已掌握旧技能 ID 的 Agent 在 SkillRegistry 中查不到对应定义，broadcaster 静默过滤
+- **[BREAKING] Server**: 技能习得机制从显式"研读" action 改为经验阈值自动触发。Agent 执行 action 成功后按 category 累计计数，达到 `game_rules.yaml` 中 `skill_acquisition` 配置的阈值时自动触发 `SkillLearned`
+- **Server**: `AgentState` 新增 `action_counts: HashMap<String, i32>` 字段，持久化到 JSONB `attributes._action_counts`。`#[serde(default)]` 兼容旧数据
+- **Server**: 连接时全量技能推送改为按 Agent 已掌握技能过滤推送
+- **Server**: `realtime.rs` 新增技能习得后增量推送 `ConfigUpdate` 给 Agent
+- **Agent**: `skill_cache` 改为内存 + 本地文件（`skill_cache.json`）双层持久化，启动时从文件加载，运行时从 Server 推送更新后同步写入
+- **Agent**: `engine_prompts.rs` 和 `skill_tool.rs` 删除文件系统读取逻辑，统一从 `skill_cache` HashMap 读取
+- **Agent**: `EarthToolContext` 移除不再使用的 `config_dir` 字段
+
 ### Added
 
 - **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数

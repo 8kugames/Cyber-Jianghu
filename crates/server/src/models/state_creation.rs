@@ -45,6 +45,7 @@ impl AgentState {
             is_alive: true,
             inventory_cleared_this_tick: false,
             skills: vec![],
+            action_counts: std::collections::HashMap::new(),
             birth_tick: None, // 由 register/rebirth 时显式设置
             created_at: Utc::now(),
         }

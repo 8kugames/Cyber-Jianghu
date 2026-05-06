@@ -10,6 +10,7 @@
 // skill_view / search_memory / recall_archived 工具按需获取精确数据。
 
 use anyhow::Result;
+use serde_json;
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
@@ -158,8 +159,6 @@ pub struct CognitiveEngine {
     pub(super) field_alias_map: std::sync::RwLock<FieldAliasMap>,
     /// SKILL.md body 缓存（skill_id → body content），避免每 tick 重复 IO
     pub(super) skill_cache: std::sync::RwLock<std::collections::HashMap<String, String>>,
-    /// 配置目录（用于地魂 tool-calling 的 skill_view 文件加载）
-    pub(super) config_dir: std::path::PathBuf,
     /// 记忆管理器引用（用于地魂 search_memory / recall_archived）
     pub(super) memory_manager: std::sync::RwLock<
         Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
@@ -183,7 +182,7 @@ impl CognitiveEngine {
 
         let prompt_template = Self::load_prompt_template();
 
-        Self {
+        let engine = Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
@@ -195,10 +194,11 @@ impl CognitiveEngine {
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
-            config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
-        }
+        };
+        engine.load_skill_cache_from_disk();
+        engine
     }
 
     /// 设置 NarrativeSummaryWindow 窗口大小
@@ -211,6 +211,8 @@ impl CognitiveEngine {
     ///
     /// - update_type == "full": 全量替换，先清空再插入
     /// - update_type == "incremental": 增量更新，插入新版 + 移除已删除的
+    ///
+    /// 更新后自动持久化到本地文件。
     pub fn update_skill_cache(
         &self,
         skills: Vec<cyber_jianghu_protocol::types::SkillContent>,
@@ -237,6 +239,10 @@ impl CognitiveEngine {
             removed_count,
             cache.len()
         );
+
+        // drop lock before persisting
+        drop(cache);
+        self.persist_skill_cache_to_disk();
     }
 
     /// 设置是否启用流式 LLM 调用
@@ -262,7 +268,7 @@ impl CognitiveEngine {
 
         let prompt_template = Self::load_prompt_template();
 
-        Self {
+        let engine = Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
@@ -274,19 +280,74 @@ impl CognitiveEngine {
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
-            config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+        };
+        engine.load_skill_cache_from_disk();
+        engine
+    }
+
+    /// 数据目录（用于本地持久化，如 skill_cache.json）
+    fn resolve_data_dir() -> std::path::PathBuf {
+        std::env::var("CYBER_JIANGHU_DATA_DIR")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("./data"))
+    }
+
+    /// skill_cache.json 路径
+    fn skill_cache_path() -> std::path::PathBuf {
+        Self::resolve_data_dir().join("skill_cache.json")
+    }
+
+    /// 启动时从本地文件加载 skill 缓存
+    fn load_skill_cache_from_disk(&self) {
+        let path = Self::skill_cache_path();
+        if !path.exists() {
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                let cached: std::collections::HashMap<String, String> =
+                    match serde_json::from_str(&content) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::warn!("skill_cache.json 解析失败，忽略: {}", e);
+                            return;
+                        }
+                    };
+                let mut cache = self.skill_cache.write().unwrap();
+                let count = cached.len();
+                *cache = cached;
+                tracing::info!("从 skill_cache.json 加载了 {} 个技能", count);
+            }
+            Err(e) => {
+                tracing::debug!("读取 skill_cache.json 失败: {}", e);
+            }
         }
     }
 
-    /// 解析配置目录路径
-    fn resolve_config_dir() -> std::path::PathBuf {
-        std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("config")))
-            .unwrap_or_default()
+    /// 持久化 skill 缓存到本地文件
+    fn persist_skill_cache_to_disk(&self) {
+        let path = Self::skill_cache_path();
+        let cache = self.skill_cache.read().unwrap().clone();
+        if cache.is_empty() {
+            return;
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match serde_json::to_string_pretty(&cache) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json) {
+                    tracing::warn!("skill_cache.json 写入失败: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("skill_cache.json 序列化失败: {}", e);
+            }
+        }
     }
 
     /// 加载 prompt 模板配置
@@ -595,7 +656,6 @@ impl CognitiveEngine {
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().unwrap().clone(),
-                        config_dir: self.config_dir.clone(),
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
                     },
