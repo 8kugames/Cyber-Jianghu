@@ -176,6 +176,10 @@ pub struct AppState {
 
     /// Vendor 待注入事件（跨请求缓冲，grant-items 写入，tick 广播时消费）
     pub vendor_pending_events: crate::models::VendorPendingEvents,
+
+    /// Prompt 模板 JSON 缓存（Server YAML→JSON 解析后，用于 WS 连接时下发）
+    pub prompt_template_cache:
+        Arc<tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>>,
 }
 
 impl AppState {
@@ -211,6 +215,7 @@ impl AppState {
             config_dir,
             current_accepting_tick_id,
             vendor_pending_events: crate::models::VendorPendingEvents::default(),
+            prompt_template_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 }

@@ -345,6 +345,7 @@ async fn handle_websocket(
             update_type: "full".to_string(),
             version: game_rules_for_protocol.version.clone(),
             content: serde_json::to_value(&game_rules_for_protocol).unwrap_or_default(),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
@@ -378,6 +379,7 @@ async fn handle_websocket(
             update_type: "full".to_string(),
             version: wb_rules.version.clone(),
             content: serde_json::to_value(&wb_rules).unwrap_or_default(),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
@@ -434,6 +436,7 @@ async fn handle_websocket(
                 update_type: "full".to_string(),
                 version: "1.0.0".to_string(),
                 content: serde_json::to_value(&skill_contents).unwrap_or_default(),
+                content_hash: None,
                 updated_items: vec![],
                 removed_items: vec![],
             };
@@ -456,6 +459,41 @@ async fn handle_websocket(
                     skill_contents.len(),
                     agent_name,
                     agent_id
+                );
+            }
+        }
+    }
+
+    // ===== 发送 prompt_templates（ConfigUpdate，JSON 格式） =====
+    if agent_id != uuid::Uuid::nil() {
+        let cache = state.prompt_template_cache.read().await;
+        if let Some(ref pt_cache) = *cache {
+            let config_update = ServerMessage::ConfigUpdate {
+                config_type: "prompt_templates".to_string(),
+                update_type: "full".to_string(),
+                version: pt_cache.version.clone(),
+                content: pt_cache.json_value.clone(),
+                content_hash: Some(pt_cache.hash.clone()),
+                updated_items: vec![],
+                removed_items: vec![],
+            };
+
+            if let Err(e) = broadcast::send_config_update(
+                agent_id,
+                config_update,
+                &state.connection_manager,
+                &state.agent_to_device_map,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to send prompt_templates ConfigUpdate to agent {}: {}",
+                    agent_id, e
+                );
+            } else {
+                debug!(
+                    "Sent prompt_templates ConfigUpdate to agent '{}' ({})",
+                    agent_name, agent_id
                 );
             }
         }

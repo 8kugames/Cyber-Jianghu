@@ -250,6 +250,7 @@ impl IntentWorker {
                     update_type: "incremental".to_string(),
                     version: "1.0.0".to_string(),
                     content: serde_json::to_value(&skill_contents).unwrap_or_default(),
+                    content_hash: None,
                     updated_items: skill_contents.iter().map(|s| s.skill_id.clone()).collect(),
                     removed_items: vec![],
                 };

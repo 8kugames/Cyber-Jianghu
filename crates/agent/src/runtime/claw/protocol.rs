@@ -930,6 +930,7 @@ mod tests {
                 "intent_batch": null,
                 "immediate_events": null,
             }),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
