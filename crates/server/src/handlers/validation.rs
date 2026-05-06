@@ -109,6 +109,7 @@ pub async fn validate_action(
         observer_thought: None,
         narrative: None,
         chaos_marker: None,
+        dream_marker: None,
         already_broadcast: false,
         session_id: None,
         subsequent_intents: vec![],

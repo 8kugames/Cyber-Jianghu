@@ -270,7 +270,10 @@ impl IntentWorker {
                     info!(
                         "Skill ConfigUpdate 已推送: agent={}, skills={:?}",
                         agent_id,
-                        skill_contents.iter().map(|s| &s.skill_id).collect::<Vec<_>>()
+                        skill_contents
+                            .iter()
+                            .map(|s| &s.skill_id)
+                            .collect::<Vec<_>>()
                     );
                 }
             }

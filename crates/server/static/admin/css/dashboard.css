@@ -887,6 +887,12 @@ input:checked + .slider:before {
     font-size: 11px; font-weight: 600;
     background: rgba(231, 76, 60, 0.15); color: #e74c3c; border: 1px solid #e74c3c;
 }
+.dream-badge { margin-top: 4px; }
+.dream-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+    background: rgba(142, 68, 173, 0.15); color: #8e44ad; border: 1px solid #8e44ad;
+}
 
 .tick-section-immediate {
     background: var(--bg-level-1);

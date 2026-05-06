@@ -6,9 +6,7 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{
-    CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData,
-};
+use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData};
 use crate::models::Intent;
 
 /// 基础动作执行器

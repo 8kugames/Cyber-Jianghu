@@ -152,6 +152,7 @@ templates:
       planning_description: 100
       content_hint: 30
       summary_window: 50
+      dream_marker_thought: 50
       tool_calling_history_turns: 8
 
     # LLM 调用参数配置（独立于 truncation，语义分离）

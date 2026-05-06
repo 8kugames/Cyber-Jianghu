@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::game_data::types::UnifiedWorldBuildingRulesConfig;
 use crate::game_data::{ActionRegistry, InitialInventoryRegistry};
 use chrono::Utc;
-use cyber_jianghu_protocol::{GameRules, GradedValidationConfig, InitialItem, IntentBatchConfig, WorldBuildingRules};
+use cyber_jianghu_protocol::{
+    GameRules, GradedValidationConfig, InitialItem, IntentBatchConfig, WorldBuildingRules,
+};
 
 // ============================================================================
 // IntentBatch 内参默认值（零魔法值）
@@ -113,7 +115,10 @@ pub fn build_game_rules_from_config(
             .as_ref()
             .map(|ib| ib.max_intents_per_tick)
             .unwrap_or(INTENT_BATCH_MAX_PER_TICK),
-        max_retries: intent_batch.as_ref().map(|ib| ib.max_retries).unwrap_or(INTENT_BATCH_MAX_RETRIES),
+        max_retries: intent_batch
+            .as_ref()
+            .map(|ib| ib.max_retries)
+            .unwrap_or(INTENT_BATCH_MAX_RETRIES),
         pipeline_execution_enabled: intent_batch
             .as_ref()
             .map(|ib| ib.pipeline_execution_enabled)

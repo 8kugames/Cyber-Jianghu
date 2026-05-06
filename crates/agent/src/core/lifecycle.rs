@@ -1292,7 +1292,12 @@ impl super::Agent {
 
                         // 托梦标记：本 tick 有活跃托梦时，标记所有 intent
                         if let Some(ref dream) = active_dream {
-                            let summary: String = dream.chars().take(50).collect();
+                            let dream_trunc = self
+                                .cognitive_engine
+                                .as_ref()
+                                .map(|e| e.truncation("dream_marker_thought", 50))
+                                .unwrap_or(50);
+                            let summary: String = dream.chars().take(dream_trunc).collect();
                             for intent in &mut all_raw_intents {
                                 intent.dream_marker = Some(
                                     cyber_jianghu_protocol::types::DreamMarker {
@@ -1808,6 +1813,7 @@ impl super::Agent {
                                             intent_id: Some(id),
                                             action_type: r.final_action_type.clone(),
                                             action_data: r.final_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                            // markers 存于 Server DB agent_action_logs（processor.rs 提取），此处 SoulCycleRecord 不存储
                                             chaos_marker: None,
                                             dream_marker: None,
                                         }),

@@ -1079,6 +1079,11 @@ function renderSoulInline(label, data, type) {
           cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
         html += `<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">${escapeHtml(chaosLabel)}</span></div>`;
       }
+      // 托梦影响徽章
+      if (data.dream_marker) {
+        const thought = data.dream_marker.thought || '';
+        html += `<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>${thought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(thought) + '</span>' : ''}</div>`;
+      }
     }
   }
   html += `</div></div>`;

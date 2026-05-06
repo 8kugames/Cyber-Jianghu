@@ -63,6 +63,11 @@ pub struct AgentAction {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chaos_marker: Option<serde_json::Value>,
 
+    /// 托梦影响标记（JSONB）
+    /// None = 未受托梦影响；Some = 本 tick 有活跃托梦
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dream_marker: Option<serde_json::Value>,
+
     /// 记录时间
     pub created_at: DateTime<Utc>,
 

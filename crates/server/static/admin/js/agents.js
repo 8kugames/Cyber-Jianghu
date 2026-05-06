@@ -717,6 +717,14 @@ function renderServerSoulInline(label, data, type) {
           escapeHtml(chaosLabel) +
           "</span></div>";
       }
+      // 托梦影响徽章
+      if (data.dream_marker) {
+        var dreamThought = data.dream_marker.thought || '';
+        html +=
+          '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
+          (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
+          '</div>';
+      }
     }
   }
   html += "</div></div>";
