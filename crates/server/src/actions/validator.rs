@@ -450,6 +450,7 @@ mod tests {
             session_id: None,
             subsequent_intents: vec![],
             chaos_marker: None,
+            dream_marker: None,
         }
     }
 

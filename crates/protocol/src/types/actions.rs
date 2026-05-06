@@ -116,6 +116,17 @@ pub enum ChaosMarker {
 }
 
 // ============================================================================
+// 托梦标记
+// ============================================================================
+
+/// 托梦影响标记，用于前端渲染"受托梦影响"徽章及 DB 追溯
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DreamMarker {
+    /// 托梦内容摘要（前 50 字）
+    pub thought: String,
+}
+
+// ============================================================================
 // 意图
 // ============================================================================
 
@@ -167,6 +178,12 @@ pub struct Intent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chaos_marker: Option<ChaosMarker>,
 
+    /// 托梦影响标记（前端据此渲染"受托梦影响"徽章）
+    ///
+    /// None = 未受托梦影响；Some = 本 tick 有活跃托梦
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dream_marker: Option<DreamMarker>,
+
     /// 是否已经广播（用于 speak 动作的幂等性）
     ///
     /// speak 动作在 handle_intent 时立即广播给同 Location 的 Agent，
@@ -212,6 +229,7 @@ impl Intent {
             observer_thought: None,
             narrative: None,
             chaos_marker: None,
+            dream_marker: None,
             already_broadcast: false,
             session_id: None,
             subsequent_intents: vec![],
@@ -237,6 +255,7 @@ impl Intent {
             observer_thought: None,
             narrative: None,
             chaos_marker: None,
+            dream_marker: None,
             already_broadcast: false,
             session_id: None,
             subsequent_intents: vec![],
@@ -264,6 +283,12 @@ impl Intent {
     /// 设置混沌标记
     pub fn with_chaos_marker(mut self, marker: ChaosMarker) -> Self {
         self.chaos_marker = Some(marker);
+        self
+    }
+
+    /// 设置托梦标记
+    pub fn with_dream_marker(mut self, marker: DreamMarker) -> Self {
+        self.dream_marker = Some(marker);
         self
     }
 

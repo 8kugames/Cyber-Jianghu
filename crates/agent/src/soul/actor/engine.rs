@@ -435,7 +435,7 @@ impl CognitiveEngine {
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
-    fn truncation(&self, key: &str, default: usize) -> usize {
+    pub fn truncation(&self, key: &str, default: usize) -> usize {
         self.prompt_template()
             .truncation("actor_direct", key, default)
     }

@@ -100,10 +100,10 @@ impl StateMutator for SkillMutator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
     use crate::db::DbPool;
     use crate::game_data::init_test_registry;
     use crate::models::AgentState;
+    use uuid::Uuid;
 
     fn make_test_agent(agent_id: Uuid) -> AgentState {
         init_test_registry();
