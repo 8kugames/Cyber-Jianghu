@@ -120,16 +120,17 @@ impl super::Agent {
         // 设置 Prompt 模板配置更新回调
         let cognitive_engine_for_prompt = self.cognitive_engine.clone();
         self.client
-            .set_prompt_template_callback(Arc::new(move |yaml_content| {
-                info!(
-                    "Agent '{}' received prompt_templates config update: {} bytes",
-                    agent_name_for_prompt,
-                    yaml_content.len()
-                );
-                if let Some(ref engine) = cognitive_engine_for_prompt {
-                    engine.update_prompt_template(&yaml_content);
-                }
-            }))
+            .set_prompt_template_callback(Arc::new(
+                move |config: cyber_jianghu_protocol::PromptTemplateConfig| {
+                    info!(
+                        "Agent '{}' received prompt_templates config update: version={}",
+                        agent_name_for_prompt, config.version
+                    );
+                    if let Some(ref engine) = cognitive_engine_for_prompt {
+                        engine.update_prompt_template_from_config(config);
+                    }
+                },
+            ))
             .await;
 
         // 设置对话消息回调（如果启用了对话系统）
@@ -350,6 +351,8 @@ impl super::Agent {
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
         let event_buffer = self.immediate_event_buffer.clone();
+        let memory_manager = self.memory_manager.clone();
+        let game_rules = self.config.game_rules.clone();
         let callback: Arc<dyn Fn(ServerMessage) + Send + Sync> =
             Arc::new(move |msg: ServerMessage| {
                 // 1. 验证错误反馈
@@ -424,6 +427,68 @@ impl super::Agent {
                         };
                         let mut guard = buf.lock().await;
                         guard.push(world_event);
+                    });
+                }
+                // 2c. DailySummaryData：存储到 episodic memory（服务器侧权威动作统计）
+                if let ServerMessage::DailySummaryData {
+                    game_day,
+                    action_counts,
+                    location_history,
+                    success_count,
+                    failure_count,
+                    total_actions,
+                } = &msg
+                {
+                    let mm = memory_manager.clone();
+                    let gr = game_rules.clone();
+                    // Clone owned data before spawn (tokio::spawn requires 'static)
+                    let gd = *game_day;
+                    let ac = action_counts.clone();
+                    let lh = location_history.clone();
+                    let sc = *success_count;
+                    let fc = *failure_count;
+                    let ta = *total_actions;
+                    tokio::spawn(async move {
+                        if let Some(ref mgr) = mm {
+                            let importance = gr
+                                .as_ref()
+                                .and_then(|g| g.immediate_events.as_ref())
+                                .and_then(|ie| ie.event_triage.as_ref())
+                                .map(|et| et.daily_summary_importance as f32)
+                                .unwrap_or(0.8);
+                            // 格式化动作统计
+                            let mut sorted: Vec<_> = ac.iter().collect();
+                            sorted.sort_by(|a, b| b.1.cmp(a.1));
+                            let action_parts: Vec<String> = sorted
+                                .iter()
+                                .take(5)
+                                .map(|(k, v)| format!("{}x{}", k, v))
+                                .collect();
+                            let content = format!(
+                                "第{}游戏日动作统计：共{}次（成{}、败{}）。动作：{}{}",
+                                gd,
+                                ta,
+                                sc,
+                                fc,
+                                action_parts.join("、"),
+                                if lh.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("；足迹：{}", lh.join("→"))
+                                }
+                            );
+                            let mut entry = crate::component::memory::MemoryEntry::new(
+                                Uuid::nil(),
+                                gd,
+                                content,
+                            )
+                            .with_event_type("daily_action_stats".to_string())
+                            .with_importance(importance);
+                            let mut guard = mgr.write().await;
+                            if let Err(e) = guard.episodic_mut().add(&mut entry).await {
+                                warn!("游戏日{}动作统计写入 episodic memory 失败: {}", gd, e);
+                            }
+                        }
                     });
                 }
                 // 3. 透传给 binary 回调（AgentDied 处理、Claw 模式 OpenClaw 转发等）
@@ -560,7 +625,6 @@ impl super::Agent {
                             &world_state.world_time,
                             self.config.game_rules.as_ref().and_then(|g| g.calendar.as_ref()),
                         );
-                        handler.set_game_day(game_day).await;
 
                         // Session Triage Engine 生命周期：每游戏日重生
                         let need_spawn = match self.session_triage_handle {
@@ -568,8 +632,11 @@ impl super::Agent {
                             Some(ref handle) => handle.is_finished(),
                         };
                         if need_spawn {
-                            // take 旧 handle 并检查退出原因
+                            // 在更新 current_game_day 之前保存旧值（供旧 engine 摘要使用）
                             let prev_game_day = self.session_triage_game_day.take();
+                            // 更新共享 game_day（新 engine 可见；旧 engine 检测到 day 改变而退出）
+                            handler.set_game_day(game_day).await;
+                            self.session_triage_game_day = Some(game_day);
                             if let Some(old_handle) = self.session_triage_handle.take() {
                                 match old_handle.await {
                                     Ok(summary_opt) => {
@@ -666,7 +733,6 @@ impl super::Agent {
                                     Some(world_state.world_time.clone()),
                                 );
                                 self.session_triage_handle = Some(tokio::spawn(engine.run()));
-                                self.session_triage_game_day = Some(game_day);
                                 info!(
                                     "SessionTriageEngine 已 spawn: agent={}, game_day={}",
                                     self.character_name(), game_day
@@ -1005,7 +1071,11 @@ impl super::Agent {
                     if let Some(ref handler) = self.immediate_handler {
                         let store = handler.event_store();
                         let config = store.config();
-                        match store.query_triaged_async(config.context.clone()).await {
+                        let game_day = Self::compute_game_day(
+                            &world_state.world_time,
+                            self.config.game_rules.as_ref().and_then(|g| g.calendar.as_ref()),
+                        );
+                        match store.query_triaged_async(config.context.clone(), game_day).await {
                             Ok(triaged) => {
                                 // URGENT: 逐条高可见性展示
                                 for event in &triaged.urgent {
