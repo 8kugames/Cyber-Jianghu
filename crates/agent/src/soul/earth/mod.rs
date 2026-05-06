@@ -23,4 +23,3 @@ pub use budget::ToolResultBudget;
 pub use config::{EarthSoulConfig, LoopGuardConfig, ToolBudgetConfig};
 pub use executor::{EarthToolContext, EarthToolExecutor};
 pub use loop_guard::{LoopGuard, LoopGuardAction};
-pub(crate) use skill_tool::extract_skill_body;

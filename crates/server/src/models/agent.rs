@@ -84,6 +84,15 @@ pub struct AgentState {
     #[serde(default)]
     pub skills: Vec<String>,
 
+    /// action category 成功执行计数（用于技能习得阈值判定）
+    ///
+    /// 持久化到 DB 的 JSONB attributes._action_counts 字段。
+    /// 不广播到 WorldState（仅 Server 内部使用）。
+    /// key: action category（如 "social", "martial"）
+    /// value: 该 category 的累计成功执行次数
+    #[serde(default)]
+    pub action_counts: std::collections::HashMap<String, i32>,
+
     /// 角色出生 tick（秒级时间戳，不可变）
     /// 从 agents 表 JOIN 获取，缓存到 DashMap
     /// NULL = 不朽（迁移前角色不受寿命约束）

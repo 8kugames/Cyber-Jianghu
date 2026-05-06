@@ -42,6 +42,9 @@ pub(super) fn serialize_attributes_with_skills(state: &AgentState) -> Result<ser
     if !state.status.max_modifiers.is_empty() {
         json["_max_modifiers"] = serde_json::to_value(&state.status.max_modifiers)?;
     }
+    if !state.action_counts.is_empty() {
+        json["_action_counts"] = serde_json::to_value(&state.action_counts)?;
+    }
     Ok(json)
 }
 
