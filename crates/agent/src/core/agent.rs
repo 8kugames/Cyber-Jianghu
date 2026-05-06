@@ -443,9 +443,18 @@ impl Agent {
     }
 
     /// 处理世界事件并更新记忆
-    pub async fn process_events(&mut self, events: &[crate::models::WorldEvent]) -> Result<()> {
+    /// cognitive_engine: 可选，用于叙事合成（人魂处理）
+    pub async fn process_events(
+        &mut self,
+        events: &[crate::models::WorldEvent],
+        cognitive_engine: Option<&crate::soul::actor::CognitiveEngine>,
+    ) -> Result<()> {
         if let Some(ref mut manager) = self.memory_manager {
-            manager.write().await.process_events(events).await?;
+            manager
+                .write()
+                .await
+                .process_events(events, cognitive_engine)
+                .await?;
         }
         Ok(())
     }

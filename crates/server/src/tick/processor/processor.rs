@@ -134,6 +134,7 @@ impl StateProcessor {
                             change,
                             result.intent_id,
                             &mut single_states,
+                            all_states,
                             &mut events,
                         )
                         .await;
@@ -157,7 +158,8 @@ impl StateProcessor {
                         MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
                     let mut single_states = vec![agent_state.clone()];
                     for mutator in &self.mutators {
-                        if let Ok(true) = mutator.mutate(&change, &mut single_states, &mut ctx).await
+                        if let Ok(true) =
+                            mutator.mutate(&change, &mut single_states, &mut ctx).await
                         {
                             agent_state = single_states.into_iter().next().unwrap_or(agent_state);
                             break;

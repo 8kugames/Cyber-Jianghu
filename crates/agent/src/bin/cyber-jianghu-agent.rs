@@ -613,7 +613,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     });
 
     // Fail Fast: 校验 EarthSoul 配置
-    config.earth_soul.validate().context("earth_soul 配置校验失败")?;
+    config
+        .earth_soul
+        .validate()
+        .context("earth_soul 配置校验失败")?;
 
     // Ensure servers_dir is set (#[serde(default)] means it's empty after from_file)
     // 优先级：CYBER_JIANGHU_DATA_DIR 环境变量 > ~/.cyber-jianghu/servers
@@ -1024,6 +1027,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     }
 
     let mut agent = builder.build();
+
+    // 注入 relationship_store 到 HttpApiState
+    if let Some(store) = agent.relationship_store() {
+        *api_state.relationship_store.write().unwrap() = Some(Arc::new(store.clone()));
+        info!("relationship_store 已注入 HttpApiState");
+    }
 
     // 注入 LLM container 到 HttpApiState（支持热重载重建）
     {

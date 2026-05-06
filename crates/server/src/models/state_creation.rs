@@ -38,6 +38,7 @@ impl AgentState {
         Self {
             id: 0, // 数据库自动生成
             agent_id,
+            name: String::new(), // 由 DB JOIN 填充
             tick_id,
             primary_attributes,
             status,

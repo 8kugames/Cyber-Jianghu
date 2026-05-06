@@ -1850,6 +1850,17 @@ pub struct CharacterInfoResponse {
     pub status: Option<String>,
     /// 数据是否来自缓存（true = 数据可能已过时）
     pub is_stale: bool,
+
+    // === 技能 ===
+    /// 已掌握技能列表
+    pub skills: Vec<SkillBrief>,
+}
+
+/// 技能简要信息（API 响应用）
+#[derive(Debug, serde::Serialize)]
+pub struct SkillBrief {
+    pub skill_id: String,
+    pub name: String,
 }
 
 /// 获取角色信息
@@ -1976,6 +1987,19 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 .map(|ws| ws.self_state.derived_attributes.clone()),
             &narrative_config,
         ),
+        skills: current
+            .as_ref()
+            .map(|ws| {
+                ws.self_state
+                    .skills
+                    .iter()
+                    .map(|s| SkillBrief {
+                        skill_id: s.skill_id.clone(),
+                        name: s.name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     };
 
     Json(response).into_response()
@@ -2079,6 +2103,19 @@ pub(super) async fn get_character_by_id_handler(
                     .map(|ws| ws.self_state.derived_attributes.clone()),
                 &narrative_config,
             ),
+            skills: current
+                .as_ref()
+                .map(|ws| {
+                    ws.self_state
+                        .skills
+                        .iter()
+                        .map(|s| SkillBrief {
+                            skill_id: s.skill_id.clone(),
+                            name: s.name.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .into_response();
     }
@@ -2119,6 +2156,7 @@ pub(super) async fn get_character_by_id_handler(
         }),
         is_stale: true,
         derived_attributes: None,
+        skills: vec![],
     };
 
     Json(response).into_response()

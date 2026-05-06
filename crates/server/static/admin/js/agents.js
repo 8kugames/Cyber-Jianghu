@@ -561,7 +561,7 @@ function renderTickCard(exp, metadata, time) {
     html += '<div class="tick-attempt-box">';
     if (attempts.length > 1) {
       html +=
-        '<div class="tick-attempt-label">第 ' + (idx + 1) + " 次尝试</div>";
+        '<div class="tick-attempt-label">行动 ' + (idx + 1) + "</div>";
     }
     html += renderServerSoulInline("人魂", attempt.renhun, "renhun");
     html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");

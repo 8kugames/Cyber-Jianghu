@@ -57,6 +57,10 @@ pub struct AgentState {
     /// Agent ID
     pub agent_id: Uuid,
 
+    /// Agent 名称（从 agents 表 JOIN 填充，用于事件描述等）
+    #[serde(default)]
+    pub name: String,
+
     /// Tick编号（递增）
     pub tick_id: i64,
 
