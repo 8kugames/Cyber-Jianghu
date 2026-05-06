@@ -99,6 +99,9 @@ struct ConnectionState {
     /// 技能配置更新回调（ConfigUpdate with config_type="skills"）
     /// 参数: (skills, removed_items)
     skill_update_callback: Option<SkillUpdateCallback>,
+    /// Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
+    /// 参数: (raw_yaml_string)
+    prompt_template_callback: Option<Arc<dyn Fn(String) + Send + Sync>>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -132,6 +135,7 @@ impl WebSocketClient {
                 server_msg_callback: None,
                 action_update_callback: None,
                 skill_update_callback: None,
+                prompt_template_callback: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -327,6 +331,18 @@ impl WebSocketClient {
             rt.block_on(async {
                 let mut state = self.state.write().await;
                 state.skill_update_callback = Some(callback);
+            });
+        });
+    }
+
+    /// 设置 Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
+    /// 参数: (raw_yaml_string)
+    pub fn set_prompt_template_callback(&self, callback: Arc<dyn Fn(String) + Send + Sync>) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.prompt_template_callback = Some(callback);
             });
         });
     }
@@ -649,7 +665,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -657,6 +673,7 @@ async fn websocket_background_task(
                                 state_guard.world_building_rules_callback.clone(),
                                 state_guard.action_update_callback.clone(),
                                 state_guard.skill_update_callback.clone(),
+                                state_guard.prompt_template_callback.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -740,6 +757,15 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             warn!("Failed to parse world_building_rules content from ConfigUpdate");
+                                        }
+                                    // 处理 prompt_templates 配置更新
+                                    } else if config_type == "prompt_templates" {
+                                        if let Ok(yaml_content) = serde_json::from_value::<String>(content.clone()) {
+                                            if let Some(ref cb) = prompt_template_cb {
+                                                cb(yaml_content);
+                                            }
+                                        } else {
+                                            warn!("Failed to parse prompt_templates content from ConfigUpdate");
                                         }
                                     }
                                 }
@@ -1047,6 +1073,13 @@ impl AgentClient {
     pub async fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {
         let client = self.client.read().await;
         client.set_skill_update_callback(callback);
+    }
+
+    /// 设置 Prompt 模板配置更新回调
+    /// 参数: (raw_yaml_string)
+    pub async fn set_prompt_template_callback(&self, callback: Arc<dyn Fn(String) + Send + Sync>) {
+        let client = self.client.read().await;
+        client.set_prompt_template_callback(callback);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）
