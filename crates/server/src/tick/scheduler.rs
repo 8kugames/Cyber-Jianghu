@@ -93,7 +93,7 @@ pub struct TickScheduler {
 
     /// Prompt 模板 JSON 缓存（与 AppState 共享，用于 WS 连接时下发）
     prompt_template_cache:
-        Option<Arc<tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>>>,
+        Option<Arc<tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>>>,
 
     /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
     vendor_pending_events: crate::models::VendorPendingEvents,
@@ -137,7 +137,7 @@ impl TickScheduler {
     /// 设置 prompt_template_cache（与 AppState 共享）
     pub fn set_prompt_template_cache(
         &mut self,
-        cache: Arc<tokio::sync::RwLock<Option<cyber_jianghu_protocol::PromptTemplateCache>>>,
+        cache: Arc<tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>>,
     ) {
         self.prompt_template_cache = Some(cache);
     }
@@ -392,7 +392,7 @@ impl TickScheduler {
 
         if let Some(cache) = &self.prompt_template_cache {
             let mut guard = cache.write().await;
-            *guard = Some(cyber_jianghu_protocol::PromptTemplateCache {
+            *guard = Some(crate::state::PromptTemplateCache {
                 json_value: content,
                 hash,
                 version,
