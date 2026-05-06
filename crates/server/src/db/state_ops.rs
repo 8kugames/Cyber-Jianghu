@@ -70,7 +70,7 @@ pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<Age
     // 否则会忽略最新的死亡记录、找到旧的存活记录，导致已死亡 agent 被加载
     let states = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT latest.*, a.birth_tick FROM (
+        SELECT latest.*, a.birth_tick, a.name FROM (
             SELECT DISTINCT ON (agent_id) *
             FROM agent_states
             ORDER BY agent_id, tick_id DESC
@@ -132,7 +132,7 @@ pub async fn get_latest_agent_state(pool: &PgPool, agent_id: uuid::Uuid) -> Resu
 
     let state = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT s.*, a.birth_tick
+        SELECT s.*, a.birth_tick, a.name
         FROM agent_states s
         JOIN agents a ON a.agent_id = s.agent_id
         WHERE s.agent_id = $1

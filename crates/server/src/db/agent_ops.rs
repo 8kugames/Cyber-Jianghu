@@ -428,6 +428,9 @@ pub async fn register_agent_transactional(
     }
 
     // 步骤1: 创建Agent（关联设备，默认状态为 active，记录 birth_tick）
+    // birth_tick 需偏移 starting_age，使 compute_age_years 返回 starting_age 而非 0
+    let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
+    let birth_tick = initial_tick_id - starting_age_ticks;
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
         INSERT INTO agents (device_id, name, system_prompt, status, birth_tick)
@@ -438,7 +441,7 @@ pub async fn register_agent_transactional(
     .bind(device_id)
     .bind(name)
     .bind(system_prompt)
-    .bind(initial_tick_id)
+    .bind(birth_tick)
     .fetch_one(&mut *tx)
     .await
     .context("在事务中创建 Agent 失败")?;
