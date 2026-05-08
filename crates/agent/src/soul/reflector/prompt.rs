@@ -5,10 +5,10 @@
 use crate::models::Intent;
 
 /// 观察者 System Prompt
-const OBSERVER_SYSTEM_PROMPT: &str = r#"你是「赛博江湖」的世界观守护者（观察者）。
+const OBSERVER_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察者）。
 
 ## 你的职责
-1. 审核玩家的意图是否符合世界观
+1. 审核玩家的意图是否符合武侠世界观
 2. 审核玩家的行为是否符合其人设
 
 ## 你不是
@@ -72,6 +72,9 @@ impl ObserverPrompt {
 ### 禁止的概念
 {}
 
+### 世界观详细说明
+{}
+
 ## 玩家人设
 - 角色：{}
 - 性别：{}
@@ -91,6 +94,7 @@ impl ObserverPrompt {
             world_rules.era.name,
             world_rules.era.tech_level,
             world_rules.forbidden_concepts.join("、"),
+            world_rules.narrative_rules,
             persona.name.as_deref().unwrap_or("未命名"),
             persona.gender,
             persona.personality.join("、"),
@@ -126,7 +130,7 @@ mod tests {
     #[test]
     fn test_observer_prompt_default() {
         let prompt = ObserverPrompt::new();
-        assert!(prompt.system_prompt().contains("世界观守护者"));
+        assert!(prompt.system_prompt().contains("武侠世界"));
     }
 
     #[test]
@@ -173,5 +177,13 @@ mod tests {
         assert!(validation_prompt.contains("玩家人设"));
         assert!(validation_prompt.contains("玩家意图"));
         assert!(validation_prompt.contains("休息"));
+        assert!(
+            validation_prompt.contains("世界观详细说明"),
+            "prompt 应包含 narrative_rules 段"
+        );
+        assert!(
+            validation_prompt.contains("测试"),
+            "prompt 应包含 narrative_rules 内容"
+        );
     }
 }

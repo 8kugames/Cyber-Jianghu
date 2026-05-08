@@ -2,9 +2,10 @@
 // 认知引擎 Prompt 构建方法
 // ============================================================================
 //
-// 所有 prompt 模板统一由 prompt_templates.yaml 定义，本文件仅负责：
+// 所有 prompt 模板统一由 prompt_templates.json 定义（本地加载或 WS ConfigUpdate 下发）。
+// 本文件仅负责：
 // - 组装变量 → 调用模板渲染
-// - 构建 WorldState 数据段（动态数据，不适合放 YAML）
+// - 构建 WorldState 数据段（动态数据，不适合放模板）
 // - 构建动作描述/字段提示
 // ============================================================================
 
@@ -13,7 +14,8 @@ use cyber_jianghu_protocol::AvailableAction;
 impl super::CognitiveEngine {
     /// 构建直连 WorldState 的 prompt（包含精确数据）
     ///
-    /// 单一数据源：prompt_templates.yaml。模板加载失败在启动时 panic。
+    /// 单一数据源：prompt_templates.json（本地加载或 WS ConfigUpdate 下发）。
+    /// 模板必须包含 actor_direct，否则返回 Err。
     pub(super) fn build_direct_prompt(
         &self,
         world_state: &cyber_jianghu_protocol::WorldState,
@@ -22,7 +24,7 @@ impl super::CognitiveEngine {
         persona_desc: &str,
         agent_name: &str,
         use_tool_calling: bool,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
             None => String::new(),
@@ -53,10 +55,12 @@ impl super::CognitiveEngine {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
         };
 
-        let tmpl = self
-            .prompt_template
-            .get_template("actor_direct")
-            .expect("prompt_templates.yaml 必须包含 actor_direct 模板");
+        let prompt_template = self.prompt_template();
+
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
 
         let mut vars = std::collections::HashMap::new();
         vars.insert("feedback_section".to_string(), feedback_section);
@@ -71,7 +75,7 @@ impl super::CognitiveEngine {
         vars.insert("skill_instructions".to_string(), skill_instructions);
         vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
 
-        tmpl.render_all(&vars)
+        Ok(tmpl.render_all(&vars))
     }
 
     /// 构建 WorldState 数据段（动态数据，不适合放 YAML）
@@ -80,7 +84,7 @@ impl super::CognitiveEngine {
         world_state: &cyber_jianghu_protocol::WorldState,
     ) -> String {
         let content_hint_len = self
-            .prompt_template
+            .prompt_template()
             .get_template("actor_direct")
             .and_then(|t| t.truncation.get("content_hint"))
             .copied()
@@ -250,7 +254,7 @@ impl super::CognitiveEngine {
         validation_feedback: Option<&str>,
         persona_desc: &str,
         agent_name: &str,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
             None => String::new(),
@@ -269,12 +273,13 @@ impl super::CognitiveEngine {
         let action_field_hints = cache.get_action_field_hints().to_string();
         drop(cache);
 
-        let tmpl = self
-            .prompt_template
-            .get_template("actor_direct")
-            .expect("prompt_templates.yaml 必须包含 actor_direct 模板");
-
+        let prompt_template = self.prompt_template();
         let world_state_section = format!("- Tick: {} (旧式模式，无 WorldState)", tick_id);
+
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
 
         let mut vars = std::collections::HashMap::new();
         vars.insert("feedback_section".to_string(), feedback_section);
@@ -292,7 +297,7 @@ impl super::CognitiveEngine {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string(),
         );
 
-        tmpl.render_all(&vars)
+        Ok(tmpl.render_all(&vars))
     }
 
     /// 从 skill_cache 构建技能行为指令
@@ -355,7 +360,7 @@ impl super::CognitiveEngine {
 
     /// 渲染模板中的非 required section（progressive disclosure 用）
     fn render_template_section(&self, section_name: &str) -> Option<String> {
-        self.prompt_template
+        self.prompt_template()
             .get_template("actor_direct")
             .and_then(|tmpl| tmpl.sections.get(section_name))
             .map(|s| s.trim().to_string())

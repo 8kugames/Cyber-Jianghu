@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
 use cyber_jianghu_agent::models::WorldState;
+use cyber_jianghu_agent::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_agent::soul::actor::stages::{
     CognitiveStage, PerceptionMotivationResponse, StageOutput,
 };
@@ -52,6 +53,28 @@ fn make_mock_client() -> MockLlmClient {
 
 fn make_validator() -> CognitiveValidator {
     CognitiveValidator::new("测试侠客人设".to_string())
+}
+
+/// 创建包含 actor_direct 最小模板的 PromptTemplateConfig（测试用）
+fn make_minimal_prompt_config() -> PromptTemplateConfig {
+    let json = serde_json::json!({
+        "version": "test-1.0",
+        "templates": {
+            "actor_direct": {
+                "required_sections": ["persona", "world_state"],
+                "sections": {
+                    "persona": "{feedback_section}你是{agent_name}，一名江湖中人。\n### 人设\n{persona}\n",
+                    "world_state": "### 当前世界状态\n{world_state_section}\n",
+                    "memory": "{memory_section}",
+                    "summary": "{summary_context}",
+                    "actions": "### 可用行动\n{action_descriptions}\n\n{action_field_hints}\n\n{skill_instructions}\n",
+                    "output": "{tool_calling_guidance}```json\n{{\"self_status\": \"状态\", \"environment\": \"环境\", \"key_observations\": [\"观察\"], \"primary_drive\": \"驱动力\", \"drive_intensity\": 5, \"thought_process\": \"思考\", \"actions\": [{{\"action_type\": \"...\", \"action_data\": {{}}}}]}}\n```",
+                    "outcome": "{outcome_section}"
+                }
+            }
+        }
+    });
+    PromptTemplateConfig::from_json_value(json).unwrap()
 }
 
 // ============================================================================
@@ -202,6 +225,7 @@ mod tests {
     async fn test_cognitive_engine_create_callback() {
         let mock = Arc::new(make_mock_client());
         let engine = CognitiveEngine::with_defaults(mock);
+        engine.update_prompt_template_from_config(make_minimal_prompt_config());
         let callback = engine.create_decision_callback();
 
         let world_state = make_minimal_world_state(1);
@@ -218,6 +242,7 @@ mod tests {
     async fn test_cognitive_engine_full_flow() {
         let mock = Arc::new(make_mock_client());
         let engine = CognitiveEngine::with_defaults(mock);
+        engine.update_prompt_template_from_config(make_minimal_prompt_config());
 
         let world_state = make_minimal_world_state(1);
         let result = engine

@@ -61,8 +61,9 @@ templates:
         - 资源有限时，竞争是自然选择。附近有多人争夺同一物品时，先到先得或以实力说话
         - 给予可以建立同盟，但资源稀缺时同盟也可能破裂
 
-        ## 行为多样性
-        - 避免连续多轮执行相同动作。如果你最近几轮一直在做同一件事（如反复拾取或打坐），主动尝试其他活动
+        ## 行为多样性（强制）
+        - 如果"近期认知轨迹"中出现[行为锁定警告]，你**必须**执行警告中提到的其他动作之一，不得继续重复
+        - 同一动作连续超过3轮是不可接受的——即使该动作"合理"，也必须穿插其他活动
         - 平衡你的行为：探索新地点、与附近的人交流、修炼武功、寻找资源——不要只专注于单一活动
         - 当你的生存需求得到满足时，根据你的性格和价值观去探索世界、建立关系、追寻目标
 
@@ -176,32 +177,32 @@ templates:
     truncation:
       max_items: 5
 
-  # 记忆叙事合成配置（data-driven）
-  # 复用 episodic_threshold 作为触发阈值（避免双重魔法数字）
-  memory_narrative:
-    min_events: 1
-    max_events_per_tick: 10
-    max_narrative_len: 200
-    min_narrative_len: 10
-    temperature: 0.3
-    prompt: |
-      ## 任务
-      将以下原始事件转换为叙事性记忆描述。
+# 记忆叙事合成配置（data-driven）
+# PromptTemplateConfig 顶级字段，与 templates 同级
+memory_narrative:
+  min_events: 1
+  max_events_per_tick: 10
+  max_narrative_len: 200
+  min_narrative_len: 10
+  temperature: 0.3
+  prompt: |
+    ## 任务
+    将以下原始事件转换为叙事性记忆描述。
 
-      ## 原始事件
-      {events_list}
+    ## 原始事件
+    {events_list}
 
-      ## 近期行动背景
-      {summary_context}
-      {outcome_context}
+    ## 近期行动背景
+    {summary_context}
+    {outcome_context}
 
-      ## 要求
-      1. 合并同类事件（如连续多次"使用了X"合并为"多次使用X"）
-      2. 补全主语（根据上下文推断"你"指代的具体行为主体）
-      3. 用自然语言描述，不要罗列日志条目
-      4. 体现事件的意义而非事实本身
-      5. 字数控制在 {max_narrative_len} 字以内
-      6. 只描述值得长期记忆的事件，无意义重复直接忽略
+    ## 要求
+    1. 合并同类事件（如连续多次"使用了X"合并为"多次使用X"）
+    2. 补全主语（根据上下文推断"你"指代的具体行为主体）
+    3. 用自然语言描述，不要罗列日志条目
+    4. 体现事件的意义而非事实本身
+    5. 字数控制在 {max_narrative_len} 字以内
+    6. 只描述值得长期记忆的事件，无意义重复直接忽略
 
-      ## 输出格式
-      {"narrative": "..."}
+    ## 输出格式
+    {"narrative": "..."}

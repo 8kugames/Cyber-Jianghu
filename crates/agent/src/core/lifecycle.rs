@@ -130,6 +130,7 @@ impl super::Agent {
                     // 更新人魂 CognitiveEngine
                     if let Some(ref engine) = cognitive_engine_for_prompt {
                         engine.update_prompt_template_from_config(config.clone());
+                        engine.save_prompt_template_to_disk();
                     }
                     // 更新天魂 RuleEngine reject 反馈模板
                     {
@@ -348,6 +349,9 @@ impl super::Agent {
         if let Some(ref engine) = self.cognitive_engine {
             engine.update_action_aliases(&game_rules.available_actions);
         }
+
+        // 启动时主动拉取 prompt_templates 并写盘
+        self.fetch_prompt_templates_from_server().await;
 
         // 即时事件处理器：新架构下无需热更新（EventStore 配置在 open 时绑定）
         // tick_id 在主循环每个 tick 更新
@@ -2120,6 +2124,69 @@ impl super::Agent {
             }
             "休息" => "原地休息".to_string(),
             other => format!("执行{}", other),
+        }
+    }
+
+    /// 启动时主动从 Server 拉取 prompt_templates 并写盘
+    ///
+    /// 确保本地存在 prompt_templates.json 文件供下次冷启动使用。
+    /// 失败不阻塞启动——WS ConfigUpdate 已在连接时更新了 runtime config。
+    async fn fetch_prompt_templates_from_server(&self) {
+        let Some(ref engine) = self.cognitive_engine else {
+            return;
+        };
+        let Some(ref device_cfg) = self.device_config else {
+            return;
+        };
+
+        let http_url = self.config.server.http_url.clone();
+        let device_id = device_cfg.device_id;
+        let auth_token = device_cfg.auth_token.clone();
+        let engine = engine.clone();
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/v1/agent/prompt-templates", http_url);
+        let body = serde_json::json!({
+            "device_id": device_id,
+            "auth_token": auth_token,
+        });
+
+        match client.post(&url).json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(data) => {
+                        let hash = data["hash"].as_str().unwrap_or("");
+                        let version = data["version"].as_str().unwrap_or("");
+                        if let Some(content) = data.get("content") {
+                            match cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(
+                                content.clone(),
+                            ) {
+                                Ok(config) => {
+                                    info!(
+                                        "启动拉取 prompt_templates 成功: version={}, hash={}",
+                                        version,
+                                        &hash[..12.min(hash.len())]
+                                    );
+                                    engine.update_prompt_template_from_config(config);
+                                    engine.save_prompt_template_to_disk();
+                                }
+                                Err(e) => {
+                                    warn!("启动拉取 prompt_templates 解析失败: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("启动拉取 prompt_templates 响应解析失败: {}", e);
+                    }
+                }
+            }
+            Ok(resp) => {
+                warn!("启动拉取 prompt_templates 失败: status={}", resp.status());
+            }
+            Err(e) => {
+                warn!("启动拉取 prompt_templates 请求失败: {}", e);
+            }
         }
     }
 }

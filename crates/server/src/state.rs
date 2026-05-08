@@ -193,8 +193,7 @@ pub struct AppState {
     pub vendor_pending_events: crate::models::VendorPendingEvents,
 
     /// Prompt 模板 JSON 缓存（Server YAML→JSON 解析后，用于 WS 连接时下发）
-    pub prompt_template_cache:
-        Arc<tokio::sync::RwLock<Option<PromptTemplateCache>>>,
+    pub prompt_template_cache: Arc<tokio::sync::RwLock<Option<PromptTemplateCache>>>,
 }
 
 impl AppState {

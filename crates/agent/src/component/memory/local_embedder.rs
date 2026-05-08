@@ -138,12 +138,20 @@ impl LocalEmbedder {
             )?
             .unsqueeze(0)?;
 
+            // 创建 token_type_ids（单句输入全零）
+            let token_type_ids = Tensor::zeros(
+                input_ids_tensor.shape().dims(),
+                input_ids_tensor.dtype(),
+                &self.device,
+            )?;
+
             // 模型推理
-            // BertModel::forward 需要 3 个参数: input_ids, attention_mask, token_type_ids
-            // token_type_ids 对于单句输入可以为 None
-            let embeddings = self
-                .model
-                .forward(&input_ids_tensor, &attention_mask_tensor, None)?;
+            // BertModel::forward(input_ids, token_type_ids, attention_mask)
+            let embeddings = self.model.forward(
+                &input_ids_tensor,
+                &token_type_ids,
+                Some(&attention_mask_tensor),
+            )?;
 
             // 平均池化（取 [CLS] token 的嵌入）
             // BGE 模型使用 [CLS] token 作为句子表示
