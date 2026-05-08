@@ -91,8 +91,8 @@ impl PromptTemplateConfig {
     /// 1. struct → serde_json::Value（HashMap entries 被收集到 Map=BTreeMap，自动排序）
     /// 2. Value → bytes（BTreeMap 迭代顺序稳定）
     pub fn to_json_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        let value = serde_json::to_value(self)
-            .context("PromptTemplateConfig → Value 序列化失败")?;
+        let value =
+            serde_json::to_value(self).context("PromptTemplateConfig → Value 序列化失败")?;
         serde_json::to_vec(&value).context("Value → bytes 序列化失败")
     }
 
@@ -226,7 +226,10 @@ mod tests {
         let config = PromptTemplateConfig::from_json_value(make_minimal_config()).unwrap();
         let bytes1 = config.to_json_bytes().unwrap();
         let bytes2 = config.to_json_bytes().unwrap();
-        assert_eq!(bytes1, bytes2, "to_json_bytes must produce identical output");
+        assert_eq!(
+            bytes1, bytes2,
+            "to_json_bytes must produce identical output"
+        );
     }
 
     #[test]
@@ -247,8 +250,10 @@ mod tests {
         let alpha_pos = json_str.find("\"alpha\"").unwrap();
         let middle_pos = json_str.find("\"middle\"").unwrap();
         let zebra_pos = json_str.find("\"zebra\"").unwrap();
-        assert!(alpha_pos < middle_pos && middle_pos < zebra_pos,
-            "JSON keys must be sorted: alpha < middle < zebra");
+        assert!(
+            alpha_pos < middle_pos && middle_pos < zebra_pos,
+            "JSON keys must be sorted: alpha < middle < zebra"
+        );
     }
 
     #[test]
@@ -285,7 +290,10 @@ mod tests {
         let result = config.validate();
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("footer"), "Error should mention missing section 'footer'");
+        assert!(
+            msg.contains("footer"),
+            "Error should mention missing section 'footer'"
+        );
     }
 
     #[test]
@@ -321,7 +329,10 @@ mod tests {
         let tmpl = config.get_template("test_template").unwrap();
         let vars = HashMap::new();
         let rendered = tmpl.render_section("body", &vars).unwrap();
-        assert!(rendered.contains("{name}"), "Unresolved vars should keep placeholder");
+        assert!(
+            rendered.contains("{name}"),
+            "Unresolved vars should keep placeholder"
+        );
     }
 
     #[test]
