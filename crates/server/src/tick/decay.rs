@@ -293,7 +293,26 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
         if ticks_per_hour <= 0 {
             return 0;
         }
-        let game_hours = age_ticks / ticks_per_hour;
+
+        // tick_id 是秒级时间戳，需除以 real_seconds_per_tick 得到 tick count
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+        let real_seconds_per_tick = registry
+            .get()
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            age_ticks / real_seconds_per_game_hour
+        } else {
+            age_ticks / ticks_per_hour
+        };
+
         let hours_per_year = time_config.hours_per_day as i64
             * time_config.days_per_season as i64
             * time_config.seasons_per_year as i64;
@@ -309,6 +328,7 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
 /// 计算 starting_age 对应的 tick 偏移量（用于重生时设置 birth_tick）
 ///
 /// 使 age 计算结果为 starting_age 岁，而非 0 岁。
+/// tick_id 是秒级时间戳，偏移量需包含 real_seconds_per_tick 转换。
 pub fn compute_starting_age_ticks() -> i64 {
     let registry = match crate::game_data::registry_or_error() {
         Ok(r) => r,
@@ -342,9 +362,17 @@ pub fn compute_starting_age_ticks() -> i64 {
         let hours_per_year = time_config.hours_per_day as i64
             * time_config.days_per_season as i64
             * time_config.seasons_per_year as i64;
-        let ticks_per_year = ticks_per_hour * hours_per_year;
-        if ticks_per_year > 0 {
-            return starting_age * ticks_per_year;
+
+        let real_seconds_per_tick = gd
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let real_seconds_per_year = real_seconds_per_game_hour * hours_per_year;
+        if real_seconds_per_year > 0 {
+            return starting_age * real_seconds_per_year;
         }
     }
     0
@@ -551,20 +579,25 @@ mod tests {
 
     /// 测试 compute_age_years 的基本计算
     ///
-    /// 测试配置: ticks_per_hour=1, hours_per_day=24, days_per_season=10, seasons_per_year=4
-    /// → 1 游戏年 = 1 * 24 * 10 * 4 = 960 ticks
+    /// 测试配置: ticks_per_hour=1, real_seconds_per_tick=60,
+    /// hours_per_day=24, days_per_season=10, seasons_per_year=4
+    /// → real_seconds_per_game_hour = 60 * 1 = 60
+    /// → hours_per_year = 24 * 10 * 4 = 960
+    /// → real_seconds_per_year = 60 * 960 = 57600
+    ///
+    /// tick_id 是秒级时间戳，age_ticks / real_seconds_per_game_hour = game_hours
     #[test]
     fn test_compute_age_years_basic() {
         crate::game_data::init_test_registry();
 
-        // 960 ticks 差 = 1 游戏年
-        assert_eq!(compute_age_years(0, 960), 1);
-        assert_eq!(compute_age_years(0, 1920), 2);
-        assert_eq!(compute_age_years(0, 9600), 10);
+        // 57600 秒差 = 1 游戏年（60 * 960）
+        assert_eq!(compute_age_years(0, 57600), 1);
+        assert_eq!(compute_age_years(0, 115200), 2);
+        assert_eq!(compute_age_years(0, 576000), 10);
 
         // birth_tick > 0
-        assert_eq!(compute_age_years(960, 1920), 1);
-        assert_eq!(compute_age_years(960, 9600), 9);
+        assert_eq!(compute_age_years(57600, 115200), 1);
+        assert_eq!(compute_age_years(57600, 576000), 9);
     }
 
     /// 测试 compute_age_years 边界条件
@@ -579,7 +612,7 @@ mod tests {
         assert_eq!(compute_age_years(200, 100), 0);
 
         // 不足 1 年 → 0 岁（整数除法截断）
-        assert_eq!(compute_age_years(0, 959), 0);
+        assert_eq!(compute_age_years(0, 57599), 0);
     }
 
     /// 测试 compute_age_years 与 compute_starting_age_ticks 的 round-trip 可逆性
@@ -591,14 +624,15 @@ mod tests {
         crate::game_data::init_test_registry();
 
         let starting_ticks = compute_starting_age_ticks();
-        // starting_age 默认 18 → 18 * 960 = 17280 ticks
+        // starting_age=18, real_seconds_per_year = 60 * 960 = 57600
+        // → starting_ticks = 18 * 57600 = 1036800
         assert_eq!(
             starting_ticks,
-            18 * 960,
-            "starting_age=18 应产生 17280 ticks"
+            18 * 60 * 960,
+            "starting_age=18 应产生 1036800 秒偏移"
         );
 
-        let current_tick = 10000;
+        let current_tick = 1036800;
         let birth_tick = current_tick - starting_ticks;
 
         let age = compute_age_years(birth_tick, current_tick);
