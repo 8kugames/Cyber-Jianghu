@@ -367,23 +367,13 @@ impl CognitiveEngine {
     /// 加载 prompt 模板配置
     ///
     /// 查找路径：
-    /// 1. $CYBER_JIANGHU_CONFIG_DIR/prompt_templates.yaml
-    /// 2. ~/.cyber-jianghu/config/prompt_templates.yaml
+    /// 1. $CYBER_JIANGHU_CONFIG_DIR/prompt_templates.json
+    /// 2. ~/.cyber-jianghu/config/prompt_templates.json
     /// 3. 内置默认路径（编译时嵌入或同级 config/）
     ///
-    /// Fail-fast: 配置文件存在但格式错误时 panic。找不到文件也 panic。
+    /// 本地文件不存在时返回空壳配置，等待 WS ConfigUpdate 覆盖。
     fn load_prompt_template() -> PromptTemplateConfig {
-        let search_paths = [
-            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-                .ok()
-                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
-            dirs::home_dir().map(|h| {
-                h.join(".cyber-jianghu")
-                    .join("config")
-                    .join("prompt_templates.yaml")
-            }),
-            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
-        ];
+        let search_paths = Self::prompt_template_search_paths();
 
         for path_opt in &search_paths {
             if let Some(path) = path_opt
@@ -395,30 +385,48 @@ impl CognitiveEngine {
                         return config;
                     }
                     Err(e) => {
-                        warn!("Prompt 模板文件解析失败 ({}): {}，等待 Server WS 下发", path.display(), e);
+                        warn!(
+                            "Prompt 模板文件解析失败 ({}): {}，等待 Server WS 下发",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
         }
         warn!(
-            "未找到 prompt_templates.yaml，搜索路径: {:?}，等待 Server WS 下发",
+            "未找到 prompt_templates.json，搜索路径: {:?}，等待 Server WS 下发",
             search_paths
                 .iter()
                 .filter_map(|p| p.as_ref().map(|x| x.display().to_string()))
                 .collect::<Vec<_>>()
         );
-        // 返回空壳配置，WS 下发后会覆盖
         PromptTemplateConfig {
-            version: "empty-fallback".to_string(),
+            version: super::prompt_template::EMPTY_FALLBACK_VERSION.to_string(),
             description: String::new(),
             templates: std::collections::HashMap::new(),
             memory_narrative: None,
         }
     }
 
+    /// prompt_templates.json 搜索路径（load 和 save 共用）
+    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 3] {
+        [
+            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
+            dirs::home_dir().map(|h| {
+                h.join(".cyber-jianghu")
+                    .join("config")
+                    .join("prompt_templates.json")
+            }),
+            Some(std::path::PathBuf::from("config/prompt_templates.json")),
+        ]
+    }
+
     /// 获取 Prompt 模板配置（运行时覆盖优先）
     ///
-    /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 YAML 配置。
+    /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 JSON 配置。
     pub fn prompt_template(&self) -> PromptTemplateConfig {
         // runtime override 优先
         if let Some(runtime) = self.runtime_prompt_template.read().unwrap().as_ref() {
@@ -432,6 +440,49 @@ impl CognitiveEngine {
         let mut guard = self.runtime_prompt_template.write().unwrap();
         *guard = Some(config);
         info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
+    }
+
+    /// 将当前 prompt 模板配置持久化到本地磁盘（供下次启动加载）
+    pub fn save_prompt_template_to_disk(&self) {
+        let config = self.prompt_template();
+        if config.version == super::prompt_template::EMPTY_FALLBACK_VERSION {
+            return;
+        }
+
+        let json_bytes = match config.to_json_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!("Prompt 模板序列化失败: {}", e);
+                return;
+            }
+        };
+
+        // 使用与 load_prompt_template() 相同的路径优先级：
+        // 优先写入已存在的路径，否则写入最高优先级的路径
+        let search_paths = Self::prompt_template_search_paths();
+        let save_path = search_paths
+            .iter()
+            .find_map(|p| p.as_ref().filter(|path| path.exists()))
+            .cloned()
+            .or_else(|| search_paths.into_iter().find_map(|p| p))
+            .unwrap_or_else(|| std::path::PathBuf::from("config/prompt_templates.json"));
+
+        if let Some(parent) = save_path.parent()
+            && !parent.exists()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!("创建配置目录失败 {}: {}", parent.display(), e);
+            return;
+        }
+
+        match std::fs::write(&save_path, &json_bytes) {
+            Ok(()) => tracing::info!(
+                "prompt_templates.json 已写盘: {} ({} bytes)",
+                save_path.display(),
+                json_bytes.len()
+            ),
+            Err(e) => tracing::warn!("prompt_templates.json 写盘失败: {}", e),
+        }
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
@@ -665,7 +716,7 @@ impl CognitiveEngine {
             &persona_for_prompt,
             &agent_name,
             use_tool_calling,
-        );
+        )?;
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
@@ -984,7 +1035,7 @@ impl CognitiveEngine {
             validation_feedback,
             &persona_for_prompt,
             &agent_name,
-        );
+        )?;
 
         let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
         let response_json = serde_json::to_string(&response)?;
@@ -1172,7 +1223,7 @@ impl CognitiveEngine {
         summary_context: &str,
         outcome_context: &str,
     ) -> String {
-        // 1. 获取配置（从 prompt_templates.yaml 的 memory_narrative section）
+        // 1. 获取配置（从 prompt_templates.json 的 memory_narrative section）
         let prompt_cfg = self.prompt_template();
         let config = match prompt_cfg.get_memory_narrative_config() {
             Some(c) => c,

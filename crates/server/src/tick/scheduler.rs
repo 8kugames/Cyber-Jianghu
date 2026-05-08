@@ -373,11 +373,13 @@ impl TickScheduler {
         let yaml_content = std::fs::read_to_string(&path)
             .with_context(|| format!("读取 {} 失败", path.display()))?;
 
-        let config: cyber_jianghu_protocol::PromptTemplateConfig = serde_yaml::from_str(&yaml_content)
-            .with_context(|| format!("解析 {} 失败", path.display()))?;
+        let config: cyber_jianghu_protocol::PromptTemplateConfig =
+            serde_yaml::from_str(&yaml_content)
+                .with_context(|| format!("解析 {} 失败", path.display()))?;
 
         let version = config.version.clone();
-        let json_bytes = config.to_json_bytes()
+        let json_bytes = config
+            .to_json_bytes()
             .context("Prompt 模板 JSON 序列化失败")?;
         let hash = format!("{:x}", sha2::Sha256::digest(&json_bytes));
         let content: serde_json::Value = serde_json::from_slice(&json_bytes)
@@ -397,6 +399,12 @@ impl TickScheduler {
                 hash,
                 version,
             });
+        }
+
+        // 将 canonical JSON 持久化到 config dir，供 Agent HTTP 拉取
+        let json_path = config_dir.join("prompt_templates.json");
+        if let Err(e) = std::fs::write(&json_path, &json_bytes) {
+            warn!("prompt_templates.json 写盘失败: {}", e);
         }
 
         Ok(())
