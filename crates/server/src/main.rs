@@ -90,9 +90,7 @@ fn start_tick_engine(
     agent_state_cache: cyber_jianghu_server::state::AgentStateCache,
     accepting_tick_id: Arc<AtomicI64>,
     vendor_pending_events: cyber_jianghu_server::models::VendorPendingEvents,
-    prompt_template_cache: Arc<
-        tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>,
-    >,
+    prompt_template_cache: Arc<tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut tick_scheduler = TickScheduler::new(
@@ -347,6 +345,11 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/agent/biography",
             post(handlers::agent::update_biography),
+        )
+        // Prompt Templates 拉取 — Agent 启动时主动获取
+        .route(
+            "/api/v1/agent/prompt-templates",
+            post(handlers::agent::get_prompt_templates),
         )
         // Vendor 补货规则管理
         .route(

@@ -176,13 +176,13 @@ impl RuleEngine {
         let search_paths: Vec<Option<std::path::PathBuf>> = vec![
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
-                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             dirs::home_dir().map(|h| {
                 h.join(".cyber-jianghu")
                     .join("config")
-                    .join("prompt_templates.yaml")
+                    .join("prompt_templates.json")
             }),
-            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
+            Some(std::path::PathBuf::from("config/prompt_templates.json")),
         ];
 
         for path_opt in &search_paths {
@@ -197,7 +197,11 @@ impl RuleEngine {
                         return Some(Arc::new(config));
                     }
                     Err(e) => {
-                        warn!("RuleEngine prompt 模板文件解析失败 ({}): {}，等待 Server 下发", path.display(), e);
+                        warn!(
+                            "RuleEngine prompt 模板文件解析失败 ({}): {}，等待 Server 下发",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
