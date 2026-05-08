@@ -103,6 +103,13 @@ pub async fn get_current_world_tick_id(pool: &PgPool) -> Result<i64> {
     .await
     .context("获取当前世界 tick ID 失败")?;
 
+    // 空库兜底：tick_logs 和 agent_states 均为空时返回 0，
+    // 导致注册时 birth_tick 为负值（BUG-8）。
+    // 使用当前 Unix 时间戳作为合理的初始 tick_id。
+    if tick_id == 0 {
+        return Ok(chrono::Utc::now().timestamp());
+    }
+
     Ok(tick_id)
 }
 
