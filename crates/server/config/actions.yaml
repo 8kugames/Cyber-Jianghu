@@ -444,7 +444,7 @@ data:
   说话:
     name: "说话"
     aliases: ["交谈", "说", "讲话", "发言", "say", "speak", "talk", "chat"]
-    description: "在当前位置公开说话，内容对所有在场 Agent 可见。必须指定说话内容（content）。注意区分：说话 是公开说话（所有人都听到），私语 是私聊（仅双方可见）。"
+    description: "在当前位置公开说话，内容对所有在场 Agent 可见。必须指定说话内容（content）。说话消耗体力并增加口渴感。注意区分：说话 是公开说话（所有人都听到），私语 是私聊（仅双方可见）。"
     category: social
     ooc_risk: high
     max_content_length: 500
@@ -461,6 +461,11 @@ data:
         attribute: stamina
         min: 0
         cost: 1
+    effects:
+      - effect_type: attribute_change
+        attribute: thirst
+        operation: add
+        value: 2
 
   私语:
     name: "私语"
@@ -481,7 +486,7 @@ data:
       - requirement_type: attribute
         attribute: qi
         min: 0
-        cost: 1
+        cost: 2
 
   # NOTE: 以下社交动作仅有 generic fallback，无实际效果
   #   - follow: 需 AgentState.following + 移动同步逻辑
