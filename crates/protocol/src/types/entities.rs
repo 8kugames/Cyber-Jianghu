@@ -229,10 +229,58 @@ pub struct AvailableAction {
     /// 字段别名映射 { canonical_field_name: [aliases...] }
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub field_aliases: std::collections::HashMap<String, Vec<String>>,
+
+    /// 动作需求列表（消耗/前置条件，从 actions.yaml 直传）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<ActionRequirementInfo>,
+
+    /// 动作效果列表（属性变化/物品变化，从 actions.yaml 直传）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<ActionEffectInfo>,
 }
 
 fn default_ooc_risk() -> String {
     "low".to_string()
+}
+
+// ============================================================================
+// 动作需求与效果 — 通用数据驱动类型
+// ============================================================================
+
+/// 动作需求（通用，数据驱动）
+///
+/// 从 actions.yaml requirements 字段直传。
+/// 通用 key-value 结构，支持任意 requirement_type 扩展。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionRequirementInfo {
+    /// 需求类型（"attribute" | "item" | "location" | "skill" 等，可扩展）
+    pub requirement_type: String,
+
+    /// 目标（"self" | "target"，默认 "self"）
+    #[serde(default)]
+    pub target: String,
+
+    /// 通用参数（attribute/item/location 各类型的具体参数）
+    #[serde(flatten)]
+    pub params: HashMap<String, serde_json::Value>,
+}
+
+/// 动作效果（通用，数据驱动）
+///
+/// 从 actions.yaml effects 字段直传。
+/// 通用 key-value 结构，支持任意 effect_type 扩展。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionEffectInfo {
+    /// 效果类型（"attribute_change" | "add_item" | "remove_item" 等，可扩展）
+    pub effect_type: String,
+
+    /// 目标（"self" | "target"，默认 "self"）
+    #[serde(default)]
+    pub target: String,
+
+    /// 通用参数
+    #[serde(flatten)]
+    pub params: HashMap<String, serde_json::Value>,
 }
 
 /// 初始物品配置

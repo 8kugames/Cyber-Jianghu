@@ -4,7 +4,7 @@
 
 use super::global::registry;
 use crate::game_data::types::ActionConfigEntry;
-use cyber_jianghu_protocol::AvailableAction;
+use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
 /// Action 配置访问器
 ///
@@ -96,6 +96,24 @@ impl ActionRegistry {
                         .as_ref()
                         .map(|v| v.field_aliases.clone())
                         .unwrap_or_default(),
+                    requirements: config
+                        .requirements
+                        .iter()
+                        .map(|r| ActionRequirementInfo {
+                            requirement_type: r.requirement_type.clone(),
+                            target: r.target.clone(),
+                            params: r.params.clone(),
+                        })
+                        .collect(),
+                    effects: config
+                        .effects
+                        .iter()
+                        .map(|e| ActionEffectInfo {
+                            effect_type: e.effect_type.clone(),
+                            target: e.target.clone(),
+                            params: e.params.clone(),
+                        })
+                        .collect(),
                 })
             })
             .collect()
