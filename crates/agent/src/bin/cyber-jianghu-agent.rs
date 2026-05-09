@@ -49,7 +49,7 @@ use cyber_jianghu_agent::{
     },
     soul::actor::{CognitiveEngine, CognitiveEngineConfig},
 };
-use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
+use cyber_jianghu_protocol::{EraSettings, Intent, ServerMessage, WorldBuildingRules, WorldState};
 
 // ============================================================================
 // CLI 定义
@@ -544,6 +544,7 @@ fn create_llm_client(
         RuntimeMode::Cognitive => Ok(cyber_jianghu_agent::component::llm::build_fallback_client(
             &config.llm,
             config.llm.enable_streaming,
+            Some(config.earth_soul.clone()),
         )?),
         RuntimeMode::Claw => {
             let upstream_tx = shared_state
@@ -610,6 +611,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         info!("配置文件不存在，从环境变量加载");
         Config::from_env().unwrap_or_default()
     });
+
+    // Fail Fast: 校验 EarthSoul 配置
+    config
+        .earth_soul
+        .validate()
+        .context("earth_soul 配置校验失败")?;
 
     // Ensure servers_dir is set (#[serde(default)] means it's empty after from_file)
     // 优先级：CYBER_JIANGHU_DATA_DIR 环境变量 > ~/.cyber-jianghu/servers
@@ -983,7 +990,21 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .with_decision_chain(decision_with_chain)
         .with_decision_memory(decision_with_memory)
         .with_llm_container(llm_container.clone())
-        .with_llm_client(llm_client.clone(), None)
+        .with_llm_client(
+            llm_client.clone(),
+            Some(WorldBuildingRules {
+                version: String::new(),
+                era: EraSettings {
+                    name: String::new(),
+                    tech_level: String::new(),
+                    social_structure: String::new(),
+                },
+                allowed_concepts: Vec::new(),
+                forbidden_concepts: Vec::new(),
+                narrative_rules: String::new(),
+                last_updated: String::new(),
+            }),
+        )
         .with_http_api_state(api_state.clone())
         .with_reconnect_rx(reconnect_rx)
         .cognitive_engine(cognitive_engine.clone());
@@ -1006,6 +1027,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     }
 
     let mut agent = builder.build();
+
+    // 注入 relationship_store 到 HttpApiState
+    if let Some(store) = agent.relationship_store() {
+        *api_state.relationship_store.write().unwrap() = Some(Arc::new(store.clone()));
+        info!("relationship_store 已注入 HttpApiState");
+    }
 
     // 注入 LLM container 到 HttpApiState（支持热重载重建）
     {

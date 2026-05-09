@@ -121,6 +121,26 @@ data:
     # 单个 Agent 可掌握的技能上限
     max_skills_per_agent: 10
 
+  # 技能习得阈值配置（数据驱动）
+  # trigger_categories: 对应 actions.yaml 中每个 action 的 category
+  # min_count: 该 category 的 action 成功执行多少次后自动习得
+  skill_acquisition:
+    social/trust-reading:
+      trigger_categories: ["social"]
+      min_count: 5
+    social/conflict-navigation:
+      trigger_categories: ["martial", "social"]
+      min_count: 4
+    cognitive/risk-assessment:
+      trigger_categories: ["martial", "social", "survival"]
+      min_count: 8
+    cognitive/resource-planning:
+      trigger_categories: ["survival", "economic"]
+      min_count: 5
+    survival/situational-awareness:
+      trigger_categories: ["martial", "survival"]
+      min_count: 6
+
   # 即时事件处理配置
   immediate_events:
     # 事件 triage 配置（DB 持久化 + Session LLM 分流）

@@ -393,17 +393,85 @@ fn find_first_json_end(s: &str) -> Option<usize> {
     None
 }
 
-/// 尝试修复截断的 JSON 字符串
-fn try_fix_truncated_json(json_str: &str) -> String {
-    let mut fixed = json_str.trim_end().to_string();
+/// LLM JSON 归一化预处理
+///
+/// 确定性文本变换，将 LLM 输出的常见非标 JSON 模式归一化为合法 JSON。
+/// 在 serde_json::from_str 之前调用，消除因模型输出质量导致的解析失败。
+///
+/// 处理范围：
+/// 1. 中文全角引号 "" → ""
+/// 2. 单行注释 // ... → 移除
+/// 3. 尾部逗号 → 移除
+/// 4. 未闭合引号/括号 → 修补
+fn normalize_llm_json(json_str: &str) -> String {
+    let mut result = String::with_capacity(json_str.len());
+    let mut chars = json_str.chars().peekable();
+    let mut in_string = false;
 
-    // 移除尾部逗号
-    if fixed.ends_with(',') {
-        fixed.pop();
+    while let Some(c) = chars.next() {
+        if in_string {
+            if c == '\\' {
+                result.push('\\');
+                if let Some(next) = chars.next() {
+                    result.push(next);
+                }
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+            result.push(c);
+            continue;
+        }
+
+        match c {
+            '"' => {
+                in_string = true;
+                result.push('"');
+            }
+            // 中文左/右引号 → "
+            '\u{201c}' | '\u{201d}' => {
+                result.push('"');
+            }
+            // 单行注释 // ... \n → 移除到行尾
+            '/' if chars.peek() == Some(&'/') => {
+                for nc in chars.by_ref() {
+                    if nc == '\n' {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                result.push(c);
+            }
+        }
     }
 
-    // 修复截断的字符串值（未闭合的引号）
-    // 检查最后一个 `"` 之后是否有奇数个引号，如果有则补一个
+    // 尾部清理
+    let mut fixed = result.trim_end().to_string();
+
+    // 移除数组/对象闭合后的多余引号：]" → ], }" → }
+    let bytes = fixed.as_bytes();
+    let len = bytes.len();
+    if len >= 2 {
+        let last = bytes[len - 1];
+        let prev = bytes[len - 2];
+        if last == b'"' && (prev == b']' || prev == b'}') {
+            fixed.pop();
+        }
+    }
+
+    // 移除尾部逗号（在 } 或 ] 前的）
+    while let Some(last) = fixed.chars().last() {
+        if last == ',' {
+            fixed.pop();
+            fixed = fixed.trim_end().to_string();
+        } else {
+            break;
+        }
+    }
+
+    // 修复未闭合引号（奇数个 "）
     let quote_count = fixed.chars().filter(|&c| c == '"').count();
     if quote_count % 2 != 0 {
         fixed.push('"');
@@ -425,35 +493,160 @@ fn try_fix_truncated_json(json_str: &str) -> String {
     fixed
 }
 
-/// 解析 LLM 响应为结构化类型（带截断修复）
+/// 解析 LLM 响应为结构化类型（带归一化预处理 + 括号平衡修复）
+///
+/// 流程：extract_json_str → normalize_llm_json → 括号平衡修复 → serde 解析
+///
+/// 括号平衡修复：逐字符追踪 {}[] 嵌套深度（跳过字符串内部），
+/// 当遇到 ] 或 } 试图闭合但深度不匹配时，自动补全缺失的闭合符号。
+/// 这是确定性的 — 不猜测，直接修正嵌套错误。
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
-    let json_str = extract_json_str(response);
+    let raw_json = extract_json_str(response);
+    let json_str = normalize_llm_json(&raw_json);
 
-    match serde_json::from_str::<D>(&json_str) {
-        Ok(parsed) => Ok(parsed),
-        Err(first_err) => {
-            let fixed = try_fix_truncated_json(&json_str);
+    // 第一轮：严格解析
+    if let Ok(parsed) = serde_json::from_str::<D>(&json_str) {
+        return Ok(parsed);
+    }
 
-            match serde_json::from_str::<D>(&fixed) {
-                Ok(parsed) => {
-                    tracing::warn!("JSON was truncated, auto-fixed");
-                    Ok(parsed)
+    // 第二轮：括号平衡修复
+    let balanced = balance_braces(&json_str);
+    if balanced != json_str
+        && let Ok(parsed) = serde_json::from_str::<D>(&balanced)
+    {
+        tracing::warn!("JSON repaired via brace balancing");
+        return Ok(parsed);
+    }
+
+    // 全部失败，输出诊断信息
+    let strict_err = match serde_json::from_str::<D>(&json_str) {
+        Ok(_) => unreachable!(),
+        Err(e) => e,
+    };
+    let error_line = strict_err.line();
+    let lines: Vec<&str> = json_str.lines().collect();
+    let start = error_line.saturating_sub(4);
+    let end = (error_line + 2).min(lines.len());
+    let error_snippet: String = lines[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let line_num = start + i + 1;
+            let marker = if line_num == error_line { ">>>" } else { "   " };
+            format!("{} {:4}: {}", marker, line_num, l)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    tracing::error!(
+        error_type = ?strict_err.classify(),
+        error_msg = %strict_err,
+        line = error_line,
+        column = strict_err.column(),
+        json_len = json_str.len(),
+        "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
+    );
+    Err(strict_err.into())
+}
+
+/// 括号平衡修复：确定性深度追踪 + 自动补全
+///
+/// 逐字符追踪 {}[] 嵌套深度（跳过字符串和转义序列），
+/// 核心逻辑：遇到 `}` 时只弹出一个 `{`（不跨类型），遇到 `]` 时只弹出一个 `[`。
+/// 栈空时遇到闭合符号 → 丢弃（LLM 多余输出）。
+/// 额外修复：当 `}` 后跟随 `,` + `{`，如果栈深度表明当前对象未闭合，立即补 `}`。
+fn balance_braces(json: &str) -> String {
+    let chars: Vec<char> = json.chars().collect();
+    let len = chars.len();
+    let mut result = String::with_capacity(json.len() + 32);
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_string = false;
+    let mut i = 0;
+
+    while i < len {
+        let c = chars[i];
+
+        if in_string {
+            result.push(c);
+            if c == '\\' && i + 1 < len {
+                i += 1;
+                result.push(chars[i]);
+            } else if c == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match c {
+            '"' => {
+                in_string = true;
+                result.push('"');
+            }
+            '{' | '[' => {
+                stack.push(c);
+                result.push(c);
+            }
+            '}' => {
+                if stack.is_empty() {
+                    i += 1;
+                    continue;
                 }
-                Err(e) => {
-                    tracing::error!(
-                        error_type = ?e.classify(),
-                        error_msg = %e,
-                        line = e.line(),
-                        column = e.column(),
-                        json_len = json_str.len(),
-                        response_preview = %response.chars().take(200).collect::<String>(),
-                        "JSON parse failed (even after truncation fix)"
-                    );
-                    Err(first_err.into())
+                while let Some(&top) = stack.last() {
+                    if top == '{' {
+                        stack.pop();
+                        break;
+                    }
+                    stack.pop();
+                    result.push(']');
+                }
+                result.push('}');
+
+                // }, { 模式：action_data 的 } 关闭后，紧跟 ,{ 表示下一个元素
+                let mut peek = i + 1;
+                while peek < len && chars[peek].is_whitespace() {
+                    peek += 1;
+                }
+                if peek < len && chars[peek] == ',' {
+                    peek += 1;
+                    while peek < len && chars[peek].is_whitespace() {
+                        peek += 1;
+                    }
+                    if peek < len && chars[peek] == '{' {
+                        while stack.last() == Some(&'{') {
+                            stack.pop();
+                            result.push('}');
+                        }
+                    }
                 }
             }
+            ']' => {
+                if stack.is_empty() {
+                    i += 1;
+                    continue;
+                }
+                while let Some(&top) = stack.last() {
+                    if top == '[' {
+                        stack.pop();
+                        break;
+                    }
+                    stack.pop();
+                    result.push('}');
+                }
+                result.push(']');
+            }
+            _ => {
+                result.push(c);
+            }
         }
+        i += 1;
     }
+
+    while let Some(top) = stack.pop() {
+        result.push(if top == '{' { '}' } else { ']' });
+    }
+
+    result
 }
 
 #[async_trait]

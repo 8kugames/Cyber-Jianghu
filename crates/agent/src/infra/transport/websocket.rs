@@ -99,6 +99,12 @@ struct ConnectionState {
     /// 技能配置更新回调（ConfigUpdate with config_type="skills"）
     /// 参数: (skills, removed_items)
     skill_update_callback: Option<SkillUpdateCallback>,
+    /// Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
+    /// 参数: (PromptTemplateConfig)
+    prompt_template_callback:
+        Option<Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>>,
+    /// 上次收到的 prompt_templates content_hash（用于 skip-optimization）
+    prompt_template_hash: Option<String>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -132,6 +138,8 @@ impl WebSocketClient {
                 server_msg_callback: None,
                 action_update_callback: None,
                 skill_update_callback: None,
+                prompt_template_callback: None,
+                prompt_template_hash: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -327,6 +335,21 @@ impl WebSocketClient {
             rt.block_on(async {
                 let mut state = self.state.write().await;
                 state.skill_update_callback = Some(callback);
+            });
+        });
+    }
+
+    /// 设置 Prompt 模板配置更新回调（ConfigUpdate with config_type="prompt_templates"）
+    /// 参数: (PromptTemplateConfig)
+    pub fn set_prompt_template_callback(
+        &self,
+        callback: Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>,
+    ) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.prompt_template_callback = Some(callback);
             });
         });
     }
@@ -649,7 +672,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -657,6 +680,7 @@ async fn websocket_background_task(
                                 state_guard.world_building_rules_callback.clone(),
                                 state_guard.action_update_callback.clone(),
                                 state_guard.skill_update_callback.clone(),
+                                state_guard.prompt_template_callback.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -677,9 +701,9 @@ async fn websocket_background_task(
                                     ref update_type,
                                     ref version,
                                     ref content,
+                                    ref content_hash,
                                     ref updated_items,
                                     ref removed_items,
-                                    ..
                                 } = msg
                                 {
                                     info!(
@@ -740,6 +764,32 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             warn!("Failed to parse world_building_rules content from ConfigUpdate");
+                                        }
+                                    // 处理 prompt_templates 配置更新（JSON 格式 + hash skip）
+                                    } else if config_type == "prompt_templates" {
+                                        // hash skip: 内容未变则跳过更新
+                                        let should_update = {
+                                            let state_guard = state.read().await;
+                                            match (content_hash.as_ref(), state_guard.prompt_template_hash.as_ref()) {
+                                                (Some(new_hash), Some(old_hash)) => new_hash != old_hash,
+                                                _ => true,
+                                            }
+                                        };
+                                        if should_update {
+                                            // 无论解析成功与否，先记录 hash，防止相同坏数据反复重试
+                                            if let Some(hash) = content_hash.as_ref() {
+                                                let mut state_guard = state.write().await;
+                                                state_guard.prompt_template_hash = Some(hash.clone());
+                                            }
+                                            if let Ok(config) = cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(content.clone()) {
+                                                if let Some(ref cb) = prompt_template_cb {
+                                                    cb(config);
+                                                }
+                                            } else {
+                                                warn!("Failed to parse prompt_templates JSON from ConfigUpdate");
+                                            }
+                                        } else {
+                                            debug!("prompt_templates skip: hash unchanged");
                                         }
                                     }
                                 }
@@ -830,25 +880,31 @@ async fn websocket_background_task(
                             Ok(msg @ ServerMessage::AgentDied { .. }) => {
                                 if let ServerMessage::AgentDied {
                                     agent_id,
-                                    ref cause,
-                                    ref description,
+                                    cause,
+                                    description,
                                     ..
-                                } = msg
+                                } = &msg
                                 {
                                     let current_agent_id = {
                                         let guard = state.read().await;
                                         guard.agent_id
                                     };
-                                    if current_agent_id == Some(agent_id) {
+                                    if current_agent_id == Some(*agent_id) {
                                         warn!("Agent {} died: {} - {}", agent_id, cause, description);
                                         if let Some(ref cb) = server_msg_cb {
-                                            cb(msg);
+                                            cb(msg.clone());
                                         }
                                     }
                                 }
                             }
                             Ok(ServerMessage::Pong { .. }) => {
                                 debug!("Background: Pong received");
+                            }
+                            Ok(ref msg @ ServerMessage::DailySummaryData { .. }) => {
+                                debug!("Background: DailySummaryData received");
+                                if let Some(ref cb) = server_msg_cb {
+                                    cb(msg.clone());
+                                }
                             }
                             Err(e) => {
                                 warn!("Background: Parse error: {}", e);
@@ -1047,6 +1103,16 @@ impl AgentClient {
     pub async fn set_skill_update_callback(&self, callback: SkillUpdateCallback) {
         let client = self.client.read().await;
         client.set_skill_update_callback(callback);
+    }
+
+    /// 设置 Prompt 模板配置更新回调
+    /// 参数: (PromptTemplateConfig)
+    pub async fn set_prompt_template_callback(
+        &self,
+        callback: Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>,
+    ) {
+        let client = self.client.read().await;
+        client.set_prompt_template_callback(callback);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）

@@ -27,6 +27,7 @@ pub mod attributes;
 pub mod entities;
 pub mod locations;
 pub mod narrative;
+pub mod prompt_template;
 pub mod review;
 pub mod rules;
 pub mod world;
@@ -37,6 +38,7 @@ pub use attributes::*;
 pub use entities::*;
 pub use locations::*;
 pub use narrative::*;
+pub use prompt_template::*;
 pub use review::*;
 pub use rules::*;
 pub use world::*;
@@ -246,8 +248,19 @@ mod tests {
     }
 
     #[test]
-    fn test_world_building_rules_default() {
-        let rules = WorldBuildingRules::default();
+    fn test_world_building_rules_construction() {
+        let rules = WorldBuildingRules {
+            version: "0.0.1".to_string(),
+            era: EraSettings {
+                name: "武侠架空世界".to_string(),
+                tech_level: "冷兵器时代".to_string(),
+                social_structure: "封建帝制".to_string(),
+            },
+            allowed_concepts: vec!["内力".to_string(), "轻功".to_string()],
+            forbidden_concepts: vec!["魔法".to_string()],
+            narrative_rules: "测试".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+        };
         assert_eq!(rules.version, "0.0.1");
         assert!(rules.allowed_concepts.contains(&"内力".to_string()));
         assert!(rules.forbidden_concepts.contains(&"魔法".to_string()));

@@ -550,6 +550,143 @@ pub fn init_test_registry() {
             }"#,
         ).unwrap();
 
+        // 写入 narrative_config.yaml
+        fs::write(
+            dir.path().join("narrative_config.yaml"),
+            r#"version: "0.0.1-test"
+description: "测试用叙事化配置"
+
+attribute_categories:
+  primary:
+    - strength
+    - agility
+    - constitution
+    - intelligence
+    - charisma
+    - luck
+  status:
+    - hp
+    - stamina
+    - hunger
+    - thirst
+    - qi
+    - sanity
+    - reputation
+
+attributes:
+    hp:
+      name: hp
+      display_name: 生命值
+      thresholds:
+        - min: 90
+          max: 100
+          description: "身体状况极佳，精力充沛"
+        - min: 50
+          max: 89
+          description: "身体状态一般"
+        - min: 0
+          max: 49
+          description: "身体虚弱，伤痛明显"
+
+    hunger:
+      name: hunger
+      display_name: 饥饿值
+      thresholds:
+        - min: 80
+          max: 100
+          description: "肚子很饱"
+        - min: 0
+          max: 79
+          description: "有些饿"
+
+    thirst:
+      name: thirst
+      display_name: 口渴值
+      thresholds:
+        - min: 80
+          max: 100
+          description: "完全不渴"
+        - min: 0
+          max: 79
+          description: "口渴"
+
+    stamina:
+      name: stamina
+      display_name: 体力
+      thresholds:
+        - min: 80
+          max: 100
+          description: "体力充沛"
+        - min: 0
+          max: 79
+          description: "体力有些不支"
+
+    qi:
+      name: qi
+      display_name: 内力
+      thresholds:
+        - min: 50
+          max: 100
+          description: "内力充沛"
+        - min: 0
+          max: 49
+          description: "内力不足"
+
+    sanity:
+      name: sanity
+      display_name: 理智值
+      thresholds:
+        - min: 80
+          max: 100
+          description: "神志清明"
+        - min: 0
+          max: 79
+          description: "有些恍惚"
+
+    reputation:
+      name: reputation
+      display_name: 声望
+      thresholds:
+        - min: 0
+          max: 100
+          description: "声望"
+
+status_effects:
+  poisoned:
+    description: "身中剧毒"
+  exhausted:
+    description: "精疲力尽"
+"#,
+        ).unwrap();
+
+        // 写入 display_messages.yaml
+        fs::write(
+            dir.path().join("display_messages.yaml"),
+            r#"version: "0.0.1-test"
+description: "测试用显示消息配置"
+
+entity_states:
+  alive: "存活"
+  dead: "死亡，请大侠转世重来"
+
+weather:
+  sunny: "晴"
+  cloudy: "多云"
+  rainy: "雨"
+  stormy: "暴风雨"
+
+weather_events:
+  sunny: "天朗气清"
+  cloudy: "阴云密布"
+  rainy: "细雨绵绵"
+  stormy: "雷暴来袭"
+
+notifications:
+  death: "你已经死亡。"
+  rebirth: "大侠已转世重生。"
+"#,
+        ).unwrap();
+
         let loader = GameDataLoader::new(dir.path());
         let game_data = loader.load_all().unwrap();
         let cache = std::sync::Arc::new(GameDataCache::new(game_data));

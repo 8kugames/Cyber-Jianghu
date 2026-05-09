@@ -45,6 +45,7 @@ templates:
       survival_rules: |
         ## 生存法则
         - 当饥饿或口渴描述中出现紧迫措辞时（如"饥肠辘辘/饥饿难耐/急需"等），进食/饮水是最高优先级
+        - 当任何状态描述中出现"消逝/消散/垂危/倒下/模糊"等濒危信号时，该状态对应的生存行动视为最高优先级
         - 没有食物时：先拾取地上的食物/水（拾取），再进食/饮水（进食/饮水）
         - 背包和地面都没有时：采集（采集）或移动到可能有资源的地点（移动）
 
@@ -59,6 +60,12 @@ templates:
         ## 环境利用
         - 资源有限时，竞争是自然选择。附近有多人争夺同一物品时，先到先得或以实力说话
         - 给予可以建立同盟，但资源稀缺时同盟也可能破裂
+
+        ## 行为多样性（强制）
+        - 如果"近期认知轨迹"中出现[行为锁定警告]，你**必须**执行警告中提到的其他动作之一，不得继续重复
+        - 同一动作连续超过3轮是不可接受的——即使该动作"合理"，也必须穿插其他活动
+        - 平衡你的行为：探索新地点、与附近的人交流、修炼武功、寻找资源——不要只专注于单一活动
+        - 当你的生存需求得到满足时，根据你的性格和价值观去探索世界、建立关系、追寻目标
 
       narrative_limits: |
         ## 叙事限制
@@ -82,7 +89,7 @@ templates:
 
       # Progressive disclosure：tool-calling 启用时，技能索引 header
       skill_index_header: |
-        ## 已掌握技能（使用 skill_view 工具查看详情和行为指引）
+        ## 已掌握技能（可选：调用 skill_view 工具查看某技能的行为指引）
 
       # 降级路径：非 tool-calling 时，完整技能 header
       skill_full_header: |
@@ -90,8 +97,7 @@ templates:
 
       # Progressive disclosure：可用工具提示 header
       tool_hints_header: |
-        ## 可用工具
-        调用以下工具获取决策所需信息：
+        ## 可用工具（可选，仅在需要时调用）
 
       output_format: |
         {tool_calling_guidance}
@@ -147,6 +153,7 @@ templates:
       planning_description: 100
       content_hint: 30
       summary_window: 50
+      dream_marker_thought: 50
       tool_calling_history_turns: 8
 
     # LLM 调用参数配置（独立于 truncation，语义分离）
@@ -169,3 +176,33 @@ templates:
         移动失败：目标地点ID无效。可前往的地点：[{reachable_nodes}]。请使用 移动，目标地点 必须是上述之一。
     truncation:
       max_items: 5
+
+# 记忆叙事合成配置（data-driven）
+# PromptTemplateConfig 顶级字段，与 templates 同级
+memory_narrative:
+  min_events: 1
+  max_events_per_tick: 10
+  max_narrative_len: 200
+  min_narrative_len: 10
+  temperature: 0.3
+  prompt: |
+    ## 任务
+    将以下原始事件转换为叙事性记忆描述。
+
+    ## 原始事件
+    {events_list}
+
+    ## 近期行动背景
+    {summary_context}
+    {outcome_context}
+
+    ## 要求
+    1. 合并同类事件（如连续多次"使用了X"合并为"多次使用X"）
+    2. 补全主语（根据上下文推断"你"指代的具体行为主体）
+    3. 用自然语言描述，不要罗列日志条目
+    4. 体现事件的意义而非事实本身
+    5. 字数控制在 {max_narrative_len} 字以内
+    6. 只描述值得长期记忆的事件，无意义重复直接忽略
+
+    ## 输出格式
+    {"narrative": "..."}

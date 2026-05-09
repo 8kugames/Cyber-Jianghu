@@ -10,13 +10,16 @@ use crate::models::{AgentState, WorldEvent, WorldEventType};
 
 /// 应用状态变更的回退逻辑
 ///
-/// 用于处理 mutator 未覆盖的状态变更类型
+/// 用于处理 mutator 未覆盖的状态变更类型。
+/// `agent_states` 为当前 agent 的可变状态（单元素）。
+/// `all_states` 为全局所有 agent 的只读快照（用于跨 agent 查找如名字解析）。
 pub async fn apply_state_change(
     db_pool: &DbPool,
     tick_id: i64,
     change: &StateChange,
     intent_id: Option<uuid::Uuid>,
     agent_states: &mut [AgentState],
+    all_states: &[AgentState],
     events: &mut Vec<(uuid::Uuid, WorldEvent)>,
 ) -> bool {
     match change {
@@ -82,10 +85,21 @@ pub async fn apply_state_change(
                 events.push((*from, event));
                 false
             } else {
+                let to_name = all_states
+                    .iter()
+                    .find(|s| s.agent_id == *to)
+                    .map(|s| format!("{}（{}）", s.name, to))
+                    .unwrap_or_else(|| format!("未知（{}）", to));
+                let from_name = all_states
+                    .iter()
+                    .find(|s| s.agent_id == *from)
+                    .map(|s| format!("{}（{}）", s.name, from))
+                    .unwrap_or_else(|| format!("未知（{}）", from));
+
                 let event = WorldEvent {
                     event_type: WorldEventType::SocialInteraction,
                     tick_id,
-                    description: format!("你给 {} 转移了 {} 个 {}", to, quantity, item_id),
+                    description: format!("你给 {} 转移了 {} 个 {}", to_name, quantity, item_id),
                     metadata: serde_json::json!({
                         "action": "给予",
                         "target": to.to_string(),
@@ -98,7 +112,7 @@ pub async fn apply_state_change(
                 let event = WorldEvent {
                     event_type: WorldEventType::SocialInteraction,
                     tick_id,
-                    description: format!("{} 给你转移了 {} 个 {}", from, quantity, item_id),
+                    description: format!("{} 给你转移了 {} 个 {}", from_name, quantity, item_id),
                     metadata: serde_json::json!({
                         "action": "receive",
                         "from": from.to_string(),
@@ -683,7 +697,7 @@ pub async fn apply_state_change(
             }
         }
         // AttributeChanged, HpChanged 由 AttributeMutator 处理
-        // SkillLearned 由 SkillMutator 处理
+        // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入）
         StateChange::SkillLearned { .. } => true,
         _ => true,
     }
@@ -725,6 +739,7 @@ mod tests {
         AgentState {
             id: 0,
             agent_id,
+            name: "测试角色".to_string(),
             tick_id: 1,
             primary_attributes: crate::game_data::types::AttributeComponent {
                 collection: AttributeCollection::new_collection(),
@@ -737,6 +752,7 @@ mod tests {
             is_alive: true,
             inventory_cleared_this_tick: false,
             skills: vec![],
+            action_counts: std::collections::HashMap::new(),
             birth_tick: None,
             created_at: chrono::Utc::now(),
         }
@@ -763,6 +779,7 @@ mod tests {
             &change,
             None,
             &mut [agent_state],
+            &[],
             &mut events,
         )
         .await;

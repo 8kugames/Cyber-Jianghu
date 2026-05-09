@@ -16,11 +16,12 @@
 
 use anyhow::{Context, Result};
 use chrono::FixedOffset;
+use sha2::Digest;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::db::DbPool;
 use crate::game_data::GameDataCache;
@@ -28,7 +29,7 @@ use crate::state::AgentStateCache;
 use crate::websocket::{AgentToDeviceMap, ConnectionManager};
 
 use super::WorkerMessage;
-use super::broadcaster::Broadcaster;
+use super::broadcaster::{Broadcaster, send_to_agent};
 use super::event_manager::SharedEventManager;
 
 use crate::game_data::loaders::load_actions;
@@ -87,6 +88,13 @@ pub struct TickScheduler {
     /// 上次加载的 world_building_rules.yaml 修改时间
     last_world_building_rules_mtime: Option<std::time::SystemTime>,
 
+    /// 上次加载的 prompt_templates.yaml 修改时间
+    last_prompt_templates_mtime: Option<std::time::SystemTime>,
+
+    /// Prompt 模板 JSON 缓存（与 AppState 共享，用于 WS 连接时下发）
+    prompt_template_cache:
+        Option<Arc<tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>>>,
+
     /// Vendor 跨请求事件缓冲（grant-items handler 写入，broadcast 消费）
     vendor_pending_events: crate::models::VendorPendingEvents,
 }
@@ -120,8 +128,18 @@ impl TickScheduler {
             last_skills_mtime: None,
             last_game_rules_mtime: None,
             last_world_building_rules_mtime: None,
+            last_prompt_templates_mtime: None,
+            prompt_template_cache: None,
             vendor_pending_events,
         }
+    }
+
+    /// 设置 prompt_template_cache（与 AppState 共享）
+    pub fn set_prompt_template_cache(
+        &mut self,
+        cache: Arc<tokio::sync::RwLock<Option<crate::state::PromptTemplateCache>>>,
+    ) {
+        self.prompt_template_cache = Some(cache);
     }
 
     /// 检查 actions.yaml 是否变更，若变更则重新加载并广播
@@ -185,6 +203,7 @@ impl TickScheduler {
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(available_actions)?,
+                        content_hash: None,
                         updated_items: vec![],
                         removed_items: vec![],
                     };
@@ -254,6 +273,7 @@ impl TickScheduler {
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(&self.game_data_cache.get().game_rules)?,
+                        content_hash: None,
                         updated_items: vec![],
                         removed_items: vec![],
                     };
@@ -320,6 +340,7 @@ impl TickScheduler {
                     update_type: "full".to_string(),
                     version,
                     content: serde_json::to_value(&world_building_rules)?,
+                    content_hash: None,
                     updated_items: vec![],
                     removed_items: vec![],
                 };
@@ -328,6 +349,120 @@ impl TickScheduler {
                     broadcast_config_update(config_update, &self.connection_manager).await
                 {
                     warn!("广播世界观规则更新失败: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 预加载 prompt_templates 到 AppState 缓存（Server 启动时调用一次）
+    pub async fn preload_prompt_templates(&self) -> Result<()> {
+        self.load_prompt_templates_to_cache().await
+    }
+
+    /// 从 YAML 加载 prompt_templates → JSON → hash → 写入缓存
+    async fn load_prompt_templates_to_cache(&self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let path = config_dir.join("prompt_templates.yaml");
+
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let yaml_content = std::fs::read_to_string(&path)
+            .with_context(|| format!("读取 {} 失败", path.display()))?;
+
+        let config: cyber_jianghu_protocol::PromptTemplateConfig =
+            serde_yaml::from_str(&yaml_content)
+                .with_context(|| format!("解析 {} 失败", path.display()))?;
+
+        let version = config.version.clone();
+        let json_bytes = config
+            .to_json_bytes()
+            .context("Prompt 模板 JSON 序列化失败")?;
+        let hash = format!("{:x}", sha2::Sha256::digest(&json_bytes));
+        let content: serde_json::Value = serde_json::from_slice(&json_bytes)
+            .context("Prompt 模板 JSON bytes → Value 反序列化失败")?;
+
+        info!(
+            "Prompt 模板已加载: version={}, {} bytes, hash={}",
+            version,
+            json_bytes.len(),
+            &hash[..12]
+        );
+
+        if let Some(cache) = &self.prompt_template_cache {
+            let mut guard = cache.write().await;
+            *guard = Some(crate::state::PromptTemplateCache {
+                json_value: content,
+                hash,
+                version,
+            });
+        }
+
+        // 将 canonical JSON 持久化到 config dir，供 Agent HTTP 拉取
+        let json_path = config_dir.join("prompt_templates.json");
+        if let Err(e) = std::fs::write(&json_path, &json_bytes) {
+            warn!("prompt_templates.json 写盘失败: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// 检查 prompt_templates.yaml 是否变更，若变更则重新加载并广播
+    async fn check_and_reload_prompt_templates(&mut self) -> Result<()> {
+        let config_dir = get_config_dir();
+        let prompt_templates_path = config_dir.join("prompt_templates.yaml");
+
+        if !prompt_templates_path.exists() {
+            return Ok(());
+        }
+
+        let metadata = match fs::metadata(&prompt_templates_path) {
+            Ok(m) => m,
+            Err(_) => return Ok(()),
+        };
+
+        let modified = match metadata.modified() {
+            Ok(t) => t,
+            Err(_) => return Ok(()),
+        };
+
+        let should_reload = match self.last_prompt_templates_mtime {
+            Some(last) => modified > last,
+            None => true,
+        };
+
+        if !should_reload {
+            return Ok(());
+        }
+
+        self.last_prompt_templates_mtime = Some(modified);
+
+        if let Err(e) = self.load_prompt_templates_to_cache().await {
+            warn!("Prompt 模板热重载失败: {}", e);
+            return Ok(());
+        }
+
+        // 从缓存读取并广播给在线 Agent
+        if let Some(cache) = &self.prompt_template_cache {
+            let guard = cache.read().await;
+            if let Some(ref pt_cache) = *guard {
+                let config_update = ServerMessage::ConfigUpdate {
+                    config_type: "prompt_templates".to_string(),
+                    update_type: "full".to_string(),
+                    version: pt_cache.version.clone(),
+                    content: pt_cache.json_value.clone(),
+                    content_hash: Some(pt_cache.hash.clone()),
+                    updated_items: vec![],
+                    removed_items: vec![],
+                };
+
+                if let Err(e) =
+                    broadcast_config_update(config_update, &self.connection_manager).await
+                {
+                    warn!("广播 prompt_templates 更新失败: {}", e);
                 }
             }
         }
@@ -397,6 +532,7 @@ impl TickScheduler {
                         update_type: "full".to_string(),
                         version,
                         content: serde_json::to_value(skill_contents).unwrap_or_default(),
+                        content_hash: None,
                         updated_items: vec![],
                         removed_items: vec![],
                     };
@@ -630,6 +766,11 @@ impl TickScheduler {
                 warn!("世界观规则热重载检查失败: {}", e);
             }
 
+            // 热重载 prompt_templates.yaml
+            if let Err(e) = self.check_and_reload_prompt_templates().await {
+                warn!("Prompt 模板热重载检查失败: {}", e);
+            }
+
             // 热重载 skills/
             if let Err(e) = self.check_and_reload_skills().await {
                 warn!("技能热重载检查失败: {}", e);
@@ -666,6 +807,15 @@ impl TickScheduler {
             // 2. 广播 WorldState
             if let Err(e) = self.broadcast_new_tick(self.current_tick_id).await {
                 error!("Tick {} 广播失败: {}", self.current_tick_id, e);
+            }
+
+            // 2.5 游戏日边界推送：每个游戏日结束时向所有在线 Agent 推送动作统计
+            let ticks_per_day = crate::game_data::registry::TimeRegistry::get_config()
+                .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64)
+                .unwrap_or(12);
+            if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day == 0 {
+                let game_day = self.current_tick_id / ticks_per_day;
+                self.broadcast_daily_summaries(game_day).await;
             }
 
             // 3. 群像传记：每 168 tick (7 游戏日) 生成一次
@@ -736,6 +886,65 @@ impl TickScheduler {
 
         info!("Tick {} 广播完成: {}个Agent", tick_id, agent_states.len(),);
         Ok(())
+    }
+
+    /// 游戏日边界：向所有在线 Agent 推送上一游戏日的动作统计
+    ///
+    /// 在 game_day 结束时（tick_id % ticks_per_day == 0）调用，
+    /// 从 agent_action_logs 聚合数据，通过 WebSocket 发送给各 Agent。
+    /// 注意：本方法仅推送数据，不写入 agent_daily_summaries 表。
+    /// agent_daily_summaries 的叙事摘要由 SessionTriageEngine 在游戏日切换时生成。
+    async fn broadcast_daily_summaries(&self, game_day: i64) {
+        use crate::db::{get_agent_daily_action_stats, get_all_alive_agents_latest_states};
+
+        let alive_agents = match get_all_alive_agents_latest_states(&self.db_pool).await {
+            Ok(agents) => agents,
+            Err(e) => {
+                error!("游戏日 {} 每日摘要：查询存活 Agent 失败: {}", game_day, e);
+                return;
+            }
+        };
+
+        for agent_state in alive_agents {
+            let stats =
+                match get_agent_daily_action_stats(&self.db_pool, agent_state.agent_id, game_day)
+                    .await
+                {
+                    Ok(Some(stats)) => stats,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        warn!(
+                            "游戏日 {} Agent {} 动作统计查询失败: {}",
+                            game_day, agent_state.agent_id, e
+                        );
+                        continue;
+                    }
+                };
+
+            // 推送 DailySummaryData 到在线 Agent（供 Agent 侧记忆系统使用）
+            let msg = ServerMessage::DailySummaryData {
+                game_day,
+                action_counts: stats.action_counts.clone(),
+                location_history: stats.location_history.clone(),
+                success_count: stats.success_count,
+                failure_count: stats.failure_count,
+                total_actions: stats.total_actions,
+            };
+
+            if let Err(e) = send_to_agent(
+                agent_state.agent_id,
+                &msg,
+                &self.connection_manager,
+                &self.agent_to_device_map,
+            )
+            .await
+            {
+                debug!(
+                    "游戏日 {} 每日摘要推送 Agent {} 失败（可能已离线）: {}",
+                    game_day, agent_state.agent_id, e
+                );
+            }
+        }
     }
 
     /// 根据真实时间计算 tick ID（秒级秒数）

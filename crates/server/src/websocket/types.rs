@@ -11,7 +11,28 @@ use uuid::Uuid;
 use crate::game_data::types::UnifiedWorldBuildingRulesConfig;
 use crate::game_data::{ActionRegistry, InitialInventoryRegistry};
 use chrono::Utc;
-use cyber_jianghu_protocol::{GameRules, InitialItem, WorldBuildingRules};
+use cyber_jianghu_protocol::{
+    GameRules, GradedValidationConfig, InitialItem, IntentBatchConfig, WorldBuildingRules,
+};
+
+// ============================================================================
+// IntentBatch 内参默认值（零魔法值）
+// ============================================================================
+//
+// 以下常量在 game_rules.yaml 未指定 intent_batch 时使用。
+// 每个值都有明确来源和用途，不得随意更改。
+//
+// 来源依据：
+//   max_intents_per_tick = 5      — 单 tick 最大意图数，防止 agent 过度消耗资源
+//   max_retries = 3              — 意图执行失败重试次数上限
+//   llm_chaos_threshold = 12    — LLM 混沌阈值（sanity <此值时触发混乱行为）
+//   minimum_per_tick = 1          — 每 tick 最少审核意图数（即使 ooc_risk=skip）
+// ============================================================================
+
+const INTENT_BATCH_MAX_PER_TICK: usize = 5;
+const INTENT_BATCH_MAX_RETRIES: i32 = 3;
+const INTENT_BATCH_MINIMUM_PER_TICK: usize = 1;
+const INTENT_BATCH_LLM_CHAOS_THRESHOLD: u32 = 12;
 
 /// WebSocket 升级请求的查询参数
 #[derive(Debug, Deserialize)]
@@ -75,18 +96,29 @@ pub fn build_game_rules_from_config(
     let mut llm_validation = intent_batch
         .as_ref()
         .map(|ib| ib.llm_validation.clone())
-        .unwrap_or_default();
+        .unwrap_or_else(|| GradedValidationConfig {
+            always_types: Vec::new(),
+            adaptive_types: Vec::new(),
+            skip_types: Vec::new(),
+            minimum_per_tick: INTENT_BATCH_MINIMUM_PER_TICK,
+            restricted_area_keywords: Vec::new(),
+            high_value_item_keywords: Vec::new(),
+            adaptive_field_mapping: std::collections::HashMap::new(),
+        });
 
     llm_validation.always_types = always_types;
     llm_validation.adaptive_types = adaptive_types;
     llm_validation.skip_types = skip_types;
 
-    let intent_batch = cyber_jianghu_protocol::IntentBatchConfig {
+    let intent_batch = IntentBatchConfig {
         max_intents_per_tick: intent_batch
             .as_ref()
             .map(|ib| ib.max_intents_per_tick)
-            .unwrap_or(5),
-        max_retries: intent_batch.as_ref().map(|ib| ib.max_retries).unwrap_or(3),
+            .unwrap_or(INTENT_BATCH_MAX_PER_TICK),
+        max_retries: intent_batch
+            .as_ref()
+            .map(|ib| ib.max_retries)
+            .unwrap_or(INTENT_BATCH_MAX_RETRIES),
         pipeline_execution_enabled: intent_batch
             .as_ref()
             .map(|ib| ib.pipeline_execution_enabled)
@@ -99,7 +131,7 @@ pub fn build_game_rules_from_config(
         llm_chaos_threshold: intent_batch
             .as_ref()
             .map(|ib| ib.llm_chaos_threshold)
-            .unwrap_or(12),
+            .unwrap_or(INTENT_BATCH_LLM_CHAOS_THRESHOLD),
     };
 
     let initial_items = InitialInventoryRegistry::items()
@@ -123,7 +155,6 @@ pub fn build_game_rules_from_config(
         version,
         last_updated: Utc::now().to_rfc3339(),
         intent_batch: Some(intent_batch),
-        reflector_narrative: None,
         immediate_events,
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
         rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,

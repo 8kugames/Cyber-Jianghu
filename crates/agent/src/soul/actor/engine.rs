@@ -10,8 +10,9 @@
 // skill_view / search_memory / recall_archived 工具按需获取精确数据。
 
 use anyhow::Result;
+use serde_json;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use super::chain::CognitiveChain;
@@ -65,6 +66,15 @@ pub(crate) struct DirectCognitiveAction {
     /// 结构化 action_data（精确 ID）
     pub action_data: Option<serde_json::Value>,
 }
+
+/// 记忆叙事合成响应
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct MemoryNarrativeResponse {
+    narrative: String,
+}
+
+/// 失败降级文本（用户指定，一字不差）
+pub(crate) const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
 
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
 ///
@@ -150,6 +160,9 @@ pub struct CognitiveEngine {
     conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
     /// Prompt 模板配置（从 YAML 加载，启动时 fail-fast）
     pub(super) prompt_template: PromptTemplateConfig,
+    /// 运行时 Prompt 模板配置（来自 Server ConfigUpdate，覆盖 prompt_template）
+    /// Server 下发时非空，启动时为 None
+    runtime_prompt_template: std::sync::RwLock<Option<PromptTemplateConfig>>,
     /// 行动结果记忆（Hermes 模式）
     pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
     /// action_type 别名映射（中文/别名 → 英文 canonical）
@@ -158,8 +171,6 @@ pub struct CognitiveEngine {
     pub(super) field_alias_map: std::sync::RwLock<FieldAliasMap>,
     /// SKILL.md body 缓存（skill_id → body content），避免每 tick 重复 IO
     pub(super) skill_cache: std::sync::RwLock<std::collections::HashMap<String, String>>,
-    /// 配置目录（用于地魂 tool-calling 的 skill_view 文件加载）
-    pub(super) config_dir: std::path::PathBuf,
     /// 记忆管理器引用（用于地魂 search_memory / recall_archived）
     pub(super) memory_manager: std::sync::RwLock<
         Option<std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
@@ -183,7 +194,7 @@ impl CognitiveEngine {
 
         let prompt_template = Self::load_prompt_template();
 
-        Self {
+        let engine = Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
@@ -191,14 +202,16 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
             conversation_history: None,
             prompt_template,
+            runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
-            config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
-        }
+        };
+        engine.load_skill_cache_from_disk();
+        engine
     }
 
     /// 设置 NarrativeSummaryWindow 窗口大小
@@ -211,6 +224,8 @@ impl CognitiveEngine {
     ///
     /// - update_type == "full": 全量替换，先清空再插入
     /// - update_type == "incremental": 增量更新，插入新版 + 移除已删除的
+    ///
+    /// 更新后自动持久化到本地文件。
     pub fn update_skill_cache(
         &self,
         skills: Vec<cyber_jianghu_protocol::types::SkillContent>,
@@ -237,6 +252,10 @@ impl CognitiveEngine {
             removed_count,
             cache.len()
         );
+
+        // drop lock before persisting
+        drop(cache);
+        self.persist_skill_cache_to_disk();
     }
 
     /// 设置是否启用流式 LLM 调用
@@ -262,7 +281,7 @@ impl CognitiveEngine {
 
         let prompt_template = Self::load_prompt_template();
 
-        Self {
+        let engine = Self {
             llm_client,
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
@@ -270,84 +289,212 @@ impl CognitiveEngine {
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
             conversation_history: None,
             prompt_template,
+            runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
             action_alias_map: std::sync::RwLock::new(alias_map),
             field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
-            config_dir: Self::resolve_config_dir(),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+        };
+        engine.load_skill_cache_from_disk();
+        engine
+    }
+
+    /// 数据目录（用于本地持久化，如 skill_cache.json）
+    fn resolve_data_dir() -> std::path::PathBuf {
+        std::env::var("CYBER_JIANGHU_DATA_DIR")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("./data"))
+    }
+
+    /// skill_cache.json 路径
+    fn skill_cache_path() -> std::path::PathBuf {
+        Self::resolve_data_dir().join("skill_cache.json")
+    }
+
+    /// 启动时从本地文件加载 skill 缓存
+    fn load_skill_cache_from_disk(&self) {
+        let path = Self::skill_cache_path();
+        if !path.exists() {
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                let cached: std::collections::HashMap<String, String> =
+                    match serde_json::from_str(&content) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::warn!("skill_cache.json 解析失败，忽略: {}", e);
+                            return;
+                        }
+                    };
+                let mut cache = self.skill_cache.write().unwrap();
+                let count = cached.len();
+                *cache = cached;
+                tracing::info!("从 skill_cache.json 加载了 {} 个技能", count);
+            }
+            Err(e) => {
+                tracing::debug!("读取 skill_cache.json 失败: {}", e);
+            }
         }
     }
 
-    /// 解析配置目录路径
-    fn resolve_config_dir() -> std::path::PathBuf {
-        std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("config")))
-            .unwrap_or_default()
+    /// 持久化 skill 缓存到本地文件
+    fn persist_skill_cache_to_disk(&self) {
+        let path = Self::skill_cache_path();
+        let cache = self.skill_cache.read().unwrap().clone();
+        if cache.is_empty() {
+            return;
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match serde_json::to_string_pretty(&cache) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json) {
+                    tracing::warn!("skill_cache.json 写入失败: {}", e);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("skill_cache.json 序列化失败: {}", e);
+            }
+        }
     }
 
     /// 加载 prompt 模板配置
     ///
     /// 查找路径：
-    /// 1. $CYBER_JIANGHU_CONFIG_DIR/prompt_templates.yaml
-    /// 2. ~/.cyber-jianghu/config/prompt_templates.yaml
+    /// 1. $CYBER_JIANGHU_CONFIG_DIR/prompt_templates.json
+    /// 2. ~/.cyber-jianghu/config/prompt_templates.json
     /// 3. 内置默认路径（编译时嵌入或同级 config/）
     ///
-    /// Fail-fast: 配置文件存在但格式错误时 panic。找不到文件也 panic。
+    /// 本地文件不存在时返回空壳配置，等待 WS ConfigUpdate 覆盖。
     fn load_prompt_template() -> PromptTemplateConfig {
-        let search_paths = [
-            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-                .ok()
-                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
-            dirs::home_dir().map(|h| {
-                h.join(".cyber-jianghu")
-                    .join("config")
-                    .join("prompt_templates.yaml")
-            }),
-            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
-        ];
+        let search_paths = Self::prompt_template_search_paths();
 
         for path_opt in &search_paths {
             if let Some(path) = path_opt
                 && path.exists()
             {
-                match PromptTemplateConfig::load_from_file(path) {
+                match super::prompt_template::load_prompt_template_from_file(path) {
                     Ok(config) => {
                         info!("已加载 prompt 模板: {:?}", path);
                         return config;
                     }
                     Err(e) => {
-                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                        warn!(
+                            "Prompt 模板文件解析失败 ({}): {}，等待 Server WS 下发",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
         }
-        panic!(
-            "未找到 prompt_templates.yaml，搜索路径: {:?}",
+        warn!(
+            "未找到 prompt_templates.json，搜索路径: {:?}，等待 Server WS 下发",
             search_paths
                 .iter()
                 .filter_map(|p| p.as_ref().map(|x| x.display().to_string()))
                 .collect::<Vec<_>>()
         );
+        PromptTemplateConfig {
+            version: super::prompt_template::EMPTY_FALLBACK_VERSION.to_string(),
+            description: String::new(),
+            templates: std::collections::HashMap::new(),
+            memory_narrative: None,
+        }
     }
 
-    /// 获取 Prompt 模板配置的引用
-    pub fn prompt_template(&self) -> &PromptTemplateConfig {
-        &self.prompt_template
+    /// prompt_templates.json 搜索路径（load 和 save 共用）
+    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 3] {
+        [
+            std::env::var("CYBER_JIANGHU_CONFIG_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
+            dirs::home_dir().map(|h| {
+                h.join(".cyber-jianghu")
+                    .join("config")
+                    .join("prompt_templates.json")
+            }),
+            Some(std::path::PathBuf::from("config/prompt_templates.json")),
+        ]
+    }
+
+    /// 获取 Prompt 模板配置（运行时覆盖优先）
+    ///
+    /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 JSON 配置。
+    pub fn prompt_template(&self) -> PromptTemplateConfig {
+        // runtime override 优先
+        if let Some(runtime) = self.runtime_prompt_template.read().unwrap().as_ref() {
+            return runtime.clone();
+        }
+        self.prompt_template.clone()
+    }
+
+    /// 从 Server 下发的 PromptTemplateConfig 直接更新（JSON 路径）
+    pub fn update_prompt_template_from_config(&self, config: PromptTemplateConfig) {
+        let mut guard = self.runtime_prompt_template.write().unwrap();
+        *guard = Some(config);
+        info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
+    }
+
+    /// 将当前 prompt 模板配置持久化到本地磁盘（供下次启动加载）
+    pub fn save_prompt_template_to_disk(&self) {
+        let config = self.prompt_template();
+        if config.version == super::prompt_template::EMPTY_FALLBACK_VERSION {
+            return;
+        }
+
+        let json_bytes = match config.to_json_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!("Prompt 模板序列化失败: {}", e);
+                return;
+            }
+        };
+
+        // 使用与 load_prompt_template() 相同的路径优先级：
+        // 优先写入已存在的路径，否则写入最高优先级的路径
+        let search_paths = Self::prompt_template_search_paths();
+        let save_path = search_paths
+            .iter()
+            .find_map(|p| p.as_ref().filter(|path| path.exists()))
+            .cloned()
+            .or_else(|| search_paths.into_iter().find_map(|p| p))
+            .unwrap_or_else(|| std::path::PathBuf::from("config/prompt_templates.json"));
+
+        if let Some(parent) = save_path.parent()
+            && !parent.exists()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!("创建配置目录失败 {}: {}", parent.display(), e);
+            return;
+        }
+
+        match std::fs::write(&save_path, &json_bytes) {
+            Ok(()) => tracing::info!(
+                "prompt_templates.json 已写盘: {} ({} bytes)",
+                save_path.display(),
+                json_bytes.len()
+            ),
+            Err(e) => tracing::warn!("prompt_templates.json 写盘失败: {}", e),
+        }
     }
 
     /// 获取截断长度配置（数据驱动替代 .take(N) 魔法数字）
-    fn truncation(&self, key: &str, default: usize) -> usize {
-        self.prompt_template
+    pub fn truncation(&self, key: &str, default: usize) -> usize {
+        self.prompt_template()
             .truncation("actor_direct", key, default)
     }
 
     /// 获取 LLM 调用参数配置（数据驱动替代硬编码参数）
     fn llm_param(&self, key: &str, default: usize) -> usize {
-        self.prompt_template.llm_param("actor_direct", key, default)
+        self.prompt_template()
+            .llm_param("actor_direct", key, default)
     }
 
     /// 加载动作列表（用于缓存 + 别名映射）
@@ -569,7 +716,7 @@ impl CognitiveEngine {
             &persona_for_prompt,
             &agent_name,
             use_tool_calling,
-        );
+        )?;
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
@@ -595,7 +742,6 @@ impl CognitiveEngine {
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().unwrap().clone(),
-                        config_dir: self.config_dir.clone(),
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
                     },
@@ -889,7 +1035,7 @@ impl CognitiveEngine {
             validation_feedback,
             &persona_for_prompt,
             &agent_name,
-        );
+        )?;
 
         let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
         let response_json = serde_json::to_string(&response)?;
@@ -1057,6 +1203,101 @@ impl CognitiveEngine {
             .as_ref()
             .map(|m| m.to_prompt_context())
             .unwrap_or_default()
+    }
+
+    /// 记忆叙事合成（人魂处理）
+    ///
+    /// 每 Tick 最多调用一次，将高重要性事件批量合成叙事。
+    /// 失败时返回降级文本，不丢弃记忆。
+    ///
+    /// # Arguments
+    /// * `events` - 高重要性事件（已按 importance_score 过滤）
+    /// * `summary_context` - 前X回合行动摘要（来自 NarrativeSummaryWindow）
+    /// * `outcome_context` - 行动结果学习（来自 OutcomeMemory）
+    ///
+    /// # Returns
+    /// 叙事化文本（10-200字），或失败降级文本
+    pub async fn synthesize_memory_narrative(
+        &self,
+        events: &[cyber_jianghu_protocol::WorldEvent],
+        summary_context: &str,
+        outcome_context: &str,
+    ) -> String {
+        // 1. 获取配置（从 prompt_templates.json 的 memory_narrative section）
+        let prompt_cfg = self.prompt_template();
+        let config = match prompt_cfg.get_memory_narrative_config() {
+            Some(c) => c,
+            None => {
+                tracing::warn!("记忆叙事合成配置缺失，降级");
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 2. 限制输入事件数
+        let events_to_process = events.iter().take(config.max_events_per_tick);
+        let events_list = events_to_process
+            .map(|e| format!("- [{}] {}", e.event_type, e.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // 3. 构建 prompt
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("events_list".to_string(), events_list);
+        vars.insert(
+            "summary_context".to_string(),
+            if summary_context.is_empty() {
+                "无近期行动记录".to_string()
+            } else {
+                summary_context.to_string()
+            },
+        );
+        vars.insert(
+            "outcome_context".to_string(),
+            if outcome_context.is_empty() {
+                "无行动结果学习".to_string()
+            } else {
+                outcome_context.to_string()
+            },
+        );
+        vars.insert(
+            "max_narrative_len".to_string(),
+            config.max_narrative_len.to_string(),
+        );
+
+        let prompt = match self.prompt_template().render_memory_narrative(&vars) {
+            Some(p) => p,
+            None => {
+                tracing::warn!("记忆叙事合成 prompt 渲染失败，降级");
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 4. 调用 LLM
+        let response: MemoryNarrativeResponse = match self.llm_client.complete_json(&prompt).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("记忆叙事合成 LLM 调用失败: {}，降级", e);
+                return FALLBACK_NARRATIVE.to_string();
+            }
+        };
+
+        // 5. 验证输出
+        let narrative = response.narrative.trim().to_string();
+        if narrative.len() < config.min_narrative_len {
+            tracing::warn!(
+                "记忆叙事合成输出过短 ({} < {})，降级",
+                narrative.len(),
+                config.min_narrative_len
+            );
+            return FALLBACK_NARRATIVE.to_string();
+        }
+
+        // 6. 截断超长输出
+        if narrative.len() > config.max_narrative_len {
+            return narrative.chars().take(config.max_narrative_len).collect();
+        }
+
+        narrative
     }
 
     /// 获取 action descriptions 和 field hints（公开接口）

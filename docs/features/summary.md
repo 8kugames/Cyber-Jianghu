@@ -80,10 +80,11 @@
   - [x] 监听文件 mtime 变化，支持配置热重载。
   - [x] 引入 evalexpr 公式引擎，支持动态计算派生属性和伤害数值。
   - [x] 体感叙事系统（`narrative_config.yaml` → `attribute_descriptions`）：Agent 通过世界状态自主感知，替代天道干预式警告注入。
-- [x] **[AI 过程性技能系统 (Procedural Skills)](../../crates/server/docs/architecture/p1_major/procedural_skills.md)**: 基于 Markdown 的行为指令系统，体现“身心分离”架构的核心设计。
-  - [x] **Server 注册表**：基于 `SKILL.md`（YAML + Markdown）的动态加载与注册 (`SkillRegistry`)。
-  - [x] **习得链路**：通过 `practice` 动作触发 `SkillMutator`，将技能 ID 注入 `AgentState`。
-  - [x] **认知集成**：Agent 地魂实现 `skill_view` 工具，LLM 按需检索长文本行为指令，避免将庞大技能规则硬塞入 System Prompt。
+- [x] **[AI 元认知行为框架 (Procedural Skills)](../../crates/server/docs/architecture/p1_major/procedural_skills.md)**: 元认知思维框架，帮助 Agent 学会”更像人”的思维方式。体现”身心分离”架构的核心设计。
+  - [x] **Server 注册表**：基于 `SKILL.md`（YAML + Markdown）的动态加载与注册 (`SkillRegistry`)。5 个认知框架：识人之明、进退之道、审时度势、未雨绸缪、见微知著。
+  - [x] **经验阈值习得**：Agent 执行 action 成功后按 category 累计计数，达到 `game_rules.yaml` 中 `skill_acquisition` 配置的阈值时自动触发 `SkillLearned`。无显式”学习”动作。
+  - [x] **Server 推送**：习得后通过 `ConfigUpdate` 推送 `SkillContent` 给 Agent，Agent 本地持久化到 `skill_cache.json`。
+  - [x] **认知集成**：Agent 地魂实现 `skill_view` 工具，LLM 按需检索认知框架详情，避免将庞大技能规则硬塞入 System Prompt。
 
 ### P2 体验增强
 
@@ -125,10 +126,16 @@
   - [x] **人魂 (ActorSoul)**：主导动机推演与规划的“感性与理性大脑”。
     - [x] 直连世界状态生成因果推导链，结合环境上下文、记忆和社交关系生成 Intent。
     - [x] 内置低 San 值混沌行为注入器，模拟精神崩溃时的非理性行为（如发疯、喃喃自语）。
-  - [x] **地魂 (EarthSoul)**：对接物理世界的“工具执行池”。
+  - [x] **地魂 (EarthSoul)**：对接物理世界的”工具执行池”。
     - [x] 负责将人魂意图转换为系统 API 调用，并在决策中途按需获取外部数据。
+    - [x] **工具调用安全机制 (F1/F2/F3)**:
+      - [x] F1 ToolResultBudget: per-tool + aggregate 字符配额，`.chars().count()` Unicode 安全截断，50 字预留截断标记。
+      - [x] F2 LoopGuard: 连续相同工具调用检测，Warn→Terminate 两级升级，`pending_warning` 跨 `tool_calls` 清零防泄漏。
+      - [x] F3 Error Signaling: 工具执行错误格式化为结构化中文 `[工具调用失败] 工具: X | 原因: Y`，替代原始 JSON 错误。
+      - [x] `EarthSoulConfig` 配置驱动（`agent.yaml` 的 `earth_soul` 段），`#[serde(default)]` 向后兼容，`enabled: true` 默认启用。
+      - [x] `validate()` Fail Fast: 启动路径 + 热重载路径均校验配置合法性（零/负值拒绝）。
     - [x] 记忆检索工具 (`search_memory`, `recall_archived`)：供 LLM 检索工作记忆与情景/语义记忆。`recall_archived` 已去重为独立的时间倒序路径
-    - [x] 技能查阅工具 (`skill_view`)：供 LLM 按需获取武功等长文本技能详情
+    - [x] 技能查阅工具 (`skill_view`)：供 LLM 按需获取元认知行为框架详情
     - [x] 关系查询工具 (`get_relationship`, `list_relationships`)：供 LLM 查询人际关系（UUID/名字查找，好感度过滤）
     - [x] 社交事件记录工具 (`record_social_event`)：供 LLM 主动记录社交互动和好感度变化，避免撑爆 System Prompt。
   - [x] **天魂 (ReflectorSoul)**：三段式“自我审查官”。
@@ -151,6 +158,7 @@
   - [x] **情景记忆 (Episodic Memory)**：利用 SQLite 持久化存储带时间戳的事件，包含遗忘曲线与重要度评分机制。
     - [x] 基于艾宾浩斯遗忘曲线的记忆归档机制。
     - [x] 自动基于事件类型与元数据为记忆进行重要性打分。
+    - [x] **记忆叙事合成**: 高重要性事件（≥ episodic_threshold）经人魂（CognitiveEngine）LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题。配置驱动（`prompt_templates.yaml` 的 `memory_narrative` section），失败降级文本: `你一阵恍惚，似乎遗漏了一些重要的记忆。`
   - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。Docker 镜像内建 bge-small-zh-v1.5 嵌入模型（~100MB）。
 - [x] **[双栖运行模式](../../crates/agent/docs/architecture/p0_core/dual_mode.md)**:
   - [x] **Cognitive 模式**：调用内置 LLM 的独立智能体。
@@ -201,4 +209,4 @@
 |------|------|------|------|
 | **每日事件摘要入库** | `component/immediate/session_triage.rs` | ✅ 已实装 | 游戏日结束时 `produce_daily_summary` 生成摘要 → Agent 本地 Episodic Memory + WebSocket 提交 Server 存档（`agent_daily_summaries` 表，UPSERT），Chronicle 聚合时 LEFT JOIN 注入 `AgentSummary.narrative`；玩家端 `GET /api/v1/memory/daily-summaries` 查看个人摘要；Admin 端 `admin/history.html（历史记录 → 每日摘要 tab）` 查看所有摘要。 |
 | **未实现交互动作拓展** | `actions/executor/` | 功能补全 | 防御、闪避、招架、重击、跟随、潜行、下毒、修理等配置已规划但逻辑未落地。 |
-| **动作冷却检查 (Cooldown)** | `actions/validator.rs:55` | 机制完善 | `TODO BUG-2`: 待在 AgentState 中补充 `last_action_ticks` 以支持动作频率限制。 |
+| **动作冷却检查 (Cooldown)** | `actions/validator.rs:55` | 机制完善 | 待在 AgentState 中补充 `last_action_ticks` 以支持动作频率限制。 |

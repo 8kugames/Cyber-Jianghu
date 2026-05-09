@@ -643,6 +643,7 @@ pub(super) async fn submit_intent_handler(
         history
             .record_intent(
                 tick_id,
+                0,
                 intent.intent_id,
                 action_type_str,
                 req.thought_log.clone(),
@@ -1849,6 +1850,17 @@ pub struct CharacterInfoResponse {
     pub status: Option<String>,
     /// 数据是否来自缓存（true = 数据可能已过时）
     pub is_stale: bool,
+
+    // === 技能 ===
+    /// 已掌握技能列表
+    pub skills: Vec<SkillBrief>,
+}
+
+/// 技能简要信息（API 响应用）
+#[derive(Debug, serde::Serialize)]
+pub struct SkillBrief {
+    pub skill_id: String,
+    pub name: String,
 }
 
 /// 获取角色信息
@@ -1975,6 +1987,19 @@ pub(super) async fn get_character_handler(State(state): State<HttpApiState>) -> 
                 .map(|ws| ws.self_state.derived_attributes.clone()),
             &narrative_config,
         ),
+        skills: current
+            .as_ref()
+            .map(|ws| {
+                ws.self_state
+                    .skills
+                    .iter()
+                    .map(|s| SkillBrief {
+                        skill_id: s.skill_id.clone(),
+                        name: s.name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     };
 
     Json(response).into_response()
@@ -2078,6 +2103,19 @@ pub(super) async fn get_character_by_id_handler(
                     .map(|ws| ws.self_state.derived_attributes.clone()),
                 &narrative_config,
             ),
+            skills: current
+                .as_ref()
+                .map(|ws| {
+                    ws.self_state
+                        .skills
+                        .iter()
+                        .map(|s| SkillBrief {
+                            skill_id: s.skill_id.clone(),
+                            name: s.name.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .into_response();
     }
@@ -2118,6 +2156,7 @@ pub(super) async fn get_character_by_id_handler(
         }),
         is_stale: true,
         derived_attributes: None,
+        skills: vec![],
     };
 
     Json(response).into_response()
@@ -2366,6 +2405,8 @@ struct FinalIntentEntry {
     intent_id: Option<String>,
     action_type: Option<String>,
     action_data: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dream_marker: Option<serde_json::Value>,
 }
 
 /// 单条三魂尝试记录
@@ -2463,6 +2504,7 @@ fn record_to_attempt_entry(
             intent_id: Some(id),
             action_type: r.final_action_type,
             action_data,
+            dream_marker: None,
         }),
     }
 }
@@ -3809,6 +3851,17 @@ pub(super) async fn reload_config_handler(
     let config_path = state.config_path.clone();
     match crate::config::Config::from_file(&config_path) {
         Ok(config) => {
+            // Fail Fast: 校验 EarthSoul 配置
+            if let Err(e) = config.earth_soul.validate() {
+                tracing::error!("[config] earth_soul 配置校验失败: {}（保留旧配置）", e);
+                return Json(ConfigReloadResponse {
+                    success: false,
+                    message: format!("earth_soul 配置校验失败: {}", e),
+                    config: None,
+                })
+                .into_response();
+            }
+
             // 更新 server URLs
             {
                 let mut http_url = state.server_http_url.write().await;
@@ -3833,6 +3886,7 @@ pub(super) async fn reload_config_handler(
                 match crate::component::llm::build_fallback_client(
                     &config.llm,
                     config.llm.enable_streaming,
+                    Some(config.earth_soul.clone()),
                 ) {
                     Ok(new_client) => {
                         *container.write().await = new_client;
@@ -4417,7 +4471,6 @@ pub(super) async fn update_llm_config_handler(
         soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
         narrative_window_size: config.llm.narrative_window_size,
         enable_streaming: config.llm.enable_streaming,
-        reflector_narrative: config.llm.reflector_narrative,
         enable_thinking: config.llm.enable_thinking,
     };
 
@@ -4449,7 +4502,6 @@ pub(super) async fn update_llm_config_handler(
             soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
             narrative_window_size: config.llm.narrative_window_size,
             enable_streaming: config.llm.enable_streaming,
-            reflector_narrative: config.llm.reflector_narrative,
             enable_thinking: config.llm.enable_thinking,
         });
     }

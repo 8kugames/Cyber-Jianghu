@@ -91,6 +91,7 @@ impl super::Agent {
         // 设置游戏规则更新回调
         let agent_name_for_callback = self.character_name().to_string();
         let agent_name_for_skills = agent_name_for_callback.clone();
+        let agent_name_for_prompt = agent_name_for_callback.clone();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
@@ -114,6 +115,30 @@ impl super::Agent {
                     engine.update_skill_cache(skills, removed_items);
                 }
             }))
+            .await;
+
+        // 设置 Prompt 模板配置更新回调
+        let cognitive_engine_for_prompt = self.cognitive_engine.clone();
+        let rule_engine_prompt_config = self.rule_engine.prompt_config_handle();
+        self.client
+            .set_prompt_template_callback(Arc::new(
+                move |config: cyber_jianghu_protocol::PromptTemplateConfig| {
+                    info!(
+                        "Agent '{}' received prompt_templates config update: version={}",
+                        agent_name_for_prompt, config.version
+                    );
+                    // 更新人魂 CognitiveEngine
+                    if let Some(ref engine) = cognitive_engine_for_prompt {
+                        engine.update_prompt_template_from_config(config.clone());
+                        engine.save_prompt_template_to_disk();
+                    }
+                    // 更新天魂 RuleEngine reject 反馈模板
+                    {
+                        let mut guard = rule_engine_prompt_config.write().unwrap();
+                        *guard = Some(std::sync::Arc::new(config));
+                    }
+                },
+            ))
             .await;
 
         // 设置对话消息回调（如果启用了对话系统）
@@ -325,6 +350,9 @@ impl super::Agent {
             engine.update_action_aliases(&game_rules.available_actions);
         }
 
+        // 启动时主动拉取 prompt_templates 并写盘
+        self.fetch_prompt_templates_from_server().await;
+
         // 即时事件处理器：新架构下无需热更新（EventStore 配置在 open 时绑定）
         // tick_id 在主循环每个 tick 更新
 
@@ -334,6 +362,8 @@ impl super::Agent {
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
         let event_buffer = self.immediate_event_buffer.clone();
+        let memory_manager = self.memory_manager.clone();
+        let game_rules = self.config.game_rules.clone();
         let callback: Arc<dyn Fn(ServerMessage) + Send + Sync> =
             Arc::new(move |msg: ServerMessage| {
                 // 1. 验证错误反馈
@@ -408,6 +438,68 @@ impl super::Agent {
                         };
                         let mut guard = buf.lock().await;
                         guard.push(world_event);
+                    });
+                }
+                // 2c. DailySummaryData：存储到 episodic memory（服务器侧权威动作统计）
+                if let ServerMessage::DailySummaryData {
+                    game_day,
+                    action_counts,
+                    location_history,
+                    success_count,
+                    failure_count,
+                    total_actions,
+                } = &msg
+                {
+                    let mm = memory_manager.clone();
+                    let gr = game_rules.clone();
+                    // Clone owned data before spawn (tokio::spawn requires 'static)
+                    let gd = *game_day;
+                    let ac = action_counts.clone();
+                    let lh = location_history.clone();
+                    let sc = *success_count;
+                    let fc = *failure_count;
+                    let ta = *total_actions;
+                    tokio::spawn(async move {
+                        if let Some(ref mgr) = mm {
+                            let importance = gr
+                                .as_ref()
+                                .and_then(|g| g.immediate_events.as_ref())
+                                .and_then(|ie| ie.event_triage.as_ref())
+                                .map(|et| et.daily_summary_importance as f32)
+                                .unwrap_or(0.8);
+                            // 格式化动作统计
+                            let mut sorted: Vec<_> = ac.iter().collect();
+                            sorted.sort_by(|a, b| b.1.cmp(a.1));
+                            let action_parts: Vec<String> = sorted
+                                .iter()
+                                .take(5)
+                                .map(|(k, v)| format!("{}x{}", k, v))
+                                .collect();
+                            let content = format!(
+                                "第{}游戏日动作统计：共{}次（成{}、败{}）。动作：{}{}",
+                                gd,
+                                ta,
+                                sc,
+                                fc,
+                                action_parts.join("、"),
+                                if lh.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("；足迹：{}", lh.join("→"))
+                                }
+                            );
+                            let mut entry = crate::component::memory::MemoryEntry::new(
+                                Uuid::nil(),
+                                gd,
+                                content,
+                            )
+                            .with_event_type("daily_action_stats".to_string())
+                            .with_importance(importance);
+                            let mut guard = mgr.write().await;
+                            if let Err(e) = guard.episodic_mut().add(&mut entry).await {
+                                warn!("游戏日{}动作统计写入 episodic memory 失败: {}", gd, e);
+                            }
+                        }
                     });
                 }
                 // 3. 透传给 binary 回调（AgentDied 处理、Claw 模式 OpenClaw 转发等）
@@ -496,8 +588,10 @@ impl super::Agent {
                                         self.relationship_store = Some(new_store.clone());
                                         // 同步更新 CognitiveEngine 内部引用
                                         if let Some(ref engine) = self.cognitive_engine {
-                                            engine.set_relationship_store(new_store);
+                                            engine.set_relationship_store(new_store.clone());
                                         }
+                                        // 同步更新 HttpApiState 引用
+                                        *api_state.relationship_store.write().unwrap() = Some(Arc::new(new_store));
                                         info!("转世重生: RelationshipStore 已重初始化 (new_id={})", new_id);
                                     }
                                     Err(e) => {
@@ -542,7 +636,6 @@ impl super::Agent {
                             &world_state.world_time,
                             self.config.game_rules.as_ref().and_then(|g| g.calendar.as_ref()),
                         );
-                        handler.set_game_day(game_day).await;
 
                         // Session Triage Engine 生命周期：每游戏日重生
                         let need_spawn = match self.session_triage_handle {
@@ -550,8 +643,11 @@ impl super::Agent {
                             Some(ref handle) => handle.is_finished(),
                         };
                         if need_spawn {
-                            // take 旧 handle 并检查退出原因
+                            // 在更新 current_game_day 之前保存旧值（供旧 engine 摘要使用）
                             let prev_game_day = self.session_triage_game_day.take();
+                            // 更新共享 game_day（新 engine 可见；旧 engine 检测到 day 改变而退出）
+                            handler.set_game_day(game_day).await;
+                            self.session_triage_game_day = Some(game_day);
                             if let Some(old_handle) = self.session_triage_handle.take() {
                                 match old_handle.await {
                                     Ok(summary_opt) => {
@@ -648,7 +744,6 @@ impl super::Agent {
                                     Some(world_state.world_time.clone()),
                                 );
                                 self.session_triage_handle = Some(tokio::spawn(engine.run()));
-                                self.session_triage_game_day = Some(game_day);
                                 info!(
                                     "SessionTriageEngine 已 spawn: agent={}, game_day={}",
                                     self.character_name(), game_day
@@ -735,10 +830,27 @@ impl super::Agent {
                                 let dead_agent_id = world_state.agent_id.unwrap_or_default();
                                 tokio::spawn(async move {
                                     info!("[biography] 死亡触发传记生成: agent={}", dead_agent_id);
-                                    match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
-                                        Ok(bio) => info!("[biography] 死亡传记生成成功: {}字", bio.chars().count()),
-                                        Err(e) => warn!("[biography] 死亡传记生成失败（非致命）: {}", e),
+                                    // 最多重试 3 次，间隔 30s（LLM 瞬断/rate limit 等临时错误可恢复）
+                                    const MAX_RETRIES: u32 = 3;
+                                    const RETRY_DELAY_SECS: u64 = 30;
+                                    for attempt in 0..MAX_RETRIES {
+                                        match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
+                                            Ok(bio) => {
+                                                info!("[biography] 死亡传记生成成功: {}字", bio.chars().count());
+                                                return;
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    "[biography] 死亡传记生成失败 (attempt {}/{}): {}",
+                                                    attempt + 1, MAX_RETRIES, e
+                                                );
+                                                if attempt + 1 < MAX_RETRIES {
+                                                    tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
+                                                }
+                                            }
+                                        }
                                     }
+                                    warn!("[biography] 死亡传记生成最终失败: agent={}", dead_agent_id);
                                 });
                             }
 
@@ -902,13 +1014,19 @@ impl super::Agent {
                     };
                     if !immediate_events.is_empty() {
                         debug!("消费 {} 个即时事件到工作记忆", immediate_events.len());
-                        if let Err(e) = self.process_events(&immediate_events).await {
+                        // 即时事件不经过叙事合成（直接工作记忆）
+                        if let Err(e) = self.process_events(&immediate_events, None).await {
                             warn!("即时事件写入记忆失败: {}", e);
                         }
                     }
 
-                    // 2. 处理事件并更新记忆
-                    if let Err(e) = self.process_events(&world_state.events_log).await {
+                    // 2. 处理事件并更新记忆（叙事合成）
+                    // 先 clone Arc 让 borrow 立即结束，避免与后续的 &mut self 冲突
+                    let cognitive_engine_ref = self.cognitive_engine.as_ref().cloned();
+                    if let Err(e) = self
+                        .process_events(&world_state.events_log, cognitive_engine_ref.as_deref())
+                        .await
+                    {
                         warn!("Failed to process events into memory: {}", e);
                     }
 
@@ -964,7 +1082,11 @@ impl super::Agent {
                     if let Some(ref handler) = self.immediate_handler {
                         let store = handler.event_store();
                         let config = store.config();
-                        match store.query_triaged_async(config.context.clone()).await {
+                        let game_day = Self::compute_game_day(
+                            &world_state.world_time,
+                            self.config.game_rules.as_ref().and_then(|g| g.calendar.as_ref()),
+                        );
+                        match store.query_triaged_async(config.context.clone(), game_day).await {
                             Ok(triaged) => {
                                 // URGENT: 逐条高可见性展示
                                 for event in &triaged.urgent {
@@ -1048,14 +1170,17 @@ impl super::Agent {
                     }
 
                     // 4.4 托梦注入（统一路径：消费 dream 并注入 memory_context）
-                    if let Some(ref api_state) = self.http_api_state
+                    let active_dream: Option<String> = if let Some(ref api_state) = self.http_api_state
                         && let Some(dream_thought) = api_state.consume_dream().await
                     {
                         info!("[dream] 托梦注入决策上下文: {}字", dream_thought.chars().count());
                         memory_context.push_str("\n### 托梦\n");
                         memory_context.push_str(&dream_thought);
                         memory_context.push('\n');
-                    }
+                        Some(dream_thought)
+                    } else {
+                        None
+                    };
 
                     // 4.4b 跨 Agent 传承教训注入
                     if !world_state.lessons_learned.is_empty() {
@@ -1202,7 +1327,7 @@ impl super::Agent {
 
                         // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
-                        let all_raw_intents: Vec<Intent> = {
+                        let mut all_raw_intents: Vec<Intent> = {
                             // llm_chaos_active 时排除认知 fallback（"休息"），仅使用混沌 intents
                             let mut intents: Vec<Intent> = if self.llm_chaos_active {
                                 Vec::new()
@@ -1245,6 +1370,23 @@ impl super::Agent {
                             }
                             intents
                         };
+
+                        // 托梦标记：本 tick 有活跃托梦时，标记所有 intent
+                        if let Some(ref dream) = active_dream {
+                            let dream_trunc = self
+                                .cognitive_engine
+                                .as_ref()
+                                .map(|e| e.truncation("dream_marker_thought", 50))
+                                .unwrap_or(50);
+                            let summary: String = dream.chars().take(dream_trunc).collect();
+                            for intent in &mut all_raw_intents {
+                                intent.dream_marker = Some(
+                                    cyber_jianghu_protocol::types::DreamMarker {
+                                        thought: summary.clone(),
+                                    },
+                                );
+                            }
+                        }
 
                         // 处理人魂判断的重要记忆固化
                         #[allow(clippy::collapsible_if)]
@@ -1461,6 +1603,7 @@ impl super::Agent {
                             history
                                 .record_intent(
                                     final_intent.tick_id,
+                                    0,
                                     final_intent.intent_id,
                                     final_intent.action_type.to_string(),
                                     final_intent.thought_log.clone(),
@@ -1751,6 +1894,9 @@ impl super::Agent {
                                             intent_id: Some(id),
                                             action_type: r.final_action_type.clone(),
                                             action_data: r.final_action_data.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                                            // markers 存于 Server DB agent_action_logs（processor.rs 提取），此处 SoulCycleRecord 不存储
+                                            chaos_marker: None,
+                                            dream_marker: None,
                                         }),
                                     }
                                 }).collect();
@@ -1978,6 +2124,69 @@ impl super::Agent {
             }
             "休息" => "原地休息".to_string(),
             other => format!("执行{}", other),
+        }
+    }
+
+    /// 启动时主动从 Server 拉取 prompt_templates 并写盘
+    ///
+    /// 确保本地存在 prompt_templates.json 文件供下次冷启动使用。
+    /// 失败不阻塞启动——WS ConfigUpdate 已在连接时更新了 runtime config。
+    async fn fetch_prompt_templates_from_server(&self) {
+        let Some(ref engine) = self.cognitive_engine else {
+            return;
+        };
+        let Some(ref device_cfg) = self.device_config else {
+            return;
+        };
+
+        let http_url = self.config.server.http_url.clone();
+        let device_id = device_cfg.device_id;
+        let auth_token = device_cfg.auth_token.clone();
+        let engine = engine.clone();
+
+        let client = reqwest::Client::new();
+        let url = format!("{}/api/v1/agent/prompt-templates", http_url);
+        let body = serde_json::json!({
+            "device_id": device_id,
+            "auth_token": auth_token,
+        });
+
+        match client.post(&url).json(&body).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(data) => {
+                        let hash = data["hash"].as_str().unwrap_or("");
+                        let version = data["version"].as_str().unwrap_or("");
+                        if let Some(content) = data.get("content") {
+                            match cyber_jianghu_protocol::PromptTemplateConfig::from_json_value(
+                                content.clone(),
+                            ) {
+                                Ok(config) => {
+                                    info!(
+                                        "启动拉取 prompt_templates 成功: version={}, hash={}",
+                                        version,
+                                        &hash[..12.min(hash.len())]
+                                    );
+                                    engine.update_prompt_template_from_config(config);
+                                    engine.save_prompt_template_to_disk();
+                                }
+                                Err(e) => {
+                                    warn!("启动拉取 prompt_templates 解析失败: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("启动拉取 prompt_templates 响应解析失败: {}", e);
+                    }
+                }
+            }
+            Ok(resp) => {
+                warn!("启动拉取 prompt_templates 失败: status={}", resp.status());
+            }
+            Err(e) => {
+                warn!("启动拉取 prompt_templates 请求失败: {}", e);
+            }
         }
     }
 }

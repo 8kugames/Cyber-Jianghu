@@ -2,18 +2,20 @@
 // 认知引擎 Prompt 构建方法
 // ============================================================================
 //
-// 所有 prompt 模板统一由 prompt_templates.yaml 定义，本文件仅负责：
+// 所有 prompt 模板统一由 prompt_templates.json 定义（本地加载或 WS ConfigUpdate 下发）。
+// 本文件仅负责：
 // - 组装变量 → 调用模板渲染
-// - 构建 WorldState 数据段（动态数据，不适合放 YAML）
+// - 构建 WorldState 数据段（动态数据，不适合放模板）
 // - 构建动作描述/字段提示
 // ============================================================================
 
-use cyber_jianghu_protocol::AvailableAction;
+use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
 impl super::CognitiveEngine {
     /// 构建直连 WorldState 的 prompt（包含精确数据）
     ///
-    /// 单一数据源：prompt_templates.yaml。模板加载失败在启动时 panic。
+    /// 单一数据源：prompt_templates.json（本地加载或 WS ConfigUpdate 下发）。
+    /// 模板必须包含 actor_direct，否则返回 Err。
     pub(super) fn build_direct_prompt(
         &self,
         world_state: &cyber_jianghu_protocol::WorldState,
@@ -22,7 +24,7 @@ impl super::CognitiveEngine {
         persona_desc: &str,
         agent_name: &str,
         use_tool_calling: bool,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
             None => String::new(),
@@ -48,15 +50,17 @@ impl super::CognitiveEngine {
             self.build_skill_instructions(&world_state.self_state.skills, use_tool_calling);
 
         let tool_calling_guidance = if use_tool_calling {
-            "## 决策流程\n你必须按以下顺序完成决策：\n1. 先调用 skill_view 工具查看你掌握的技能行为指引\n2. 如需了解人际关系，调用 get_relationship 或 list_relationships\n3. 如需搜索记忆，调用 search_memory\n4. 工具调用完成后，按以下 JSON 格式输出决策\n".to_string()
+            "## 输出格式\n直接输出以下 JSON。工具调用是可选的——大多数情况下你不需要调用任何工具，直接根据已有信息决策即可。\n仅在确实需要查阅技能行为指引时才调用 skill_view，或需要确认人际关系/搜索记忆时才调用对应工具。\n你最多可以调用 1 次工具，调用后必须立即输出 JSON。\n".to_string()
         } else {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
         };
 
-        let tmpl = self
-            .prompt_template
-            .get_template("actor_direct")
-            .expect("prompt_templates.yaml 必须包含 actor_direct 模板");
+        let prompt_template = self.prompt_template();
+
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
 
         let mut vars = std::collections::HashMap::new();
         vars.insert("feedback_section".to_string(), feedback_section);
@@ -71,7 +75,7 @@ impl super::CognitiveEngine {
         vars.insert("skill_instructions".to_string(), skill_instructions);
         vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
 
-        tmpl.render_all(&vars)
+        Ok(tmpl.render_all(&vars))
     }
 
     /// 构建 WorldState 数据段（动态数据，不适合放 YAML）
@@ -80,7 +84,7 @@ impl super::CognitiveEngine {
         world_state: &cyber_jianghu_protocol::WorldState,
     ) -> String {
         let content_hint_len = self
-            .prompt_template
+            .prompt_template()
             .get_template("actor_direct")
             .and_then(|t| t.truncation.get("content_hint"))
             .copied()
@@ -181,7 +185,7 @@ impl super::CognitiveEngine {
         ws_parts.join("\n")
     }
 
-    /// 从动作列表构建描述文本
+    /// 从动作列表构建描述文本（含 cost/effect 摘要）
     pub(super) fn build_action_descriptions(actions: &[AvailableAction]) -> String {
         if actions.is_empty() {
             return "- 休息: 休息".to_string();
@@ -200,7 +204,12 @@ impl super::CognitiveEngine {
                 } else {
                     a.description.clone()
                 };
-                format!("- {}: {}", display_name, desc)
+                let meta = render_action_meta(&a.requirements, &a.effects);
+                if meta.is_empty() {
+                    format!("- {}: {}", display_name, desc)
+                } else {
+                    format!("- {}: {} [{}]", display_name, desc, meta)
+                }
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -250,7 +259,7 @@ impl super::CognitiveEngine {
         validation_feedback: Option<&str>,
         persona_desc: &str,
         agent_name: &str,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         let feedback_section = match validation_feedback {
             Some(fb) => format!("\n[验证反馈]: {}\n", fb),
             None => String::new(),
@@ -269,12 +278,13 @@ impl super::CognitiveEngine {
         let action_field_hints = cache.get_action_field_hints().to_string();
         drop(cache);
 
-        let tmpl = self
-            .prompt_template
-            .get_template("actor_direct")
-            .expect("prompt_templates.yaml 必须包含 actor_direct 模板");
-
+        let prompt_template = self.prompt_template();
         let world_state_section = format!("- Tick: {} (旧式模式，无 WorldState)", tick_id);
+
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
 
         let mut vars = std::collections::HashMap::new();
         vars.insert("feedback_section".to_string(), feedback_section);
@@ -292,10 +302,14 @@ impl super::CognitiveEngine {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string(),
         );
 
-        tmpl.render_all(&vars)
+        Ok(tmpl.render_all(&vars))
     }
 
-    /// 从本地配置目录加载技能行为指令（带缓存）
+    /// 从 skill_cache 构建技能行为指令
+    ///
+    /// skill_cache 来源：
+    /// 1. 启动时从 skill_cache.json 加载
+    /// 2. 运行时从 Server ConfigUpdate 推送
     fn build_skill_instructions(
         &self,
         skills: &[cyber_jianghu_protocol::types::entities::SkillInfo],
@@ -305,36 +319,12 @@ impl super::CognitiveEngine {
             return String::new();
         }
 
-        let config_dir = self.config_dir.clone();
-        if config_dir.as_os_str().is_empty() {
-            tracing::warn!("配置目录为空，跳过技能指令加载");
-            return String::new();
-        }
-
-        let skills_dir = config_dir.join("skills");
-
-        if skills_dir.exists() {
-            let mut cache = self.skill_cache.write().unwrap();
-            for skill in skills {
-                if cache.contains_key(&skill.skill_id) {
-                    continue;
-                }
-                let skill_path = skills_dir.join(&skill.skill_id).join("SKILL.md");
-                if let Ok(content) = std::fs::read_to_string(&skill_path) {
-                    let body = super::super::earth::extract_skill_body(&content);
-                    if !body.is_empty() {
-                        cache.insert(skill.skill_id.clone(), body);
-                    }
-                }
-            }
-        }
-
         if index_only {
             let header = self
                 .render_template_section("skill_index_header")
                 .unwrap_or_else(|| {
                     format!(
-                        "## 已掌握技能（共 {} 项，使用 skill_view 工具查看详情和行为指引）",
+                        "## 已掌握技能（共 {} 项，可选：调用 skill_view 查看行为指引）",
                         skills.len()
                     )
                 });
@@ -344,7 +334,7 @@ impl super::CognitiveEngine {
 
             let tool_header = self
                 .render_template_section("tool_hints_header")
-                .unwrap_or_else(|| "## 可用工具\n调用以下工具获取决策所需信息：".to_string());
+                .unwrap_or_else(|| "## 可用工具（可选，仅在需要时调用）".to_string());
             lines.push(tool_header);
 
             for tool in super::super::earth::EarthToolExecutor::tool_definitions() {
@@ -375,9 +365,100 @@ impl super::CognitiveEngine {
 
     /// 渲染模板中的非 required section（progressive disclosure 用）
     fn render_template_section(&self, section_name: &str) -> Option<String> {
-        self.prompt_template
+        self.prompt_template()
             .get_template("actor_direct")
             .and_then(|tmpl| tmpl.sections.get(section_name))
             .map(|s| s.trim().to_string())
     }
+}
+
+// ============================================================================
+// Action cost/effect 通用渲染（纯数据驱动，零硬编码）
+// ============================================================================
+
+/// 将 requirements + effects 渲染为单行摘要
+///
+/// 格式示例: "消耗qi 2, thirst+2"
+/// 未知 requirement_type/effect_type 跳过（通用适配）
+fn render_action_meta(
+    requirements: &[ActionRequirementInfo],
+    effects: &[ActionEffectInfo],
+) -> String {
+    let mut parts = Vec::new();
+
+    for req in requirements {
+        if let Some(s) = render_requirement(req) {
+            parts.push(s);
+        }
+    }
+
+    for eff in effects {
+        if let Some(s) = render_effect(eff) {
+            parts.push(s);
+        }
+    }
+
+    parts.join(", ")
+}
+
+fn render_requirement(req: &ActionRequirementInfo) -> Option<String> {
+    match req.requirement_type.as_str() {
+        "attribute" => {
+            let attr = display_attr(&req.params)?;
+            let cost = req.params.get("cost").and_then(|v| v.as_i64()).unwrap_or(0);
+            if cost > 0 {
+                Some(format!("消耗{}{}", attr, cost))
+            } else {
+                None
+            }
+        }
+        "item" => {
+            let item = req.params.get("item_id")?.as_str()?;
+            let qty = req.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("需要{}x{}", item, qty))
+        }
+        _ => None,
+    }
+}
+
+fn render_effect(eff: &ActionEffectInfo) -> Option<String> {
+    match eff.effect_type.as_str() {
+        "attribute_change" => {
+            let attr = display_attr(&eff.params)?;
+            let op = eff
+                .params
+                .get("operation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("add");
+            let val = eff.params.get("value")?.as_i64()?;
+            let formatted = match op {
+                "add" if val > 0 => format!("{}+{}", attr, val),
+                "add" if val < 0 => format!("{}{}", attr, val),
+                "add" => return None,
+                "set" => format!("{}={}", attr, val),
+                _ => format!("{}{}{}", attr, op, val),
+            };
+            Some(formatted)
+        }
+        "add_item" => {
+            let item = eff.params.get("item_id")?.as_str()?;
+            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("获得{}x{}", item, qty))
+        }
+        "remove_item" => {
+            let item = eff.params.get("item_id")?.as_str()?;
+            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("消耗{}x{}", item, qty))
+        }
+        _ => None,
+    }
+}
+
+/// 优先使用 display_attribute（Server 注入的中文显示名），fallback 到 attribute
+fn display_attr(params: &std::collections::HashMap<String, serde_json::Value>) -> Option<String> {
+    params
+        .get("display_attribute")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| params.get("attribute").and_then(|v| v.as_str()).map(|s| s.to_string()))
 }

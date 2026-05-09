@@ -211,6 +211,11 @@ pub struct GameRulesData {
     /// 跨 Agent 传承教训配置
     #[serde(default)]
     pub lesson: Option<LessonConfig>,
+
+    /// 技能习得阈值配置（数据驱动）
+    /// key: skill_id, value: 触发条件（action categories + 最小成功次数）
+    #[serde(default)]
+    pub skill_acquisition: SkillAcquisitionConfig,
 }
 
 /// 死因到建议文本的映射（数据驱动，来自 game_rules.yaml）
@@ -329,6 +334,24 @@ impl Default for SkillsConfig {
         }
     }
 }
+
+/// 技能习得阈值条目（数据驱动）
+///
+/// 每个技能配置哪些 action category 的成功执行会计数，
+/// 以及达到多少次后自动习得该技能。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SkillAcquisitionEntry {
+    /// 触发计数的 action category 列表（对应 actions.yaml 中 action 的 category 字段）
+    pub trigger_categories: Vec<String>,
+    /// 最小成功执行次数
+    pub min_count: i32,
+}
+
+/// 技能习得阈值配置（数据驱动）
+///
+/// key: skill_id（如 "social/trust-reading"）
+/// value: 习得条件
+pub type SkillAcquisitionConfig = HashMap<String, SkillAcquisitionEntry>;
 
 /// Agent 状态配置（数据驱动）
 #[derive(Debug, Clone, Deserialize, Serialize)]

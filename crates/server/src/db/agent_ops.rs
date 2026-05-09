@@ -428,6 +428,9 @@ pub async fn register_agent_transactional(
     }
 
     // 步骤1: 创建Agent（关联设备，默认状态为 active，记录 birth_tick）
+    // birth_tick 需偏移 starting_age，使 compute_age_years 返回 starting_age 而非 0
+    let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
+    let birth_tick = initial_tick_id - starting_age_ticks;
     let agent = sqlx::query_as::<Postgres, Agent>(
         r#"
         INSERT INTO agents (device_id, name, system_prompt, status, birth_tick)
@@ -438,7 +441,7 @@ pub async fn register_agent_transactional(
     .bind(device_id)
     .bind(name)
     .bind(system_prompt)
-    .bind(initial_tick_id)
+    .bind(birth_tick)
     .fetch_one(&mut *tx)
     .await
     .context("在事务中创建 Agent 失败")?;
@@ -731,12 +734,12 @@ pub async fn auto_rebirth_agent(
         None => anyhow::bail!("Agent {} 不存在或非 dead 状态，无法转世", old_agent_id),
     };
 
-    // 2. 旧 agent dead → retired（与 get_agent_by_device_id 排除逻辑对齐）
-    sqlx::query("UPDATE agents SET status = 'retired', retired_at = NOW() WHERE agent_id = $1")
+    // 2. 旧 agent 标记 retired_at（保持 dead 状态，dashboard 可区分死亡 vs 归隐）
+    sqlx::query("UPDATE agents SET retired_at = NOW() WHERE agent_id = $1")
         .bind(old_agent_id)
         .execute(&mut *tx)
         .await
-        .context("退役旧 Agent 失败")?;
+        .context("标记旧 Agent 转世时间失败")?;
 
     // 3. 获取当前 tick_id（用于 birth_tick 计算）
     let current_tick: i64 = sqlx::query_scalar(

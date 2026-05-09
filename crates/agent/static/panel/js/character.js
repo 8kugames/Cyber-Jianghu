@@ -254,7 +254,7 @@ function renderDrawerSoulCycles(recordsMap, immMap) {
       '<div class="tick-section"><div class="tick-section-title">行动</div>';
     attempts.forEach((a, idx) => {
       if (attempts.length > 1) {
-        html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+        html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
       }
       html += renderSoulInline("人魂", a.renhun, "renhun");
       html += renderSoulInline("天魂", a.tianhun, "tianhun");
@@ -421,6 +421,16 @@ async function loadCharacterIntoDrawer(char) {
         `;
   }
 
+  // 已掌握技能
+  if (charData.skills && charData.skills.length > 0) {
+    html += `
+            <section class="drawer-section">
+                <div class="drawer-section-title">已习得技能</div>
+                <div class="tag-list" style="margin-top: 8px;">${charData.skills.map((s) => `<span class="info-tag skill-tag" title="${escapeHtml(s.skill_id)}">${escapeHtml(s.name)}</span>`).join("")}</div>
+            </section>
+        `;
+  }
+
   // 属性（使用 generateAttributesHtml 统一渲染）
   if (charData.attributes) {
     const attrHtml = generateAttributesHtml(
@@ -568,8 +578,8 @@ async function loadBiographySection(agentId) {
     </section>
   `;
 
-  // 先返回占位，异步填充
-  loadBiographyAsync(agentId);
+  // 先返回占位，延迟异步填充（占位 HTML 尚未挂载 DOM，需等渲染后执行）
+  requestAnimationFrame(function () { loadBiographyAsync(agentId); });
   return placeholder;
 }
 
@@ -953,7 +963,7 @@ async function loadExperiences(page = 1) {
 
         attempts.forEach((a, idx) => {
           if (attempts.length > 1) {
-            html += `<div class="tick-attempt-label">第 ${idx + 1} 次尝试</div>`;
+            html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
           }
 
           // 人魂：感知与思考
@@ -1068,6 +1078,11 @@ function renderSoulInline(label, data, type) {
         const chaosLabel =
           cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
         html += `<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">${escapeHtml(chaosLabel)}</span></div>`;
+      }
+      // 托梦影响徽章
+      if (data.dream_marker) {
+        const thought = data.dream_marker.thought || '';
+        html += `<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>${thought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(thought) + '</span>' : ''}</div>`;
       }
     }
   }

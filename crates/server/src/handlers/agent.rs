@@ -229,7 +229,6 @@ pub async fn agent_register(
         rebirth_delay_ticks: survival.rebirth_delay_ticks,
         rebirth_retry_max_attempts: survival.rebirth_retry_max_attempts,
         rebirth_retry_interval_secs: survival.rebirth_retry_interval_secs,
-        reflector_narrative: None,
         immediate_events,
         lifespan,
         calendar: crate::game_data::registry::TimeRegistry::get_config().map(|tc| {
@@ -705,5 +704,77 @@ pub async fn update_biography(
                 Json(serde_json::json!({"error": format!("保存失败: {}", e)})),
             ))
         }
+    }
+}
+
+// ============================================================================
+// Prompt Templates 获取（Agent 启动时主动拉取）
+// ============================================================================
+
+#[derive(Debug, serde::Deserialize)]
+pub struct GetPromptTemplatesRequest {
+    pub device_id: uuid::Uuid,
+    pub auth_token: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct PromptTemplatesResponse {
+    pub hash: String,
+    pub version: String,
+    pub content: serde_json::Value,
+}
+
+/// POST /api/v1/agent/prompt-templates
+///
+/// Agent 启动时主动拉取 prompt_templates JSON。
+/// 使用 device token 认证（与 agent_register / agent_retire 一致）。
+pub async fn get_prompt_templates(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<GetPromptTemplatesRequest>,
+) -> Result<Json<PromptTemplatesResponse>, (StatusCode, Json<PromptTemplatesResponse>)> {
+    let valid = verify_device_token(&state.db_pool, payload.device_id, &payload.auth_token)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                "prompt-templates 设备认证失败: device_id={}, error={}",
+                payload.device_id,
+                e
+            );
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(PromptTemplatesResponse {
+                    hash: String::new(),
+                    version: String::new(),
+                    content: serde_json::Value::Null,
+                }),
+            )
+        })?;
+
+    if !valid {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(PromptTemplatesResponse {
+                hash: String::new(),
+                version: String::new(),
+                content: serde_json::Value::Null,
+            }),
+        ));
+    }
+
+    let cache = state.prompt_template_cache.read().await;
+    match cache.as_ref() {
+        Some(pt_cache) => Ok(Json(PromptTemplatesResponse {
+            hash: pt_cache.hash.clone(),
+            version: pt_cache.version.clone(),
+            content: pt_cache.json_value.clone(),
+        })),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(PromptTemplatesResponse {
+                hash: String::new(),
+                version: String::new(),
+                content: serde_json::Value::Null,
+            }),
+        )),
     }
 }

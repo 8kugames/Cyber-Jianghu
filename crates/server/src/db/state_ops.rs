@@ -12,7 +12,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use sqlx::{PgPool, Postgres, QueryBuilder};
+use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
@@ -42,6 +42,9 @@ pub(super) fn serialize_attributes_with_skills(state: &AgentState) -> Result<ser
     if !state.status.max_modifiers.is_empty() {
         json["_max_modifiers"] = serde_json::to_value(&state.status.max_modifiers)?;
     }
+    if !state.action_counts.is_empty() {
+        json["_action_counts"] = serde_json::to_value(&state.action_counts)?;
+    }
     Ok(json)
 }
 
@@ -67,7 +70,7 @@ pub async fn get_all_alive_agents_latest_states(pool: &PgPool) -> Result<Vec<Age
     // 否则会忽略最新的死亡记录、找到旧的存活记录，导致已死亡 agent 被加载
     let states = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT latest.*, a.birth_tick FROM (
+        SELECT latest.*, a.birth_tick, a.name FROM (
             SELECT DISTINCT ON (agent_id) *
             FROM agent_states
             ORDER BY agent_id, tick_id DESC
@@ -100,6 +103,13 @@ pub async fn get_current_world_tick_id(pool: &PgPool) -> Result<i64> {
     .await
     .context("获取当前世界 tick ID 失败")?;
 
+    // 空库兜底：tick_logs 和 agent_states 均为空时返回 0，
+    // 导致注册时 birth_tick 为负值（BUG-8）。
+    // 使用当前 Unix 时间戳作为合理的初始 tick_id。
+    if tick_id == 0 {
+        return Ok(chrono::Utc::now().timestamp());
+    }
+
     Ok(tick_id)
 }
 
@@ -129,7 +139,7 @@ pub async fn get_latest_agent_state(pool: &PgPool, agent_id: uuid::Uuid) -> Resu
 
     let state = sqlx::query_as::<Postgres, AgentState>(
         r#"
-        SELECT s.*, a.birth_tick
+        SELECT s.*, a.birth_tick, a.name
         FROM agent_states s
         JOIN agents a ON a.agent_id = s.agent_id
         WHERE s.agent_id = $1
@@ -363,7 +373,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, chaos_marker) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, chaos_marker, dream_marker, pipe_seq) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
@@ -378,12 +388,14 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
             .push_bind(&action.observer_thought)
             .push_bind(&action.narrative)
             .push_bind(&action.soul_cycle_metadata)
-            .push_bind(&action.chaos_marker);
+            .push_bind(&action.chaos_marker)
+            .push_bind(&action.dream_marker)
+            .push_bind(action.pipe_seq);
     });
 
     // UPSERT: SoulCycleReport 可能先到达创建占位行，此处覆盖
     query_builder.push(
-        " ON CONFLICT (agent_id, tick_id) DO UPDATE SET \
+        " ON CONFLICT (agent_id, tick_id, pipe_seq) DO UPDATE SET \
          action_type = EXCLUDED.action_type, \
          action_type_display = EXCLUDED.action_type_display, \
          action_data = EXCLUDED.action_data, \
@@ -392,7 +404,8 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
          thought_log = EXCLUDED.thought_log, \
          observer_thought = EXCLUDED.observer_thought, \
          narrative = EXCLUDED.narrative, \
-         chaos_marker = EXCLUDED.chaos_marker",
+         chaos_marker = EXCLUDED.chaos_marker, \
+         dream_marker = EXCLUDED.dream_marker",
     );
 
     query_builder
@@ -642,4 +655,115 @@ pub async fn get_recent_actions_batch(
     }
 
     Ok(map)
+}
+
+/// Agent 每日动作统计（用于 Server → Agent 推送）
+pub struct AgentDailyActionStats {
+    pub game_day: i64,
+    pub action_counts: std::collections::HashMap<String, i32>,
+    pub location_history: Vec<String>,
+    pub success_count: i32,
+    pub failure_count: i32,
+    pub total_actions: i32,
+}
+
+/// 查询指定 Agent 在指定游戏日的动作统计
+///
+/// 将 tick_id 范围映射到 game_day：
+///   tick_start = (game_day - 1) * ticks_per_day + 1
+///   tick_end = game_day * ticks_per_day
+/// 其中 ticks_per_day = ticks_per_hour * hours_per_day = 1 * 12 = 12（配置值）
+///
+/// 注意：本函数假设所有 tick_id 从 1 开始递增。
+pub async fn get_agent_daily_action_stats(
+    pool: &PgPool,
+    agent_id: uuid::Uuid,
+    game_day: i64,
+) -> Result<Option<AgentDailyActionStats>> {
+    // 从 game_rules 获取 ticks_per_day 配置
+    let ticks_per_day = crate::game_data::registry::TimeRegistry::get_config()
+        .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64)
+        .unwrap_or(12); // 降级默认值
+
+    let tick_start = (game_day - 1) * ticks_per_day + 1;
+    let tick_end = game_day * ticks_per_day;
+
+    // 动作类型统计
+    let count_rows = sqlx::query(
+        r#"
+        SELECT action_type, COUNT(*) as cnt
+        FROM agent_action_logs
+        WHERE agent_id = $1 AND tick_id BETWEEN $2 AND $3
+        GROUP BY action_type
+        "#,
+    )
+    .bind(agent_id)
+    .bind(tick_start)
+    .bind(tick_end)
+    .fetch_all(pool)
+    .await
+    .context("查询动作类型统计失败")?;
+
+    if count_rows.is_empty() {
+        return Ok(None);
+    }
+
+    let mut action_counts = std::collections::HashMap::new();
+    let mut total_actions = 0i32;
+    for row in &count_rows {
+        let action_type: String = row.get("action_type");
+        let cnt: i64 = row.get("cnt");
+        total_actions += cnt as i32;
+        action_counts.insert(action_type, cnt as i32);
+    }
+
+    // 成功/失败统计
+    let success_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM agent_action_logs WHERE agent_id = $1 AND tick_id BETWEEN $2 AND $3 AND result = 'success'",
+    )
+    .bind(agent_id)
+    .bind(tick_start)
+    .bind(tick_end)
+    .fetch_one(pool)
+    .await
+    .context("查询成功动作数失败")?;
+
+    let failure_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM agent_action_logs WHERE agent_id = $1 AND tick_id BETWEEN $2 AND $3 AND result = 'failure'",
+    )
+    .bind(agent_id)
+    .bind(tick_start)
+    .bind(tick_end)
+    .fetch_one(pool)
+    .await
+    .context("查询失败动作数失败")?;
+
+    // 地点变化历史（从 agent_states 获取）
+    let location_rows = sqlx::query(
+        r#"
+        SELECT node_id FROM agent_states
+        WHERE agent_id = $1 AND tick_id BETWEEN $2 AND $3
+        ORDER BY tick_id ASC
+        "#,
+    )
+    .bind(agent_id)
+    .bind(tick_start)
+    .bind(tick_end)
+    .fetch_all(pool)
+    .await
+    .context("查询地点历史失败")?;
+
+    let location_history: Vec<String> = location_rows
+        .into_iter()
+        .map(|row| row.get::<String, _>("node_id"))
+        .collect();
+
+    Ok(Some(AgentDailyActionStats {
+        game_day,
+        action_counts,
+        location_history,
+        success_count: success_count as i32,
+        failure_count: failure_count as i32,
+        total_actions,
+    }))
 }

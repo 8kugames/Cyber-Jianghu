@@ -345,6 +345,7 @@ mod tests {
                     chronicle: None,
                     lifespan: None,
                     lesson: None,
+                    skill_acquisition: std::collections::HashMap::new(),
                 },
             },
             items: UnifiedItemsConfig {
@@ -437,8 +438,32 @@ mod tests {
                     seasons: vec![],
                 },
             },
-            narrative: Default::default(),
-            display_messages: Default::default(),
+            narrative: cyber_jianghu_protocol::NarrativeConfig {
+                version: "0.0.1-test".to_string(),
+                description: "测试叙事配置".to_string(),
+                attribute_categories: Default::default(),
+                attributes: Default::default(),
+                status_effects: Default::default(),
+            },
+            display_messages: DisplayMessagesConfig {
+                version: "0.0.1-test".to_string(),
+                description: "测试配置".to_string(),
+                entity_states: EntityStatesConfig {
+                    alive: "存活".to_string(),
+                    dead: "死亡".to_string(),
+                },
+                weather: WeatherConfig {
+                    sunny: "晴".to_string(),
+                    cloudy: "多云".to_string(),
+                    rainy: "雨".to_string(),
+                    stormy: "暴风雨".to_string(),
+                },
+                weather_events: Default::default(),
+                notifications: NotificationsConfig {
+                    death: "死亡通知".to_string(),
+                    rebirth: "转世通知".to_string(),
+                },
+            },
             skills: Default::default(),
         }
     }

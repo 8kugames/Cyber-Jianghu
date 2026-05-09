@@ -99,6 +99,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
         Ok(Self {
             id: row.try_get("id")?,
             agent_id: row.try_get("agent_id")?,
+            name: row.try_get("name").unwrap_or_default(),
             tick_id: row.try_get("tick_id")?,
             primary_attributes,
             status,
@@ -107,6 +108,10 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
             inventory_cleared_this_tick: false,
             skills: attributes_json
                 .get("_skills")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default(),
+            action_counts: attributes_json
+                .get("_action_counts")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
             birth_tick: row.try_get("birth_tick").ok().flatten(),

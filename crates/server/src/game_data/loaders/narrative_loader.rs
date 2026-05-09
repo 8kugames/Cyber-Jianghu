@@ -17,7 +17,7 @@ use std::path::Path;
 /// - `config_dir`: 配置文件目录
 ///
 /// # 返回
-/// 叙事化配置，如果文件不存在则返回默认配置
+/// 叙事化配置，配置缺失时返回 `Err`（Fail-Fast）
 pub fn load_narrative(config_dir: &Path) -> Result<NarrativeConfig> {
     // 优先尝试 YAML 格式
     let yaml_path = config_dir.join("narrative_config.yaml");
@@ -31,8 +31,10 @@ pub fn load_narrative(config_dir: &Path) -> Result<NarrativeConfig> {
         return load_narrative_from_path(&json_path, ConfigFormat::Json);
     }
 
-    tracing::info!("[narrative_loader] Config file not found, using builtin config");
-    Ok(NarrativeConfig::builtin())
+    Err(anyhow::anyhow!(
+        "[narrative_loader] 叙事化配置文件不存在: {:?}",
+        yaml_path
+    ))
 }
 
 fn load_narrative_from_path(path: &Path, format: ConfigFormat) -> Result<NarrativeConfig> {
@@ -66,12 +68,10 @@ fn load_narrative_from_path(path: &Path, format: ConfigFormat) -> Result<Narrati
             );
             Ok(config)
         }
-        Err(e) => {
-            tracing::warn!(
-                "[narrative_loader] Failed to parse narrative config: {}, using builtin",
-                e
-            );
-            Ok(NarrativeConfig::builtin())
-        }
+        Err(e) => Err(anyhow::anyhow!(
+            "[narrative_loader] 解析叙事化配置文件失败: {} from {:?}",
+            e,
+            path
+        )),
     }
 }

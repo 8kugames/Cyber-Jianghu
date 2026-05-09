@@ -38,6 +38,7 @@ impl AgentState {
         Self {
             id: 0, // 数据库自动生成
             agent_id,
+            name: String::new(), // 由 DB JOIN 填充
             tick_id,
             primary_attributes,
             status,
@@ -45,6 +46,7 @@ impl AgentState {
             is_alive: true,
             inventory_cleared_this_tick: false,
             skills: vec![],
+            action_counts: std::collections::HashMap::new(),
             birth_tick: None, // 由 register/rebirth 时显式设置
             created_at: Utc::now(),
         }

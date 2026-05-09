@@ -109,6 +109,8 @@ fn test_build_with_world_state() {
             ooc_risk: "high".to_string(),
             aliases: vec![],
             field_aliases: std::collections::HashMap::new(),
+            requirements: vec![],
+            effects: vec![],
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "移动".to_string(),
@@ -120,6 +122,8 @@ fn test_build_with_world_state() {
             ooc_risk: "low".to_string(),
             aliases: vec![],
             field_aliases: std::collections::HashMap::new(),
+            requirements: vec![],
+            effects: vec![],
         },
         cyber_jianghu_protocol::AvailableAction {
             action: "使用".to_string(),
@@ -131,6 +135,8 @@ fn test_build_with_world_state() {
             ooc_risk: "low".to_string(),
             aliases: vec![],
             field_aliases: std::collections::HashMap::new(),
+            requirements: vec![],
+            effects: vec![],
         },
     ];
 

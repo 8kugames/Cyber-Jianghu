@@ -270,38 +270,49 @@ pub fn apply_decay_and_environmental_damage(
 
     // 处理物品耐久度自然衰减
     // 异步操作需要 db_pool，这里先收集需要处理的物品 ID
-    // TODO: 实现物品自然损坏逻辑 (Phase 2)
+    // Phase 2: 物品自然损坏（需耐久度系统支持）
 
     (agent_states, dead_agents, events, death_notifications)
 }
 
 /// 从 birth_tick 和 current_tick 计算角色年龄（游戏年）
 ///
-/// 复用 broadcaster.rs::compute_game_time 相同公式：
-/// tick_id 是秒级时间戳（now - game_epoch）
-/// game_hours = tick_id / (real_seconds_per_tick * ticks_per_hour)
-/// game_years = game_hours / (hours_per_day * days_per_season * seasons_per_year)
+/// tick_id 是 tick count（非秒级时间戳）。
+/// age_ticks / ticks_per_hour = game_hours
+/// game_hours / hours_per_year = game_years
 pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
     use crate::game_data::registry::TimeRegistry;
 
-    let age_seconds = current_tick - birth_tick;
-    if age_seconds <= 0 {
+    let age_ticks = current_tick - birth_tick;
+    if age_ticks <= 0 {
         return 0;
     }
 
-    let registry = match crate::game_data::registry_or_error() {
-        Ok(r) => r,
-        Err(_) => return 0,
-    };
-    let gd = registry.get();
-    let real_seconds_per_tick = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
-
     if let Some(time_config) = TimeRegistry::get_config() {
-        let real_seconds_per_game_hour = real_seconds_per_tick * time_config.ticks_per_hour as i64;
-        if real_seconds_per_game_hour <= 0 {
+        let ticks_per_hour = time_config.ticks_per_hour as i64;
+        if ticks_per_hour <= 0 {
             return 0;
         }
-        let game_hours = age_seconds / real_seconds_per_game_hour;
+
+        // tick_id 是秒级时间戳，需除以 real_seconds_per_tick 得到 tick count
+        let registry = match crate::game_data::registry_or_error() {
+            Ok(r) => r,
+            Err(_) => return 0,
+        };
+        let real_seconds_per_tick = registry
+            .get()
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let game_hours = if real_seconds_per_game_hour > 0 {
+            age_ticks / real_seconds_per_game_hour
+        } else {
+            age_ticks / ticks_per_hour
+        };
+
         let hours_per_year = time_config.hours_per_day as i64
             * time_config.days_per_season as i64
             * time_config.seasons_per_year as i64;
@@ -317,6 +328,7 @@ pub fn compute_age_years(birth_tick: i64, current_tick: i64) -> i64 {
 /// 计算 starting_age 对应的 tick 偏移量（用于重生时设置 birth_tick）
 ///
 /// 使 age 计算结果为 starting_age 岁，而非 0 岁。
+/// tick_id 是秒级时间戳，偏移量需包含 real_seconds_per_tick 转换。
 pub fn compute_starting_age_ticks() -> i64 {
     let registry = match crate::game_data::registry_or_error() {
         Ok(r) => r,
@@ -350,9 +362,17 @@ pub fn compute_starting_age_ticks() -> i64 {
         let hours_per_year = time_config.hours_per_day as i64
             * time_config.days_per_season as i64
             * time_config.seasons_per_year as i64;
-        let ticks_per_year = ticks_per_hour * hours_per_year;
-        if ticks_per_year > 0 {
-            return starting_age * ticks_per_year;
+
+        let real_seconds_per_tick = gd
+            .game_rules
+            .data
+            .agent_state
+            .tick
+            .real_seconds_per_tick as i64;
+        let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
+        let real_seconds_per_year = real_seconds_per_game_hour * hours_per_year;
+        if real_seconds_per_year > 0 {
+            return starting_age * real_seconds_per_year;
         }
     }
     0
@@ -551,5 +571,71 @@ mod tests {
             death_notifications.is_empty(),
             "已死亡的 Agent 不应再次产生死亡通知"
         );
+    }
+
+    // ============================================================================
+    // 年龄计算单元测试
+    // ============================================================================
+
+    /// 测试 compute_age_years 的基本计算
+    ///
+    /// 测试配置: ticks_per_hour=1, real_seconds_per_tick=60,
+    /// hours_per_day=24, days_per_season=10, seasons_per_year=4
+    /// → real_seconds_per_game_hour = 60 * 1 = 60
+    /// → hours_per_year = 24 * 10 * 4 = 960
+    /// → real_seconds_per_year = 60 * 960 = 57600
+    ///
+    /// tick_id 是秒级时间戳，age_ticks / real_seconds_per_game_hour = game_hours
+    #[test]
+    fn test_compute_age_years_basic() {
+        crate::game_data::init_test_registry();
+
+        // 57600 秒差 = 1 游戏年（60 * 960）
+        assert_eq!(compute_age_years(0, 57600), 1);
+        assert_eq!(compute_age_years(0, 115200), 2);
+        assert_eq!(compute_age_years(0, 576000), 10);
+
+        // birth_tick > 0
+        assert_eq!(compute_age_years(57600, 115200), 1);
+        assert_eq!(compute_age_years(57600, 576000), 9);
+    }
+
+    /// 测试 compute_age_years 边界条件
+    #[test]
+    fn test_compute_age_years_edge_cases() {
+        crate::game_data::init_test_registry();
+
+        // birth_tick == current_tick → 0 岁
+        assert_eq!(compute_age_years(100, 100), 0);
+
+        // birth_tick > current_tick → 0 岁（还没出生）
+        assert_eq!(compute_age_years(200, 100), 0);
+
+        // 不足 1 年 → 0 岁（整数除法截断）
+        assert_eq!(compute_age_years(0, 57599), 0);
+    }
+
+    /// 测试 compute_age_years 与 compute_starting_age_ticks 的 round-trip 可逆性
+    ///
+    /// 如果 birth_tick = current_tick - starting_age_ticks，
+    /// 则 compute_age_years 应返回 starting_age。
+    #[test]
+    fn test_age_round_trip() {
+        crate::game_data::init_test_registry();
+
+        let starting_ticks = compute_starting_age_ticks();
+        // starting_age=18, real_seconds_per_year = 60 * 960 = 57600
+        // → starting_ticks = 18 * 57600 = 1036800
+        assert_eq!(
+            starting_ticks,
+            18 * 60 * 960,
+            "starting_age=18 应产生 1036800 秒偏移"
+        );
+
+        let current_tick = 1036800;
+        let birth_tick = current_tick - starting_ticks;
+
+        let age = compute_age_years(birth_tick, current_tick);
+        assert_eq!(age, 18, "round-trip 应返回 starting_age=18");
     }
 }

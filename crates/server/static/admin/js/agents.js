@@ -561,7 +561,7 @@ function renderTickCard(exp, metadata, time) {
     html += '<div class="tick-attempt-box">';
     if (attempts.length > 1) {
       html +=
-        '<div class="tick-attempt-label">第 ' + (idx + 1) + " 次尝试</div>";
+        '<div class="tick-attempt-label">行动 ' + (idx + 1) + "</div>";
     }
     html += renderServerSoulInline("人魂", attempt.renhun, "renhun");
     html += renderServerSoulInline("天魂", attempt.tianhun, "tianhun");
@@ -716,6 +716,14 @@ function renderServerSoulInline(label, data, type) {
           '<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">' +
           escapeHtml(chaosLabel) +
           "</span></div>";
+      }
+      // 托梦影响徽章
+      if (data.dream_marker) {
+        var dreamThought = data.dream_marker.thought || '';
+        html +=
+          '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
+          (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
+          '</div>';
       }
     }
   }

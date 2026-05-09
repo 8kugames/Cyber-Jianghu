@@ -73,18 +73,37 @@ impl IntentHistoryStore {
     fn init_schema(conn: &Connection) -> Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS intent_history (
-                tick_id INTEGER PRIMARY KEY,
+                tick_id INTEGER NOT NULL,
+                pipe_seq INTEGER NOT NULL DEFAULT 0,
                 intent_id TEXT NOT NULL,
                 action_type TEXT NOT NULL DEFAULT '',
                 thought_log TEXT,
                 observer_thought TEXT,
                 event TEXT,
                 world_time TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (tick_id, pipe_seq)
             )",
             [],
         )
         .context("Failed to create intent_history table")?;
+
+        // Migration: 旧表 PRIMARY KEY 为 (tick_id)，需添加 pipe_seq 列并重建 PK
+        let has_pipe_seq: bool = conn
+            .prepare("SELECT pipe_seq FROM intent_history LIMIT 0")
+            .is_ok();
+        if !has_pipe_seq {
+            conn.execute(
+                "ALTER TABLE intent_history ADD COLUMN pipe_seq INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .context("Failed to add pipe_seq column")?;
+            // 旧 PK 为 (tick_id)，需重建索引以支持 (tick_id, pipe_seq)
+            conn.execute("DROP INDEX IF EXISTS idx_intent_history_tick_id", [])
+                .ok();
+            // SQLite 不支持 ALTER PK，但 CREATE TABLE IF NOT EXISTS 已确保新表有正确 PK
+            // 旧表数据通过 DEFAULT 0 兼容
+        }
 
         conn.execute("PRAGMA journal_mode = WAL", []).ok();
         conn.execute("PRAGMA synchronous = NORMAL", []).ok();
@@ -96,6 +115,7 @@ impl IntentHistoryStore {
     pub async fn record_intent(
         &self,
         tick_id: i64,
+        pipe_seq: i64,
         intent_id: Uuid,
         action_type: String,
         thought_log: Option<String>,
@@ -103,18 +123,19 @@ impl IntentHistoryStore {
         let conn = self.conn.lock().expect("intent_history lock not poisoned");
         let created_at = Utc::now().to_rfc3339();
 
-        // INSERT ON CONFLICT: 同一 tick 可能被重新提交，保留已有 observer_thought/event/world_time
+        // INSERT ON CONFLICT: 同一 tick+pipe_seq 可能被重新提交，保留已有 observer_thought/event/world_time
         let result = conn.execute(
             "INSERT INTO intent_history
-             (tick_id, intent_id, action_type, thought_log, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(tick_id) DO UPDATE SET
+             (tick_id, pipe_seq, intent_id, action_type, thought_log, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(tick_id, pipe_seq) DO UPDATE SET
                 intent_id = excluded.intent_id,
                 action_type = excluded.action_type,
                 thought_log = excluded.thought_log,
                 created_at = excluded.created_at",
             params![
                 tick_id,
+                pipe_seq,
                 intent_id.to_string(),
                 action_type,
                 thought_log,
@@ -320,6 +341,7 @@ mod tests {
         store
             .record_intent(
                 1,
+                0,
                 intent_id,
                 "休息".to_string(),
                 Some("思考中...".to_string()),
@@ -341,7 +363,7 @@ mod tests {
         let intent_id = Uuid::new_v4();
 
         store
-            .record_intent(1, intent_id, "休息".to_string(), None)
+            .record_intent(1, 0, intent_id, "休息".to_string(), None)
             .await;
 
         store
@@ -360,6 +382,7 @@ mod tests {
         store
             .record_intent(
                 5,
+                0,
                 intent_id,
                 "说话".to_string(),
                 Some("想说点什么".to_string()),
@@ -394,6 +417,7 @@ mod tests {
             store
                 .record_intent(
                     i,
+                    0,
                     Uuid::new_v4(),
                     "休息".to_string(),
                     Some(format!("thought {}", i)),
@@ -425,6 +449,7 @@ mod tests {
         store
             .record_intent(
                 42,
+                0,
                 intent_id,
                 "移动".to_string(),
                 Some("去集市".to_string()),

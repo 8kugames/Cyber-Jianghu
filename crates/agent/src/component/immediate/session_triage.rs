@@ -132,7 +132,13 @@ impl SessionTriageEngine {
                 _ = tokio::time::sleep(poll_interval) => {}
             }
 
-            // 阶段 2：查询待处理事件
+            // 阶段 2：立即检测游戏日是否已切换（不论有无事件）
+            if let Some(s) = self.check_game_day_ended().await {
+                summary = Some(s);
+                break;
+            }
+
+            // 阶段 3：查询待处理事件
             let pending = match self.event_store.query_pending_async(self.game_day).await {
                 Ok(events) => events,
                 Err(e) => {
@@ -142,11 +148,8 @@ impl SessionTriageEngine {
             };
 
             if pending.is_empty() {
-                // 阶段 5：游戏日结束检查
-                if let Some(s) = self.check_game_day_ended().await {
-                    summary = Some(s);
-                    break;
-                }
+                // 无事件时 sleep 避免空轮询（仅靠 select 的 poll_interval 不足）
+                tokio::time::sleep(poll_interval).await;
                 continue;
             }
 
@@ -156,7 +159,7 @@ impl SessionTriageEngine {
                 self.game_day
             );
 
-            // 阶段 3：批量 LLM triage（带超时）
+            // 阶段 4：批量 LLM triage（带超时）
             let decisions =
                 match tokio::time::timeout(llm_timeout, self.triage_batch(&pending)).await {
                     Ok(Ok(decisions)) => decisions,
@@ -173,7 +176,7 @@ impl SessionTriageEngine {
                     }
                 };
 
-            // 阶段 4：写回 DB
+            // 阶段 5：写回 DB
             let batch_id = self.next_batch_id;
             self.next_batch_id += 1;
 
@@ -185,7 +188,7 @@ impl SessionTriageEngine {
                 error!("Session triage 写入 DB 失败: {}", e);
             }
 
-            // 阶段 5：游戏日结束检查
+            // 阶段 6：游戏日结束检查（triage 后也检测，确保事件处理完后立即响应 day 切换）
             if let Some(s) = self.check_game_day_ended().await {
                 summary = Some(s);
                 break;
@@ -379,10 +382,10 @@ event_id 必须是以下值之一：{event_ids}"#,
 
     /// 游戏日结束：生成摘要
     async fn produce_daily_summary(&self) -> anyhow::Result<String> {
-        // 查询当日所有已 triage 的事件
+        // 查询当日所有已 triage 的事件（按 game_day 过滤）
         let triaged = self
             .event_store
-            .query_triaged_async(self.config.context.clone())
+            .query_triaged_async(self.config.context.clone(), self.game_day)
             .await?;
 
         let total_count = triaged.urgent.len() + triaged.batch.len();
@@ -491,10 +494,23 @@ mod fallback_tests {
 
     #[test]
     fn fallback_priority_split_three_way() {
+        let mut event_type_priority = std::collections::HashMap::new();
+        event_type_priority.insert(WorldEventType::DeathNotification, 100);
+        event_type_priority.insert(WorldEventType::PrivateDialogue, 80);
+        event_type_priority.insert(WorldEventType::SocialInteraction, 60);
+        event_type_priority.insert(WorldEventType::StateChange, 50);
+        event_type_priority.insert(WorldEventType::ActionResult, 40);
+        event_type_priority.insert(WorldEventType::PublicMessage, 20);
+        event_type_priority.insert(WorldEventType::EnvironmentalChange, 10);
+        event_type_priority.insert(WorldEventType::SystemNotification, 10);
+        event_type_priority.insert(WorldEventType::TimeUpdate, 5);
+
         let pre = EventTriagePreFilter {
             fallback_urgent_cutoff_priority: 80,
             fallback_ignore_cutoff_priority: 20,
-            ..Default::default()
+            max_events_per_triage: 50,
+            default_priority: 0,
+            event_type_priority,
         };
 
         let events = vec![
@@ -516,10 +532,23 @@ mod fallback_tests {
 
     #[test]
     fn fallback_reason_distinguishes_error_and_timeout() {
+        let mut event_type_priority = std::collections::HashMap::new();
+        event_type_priority.insert(WorldEventType::DeathNotification, 100);
+        event_type_priority.insert(WorldEventType::PrivateDialogue, 80);
+        event_type_priority.insert(WorldEventType::SocialInteraction, 60);
+        event_type_priority.insert(WorldEventType::StateChange, 50);
+        event_type_priority.insert(WorldEventType::ActionResult, 40);
+        event_type_priority.insert(WorldEventType::PublicMessage, 20);
+        event_type_priority.insert(WorldEventType::EnvironmentalChange, 10);
+        event_type_priority.insert(WorldEventType::SystemNotification, 10);
+        event_type_priority.insert(WorldEventType::TimeUpdate, 5);
+
         let pre = EventTriagePreFilter {
             fallback_urgent_cutoff_priority: 80,
             fallback_ignore_cutoff_priority: 20,
-            ..Default::default()
+            max_events_per_triage: 50,
+            default_priority: 0,
+            event_type_priority,
         };
 
         let events = vec![mk_event("e1", WorldEventType::TimeUpdate)];

@@ -345,6 +345,7 @@ async fn handle_websocket(
             update_type: "full".to_string(),
             version: game_rules_for_protocol.version.clone(),
             content: serde_json::to_value(&game_rules_for_protocol).unwrap_or_default(),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
@@ -378,6 +379,7 @@ async fn handle_websocket(
             update_type: "full".to_string(),
             version: wb_rules.version.clone(),
             content: serde_json::to_value(&wb_rules).unwrap_or_default(),
+            content_hash: None,
             updated_items: vec![],
             removed_items: vec![],
         };
@@ -403,11 +405,24 @@ async fn handle_websocket(
     }
 
     // ===== 发送技能配置（ConfigUpdate） =====
-    // Agent 连接后立即下发全量技能内容
+    // Agent 连接后仅下发该 Agent 已掌握的技能内容
     if agent_id != uuid::Uuid::nil() {
-        let skills = crate::game_data::registry::SkillRegistry::all_with_id();
-        let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = skills
+        // 优先从 DashMap 读取（已在内存中）
+        let agent_skills: Vec<String> = match state.agent_state_cache.get(&agent_id) {
+            Some(r) => r.value().skills.clone(),
+            None => {
+                // Fallback: DashMap miss 时查 DB（首连场景）
+                crate::db::get_latest_agent_state(&state.db_pool, agent_id)
+                    .await
+                    .map(|s| s.skills.clone())
+                    .unwrap_or_default()
+            }
+        };
+
+        let all_skills = crate::game_data::registry::SkillRegistry::all_with_id();
+        let skill_contents: Vec<cyber_jianghu_protocol::types::SkillContent> = all_skills
             .into_iter()
+            .filter(|s| agent_skills.contains(&s.skill_id))
             .map(|s| cyber_jianghu_protocol::types::SkillContent {
                 skill_id: s.skill_id,
                 name: s.definition.name,
@@ -420,7 +435,8 @@ async fn handle_websocket(
                 config_type: "skills".to_string(),
                 update_type: "full".to_string(),
                 version: "1.0.0".to_string(),
-                content: serde_json::to_value(skill_contents).unwrap_or_default(),
+                content: serde_json::to_value(&skill_contents).unwrap_or_default(),
+                content_hash: None,
                 updated_items: vec![],
                 removed_items: vec![],
             };
@@ -439,7 +455,44 @@ async fn handle_websocket(
                 );
             } else {
                 debug!(
-                    "Sent skills ConfigUpdate to agent '{}' ({})",
+                    "Sent {} skills ConfigUpdate to agent '{}' ({})",
+                    skill_contents.len(),
+                    agent_name,
+                    agent_id
+                );
+            }
+        }
+    }
+
+    // ===== 发送 prompt_templates（ConfigUpdate，JSON 格式） =====
+    if agent_id != uuid::Uuid::nil() {
+        let cache = state.prompt_template_cache.read().await;
+        if let Some(ref pt_cache) = *cache {
+            let config_update = ServerMessage::ConfigUpdate {
+                config_type: "prompt_templates".to_string(),
+                update_type: "full".to_string(),
+                version: pt_cache.version.clone(),
+                content: pt_cache.json_value.clone(),
+                content_hash: Some(pt_cache.hash.clone()),
+                updated_items: vec![],
+                removed_items: vec![],
+            };
+
+            if let Err(e) = broadcast::send_config_update(
+                agent_id,
+                config_update,
+                &state.connection_manager,
+                &state.agent_to_device_map,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to send prompt_templates ConfigUpdate to agent {}: {}",
+                    agent_id, e
+                );
+            } else {
+                debug!(
+                    "Sent prompt_templates ConfigUpdate to agent '{}' ({})",
                     agent_name, agent_id
                 );
             }
@@ -1042,6 +1095,7 @@ async fn handle_intent(
         observer_thought: None,
         narrative: None,
         chaos_marker: None,
+        dream_marker: None,
         already_broadcast: false,
         session_id: None,
         subsequent_intents,

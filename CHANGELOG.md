@@ -7,9 +7,52 @@
 
 ## [Unreleased]
 
+### Changed — PromptTemplateConfig YAML→JSON 重构
+
+- **[BREAKING] Protocol**: `PromptTemplateConfig` 从 agent crate 迁移至 protocol crate（`cyber_jianghu_protocol::types::prompt_template`）。agent crate 的 `prompt_template.rs` 改为 re-export + 本地 YAML loading fallback
+- **Protocol**: `ConfigUpdate` 新增 `content_hash: Option<String>` 字段，`#[serde(default)]` 向后兼容
+- **Protocol**: `PromptTemplateConfig::to_json_bytes()` 两步序列化保证 canonical JSON（`to_value()` → BTreeMap 自动排序 → `to_vec()`），消除 HashMap 迭代顺序不确定性
+- **Server**: prompt_templates 热重载路径重构 — YAML→`PromptTemplateConfig`→canonical JSON→SHA256 hash→写入 `AppState.prompt_template_cache`→广播 JSON ConfigUpdate
+- **Server**: 启动时预加载 prompt_templates 到缓存（`TickScheduler::preload_prompt_templates()`），消除首个 Agent 连接时缓存为空的时序窗口
+- **Server**: WS 连接时下发 prompt_templates ConfigUpdate（补齐之前 game_rules/world_building_rules/skills 有但 prompt_templates 没有的 gap）
+- **Agent**: WS 接收路径从 YAML 字符串改为 JSON（`from_json_value()`），彻底消除 agent 端 `serde_yaml` 在 Linux Docker 中的解析故障
+- **Agent**: hash skip 优化 — `ConnectionState.prompt_template_hash` 记录已接收 hash，相同内容跳过更新；hash 记录与 JSON 解析结果解耦，防止解析失败时重试风暴
+- **Agent**: RuleEngine `prompt_config` 改为 `Arc<RwLock>` 共享状态（`SharedPromptConfig`），WS 回调同时更新 CognitiveEngine + RuleEngine reject 反馈模板
+- **Agent**: 回调类型从 `Fn(String)` 改为 `Fn(PromptTemplateConfig)`，消除 YAML→String 中间态
+
+### Changed — SKILL.md 元认知行为框架重构
+
+- **[BREAKING] Server**: SKILL.md 系统推翻重做 — 7 个 RPG 技术技能（sword-basic, unarmed-basic, stealth, qi-meditation, first-aid, herbalism, bargaining）替换为 5 个元认知行为框架（social/trust-reading, social/conflict-navigation, cognitive/risk-assessment, cognitive/resource-planning, survival/situational-awareness）。已掌握旧技能 ID 的 Agent 在 SkillRegistry 中查不到对应定义，broadcaster 静默过滤
+- **[BREAKING] Server**: 技能习得机制从显式"研读" action 改为经验阈值自动触发。Agent 执行 action 成功后按 category 累计计数，达到 `game_rules.yaml` 中 `skill_acquisition` 配置的阈值时自动触发 `SkillLearned`
+- **Server**: `AgentState` 新增 `action_counts: HashMap<String, i32>` 字段，持久化到 JSONB `attributes._action_counts`。`#[serde(default)]` 兼容旧数据
+- **Server**: 连接时全量技能推送改为按 Agent 已掌握技能过滤推送
+- **Server**: `realtime.rs` 新增技能习得后增量推送 `ConfigUpdate` 给 Agent
+- **Agent**: `skill_cache` 改为内存 + 本地文件（`skill_cache.json`）双层持久化，启动时从文件加载，运行时从 Server 推送更新后同步写入
+- **Agent**: `engine_prompts.rs` 和 `skill_tool.rs` 删除文件系统读取逻辑，统一从 `skill_cache` HashMap 读取
+- **Agent**: `EarthToolContext` 移除不再使用的 `config_dir` 字段
+
 ### Added
 
 - **Agent**: 纪传体传记自动生成 — 角色死亡时 fire-and-forget 触发 LLM 生成传记，写入 character.yaml 并回传 server。核心逻辑从 HTTP handler 提取为 `generate_biography_for_agent()` 共用函数
+
+### Added — 托梦显式 Intent 引用
+
+- **Protocol**: `DreamMarker` 结构体 + `Intent.dream_marker` 字段 — 照搬 `chaos_marker` 模式，全链路追踪"此 intent 受托梦影响"
+- **Protocol**: `FinalIntentReport` 补齐 `chaos_marker` + `dream_marker`（修复前端 chaos badge dead code）
+- **Agent**: `lifecycle.rs` 捕获 `consume_dream()` 返回值 → 打标本 tick 全部 `all_raw_intents`
+- **Server**: `AgentAction` + `agent_action_logs` 新增 `dream_marker JSONB` 列，`processor.rs` 提取并持久化
+- **Server**: migration `020_dream_marker.sql`
+- **Frontend**: 两个面板（agent panel + admin dashboard）新增"受托梦影响"紫色 badge 渲染
+- **Config**: `prompt_templates.yaml` 新增 `dream_marker_thought: 50` 截断配置（数据驱动）
+
+### Added — 记忆叙事合成
+
+- **Agent**: 记忆叙事合成 — 高重要性事件经 LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题
+  - `CognitiveEngine::synthesize_memory_narrative()`: 人魂处理叙事合成，每 Tick 最多一次 LLM 调用
+  - `prompt_templates.yaml` 新增 `memory_narrative` section: `min_events`、`max_events_per_tick`、`max_narrative_len`、`min_narrative_len`、`temperature`、`prompt`
+  - `MemoryManager::process_events()` 重构: 所有事件写入工作记忆，高重要性事件（≥ episodic_threshold）经 LLM 叙事加工后写入情景记忆
+  - 失败降级文本: `你一阵恍惚，似乎遗漏了一些重要的记忆。`（一字不差）
+  - 配置驱动: 所有阈值/参数均从 `prompt_templates.yaml` 读取，零硬编码
 
 ### Changed
 
@@ -17,8 +60,25 @@
 - **Agent**: rebirth 恢复时重新 open RelationshipStore（新 agent_id → 新 DB 文件），同步更新 CognitiveEngine 内部引用
 - **Agent**: `max_tool_rounds` 外部化到 `prompt_templates.yaml` 的 `llm_parameters` 段，消除硬编码
 
+### Added — 数据驱动重构
+
+- **Agent**: EarthSoul tool calling 安全机制 (F1/F2/F3)
+  - F1 ToolResultBudget: per-tool + aggregate 字配额，`.chars().count()` 统一 Unicode 安全截断
+  - F2 LoopGuard: 连续调用检测，Warn→Terminate 升级机制
+  - F3 Error Signaling: 工具执行错误格式化为 `[工具调用失败] 工具: X | 原因: Y`
+  - `EarthSoulConfig` 配置驱动，`#[serde(default)]` 向后兼容，`enabled: true` 默认启用
+  - `validate()` Fail Fast 校验，启动路径 + 热重载路径均调用
+- **Agent**: `IntentBatchConfig` 配置外部化 — `max_intents_per_tick` / `max_retries` / `pipeline_execution_enabled` 从 `game_rules.yaml` 读取，消除硬编码魔法数字
+- **Agent**: EarthSoul `validate()` 启动时 + 热重载时 Fail Fast 校验，非法配置立即拒绝
+
+### Changed — 数据驱动重构
+
+- **[BREAKING] Protocol**: 移除 `IntentBatchConfig::default()` 硬编码默认值，改为从 Server 配置下发。旧 Agent 未收到配置时使用编译期 fallback（不再独立决定批次参数）
+- **[BREAKING] Server**: processor pipeline 展平记录 — 移除嵌套 `Vec<Vec<...>>`，audit log 直接记录扁平 Intent 执行结果
+
 ### Fixed
 
+- **Agent**: 移除 `display_messages` 残留死代码（未使用函数 + 未使用 import）
 - **Agent**: skill_view tool description 加强 skill_id 选择指引，引导 LLM 从已掌握技能列表选择
 - **Server**: auto-rebirth handler 清理 agent_to_device_map 旧映射 + DashMap 旧缓存，防止幽灵映射
 - **Agent**: 地魂工具池扩展至 6 个工具（3 个新增关系工具）

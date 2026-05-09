@@ -6,9 +6,7 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{
-    CraftData, DropData, GatherData, MoveData, PickupData, PracticeData, ShoutData, SpeakData,
-};
+use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData};
 use crate::models::Intent;
 
 /// 基础动作执行器
@@ -189,73 +187,6 @@ impl BasicActionExecutor {
             content: data.content,
             target_agent_id: None,
             already_broadcast: intent.already_broadcast,
-        });
-
-        result
-    }
-
-    /// 执行 practice 动作
-    ///
-    /// 修炼武功。验证 skill_id 存在且 Agent 尚未掌握，然后发射 SkillLearned。
-    pub(super) fn execute_practice(
-        intent: &Intent,
-        action_data: Option<serde_json::Value>,
-        current_skills: &[String],
-    ) -> ActionExecutionResult {
-        let data: PracticeData =
-            deserialize_action_data!(action_data, intent, PracticeData, "修炼");
-
-        // 验证技能存在于注册表
-        if crate::game_data::registry::SkillRegistry::get(&data.skill_id).is_none() {
-            return ActionExecutionResult::failure(
-                format!("技能不存在: {}", data.skill_id),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        // 已掌握则跳过（幂等）
-        if current_skills.iter().any(|s| s == &data.skill_id) {
-            return ActionExecutionResult::success(
-                format!("{} 已掌握 {}", intent.agent_id, data.skill_id),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        // 检查技能数量上限（数据驱动）
-        let max_skills = crate::game_data::registry_or_error()
-            .ok()
-            .and_then(|r| {
-                r.get()
-                    .game_rules
-                    .data
-                    .skills
-                    .as_ref()
-                    .map(|c| c.max_skills_per_agent)
-            })
-            .unwrap_or(10);
-        if current_skills.len() >= max_skills {
-            return ActionExecutionResult::failure(
-                format!(
-                    "已掌握 {} 个技能，达到上限 {}",
-                    current_skills.len(),
-                    max_skills
-                ),
-                intent.action_type.to_string(),
-                Some(intent.intent_id),
-            );
-        }
-
-        let mut result = ActionExecutionResult::success(
-            format!("{} 修炼了 {}", intent.agent_id, data.skill_id),
-            intent.action_type.to_string(),
-            Some(intent.intent_id),
-        );
-
-        result.add_change(StateChange::SkillLearned {
-            agent_id: intent.agent_id,
-            skill_id: data.skill_id,
         });
 
         result

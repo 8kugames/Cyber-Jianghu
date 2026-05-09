@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use cyber_jianghu_protocol::WorldBuildingRules;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 // ============================================================================
 // RuleEngine 错误消息常量
@@ -30,13 +30,16 @@ pub const ERR_MOVE_INVALID_TARGET: &str = "移动失败：目标地点ID无效";
 /// 规则引擎
 ///
 /// 协调规则注册表和条件评估器，提供统一的验证入口
+/// reject 反馈模板共享状态（RuleEngine + WS 回调共享同一 Arc）
+type SharedPromptConfig = std::sync::RwLock<Option<Arc<PromptTemplateConfig>>>;
+
 pub struct RuleEngine {
     /// 规则注册表
     registry: Arc<RuleRegistry>,
     /// 条件评估器
     evaluator: Box<dyn ConditionEvaluator>,
-    /// reject 反馈模板配置
-    prompt_config: Option<Arc<PromptTemplateConfig>>,
+    /// reject 反馈模板配置（Arc<RwLock> 支持跨组件热更新共享）
+    prompt_config: Arc<SharedPromptConfig>,
 }
 
 #[async_trait]
@@ -85,7 +88,7 @@ impl RuleEngine {
         Self {
             registry: Arc::new(RuleRegistry::new()),
             evaluator: Box::new(DefaultEvaluator),
-            prompt_config: None,
+            prompt_config: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 
@@ -155,7 +158,7 @@ impl RuleEngine {
         Self {
             registry: Arc::new(RuleRegistry::from_rule_set(rule_set)),
             evaluator: Box::new(DefaultEvaluator),
-            prompt_config: Self::load_prompt_config(),
+            prompt_config: Arc::new(std::sync::RwLock::new(Self::load_prompt_config())),
         }
     }
 
@@ -173,26 +176,32 @@ impl RuleEngine {
         let search_paths: Vec<Option<std::path::PathBuf>> = vec![
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
-                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.yaml")),
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             dirs::home_dir().map(|h| {
                 h.join(".cyber-jianghu")
                     .join("config")
-                    .join("prompt_templates.yaml")
+                    .join("prompt_templates.json")
             }),
-            Some(std::path::PathBuf::from("config/prompt_templates.yaml")),
+            Some(std::path::PathBuf::from("config/prompt_templates.json")),
         ];
 
         for path_opt in &search_paths {
             if let Some(path) = path_opt
                 && path.exists()
             {
-                match PromptTemplateConfig::load_from_file(path) {
+                match super::super::super::actor::prompt_template::load_prompt_template_from_file(
+                    path,
+                ) {
                     Ok(config) => {
                         info!("RuleEngine 已加载 reject 反馈模板: {:?}", path);
                         return Some(Arc::new(config));
                     }
                     Err(e) => {
-                        panic!("Prompt 模板文件格式错误 ({}): {}", path.display(), e);
+                        warn!(
+                            "RuleEngine prompt 模板文件解析失败 ({}): {}，等待 Server 下发",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -203,6 +212,17 @@ impl RuleEngine {
     /// 获取规则注册表的引用
     pub fn registry(&self) -> Arc<RuleRegistry> {
         Arc::clone(&self.registry)
+    }
+
+    /// 获取 prompt_config 共享句柄（供 WS 回调等外部组件直接写入）
+    pub fn prompt_config_handle(&self) -> Arc<SharedPromptConfig> {
+        Arc::clone(&self.prompt_config)
+    }
+
+    /// 从 Server 下发更新 prompt 配置
+    pub fn update_prompt_config(&self, config: Arc<PromptTemplateConfig>) {
+        let mut guard = self.prompt_config.write().unwrap();
+        *guard = Some(config);
     }
 
     /// 增强 reject 消息：附加上下文数据帮助 LLM 自纠正
@@ -222,7 +242,8 @@ impl RuleEngine {
         };
 
         // 尝试使用模板配置
-        if let Some(config) = &self.prompt_config
+        let guard = self.prompt_config.read().unwrap();
+        if let Some(config) = guard.as_ref()
             && let Some(tmpl) = config.get_template("reject_feedback")
         {
             let max_items = config.truncation("reject_feedback", "max_items", 5);
