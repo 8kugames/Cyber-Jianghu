@@ -3,6 +3,7 @@
 // ============================================================================
 
 use super::global::registry;
+use super::state_registry::StateRegistry;
 use crate::game_data::types::ActionConfigEntry;
 use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
@@ -74,6 +75,8 @@ impl ActionRegistry {
 
     /// 构建所有可用动作的 AvailableAction 列表（数据驱动）
     pub fn build_available_actions() -> Vec<AvailableAction> {
+        let display_map = Self::build_attribute_display_map();
+
         Self::all_action_names()
             .into_iter()
             .filter_map(|action_name| {
@@ -99,24 +102,64 @@ impl ActionRegistry {
                     requirements: config
                         .requirements
                         .iter()
-                        .map(|r| ActionRequirementInfo {
-                            requirement_type: r.requirement_type.clone(),
-                            target: r.target.clone(),
-                            params: r.params.clone(),
+                        .map(|r| {
+                            let mut params = r.params.clone();
+                            Self::inject_display_name(&mut params, &display_map);
+                            ActionRequirementInfo {
+                                requirement_type: r.requirement_type.clone(),
+                                target: r.target.clone(),
+                                params,
+                            }
                         })
                         .collect(),
                     effects: config
                         .effects
                         .iter()
-                        .map(|e| ActionEffectInfo {
-                            effect_type: e.effect_type.clone(),
-                            target: e.target.clone(),
-                            params: e.params.clone(),
+                        .map(|e| {
+                            let mut params = e.params.clone();
+                            Self::inject_display_name(&mut params, &display_map);
+                            ActionEffectInfo {
+                                effect_type: e.effect_type.clone(),
+                                target: e.target.clone(),
+                                params,
+                            }
                         })
                         .collect(),
                 })
             })
             .collect()
+    }
+
+    /// 构建 attribute name → display_name 映射（从 attributes.yaml）
+    fn build_attribute_display_map() -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(attrs) = StateRegistry::get_attributes_config() {
+            for (name, def) in &attrs.data.primary.attributes {
+                map.insert(name.clone(), def.display_name.clone());
+            }
+            for (name, def) in &attrs.data.status.attributes {
+                map.insert(name.clone(), def.display_name.clone());
+            }
+            for (name, def) in &attrs.data.derived.attributes {
+                map.insert(name.clone(), def.display_name.clone());
+            }
+        }
+        map
+    }
+
+    /// 如果 params 含 "attribute" 字段，注入 "display_attribute" 用于渲染
+    fn inject_display_name(
+        params: &mut std::collections::HashMap<String, serde_json::Value>,
+        display_map: &std::collections::HashMap<String, String>,
+    ) {
+        if let Some(attr) = params.get("attribute").and_then(|v| v.as_str())
+            && let Some(display) = display_map.get(attr)
+        {
+            params.insert(
+                "display_attribute".to_string(),
+                serde_json::Value::String(display.clone()),
+            );
+        }
     }
 }
 
