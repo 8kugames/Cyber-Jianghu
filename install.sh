@@ -221,8 +221,18 @@ cmd_component_logs() {
 cmd_component_build() {
     local component="$1"; shift || true
     cd "$PROJECT_ROOT/crates/$component"
-    info "构建 $component 镜像..."
-    [ "${1:-}" = "--no-cache" ] && docker compose build --no-cache || docker compose build
+    local builder_name="cyber-jianghu-$component"
+    # 确保项目级 builder 存在
+    docker buildx create --name "$builder_name" --use 2>/dev/null || true
+    if [ "${1:-}" = "--no-cache" ]; then
+        info "清除 $component 构建缓存..."
+        docker buildx prune --builder "$builder_name" -f
+        info "构建 $component 镜像（无缓存）..."
+        docker compose build --no-cache
+    else
+        info "构建 $component 镜像..."
+        docker compose build
+    fi
     success "构建完成"
 }
 
