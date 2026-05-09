@@ -404,7 +404,7 @@ fn render_action_meta(
 fn render_requirement(req: &ActionRequirementInfo) -> Option<String> {
     match req.requirement_type.as_str() {
         "attribute" => {
-            let attr = req.params.get("attribute")?.as_str()?;
+            let attr = display_attr(&req.params)?;
             let cost = req.params.get("cost").and_then(|v| v.as_i64()).unwrap_or(0);
             if cost > 0 {
                 Some(format!("消耗{}{}", attr, cost))
@@ -424,7 +424,7 @@ fn render_requirement(req: &ActionRequirementInfo) -> Option<String> {
 fn render_effect(eff: &ActionEffectInfo) -> Option<String> {
     match eff.effect_type.as_str() {
         "attribute_change" => {
-            let attr = eff.params.get("attribute")?.as_str()?;
+            let attr = display_attr(&eff.params)?;
             let op = eff
                 .params
                 .get("operation")
@@ -452,4 +452,13 @@ fn render_effect(eff: &ActionEffectInfo) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// 优先使用 display_attribute（Server 注入的中文显示名），fallback 到 attribute
+fn display_attr(params: &std::collections::HashMap<String, serde_json::Value>) -> Option<String> {
+    params
+        .get("display_attribute")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| params.get("attribute").and_then(|v| v.as_str()).map(|s| s.to_string()))
 }
