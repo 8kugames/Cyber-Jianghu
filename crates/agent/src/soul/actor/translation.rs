@@ -337,6 +337,8 @@ mod tests {
                 ooc_risk: "low".to_string(),
                 aliases: vec!["静修".to_string(), "原地等待".to_string()],
                 field_aliases: HashMap::new(),
+                requirements: vec![],
+                effects: vec![],
             },
             AvailableAction {
                 action: "说话".to_string(),
@@ -353,6 +355,8 @@ mod tests {
                     "say".to_string(),
                 ],
                 field_aliases: fa_speak,
+                requirements: vec![],
+                effects: vec![],
             },
             AvailableAction {
                 action: "移动".to_string(),
@@ -368,6 +372,8 @@ mod tests {
                     "destination".to_string(),
                 ],
                 field_aliases: fa_move,
+                requirements: vec![],
+                effects: vec![],
             },
             AvailableAction {
                 action: "进食".to_string(),
@@ -379,6 +385,8 @@ mod tests {
                 ooc_risk: "low".to_string(),
                 aliases: vec!["吃".to_string(), "食用".to_string()],
                 field_aliases: fa_eat,
+                requirements: vec![],
+                effects: vec![],
             },
         ]
     }

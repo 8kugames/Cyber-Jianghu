@@ -9,7 +9,7 @@
 // - 构建动作描述/字段提示
 // ============================================================================
 
-use cyber_jianghu_protocol::AvailableAction;
+use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
 impl super::CognitiveEngine {
     /// 构建直连 WorldState 的 prompt（包含精确数据）
@@ -185,7 +185,7 @@ impl super::CognitiveEngine {
         ws_parts.join("\n")
     }
 
-    /// 从动作列表构建描述文本
+    /// 从动作列表构建描述文本（含 cost/effect 摘要）
     pub(super) fn build_action_descriptions(actions: &[AvailableAction]) -> String {
         if actions.is_empty() {
             return "- 休息: 休息".to_string();
@@ -204,7 +204,12 @@ impl super::CognitiveEngine {
                 } else {
                     a.description.clone()
                 };
-                format!("- {}: {}", display_name, desc)
+                let meta = render_action_meta(&a.requirements, &a.effects);
+                if meta.is_empty() {
+                    format!("- {}: {}", display_name, desc)
+                } else {
+                    format!("- {}: {} [{}]", display_name, desc, meta)
+                }
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -364,5 +369,87 @@ impl super::CognitiveEngine {
             .get_template("actor_direct")
             .and_then(|tmpl| tmpl.sections.get(section_name))
             .map(|s| s.trim().to_string())
+    }
+}
+
+// ============================================================================
+// Action cost/effect 通用渲染（纯数据驱动，零硬编码）
+// ============================================================================
+
+/// 将 requirements + effects 渲染为单行摘要
+///
+/// 格式示例: "消耗qi 2, thirst+2"
+/// 未知 requirement_type/effect_type 跳过（通用适配）
+fn render_action_meta(
+    requirements: &[ActionRequirementInfo],
+    effects: &[ActionEffectInfo],
+) -> String {
+    let mut parts = Vec::new();
+
+    for req in requirements {
+        if let Some(s) = render_requirement(req) {
+            parts.push(s);
+        }
+    }
+
+    for eff in effects {
+        if let Some(s) = render_effect(eff) {
+            parts.push(s);
+        }
+    }
+
+    parts.join(", ")
+}
+
+fn render_requirement(req: &ActionRequirementInfo) -> Option<String> {
+    match req.requirement_type.as_str() {
+        "attribute" => {
+            let attr = req.params.get("attribute")?.as_str()?;
+            let cost = req.params.get("cost").and_then(|v| v.as_i64()).unwrap_or(0);
+            if cost > 0 {
+                Some(format!("消耗{}{}", attr, cost))
+            } else {
+                None
+            }
+        }
+        "item" => {
+            let item = req.params.get("item_id")?.as_str()?;
+            let qty = req.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("需要{}x{}", item, qty))
+        }
+        _ => None,
+    }
+}
+
+fn render_effect(eff: &ActionEffectInfo) -> Option<String> {
+    match eff.effect_type.as_str() {
+        "attribute_change" => {
+            let attr = eff.params.get("attribute")?.as_str()?;
+            let op = eff
+                .params
+                .get("operation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("add");
+            let val = eff.params.get("value")?.as_i64()?;
+            let formatted = match op {
+                "add" if val > 0 => format!("{}+{}", attr, val),
+                "add" if val < 0 => format!("{}{}", attr, val),
+                "add" => return None,
+                "set" => format!("{}={}", attr, val),
+                _ => format!("{}{}{}", attr, op, val),
+            };
+            Some(formatted)
+        }
+        "add_item" => {
+            let item = eff.params.get("item_id")?.as_str()?;
+            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("获得{}x{}", item, qty))
+        }
+        "remove_item" => {
+            let item = eff.params.get("item_id")?.as_str()?;
+            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            Some(format!("消耗{}x{}", item, qty))
+        }
+        _ => None,
     }
 }
