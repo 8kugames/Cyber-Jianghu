@@ -440,8 +440,41 @@ impl super::Agent {
             }
             crate::soul::reflector::ValidationResult::Rejected {
                 reason,
-                rejection_type: _,
+                rejection_type,
             } => {
+                // 生存凌驾：当 LLM 以 out_of_character 驳回，但 Agent 处于生存危机时，
+                // 覆盖驳回结果——生存本能高于人设限制。
+                if matches!(
+                    rejection_type,
+                    crate::soul::reflector::RejectionType::OutOfCharacter
+                ) {
+                    const SURVIVAL_OVERRIDE_THRESHOLD: i32 = 40;
+                    let hunger = world_state.self_state.hunger();
+                    let thirst = world_state.self_state.thirst();
+                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD
+                        || thirst < SURVIVAL_OVERRIDE_THRESHOLD
+                    {
+                        info!(
+                            "ReflectorSoul 生存凌驾: LLM 驳回(out_of_character)被覆盖 \
+                             (hunger={}, thirst={})",
+                            hunger, thirst
+                        );
+                        layers.push(LayerResult {
+                            layer: "layer3",
+                            passed: true,
+                            detail: Some(format!(
+                                "survival_override: hunger={}, thirst={} < {}",
+                                hunger, thirst, SURVIVAL_OVERRIDE_THRESHOLD
+                            )),
+                        });
+                        return Ok(ReflectorResult::Approved {
+                            intent,
+                            layers,
+                            narrative: None,
+                        });
+                    }
+                }
+
                 warn!("ReflectorSoul rejected: {}", reason);
                 layers.push(LayerResult {
                     layer: "layer3",

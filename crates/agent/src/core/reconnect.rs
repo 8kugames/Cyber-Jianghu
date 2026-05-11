@@ -108,6 +108,10 @@ impl super::Agent {
                                     api_state
                                         .is_dead
                                         .store(true, std::sync::atomic::Ordering::Relaxed);
+                                    let delay = self.config.rebirth_delay_ticks();
+                                    api_state
+                                        .rebirth_delay_ticks
+                                        .store(delay, std::sync::atomic::Ordering::Relaxed);
                                     let death_msg = ServerMessage::AgentDied {
                                         agent_id,
                                         cause: "disconnect_death".to_string(),
@@ -117,7 +121,7 @@ impl super::Agent {
                                         location: String::new(),
                                         tick_id: 0,
                                         died_at: chrono::Utc::now().timestamp_millis(),
-                                        rebirth_delay_ticks: self.config.rebirth_delay_ticks(),
+                                        rebirth_delay_ticks: delay,
                                         metadata: None,
                                     };
                                     let _ = api_state.death_event_tx.send(death_msg);
