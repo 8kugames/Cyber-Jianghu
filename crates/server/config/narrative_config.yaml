@@ -83,16 +83,16 @@ attributes:
           description: "肚子很饱，完全没有饥饿感"
         - min: 60
           max: 79
-          description: "肚子还算饱，暂时不需要进食"
+          description: "肚子还算饱，暂不需要进食"
         - min: 40
           max: 59
-          description: "肚子有些饿了，该考虑找点东西吃"
-        - min: 20
+          description: "肚子有些饿了，该找点东西吃"
+        - min: 25
           max: 39
-          description: "饥肠辘辘，急需寻找食物充饥，四肢无力"
+          description: "饥肠辘辘，四肢乏力，必须立即进食"
         - min: 0
-          max: 19
-          description: "饥肠辘辘，急需进食，生命正在消逝"
+          max: 24
+          description: "极度饥饿，生命正在消逝，不择手段也要找到食物"
 
     thirst:
       name: thirst
