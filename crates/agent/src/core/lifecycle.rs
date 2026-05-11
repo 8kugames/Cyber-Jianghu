@@ -863,7 +863,15 @@ impl super::Agent {
                                 let delay_ticks = self.rebirth_delay_ticks;
                                 let tick_secs = self.get_tick_duration().await.as_secs();
                                 let delay_ms = delay_ticks as u64 * tick_secs * 1000;
-                                let old_agent_id = world_state.agent_id.unwrap_or_default();
+                                // world_state.agent_id 在 agent 死亡后可能为 None
+                                // （server 不返回 dead agent 的 agent_id），
+                                // 此时从 character_config 获取最后已知的 agent_id，
+                                // 避免 nil UUID 导致 auto-rebirth API 永久失败。
+                                let old_agent_id = world_state.agent_id
+                                    .or_else(|| {
+                                        self.character_config.as_ref().and_then(|c| c.agent_id)
+                                    })
+                                    .unwrap_or_default();
                                 let http_url = self.config.server.http_url.clone();
                                 let api_state = self.http_api_state.clone();
 
@@ -893,71 +901,77 @@ impl super::Agent {
                                         .unwrap_or(30)
                                 );
 
-                                info!(
-                                    "自动转世重生已调度: agent={}, delay={} ticks ({}s)",
-                                    old_agent_id, delay_ticks, delay_ms / 1000
-                                );
-
-                                tokio::spawn(async move {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                                    info!("自动转世重生: 调用 auto-rebirth API (old_agent={})", old_agent_id);
-
-                                    let client = reqwest::Client::new();
-                                    let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
-                                    let body = serde_json::json!({
-                                        "device_id": device_id,
-                                        "auth_token": auth_token,
-                                        "old_agent_id": old_agent_id,
-                                        "name": name,
-                                        "system_prompt": system_prompt,
-                                    });
-
-                                    for attempt in 0..retry_max {
-                                        match client.post(&url).json(&body).send().await {
-                                            Ok(resp) if resp.status().is_success() => {
-                                                // 解析响应，提取 new_agent_id
-                                                let data: serde_json::Value = resp.json().await.unwrap_or_default();
-                                                let new_id = data["new_agent_id"]
-                                                    .as_str()
-                                                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
-                                                    .unwrap_or(uuid::Uuid::nil());
-
-                                                info!(
-                                                    "自动转世重生成功: old_agent={} → new_agent={}",
-                                                    old_agent_id, new_id
-                                                );
-
-                                                if let Some(ref api_state) = api_state {
-                                                    *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
-                                                    api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
-                                                    api_state.rebirth_notify.notify_waiters();
-                                                }
-                                                return;
-                                            }
-                                            Ok(resp) => {
-                                                let status = resp.status();
-                                                let resp_body = resp.text().await.unwrap_or_default();
-                                                warn!(
-                                                    "自动转世重生服务端拒绝 (attempt {}/{}): status={}, body={}",
-                                                    attempt + 1, retry_max, status, resp_body
-                                                );
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    "自动转世重生网络错误 (attempt {}/{}): {}",
-                                                    attempt + 1, retry_max, e
-                                                );
-                                            }
-                                        }
-                                        if attempt + 1 < retry_max {
-                                            tokio::time::sleep(retry_interval).await;
-                                        }
-                                    }
-                                    tracing::error!(
-                                        "自动转世重生最终失败: old_agent={}, 所有 {} 次重试用尽",
-                                        old_agent_id, retry_max
+                                if old_agent_id == uuid::Uuid::nil() {
+                                    warn!(
+                                        "自动转世重生跳过: 无法获取有效的 old_agent_id \
+                                         (world_state.agent_id=None, api_state.agent_id=None)"
                                     );
-                                });
+                                } else {
+                                    info!(
+                                        "自动转世重生已调度: agent={}, delay={} ticks ({}s)",
+                                        old_agent_id, delay_ticks, delay_ms / 1000
+                                    );
+
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        info!("自动转世重生: 调用 auto-rebirth API (old_agent={})", old_agent_id);
+
+                                        let client = reqwest::Client::new();
+                                        let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
+                                        let body = serde_json::json!({
+                                            "device_id": device_id,
+                                            "auth_token": auth_token,
+                                            "old_agent_id": old_agent_id,
+                                            "name": name,
+                                            "system_prompt": system_prompt,
+                                        });
+
+                                        for attempt in 0..retry_max {
+                                            match client.post(&url).json(&body).send().await {
+                                                Ok(resp) if resp.status().is_success() => {
+                                                    let data: serde_json::Value = resp.json().await.unwrap_or_default();
+                                                    let new_id = data["new_agent_id"]
+                                                        .as_str()
+                                                        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+                                                        .unwrap_or(uuid::Uuid::nil());
+
+                                                    info!(
+                                                        "自动转世重生成功: old_agent={} → new_agent={}",
+                                                        old_agent_id, new_id
+                                                    );
+
+                                                    if let Some(ref api_state) = api_state {
+                                                        *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
+                                                        api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                                        api_state.rebirth_notify.notify_waiters();
+                                                    }
+                                                    return;
+                                                }
+                                                Ok(resp) => {
+                                                    let status = resp.status();
+                                                    let resp_body = resp.text().await.unwrap_or_default();
+                                                    warn!(
+                                                        "自动转世重生服务端拒绝 (attempt {}/{}): status={}, body={}",
+                                                        attempt + 1, retry_max, status, resp_body
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "自动转世重生网络错误 (attempt {}/{}): {}",
+                                                        attempt + 1, retry_max, e
+                                                    );
+                                                }
+                                            }
+                                            if attempt + 1 < retry_max {
+                                                tokio::time::sleep(retry_interval).await;
+                                            }
+                                        }
+                                        tracing::error!(
+                                            "自动转世重生最终失败: old_agent={}, 所有 {} 次重试用尽",
+                                            old_agent_id, retry_max
+                                        );
+                                    });
+                                }
                             }
 
                             continue;
