@@ -863,9 +863,13 @@ pub(super) async fn get_recent_memory_handler(
     Json(memories_to_json_response(&memories)).into_response()
 }
 
+const DEFAULT_PAGE_SIZE: usize = 20;
+const MAX_PAGE_SIZE: usize = 100;
+
 /// 获取每日摘要记忆
 pub(super) async fn get_daily_summaries_handler(
     State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let guard = state.memory_manager.read().await;
     let mm = match guard.as_ref() {
@@ -879,11 +883,19 @@ pub(super) async fn get_daily_summaries_handler(
         }
     };
 
+    let page: usize = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .min(MAX_PAGE_SIZE);
+    let offset = (page - 1) * limit;
+
     let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
 
-    match service.get_daily_summaries(50) {
-        Ok(memories) => {
+    match service.get_daily_summaries(offset, limit) {
+        Ok((memories, has_more)) => {
             let results: Vec<serde_json::Value> = memories
                 .iter()
                 .map(|m| {
@@ -899,6 +911,9 @@ pub(super) async fn get_daily_summaries_handler(
             Json(serde_json::json!({
                 "summaries": results,
                 "count": results.len(),
+                "has_more": has_more,
+                "page": page,
+                "limit": limit,
             }))
             .into_response()
         }

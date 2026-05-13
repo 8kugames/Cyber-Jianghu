@@ -54,10 +54,15 @@ impl<'a> MemoryService<'a> {
     }
 
     /// 获取每日摘要记忆
-    pub fn get_daily_summaries(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
-        self.manager
+    /// 返回 (数据列表, 是否还有更多)
+    /// has_more 采用 limit+1 技巧：请求 limit+1 条，若返回 > limit 条则说明还有更多
+    pub fn get_daily_summaries(&self, offset: usize, limit: usize) -> Result<(Vec<MemoryEntry>, bool)> {
+        let memories = self.manager
             .episodic()
-            .get_by_event_type("daily_summary", limit)
+            .get_by_event_type("daily_summary", offset, limit + 1)?;
+        let has_more = memories.len() > limit;
+        let memories = memories.into_iter().take(limit).collect();
+        Ok((memories, has_more))
     }
 }
 
