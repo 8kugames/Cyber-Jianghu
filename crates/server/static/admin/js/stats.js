@@ -31,7 +31,10 @@ async function loadStats() {
                 renderCard("服务器运行时间", formatDuration(data.server_uptime_secs), data.server_running_days + " 天"),
                 renderCard("游戏时间", data.game_time.text, data.game_time.season + " | Tick: " + data.current_tick_id, "game-time-card"),
                 renderCard("日活跃用户 (DAU)", data.dau),
+                renderCard("3日活跃", data.active_3d),
+                renderCard("7日活跃", data.active_7d),
                 renderCard("月活跃用户 (MAU)", data.mau),
+                renderCard("年度活跃 (YAU)", data.yau),
                 renderCard("TPS (Ticks/Sec)", (1.0 / data.tick_duration_secs).toFixed(2), "Tick周期: " + data.tick_duration_secs + "s"),
             ].join("");
 
