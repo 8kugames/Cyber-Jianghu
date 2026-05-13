@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, Postgres, Row};
+use std::collections::HashMap;
 use tracing::{debug, error, info};
 use uuid::Uuid;
 
@@ -709,6 +710,7 @@ pub async fn auto_rebirth_agent(
     spawn_location: &str,
     initial_items: &[(String, String, i32, String)],
     starting_age_ticks: i64,
+    reset_recipes: bool,
 ) -> Result<AutoRebirthResult> {
     debug!(
         "自动转世重生: old_agent={}, spawn={}",
@@ -806,6 +808,20 @@ pub async fn auto_rebirth_agent(
         .context("分配初始物品失败")?;
     }
 
+    // 6. 重生配方重置（事务内，配置驱动）
+    if reset_recipes {
+        sqlx::query("DELETE FROM agent_known_recipes WHERE agent_id = $1")
+            .bind(old_agent_id)
+            .execute(&mut *tx)
+            .await
+            .context("重置旧配方失败")?;
+        sqlx::query("DELETE FROM agent_recipe_observations WHERE agent_id = $1")
+            .bind(old_agent_id)
+            .execute(&mut *tx)
+            .await
+            .context("重置旧观察记录失败")?;
+    }
+
     // 提交事务
     tx.commit().await.context("提交转世事务失败")?;
 
@@ -819,4 +835,115 @@ pub async fn auto_rebirth_agent(
         name,
         spawn_location: spawn_location.to_string(),
     })
+}
+
+// ============================================================================
+// 配方知识 CRUD
+// ============================================================================
+
+/// 批量分配 Agent 初始配方
+pub async fn assign_initial_recipes(
+    pool: &PgPool,
+    agent_id: Uuid,
+    recipe_ids: &[String],
+    tick_id: i64,
+) -> Result<()> {
+    for recipe_id in recipe_ids {
+        sqlx::query(
+            "INSERT INTO agent_known_recipes (agent_id, recipe_id, learned_at_tick, source)
+             VALUES ($1, $2, $3, 'initial')
+             ON CONFLICT (agent_id, recipe_id) DO NOTHING",
+        )
+        .bind(agent_id)
+        .bind(recipe_id)
+        .bind(tick_id)
+        .execute(pool)
+        .await
+        .context("分配初始配方失败")?;
+    }
+    Ok(())
+}
+
+/// 查询 Agent 已知配方 ID 列表
+pub async fn get_known_recipe_ids(pool: &PgPool, agent_id: Uuid) -> Result<Vec<String>> {
+    let rows = sqlx::query_scalar::<_, String>(
+        "SELECT recipe_id FROM agent_known_recipes WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .fetch_all(pool)
+    .await
+    .context("查询已知配方失败")?;
+
+    Ok(rows)
+}
+
+/// 批量查询多个 Agent 的已知配方 ID
+pub async fn batch_get_known_recipe_ids(
+    pool: &PgPool,
+    agent_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<String>>> {
+    if agent_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query_as::<_, (Uuid, String)>(
+        "SELECT agent_id, recipe_id FROM agent_known_recipes WHERE agent_id = ANY($1)",
+    )
+    .bind(agent_ids)
+    .fetch_all(pool)
+    .await
+    .context("批量查询已知配方失败")?;
+
+    let mut map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for (agent_id, recipe_id) in rows {
+        map.entry(agent_id).or_default().push(recipe_id);
+    }
+    Ok(map)
+}
+
+/// 记录配方观察，返回观察计数
+pub async fn record_recipe_observation(
+    pool: &PgPool,
+    observer_id: Uuid,
+    recipe_id: &str,
+    tick_id: i64,
+) -> Result<i32> {
+    let existing: Option<(i32,)> =
+        sqlx::query_as("SELECT observation_count FROM agent_recipe_observations WHERE agent_id = $1 AND recipe_id = $2")
+            .bind(observer_id)
+            .bind(recipe_id)
+            .fetch_optional(pool)
+            .await
+            .context("查询观察计数失败")?;
+
+    let count = match existing {
+        Some((c,)) => {
+            sqlx::query(
+                "UPDATE agent_recipe_observations SET observation_count = $3, last_seen_tick = $4
+                 WHERE agent_id = $1 AND recipe_id = $2",
+            )
+            .bind(observer_id)
+            .bind(recipe_id)
+            .bind(c + 1)
+            .bind(tick_id)
+            .execute(pool)
+            .await
+            .context("更新观察计数失败")?;
+            c + 1
+        }
+        None => {
+            sqlx::query(
+                "INSERT INTO agent_recipe_observations (agent_id, recipe_id, observation_count, last_seen_tick)
+                 VALUES ($1, $2, 1, $3)",
+            )
+            .bind(observer_id)
+            .bind(recipe_id)
+            .bind(tick_id)
+            .execute(pool)
+            .await
+            .context("插入观察记录失败")?;
+            1
+        }
+    };
+
+    Ok(count)
 }

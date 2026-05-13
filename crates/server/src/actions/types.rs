@@ -257,4 +257,14 @@ pub enum StateChange {
         /// 变化值
         delta: i32,
     },
+
+    /// 配方习得
+    RecipeLearned {
+        /// Agent ID
+        agent_id: Uuid,
+        /// 配方 ID
+        recipe_id: String,
+        /// 学习来源
+        source: String,
+    },
 }

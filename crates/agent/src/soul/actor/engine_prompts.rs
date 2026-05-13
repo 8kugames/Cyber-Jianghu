@@ -182,6 +182,17 @@ impl super::CognitiveEngine {
             }
         }
 
+        if !world_state.self_state.recipe_details.is_empty() {
+            ws_parts.push("\n## 已知配方".to_string());
+            for recipe in &world_state.self_state.recipe_details {
+                ws_parts.push(format!(
+                    "- {}（ID: {}）→ {}x{}",
+                    recipe.name, recipe.recipe_id, recipe.result_item_name, recipe.result_quantity
+                ));
+            }
+            ws_parts.push("使用 view_recipe_detail 工具查看配方详细材料要求。".to_string());
+        }
+
         ws_parts.join("\n")
     }
 

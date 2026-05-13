@@ -346,6 +346,7 @@ mod tests {
                     lifespan: None,
                     lesson: None,
                     skill_acquisition: std::collections::HashMap::new(),
+                    recipe_learning: Default::default(),
                 },
             },
             items: UnifiedItemsConfig {
@@ -465,6 +466,15 @@ mod tests {
                 },
             },
             skills: Default::default(),
+            initial_recipes: crate::game_data::types::UnifiedInitialRecipesConfig {
+                version: "1.0.0".to_string(),
+                description: String::new(),
+                meta: Default::default(),
+                data: crate::game_data::types::unified_config::InitialRecipesData {
+                    default: vec![],
+                    roles: vec![],
+                },
+            },
         }
     }
 

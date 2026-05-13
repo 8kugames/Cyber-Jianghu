@@ -739,11 +739,13 @@ impl CognitiveEngine {
             if use_tool_calling {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
                 let memory_manager = self.memory_manager.read().unwrap().clone();
+                let recipe_details = world_state.self_state.recipe_details.clone();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().unwrap().clone(),
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
+                        recipe_details,
                     },
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();

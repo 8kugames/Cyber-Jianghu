@@ -64,6 +64,7 @@ fn create_test_world_state() -> WorldState {
             skills: vec![],
             age_years: None,
             max_age: None,
+            recipe_details: vec![],
         },
         entities: vec![Entity {
             id: Uuid::new_v4(),
