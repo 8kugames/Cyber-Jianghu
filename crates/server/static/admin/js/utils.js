@@ -43,7 +43,7 @@ if (urlParams.has("token")) {
             }
         })
         .catch(function (e) {
-            console.warn("[Session] Failed to resolve token type:", e);
+            console.error("[Session] URL token validation failed:", e);
         });
 }
 
