@@ -33,6 +33,25 @@ fn get_config_format(filename: &str) -> Option<ConfigFormat> {
     }
 }
 
+/// 支持编辑的配置文件名集合（与 validate_config_content 中的已知类型一致）
+fn is_known_config(filename: &str) -> bool {
+    matches!(
+        filename,
+        "game_rules.json" | "game_rules.yaml" | "game_rules.yml"
+            | "items.json" | "items.yaml" | "items.yml"
+            | "actions.json" | "actions.yaml" | "actions.yml"
+            | "initial_inventory.json" | "initial_inventory.yaml" | "initial_inventory.yml"
+            | "inventory.json" | "inventory.yaml" | "inventory.yml"
+            | "network.json" | "network.yaml" | "network.yml"
+            | "locations.json" | "locations.yaml" | "locations.yml"
+            | "attributes.json" | "attributes.yaml" | "attributes.yml"
+            | "world_building_rules.json" | "world_building_rules.yaml" | "world_building_rules.yml"
+            | "time.json" | "time.yaml" | "time.yml"
+            | "recipes.json" | "recipes.yaml" | "recipes.yml"
+            | "narrative.json" | "narrative.yaml" | "narrative.yml"
+    )
+}
+
 #[derive(Serialize)]
 pub struct ConfigFile {
     pub name: String,
@@ -49,6 +68,7 @@ pub async fn list_configs() -> Json<Vec<ConfigFile>> {
             if path.is_file()
                 && let Some(name) = path.file_name().and_then(|n| n.to_str())
                 && get_config_format(name).is_some()
+                && is_known_config(name)
             {
                 files.push(ConfigFile {
                     name: name.to_string(),
@@ -74,6 +94,11 @@ pub async fn get_config_content(
 ) -> Result<Json<ConfigContent>, StatusCode> {
     if validate_filename(&filename).is_err() {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // 只允许读取已知类型的配置文件
+    if !is_known_config(&filename) {
+        return Err(StatusCode::FORBIDDEN);
     }
 
     let path = get_config_dir().join(&filename);
@@ -164,6 +189,10 @@ fn validate_filename(filename: &str) -> Result<(), StatusCode> {
     }
     if get_config_format(filename).is_none() {
         return Err(StatusCode::BAD_REQUEST);
+    }
+    // 只允许编辑已知类型的配置文件（防止误编辑其他 yaml/json 文件）
+    if !is_known_config(filename) {
+        return Err(StatusCode::FORBIDDEN);
     }
     Ok(())
 }
