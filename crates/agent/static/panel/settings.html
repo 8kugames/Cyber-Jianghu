@@ -342,11 +342,13 @@
                     var totalInput = 0;
                     var totalOutput = 0;
                     var totalCalls = 0;
+                    var totalFailures = 0;
                     if (Array.isArray(data)) {
                         data.forEach(function(item) {
                             totalInput += item.prompt_tokens || 0;
                             totalOutput += item.completion_tokens || 0;
                             totalCalls += item.calls || 0;
+                            totalFailures += item.failures || 0;
                         });
                     }
                     document.getElementById("stat-input-tokens").textContent =
@@ -355,7 +357,8 @@
                         formatNumber(totalOutput);
                     document.getElementById("stat-total-cost").textContent =
                         formatNumber(totalCalls);
-                    document.getElementById("stat-error-count").textContent = "-";
+                    document.getElementById("stat-error-count").textContent =
+                        formatNumber(totalFailures);
                 } catch (err) {
                     console.error("加载 Token 统计失败:", err);
                 }
