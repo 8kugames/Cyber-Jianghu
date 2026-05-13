@@ -422,41 +422,44 @@ pub async fn update_soul_cycle_metadata(
     pool: &PgPool,
     agent_id: uuid::Uuid,
     tick_id: i64,
+    pipe_seq: i32,
     metadata: &serde_json::Value,
 ) -> Result<()> {
     let rows = sqlx::query(
         "UPDATE agent_action_logs SET soul_cycle_metadata = $1
-         WHERE agent_id = $2 AND tick_id = $3",
+         WHERE agent_id = $2 AND tick_id = $3 AND pipe_seq = $4",
     )
     .bind(metadata)
     .bind(agent_id)
     .bind(tick_id)
+    .bind(pipe_seq)
     .execute(pool)
     .await
     .context("更新三魂循环元数据失败")?;
 
     if rows.rows_affected() == 0 {
         warn!(
-            "未找到 agent_action_logs 记录，插入新记录：agent_id={}, tick_id={}",
-            agent_id, tick_id
+            "未找到 agent_action_logs 记录，插入新记录：agent_id={}, tick_id={}, pipe_seq={}",
+            agent_id, tick_id, pipe_seq
         );
         // Upsert：SoulCycleReport 可能先于 tick processor 到达
         // 提供默认值以满足 NOT NULL 约束（action_type, tick_id FK 已移除）
         sqlx::query(
-            "INSERT INTO agent_action_logs (agent_id, tick_id, action_type, result, soul_cycle_metadata)
-             VALUES ($1, $2, 'idle', 'success', $3)
-             ON CONFLICT (agent_id, tick_id) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
+            "INSERT INTO agent_action_logs (agent_id, tick_id, pipe_seq, action_type, result, soul_cycle_metadata)
+             VALUES ($1, $2, $3, 'idle', 'success', $4)
+             ON CONFLICT (agent_id, tick_id, pipe_seq) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
         )
         .bind(agent_id)
         .bind(tick_id)
+        .bind(pipe_seq)
         .bind(metadata)
         .execute(pool)
         .await
         .context("插入三魂循环元数据失败")?;
     } else {
         debug!(
-            "已更新 agent_id={}, tick_id={} 的三魂循环元数据",
-            agent_id, tick_id
+            "已更新 agent_id={}, tick_id={}, pipe_seq={} 的三魂循环元数据",
+            agent_id, tick_id, pipe_seq
         );
     }
 

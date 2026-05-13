@@ -1,7 +1,9 @@
 // Auth Functions
 // Note: authToken is declared in utils.js (loaded first)
 
-var authVerified = false; // Set to true after user manually enters token
+// Don't reset authVerified if already set by URL token flow (utils.js)
+// auth.js loads after utils.js, so authVerified may already be true from URL token
+var authVerified = typeof authVerified !== "undefined" ? authVerified : false;
 // Note: authTokenType is declared in utils.js (loaded first)
 
 class ApiError extends Error {

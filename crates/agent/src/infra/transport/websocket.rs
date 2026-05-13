@@ -516,12 +516,14 @@ impl WebSocketClient {
     pub async fn send_soul_cycle_report(
         &self,
         tick_id: i64,
+        pipe_seq: i32,
         metadata: cyber_jianghu_protocol::SoulCycleMetadata,
     ) -> Result<()> {
         let agent_id = self.agent_id();
         let msg = ClientMessage::SoulCycleReport {
             tick_id,
             agent_id,
+            pipe_seq,
             metadata,
         };
         let tx = {
@@ -1045,10 +1047,11 @@ impl AgentClient {
     pub async fn send_soul_cycle_report(
         &self,
         tick_id: i64,
+        pipe_seq: i32,
         metadata: cyber_jianghu_protocol::SoulCycleMetadata,
     ) -> Result<()> {
         let client = self.client.read().await;
-        client.send_soul_cycle_report(tick_id, metadata).await
+        client.send_soul_cycle_report(tick_id, pipe_seq, metadata).await
     }
 
     /// 发送每日 LLM 日志摘要

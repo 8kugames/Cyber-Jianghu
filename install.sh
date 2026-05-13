@@ -30,7 +30,7 @@ prompt()  { echo -ne "${CYAN}${1:-}${NC}"; }
 show_banner() {
     echo -e "${GREEN}
 ╔══════════════════════════════════════════════════════════════╗
-║     Cyber-Jianghu (赛博江湖)                        ║
+║     Cyber-Jianghu (虚境：江湖)                        ║
 ║     天道无为，万物自化                              ║
 ╚══════════════════════════════════════════════════════════════╝${NC}"
 }
@@ -226,7 +226,7 @@ cmd_component_build() {
     docker buildx create --name "$builder_name" --use 2>/dev/null || true
     if [ "${1:-}" = "--no-cache" ]; then
         info "清除 $component 构建缓存..."
-        docker buildx prune --builder "$builder_name" -f
+        docker buildx prune --builder "$builder_name" -f 2>/dev/null || true
         info "构建 $component 镜像（无缓存）..."
         docker compose build --no-cache
     else
