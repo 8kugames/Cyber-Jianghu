@@ -165,6 +165,23 @@ pub async fn agent_register(
         agent.name
     );
 
+    // 6.5 分配初始配方（根据角色名匹配 initial_recipes.yaml）
+    {
+        let initial_recipes = crate::game_data::registry::InitialRecipesRegistry::get_initial_recipes(Some(&agent.name));
+        if !initial_recipes.is_empty() {
+            if let Err(e) = crate::db::assign_initial_recipes(
+                &state.db_pool,
+                agent.agent_id,
+                &initial_recipes,
+                current_tick_id,
+            ).await {
+                tracing::warn!("Failed to assign initial recipes for {}: {}", agent.name, e);
+            } else {
+                tracing::info!("Assigned {} initial recipes to {}", initial_recipes.len(), agent.name);
+            }
+        }
+    }
+
     // 7.5 更新 agent_id → device_id 反向映射（用于 WebSocket 广播）
     {
         let mut agent_to_device = state.agent_to_device_map.write().await;
@@ -453,6 +470,11 @@ pub async fn agent_auto_rebirth(
 
     let starting_age_ticks = crate::tick::decay::compute_starting_age_ticks();
 
+    // 读取重生配置
+    let reset_recipes = crate::game_data::registry()
+        .map(|cache| cache.get().game_rules.data.agent_state.survival.rebirth.reset_recipes)
+        .unwrap_or(true);
+
     // 执行转世重生（单事务）
     let result = db::auto_rebirth_agent(
         &state.db_pool,
@@ -460,6 +482,7 @@ pub async fn agent_auto_rebirth(
         &spawn_location,
         &initial_items_data,
         starting_age_ticks,
+        reset_recipes,
     )
     .await
     .map_err(|e| {
@@ -494,6 +517,19 @@ pub async fn agent_auto_rebirth(
         let mut map = state.agent_to_device_map.write().await;
         map.remove(&payload.old_agent_id);
         map.insert(result.agent_id, payload.device_id);
+    }
+
+    // 重生后重新分配初始配方
+    {
+        let initial_recipes = crate::game_data::registry::InitialRecipesRegistry::get_initial_recipes(Some(&result.name));
+        if !initial_recipes.is_empty() {
+            let tick_id = crate::db::get_current_world_tick_id(&state.db_pool).await.unwrap_or(0);
+            if let Err(e) = crate::db::assign_initial_recipes(
+                &state.db_pool, result.agent_id, &initial_recipes, tick_id,
+            ).await {
+                tracing::warn!("Rebirth recipe assignment failed: {}", e);
+            }
+        }
     }
 
     info!(

@@ -50,6 +50,10 @@ pub struct AgentSelfState {
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
 
+    /// 已知配方详情（Server 权威，每 tick 下发）
+    #[serde(default)]
+    pub recipe_details: Vec<RecipeDetail>,
+
     /// 当前年龄（游戏年，由 Server 从 birth_tick + time.yaml 计算）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub age_years: Option<u32>,
@@ -118,6 +122,38 @@ pub struct SkillInfo {
     pub skill_id: String,
     /// 技能名称（中文）
     pub name: String,
+}
+
+/// 配方详情（Server 权威，每 tick 下发到 AgentSelfState）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeDetail {
+    /// 配方 ID（对应 recipes.yaml 中的 key）
+    pub recipe_id: String,
+    /// 配方名称（显示用）
+    pub name: String,
+    /// 配方描述
+    pub description: String,
+    /// 所需材料
+    pub materials: Vec<RecipeMaterialInfo>,
+    /// 产出物品 ID
+    pub result_item: String,
+    /// 产出物品名称
+    pub result_item_name: String,
+    /// 产出数量
+    pub result_quantity: i32,
+    /// 体力消耗
+    pub stamina_cost: i32,
+}
+
+/// 配方材料信息
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeMaterialInfo {
+    /// 材料 ID
+    pub item_id: String,
+    /// 材料名称
+    pub item_name: String,
+    /// 所需数量
+    pub quantity: i32,
 }
 
 /// 技能内容（用于 Server → Agent 下发 SKILL.md body）

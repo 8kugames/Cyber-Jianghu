@@ -10,7 +10,7 @@ use super::{
     mutator::{MutationContext, StateMutator},
     resolver::IntentResolver,
 };
-use crate::actions::ActionExecutor;
+use crate::actions::{ActionExecutor, ActionExecutionResult};
 use crate::actions::StateChange;
 use crate::db::DbPool;
 use crate::game_data::registry::ActionRegistry;
@@ -81,97 +81,107 @@ impl StateProcessor {
         // Sagas: 快照
         let agent_state_snapshot = agent_state.clone();
         let events_len_before = events.len();
-        let mut execution_failed = false;
 
-        // 验证（传入所有 Agent 状态，支持跨 Agent 校验如 attack/trade）
-        if let Err(e) = self
+        // 验证并执行（统一 result 变量确保所有路径都可访问）
+        let result = match self
             .resolver
             .validate_intent(intent, &agent_state, all_states)
             .await
         {
-            warn!("Intent 验证失败: agent={}, error={}", intent.agent_id, e);
-            execution_failed = true;
-        }
+            Err(e) => {
+                warn!("Intent 验证失败: agent={}, error={}", intent.agent_id, e);
+                ActionExecutionResult::failure(
+                    format!("Intent 验证失败: {}", e),
+                    intent.action_type.clone(),
+                    Some(intent.intent_id),
+                )
+            }
+            Ok(()) => executor.execute(intent, &mut agent_state),
+        };
 
-        // 执行
-        if !execution_failed {
-            let result = executor.execute(intent, &mut agent_state);
+        let execution_failed = !result.success;
 
-            if result.success {
-                // 经验阈值：按 action category 递增计数 + 检查技能习得
-                if let Some(config) = ActionRegistry::get(intent.action_type.as_str()) {
-                    let count = agent_state
-                        .action_counts
-                        .entry(config.category.clone())
-                        .or_insert(0);
-                    *count += 1;
+        if result.success {
+            // 经验阈值：按 action category 递增计数 + 检查技能习得
+            if let Some(config) = ActionRegistry::get(intent.action_type.as_str()) {
+                let count = agent_state
+                    .action_counts
+                    .entry(config.category.clone())
+                    .or_insert(0);
+                *count += 1;
+            }
+
+            // 检查技能习得阈值（基于已更新的 action_counts）
+            let acquired_skills = check_skill_acquisition(&agent_state);
+
+            let mut all_applied = true;
+            for change in &result.state_changes {
+                let mut ctx =
+                    MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
+
+                let mut single_states = vec![agent_state.clone()];
+                let mut applied = false;
+                for mutator in &self.mutators {
+                    if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
+                    {
+                        applied = true;
+                        agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                        break;
+                    }
                 }
 
-                // 检查技能习得阈值（基于已更新的 action_counts）
-                let acquired_skills = check_skill_acquisition(&agent_state);
-
-                let mut all_applied = true;
-                for change in &result.state_changes {
-                    let mut ctx =
-                        MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
-
+                if !applied {
                     let mut single_states = vec![agent_state.clone()];
-                    let mut applied = false;
-                    for mutator in &self.mutators {
-                        if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
-                        {
-                            applied = true;
-                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
-                            break;
-                        }
-                    }
-
-                    if !applied {
-                        let mut single_states = vec![agent_state.clone()];
-                        applied = apply_state_change(
-                            &self.db_pool,
-                            tick_id,
-                            change,
-                            result.intent_id,
-                            &mut single_states,
-                            all_states,
-                            &mut events,
-                        )
-                        .await;
-                        if applied {
-                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
-                        }
-                    }
-
-                    if !applied {
-                        all_applied = false;
+                    applied = apply_state_change(
+                        &self.db_pool,
+                        tick_id,
+                        change,
+                        result.intent_id,
+                        &mut single_states,
+                        all_states,
+                        &mut events,
+                    )
+                    .await;
+                    if applied {
+                        agent_state = single_states.into_iter().next().unwrap_or(agent_state);
                     }
                 }
 
-                // 处理经验阈值触发的技能习得
-                for skill_id in acquired_skills {
-                    let change = StateChange::SkillLearned {
-                        agent_id: intent.agent_id,
-                        skill_id: skill_id.clone(),
-                    };
-                    let mut ctx =
-                        MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
-                    let mut single_states = vec![agent_state.clone()];
-                    for mutator in &self.mutators {
-                        if let Ok(true) =
-                            mutator.mutate(&change, &mut single_states, &mut ctx).await
-                        {
-                            agent_state = single_states.into_iter().next().unwrap_or(agent_state);
-                            break;
-                        }
+                if !applied {
+                    all_applied = false;
+                }
+            }
+
+            // 观察学习：ItemCrafted 成功后，同位置旁观者观察配方
+            self.process_recipe_observations(
+                &result.state_changes,
+                &agent_state,
+                all_states,
+                tick_id,
+            )
+            .await;
+
+            // 处理经验阈值触发的技能习得
+            for skill_id in acquired_skills {
+                let change = StateChange::SkillLearned {
+                    agent_id: intent.agent_id,
+                    skill_id: skill_id.clone(),
+                };
+                let mut ctx =
+                    MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
+                let mut single_states = vec![agent_state.clone()];
+                for mutator in &self.mutators {
+                    if let Ok(true) =
+                        mutator.mutate(&change, &mut single_states, &mut ctx).await
+                    {
+                        agent_state = single_states.into_iter().next().unwrap_or(agent_state);
+                        break;
                     }
                 }
+            }
 
-                if !all_applied {
-                    execution_failed = true;
-                }
-            } else {
-                execution_failed = true;
+            if !all_applied {
+                // execution_failed 已在 let execution_failed = !result.success; 设置
             }
         }
 
@@ -198,7 +208,7 @@ impl StateProcessor {
             } else {
                 ActionResult::Success
             },
-            result_message: None,
+            result_message: Some(result.message.clone()),
             thought_log: intent.thought_log.clone(),
             observer_thought: intent.observer_thought.clone(),
             narrative: intent.narrative.clone(),
@@ -226,6 +236,101 @@ impl StateProcessor {
             updated_state: agent_state,
             events,
         })
+    }
+
+    /// 观察学习：制造成功后，同位置旁观者累积观察计数，达标自动习得
+    async fn process_recipe_observations(
+        &self,
+        state_changes: &[StateChange],
+        crafter_state: &AgentState,
+        all_states: &[AgentState],
+        tick_id: i64,
+    ) {
+        // 从配置读取观察学习参数
+        let (threshold, observation_range) = crate::game_data::registry()
+            .map(|cache| {
+                let c = &cache.get().game_rules.data.recipe_learning;
+                (c.observation_threshold, c.observation_range.clone())
+            })
+            .unwrap_or_else(|| {
+                let d = crate::game_data::types::unified_config::RecipeLearningConfig::default();
+                (d.observation_threshold, d.observation_range)
+            });
+
+        let crafter_node = &crafter_state.node_id;
+        let crafter_id = crafter_state.agent_id;
+
+        for change in state_changes {
+            let item_id = match change {
+                StateChange::ItemCrafted { item_id, .. } => item_id,
+                _ => continue,
+            };
+
+            // 从 item_id 反查 recipe_id
+            let recipe_id = match crate::game_data::registry() {
+                Some(cache) => cache
+                    .get()
+                    .recipes
+                    .data
+                    .iter()
+                    .find(|(_, r)| &r.result_item == item_id)
+                    .map(|(id, _)| id.clone()),
+                None => None,
+            };
+            let Some(recipe_id) = recipe_id else { continue };
+
+            // 根据配置的 observation_range 筛选观察者
+            let observers: Vec<uuid::Uuid> = all_states
+                .iter()
+                .filter(|s| {
+                    if !s.is_alive || s.agent_id == crafter_id {
+                        return false;
+                    }
+                    match observation_range.as_str() {
+                        "same_node" => s.node_id == *crafter_node,
+                        _ => s.node_id == *crafter_node,
+                    }
+                })
+                .map(|s| s.agent_id)
+                .collect();
+
+            for observer_id in observers {
+                match crate::db::record_recipe_observation(
+                    &self.db_pool,
+                    observer_id,
+                    &recipe_id,
+                    tick_id,
+                )
+                .await
+                {
+                    Ok(count) if count >= threshold => {
+                        // 观察达标 → 习得配方
+                        let insert_result = sqlx::query(
+                            "INSERT INTO agent_known_recipes (agent_id, recipe_id, learned_at_tick, source, source_detail)
+                             VALUES ($1, $2, $3, 'observed', $4)
+                             ON CONFLICT (agent_id, recipe_id) DO NOTHING",
+                        )
+                        .bind(observer_id)
+                        .bind(&recipe_id)
+                        .bind(tick_id)
+                        .bind(serde_json::json!({"observation_count": count, "learned_from": crafter_id.to_string()}))
+                        .execute(&self.db_pool)
+                        .await;
+
+                        if let Err(e) = insert_result {
+                            warn!(
+                                "观察习得配方写入失败: observer={}, recipe={}, err={}",
+                                observer_id, recipe_id, e
+                            );
+                        }
+                    }
+                    Ok(_) => {} // 未达标，继续
+                    Err(e) => {
+                        warn!("观察计数记录失败: observer={}, err={}", observer_id, e);
+                    }
+                }
+            }
+        }
     }
 }
 

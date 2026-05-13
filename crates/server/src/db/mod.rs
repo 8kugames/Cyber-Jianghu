@@ -42,6 +42,8 @@ pub use agent_ops::{
     get_agent_by_device_id, get_agent_by_id, get_all_agents, get_intent_timeout_stats,
     register_agent_transactional, retire_agent, update_agent_biography, update_agent_location,
     update_agent_online, update_device_last_seen, verify_device_token,
+    assign_initial_recipes, get_known_recipe_ids, batch_get_known_recipe_ids,
+    record_recipe_observation,
 };
 
 // 导出公共API - AgentState操作

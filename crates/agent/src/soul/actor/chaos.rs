@@ -342,6 +342,20 @@ impl ChaosGenerator {
                     map.insert(field.clone(), serde_json::Value::String("...".into()));
                     Some(())
                 }
+                // 配方 — 从已知配方中随机选
+                "recipe_id" => {
+                    if world_state.self_state.recipe_details.is_empty() {
+                        None
+                    } else {
+                        let recipes = &world_state.self_state.recipe_details;
+                        let idx = rng.random_range(0..recipes.len());
+                        map.insert(
+                            field.clone(),
+                            serde_json::Value::String(recipes[idx].recipe_id.clone()),
+                        );
+                        Some(())
+                    }
+                }
                 _ => None,
             };
             resolved?;
@@ -414,6 +428,7 @@ mod tests {
                 skills: vec![],
                 age_years: None,
                 max_age: None,
+                recipe_details: vec![],
             },
             events_log: vec![],
             private_dialogue_log: vec![],
