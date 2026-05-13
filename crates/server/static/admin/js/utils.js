@@ -20,16 +20,23 @@ var refreshInterval = null;
 var smoothTimeConfig = null;
 var smoothTimeAnimationId = null;
 
+// authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
+var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
+
 // Check for token in URL
 var urlParams = new URLSearchParams(window.location.search);
 if (urlParams.has("token")) {
     authToken = urlParams.get("token");
     localStorage.setItem("admin_token", authToken);
     window.history.replaceState({}, document.title, window.location.pathname);
-    // Resolve token type async (URL token doesn't go through login endpoint)
+    // Resolve token type async; only mark as verified after server confirms token is valid
     fetch(API.ADMIN + "/session", { headers: { Authorization: "Bearer " + authToken } })
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
+            if (data.authenticated) {
+                authVerified = true;
+                if (typeof window !== "undefined") window.authVerified = true;
+            }
             if (data.token_type) {
                 authTokenType = data.token_type;
                 localStorage.setItem("admin_token_type", authTokenType);

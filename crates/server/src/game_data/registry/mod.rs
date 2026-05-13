@@ -18,6 +18,7 @@
 mod action_registry;
 mod chronicle_registry;
 mod global;
+mod initial_recipes_registry;
 mod inventory_registry;
 mod item_registry;
 mod network_registry;
@@ -29,6 +30,7 @@ pub mod time_registry;
 pub use action_registry::{ActionField, ActionRegistry};
 pub use chronicle_registry::ChronicleRegistry;
 pub use global::{init_registry, registry, registry_or_error};
+pub use initial_recipes_registry::InitialRecipesRegistry;
 pub use inventory_registry::{InitialInventoryRegistry, InventoryRegistry};
 pub use item_registry::ItemRegistry;
 pub use network_registry::NetworkRegistry;

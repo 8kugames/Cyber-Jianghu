@@ -593,6 +593,26 @@ data:
         attribute: stamina
         min: 10
 
+  传授:
+    name: "传授"
+    aliases: ["教配方", "教导", "传艺", "teach", "instruct"]
+    description: "将自己已知的配方传授给同一地点的他人。必须指定目标人物 ID（target_agent_id）和配方 ID（recipe_id）。传授会消耗体力。"
+    category: social
+    ooc_risk: low
+    validation:
+      requires_target: true
+      requires_target_alive: true
+      required_fields:
+        - target_agent_id
+        - recipe_id
+      field_aliases:
+        target_agent_id: ["目标人物ID", "对象ID", "目标ID", "人物"]
+        recipe_id: ["配方ID", "配方", "recipe"]
+    requirements:
+      - requirement_type: attribute
+        attribute: stamina
+        min: 10
+
   # repair:
   #   name: "修理"
   #   description: "修理装备的耐久度"

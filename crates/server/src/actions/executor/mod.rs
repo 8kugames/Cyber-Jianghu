@@ -93,6 +93,7 @@ impl ActionExecutor {
                 &agent_state.node_id.clone(),
             ),
             "制造" => BasicActionExecutor::execute_craft(intent, action_data.clone()),
+            "传授" => BasicActionExecutor::execute_teach(intent, action_data.clone()),
             "攻击" => CombatActionExecutor::execute_attack(intent, &action_data, agent_state),
             "大喊" => BasicActionExecutor::execute_shout(intent, action_data.clone()),
             // 修炼：纯数据驱动，无自定义 executor

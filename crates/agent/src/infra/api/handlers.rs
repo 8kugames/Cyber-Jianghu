@@ -5005,10 +5005,6 @@ pub(crate) async fn generate_biography_for_agent(
         }
     };
 
-    if timeline.is_empty() && daily_summaries.is_empty() {
-        anyhow::bail!("无经历数据，无法生成传记");
-    }
-
     // 3. 构建 prompt
     let char_info = format!(
         "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
@@ -5019,6 +5015,13 @@ pub(crate) async fn generate_biography_for_agent(
         character.personality.join("、"),
         character.values.join("、"),
     );
+
+    // 构建经历日志段落（有数据则用，无数据则留空让 LLM 基于人物信息虚构）
+    let timeline_section = if timeline.is_empty() {
+        "（无经历日志）".to_string()
+    } else {
+        timeline
+    };
 
     let daily_section = if daily_summaries.is_empty() {
         String::new()
@@ -5033,7 +5036,7 @@ pub(crate) async fn generate_biography_for_agent(
 {char_info}
 
 ## 经历日志（按时间顺序）
-{timeline}
+{timeline_section}
 {daily_section}
 
 ## 撰写要求
@@ -5046,7 +5049,7 @@ pub(crate) async fn generate_biography_for_agent(
 
 请直接输出传记正文："#,
         char_info = char_info,
-        timeline = timeline,
+        timeline_section = timeline_section,
         daily_section = daily_section,
     );
 

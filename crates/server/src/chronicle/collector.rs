@@ -125,13 +125,12 @@ async fn collect_agents(
                 'unknown'
             ) as location
         FROM agents a
-        INNER JOIN agent_action_logs l ON a.agent_id = l.agent_id
+        LEFT JOIN agent_action_logs l ON a.agent_id = l.agent_id AND l.tick_id BETWEEN $1 AND $2
         LEFT JOIN LATERAL (
             SELECT node_id FROM agent_states s
             WHERE s.agent_id = a.agent_id AND s.tick_id <= $2
             ORDER BY s.tick_id DESC LIMIT 1
         ) latest_state ON true
-        WHERE l.tick_id BETWEEN $1 AND $2
         GROUP BY a.agent_id, a.name, latest_state.node_id
         ORDER BY a.name
         "#,

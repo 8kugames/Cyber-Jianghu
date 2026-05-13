@@ -13,6 +13,7 @@ use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
 use crate::component::social::RelationshipStore;
 use anyhow::Result;
 use async_trait::async_trait;
+use cyber_jianghu_protocol::types::entities::RecipeDetail;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -23,6 +24,7 @@ pub struct EarthToolContext {
     pub skill_cache: HashMap<String, String>,
     pub memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     pub relationship_store: Option<RelationshipStore>,
+    pub recipe_details: Vec<RecipeDetail>,
 }
 
 /// 地魂复合工具执行器
@@ -30,6 +32,7 @@ pub struct EarthToolExecutor {
     skill_cache: HashMap<String, String>,
     memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     relationship_store: Option<RelationshipStore>,
+    recipe_details: Vec<RecipeDetail>,
 }
 
 impl EarthToolExecutor {
@@ -39,6 +42,7 @@ impl EarthToolExecutor {
             skill_cache: ctx.skill_cache,
             memory_manager: ctx.memory_manager,
             relationship_store: ctx.relationship_store,
+            recipe_details: ctx.recipe_details,
         }
     }
 
@@ -51,6 +55,8 @@ impl EarthToolExecutor {
             super::relationship_tool::get_relationship_definition(),
             super::relationship_tool::list_relationships_definition(),
             super::relationship_tool::record_social_event_definition(),
+            super::recipe_tool::list_known_recipes_definition(),
+            super::recipe_tool::view_recipe_detail_definition(),
         ]
     }
 }
@@ -135,6 +141,15 @@ impl ToolExecutor for EarthToolExecutor {
                     }))
                 }
             }
+            "list_known_recipes" => {
+                Ok(super::recipe_tool::execute_list_known_recipes(&self.recipe_details))
+            }
+            "view_recipe_detail" => {
+                let recipe_id = arguments["recipe_id"]
+                    .as_str()
+                    .unwrap_or("");
+                Ok(super::recipe_tool::execute_view_recipe_detail(recipe_id, &self.recipe_details))
+            }
             "record_social_event" => {
                 let target_agent_id = arguments["target_agent_id"]
                     .as_str()
@@ -186,7 +201,7 @@ mod tests {
     #[test]
     fn test_tool_definitions_count() {
         let defs = EarthToolExecutor::tool_definitions();
-        assert_eq!(defs.len(), 6);
+        assert_eq!(defs.len(), 8);
     }
 
     #[test]
@@ -195,6 +210,7 @@ mod tests {
             skill_cache: HashMap::new(),
             memory_manager: None,
             relationship_store: None,
+            recipe_details: vec![],
         };
         let executor = EarthToolExecutor::from_context(ctx);
         assert!(executor.skill_cache.is_empty());
@@ -208,6 +224,7 @@ mod tests {
             skill_cache: cache,
             memory_manager: None,
             relationship_store: None,
+            recipe_details: vec![],
         });
 
         let rt = tokio::runtime::Runtime::new().unwrap();

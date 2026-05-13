@@ -302,7 +302,14 @@ pub async fn generate_and_store(
     // - LLM 成功：summary_llm = LLM, summary = 模板（同步），异步生成 LLM 补充
     // - LLM 失败：summary = 模板（同步），summary_llm = None，异步生成 LLM 补充
     // 2.1 先同步生成模板（总是需要）
-    let summary = generator::generate_template(&data)?;
+    // 空周期时使用配置的 empty_period_template
+    let summary = if data.agents.is_empty() && data.highlights.is_empty() {
+        crate::game_data::registry::ChronicleRegistry::get_config()
+            .map(|c| c.empty_period_template)
+            .unwrap_or_else(|| "此间风平浪静，江湖无事。".to_string())
+    } else {
+        generator::generate_template(&data)?
+    };
 
     // 2.2 尝试 LLM（如果成功则作为补充版本异步存储）
     let summary_llm = match generator::generate_llm(&data).await {

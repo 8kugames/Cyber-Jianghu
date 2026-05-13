@@ -16,6 +16,7 @@ pub mod config;
 mod executor;
 pub mod loop_guard;
 mod memory_tool;
+mod recipe_tool;
 mod relationship_tool;
 mod skill_tool;
 

@@ -699,6 +699,27 @@ pub async fn apply_state_change(
         // AttributeChanged, HpChanged 由 AttributeMutator 处理
         // SkillLearned 由 SkillMutator 处理（LLM 行为指令注入）
         StateChange::SkillLearned { .. } => true,
+
+        StateChange::RecipeLearned {
+            agent_id,
+            recipe_id,
+            source,
+        } => {
+            let source_str = source.as_str();
+            sqlx::query(
+                "INSERT INTO agent_known_recipes (agent_id, recipe_id, learned_at_tick, source)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (agent_id, recipe_id) DO NOTHING",
+            )
+            .bind(*agent_id)
+            .bind(recipe_id)
+            .bind(tick_id)
+            .bind(source_str)
+            .execute(db_pool)
+            .await
+            .is_ok()
+        }
+
         _ => true,
     }
 }

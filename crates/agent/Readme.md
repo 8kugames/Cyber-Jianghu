@@ -1,6 +1,6 @@
 # Cyber-Jianghu Agent SDK
 
-Agent SDK 是连接赛博江湖服务端的桥梁。它为开发者提供了与游戏世界交互的基础设施，并且内置了记忆、认知、对话等高级 AI 模块，支持两种运行模式：
+Agent SDK 是连接虚境：江湖服务端的桥梁。它为开发者提供了与游戏世界交互的基础设施，并且内置了记忆、认知、对话等高级 AI 模块，支持两种运行模式：
 
 - **Cognitive 模式（默认）**：内置 LLM 客户端，使用 CognitiveEngine 自主决策
 - **Claw 模式**：通过 OpenClawBridge 桥接外部 LLM，使用相同的 CognitiveEngine 架构

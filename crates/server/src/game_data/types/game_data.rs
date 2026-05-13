@@ -56,4 +56,7 @@ pub struct GameData {
 
     /// 技能定义 (skills/ 目录下的 SKILL.md 文件)
     pub skills: SkillsData,
+
+    /// 初始配方配置 (initial_recipes.yaml)
+    pub initial_recipes: UnifiedInitialRecipesConfig,
 }

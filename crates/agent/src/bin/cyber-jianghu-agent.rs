@@ -2,7 +2,7 @@
 // Cyber-Jianghu Agent CLI
 // ============================================================================
 //
-// 连接赛博江湖游戏世界的 Agent CLI
+// 连接虚境：江湖游戏世界的 Agent CLI
 //
 // ## 架构说明
 //
@@ -57,7 +57,7 @@ use cyber_jianghu_protocol::{EraSettings, Intent, ServerMessage, WorldBuildingRu
 
 #[derive(Parser)]
 #[command(name = "cyber-jianghu-agent")]
-#[command(about = "赛博江湖 Agent - 连接游戏世界", long_about = None)]
+#[command(about = "虚境：江湖 Agent - 连接游戏世界", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

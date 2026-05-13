@@ -49,7 +49,7 @@ pub fn create_test_config_dir() -> TempDir {
                     "offline_cleanup_days": 30
                 },
                 "world": {
-                    "name": "赛博江湖",
+                    "name": "虚境：江湖",
                     "description": "一个充满武侠与科技的世界"
                 }
             }

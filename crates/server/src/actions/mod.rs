@@ -133,6 +133,13 @@ pub struct CraftData {
     pub recipe_id: String,
 }
 
+/// teach 动作数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeachData {
+    pub target_agent_id: String,
+    pub recipe_id: String,
+}
+
 /// attack 动作数据
 ///
 /// 攻击目标 Agent

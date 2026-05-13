@@ -33,7 +33,7 @@ services:
   # PostgreSQL 数据库
   # ============================================================================
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: cyber-jianghu-postgres
     restart: unless-stopped
     environment:

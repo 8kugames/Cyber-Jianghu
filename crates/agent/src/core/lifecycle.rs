@@ -1939,7 +1939,7 @@ impl super::Agent {
                                 let max_retries = self.config.llm.soul_cycle_report_retries;
                                 let base_delay = self.config.llm.soul_cycle_report_base_delay_ms;
                                 for attempt in 0..max_retries {
-                                    match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
+                                    match self.client.send_soul_cycle_report(tick_id_for_report, 0, metadata.clone()).await {
                                         Ok(()) => {
                                             debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
                                             reported = true;
@@ -1955,6 +1955,76 @@ impl super::Agent {
                                 }
                                 if !reported {
                                     error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
+                                }
+
+                                // 7.6 上报后续 intent 的简化元数据（subsequent intents 不经过三魂审查）
+                                let subsequent_count = final_intent.subsequent_intents.len();
+                                if subsequent_count > 0 {
+                                    let world_time = metadata.world_time.clone();
+                                    for (idx, subsequent) in final_intent.subsequent_intents.iter().enumerate() {
+                                        let pipe_seq = (idx + 1) as i32;
+                                        // Subsequent intents bypass soul review: simplified metadata with single passed cycle
+                                        let simplified_metadata = cyber_jianghu_protocol::SoulCycleMetadata {
+                                            world_time: world_time.clone(),
+                                            cycles: vec![cyber_jianghu_protocol::SoulCycleAttempt {
+                                                attempt: 0,
+                                                renhun: cyber_jianghu_protocol::RenhunReport {
+                                                    narrative: Some("后续意图".to_string()),
+                                                    thought_log: None,
+                                                },
+                                                tianhun: cyber_jianghu_protocol::TianhunReport {
+                                                    result: Some("通过".to_string()),
+                                                    layers: vec![
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer1".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer2".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer3".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                    ],
+                                                    reason: None,
+                                                    narrative: Some(format!("后续动作: {}", subsequent.action_type)),
+                                                },
+                                                final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
+                                                    intent_id: Some(subsequent.intent_id.to_string()),
+                                                    action_type: Some(subsequent.action_type.to_string()),
+                                                    action_data: subsequent.action_data.clone(),
+                                                    chaos_marker: subsequent.chaos_marker.clone(),
+                                                    dream_marker: subsequent.dream_marker.clone(),
+                                                }),
+                                            }],
+                                            immediate_intents: vec![],
+                                        };
+
+                                        let mut reported = false;
+                                        for attempt in 0..max_retries {
+                                            match self.client.send_soul_cycle_report(tick_id_for_report, pipe_seq, simplified_metadata.clone()).await {
+                                                Ok(()) => {
+                                                    debug!("后续意图元数据上报成功: tick={}, pipe_seq={}, action={}", tick_id_for_report, pipe_seq, subsequent.action_type);
+                                                    reported = true;
+                                                    break;
+                                                }
+                                                Err(e) => {
+                                                    warn!("后续意图元数据上报失败 (尝试 {}/{}): tick={}, pipe_seq={}, err={}", attempt + 1, max_retries, tick_id_for_report, pipe_seq, e);
+                                                    if attempt + 1 < max_retries {
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(base_delay * (1 << attempt))).await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !reported {
+                                            error!("后续意图元数据上报最终失败: tick={}, pipe_seq={}", tick_id_for_report, pipe_seq);
+                                        }
+                                    }
                                 }
                             }
 

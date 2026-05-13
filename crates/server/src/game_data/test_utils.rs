@@ -66,7 +66,7 @@ pub fn init_test_registry() {
                         "offline_cleanup_days": 30
                     },
                     "world": {
-                        "name": "赛博江湖",
+                        "name": "虚境：江湖",
                         "description": "测试世界"
                     }
                 }
@@ -685,6 +685,12 @@ notifications:
   death: "你已经死亡。"
   rebirth: "大侠已转世重生。"
 "#,
+        ).unwrap();
+
+        // 写入 initial_recipes.json
+        fs::write(
+            dir.path().join("initial_recipes.json"),
+            r#"{"version":"1.0.0","description":"test","data":{"default":[],"roles":[]}}"#,
         ).unwrap();
 
         let loader = GameDataLoader::new(dir.path());
