@@ -313,6 +313,10 @@
                 border-radius: var(--radius-md);
             }
 
+            .exp-table-wrap.hidden {
+                display: none;
+            }
+
             .exp-table {
                 width: 100%;
                 border-collapse: collapse;
@@ -342,6 +346,84 @@
 
             .exp-table tr:hover td {
                 background: var(--bg-level-1);
+            }
+
+            .exp-table tr.exp-master-row {
+                cursor: pointer;
+            }
+
+            .exp-table tr.exp-master-row:hover td {
+                background: var(--bg-level-2);
+            }
+
+            .exp-expand-arrow {
+                display: inline-block;
+                width: 16px;
+                text-align: center;
+                color: var(--text-subtle);
+                font-size: 10px;
+                transition: transform 0.15s;
+            }
+
+            .exp-master-row.exp-expanded .exp-expand-arrow {
+                transform: rotate(90deg);
+            }
+
+            .exp-detail-row td {
+                padding: 0 !important;
+                border-bottom: 1px solid var(--border-subtle) !important;
+                background: var(--bg-level-1);
+            }
+
+            .exp-detail-content {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr 1.5fr;
+                gap: 0;
+                padding: 12px 16px;
+            }
+
+            .exp-detail-cell {
+                padding: 8px 12px;
+                border-right: 1px solid var(--border-subtle);
+            }
+
+            .exp-detail-cell:last-child {
+                border-right: none;
+            }
+
+            .exp-detail-label {
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--accent);
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+                margin-bottom: 6px;
+            }
+
+            .exp-detail-body {
+                font-size: 12px;
+                line-height: 1.5;
+                color: var(--text-primary);
+                max-height: 200px;
+                overflow-y: auto;
+            }
+
+            .result-badge {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+
+            .result-success {
+                background: var(--success-muted);
+                color: var(--success);
+            }
+
+            .result-failed {
+                background: var(--error-muted);
+                color: var(--error);
             }
 
             .tick-badge {
@@ -504,11 +586,38 @@
                 white-space: pre-wrap;
                 word-break: break-word;
                 max-height: 200px;
-                overflow-y: auto;
+                overflow-y: hidden;
                 padding: 10px;
                 background: var(--bg-level-2);
                 border-radius: var(--radius-sm);
                 border: 1px solid var(--border-subtle);
+                position: relative;
+                transition: max-height 0.3s ease;
+            }
+
+            .summary-content.expanded {
+                max-height: none;
+                overflow-y: auto;
+            }
+
+            .summary-expand-btn {
+                display: block;
+                margin-top: 8px;
+                padding: 4px 12px;
+                background: var(--bg-level-1);
+                border: 1px solid var(--border-color);
+                color: var(--text-secondary);
+                border-radius: var(--radius-sm);
+                font-size: 11px;
+                cursor: pointer;
+                text-align: center;
+                transition: all 0.15s;
+                font-family: var(--font-family);
+            }
+
+            .summary-expand-btn:hover {
+                border-color: var(--accent);
+                color: var(--accent);
             }
 
             /* ========== Shared ========== */
@@ -843,6 +952,11 @@
                     <select id="filter-action" class="filter-select">
                         <option value="">所有动作</option>
                     </select>
+                    <select id="filter-result" class="filter-select">
+                        <option value="success">仅成功</option>
+                        <option value="failed">仅失败</option>
+                        <option value="all">全部</option>
+                    </select>
                 </div>
                 <div class="filter-group">
                     <span
@@ -880,14 +994,13 @@
                 <table class="exp-table">
                     <thead>
                         <tr>
+                            <th></th>
                             <th>Tick</th>
                             <th>角色</th>
                             <th>位置</th>
                             <th>动作</th>
-                            <th>人魂</th>
-                            <th>天魂</th>
-                            <th>地魂</th>
-                            <th>叙事</th>
+                            <th>结果</th>
+                            <th>时间</th>
                         </tr>
                     </thead>
                     <tbody id="experiences-tbody">
@@ -932,15 +1045,24 @@
                 <input
                     type="text"
                     class="search-input"
-                    placeholder="搜索摘要内容..."
+                    placeholder="搜索摘要内容（需点击刷新生效）..."
                     id="sum-search-input"
-                    oninput="filterSummaries()"
                 />
                 <select id="sum-agent-filter" class="filter-select">
                     <option value="">所有角色</option>
                 </select>
-                <button class="btn btn-secondary" onclick="loadSummaries()">
-                    刷新
+                <input
+                    type="number"
+                    id="sum-game-day-filter"
+                    class="filter-input"
+                    placeholder="游戏日"
+                    style="width: 100px"
+                />
+                <button class="btn btn-primary" onclick="searchSummaries()">
+                    搜索
+                </button>
+                <button class="btn btn-secondary" onclick="resetSumFilters()">
+                    重置
                 </button>
             </div>
 
@@ -956,6 +1078,15 @@
                 <button id="sum-prev-btn" onclick="changeSumPage(-1)">
                     上一页
                 </button>
+                <select
+                    id="sum-page-size"
+                    class="page-size-select"
+                    onchange="changeSumPageSize()"
+                >
+                    <option value="20">20条/页</option>
+                    <option value="50">50条/页</option>
+                    <option value="100">100条/页</option>
+                </select>
                 <span id="sum-page-info" class="page-info"></span>
                 <button id="sum-next-btn" onclick="changeSumPage(1)">
                     下一页
@@ -1079,8 +1210,8 @@
                         (c) => `
                 <div class="chronicle-card" data-chronicle-id="${escapeHtml(c.chronicle_id)}">
                     <div class="chronicle-header">
-                        <span class="chronicle-id">${escapeHtml(c.chronicle_id)}</span>
-                        <span class="chronicle-season">${escapeHtml(c.season)}</span>
+                        <span class="chronicle-id">${escapeHtml(c.season)} · 第${escapeHtml(c.game_day_start)}-${escapeHtml(c.game_day_end)}日</span>
+                        <span class="chronicle-season">${escapeHtml(c.chronicle_id)}</span>
                     </div>
                     <div class="chronicle-period">第${escapeHtml(c.game_day_start)}日 - 第${escapeHtml(c.game_day_end)}日</div>
                     <div class="chronicle-stats">
@@ -1196,7 +1327,7 @@
                 <div class="detail-section">
                     <h3>江湖群像</h3>
                     <div class="agents-grid">
-                        ${c.agent_summaries.map((a) => `<div class="agent-card"><div class="agent-name">${escapeHtml(a.name || "")}</div><div class="agent-info"><div>位置: ${escapeHtml(a.location || "-")}</div><div>行动: ${escapeHtml(a.actions_count || 0)}次</div>${a.died_this_period ? '<div class="agent-died">已于本周期陨落</div>' : ""}</div></div>`).join("")}
+                        ${c.agent_summaries.map((a) => `<div class="agent-card"><div class="agent-name">${escapeHtml(a.name || "")}</div><div class="agent-info"><div>位置: ${escapeHtml(getLocationName(a.location || "-"))}</div><div>行动: ${escapeHtml(a.actions_count || 0)}次</div>${a.died_this_period ? '<div class="agent-died">已于本周期陨落</div>' : ""}</div></div>`).join("")}
                     </div>
                 </div>`
                         : ""
@@ -1265,6 +1396,8 @@
             async function ensureExperiencesLoaded() {
                 if (!expFiltersLoaded) await initExpFilters();
                 if (!experiencesLoaded) await loadExperiences();
+                // 确保 location 映射已加载
+                if (!Object.keys(locationNames).length) await initLocationMapping();
             }
 
             async function initExpFilters() {
@@ -1281,30 +1414,36 @@
                         const locSel =
                             document.getElementById("filter-location");
                         const locSet = new Set();
+                        const agentFrag = document.createDocumentFragment();
                         agents.forEach((a) => {
                             const opt = document.createElement("option");
                             opt.value = a.id;
                             opt.textContent = a.name;
-                            agentSel.appendChild(opt);
+                            agentFrag.appendChild(opt);
                             if (a.location && a.location !== "unknown")
                                 locSet.add(a.location);
                         });
+                        agentSel.appendChild(agentFrag);
+                        const locFrag = document.createDocumentFragment();
                         [...locSet].sort().forEach((loc) => {
                             const opt = document.createElement("option");
                             opt.value = loc;
                             opt.textContent = loc;
-                            locSel.appendChild(opt);
+                            locFrag.appendChild(opt);
                         });
+                        locSel.appendChild(locFrag);
                     }
                     if (actRes.ok) {
                         const actMap = await actRes.json();
                         const sel = document.getElementById("filter-action");
+                        const actFrag = document.createDocumentFragment();
                         Object.entries(actMap).forEach(([k, v]) => {
                             const opt = document.createElement("option");
                             opt.value = k;
                             opt.textContent = v;
-                            sel.appendChild(opt);
+                            actFrag.appendChild(opt);
                         });
+                        sel.appendChild(actFrag);
                     }
                     expFiltersLoaded = true;
                 } catch (e) {
@@ -1327,11 +1466,13 @@
                 const aid = document.getElementById("filter-agent").value;
                 const loc = document.getElementById("filter-location").value;
                 const act = document.getElementById("filter-action").value;
+                const resultVal = document.getElementById("filter-result").value;
                 const from = document.getElementById("filter-from-tick").value;
                 const to = document.getElementById("filter-to-tick").value;
                 if (aid) params.set("agent_id", aid);
                 if (loc) params.set("location", loc);
                 if (act) params.set("action_type", act);
+                if (resultVal && resultVal !== "success") params.set("result", resultVal);
                 if (from) params.set("from_tick", from);
                 if (to) params.set("to_tick", to);
 
@@ -1356,38 +1497,63 @@
                 const loading = document.getElementById("exp-loading");
                 const empty = document.getElementById("exp-empty");
                 const tbody = document.getElementById("experiences-tbody");
+                const tableWrap = tbody.closest(".exp-table-wrap");
                 loading.style.display = experiences.length ? "none" : "flex";
                 if (!experiences.length) {
-                    empty.style.display = experiences.length ? "none" : "flex";
+                    empty.style.display = "flex";
+                    if (tableWrap) tableWrap.classList.add("hidden");
                     return;
                 }
                 empty.style.display = "none";
+                if (tableWrap) tableWrap.classList.remove("hidden");
                 tbody.innerHTML = experiences
-                    .map((e) => {
+                    .map((e, idx) => {
                         const metadata = e.soul_cycle_metadata || {};
                         const cycles = metadata.cycles || [];
-                        const renhunCell = renderRenhunCell(cycles, e);
-                        const tianhunCell = renderTianhunCell(cycles, e);
-                        const dihunCell = renderDihunCell(cycles, e);
-                        const narrativeText = e.narrative || "";
+                        const isSuccess = e.result === "success";
+                        const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
-                        let html =
-                            `<tr>` +
-                            `<td>T${escapeHtml(e.tick_id || "-")}</td>` +
+                        const timeStr = e.created_at
+                            ? new Date(e.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                            : "-";
+
+                        // 主行
+                        let html = `<tr class="exp-master-row" data-exp-idx="${idx}" onclick="toggleExpDetail(${idx})">` +
+                            `<td><span class="exp-expand-arrow">&#9654;</span></td>` +
+                            `<td><span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span></td>` +
                             `<td>${escapeHtml(e.agent_name || "-")}</td>` +
-                            `<td>${escapeHtml(e.location || "-")}</td>` +
+                            `<td>${escapeHtml(getLocationName(e.location || "-"))}</td>` +
                             `<td><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span></td>` +
-                            `<td class="col-renhun">${renhunCell}</td>` +
-                            `<td class="col-tianhun">${tianhunCell}</td>` +
-                            `<td class="col-dihun">${dihunCell}</td>` +
-                            `<td class="col-narrative">`;
-                        if (narrativeText) {
-                            html += `<div class="exp-narrative-full">${escapeHtml(narrativeText)}</div>`;
-                        }
-                        html += `</td></tr>`;
+                            `<td>${resultBadge}</td>` +
+                            `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
+                            `</tr>`;
+
+                        // 详情行（默认隐藏）
+                        const renhunHtml = renderRenhunCell(cycles, e);
+                        const tianhunHtml = renderTianhunCell(cycles, e);
+                        const dihunHtml = renderDihunCell(cycles, e);
+                        const narrativeHtml = e.narrative ? escapeHtml(e.narrative) : '<span style="color:var(--text-subtle)">无叙事</span>';
+
+                        html += `<tr class="exp-detail-row" id="exp-detail-${idx}" style="display:none"><td colspan="7">` +
+                            `<div class="exp-detail-content">` +
+                            `<div class="exp-detail-cell"><div class="exp-detail-label">人魂 · 行动之魂</div><div class="exp-detail-body">${renhunHtml}</div></div>` +
+                            `<div class="exp-detail-cell"><div class="exp-detail-label">天魂 · 守护之魂</div><div class="exp-detail-body">${tianhunHtml}</div></div>` +
+                            `<div class="exp-detail-cell"><div class="exp-detail-label">地魂 · 能力之魂</div><div class="exp-detail-body">${dihunHtml}</div></div>` +
+                            `<div class="exp-detail-cell"><div class="exp-detail-label">叙事</div><div class="exp-detail-body">${narrativeHtml}</div></div>` +
+                            `</div></td></tr>`;
+
                         return html;
                     })
                     .join("");
+            }
+
+            function toggleExpDetail(idx) {
+                const row = document.querySelector(`.exp-master-row[data-exp-idx="${idx}"]`);
+                const detail = document.getElementById(`exp-detail-${idx}`);
+                if (!row || !detail) return;
+                const isExpanded = row.classList.contains("exp-expanded");
+                row.classList.toggle("exp-expanded", !isExpanded);
+                detail.style.display = isExpanded ? "none" : "";
             }
 
             // 天魂三层审查标签中文映射
@@ -1514,6 +1680,7 @@
                 document.getElementById("filter-agent").value = "";
                 document.getElementById("filter-location").value = "";
                 document.getElementById("filter-action").value = "";
+                document.getElementById("filter-result").value = "success";
                 document.getElementById("filter-from-tick").value = "";
                 document.getElementById("filter-to-tick").value = "";
                 expPage = 1;
@@ -1543,7 +1710,10 @@
                 params.set("limit", sumPageSize);
                 const agentFilterVal =
                     document.getElementById("sum-agent-filter").value;
+                const gameDayVal =
+                    document.getElementById("sum-game-day-filter").value;
                 if (agentFilterVal) params.set("agent_id", agentFilterVal);
+                if (gameDayVal) params.set("game_day", gameDayVal);
 
                 try {
                     const res = await apiFetch(
@@ -1553,7 +1723,16 @@
                     summariesData = data.summaries || [];
                     sumTotal = data.total || 0;
                     summariesLoaded = true;
-                    renderSummaries(summariesData);
+                    // client-side 文本搜索过滤
+                    const q = document.getElementById("sum-search-input").value.toLowerCase().trim();
+                    if (q) {
+                        renderSummaries(summariesData.filter(s =>
+                            (s.summary || "").toLowerCase().includes(q) ||
+                            getAgentName(s.agent_id).toLowerCase().includes(q)
+                        ), true);
+                    } else {
+                        renderSummaries(summariesData);
+                    }
                     updateSumPagination();
                 } catch (e) {
                     if (e.name !== "ApiError") {
@@ -1561,6 +1740,19 @@
                             '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
                     }
                 }
+            }
+
+            function searchSummaries() {
+                sumPage = 1;
+                loadSummaries();
+            }
+
+            function resetSumFilters() {
+                document.getElementById("sum-search-input").value = "";
+                document.getElementById("sum-agent-filter").value = "";
+                document.getElementById("sum-game-day-filter").value = "";
+                sumPage = 1;
+                loadSummaries();
             }
 
             async function ensureAgentFilterPopulated() {
@@ -1586,7 +1778,7 @@
                 return found ? found.name : `Agent ${agentId.substring(0, 8)}`;
             }
 
-            function renderSummaries(list) {
+            function renderSummaries(list, isFiltered) {
                 const container = document.getElementById(
                     "summaries-container",
                 );
@@ -1618,28 +1810,13 @@
                             <span class="summary-game-day">第${escapeHtml(s.game_day)}日</span>
                         </div>
                         <div class="summary-meta">存档时间: ${escapeHtml(dateStr)}</div>
-                        <div class="summary-content">${escapeHtml(s.summary || "")}</div>
+                        <div class="summary-content" data-sum-expanded="false">${escapeHtml(s.summary || "")}</div>
+                        <button class="summary-expand-btn" onclick="toggleSummaryExpand(this)">展开全文</button>
                     </div>`;
                     })
                     .join("");
             }
 
-            function filterSummaries() {
-                const q = document
-                    .getElementById("sum-search-input")
-                    .value.toLowerCase();
-                if (!q) {
-                    renderSummaries(summariesData);
-                    return;
-                }
-                renderSummaries(
-                    summariesData.filter(
-                        (s) =>
-                            (s.summary || "").toLowerCase().includes(q) ||
-                            getAgentName(s.agent_id).toLowerCase().includes(q),
-                    ),
-                );
-            }
 
             function updateSumPagination() {
                 const totalPages = Math.ceil(sumTotal / sumPageSize);
@@ -1654,12 +1831,27 @@
                 document.getElementById("sum-prev-btn").disabled = sumPage <= 1;
                 document.getElementById("sum-next-btn").disabled =
                     sumPage >= totalPages;
+                document.getElementById("sum-page-size").value = sumPageSize;
             }
 
             function changeSumPage(delta) {
                 const totalPages = Math.ceil(sumTotal / sumPageSize);
                 sumPage = Math.max(1, Math.min(totalPages, sumPage + delta));
                 loadSummaries();
+            }
+
+            function changeSumPageSize() {
+                sumPageSize = parseInt(
+                    document.getElementById("sum-page-size").value,
+                );
+                sumPage = 1;
+                loadSummaries();
+            }
+
+            function toggleSummaryExpand(btn) {
+                const content = btn.previousElementSibling;
+                const expanded = content.classList.toggle("expanded");
+                btn.textContent = expanded ? "收起" : "展开全文";
             }
 
             document.addEventListener("keydown", (e) => {

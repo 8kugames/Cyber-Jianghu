@@ -1144,6 +1144,8 @@ pub struct ExperienceStreamQuery {
     pub action_type: Option<String>,
     pub from_tick: Option<i64>,
     pub to_tick: Option<i64>,
+    /// 结果过滤: "success" | "failed" | 空=全部
+    pub result: Option<String>,
 }
 
 /// 经历日志流水条目
@@ -1177,7 +1179,8 @@ pub struct ExperienceStreamResponse {
 
 /// GET /api/dashboard/experiences
 ///
-/// 返回所有成功的 agent 动作日志（全局视图），用于经历日志流水
+/// 返回 agent 动作日志（全局视图），用于经历日志流水。
+/// 默认只返回成功记录，传 result=all 查看全部。
 pub async fn get_experiences(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ExperienceStreamQuery>,
@@ -1192,8 +1195,10 @@ pub async fn get_experiences(
     let action_type_filter = params.action_type;
     let from_tick_filter = params.from_tick;
     let to_tick_filter = params.to_tick;
+    // result 过滤: None/空 → 只看成功, "failed" → 只看失败, "all" → 全部
+    let result_filter = params.result.as_deref().unwrap_or("success");
 
-    // 查询总数：使用与 main query 一致的 LATERAL JOIN 逻辑
+    // 查询总数
     let total: i64 = sqlx::query_scalar(
         r#"
         WITH action_with_location AS (
@@ -1207,7 +1212,7 @@ pub async fn get_experiences(
                 ORDER BY st2.tick_id DESC
                 LIMIT 1
             ) loc ON true
-            WHERE a.result = 'success'
+            WHERE ($6::text = 'all' OR a.result = $6)
               AND ($1::uuid IS NULL OR a.agent_id = $1)
               AND ($3::text IS NULL OR a.action_type = $3)
               AND ($4::bigint IS NULL OR a.tick_id >= $4)
@@ -1223,6 +1228,7 @@ pub async fn get_experiences(
     .bind(&action_type_filter)
     .bind(from_tick_filter)
     .bind(to_tick_filter)
+    .bind(result_filter)
     .fetch_one(&state.db_pool)
     .await
     .unwrap_or(0);
@@ -1243,14 +1249,14 @@ pub async fn get_experiences(
             ORDER BY st2.tick_id DESC
             LIMIT 1
         ) loc ON true
-        WHERE a.result = 'success'
+        WHERE ($6::text = 'all' OR a.result = $6)
           AND ($1::uuid IS NULL OR a.agent_id = $1)
           AND ($2::text IS NULL OR loc.node_id = $2)
           AND ($3::text IS NULL OR a.action_type = $3)
           AND ($4::bigint IS NULL OR a.tick_id >= $4)
           AND ($5::bigint IS NULL OR a.tick_id <= $5)
         ORDER BY a.tick_id DESC
-        LIMIT $6 OFFSET $7
+        LIMIT $7 OFFSET $8
         "#,
     )
     .bind(agent_id_filter)
