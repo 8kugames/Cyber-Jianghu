@@ -71,6 +71,34 @@ pub enum ValidationResult {
     },
 }
 
+/// 天魂单层审查结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct LayerResult {
+    /// 层标识
+    pub layer: &'static str,
+    /// 是否通过
+    pub passed: bool,
+    /// 详情，通过时为 None，驳回时包含原因
+    pub detail: Option<String>,
+}
+
+/// ReflectorSoul 完整审查结果
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum PipelineValidationResult {
+    /// 审查通过，携带修正后的 Intent、三层中间结果
+    Approved {
+        intent: crate::models::Intent,
+        layers: Vec<LayerResult>,
+        narrative: Option<String>,
+    },
+    /// 审查拒绝，携带原因和三层中间结果
+    Rejected {
+        reason: String,
+        layers: Vec<LayerResult>,
+    },
+}
+
 /// 驳回类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectionType {
@@ -115,6 +143,17 @@ impl RejectionType {
 // ============================================================================
 
 /// 验证请求
+#[derive(Debug, Clone, Default)]
+pub struct ValidationRuntimeConfig {
+    /// 分级 LLM 校验配置
+    pub graded_config: Option<cyber_jianghu_protocol::GradedValidationConfig>,
+    /// 连续 follow 次数
+    pub consecutive_follow_count: usize,
+    /// 连续 follow 上限
+    pub max_consecutive_follow: usize,
+}
+
+/// 验证请求
 #[derive(Debug, Clone)]
 pub struct ValidationRequest {
     /// 待验证的意图
@@ -125,6 +164,8 @@ pub struct ValidationRequest {
     pub world_context: String,
     /// 当前 WorldState，用于提取合法 ID 列表
     pub world_state: Option<cyber_jianghu_protocol::WorldState>,
+    /// 运行时校验上下文
+    pub runtime: ValidationRuntimeConfig,
 }
 
 /// 驳回原因
@@ -150,6 +191,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cyber_jianghu_protocol::{
+        AdjacentNode, AgentSelfState, GradedValidationConfig, InventoryItem, Location, WorldState,
+        WorldTime,
+    };
+    use std::collections::HashMap;
+    use uuid::Uuid;
 
     #[test]
     fn test_rejection_type_from_str() {
@@ -162,5 +209,74 @@ mod tests {
             RejectionType::OutOfCharacter
         );
         assert_eq!(RejectionType::parse("unknown"), RejectionType::Other);
+    }
+
+    #[test]
+    fn test_validation_request_keeps_runtime_context() {
+        let request = ValidationRequest {
+            intent: crate::models::Intent::new(Uuid::new_v4(), 7, "follow", None),
+            persona: PersonaInfo::default(),
+            world_context: "测试上下文".to_string(),
+            world_state: Some(WorldState {
+                event_type: "world_state".to_string(),
+                tick_id: 7,
+                agent_id: Some(Uuid::new_v4()),
+                world_time: WorldTime {
+                    year: 1,
+                    month: 1,
+                    day: 1,
+                    hour: 8,
+                    minute: 0,
+                    second: 0,
+                    weather: "晴".to_string(),
+                },
+                location: Location {
+                    node_id: "loc_a".to_string(),
+                    name: "地点A".to_string(),
+                    node_type: "inn".to_string(),
+                    adjacent_nodes: vec![AdjacentNode {
+                        node_id: "loc_b".to_string(),
+                        name: "地点B".to_string(),
+                        travel_cost: 1,
+                        aliases: vec![],
+                    }],
+                    gatherable_items: vec![],
+                },
+                self_state: AgentSelfState {
+                    attributes: HashMap::new(),
+                    derived_attributes: HashMap::new(),
+                    attribute_descriptions: HashMap::new(),
+                    status_effects: vec![],
+                    inventory: vec![InventoryItem {
+                        item_id: "mantou".to_string(),
+                        name: "馒头".to_string(),
+                        item_type: "food".to_string(),
+                        quantity: 1,
+                        is_equipped: false,
+                        aliases: vec![],
+                    }],
+                    skills: vec![],
+                    age_years: None,
+                    max_age: None,
+                    recipe_details: vec![],
+                },
+                entities: vec![],
+                nearby_items: vec![],
+                events_log: vec![],
+                private_dialogue_log: vec![],
+                last_execution_summary: None,
+                lessons_learned: vec![],
+            }),
+            runtime: ValidationRuntimeConfig {
+                graded_config: Some(GradedValidationConfig::default()),
+                consecutive_follow_count: 2,
+                max_consecutive_follow: 5,
+            },
+        };
+
+        assert_eq!(request.runtime.consecutive_follow_count, 2);
+        assert_eq!(request.runtime.max_consecutive_follow, 5);
+        assert!(request.runtime.graded_config.is_some());
+        assert!(request.world_state.is_some());
     }
 }
