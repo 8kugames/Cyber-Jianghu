@@ -65,6 +65,8 @@ pub struct AgentBuilder {
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
+    /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
+    world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
 }
 
 impl AgentBuilder {
@@ -92,6 +94,7 @@ impl AgentBuilder {
             data_dir: PathBuf::from("."),
             immediate_handler: None,
             chaos_generator: None,
+            world_state_store: None,
         }
     }
 
@@ -216,6 +219,15 @@ impl AgentBuilder {
     /// 设置混沌意图生成器（Sanity 混沌硬逻辑）
     pub fn with_chaos_generator(mut self, generator: crate::soul::actor::ChaosGenerator) -> Self {
         self.chaos_generator = Some(generator);
+        self
+    }
+
+    /// 设置 WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
+    pub fn with_world_state_store(
+        mut self,
+        store: Arc<crate::component::state_store::WorldStateStore>,
+    ) -> Self {
+        self.world_state_store = Some(store);
         self
     }
 
@@ -371,6 +383,7 @@ impl AgentBuilder {
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,
+            world_state_store: self.world_state_store,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
