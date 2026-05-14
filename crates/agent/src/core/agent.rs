@@ -147,6 +147,9 @@ pub struct Agent {
 
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
+
+    /// 当前 tick_id（原子计数，WS callback / 主循环共享）
+    pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl Agent {
@@ -214,6 +217,7 @@ impl Agent {
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: None,
+            current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 
@@ -286,10 +290,10 @@ impl Agent {
     /// 初始化对话上下文管理器
     ///
     /// 从game_rules配置中读取参数，创建DialogueContextManager
-    pub fn init_dialogue_manager(&mut self, max_sessions: usize, max_rounds: usize, session_timeout_ticks: i64) {
+    pub fn init_dialogue_manager(&mut self, max_sessions: usize, max_rounds: usize, session_timeout_ticks: i64, dialogue_action_types: Vec<String>) {
         use crate::component::dialogue::DialogueContextManager;
         self.dialogue_manager = Some(std::sync::Arc::new(tokio::sync::RwLock::new(
-            DialogueContextManager::new(max_sessions, max_rounds, session_timeout_ticks)
+            DialogueContextManager::new(max_sessions, max_rounds, session_timeout_ticks, dialogue_action_types)
         )));
         info!(
             "Dialogue context manager initialized (max_sessions={}, max_rounds={}, timeout={})",
