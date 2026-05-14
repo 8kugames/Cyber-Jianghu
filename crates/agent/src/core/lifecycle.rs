@@ -350,6 +350,13 @@ impl super::Agent {
         // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
         if let Some(ref engine) = self.cognitive_engine {
             engine.update_action_aliases(&game_rules.available_actions);
+            // 注入 available_actions 供地魂 get_action_detail 工具使用
+            engine.set_available_actions(game_rules.available_actions.clone());
+        }
+
+        // 注入 WorldStateStore 到 CognitiveEngine（供地魂 query_world 工具使用）
+        if let (Some(engine), Some(store)) = (&self.cognitive_engine, &self.world_state_store) {
+            engine.set_world_state_store(store.clone());
         }
 
         // 初始化对话上下文管理器（Fail-Fast: dialogue_context 段存在时所有字段必填）
@@ -782,6 +789,25 @@ impl super::Agent {
                     // 更新 HTTP API 状态（供 Web Panel 查询）
                     if let Some(ref store) = self.world_state_store {
                         store.update(world_state.clone()).await;
+                    }
+
+                    // Delta Engine + Attention Controller（Token 优化模式）
+                    let focus_summary = if self.config.token_optimization.enabled {
+                        if let (Some(store), Some(delta_engine), Some(attention_ctrl)) =
+                            (&self.world_state_store, &self.delta_engine, &self.attention_controller)
+                        {
+                            let prev = store.previous().await;
+                            let delta = delta_engine.compute(prev.as_ref(), &world_state);
+                            let summary = attention_ctrl.filter(&delta);
+                            Some(summary)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(ref summary) = focus_summary {
+                        *self.current_focus_summary.write().await = Some(summary.clone());
                     }
                     if let Some(ref api_state) = self.http_api_state {
                         let mut current = api_state.current_state.write().await;
