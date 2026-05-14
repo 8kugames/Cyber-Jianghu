@@ -34,6 +34,20 @@ impl InitialRecipesRegistry {
         recipes
     }
 
+    /// 获取指定角色的配方列表
+    pub fn get_role_recipes(role_key: &str) -> Vec<String> {
+        let config = match registry() {
+            Some(r) => r.get().initial_recipes.data.clone(),
+            None => return Vec::new(),
+        };
+        for role in &config.roles {
+            if role.role_key == role_key {
+                return role.recipes.iter().map(|r| r.recipe_id.clone()).collect();
+            }
+        }
+        Vec::new()
+    }
+
     /// 获取所有定义的角色列表
     pub fn get_roles() -> Vec<String> {
         registry()
