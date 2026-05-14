@@ -526,6 +526,7 @@ pub struct AgentListEntry {
     pub max_hp: i32,
     pub attributes: std::collections::HashMap<String, i32>,
     pub birth_attributes: std::collections::HashMap<String, i32>,
+    pub roles: Vec<String>,
 }
 
 /// 获取所有 agents（统一列表，数据驱动）
@@ -578,6 +579,25 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
         .await
         .unwrap_or_default();
 
+    let agent_ids: Vec<Uuid> = rows.iter().map(|r| r.get::<Uuid, _>("agent_id")).collect();
+
+    let role_rows = if agent_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT agent_id, role_key FROM agent_assigned_roles WHERE agent_id = ANY($1)",
+        )
+        .bind(&agent_ids)
+        .fetch_all(&state.db_pool)
+        .await
+        .unwrap_or_default()
+    };
+
+    let mut roles_map: std::collections::HashMap<Uuid, Vec<String>> = std::collections::HashMap::new();
+    for (aid, rk) in &role_rows {
+        roles_map.entry(*aid).or_default().push(rk.clone());
+    }
+
     let mut agents = Vec::new();
 
     for row in rows {
@@ -628,6 +648,7 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
             max_hp: row.get("max_hp"),
             attributes,
             birth_attributes,
+            roles: roles_map.remove(&agent_id).unwrap_or_default(),
         });
     }
 
@@ -687,10 +708,9 @@ pub struct AgentDetail {
     pub attributes: std::collections::HashMap<String, i32>,
     /// 当前年龄（游戏年），NULL = 不朽
     pub age: Option<i64>,
-    /// 寿元上限（游戏年），NULL = 无上限
     pub max_age: Option<i64>,
-    /// 纪传体传记（死亡/归隐时生成）
     pub biography: Option<String>,
+    pub roles: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -746,6 +766,14 @@ pub async fn get_agent_details(
             is_equipped: row.get("is_equipped"),
         })
         .collect();
+
+    let roles = sqlx::query_scalar::<_, String>(
+        "SELECT role_key FROM agent_assigned_roles WHERE agent_id = $1 ORDER BY role_key",
+    )
+    .bind(agent_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .unwrap_or_default();
 
     let (
         location,
@@ -919,6 +947,7 @@ pub async fn get_agent_details(
         age,
         max_age,
         biography: agent_row.get("biography"),
+        roles,
     }))
 }
 

@@ -31,6 +31,7 @@ mod common;
 mod ground_item_ops;
 mod item_ops;
 mod state_ops;
+mod role_ops;
 mod vendor_ops;
 
 // 导出公共API - 连接池初始化和工具函数
@@ -84,6 +85,9 @@ pub use vendor_ops::{
     VendorRefillRule, get_all_enabled_vendor_refills, get_vendor_refills, remove_vendor_refill,
     set_vendor_refill, toggle_vendor_refill,
 };
+
+// 导出公共API - 角色身份操作
+pub use role_ops::{AgentRole, assign_role, get_agent_roles, remove_role};
 
 // 数据库连接池类型别名
 pub type DbPool = sqlx::PgPool;

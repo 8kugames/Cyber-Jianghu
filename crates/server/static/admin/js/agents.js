@@ -195,6 +195,14 @@ function renderAgents() {
         "</div>" +
         '<div class="agent-name">' +
         escapeHtml(agent.name) +
+        (agent.roles && agent.roles.length > 0
+          ? " " +
+            agent.roles
+              .map(function (r) {
+                return '<span style="font-size:10px; padding:1px 4px; background:rgba(229,192,123,0.2); border:1px solid rgba(229,192,123,0.4); border-radius:3px; color:#e5c07b; vertical-align:middle;">' + escapeHtml(r) + "</span>";
+              })
+              .join("")
+          : "") +
         "</div>" +
         '<div class="location">' +
         escapeHtml(getLocationName(agent.location)) +
@@ -286,6 +294,8 @@ async function openAgentModal(agentId) {
 
     document.getElementById("modal-tab-basic").innerHTML =
       renderBasicInfo(agent);
+    document.getElementById("modal-tab-roles").innerHTML =
+      await renderRoleSection(agent.id);
     document.getElementById("modal-tab-inventory").innerHTML =
       await renderInventoryManage(agent);
 
@@ -441,6 +451,15 @@ function renderBasicInfo(agent) {
         " / " +
         escapeHtml(agent.max_age || "∞") +
         " 岁" +
+        "</div>"
+      : "") +
+    (agent.roles && agent.roles.length > 0
+      ? '<div class="detail-item"><span class="detail-label">身份:</span> ' +
+        agent.roles
+          .map(function (r) {
+            return '<span style="font-size:12px; padding:2px 8px; background:rgba(229,192,123,0.15); border:1px solid rgba(229,192,123,0.3); border-radius:4px; color:#e5c07b;">' + escapeHtml(r) + "</span>";
+          })
+          .join(" ") +
         "</div>"
       : "") +
     "</div></div>" +
@@ -859,9 +878,6 @@ async function renderInventoryManage(agent) {
 
   // Vendor 补货规则配置（仅 write token 可编辑）
   html += await renderVendorRefillSection(agent.id);
-
-  // 角色身份管理
-  html += await renderRoleSection(agent.id);
 
   return html;
 }
@@ -1334,11 +1350,18 @@ async function assignRoleToAgent(agentId) {
     });
     if (res.ok) {
       showToast("已授予角色: " + roleKey, "success");
+      availableRolesCache = null;
+      document.getElementById("modal-tab-roles").innerHTML =
+        await renderRoleSection(currentModalAgentId);
       var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
       if (agentRes.ok) {
         var agent = await agentRes.json();
-        document.getElementById("modal-tab-inventory").innerHTML =
-          await renderInventoryManage(agent);
+        document.getElementById("modal-tab-basic").innerHTML = renderBasicInfo(agent);
+        var idx = allAgents.findIndex(function (a) { return a.id === agent.id; });
+        if (idx >= 0) {
+          allAgents[idx].roles = agent.roles;
+          renderAgents();
+        }
       }
     } else {
       var data = await res.json();
@@ -1359,11 +1382,18 @@ async function removeRoleFromAgent(agentId, roleKey) {
     );
     if (res.ok) {
       showToast("已移除角色: " + roleKey, "success");
+      availableRolesCache = null;
+      document.getElementById("modal-tab-roles").innerHTML =
+        await renderRoleSection(currentModalAgentId);
       var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
       if (agentRes.ok) {
         var agent = await agentRes.json();
-        document.getElementById("modal-tab-inventory").innerHTML =
-          await renderInventoryManage(agent);
+        document.getElementById("modal-tab-basic").innerHTML = renderBasicInfo(agent);
+        var idx = allAgents.findIndex(function (a) { return a.id === agent.id; });
+        if (idx >= 0) {
+          allAgents[idx].roles = agent.roles;
+          renderAgents();
+        }
       }
     } else {
       showToast("移除角色失败", "error");
