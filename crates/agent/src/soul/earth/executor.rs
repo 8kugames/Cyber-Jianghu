@@ -11,9 +11,10 @@
 
 use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
 use crate::component::social::RelationshipStore;
+use crate::component::state_store::WorldStateStore;
 use anyhow::Result;
 use async_trait::async_trait;
-use cyber_jianghu_protocol::types::entities::RecipeDetail;
+use cyber_jianghu_protocol::types::entities::{AvailableAction, RecipeDetail};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,6 +26,8 @@ pub struct EarthToolContext {
     pub memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     pub relationship_store: Option<RelationshipStore>,
     pub recipe_details: Vec<RecipeDetail>,
+    pub world_state_store: Option<Arc<WorldStateStore>>,
+    pub available_actions: Vec<AvailableAction>,
 }
 
 /// 地魂复合工具执行器
@@ -33,6 +36,8 @@ pub struct EarthToolExecutor {
     memory_manager: Option<Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>>,
     relationship_store: Option<RelationshipStore>,
     recipe_details: Vec<RecipeDetail>,
+    world_state_store: Option<Arc<WorldStateStore>>,
+    available_actions: Vec<AvailableAction>,
 }
 
 impl EarthToolExecutor {
@@ -43,6 +48,8 @@ impl EarthToolExecutor {
             memory_manager: ctx.memory_manager,
             relationship_store: ctx.relationship_store,
             recipe_details: ctx.recipe_details,
+            world_state_store: ctx.world_state_store,
+            available_actions: ctx.available_actions,
         }
     }
 
@@ -57,6 +64,9 @@ impl EarthToolExecutor {
             super::relationship_tool::record_social_event_definition(),
             super::recipe_tool::list_known_recipes_definition(),
             super::recipe_tool::view_recipe_detail_definition(),
+            super::state_tool::get_action_detail_definition(),
+            super::state_tool::query_world_definition(),
+            super::state_tool::list_skills_definition(),
         ]
     }
 }
@@ -190,6 +200,30 @@ impl ToolExecutor for EarthToolExecutor {
                     }))
                 }
             }
+            "get_action_detail" => {
+                let action_type = arguments["action_type"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 action_type 参数"))?;
+                Ok(super::state_tool::execute_get_action_detail(
+                    action_type,
+                    &self.available_actions,
+                ))
+            }
+            "query_world" => {
+                let section = arguments["section"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 section 参数"))?;
+                let filter = arguments["filter"].as_str();
+                if let Some(ref store) = self.world_state_store {
+                    Ok(super::state_tool::execute_query_world(section, filter, store).await)
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "message": "WorldStateStore 未初始化"
+                    }))
+                }
+            }
+            "list_skills" => Ok(super::state_tool::execute_list_skills(&self.skill_cache)),
             _ => Err(anyhow::anyhow!("地魂未知工具: {}", name)),
         }
     }
@@ -202,7 +236,7 @@ mod tests {
     #[test]
     fn test_tool_definitions_count() {
         let defs = EarthToolExecutor::tool_definitions();
-        assert_eq!(defs.len(), 8);
+        assert_eq!(defs.len(), 11);
     }
 
     #[test]
@@ -212,6 +246,8 @@ mod tests {
             memory_manager: None,
             relationship_store: None,
             recipe_details: vec![],
+            world_state_store: None,
+            available_actions: vec![],
         };
         let executor = EarthToolExecutor::from_context(ctx);
         assert!(executor.skill_cache.is_empty());
@@ -226,6 +262,8 @@ mod tests {
             memory_manager: None,
             relationship_store: None,
             recipe_details: vec![],
+            world_state_store: None,
+            available_actions: vec![],
         });
 
         let rt = tokio::runtime::Runtime::new().unwrap();
