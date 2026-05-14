@@ -2,6 +2,7 @@
 // 共享能力组件
 // ============================================================================
 
+pub mod delta_engine;
 pub mod dialogue;
 pub mod immediate;
 pub mod llm;
