@@ -122,7 +122,8 @@ impl Broadcaster {
         };
 
         // 批量加载所有 Agent 的已知配方（单次 DB 查询）
-        let recipe_ids_map = match crate::db::batch_get_known_recipe_ids(db_pool, &agent_ids).await {
+        let recipe_ids_map = match crate::db::batch_get_known_recipe_ids(db_pool, &agent_ids).await
+        {
             Ok(map) => map,
             Err(e) => {
                 warn!("批量加载配方失败: {}", e);
@@ -505,7 +506,12 @@ impl Broadcaster {
                         .lifespan
                         .as_ref()
                         .map(|l| l.max_age as u32),
-                    recipe_details: build_recipe_details(known_recipe_ids.as_ref().map(|v| v.as_slice()).unwrap_or(&[])),
+                    recipe_details: build_recipe_details(
+                        known_recipe_ids
+                            .as_ref()
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]),
+                    ),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -516,31 +522,34 @@ impl Broadcaster {
             lessons_learned: vec![],      // 广播路径通过外层赋值注入
         }
     }
-
 }
 
 /// 从已知配方 ID 列表构建 RecipeDetail 列表
-pub fn build_recipe_details(known_recipe_ids: &[String]) -> Vec<cyber_jianghu_protocol::types::entities::RecipeDetail> {
+pub fn build_recipe_details(
+    known_recipe_ids: &[String],
+) -> Vec<cyber_jianghu_protocol::types::entities::RecipeDetail> {
     known_recipe_ids
         .iter()
         .filter_map(|recipe_id| {
             let recipe = crate::game_data::registry::RecipeRegistry::get(recipe_id)?;
-            let result_item_config = crate::game_data::registry::ItemRegistry::get(&recipe.result_item);
-            let materials: Vec<cyber_jianghu_protocol::types::entities::RecipeMaterialInfo> = recipe
-                .materials
-                .iter()
-                .map(|m| {
-                    let item_config = crate::game_data::registry::ItemRegistry::get(&m.item_id);
-                    cyber_jianghu_protocol::types::entities::RecipeMaterialInfo {
-                        item_id: m.item_id.clone(),
-                        item_name: item_config
-                            .as_ref()
-                            .map(|c| c.name.clone())
-                            .unwrap_or_else(|| m.item_id.clone()),
-                        quantity: m.quantity,
-                    }
-                })
-                .collect();
+            let result_item_config =
+                crate::game_data::registry::ItemRegistry::get(&recipe.result_item);
+            let materials: Vec<cyber_jianghu_protocol::types::entities::RecipeMaterialInfo> =
+                recipe
+                    .materials
+                    .iter()
+                    .map(|m| {
+                        let item_config = crate::game_data::registry::ItemRegistry::get(&m.item_id);
+                        cyber_jianghu_protocol::types::entities::RecipeMaterialInfo {
+                            item_id: m.item_id.clone(),
+                            item_name: item_config
+                                .as_ref()
+                                .map(|c| c.name.clone())
+                                .unwrap_or_else(|| m.item_id.clone()),
+                            quantity: m.quantity,
+                        }
+                    })
+                    .collect();
             Some(cyber_jianghu_protocol::types::entities::RecipeDetail {
                 recipe_id: recipe_id.clone(),
                 name: recipe.name,

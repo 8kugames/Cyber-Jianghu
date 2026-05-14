@@ -10,8 +10,8 @@ use super::{
     mutator::{MutationContext, StateMutator},
     resolver::IntentResolver,
 };
-use crate::actions::{ActionExecutor, ActionExecutionResult};
 use crate::actions::StateChange;
+use crate::actions::{ActionExecutionResult, ActionExecutor};
 use crate::db::DbPool;
 use crate::game_data::registry::ActionRegistry;
 use crate::models::{ActionResult, ActionType, AgentAction, AgentState, Intent, WorldEvent};
@@ -122,8 +122,7 @@ impl StateProcessor {
                 let mut single_states = vec![agent_state.clone()];
                 let mut applied = false;
                 for mutator in &self.mutators {
-                    if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await
-                    {
+                    if let Ok(true) = mutator.mutate(change, &mut single_states, &mut ctx).await {
                         applied = true;
                         agent_state = single_states.into_iter().next().unwrap_or(agent_state);
                         break;
@@ -171,9 +170,7 @@ impl StateProcessor {
                     MutationContext::new(&self.db_pool, tick_id, result.intent_id, &mut events);
                 let mut single_states = vec![agent_state.clone()];
                 for mutator in &self.mutators {
-                    if let Ok(true) =
-                        mutator.mutate(&change, &mut single_states, &mut ctx).await
-                    {
+                    if let Ok(true) = mutator.mutate(&change, &mut single_states, &mut ctx).await {
                         agent_state = single_states.into_iter().next().unwrap_or(agent_state);
                         break;
                     }
