@@ -172,8 +172,12 @@ impl RuleEngine {
     }
 
     /// 加载 reject 反馈模板配置
+    /// 第一优先级：CYBER_JIANGHU_DATA_DIR（Server 写入路径，与 Server 写盘目标对称）
     fn load_prompt_config() -> Option<Arc<PromptTemplateConfig>> {
         let search_paths: Vec<Option<std::path::PathBuf>> = vec![
+            std::env::var("CYBER_JIANGHU_DATA_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
                 .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),

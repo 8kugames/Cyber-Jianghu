@@ -72,3 +72,20 @@ pub fn get_logs_dir() -> PathBuf {
         })
         .clone()
 }
+
+/// 获取运行时数据目录（用于写入运行时产物，如 prompt_templates.json）
+///
+/// 优先级：
+/// 1. 环境变量 CYBER_JIANGHU_DATA_DIR
+/// 2. 当前目录下的 .data/server/
+pub fn get_data_dir() -> PathBuf {
+    static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+    DATA_DIR
+        .get_or_init(|| {
+            if let Ok(dir) = env::var("CYBER_JIANGHU_DATA_DIR") {
+                return PathBuf::from(dir);
+            }
+            PathBuf::from(".data/server")
+        })
+        .clone()
+}

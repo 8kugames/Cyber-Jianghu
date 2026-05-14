@@ -401,8 +401,12 @@ impl TickScheduler {
             });
         }
 
-        // 将 canonical JSON 持久化到 config dir，供 Agent HTTP 拉取
-        let json_path = config_dir.join("prompt_templates.json");
+        // 将 canonical JSON 持久化到运行时数据目录，供 Agent HTTP 拉取
+        let runtime_dir = crate::paths::get_data_dir();
+        if let Err(e) = std::fs::create_dir_all(&runtime_dir) {
+            warn!("运行时数据目录创建失败: {}", e);
+        }
+        let json_path = runtime_dir.join("prompt_templates.json");
         if let Err(e) = std::fs::write(&json_path, &json_bytes) {
             warn!("prompt_templates.json 写盘失败: {}", e);
         }
