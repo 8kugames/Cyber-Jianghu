@@ -141,14 +141,15 @@ impl ToolExecutor for EarthToolExecutor {
                     }))
                 }
             }
-            "list_known_recipes" => {
-                Ok(super::recipe_tool::execute_list_known_recipes(&self.recipe_details))
-            }
+            "list_known_recipes" => Ok(super::recipe_tool::execute_list_known_recipes(
+                &self.recipe_details,
+            )),
             "view_recipe_detail" => {
-                let recipe_id = arguments["recipe_id"]
-                    .as_str()
-                    .unwrap_or("");
-                Ok(super::recipe_tool::execute_view_recipe_detail(recipe_id, &self.recipe_details))
+                let recipe_id = arguments["recipe_id"].as_str().unwrap_or("");
+                Ok(super::recipe_tool::execute_view_recipe_detail(
+                    recipe_id,
+                    &self.recipe_details,
+                ))
             }
             "record_social_event" => {
                 let target_agent_id = arguments["target_agent_id"]

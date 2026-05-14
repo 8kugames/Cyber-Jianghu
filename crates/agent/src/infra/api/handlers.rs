@@ -883,7 +883,11 @@ pub(super) async fn get_daily_summaries_handler(
         }
     };
 
-    let page: usize = params.get("page").and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
+    let page: usize = params
+        .get("page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
     let limit: usize = params
         .get("limit")
         .and_then(|s| s.parse().ok())

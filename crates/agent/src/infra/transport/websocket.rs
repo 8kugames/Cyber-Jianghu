@@ -1051,7 +1051,9 @@ impl AgentClient {
         metadata: cyber_jianghu_protocol::SoulCycleMetadata,
     ) -> Result<()> {
         let client = self.client.read().await;
-        client.send_soul_cycle_report(tick_id, pipe_seq, metadata).await
+        client
+            .send_soul_cycle_report(tick_id, pipe_seq, metadata)
+            .await
     }
 
     /// 发送每日 LLM 日志摘要
