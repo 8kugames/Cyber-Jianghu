@@ -1045,7 +1045,7 @@
                 <input
                     type="text"
                     class="search-input"
-                    placeholder="搜索摘要内容（需点击刷新生效）..."
+                    placeholder="搜索摘要内容（当前页内筛选）..."
                     id="sum-search-input"
                 />
                 <select id="sum-agent-filter" class="filter-select">
@@ -1183,9 +1183,12 @@
                     chroniclesLoaded = true;
                     renderChronicles(chronicles);
                 } catch (e) {
-                    if (e.name !== "ApiError") {
+                    if (e.name === "ApiError") {
                         container.innerHTML =
-                            '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+                            `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
+                    } else {
+                        container.innerHTML =
+                            `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
                     }
                 }
             }
@@ -1409,6 +1412,11 @@
                     ]);
                     if (agentsRes.ok) {
                         const agents = await agentsRes.json();
+                        // 同步填充全局 allAgentsMap（供 resolveTargetName / getAgentName 使用）
+                        agents.forEach((a) => {
+                            allAgentsMap[a.id] = a;
+                            if (a.agent_id) allAgentsMap[a.agent_id] = a;
+                        });
                         const agentSel =
                             document.getElementById("filter-agent");
                         const locSel =
@@ -1486,19 +1494,21 @@
                     renderExpTable();
                     updateExpPagination();
                 } catch (e) {
-                    if (e.name !== "ApiError") {
-                        loading.style.display = "none";
-                        tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>加载失败</p></td></tr>`;
+                    if (e.name === "ApiError") {
+                        // 401 已由 apiFetch 弹 auth modal，500 已由 apiFetch showToast
+                        tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败"}</p></td></tr>`;
+                    } else {
+                        tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></td></tr>`;
                     }
+                } finally {
+                    loading.style.display = "none";
                 }
             }
 
             function renderExpTable() {
-                const loading = document.getElementById("exp-loading");
                 const empty = document.getElementById("exp-empty");
                 const tbody = document.getElementById("experiences-tbody");
                 const tableWrap = tbody.closest(".exp-table-wrap");
-                loading.style.display = experiences.length ? "none" : "flex";
                 if (!experiences.length) {
                     empty.style.display = "flex";
                     if (tableWrap) tableWrap.classList.add("hidden");
@@ -1556,12 +1566,7 @@
                 detail.style.display = isExpanded ? "none" : "";
             }
 
-            // 天魂三层审查标签中文映射
-            var LAYER_NAMES = {
-                layer1: "动作审查",
-                layer2: "规则校验",
-                layer3: "意图审查",
-            };
+            // LAYER_NAMES 已移至 utils.js（全局共享）
 
             // 渲染人魂单元格
             function renderRenhunCell(cycles, entry) {
@@ -1617,9 +1622,40 @@
                 return html || "-";
             }
 
+            // 地魂 action_type 中文映射（数据库存中文，非英文）
+            var DIHUN_SPEAK_TYPES = { "说话": true, "speak": true };
+            var DIHUN_WHISPER_TYPES = { "私语": true, "whisper": true };
+            var DIHUN_SHOUT_TYPES = { "大喊": true, "shout": true };
+
+            // 解析 action_data（兼容 string / object / null）
+            function parseActionData(raw) {
+                if (!raw) return {};
+                if (typeof raw === "object") return raw;
+                if (typeof raw === "string") {
+                    try { return JSON.parse(raw); } catch(e) { return {}; }
+                }
+                return {};
+            }
+
+            // resolveTargetName 已移至 utils.js（全局共享）
+
             // 渲染地魂单元格
             function renderDihunCell(cycles, entry) {
-                if (!cycles || cycles.length === 0) return "-";
+                if (!cycles || cycles.length === 0) {
+                    // 无 cycles 时从顶层 action_data 渲染
+                    const topData = parseActionData(entry.action_data);
+                    const topType = entry.action_type || "";
+                    const topContent = topData.content || "";
+                    if (DIHUN_SPEAK_TYPES[topType] && topContent)
+                        return `<div class="exp-meta-text">"${escapeHtml(topContent)}"</div>`;
+                    if (DIHUN_WHISPER_TYPES[topType] && topContent) {
+                        const name = resolveTargetName(topData.target_agent_id);
+                        return `<div class="exp-meta-text">向${escapeHtml(name)}密语: "${escapeHtml(topContent)}"</div>`;
+                    }
+                    if (DIHUN_SHOUT_TYPES[topType] && topContent)
+                        return `<div class="exp-meta-text">大喊: "${escapeHtml(topContent)}"</div>`;
+                    return "-";
+                }
                 let html = "";
                 cycles.forEach((cycle, idx) => {
                     if (cycles.length > 1) {
@@ -1628,21 +1664,28 @@
                     const fi = cycle.final_intent;
                     if (!fi) return;
                     const fiActionType = fi.action_type || "";
-                    const fiData =
-                        fi.action_data && typeof fi.action_data === "object"
-                            ? fi.action_data
-                            : {};
+                    let fiData = parseActionData(fi.action_data);
+                    // final_intent.action_data 为空时 fallback 到顶层 action_data
+                    if (!fiData.content && entry.action_data) {
+                        const fallback = parseActionData(entry.action_data);
+                        if (fallback.content) fiData = { ...fiData, ...fallback };
+                    }
                     const fiContent = fiData.content || "";
-                    let fiText = getActionTypeDisplay(fiActionType);
-                    if (fiActionType === "speak" && fiContent)
+                    let fiText = "";
+                    if (DIHUN_SPEAK_TYPES[fiActionType] && fiContent)
                         fiText = `"${escapeHtml(fiContent)}"`;
-                    else if (fiActionType === "whisper" && fiContent)
-                        fiText = `向某人密语: "${escapeHtml(fiContent)}"`;
-                    else if (fiActionType === "shout" && fiContent)
+                    else if (DIHUN_WHISPER_TYPES[fiActionType] && fiContent) {
+                        const name = resolveTargetName(fiData.target_agent_id);
+                        fiText = `向${escapeHtml(name)}密语: "${escapeHtml(fiContent)}"`;
+                    }
+                    else if (DIHUN_SHOUT_TYPES[fiActionType] && fiContent)
                         fiText = `大喊: "${escapeHtml(fiContent)}"`;
-                    else if (Object.keys(fiData).length > 0)
-                        fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
-                    html += `<div class="exp-meta-text">${escapeHtml(fiText)}</div>`;
+                    else {
+                        fiText = escapeHtml(getActionTypeDisplay(fiActionType));
+                        if (Object.keys(fiData).length > 0)
+                            fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
+                    }
+                    html += `<div class="exp-meta-text">${fiText}</div>`;
                 });
                 return html || "-";
             }
@@ -1702,7 +1745,6 @@
                 );
                 container.innerHTML = '<div class="loading">加载中...</div>';
 
-                // Populate agent filter on first load
                 await ensureAgentFilterPopulated();
 
                 const params = new URLSearchParams();
@@ -1723,28 +1765,39 @@
                     summariesData = data.summaries || [];
                     sumTotal = data.total || 0;
                     summariesLoaded = true;
-                    // client-side 文本搜索过滤
-                    const q = document.getElementById("sum-search-input").value.toLowerCase().trim();
-                    if (q) {
-                        renderSummaries(summariesData.filter(s =>
-                            (s.summary || "").toLowerCase().includes(q) ||
-                            getAgentName(s.agent_id).toLowerCase().includes(q)
-                        ), true);
-                    } else {
-                        renderSummaries(summariesData);
-                    }
+                    applySumTextFilter();
                     updateSumPagination();
                 } catch (e) {
-                    if (e.name !== "ApiError") {
+                    if (e.name === "ApiError") {
                         container.innerHTML =
-                            '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+                            `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
+                    } else {
+                        container.innerHTML =
+                            `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
                     }
                 }
             }
 
+            // 客户端文本即时过滤（不影响 sumTotal/分页，仅在当前页内筛选显示）
+            function applySumTextFilter() {
+                const q = document.getElementById("sum-search-input").value.toLowerCase().trim();
+                if (q) {
+                    renderSummaries(summariesData.filter(s =>
+                        (s.summary || "").toLowerCase().includes(q) ||
+                        getAgentName(s.agent_id).toLowerCase().includes(q)
+                    ));
+                } else {
+                    renderSummaries(summariesData);
+                }
+            }
+
             function searchSummaries() {
-                sumPage = 1;
-                loadSummaries();
+                if (summariesLoaded) {
+                    applySumTextFilter();
+                } else {
+                    sumPage = 1;
+                    loadSummaries();
+                }
             }
 
             function resetSumFilters() {
@@ -1757,7 +1810,7 @@
 
             async function ensureAgentFilterPopulated() {
                 const sel = document.getElementById("sum-agent-filter");
-                if (sel.options.length > 1) return; // already populated
+                if (sel.options.length > 1) return;
                 if (!allAgents.length) {
                     try {
                         const res = await apiFetch(API.BASE + "/agents");
@@ -1765,6 +1818,8 @@
                     } catch (e) {}
                 }
                 allAgents.forEach((a) => {
+                    allAgentsMap[a.id] = a;
+                    if (a.agent_id) allAgentsMap[a.agent_id] = a;
                     const opt = document.createElement("option");
                     opt.value = a.id;
                     opt.textContent = a.name;
@@ -1774,11 +1829,12 @@
 
             function getAgentName(agentId) {
                 if (!agentId) return "未知角色";
-                const found = allAgents.find((a) => a.id === agentId);
-                return found ? found.name : `Agent ${agentId.substring(0, 8)}`;
+                if (allAgentsMap && allAgentsMap[agentId])
+                    return allAgentsMap[agentId].name || `Agent ${agentId.substring(0, 8)}`;
+                return `Agent ${agentId.substring(0, 8)}`;
             }
 
-            function renderSummaries(list, isFiltered) {
+            function renderSummaries(list) {
                 const container = document.getElementById(
                     "summaries-container",
                 );

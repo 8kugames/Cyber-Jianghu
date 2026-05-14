@@ -1264,6 +1264,7 @@ pub async fn get_experiences(
     .bind(&action_type_filter)
     .bind(from_tick_filter)
     .bind(to_tick_filter)
+    .bind(result_filter)
     .bind(limit as i64)
     .bind(offset as i64)
     .fetch_all(&state.db_pool)

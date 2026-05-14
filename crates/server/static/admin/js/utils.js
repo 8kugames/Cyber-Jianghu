@@ -206,3 +206,22 @@ function formatAttributeShort(key, value, attrs) {
     }
     return name + ":" + value;
 }
+
+// 天魂三层审查标签中文映射（history.html + agents.js 共用）
+var LAYER_NAMES = {
+    layer1: "动作审查",
+    layer2: "规则校验",
+    layer3: "意图审查",
+};
+
+// 解析 target_agent_id → 角色名称（agent_id）（history.html + agents.js 共用）
+function resolveTargetName(targetId) {
+    if (!targetId) return "某人";
+    if (typeof allAgentsMap !== "undefined" && allAgentsMap && allAgentsMap[targetId]) {
+        var agent = allAgentsMap[targetId];
+        var name = agent.name || targetId;
+        var shortId = targetId.substring(0, 8);
+        return name + "（" + shortId + "）";
+    }
+    return targetId.substring(0, 8) + "...";
+}
