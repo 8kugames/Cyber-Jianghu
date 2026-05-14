@@ -8,7 +8,7 @@ pub mod config_llm;
 pub mod config_reload;
 pub mod context;
 pub mod dashboard;
+pub mod role;
 pub mod system;
 pub mod validation;
-pub mod role;
 pub mod vendor;

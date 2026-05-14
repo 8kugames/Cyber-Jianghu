@@ -3,8 +3,8 @@
 //! 验证 LlmComponent + ComponentMetrics 的记录和快照功能。
 
 use cyber_jianghu_agent::component::llm::{
-    ComponentMetrics, LlmComponent, LlmProvider,
-    record_token_usage_with_component, snapshot_component_stats,
+    ComponentMetrics, LlmComponent, LlmProvider, record_token_usage_with_component,
+    snapshot_component_stats,
 };
 
 /// 辅助：解析 provider（测试用）
@@ -18,16 +18,12 @@ fn component_metrics_record_increments_counts() {
     let provider = test_provider();
     let component = LlmComponent::CognitiveEngine;
 
-    record_token_usage_with_component(
-        &provider,
-        "test-model",
-        100,
-        50,
-        component.clone(),
-    );
+    record_token_usage_with_component(&provider, "test-model", 100, 50, component.clone());
 
     let stats = snapshot_component_stats();
-    let metrics = stats.get(&component).expect("should have CognitiveEngine entry");
+    let metrics = stats
+        .get(&component)
+        .expect("should have CognitiveEngine entry");
     assert_eq!(metrics.call_count, 1);
     assert_eq!(metrics.total_input_tokens, 100);
     assert_eq!(metrics.total_output_tokens, 50);
@@ -54,12 +50,16 @@ fn snapshot_component_stats_returns_multiple_components() {
 
     let stats = snapshot_component_stats();
 
-    let reflector = stats.get(&LlmComponent::ReflectorLayer3).expect("ReflectorLayer3");
+    let reflector = stats
+        .get(&LlmComponent::ReflectorLayer3)
+        .expect("ReflectorLayer3");
     assert_eq!(reflector.call_count, 1);
     assert_eq!(reflector.total_input_tokens, 200);
     assert_eq!(reflector.total_output_tokens, 80);
 
-    let social = stats.get(&LlmComponent::SocialProcessing).expect("SocialProcessing");
+    let social = stats
+        .get(&LlmComponent::SocialProcessing)
+        .expect("SocialProcessing");
     assert_eq!(social.call_count, 1);
     assert_eq!(social.total_input_tokens, 150);
     assert_eq!(social.total_output_tokens, 40);
