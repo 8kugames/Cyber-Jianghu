@@ -780,6 +780,109 @@ impl Default for ObserverConfig {
 }
 
 // ============================================================================
+// Token 优化配置
+// ============================================================================
+
+/// Token 优化总开关与子模块配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct TokenOptimizationConfig {
+    /// 总开关（默认关闭，安全回退）
+    pub enabled: bool,
+    /// ReflectorSoul 优化：消灭重试循环
+    pub reflector: ReflectorOptConfig,
+    /// Attention Controller（后续任务）
+    pub attention: AttentionConfig,
+    /// Delta Engine（后续任务）
+    pub delta: DeltaConfig,
+    /// Tool 预加载（后续任务）
+    pub tool_preload: ToolPreloadConfig,
+}
+
+/// ReflectorSoul 优化配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReflectorOptConfig {
+    /// 启用 self-correction：被驳回后调用 LLM 纠正一次
+    pub self_correction: bool,
+    /// 双重拒绝后直接 chaos_fallback（不再重试）
+    pub chaos_on_double_reject: bool,
+    /// self-correction LLM 失败累计达到此值后，跳过 self_correct 直接 chaos_fallback
+    pub chaos_on_llm_fail: u32,
+}
+
+/// Attention Controller 配置（后续任务填充）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AttentionConfig {
+    pub max_focus_items: usize,
+    pub first_tick_focus_cap: usize,
+    pub critical_auto_include: bool,
+    pub enable_llm_ranking: bool,
+    pub llm_ranking_model: String,
+}
+
+/// Delta Engine 配置（后续任务填充）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeltaConfig {
+    pub survival_thresholds: std::collections::HashMap<String, f32>,
+    pub change_percentage_threshold: f32,
+}
+
+/// Tool 预加载配置（后续任务填充）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolPreloadConfig {
+    pub enabled: bool,
+    pub critical_preload: bool,
+}
+
+impl Default for ReflectorOptConfig {
+    fn default() -> Self {
+        Self {
+            self_correction: true,
+            chaos_on_double_reject: true,
+            chaos_on_llm_fail: 2,
+        }
+    }
+}
+
+impl Default for AttentionConfig {
+    fn default() -> Self {
+        Self {
+            max_focus_items: 5,
+            first_tick_focus_cap: 15,
+            critical_auto_include: true,
+            enable_llm_ranking: true,
+            llm_ranking_model: "haiku".to_string(),
+        }
+    }
+}
+
+impl Default for DeltaConfig {
+    fn default() -> Self {
+        let mut survival_thresholds = std::collections::HashMap::new();
+        survival_thresholds.insert("hunger".to_string(), 0.7);
+        survival_thresholds.insert("thirst".to_string(), 0.7);
+        survival_thresholds.insert("hp".to_string(), 0.3);
+        Self {
+            survival_thresholds,
+            change_percentage_threshold: 0.1,
+        }
+    }
+}
+
+impl Default for ToolPreloadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            critical_preload: true,
+        }
+    }
+}
+
+// ============================================================================
 // 完整配置
 // ============================================================================
 
@@ -838,6 +941,10 @@ pub struct Config {
     /// 地魂（EarthSoul）配置 — tool result 预算 & 循环检测
     #[serde(default)]
     pub earth_soul: crate::soul::earth::config::EarthSoulConfig,
+
+    /// Token 优化配置（总开关默认关闭）
+    #[serde(default)]
+    pub token_optimization: TokenOptimizationConfig,
 }
 
 impl Config {
@@ -913,6 +1020,7 @@ impl Config {
             runtime,
             claw: ClawConfig::default(),
             earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
+            token_optimization: TokenOptimizationConfig::default(),
             llm: LlmConfig::from_env(),
             llm_reflector: None,
             memory: MemoryConfig::default(),
