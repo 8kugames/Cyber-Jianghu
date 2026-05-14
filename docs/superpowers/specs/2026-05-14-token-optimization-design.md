@@ -10,7 +10,7 @@
 当前架构将所有数据**全量嵌入 prompt**，LLM 每轮接收完整 WorldState、Action Descriptions、Memory、Skills 等内容。核心问题：
 
 1. **全量 prompt 注入**: 每 tick 4-8K input tokens，大部分数据未发生变化
-2. **ReflectorSoul 重试循环**: max_retries=12, 最坏 13 次 LLM 调用
+2. **ReflectorSoul 重试循环**: max_retries=12, 循环 `for attempt in 0..=12` (含首尾 = 13 轮), 每轮含 ActorSoul 生成 (~4-8K input) + ReflectorSoul Layer 3 (~0.8-1.5K input), 最坏 26 次 LLM 调用
 3. **Action Descriptions 全量**: 30-50 个动作的完整描述始终嵌入 prompt (~2-4K tokens)
 4. **Skill Instructions 全量**: 已掌握技能的行为指南始终嵌入 prompt
 5. **无量化数据**: 缺乏 per-component token 消耗统计，优化无基线
@@ -25,6 +25,8 @@ Token 消耗估算 (per tick, 当前):
 | Skill Instructions | 200-1.5K | ~10% |
 | Persona + Summary | 300-600 | ~5% |
 | ReflectorSoul Layer 3 (per call) | 800-1.5K | 额外 |
+
+**最坏场景** (全部 13 轮重试, 每轮 ActorSoul + ReflectorSoul): ~62-123K input tokens/tick
 
 ## 2. 设计决策
 
@@ -82,6 +84,8 @@ Token 消耗估算 (per tick, 当前):
 
 **文件**: `crates/agent/src/component/state_store.rs` (新建)
 
+**与现有存储的关系**: 当前 `HttpApiState.current_state: Arc<RwLock<Option<WorldState>>>` 存储 WorldState 用于 HTTP API。WorldStateStore 替代此职责, `HttpApiState` 改为持有 `Arc<WorldStateStore>` 引用。迁移后 `current_state` 字段移除, 所有 WorldState 访问统一走 WorldStateStore。
+
 ```rust
 pub struct WorldStateStore {
     curr: Arc<RwLock<WorldState>>,
@@ -98,7 +102,8 @@ impl WorldStateStore {
 
 - 零 LLM token 消耗
 - 纯内存操作
-- 提供 WorldState 查询接口供 EarthSoul tools 使用
+- 提供 WorldState 查询接口供 EarthSoul tools 和 HTTP API 使用
+- 通过 `Arc<WorldStateStore>` 共享, 消除现有双 RwLock 重复
 
 ### 4.2 Delta Engine
 
@@ -127,19 +132,21 @@ pub struct StateDelta {
 
 | Category | 检测逻辑 | Urgency 判定 |
 |----------|---------|-------------|
-| Survival | HP/饥饿/口渴变化超过阈值 | 超过危险线 -> Critical; 超过 10% 变化 -> Important |
-| Social | entities 列表变化 (新人/离开) | 出现/消失 -> Important; 仅 action 变化 -> Info |
-| Environment | 事件日志新增项 | 新事件 -> Important |
-| Inventory | 物品数量变化 | 减少关键物品 -> Important; 其他 -> Info |
-| Location | node_id 变化 | 移动 -> Important |
+| Survival | `self_state.attributes` 中 `hp`/`hunger`/`thirst` 值变化超过阈值 | 超过危险线 (可配置) -> Critical; 超过 10% 变化 -> Important |
+| Social | `entities` 列表变化 (新人 agent_id 出现/离开) | 出现/消失 -> Important; 仅 recent_actions 变化 -> Info |
+| Environment | `events_log` 新增项 | 新事件 -> Important |
+| Inventory | `self_state.inventory` 物品数量变化 | 减少关键物品 -> Important; 其他 -> Info |
+| Location | `location.node_id` 变化 | 移动 -> Important |
 
-**特殊处理**: 首轮无 prev 时, 全量生成所有 category 的 StateChange, urgency 全部标记为 Important。
+**属性键名参考**: `WorldState.self_state.attributes: HashMap<String, i32>`, 键名如 `"hp"`, `"hunger"`, `"thirst"`, `"stamina"`。阈值在 `game_rules.yaml` 的 `token_optimization.delta.survival_thresholds` 中配置。
 
-**Tool Hint 生成**: 每个 StateChange 根据其 category 自动生成对应的 tool hint:
-- Survival + hunger Critical -> `nearby_items --type food`
-- Social + new entity -> `nearby_entities --id {name}`
-- Inventory + item change -> `query_inventory`
-- Environment + event -> `recent_events --type {event_type}`
+**特殊处理**: 首轮无 prev 时, 全量生成所有 category 的 StateChange, urgency 全部标记为 Important。首轮 `max_focus_items` 上限放宽为 `first_tick_focus_cap` (默认 15), 避免信息截断过猛。
+
+**Tool Hint 生成**: 每个 StateChange 根据其 category 自动生成对应的 tool hint。格式为 `tool_name(arg1=val1)`:
+- Survival + hunger Critical -> `nearby_items(type=food)`
+- Social + new entity -> `nearby_entities(id={agent_id})`
+- Inventory + item change -> `query_inventory()`
+- Environment + event -> `query_environment()`
 
 ### 4.3 Attention Controller
 
@@ -194,10 +201,10 @@ Prompt 示例:
 最终焦点项格式化为叙事摘要, 每条附带 tool hint:
 
 ```
-[紧迫] 饥饿度升至72 (查询食物来源: nearby_items --type food)
-[变化] 铁匠铺附近出现商人张三 (查询详情: nearby_entities --id 张三)
-[社交] 李四向你发起对话 (查询关系: get_relationship 李四)
-[环境] 远处传来打斗声 (查询事件: recent_events --type combat)
+[紧迫] 饥饿度升至72 (查询食物来源: nearby_items(type=food))
+[变化] 铁匠铺附近出现商人张三 (查询详情: nearby_entities(id=张三))
+[社交] 李四向你发起对话 (查询关系: get_relationship(target=李四))
+[环境] 远处传来打斗声 (查询事件: query_environment())
 ```
 
 ### 4.4 Lean Prompt Assembler
@@ -211,8 +218,8 @@ Prompt 示例:
 +-- Persona Summary (cached, ~100 tok)
 +-- Focus Summary (dynamic, ~200-500 tok, 含 tool hints)
 +-- Action Index (names only, ~200-300 tok)
-+-- Tool Definitions (~300-500 tok)
-总计: ~1,000-1,600 input tokens (不含 tool definitions)
++-- Tool Definitions (~650-1300 tok, 13 tools)
+总计: ~1,150-2,200 input tokens (不含 tool definitions)
 ```
 
 **Action Index 替代全量描述**:
@@ -235,7 +242,7 @@ Prompt 示例:
 
 | Tool | 替代内容 | 预估节省 | 数据源 |
 |------|---------|---------|--------|
-| `get_action_detail(action_type)` | 全量 action descriptions + field hints | 2-4K tok/tick | ActionRegistry |
+| `get_action_detail(action_type)` | 全量 action descriptions + field hints | 2-4K tok/tick | `load_available_actions_from_file()` 返回的 action 列表 (prompt_cache.rs 缓存) |
 | `query_inventory(filter?)` | prompt 中背包物品列表 | 200-500 tok | WorldStateStore |
 | `nearby_entities(filter?)` | prompt 中附近实体详情 | 300-600 tok | WorldStateStore |
 | `query_environment()` | prompt 中位置/采集/事件 | 200-400 tok | WorldStateStore |
@@ -244,6 +251,8 @@ Prompt 示例:
 **保留已有工具**: skill_view, search_memory, recall_archived, get/list_relationships, record_social_event, list_known_recipes, view_recipe_detail
 
 **Tool 数据源**: 所有新 tool 从 `WorldStateStore` 读取数据, 不从 prompt 解析。
+
+**Context Threading**: `EarthToolContext` 增加 `world_state_store: Arc<WorldStateStore>` 字段。`EarthToolExecutor` 构造时 (engine.rs:747-755) 传入此引用。新 tool 的 execute() 方法通过 `self.ctx.world_state_store.current()` 获取最新 WorldState 数据。现有 tool 不受影响 (它们的数据来自 skill_cache/memory_manager 等已有字段)。
 
 ### 4.6 ReflectorSoul 重构
 
@@ -281,11 +290,12 @@ ReflectorSoul (1 次调用)
 ```yaml
 # game_rules.yaml
 reflector:
-  max_retries: 0               # 不再循环重试
   self_correction: true         # 启用同轮自修正
   chaos_on_double_reject: true  # 二次拒绝 -> chaos_fallback
   chaos_on_llm_fail: 2          # LLM 失败 2 次 -> chaos_fallback
 ```
+
+**注意**: `max_retries` 不再用于此流程。lifecycle.rs 中的 retry 循环 (`for attempt in 0..=max_retries`) 将被替换为固定流程: generate -> validate -> (optional) self_correct -> submit/chaos_fallback。旧 `max_retries` 配置字段废弃。
 
 **Graded Validation 保留**: Skip/Adaptive/Always 策略不变, 但:
 - Skip: 完全跳过 ReflectorSoul -> 直接提交
@@ -294,7 +304,9 @@ reflector:
 
 ### 4.7 Instrumentation
 
-**文件**: `crates/agent/src/component/metrics.rs` (新建或扩展)
+**文件**: 扩展 `crates/agent/src/component/llm/token_tracking.rs` (已有)
+
+**与现有系统的关系**: `token_tracking.rs` 已实现 `PerModelStats` 按 provider-model 维度追踪 prompt/completion tokens, 每 tick 持久化到磁盘。新增 `TokenMetrics` 扩展此系统, 在 per-model 统计基础上增加 per-component 维度 (cognitive_engine, attention_controller, reflector_layer3 等)。底层复用 `token_tracking.rs` 的数据收集机制, 新增 component 标签到每次 LLM 调用。
 
 ```rust
 pub struct TokenMetrics {
@@ -334,13 +346,15 @@ pub struct ComponentMetrics {
 
 ## 5. 预估效果
 
-| 指标 | 当前 | 优化后 | 降幅 |
-|------|------|-------|------|
-| Input tokens/tick | 4-8K | 1.5-2.5K | 60-70% |
-| ReflectorSoul 调用/tick | 1-13 次 | 1-2 次 | 70-90% |
-| Tool calling tokens/tick | 变动 | 0-2K | 按需 |
-| 总 tokens/tick | ~40K | ~10-15K | 60-75% |
-| **24h 总消耗** | **~58M** | **~14-22M** | **60-75%** |
+| 指标 | 当前 (正常) | 当前 (最坏) | 优化后 | 降幅 |
+|------|-----------|------------|-------|------|
+| Input tokens/tick | 4-8K | 62-123K | 1.5-2.5K | 60-70% (正常) |
+| ReflectorSoul 调用/tick | 1-13 次 | 13 次 | 1-2 次 | 70-90% |
+| Tool calling tokens/tick | 变动 | 变动 | 0-2K | 按需 |
+| 总 tokens/tick | ~40K | ~130K+ | ~10-15K | 60-75% (正常) |
+| **24h 总消耗** | **~58M** | **~187M+** | **~14-22M** | **60-75%** |
+
+**注**: "当前 (最坏)" 列反映全部 13 轮重试场景 (每轮 ActorSoul + ReflectorSoul)。优化后最坏场景为 ActorSoul + ReflectorSoul + 1 次自修正 ≈ ~5-8K tokens, 相比当前最坏降幅 >95%。
 
 ## 6. 风险与缓解
 
@@ -387,13 +401,15 @@ pub struct ComponentMetrics {
 ```yaml
 # game_rules.yaml 新增
 token_optimization:
+  enabled: true                      # 总开关, false 则回退全量 prompt 模式
   attention:
     max_focus_items: 5
+    first_tick_focus_cap: 15          # 首轮焦点上限放宽
     critical_auto_include: true
     enable_llm_ranking: true
-    llm_ranking_model: "haiku"
+    llm_ranking_model: "haiku"        # 需支持中文输出
   delta:
-    survival_thresholds:
+    survival_thresholds:              # 用于 Delta Engine 和 Attention Controller 共享
       hunger: 0.7
       thirst: 0.7
       hp: 0.3
@@ -402,7 +418,6 @@ token_optimization:
     enabled: true
     critical_preload: true
   reflector:
-    max_retries: 0
     self_correction: true
     chaos_on_double_reject: true
     chaos_on_llm_fail: 2
