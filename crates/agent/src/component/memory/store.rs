@@ -354,7 +354,12 @@ impl MemoryStore {
 
         let memories = stmt
             .query_map(
-                params![self.agent_id.to_string(), event_type, limit as i64, offset as i64],
+                params![
+                    self.agent_id.to_string(),
+                    event_type,
+                    limit as i64,
+                    offset as i64
+                ],
                 Self::row_to_memory,
             )
             .context("Failed to execute query")?;
