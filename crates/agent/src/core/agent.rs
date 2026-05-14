@@ -112,6 +112,9 @@ pub struct Agent {
     /// HTTP API 状态（可选，用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 
+    /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
+    pub(crate) world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
+
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
     pub(crate) device_config: Option<DeviceConfig>,
 
@@ -205,6 +208,7 @@ impl Agent {
             llm_chaos_active: false,
             actor_llm_container: None,
             http_api_state: None,
+            world_state_store: None,
             device_config,
             character_config: None,
             cognitive_engine: None,
