@@ -1275,13 +1275,24 @@ impl super::Agent {
                         *api_state.decision_context_snapshot.write().await = Some(snapshot);
                     }
 
-                    // 5. 三魂循环：人魂决策 → 天魂审核 → 驳回则重试
-                    // 循环直到审查通过或达到最大重试次数
-                    let max_retries = self.config.game_rules
-                        .as_ref()
-                        .and_then(|g| g.intent_batch.as_ref())
-                        .map(|b| b.max_retries)
-                        .unwrap_or(12);
+                    // 5. 三魂循环：generate -> validate -> self_correct once -> chaos_fallback
+                    // Token 优化：消灭 13 轮重试循环，固定为最多 2 次 LLM 调用
+                    // 提前提取优化配置（避免后续 borrow 冲突）
+                    let (opt_enabled, opt_self_correction, opt_chaos_on_double_reject, opt_chaos_on_llm_fail) = {
+                        let opt = &self.config.token_optimization;
+                        (opt.enabled, opt.reflector.self_correction, opt.reflector.chaos_on_double_reject, opt.reflector.chaos_on_llm_fail)
+                    };
+                    let max_retries: i32 = if opt_enabled {
+                        // 优化模式：最多 self_correct 一次（attempt 0=初始, 1=纠正）
+                        1
+                    } else {
+                        // 旧模式：保留原有重试上限
+                        self.config.game_rules
+                            .as_ref()
+                            .and_then(|g| g.intent_batch.as_ref())
+                            .map(|b| b.max_retries)
+                            .unwrap_or(12)
+                    };
                     let _max_intents = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
@@ -1291,10 +1302,12 @@ impl super::Agent {
                     let mut final_intent = None;
                     let mut final_intent_validated = false;
 
+                    // tick 级 LLM 失败计数器（优化模式下使用）
+                    let mut tick_llm_fail_count: u32 = 0;
+
                     for attempt in 0..=max_retries {
 
                         // 5a. 人魂 (ActorSoul) 决策 — 直连 WorldState，输出结构化 Intent
-                        // 优先使用 decision_with_chain_callback（人魂直连 WorldState）
                         let (raw_intent, _cognitive_chain) = {
                             let tick_id = world_state.tick_id;
                             let agent_id = world_state.agent_id.unwrap_or_default();
@@ -1351,7 +1364,6 @@ impl super::Agent {
                                 &renhun_narrative,
                                 renhun_thought_log,
                             ).await;
-                            // 记录游戏内时间和现实时间
                             let world_time_str = Self::format_world_time(&world_state.world_time);
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         } else {
@@ -1361,14 +1373,7 @@ impl super::Agent {
                             );
                         }
 
-                        // 5b. 翻译步骤已消除 — 人魂直接输出结构化 Intent
-
-                        // 5b'. speak 即时通道检测
-                        // 人魂直连后，speak intent 直接从 raw_intent 提取（不再依赖翻译层拆分）
-                        // 翻译层已消除，直接使用 raw_intent
-
-                        // 5c. 天魂 (ReflectorSoul) 审核 — 直接审查人魂输出的结构化 Intent
-                        // 分级审核策略：根据 action_type 决定审核级别（Always/Adaptive/Skip）
+                        // 5c. 天魂 (ReflectorSoul) 审核 — 分级审核策略
                         let graded_config = self.config.game_rules
                             .as_ref()
                             .and_then(|g| g.intent_batch.as_ref())
@@ -1382,7 +1387,6 @@ impl super::Agent {
                         // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
                         let mut all_raw_intents: Vec<Intent> = {
-                            // llm_chaos_active 时排除认知 fallback（"休息"），仅使用混沌 intents
                             let mut intents: Vec<Intent> = if self.llm_chaos_active {
                                 Vec::new()
                             } else {
@@ -1395,7 +1399,6 @@ impl super::Agent {
                                     intents.push(i.clone());
                                 }
                             }
-                            // Sanity 混沌：低理智时注入随机 intents（数据驱动，从 available_actions 中选取）
                             if let Some(ref mut generator) = self.chaos_generator {
                                 let remaining = max_per_tick.saturating_sub(intents.len());
                                 if remaining > 0 {
@@ -1407,7 +1410,6 @@ impl super::Agent {
                                     intents.extend(chaos_intents);
                                 }
                             }
-                            // LLM 失败混沌：配额耗尽时注入生存导向的随机 intents
                             if self.llm_chaos_active
                                 && let Some(ref mut generator) = self.chaos_generator
                             {
@@ -1425,7 +1427,7 @@ impl super::Agent {
                             intents
                         };
 
-                        // 托梦标记：本 tick 有活跃托梦时，标记所有 intent
+                        // 托梦标记
                         if let Some(ref dream) = active_dream {
                             let dream_trunc = self
                                 .cognitive_engine
@@ -1442,7 +1444,7 @@ impl super::Agent {
                             }
                         }
 
-                        // 处理人魂判断的重要记忆固化
+                        // 重要记忆固化
                         #[allow(clippy::collapsible_if)]
                         if let Some(ref chain) = _cognitive_chain
                             && chain.should_remember == Some(true)
@@ -1463,6 +1465,7 @@ impl super::Agent {
                                 }
                         }
 
+                        // 逐 intent 审查 + self-correction（优化模式）
                         for intent in all_raw_intents {
                             match self
                                 .validate_with_reflector(intent, &world_state, graded_config.as_ref())
@@ -1482,23 +1485,85 @@ impl super::Agent {
                                     layers,
                                 } => {
                                     batch_layers = layers;
-                                    batch_rejection = Some(reason.clone());
+                                    let rejection_reason = reason.clone();
                                     self.set_rejection_feedback(reason.clone());
                                     warn!(
-                                        "Tick {} 第 {} 次天魂审查驳回: {}",
-                                        world_state.tick_id, attempt, reason
+                                        "Tick {} attempt {} 天魂审查驳回: {}",
+                                        world_state.tick_id, attempt, rejection_reason
                                     );
+
+                                    // 优化模式：self-correct 一次后直接 chaos_fallback
+                                    if opt_enabled
+                                        && opt_self_correction
+                                        && tick_llm_fail_count < opt_chaos_on_llm_fail
+                                    {
+                                        match self.self_correct_intent(
+                                            &world_state, &memory_context, &rejection_reason,
+                                        ).await {
+                                            Ok(corrected_intent) => {
+                                                match self.validate_with_reflector(
+                                                    corrected_intent, &world_state, graded_config.as_ref(),
+                                                ).await? {
+                                                    crate::soul::reflector::PipelineValidationResult::Approved {
+                                                        intent: approved, layers: l2, narrative: n2,
+                                                    } => {
+                                                        batch_layers = l2;
+                                                        batch_narrative = n2;
+                                                        approved_intents.push(approved);
+                                                    }
+                                                    crate::soul::reflector::PipelineValidationResult::Rejected {
+                                                        reason: reason2, ..
+                                                    } => {
+                                                        warn!(
+                                                            "Tick {} self-correct 后仍被驳回: {}",
+                                                            world_state.tick_id, reason2
+                                                        );
+                                                        if opt_chaos_on_double_reject {
+                                                            approved_intents.push(
+                                                                self.chaos_fallback_intent(
+                                                                    &world_state, agent_id,
+                                                                    format!("self-correct 后仍被驳回: {}", reason2),
+                                                                )
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tick_llm_fail_count += 1;
+                                                warn!(
+                                                    "Tick {} self-correct LLM 失败 ({}): {}",
+                                                    world_state.tick_id, tick_llm_fail_count, e
+                                                );
+                                                approved_intents.push(
+                                                    self.chaos_fallback_intent(
+                                                        &world_state, agent_id,
+                                                        format!("self-correct LLM 失败: {}", e),
+                                                    )
+                                                );
+                                            }
+                                        }
+                                    } else if opt_enabled && opt_chaos_on_double_reject {
+                                        approved_intents.push(
+                                            self.chaos_fallback_intent(
+                                                &world_state, agent_id,
+                                                format!("意图被驳回（跳过 self-correct）: {}", rejection_reason),
+                                            )
+                                        );
+                                    } else {
+                                        // 旧模式：记录 batch_rejection 以触发重试
+                                        batch_rejection = Some(rejection_reason);
+                                    }
                                 }
                             }
 
-                            // primary intent 被驳回则终止批次（Pipeline 语义）
-                            if batch_rejection.is_some() {
+                            // 旧模式：primary intent 被驳回则终止批次（Pipeline 语义）
+                            if !opt_enabled && batch_rejection.is_some() {
                                 break;
                             }
                         }
 
                         if !approved_intents.is_empty() {
-                            // 记录天魂审查结果
                             if let Some(recorder) = self.soul_recorder().await {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
@@ -1528,15 +1593,14 @@ impl super::Agent {
                                 final_intent = Some(pipeline);
                                 final_intent_validated = true;
                             }
-                            // 暂存 approved intents，供下一轮天魂生成叙事用
                             if let Ok(mut saved) = last_intents_for_narrative.lock() {
                                 saved.clone_from(&approved_intents);
                             } else {
                                 warn!("暂存 approved_intents 失败：Mutex lock 获取失败");
                             }
                             break;
-                        } else if let Some(reason) = batch_rejection {
-                            // 记录驳回
+                        } else if let Some(reason) = batch_rejection.clone() {
+                            // 仅旧模式会进入此分支
                             if let Some(recorder) = self.soul_recorder().await {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");

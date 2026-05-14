@@ -117,7 +117,7 @@ pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
 // 配置
 pub use config::{
     AgentRole, CharacterConfig, Config, DeviceConfig, GoalsConfig, LanguageStyleConfig,
-    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig,
+    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig, TokenOptimizationConfig,
 };
 pub use models::{ActionType, Intent, WorldEvent, WorldState};
 

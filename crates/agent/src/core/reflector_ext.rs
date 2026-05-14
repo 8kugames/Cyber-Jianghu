@@ -84,4 +84,52 @@ impl super::Agent {
             }),
         }
     }
+
+    // ========================================================================
+    // Self-Correction（优化模式：被驳回后调用 LLM 纠正一次）
+    // ========================================================================
+
+    /// 基于驳回原因调用 LLM 生成纠正后的 Intent
+    ///
+    /// 复用 decision_with_chain_callback 基础设施：
+    /// 1. 设置 last_rejection_feedback（callback 会读取并传给 LLM）
+    /// 2. 调用 callback 生成纠正后的 intent
+    pub(crate) async fn self_correct_intent(
+        &mut self,
+        world_state: &WorldState,
+        memory_context: &str,
+        rejection_reason: &str,
+    ) -> Result<cyber_jianghu_protocol::Intent> {
+        // 设置驳回反馈，使 callback 能传递给 LLM
+        self.set_rejection_feedback(rejection_reason.to_string());
+
+        let tick_id = world_state.tick_id;
+        let agent_id = world_state.agent_id.unwrap_or_default();
+
+        // 优先使用 decision_with_chain_callback
+        if let Some(ref chain_callback) = self.decision_with_chain_callback {
+            let fb = self.last_rejection_reason.as_deref();
+            let (corrected_intent, _) = chain_callback(world_state, memory_context, fb).await;
+            return Ok(corrected_intent);
+        }
+
+        // 降级路径：旧式回调
+        if let Some(ref callback) = self.decision_with_feedback_callback {
+            let intent = callback(tick_id, agent_id, memory_context, Some(rejection_reason)).await;
+            return Ok(intent);
+        }
+
+        if let Some(ref memory_callback) = self.decision_with_memory_callback {
+            let combined = format!(
+                "{}\n[意图被驳回: {}，请纠正并重新决策]",
+                memory_context, rejection_reason
+            );
+            let intent = memory_callback(tick_id, agent_id, &combined).await;
+            return Ok(intent);
+        }
+
+        // 最终降级：基础 callback（无反馈能力）
+        let intent = (self.decision_callback)(tick_id, agent_id).await;
+        Ok(intent)
+    }
 }
