@@ -595,7 +595,9 @@ async fn handle_websocket(
                     .load(std::sync::atomic::Ordering::Acquire);
                 let gd = state.game_data.snapshot();
                 let loc = state.game_data.location_snapshot();
-                let recipe_ids = crate::db::get_known_recipe_ids(&state.db_pool, agent_id).await.unwrap_or_default();
+                let recipe_ids = crate::db::get_known_recipe_ids(&state.db_pool, agent_id)
+                    .await
+                    .unwrap_or_default();
                 let recipe_details = crate::tick::build_recipe_details(&recipe_ids);
                 let world_state = crate::tick::build_initial_world_state(
                     &agent_state,
@@ -892,7 +894,10 @@ async fn handle_client_message(
             agent_id: msg_agent_id,
             pipe_seq,
             metadata,
-        } => handle_soul_cycle_report(device_id, msg_agent_id, tick_id, pipe_seq, &metadata, state).await,
+        } => {
+            handle_soul_cycle_report(device_id, msg_agent_id, tick_id, pipe_seq, &metadata, state)
+                .await
+        }
         ClientMessage::DailySummary { game_day, summary } => {
             handle_daily_summary(device_id, game_day, &summary, state).await
         }
@@ -1431,9 +1436,14 @@ async fn handle_soul_cycle_report(
     let metadata_json = serde_json::to_value(metadata).context("序列化三魂循环元数据失败")?;
 
     // 更新 agent_action_logs 表
-    if let Err(e) =
-        crate::db::update_soul_cycle_metadata(&state.db_pool, agent_id, tick_id, pipe_seq, &metadata_json)
-            .await
+    if let Err(e) = crate::db::update_soul_cycle_metadata(
+        &state.db_pool,
+        agent_id,
+        tick_id,
+        pipe_seq,
+        &metadata_json,
+    )
+    .await
     {
         warn!(
             "写入三魂循环元数据失败: agent={}, tick={}, err={}",
