@@ -67,6 +67,10 @@ pub struct AgentBuilder {
     chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
     /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
     world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
+    /// Delta Engine（增量检测，零 token）
+    delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
+    /// Attention Controller（规则过滤 + 轻量 LLM 排序）
+    attention_controller: Option<crate::component::attention::AttentionController>,
 }
 
 impl AgentBuilder {
@@ -95,6 +99,8 @@ impl AgentBuilder {
             immediate_handler: None,
             chaos_generator: None,
             world_state_store: None,
+            delta_engine: None,
+            attention_controller: None,
         }
     }
 
@@ -228,6 +234,18 @@ impl AgentBuilder {
         store: Arc<crate::component::state_store::WorldStateStore>,
     ) -> Self {
         self.world_state_store = Some(store);
+        self
+    }
+
+    /// 设置 Delta Engine（增量检测，零 token）
+    pub fn with_delta_engine(mut self, engine: crate::component::delta_engine::DeltaEngine) -> Self {
+        self.delta_engine = Some(engine);
+        self
+    }
+
+    /// 设置 Attention Controller（规则过滤 + 轻量 LLM 排序）
+    pub fn with_attention_controller(mut self, ctrl: crate::component::attention::AttentionController) -> Self {
+        self.attention_controller = Some(ctrl);
         self
     }
 
@@ -384,6 +402,9 @@ impl AgentBuilder {
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,
             world_state_store: self.world_state_store,
+            delta_engine: self.delta_engine,
+            attention_controller: self.attention_controller,
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }

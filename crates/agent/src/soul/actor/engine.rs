@@ -177,6 +177,10 @@ pub struct CognitiveEngine {
     >,
     /// 关系存储（用于地魂 get_relationship / list_relationships / record_social_event）
     pub(super) relationship_store: std::sync::RwLock<Option<RelationshipStore>>,
+    /// WorldState 本地落存（供地魂 query_world / get_action_detail 工具使用）
+    pub(super) world_state_store: std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>,
+    /// 可用动作列表（供地魂 get_action_detail 工具使用）
+    pub(super) available_actions: std::sync::RwLock<Vec<cyber_jianghu_protocol::types::entities::AvailableAction>>,
 }
 
 impl CognitiveEngine {
@@ -209,6 +213,8 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+            world_state_store: std::sync::RwLock::new(None),
+            available_actions: std::sync::RwLock::new(Vec::new()),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -296,6 +302,8 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+            world_state_store: std::sync::RwLock::new(None),
+            available_actions: std::sync::RwLock::new(Vec::new()),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -544,6 +552,18 @@ impl CognitiveEngine {
         *guard = Some(store);
     }
 
+    /// 设置 WorldStateStore（由 lifecycle 注入，供地魂 query_world 工具使用）
+    pub fn set_world_state_store(&self, store: Arc<crate::component::state_store::WorldStateStore>) {
+        let mut guard = self.world_state_store.write().unwrap();
+        *guard = Some(store);
+    }
+
+    /// 设置可用动作列表（由 lifecycle 注入，供地魂 get_action_detail 工具使用）
+    pub fn set_available_actions(&self, actions: Vec<cyber_jianghu_protocol::types::entities::AvailableAction>) {
+        let mut guard = self.available_actions.write().unwrap();
+        *guard = actions;
+    }
+
     pub fn set_conversation_history(&mut self, history: ConversationHistory) {
         info!(
             "对话历史已注入: {} 轮, tokens≈{}",
@@ -744,14 +764,16 @@ impl CognitiveEngine {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
                 let memory_manager = self.memory_manager.read().unwrap().clone();
                 let recipe_details = world_state.self_state.recipe_details.clone();
+                let world_state_store = self.world_state_store.read().unwrap().clone();
+                let available_actions = self.available_actions.read().unwrap().clone();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().unwrap().clone(),
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
                         recipe_details,
-                        world_state_store: None, // Will be injected in Task 6 lifecycle integration
-                        available_actions: vec![], // Will be injected in Task 8 lean prompt
+                        world_state_store,
+                        available_actions,
                     },
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
