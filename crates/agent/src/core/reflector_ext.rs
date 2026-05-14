@@ -451,8 +451,7 @@ impl super::Agent {
                     const SURVIVAL_OVERRIDE_THRESHOLD: i32 = 40;
                     let hunger = world_state.self_state.hunger();
                     let thirst = world_state.self_state.thirst();
-                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD
-                        || thirst < SURVIVAL_OVERRIDE_THRESHOLD
+                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD || thirst < SURVIVAL_OVERRIDE_THRESHOLD
                     {
                         info!(
                             "ReflectorSoul 生存凌驾: LLM 驳回(out_of_character)被覆盖 \

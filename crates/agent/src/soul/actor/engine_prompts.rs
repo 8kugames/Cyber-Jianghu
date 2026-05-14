@@ -425,7 +425,11 @@ fn render_requirement(req: &ActionRequirementInfo) -> Option<String> {
         }
         "item" => {
             let item = req.params.get("item_id")?.as_str()?;
-            let qty = req.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            let qty = req
+                .params
+                .get("quantity")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1);
             Some(format!("需要{}x{}", item, qty))
         }
         _ => None,
@@ -453,12 +457,20 @@ fn render_effect(eff: &ActionEffectInfo) -> Option<String> {
         }
         "add_item" => {
             let item = eff.params.get("item_id")?.as_str()?;
-            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            let qty = eff
+                .params
+                .get("quantity")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1);
             Some(format!("获得{}x{}", item, qty))
         }
         "remove_item" => {
             let item = eff.params.get("item_id")?.as_str()?;
-            let qty = eff.params.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            let qty = eff
+                .params
+                .get("quantity")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1);
             Some(format!("消耗{}x{}", item, qty))
         }
         _ => None,
@@ -471,5 +483,10 @@ fn display_attr(params: &std::collections::HashMap<String, serde_json::Value>) -
         .get("display_attribute")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .or_else(|| params.get("attribute").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .or_else(|| {
+            params
+                .get("attribute")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
 }
