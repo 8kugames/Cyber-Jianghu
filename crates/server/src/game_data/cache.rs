@@ -347,6 +347,7 @@ mod tests {
                     lesson: None,
                     skill_acquisition: std::collections::HashMap::new(),
                     recipe_learning: Default::default(),
+                    dialogue_context: None,
                 },
             },
             items: UnifiedItemsConfig {

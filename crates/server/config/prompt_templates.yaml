@@ -22,6 +22,7 @@ templates:
       - survival_rules
       - narrative_limits
       - action_reference
+      - dialogue_context
       - output_format
 
     sections:
@@ -152,6 +153,10 @@ templates:
 
         ### action_data 字段要求：
         {action_field_hints}
+
+      dialogue_context: |
+        ## 活跃对话
+        {dialogue_section}
 
     # 截断长度配置（消除 .take(N) 魔法数字）
     truncation:
