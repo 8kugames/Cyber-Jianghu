@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
@@ -45,6 +46,7 @@ pub struct AgentBuilder {
     /// 与 ClawDecisionState 共享，用于运行时动态切换 LLM Client
     llm_container: Option<LlmClientContainer>,
     dialogue_client: Option<DialogueClient>,
+    dialogue_manager: Option<Arc<tokio::sync::RwLock<DialogueContextManager>>>,
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
     /// 重连请求接收通道
@@ -79,6 +81,7 @@ impl AgentBuilder {
             llm_client: None,
             llm_container: None,
             dialogue_client: None,
+            dialogue_manager: None,
             relationship_store: None,
             validator: None,
             reconnect_rx: None,
@@ -141,8 +144,8 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置验证器
-    pub fn with_validator(mut self, validator: Arc<dyn Validator>) -> Self {
+    /// 设置统一意图审查器
+    pub fn with_intent_auditor(mut self, validator: Arc<dyn Validator>) -> Self {
         self.validator = Some(validator);
         self
     }
@@ -342,6 +345,7 @@ impl AgentBuilder {
             decision_with_chain_callback: self.decision_with_chain_callback,
             memory_manager,
             dialogue_client: self.dialogue_client,
+            dialogue_manager: self.dialogue_manager,
             relationship_store: self.relationship_store,
             validator: self.validator,
             last_rejection_reason: None,
@@ -364,7 +368,6 @@ impl AgentBuilder {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,

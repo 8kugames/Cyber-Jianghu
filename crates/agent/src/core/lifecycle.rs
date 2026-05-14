@@ -119,7 +119,7 @@ impl super::Agent {
 
         // 设置 Prompt 模板配置更新回调
         let cognitive_engine_for_prompt = self.cognitive_engine.clone();
-        let rule_engine_prompt_config = self.rule_engine.prompt_config_handle();
+        let validator_for_prompt = self.validator.clone();
         self.client
             .set_prompt_template_callback(Arc::new(
                 move |config: cyber_jianghu_protocol::PromptTemplateConfig| {
@@ -133,9 +133,8 @@ impl super::Agent {
                         engine.save_prompt_template_to_disk();
                     }
                     // 更新天魂 RuleEngine reject 反馈模板
-                    {
-                        let mut guard = rule_engine_prompt_config.write().unwrap();
-                        *guard = Some(std::sync::Arc::new(config));
+                    if let Some(ref validator) = validator_for_prompt {
+                        validator.update_prompt_config(std::sync::Arc::new(config));
                     }
                 },
             ))
@@ -344,10 +343,26 @@ impl super::Agent {
 
         // 更新游戏规则
         self.config.update_game_rules(game_rules.clone());
+        if let Some(ref api_state) = self.http_api_state {
+            *api_state.game_rules.write().await = Some(game_rules.clone());
+        }
 
         // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
         if let Some(ref engine) = self.cognitive_engine {
             engine.update_action_aliases(&game_rules.available_actions);
+        }
+
+        // 初始化对话上下文管理器（Fail-Fast: dialogue_context 段存在时所有字段必填）
+        if self.dialogue_manager.is_none() {
+            #[allow(clippy::collapsible_if)]
+            if let Some(ref config) = game_rules.dialogue_context {
+                self.init_dialogue_manager(
+                    config.max_sessions,
+                    config.max_rounds_per_session,
+                    config.session_timeout_ticks,
+                    config.dialogue_action_types.clone(),
+                );
+            }
         }
 
         // 启动时主动拉取 prompt_templates 并写盘
@@ -361,9 +376,11 @@ impl super::Agent {
         let prev_callback = self.client.get_server_msg_callback().await;
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
-        let event_buffer = self.immediate_event_buffer.clone();
+        let _event_buffer = self.immediate_event_buffer.clone(); // 保留用于Future ImmediateEvent扩展
         let memory_manager = self.memory_manager.clone();
+        let dialogue_manager = self.dialogue_manager.clone();
         let game_rules = self.config.game_rules.clone();
+        let current_tick = self.current_tick.clone();
         let callback: Arc<dyn Fn(ServerMessage) + Send + Sync> =
             Arc::new(move |msg: ServerMessage| {
                 // 1. 验证错误反馈
@@ -387,57 +404,62 @@ impl super::Agent {
                         h.handle_server_message(msg).await;
                     });
                 }
-                // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
-                if let ServerMessage::Dialogue { message, .. } = &msg {
+                // 2b. Dialogue: 写入 DialogueContextManager（统一 game tick 时间域）
+                if let ServerMessage::Dialogue { message } = &msg {
                     use cyber_jianghu_protocol::DialogueMessage;
-                    let (desc, from_id) = match message {
-                        DialogueMessage::Request {
-                            opening_remark,
-                            from_agent_id,
-                            ..
-                        } => (
-                            format!("收到密语请求: {}", opening_remark),
-                            Some(*from_agent_id),
-                        ),
-                        DialogueMessage::Content {
-                            content,
-                            from_agent_id,
-                            ..
-                        } => (format!("密语内容: {}", content), Some(*from_agent_id)),
-                        DialogueMessage::Accept { from_agent_id, .. } => {
-                            ("密语对话已接受".to_string(), Some(*from_agent_id))
-                        }
-                        DialogueMessage::Reject {
-                            reason,
-                            from_agent_id,
-                            ..
-                        } => (
-                            format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")),
-                            Some(*from_agent_id),
-                        ),
-                        DialogueMessage::End { from_agent_id, .. } => {
-                            ("密语对话已结束".to_string(), Some(*from_agent_id))
-                        }
-                    };
-                    let buf = event_buffer.clone();
+                    use crate::component::dialogue::DialogueRole;
+
+                    let dm = dialogue_manager.clone();
+                    let dialogue_message = message.clone();
+                    let tick = current_tick.load(std::sync::atomic::Ordering::Relaxed);
+
                     tokio::spawn(async move {
-                        let mut meta = serde_json::json!({
-                            "action": "whisper",
-                        });
-                        if let Some(fid) = from_id {
-                            meta.as_object_mut().unwrap().insert(
-                                "from_agent_id".to_string(),
-                                serde_json::json!(fid.to_string()),
-                            );
+                        let Some(ref dm) = dm else { return; };
+                        let mut guard = dm.write().await;
+
+                        match dialogue_message {
+                            DialogueMessage::Content { session_id, from_agent_id, content } => {
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    &content,
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Request { from_agent_id, opening_remark, .. } => {
+                                let session_id = format!("request_{}_{}", from_agent_id, chrono::Utc::now().timestamp());
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    &opening_remark,
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Accept { session_id, from_agent_id } => {
+                                let pending_id = format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, from_agent_id);
+                                guard.migrate_session(&pending_id, &session_id, from_agent_id, tick);
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    "[对方接受了对话请求]",
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Reject { session_id, from_agent_id, reason } => {
+                                let pending_id = format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, from_agent_id);
+                                guard.close_session(&pending_id);
+                                warn!(
+                                    "Dialogue rejected by {}: session={}, reason={:?}",
+                                    from_agent_id, session_id, reason
+                                );
+                            }
+                            DialogueMessage::End { session_id, .. } => {
+                                guard.end_session(&session_id);
+                            }
                         }
-                        let world_event = cyber_jianghu_protocol::WorldEvent {
-                            event_type: cyber_jianghu_protocol::WorldEventType::PrivateDialogue,
-                            tick_id: 0,
-                            description: desc,
-                            metadata: meta,
-                        };
-                        let mut guard = buf.lock().await;
-                        guard.push(world_event);
                     });
                 }
                 // 2c. DailySummaryData：存储到 episodic memory（服务器侧权威动作统计）
@@ -630,6 +652,11 @@ impl super::Agent {
                     };
 
                     // 更新即时事件处理器 tick_id + Session Triage 生命周期管理
+                    self.current_tick.store(world_state.tick_id, std::sync::atomic::Ordering::Relaxed);
+                    if let Some(ref dm) = self.dialogue_manager {
+                        let mut guard = dm.write().await;
+                        guard.cleanup_timed_out(world_state.tick_id);
+                    }
                     if let Some(ref handler) = self.immediate_handler {
                         handler.set_tick_id(world_state.tick_id).await;
                         let game_day = Self::compute_game_day(
@@ -1053,8 +1080,20 @@ impl super::Agent {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }
 
-                    // 4. 构建增强的世界状态（包含记忆上下文 + deferred 对话）
+                    // 4. 构建增强的世界状态（包含记忆上下文 + 对话上下文）
                     let mut memory_context = self.get_memory_context().await;
+
+                    // 4.x 拼接对话上下文
+                    let dialogue_section = if let Some(ref dm) = self.dialogue_manager {
+                        let guard = dm.read().await;
+                        guard.get_active_sessions_context()
+                    } else {
+                        String::new()
+                    };
+
+                    if !dialogue_section.is_empty() {
+                        memory_context = format!("{}\n\n# 活跃对话\n{}\n", memory_context, dialogue_section);
+                    }
 
                     // 4.1 交易议价提示（经济引导，非生存干预）
                     // 附近有其他人且有银两时注入交易建议（关系感知）
@@ -1250,6 +1289,7 @@ impl super::Agent {
                         .unwrap_or(5);
                     let agent_id = world_state.agent_id.unwrap_or_default();
                     let mut final_intent = None;
+                    let mut final_intent_validated = false;
 
                     for attempt in 0..=max_retries {
 
@@ -1336,7 +1376,7 @@ impl super::Agent {
 
                         let mut approved_intents = Vec::new();
                         let mut batch_rejection: Option<String> = None;
-                        let mut batch_layers: Vec<super::reflector_ext::LayerResult> = Vec::new();
+                        let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
                         // multi-intent pipeline: primary + subsequent intents + chaos
@@ -1424,62 +1464,30 @@ impl super::Agent {
                         }
 
                         for intent in all_raw_intents {
-                            // 分级决策：Chaos intent 跳过 LLM（降级行为不需要语义审核）
-                            let skip_llm = intent.chaos_marker.is_some()
-                                || Self::should_skip_llm_validation(
-                                    &intent, graded_config.as_ref(),
-                                );
-
-                            if skip_llm {
-                                // 仅做 Layer 1 (action_type) + Layer 2 (RuleEngine)
-                                match self.validate_rules_only(&intent, &world_state).await {
-                                    Ok(()) => {
-                                        // 记录通过的两个 layer
-                                        if batch_layers.is_empty() {
-                                            batch_layers.push(super::reflector_ext::LayerResult {
-                                                layer: "layer1",
-                                                passed: true,
-                                                detail: None,
-                                            });
-                                            batch_layers.push(super::reflector_ext::LayerResult {
-                                                layer: "layer2",
-                                                passed: true,
-                                                detail: None,
-                                            });
-                                        }
-                                        approved_intents.push(intent);
-                                    }
-                                    Err(reason) => {
-                                        warn!("Tick {} 分级审核（Skip）驳回: {}", world_state.tick_id, reason);
-                                        batch_rejection = Some(reason.clone());
-                                        batch_layers.push(super::reflector_ext::LayerResult {
-                                            layer: "layer1",
-                                            passed: true,
-                                            detail: None,
-                                        });
-                                        batch_layers.push(super::reflector_ext::LayerResult {
-                                            layer: "layer2",
-                                            passed: false,
-                                            detail: Some(reason),
-                                        });
-                                    }
+                            match self
+                                .validate_with_reflector(intent, &world_state, graded_config.as_ref())
+                                .await?
+                            {
+                                crate::soul::reflector::PipelineValidationResult::Approved {
+                                    intent: approved,
+                                    layers,
+                                    narrative,
+                                } => {
+                                    batch_layers = layers;
+                                    batch_narrative = narrative;
+                                    approved_intents.push(approved);
                                 }
-                            } else {
-                                // 完整三层审查（含 LLM）
-                                match self.validate_with_reflector(intent, &world_state).await? {
-                                    super::reflector_ext::ReflectorResult::Approved { intent: approved, layers, narrative } => {
-                                        batch_layers = layers;
-                                        batch_narrative = narrative;
-                                        approved_intents.push(approved);
-                                    }
-                                    super::reflector_ext::ReflectorResult::Rejected { reason, layers } => {
-                                        batch_layers = layers;
-                                        batch_rejection = Some(reason.clone());
-                                        // 叙事化驳回原因
-                                        let narrated = super::Agent::narrativize_rejection(&reason);
-                                        self.last_rejection_reason = Some(narrated.clone());
-                                        warn!("Tick {} 第 {} 次天魂审查驳回: {}", world_state.tick_id, attempt, reason);
-                                    }
+                                crate::soul::reflector::PipelineValidationResult::Rejected {
+                                    reason,
+                                    layers,
+                                } => {
+                                    batch_layers = layers;
+                                    batch_rejection = Some(reason.clone());
+                                    self.set_rejection_feedback(reason.clone());
+                                    warn!(
+                                        "Tick {} 第 {} 次天魂审查驳回: {}",
+                                        world_state.tick_id, attempt, reason
+                                    );
                                 }
                             }
 
@@ -1514,9 +1522,11 @@ impl super::Agent {
                                     pipeline.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
                                 ).await;
                                 final_intent = Some(pipeline);
+                                final_intent_validated = true;
                             } else {
                                 let pipeline = Self::assemble_pipeline(approved_intents.clone());
                                 final_intent = Some(pipeline);
+                                final_intent_validated = true;
                             }
                             // 暂存 approved intents，供下一轮天魂生成叙事用
                             if let Ok(mut saved) = last_intents_for_narrative.lock() {
@@ -1625,13 +1635,43 @@ impl super::Agent {
                                 .await;
                         }
 
-                    // 6. 天魂验证 + 发送意图
-                    // 天魂唯一出入口：ALL intents 离开 Agent 前必须经过天魂验证
-                    // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
-                    if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {
-                        warn!("Tick {} 最终 intent 被天魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
-                    } else {
-                        if let Err(e) = self.client.send_intent(&final_intent).await {
+                    let graded_config = self.config.game_rules
+                        .as_ref()
+                        .and_then(|g| g.intent_batch.as_ref())
+                        .map(|b| b.llm_validation.clone());
+
+                    // 6. 发送意图
+                    if !final_intent_validated {
+                        match self
+                            .validate_with_reflector(
+                                final_intent.clone(),
+                                &world_state,
+                                graded_config.as_ref(),
+                            )
+                            .await?
+                        {
+                            crate::soul::reflector::PipelineValidationResult::Approved {
+                                intent: approved,
+                                ..
+                            } => {
+                                final_intent = approved;
+                            }
+                            crate::soul::reflector::PipelineValidationResult::Rejected { reason, .. } => {
+                                self.set_rejection_feedback(reason.clone());
+                                warn!(
+                                    "Tick {} fallback intent 被天魂驳回，改用 chaos fallback: {}",
+                                    world_state.tick_id, reason
+                                );
+                                final_intent = self.chaos_fallback_intent(
+                                    &world_state,
+                                    agent_id,
+                                    format!("fallback 被天魂驳回: {}", reason),
+                                );
+                            }
+                        }
+                    }
+
+                    if let Err(e) = self.client.send_intent(&final_intent).await {
                             error!("Failed to send intent: {}", e);
                             if let Err(reconnect_err) = self.reconnect().await {
                                 error!("Reconnect failed: {}", reconnect_err);
@@ -1641,6 +1681,48 @@ impl super::Agent {
                                 "Intent sent successfully: tick={}, action={}, agent={}",
                                 final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                             );
+
+                            // 记录 Agent 自身对话消息（原子化：write lock 内解析 session_id）
+                            {
+                                use crate::component::dialogue::DialogueRole;
+                                if let Some(ref dm) = self.dialogue_manager {
+                                    let action_type_str = final_intent.action_type.as_str();
+                                    let is_dialogue = {
+                                        let dm = dm.read().await;
+                                        dm.is_dialogue_action(action_type_str)
+                                    };
+                                    if is_dialogue {
+                                        let content = final_intent.action_data
+                                            .as_ref()
+                                            .and_then(|d| d.get("content"))
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("");
+                                        if !content.is_empty() {
+                                            let target_id = final_intent.action_data
+                                                .as_ref()
+                                                .and_then(|d| d.get("target_agent_id"))
+                                                .and_then(|t| t.as_str())
+                                                .and_then(|s| Uuid::parse_str(s).ok());
+                                            let tick = self.current_tick.load(std::sync::atomic::Ordering::Relaxed);
+                                            let mut guard = dm.write().await;
+                                            let session_id = if let Some(tid) = target_id {
+                                                guard.get_session_id_by_partner(&tid)
+                                                    .map(|s| s.to_string())
+                                                    .unwrap_or_else(|| format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, tid))
+                                            } else {
+                                                format!("speak_{}", chrono::Utc::now().timestamp())
+                                            };
+                                            guard.add_message(
+                                                &session_id,
+                                                final_intent.agent_id,
+                                                DialogueRole::Own,
+                                                content,
+                                                tick,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
 
                             // 实时模式：等待 ExecutionResult（server 立即处理后的反馈）
                             // Server 同时会发送 reactive WorldState（交互驱动即时推送），
@@ -1813,9 +1895,10 @@ impl super::Agent {
                                         }
                                         // 注入失败原因到下轮推理上下文
                                         let reason = result.error.unwrap_or_default();
-                                        self.last_rejection_reason = Some(
-                                            format!("[意图执行失败: {}]", reason)
-                                        );
+                                        {
+                                            let mut guard = self.server_error_feedback.lock().await;
+                                            *guard = Some(format!("[意图执行失败: {}]", reason));
+                                        }
                                         // Outcome 写回：更新 summary window
                                         if let Some(ref engine) = self.cognitive_engine {
                                             engine.update_summary_outcome(format!("失败: {}", reason));
@@ -2044,7 +2127,6 @@ impl super::Agent {
                                 }
                             }
                         }
-                    }
                 }
             }
 
