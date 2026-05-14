@@ -220,6 +220,10 @@ pub struct GameRulesData {
     /// 配方学习配置
     #[serde(default)]
     pub recipe_learning: RecipeLearningConfig,
+
+    /// 对话上下文配置
+    #[serde(default)]
+    pub dialogue_context: Option<cyber_jianghu_protocol::DialogueContextConfig>,
 }
 
 /// 死因到建议文本的映射（数据驱动，来自 game_rules.yaml）
