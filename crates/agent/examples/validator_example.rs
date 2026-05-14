@@ -118,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     println!(
         "   let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(rules, Arc::new(RwLock::new(llm_client))));"
     );
-    println!("   agent.set_validator(validator);");
+    println!("   agent.set_intent_auditor(validator);");
 
     Ok(())
 }

@@ -17,14 +17,13 @@ pub mod types;
 pub mod validator;
 
 pub use prompt::{ObserverPrompt, sanitize_for_prompt};
-pub use rule_engine::RuleEngine as RuleEngineValidator;
 pub use rule_engine::{
     Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,
     RuleValidationResult,
 };
 pub use store::{PendingReview, PendingReviewEntry, ReviewDecision, ReviewStatus, ReviewStore};
 pub use types::{
-    LlmValidationResponse, PersonaInfo, RejectionReason, RejectionType, ValidationRequest,
-    ValidationResult,
+    LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionReason,
+    RejectionType, ValidationRequest, ValidationResult, ValidationRuntimeConfig,
 };
 pub use validator::{ReflectorSoul, Validator};
