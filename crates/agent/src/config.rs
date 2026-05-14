@@ -436,7 +436,7 @@ pub struct FallbackModelConfig {
     pub enable_thinking: Option<bool>,
 }
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
-const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
+pub const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
 const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.8;
 const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;

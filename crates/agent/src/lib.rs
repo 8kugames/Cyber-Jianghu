@@ -83,7 +83,6 @@ pub use core::{Agent, AgentBuilder};
 pub use soul::actor::{
     CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
-pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{
     Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,
     RuleValidationResult,

@@ -70,11 +70,13 @@ pub struct WsDecisionState {
 
     /// Agent ID
     pub agent_id: Arc<AtomicI64>, // 存储 as i64
+    /// 最大连续跟随次数（从配置读取）
+    pub max_consecutive_follow: usize,
 }
 
 impl WsDecisionState {
     /// 创建新的 WebSocket 决策状态
-    pub fn new() -> Self {
+    pub fn new(max_consecutive_follow: usize) -> Self {
         let (state_tx, _) = broadcast::channel(1);
         let (tick_closed_tx, _) = broadcast::channel(16);
         let (server_msg_tx, _) = broadcast::channel(32);
@@ -92,6 +94,7 @@ impl WsDecisionState {
             current_tick: Arc::new(AtomicI64::new(0)),
             tick_duration_ms: Arc::new(AtomicU64::new(DEFAULT_TICK_DURATION_SECS * 1000)),
             agent_id: Arc::new(AtomicI64::new(0)),
+            max_consecutive_follow,
         }
     }
 
@@ -215,7 +218,10 @@ impl WsDecisionState {
             current_tick: self.current_tick.clone(),
             submitted_tick: shared_state.submitted_tick.clone(),
             intent_validator: shared_state.intent_validator.clone(),
+            current_world_state: shared_state.current_world_state.clone(),
+            game_rules: shared_state.game_rules.clone(),
             persona: shared_state.persona.clone(),
+            max_consecutive_follow: shared_state.max_consecutive_follow,
         };
 
         spawn_validation_task(params)
@@ -224,7 +230,7 @@ impl WsDecisionState {
 
 impl Default for WsDecisionState {
     fn default() -> Self {
-        Self::new()
+        Self::new(crate::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW)
     }
 }
 
@@ -235,6 +241,8 @@ impl Default for WsDecisionState {
 /// WebSocket 共享状态（Clone 友好）
 #[derive(Clone)]
 pub struct WsSharedState {
+    /// 最近一份 WorldState（用于统一校验上下文）
+    pub current_world_state: Arc<RwLock<Option<Arc<WorldState>>>>,
     /// WorldState 广播通道
     pub state_tx: broadcast::Sender<Arc<WorldState>>,
 
@@ -306,6 +314,8 @@ pub struct WsSharedState {
     /// # 更新方式
     /// 通过 `POST /api/v1/config` 或 Agent 初始化时设置
     pub intent_validator: Arc<RwLock<Option<Arc<dyn crate::soul::reflector::Validator>>>>,
+    /// 最近一份 GameRules（用于构造统一验证上下文）
+    pub game_rules: Arc<RwLock<Option<cyber_jianghu_protocol::GameRules>>>,
 
     /// 人设信息
     ///
@@ -332,6 +342,9 @@ pub struct WsSharedState {
 
     /// 验证请求发送通道（容量 1，强制背压）
     pub validation_tx: mpsc::Sender<WsValidationRequest>,
+
+    /// 最大连续跟随次数（从配置读取）
+    pub max_consecutive_follow: usize,
 }
 
 impl WsSharedState {
@@ -343,6 +356,7 @@ impl WsSharedState {
             .store(world_state.tick_id, Ordering::Relaxed);
 
         let state = Arc::new(world_state.clone());
+        *self.current_world_state.blocking_write() = Some(state.clone());
 
         match self.state_tx.send(state) {
             Ok(n) => debug!("Broadcast tick {} to {} clients", world_state.tick_id, n),
@@ -363,6 +377,7 @@ impl From<&WsDecisionState> for WsSharedState {
         let (llm_response_tx, llm_response_rx) = mpsc::channel(16);
 
         Self {
+            current_world_state: Arc::new(RwLock::new(None)),
             state_tx: state.state_tx.clone(),
             tick_closed_tx: state.tick_closed_tx.clone(),
             server_msg_tx: state.server_msg_tx.clone(),
@@ -375,6 +390,7 @@ impl From<&WsDecisionState> for WsSharedState {
             allow_external_connections,
             // 新增验证相关字段
             intent_validator: Arc::new(RwLock::new(None)),
+            game_rules: Arc::new(RwLock::new(None)),
             persona: Arc::new(RwLock::new(None)),
             submitted_tick: Arc::new(AtomicI64::new(-1)), // -1 表示未提交
             validation_tx: state.validation_tx.clone(),
@@ -382,6 +398,7 @@ impl From<&WsDecisionState> for WsSharedState {
             llm_response_tx,
             llm_response_rx: Arc::new(std::sync::Mutex::new(Some(llm_response_rx))),
             upstream_rx: Arc::new(std::sync::Mutex::new(Some(upstream_rx))),
+            max_consecutive_follow: state.max_consecutive_follow,
         }
     }
 }
