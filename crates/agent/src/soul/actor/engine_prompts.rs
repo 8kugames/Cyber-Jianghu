@@ -10,6 +10,19 @@
 // ============================================================================
 
 use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
+use crate::component::attention::FocusSummary;
+
+/// Lean prompt 构建参数（避免函数签名过长）
+pub(super) struct LeanPromptParams<'a> {
+    pub world_state: &'a cyber_jianghu_protocol::WorldState,
+    pub memory_context: &'a str,
+    pub validation_feedback: Option<&'a str>,
+    pub persona_desc: &'a str,
+    pub agent_name: &'a str,
+    pub focus_summary: Option<&'a FocusSummary>,
+    pub critical_preload: Option<&'a str>,
+    pub use_tool_calling: bool,
+}
 
 // ============================================================================
 // Prompt Section Token 估算 (Phase 0a Instrumentation)
@@ -431,6 +444,159 @@ impl super::CognitiveEngine {
             .get_template("actor_direct")
             .and_then(|tmpl| tmpl.sections.get(section_name))
             .map(|s| s.trim().to_string())
+    }
+
+    // ========================================================================
+    // Lean Prompt (Task 8: Token 优化)
+    // ========================================================================
+
+    /// 构建 Lean Prompt（Token 优化模式）
+    ///
+    /// Focus Summary 替代完整 WorldState，Action Index 替代完整描述，
+    /// Skill Index 替代完整指令。LLM 通过 tool calling 按需获取详情。
+    pub(super) fn build_lean_direct_prompt(
+        &self,
+        params: LeanPromptParams<'_>,
+    ) -> anyhow::Result<String> {
+        let LeanPromptParams {
+            world_state,
+            memory_context,
+            validation_feedback,
+            persona_desc,
+            agent_name,
+            focus_summary,
+            critical_preload,
+            use_tool_calling,
+        } = params;
+
+        let feedback_section = match validation_feedback {
+            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            None => String::new(),
+        };
+
+        let memory_section = if memory_context.is_empty() {
+            String::new()
+        } else {
+            format!("\n### 记忆上下文\n{memory_context}\n")
+        };
+
+        let summary_context = self.get_summary_context();
+        let outcome_section = self.get_outcome_context();
+
+        // Lean: Focus Summary 替代完整 WorldState
+        let world_state_section = match focus_summary {
+            Some(fs) => {
+                let mut narrative = format!("### 焦点状态\n{}\n", fs.narrative);
+                // Task 9: 追加 Critical preload 数据
+                if let Some(preload) = critical_preload {
+                    narrative.push_str(preload);
+                }
+                narrative
+            }
+            None => self.build_world_state_section(world_state), // 无 summary 时降级到完整模式
+        };
+
+        // Lean: Action Index 替代完整描述
+        let actions = self.available_actions.read().unwrap();
+        let action_descriptions = Self::build_action_index(&actions);
+        drop(actions);
+        let action_field_hints = String::new(); // Lean 模式不需要，通过 tool 查询
+
+        // Lean: Skill Index 替代完整指令
+        let skill_instructions = {
+            let cache = self.skill_cache.read().unwrap();
+            Self::build_skill_index_from_cache(&cache)
+        };
+
+        let tool_calling_guidance = if use_tool_calling {
+            "## 输出格式\n直接输出以下 JSON。工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n".to_string()
+        } else {
+            "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
+        };
+
+        let prompt_template = self.prompt_template();
+
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
+
+        // Phase 0a: prompt section token 估算
+        let estimate = PromptSectionEstimate {
+            system: PromptSectionEstimate::estimate_tokens(tool_calling_guidance.len()),
+            persona: PromptSectionEstimate::estimate_tokens(persona_desc.len()),
+            world_state: PromptSectionEstimate::estimate_tokens(world_state_section.len()),
+            action_descriptions: PromptSectionEstimate::estimate_tokens(action_descriptions.len()),
+            memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
+            skill_instructions: PromptSectionEstimate::estimate_tokens(skill_instructions.len()),
+            other: PromptSectionEstimate::estimate_tokens(
+                feedback_section.len() + summary_context.len() + outcome_section.len() + agent_name.len(),
+            ),
+        };
+
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("feedback_section".to_string(), feedback_section);
+        vars.insert("agent_name".to_string(), agent_name.to_string());
+        vars.insert("persona".to_string(), persona_desc.to_string());
+        vars.insert("world_state_section".to_string(), world_state_section);
+        vars.insert("memory_section".to_string(), memory_section);
+        vars.insert("dialogue_section".to_string(), String::new());
+        vars.insert("summary_context".to_string(), summary_context);
+        vars.insert("action_descriptions".to_string(), action_descriptions);
+        vars.insert("action_field_hints".to_string(), action_field_hints);
+        vars.insert("outcome_section".to_string(), outcome_section);
+        vars.insert("skill_instructions".to_string(), skill_instructions);
+        vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
+        tracing::info!(
+            "[prompt-section-estimate][lean] total~{}tokens | persona={} world_state={} actions={} memory={} skills={} other={}",
+            estimate.total_tokens(),
+            estimate.persona, estimate.world_state, estimate.action_descriptions,
+            estimate.memory, estimate.skill_instructions, estimate.other
+        );
+
+        Ok(tmpl.render_all(&vars))
+    }
+
+    /// 构建 Action Index（名称 + 描述，无字段提示）
+    ///
+    /// Lean 模式下替代完整 action_descriptions + action_field_hints。
+    /// LLM 通过 get_action_detail(action_name) 工具按需获取详情。
+    fn build_action_index(actions: &[AvailableAction]) -> String {
+        if actions.is_empty() {
+            return "- 休息: 休息 (查询详情: get_action_detail(\"休息\"))\n".to_string();
+        }
+        let mut s = String::from("## 可用动作 (查询详情: get_action_detail(action_name))\n\n");
+        for action in actions {
+            let display_name = if action.name.is_empty() {
+                action.action.clone()
+            } else {
+                action.name.clone()
+            };
+            let desc = if action.description.is_empty() {
+                display_name.clone()
+            } else {
+                action.description.clone()
+            };
+            s.push_str(&format!("- {}: {}\n", display_name, desc));
+        }
+        s
+    }
+
+    /// 构建 Skill Index（仅名称，从 skill_cache）
+    ///
+    /// Lean 模式下替代完整 skill_instructions。
+    /// LLM 通过 skill_view(skill_id) 工具按需获取行为指引。
+    fn build_skill_index_from_cache(
+        skill_cache: &std::collections::HashMap<String, String>,
+    ) -> String {
+        if skill_cache.is_empty() {
+            return String::new();
+        }
+        let mut s = String::from("## 已掌握技能 (查询详情: skill_view(skill_id))\n\n");
+        for id in skill_cache.keys() {
+            s.push_str(&format!("- {}\n", id));
+        }
+        s
     }
 }
 
