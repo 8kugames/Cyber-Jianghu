@@ -69,6 +69,7 @@ pub fn build_game_rules_from_config(
     version: String,
     immediate_events: Option<cyber_jianghu_protocol::ImmediateEventConfig>,
     intent_batch: Option<cyber_jianghu_protocol::IntentBatchConfig>,
+    dialogue_context: Option<cyber_jianghu_protocol::DialogueContextConfig>,
 ) -> GameRules {
     let available_actions = ActionRegistry::build_available_actions();
 
@@ -167,6 +168,7 @@ pub fn build_game_rules_from_config(
             }
         }),
         daily_summary: None,
+        dialogue_context,
     }
 }
 

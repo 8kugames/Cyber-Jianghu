@@ -253,6 +253,7 @@ async fn handle_websocket(
         let game_rules_version = gd.game_rules.version.clone();
         let immediate_events = gd.game_rules.data.immediate_events.clone();
         let intent_batch = gd.game_rules.data.intent_batch.clone();
+        let dialogue_context = gd.game_rules.data.dialogue_context.clone();
         drop(gd);
 
         let survival = super::types::SurvivalConfig {
@@ -266,6 +267,7 @@ async fn handle_websocket(
             game_rules_version,
             immediate_events,
             intent_batch,
+            dialogue_context,
         );
 
         // 加载世界观规则（可选）
@@ -307,6 +309,7 @@ async fn handle_websocket(
         let game_rules_version;
         let immediate_events;
         let intent_batch;
+        let dialogue_context;
         {
             let gd = state.game_data.get();
             tick_duration_secs = gd.game_rules.data.agent_state.tick.real_seconds_per_tick as u64;
@@ -330,6 +333,7 @@ async fn handle_websocket(
             game_rules_version = gd.game_rules.version.clone();
             immediate_events = gd.game_rules.data.immediate_events.clone();
             intent_batch = gd.game_rules.data.intent_batch.clone();
+            dialogue_context = gd.game_rules.data.dialogue_context.clone();
         }
 
         let game_rules_for_protocol = build_game_rules_from_config(
@@ -338,6 +342,7 @@ async fn handle_websocket(
             game_rules_version,
             immediate_events,
             intent_batch,
+            dialogue_context,
         );
 
         let config_update = ServerMessage::ConfigUpdate {
