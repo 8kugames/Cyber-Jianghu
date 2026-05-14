@@ -19,6 +19,7 @@ mod memory_tool;
 mod recipe_tool;
 mod relationship_tool;
 mod skill_tool;
+mod state_tool;
 
 pub use budget::ToolResultBudget;
 pub use config::{EarthSoulConfig, LoopGuardConfig, ToolBudgetConfig};
