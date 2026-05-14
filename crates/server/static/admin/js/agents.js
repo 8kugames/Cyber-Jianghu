@@ -42,6 +42,8 @@ function getActionTypeDisplay(actionType) {
   return actionTypeMap[actionType] || actionType;
 }
 
+// resolveTargetName 已移至 utils.js（全局共享）
+
 var allAgentsMap = {}; // O(1) lookup map for agents
 
 async function loadAllAgents() {
@@ -355,6 +357,18 @@ document.addEventListener("click", function (event) {
   var refillDeleteBtn = event.target.closest(".refill-delete-btn[data-agent-id][data-item-id]");
   if (refillDeleteBtn) {
     deleteRefillRule(refillDeleteBtn.dataset.agentId, refillDeleteBtn.dataset.itemId);
+    return;
+  }
+
+  var roleAssignBtn = event.target.closest(".role-assign-btn[data-agent-id]");
+  if (roleAssignBtn) {
+    assignRoleToAgent(roleAssignBtn.dataset.agentId);
+    return;
+  }
+
+  var roleRemoveBtn = event.target.closest(".role-remove-btn[data-agent-id][data-role-key]");
+  if (roleRemoveBtn) {
+    removeRoleFromAgent(roleRemoveBtn.dataset.agentId, roleRemoveBtn.dataset.roleKey);
   }
 });
 
@@ -519,10 +533,29 @@ function renderExperiences(data) {
           tianhunHtml +
           "</div></div>";
 
-      // 伪装地魂：动作
+      // 伪装地魂：动作（解析 action_data 显示说话/私语内容）
       html +=
         '<div class="exp-action"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">';
-      html += '<div class="soul-text">' + escapeHtml(actionType) + "</div>";
+      var expAd = exp.action_data;
+      if (typeof expAd === "string") {
+        try { expAd = JSON.parse(expAd); } catch(e) { expAd = {}; }
+      }
+      if (!expAd || typeof expAd !== "object") expAd = {};
+      var expContent = expAd.content || "";
+      var expAt = exp.action_type || "";
+      if ((expAt === "说话" || expAt === "speak") && expContent) {
+        html += '<div class="soul-text">向众人说话："' + escapeHtml(expContent) + '"</div>';
+      } else if ((expAt === "私语" || expAt === "whisper") && expContent) {
+        var expTarget = resolveTargetName(expAd.target_agent_id);
+        html += '<div class="soul-text">向 ' + escapeHtml(expTarget) + ' 密语："' + escapeHtml(expContent) + '"</div>';
+      } else if ((expAt === "大喊" || expAt === "shout") && expContent) {
+        html += '<div class="soul-text">大声喊道："' + escapeHtml(expContent) + '"</div>';
+      } else {
+        html += '<div class="soul-text">' + escapeHtml(actionType) + "</div>";
+        if (Object.keys(expAd).length > 0) {
+          html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(expAd)) + "</span>";
+        }
+      }
       html += "</div></div>";
 
       html += "</div></div>";
@@ -605,12 +638,7 @@ function renderTickCard(exp, metadata, time) {
   return html;
 }
 
-// 天魂三层审查标签中文映射
-var LAYER_NAMES = {
-  layer1: "动作审查",
-  layer2: "规则校验",
-  layer3: "意图审查",
-};
+// LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
 function renderServerSoulInline(label, data, type) {
@@ -661,37 +689,38 @@ function renderServerSoulInline(label, data, type) {
       html +=
         '<div class="soul-narrative">' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
-    // 地魂：最终行动，speak/whisper 特殊展示
+    // 地魂：最终行动，说话/私语/大喊特殊展示
+    // 注意：action_type 存储为中文（说话/私语/shout），需同时兼容英文
     if (data.action_type) {
       var at = data.action_type;
-      var ad =
-        data.action_data && typeof data.action_data === "object"
-          ? data.action_data
-          : {};
+      var ad = data.action_data;
+      if (typeof ad === "string") {
+        try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
+      }
+      if (!ad || typeof ad !== "object") ad = {};
       var content = ad.content || "";
       var targetId = ad.target_agent_id;
 
-      if (at === "speak") {
+      if (at === "说话" || at === "speak") {
         var speakLabel = targetId ? "对某人说话" : "向众人说话";
+        if (targetId) {
+          speakLabel = "对" + resolveTargetName(targetId) + "说话";
+        }
         html +=
           '<div class="soul-text">' +
           escapeHtml(speakLabel) +
           '："' +
           escapeHtml(content) +
           '"</div>';
-      } else if (at === "whisper") {
-        var targetName = targetId || "某人";
-        // 使用预建的 O(1) 索引进行查找
-        if (allAgentsMap && targetId && allAgentsMap[targetId]) {
-          targetName = allAgentsMap[targetId].name || targetName;
-        }
+      } else if (at === "私语" || at === "whisper") {
+        var targetName = resolveTargetName(targetId);
         html +=
           '<div class="soul-text">向 ' +
           escapeHtml(targetName) +
           ' 密语："' +
           escapeHtml(content) +
           '"</div>';
-      } else if (at === "shout") {
+      } else if (at === "大喊" || at === "shout") {
         html +=
           '<div class="soul-text">大声喊道："' +
           escapeHtml(content) +
@@ -830,6 +859,9 @@ async function renderInventoryManage(agent) {
 
   // Vendor 补货规则配置（仅 write token 可编辑）
   html += await renderVendorRefillSection(agent.id);
+
+  // 角色身份管理
+  html += await renderRoleSection(agent.id);
 
   return html;
 }
@@ -1188,6 +1220,153 @@ async function deleteRefillRule(agentId, itemId) {
       }
     } else {
       showToast("删除失败", "error");
+    }
+  } catch (e) {
+    if (e.name !== "ApiError") {
+      showToast("网络请求失败", "error");
+    }
+  }
+}
+
+// ============================================================================
+// 角色身份管理
+// ============================================================================
+
+var availableRolesCache = null;
+
+async function loadAvailableRoles() {
+  if (availableRolesCache) return availableRolesCache;
+  try {
+    var res = await apiFetch(API.BASE + "/roles");
+    if (res.ok) {
+      availableRolesCache = await res.json();
+    }
+  } catch (e) {
+    if (e.name !== "ApiError") {
+      console.warn("[roles] Failed to load roles:", e);
+    }
+  }
+  return availableRolesCache || [];
+}
+
+async function renderRoleSection(agentId) {
+  var roles = [];
+  try {
+    var res = await apiFetch(API.BASE + "/agent/" + agentId + "/roles");
+    if (res.ok) roles = await res.json();
+  } catch (e) {
+    if (e.name !== "ApiError") {
+      console.warn("[roles] Failed to load:", e);
+    }
+  }
+
+  var isWrite = authTokenType === "write";
+  var html =
+    '<div class="detail-section">' +
+    '<div class="detail-title">角色身份</div>';
+
+  if (roles.length === 0) {
+    html +=
+      '<div style="color: var(--text-subtle); font-size: 13px; text-align: center; padding: 10px;">未分配角色身份</div>';
+  } else {
+    html += '<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;">';
+    roles.forEach(function (r) {
+      html +=
+        '<span style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(229,192,123,0.15); border: 1px solid rgba(229,192,123,0.3); border-radius: 4px; font-size: 13px; color: var(--text-primary);">' +
+        escapeHtml(r.role_key) +
+        (isWrite
+          ? '<button class="role-remove-btn" data-agent-id="' +
+            escapeHtml(agentId) +
+            '" data-role-key="' +
+            escapeHtml(r.role_key) +
+            '" style="background: none; border: none; color: var(--text-subtle); cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1;">&times;</button>'
+          : "") +
+        "</span>";
+    });
+    html += "</div>";
+  }
+
+  if (isWrite) {
+    var availableRoles = await loadAvailableRoles();
+    var assignedKeys = roles.map(function (r) { return r.role_key; });
+    var unassigned = availableRoles.filter(function (r) {
+      return assignedKeys.indexOf(r) === -1;
+    });
+
+    if (unassigned.length > 0) {
+      var optionsHtml = unassigned
+        .map(function (r) {
+          return (
+            '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>'
+          );
+        })
+        .join("");
+      html +=
+        '<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">' +
+        '<select id="role-assign-select" class="form-input" style="flex: 1; min-width: 120px;">' +
+        optionsHtml +
+        "</select>" +
+        '<button class="btn btn-success role-assign-btn" data-agent-id="' +
+        escapeHtml(agentId) +
+        '">授予角色</button>' +
+        "</div>";
+    } else if (availableRoles.length > 0) {
+      html +=
+        '<div style="font-size: 12px; color: var(--text-subtle); text-align: center;">已拥有全部角色身份</div>';
+    }
+  }
+
+  html += "</div>";
+  return html;
+}
+
+async function assignRoleToAgent(agentId) {
+  var select = document.getElementById("role-assign-select");
+  if (!select) return;
+  var roleKey = select.value;
+  if (!roleKey) return;
+
+  try {
+    var res = await apiFetch(API.BASE + "/agent/" + agentId + "/roles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role_key: roleKey }),
+    });
+    if (res.ok) {
+      showToast("已授予角色: " + roleKey, "success");
+      var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
+      if (agentRes.ok) {
+        var agent = await agentRes.json();
+        document.getElementById("modal-tab-inventory").innerHTML =
+          await renderInventoryManage(agent);
+      }
+    } else {
+      var data = await res.json();
+      showToast(data.error || "授予角色失败", "error");
+    }
+  } catch (e) {
+    if (e.name !== "ApiError") {
+      showToast("网络请求失败", "error");
+    }
+  }
+}
+
+async function removeRoleFromAgent(agentId, roleKey) {
+  try {
+    var res = await apiFetch(
+      API.BASE + "/agent/" + agentId + "/roles/" + encodeURIComponent(roleKey),
+      { method: "DELETE" },
+    );
+    if (res.ok) {
+      showToast("已移除角色: " + roleKey, "success");
+      var agentRes = await apiFetch(API.BASE + "/agent/" + currentModalAgentId);
+      if (agentRes.ok) {
+        var agent = await agentRes.json();
+        document.getElementById("modal-tab-inventory").innerHTML =
+          await renderInventoryManage(agent);
+      }
+    } else {
+      showToast("移除角色失败", "error");
     }
   } catch (e) {
     if (e.name !== "ApiError") {
