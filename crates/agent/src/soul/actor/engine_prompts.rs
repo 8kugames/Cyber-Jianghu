@@ -68,6 +68,7 @@ impl super::CognitiveEngine {
         vars.insert("persona".to_string(), persona_desc.to_string());
         vars.insert("world_state_section".to_string(), world_state_section);
         vars.insert("memory_section".to_string(), memory_section);
+        vars.insert("dialogue_section".to_string(), String::new()); // 对话已在memory_context中，此处传空避免模板{dialogue_section}字面输出
         vars.insert("summary_context".to_string(), summary_context);
         vars.insert("action_descriptions".to_string(), action_descriptions);
         vars.insert("action_field_hints".to_string(), action_field_hints);
