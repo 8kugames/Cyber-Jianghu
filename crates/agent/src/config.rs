@@ -373,6 +373,10 @@ impl std::fmt::Display for RuntimeMode {
     }
 }
 
+fn default_token_opt_enabled() -> bool {
+    true
+}
+
 fn default_true() -> bool {
     true
 }
@@ -784,10 +788,11 @@ impl Default for ObserverConfig {
 // ============================================================================
 
 /// Token 优化总开关与子模块配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TokenOptimizationConfig {
-    /// 总开关（默认关闭，安全回退）
+    /// 总开关（默认开启）
+    #[serde(default = "default_token_opt_enabled")]
     pub enabled: bool,
     /// ReflectorSoul 优化：消灭重试循环
     pub reflector: ReflectorOptConfig,
@@ -797,6 +802,18 @@ pub struct TokenOptimizationConfig {
     pub delta: DeltaConfig,
     /// Tool 预加载（后续任务）
     pub tool_preload: ToolPreloadConfig,
+}
+
+impl Default for TokenOptimizationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            reflector: ReflectorOptConfig::default(),
+            attention: AttentionConfig::default(),
+            delta: DeltaConfig::default(),
+            tool_preload: ToolPreloadConfig::default(),
+        }
+    }
 }
 
 /// ReflectorSoul 优化配置
