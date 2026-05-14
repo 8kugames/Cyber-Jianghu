@@ -20,6 +20,7 @@ pub mod translation; // 中文 LLM 边界翻译层
 pub use chain::CognitiveChain;
 pub use chaos::{ChaosConfig, ChaosGenerator};
 pub use engine::{CognitiveEngine, CognitiveEngineConfig};
+pub use engine_prompts::PromptSectionEstimate;
 pub use prompt_cache::PromptCache;
 pub use stages::{CognitiveStage, PerceptionMotivationResponse, StageOutput};
 pub use summary_window::{NarrativeSummary, NarrativeSummaryWindow};
