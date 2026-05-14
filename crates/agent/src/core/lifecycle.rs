@@ -418,19 +418,25 @@ impl super::Agent {
                 }
                 // 2b. Dialogue: 写入 DialogueContextManager（统一 game tick 时间域）
                 if let ServerMessage::Dialogue { message } = &msg {
-                    use cyber_jianghu_protocol::DialogueMessage;
                     use crate::component::dialogue::DialogueRole;
+                    use cyber_jianghu_protocol::DialogueMessage;
 
                     let dm = dialogue_manager.clone();
                     let dialogue_message = message.clone();
                     let tick = current_tick.load(std::sync::atomic::Ordering::Relaxed);
 
                     tokio::spawn(async move {
-                        let Some(ref dm) = dm else { return; };
+                        let Some(ref dm) = dm else {
+                            return;
+                        };
                         let mut guard = dm.write().await;
 
                         match dialogue_message {
-                            DialogueMessage::Content { session_id, from_agent_id, content } => {
+                            DialogueMessage::Content {
+                                session_id,
+                                from_agent_id,
+                                content,
+                            } => {
                                 guard.add_message(
                                     &session_id,
                                     from_agent_id,
@@ -439,8 +445,16 @@ impl super::Agent {
                                     tick,
                                 );
                             }
-                            DialogueMessage::Request { from_agent_id, opening_remark, .. } => {
-                                let session_id = format!("request_{}_{}", from_agent_id, chrono::Utc::now().timestamp());
+                            DialogueMessage::Request {
+                                from_agent_id,
+                                opening_remark,
+                                ..
+                            } => {
+                                let session_id = format!(
+                                    "request_{}_{}",
+                                    from_agent_id,
+                                    chrono::Utc::now().timestamp()
+                                );
                                 guard.add_message(
                                     &session_id,
                                     from_agent_id,
@@ -449,9 +463,21 @@ impl super::Agent {
                                     tick,
                                 );
                             }
-                            DialogueMessage::Accept { session_id, from_agent_id } => {
-                                let pending_id = format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, from_agent_id);
-                                guard.migrate_session(&pending_id, &session_id, from_agent_id, tick);
+                            DialogueMessage::Accept {
+                                session_id,
+                                from_agent_id,
+                            } => {
+                                let pending_id = format!(
+                                    "{}{}",
+                                    crate::component::dialogue::PENDING_SESSION_PREFIX,
+                                    from_agent_id
+                                );
+                                guard.migrate_session(
+                                    &pending_id,
+                                    &session_id,
+                                    from_agent_id,
+                                    tick,
+                                );
                                 guard.add_message(
                                     &session_id,
                                     from_agent_id,
@@ -460,8 +486,16 @@ impl super::Agent {
                                     tick,
                                 );
                             }
-                            DialogueMessage::Reject { session_id, from_agent_id, reason } => {
-                                let pending_id = format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, from_agent_id);
+                            DialogueMessage::Reject {
+                                session_id,
+                                from_agent_id,
+                                reason,
+                            } => {
+                                let pending_id = format!(
+                                    "{}{}",
+                                    crate::component::dialogue::PENDING_SESSION_PREFIX,
+                                    from_agent_id
+                                );
                                 guard.close_session(&pending_id);
                                 warn!(
                                     "Dialogue rejected by {}: session={}, reason={:?}",

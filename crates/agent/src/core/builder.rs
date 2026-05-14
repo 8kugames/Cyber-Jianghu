@@ -238,13 +238,19 @@ impl AgentBuilder {
     }
 
     /// 设置 Delta Engine（增量检测，零 token）
-    pub fn with_delta_engine(mut self, engine: crate::component::delta_engine::DeltaEngine) -> Self {
+    pub fn with_delta_engine(
+        mut self,
+        engine: crate::component::delta_engine::DeltaEngine,
+    ) -> Self {
         self.delta_engine = Some(engine);
         self
     }
 
     /// 设置 Attention Controller（规则过滤 + 轻量 LLM 排序）
-    pub fn with_attention_controller(mut self, ctrl: crate::component::attention::AttentionController) -> Self {
+    pub fn with_attention_controller(
+        mut self,
+        ctrl: crate::component::attention::AttentionController,
+    ) -> Self {
         self.attention_controller = Some(ctrl);
         self
     }

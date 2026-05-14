@@ -71,8 +71,9 @@ impl DialogueContextManager {
                 self.sessions.remove(&old_session_id);
             }
         }
-        self.sessions.entry(session_id.to_string()).or_insert_with(|| {
-            DialogueSession {
+        self.sessions
+            .entry(session_id.to_string())
+            .or_insert_with(|| DialogueSession {
                 session_id: session_id.to_string(),
                 partner_id,
                 partner_name: String::new(),
@@ -80,8 +81,7 @@ impl DialogueContextManager {
                 created_at: tick_id,
                 last_active_tick: tick_id,
                 is_active: true,
-            }
-        });
+            });
         // IMPORTANT: always update partner_id even if session already exists
         if let Some(session) = self.sessions.get_mut(session_id) {
             session.partner_id = partner_id;
@@ -128,8 +128,10 @@ impl DialogueContextManager {
         content: &str,
         tick_id: i64,
     ) {
-        let session = self.sessions.entry(session_id.to_string()).or_insert_with(|| {
-            DialogueSession {
+        let session = self
+            .sessions
+            .entry(session_id.to_string())
+            .or_insert_with(|| DialogueSession {
                 session_id: session_id.to_string(),
                 partner_id,
                 partner_name: String::new(),
@@ -137,8 +139,7 @@ impl DialogueContextManager {
                 created_at: tick_id,
                 last_active_tick: tick_id,
                 is_active: true,
-            }
-        });
+            });
 
         session.partner_id = partner_id;
         session.last_active_tick = tick_id;
@@ -226,11 +227,8 @@ impl DialogueContextManager {
     }
 
     pub fn get_active_sessions_context(&self) -> String {
-        let active_sessions: Vec<&DialogueSession> = self
-            .sessions
-            .values()
-            .filter(|s| s.is_active)
-            .collect();
+        let active_sessions: Vec<&DialogueSession> =
+            self.sessions.values().filter(|s| s.is_active).collect();
 
         if active_sessions.is_empty() {
             return String::new();
@@ -315,7 +313,13 @@ mod tests {
         let partner_id = Uuid::new_v4();
 
         manager.add_message("session1", partner_id, DialogueRole::Own, "你好", 1);
-        manager.add_message("session1", partner_id, DialogueRole::Partner, "你好，我是...", 2);
+        manager.add_message(
+            "session1",
+            partner_id,
+            DialogueRole::Partner,
+            "你好，我是...",
+            2,
+        );
 
         let history = manager.get_session_history("session1").unwrap();
         assert_eq!(history.messages.len(), 2);
@@ -327,7 +331,13 @@ mod tests {
         let partner_id = Uuid::new_v4();
 
         for i in 1..=5 {
-            manager.add_message("session1", partner_id, DialogueRole::Own, &format!("消息{}", i), i);
+            manager.add_message(
+                "session1",
+                partner_id,
+                DialogueRole::Own,
+                &format!("消息{}", i),
+                i,
+            );
         }
 
         let history = manager.get_session_history("session1").unwrap();
@@ -343,10 +353,16 @@ mod tests {
         let partner_id = Uuid::new_v4();
 
         manager.register_session("old_session", partner_id, 1);
-        assert_eq!(manager.get_session_id_by_partner(&partner_id), Some("old_session"));
+        assert_eq!(
+            manager.get_session_id_by_partner(&partner_id),
+            Some("old_session")
+        );
 
         manager.register_session("new_session", partner_id, 2);
-        assert_eq!(manager.get_session_id_by_partner(&partner_id), Some("new_session"));
+        assert_eq!(
+            manager.get_session_id_by_partner(&partner_id),
+            Some("new_session")
+        );
         assert!(manager.get_session_history("old_session").is_none());
         assert!(manager.get_session_history("new_session").is_some());
     }
@@ -364,7 +380,10 @@ mod tests {
         assert!(manager.get_session_history("pending_xyz").is_none());
         let history = manager.get_session_history("real_session_123").unwrap();
         assert_eq!(history.messages.len(), 1);
-        assert_eq!(manager.get_session_id_by_partner(&partner_id), Some("real_session_123"));
+        assert_eq!(
+            manager.get_session_id_by_partner(&partner_id),
+            Some("real_session_123")
+        );
     }
 
     #[test]
@@ -375,7 +394,10 @@ mod tests {
         manager.migrate_session("nonexistent", "new_session", partner_id, 1);
 
         assert!(manager.get_session_history("new_session").is_some());
-        assert_eq!(manager.get_session_id_by_partner(&partner_id), Some("new_session"));
+        assert_eq!(
+            manager.get_session_id_by_partner(&partner_id),
+            Some("new_session")
+        );
     }
 
     #[test]
@@ -396,7 +418,10 @@ mod tests {
         let partner_id = Uuid::new_v4();
 
         manager.register_session("session1", partner_id, 1);
-        assert_eq!(manager.get_session_id_by_partner(&partner_id), Some("session1"));
+        assert_eq!(
+            manager.get_session_id_by_partner(&partner_id),
+            Some("session1")
+        );
 
         manager.end_session("session1");
 
@@ -427,7 +452,13 @@ mod tests {
         let partner_id = Uuid::new_v4();
 
         manager.add_message("session1", partner_id, DialogueRole::Own, "你好", 1);
-        manager.add_message("session1", partner_id, DialogueRole::Partner, "你好，我是...", 2);
+        manager.add_message(
+            "session1",
+            partner_id,
+            DialogueRole::Partner,
+            "你好，我是...",
+            2,
+        );
 
         let context = manager.get_active_sessions_context();
         assert!(context.contains("与"));

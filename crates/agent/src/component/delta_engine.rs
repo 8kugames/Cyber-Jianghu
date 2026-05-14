@@ -139,7 +139,10 @@ impl DeltaEngine {
                 field: "entities".to_string(),
                 description: format!("附近存在: {}", entity.name),
                 data: serde_json::json!({ "id": entity.id, "name": entity.name }),
-                tool_hint: Some(format!("query_world(section=entities, filter={})", entity.name)),
+                tool_hint: Some(format!(
+                    "query_world(section=entities, filter={})",
+                    entity.name
+                )),
             });
         }
 
@@ -148,7 +151,10 @@ impl DeltaEngine {
             category: ChangeCategory::Location,
             urgency: Urgency::Important,
             field: "location".to_string(),
-            description: format!("当前位置: {} ({})", curr.location.name, curr.location.node_id),
+            description: format!(
+                "当前位置: {} ({})",
+                curr.location.name, curr.location.node_id
+            ),
             data: serde_json::json!({
                 "node_id": curr.location.node_id,
                 "name": curr.location.name,
@@ -314,14 +320,10 @@ impl DeltaEngine {
         prev_inv: &[cyber_jianghu_protocol::InventoryItem],
         changes: &mut Vec<StateChange>,
     ) {
-        let curr_map: HashMap<&str, &cyber_jianghu_protocol::InventoryItem> = curr_inv
-            .iter()
-            .map(|i| (i.item_id.as_str(), i))
-            .collect();
-        let prev_map: HashMap<&str, &cyber_jianghu_protocol::InventoryItem> = prev_inv
-            .iter()
-            .map(|i| (i.item_id.as_str(), i))
-            .collect();
+        let curr_map: HashMap<&str, &cyber_jianghu_protocol::InventoryItem> =
+            curr_inv.iter().map(|i| (i.item_id.as_str(), i)).collect();
+        let prev_map: HashMap<&str, &cyber_jianghu_protocol::InventoryItem> =
+            prev_inv.iter().map(|i| (i.item_id.as_str(), i)).collect();
 
         // 新增或数量变化
         for (id, item) in &curr_map {
@@ -536,11 +538,7 @@ mod tests {
         assert!(!delta.changes.is_empty());
 
         // 应包含属性、实体、位置、事件、背包变化
-        let categories: HashSet<_> = delta
-            .changes
-            .iter()
-            .map(|c| c.category.clone())
-            .collect();
+        let categories: HashSet<_> = delta.changes.iter().map(|c| c.category.clone()).collect();
         assert!(categories.contains(&ChangeCategory::Survival));
         assert!(categories.contains(&ChangeCategory::Social));
         assert!(categories.contains(&ChangeCategory::Location));
@@ -561,14 +559,8 @@ mod tests {
     fn test_survival_critical_threshold() {
         let engine = test_engine();
         // hp threshold = 0.3 → hp <= 30 时 Critical
-        let prev_attrs = HashMap::from([
-            ("hp".to_string(), 50),
-            ("hunger".to_string(), 50),
-        ]);
-        let curr_attrs = HashMap::from([
-            ("hp".to_string(), 20),
-            ("hunger".to_string(), 50),
-        ]);
+        let prev_attrs = HashMap::from([("hp".to_string(), 50), ("hunger".to_string(), 50)]);
+        let curr_attrs = HashMap::from([("hp".to_string(), 20), ("hunger".to_string(), 50)]);
 
         let prev = build_world_state(prev_attrs, vec![], vec![], vec![], default_location());
         let mut curr = prev.clone();
@@ -606,10 +598,7 @@ mod tests {
     #[test]
     fn test_survival_no_change() {
         let engine = test_engine();
-        let attrs = HashMap::from([
-            ("hp".to_string(), 80),
-            ("hunger".to_string(), 50),
-        ]);
+        let attrs = HashMap::from([("hp".to_string(), 80), ("hunger".to_string(), 50)]);
 
         let prev = build_world_state(attrs.clone(), vec![], vec![], vec![], default_location());
         let curr = build_world_state(attrs, vec![], vec![], vec![], default_location());
@@ -684,8 +673,13 @@ mod tests {
         let e1 = make_event("有人打架");
         let e2 = make_event("天降大雨");
 
-        let prev =
-            build_world_state(HashMap::new(), vec![], vec![e1.clone()], vec![], default_location());
+        let prev = build_world_state(
+            HashMap::new(),
+            vec![],
+            vec![e1.clone()],
+            vec![],
+            default_location(),
+        );
         let curr = build_world_state(
             HashMap::new(),
             vec![],
@@ -746,8 +740,7 @@ mod tests {
             vec![make_item("sword", "铁剑", 1)],
             default_location(),
         );
-        let curr =
-            build_world_state(HashMap::new(), vec![], vec![], vec![], default_location());
+        let curr = build_world_state(HashMap::new(), vec![], vec![], vec![], default_location());
 
         let delta = engine.compute(Some(&prev), &curr);
         let inv: Vec<_> = delta
@@ -773,10 +766,8 @@ mod tests {
             gatherable_items: vec![],
         };
 
-        let prev =
-            build_world_state(HashMap::new(), vec![], vec![], vec![], prev_loc);
-        let curr =
-            build_world_state(HashMap::new(), vec![], vec![], vec![], curr_loc);
+        let prev = build_world_state(HashMap::new(), vec![], vec![], vec![], prev_loc);
+        let curr = build_world_state(HashMap::new(), vec![], vec![], vec![], curr_loc);
 
         let delta = engine.compute(Some(&prev), &curr);
         let loc_changes: Vec<_> = delta

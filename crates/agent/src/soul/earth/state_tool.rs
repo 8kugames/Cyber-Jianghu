@@ -226,9 +226,7 @@ pub fn execute_list_skills(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cyber_jianghu_protocol::{
-        AgentSelfState, Location, WorldState, WorldTime,
-    };
+    use cyber_jianghu_protocol::{AgentSelfState, Location, WorldState, WorldTime};
     use std::collections::HashMap;
     use uuid::Uuid;
 
@@ -299,8 +297,14 @@ mod tests {
     #[test]
     fn test_list_skills_with_entries() {
         let mut cache = HashMap::new();
-        cache.insert("social/trust-reading".to_string(), "识人之明指引".to_string());
-        cache.insert("cognitive/risk-assessment".to_string(), "审时度势指引".to_string());
+        cache.insert(
+            "social/trust-reading".to_string(),
+            "识人之明指引".to_string(),
+        );
+        cache.insert(
+            "cognitive/risk-assessment".to_string(),
+            "审时度势指引".to_string(),
+        );
         let result = execute_list_skills(&cache);
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["total"], 2);

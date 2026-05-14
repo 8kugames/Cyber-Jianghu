@@ -45,7 +45,10 @@ pub struct RuleEngine {
 
 #[async_trait]
 impl Validator for RuleEngine {
-    async fn validate(&self, request: ValidationRequest) -> anyhow::Result<PipelineValidationResult> {
+    async fn validate(
+        &self,
+        request: ValidationRequest,
+    ) -> anyhow::Result<PipelineValidationResult> {
         // 构建验证上下文
         let tick_id = request.intent.tick_id;
         let (available_item_ids, reachable_node_ids) = request

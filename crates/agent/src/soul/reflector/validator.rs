@@ -95,8 +95,9 @@ impl ReflectorSoul {
     /// 暴露 RuleEngine 的 reject 模板配置句柄，供生命周期回调热更新
     pub fn prompt_config_handle(
         &self,
-    ) -> Arc<std::sync::RwLock<Option<Arc<crate::soul::actor::prompt_template::PromptTemplateConfig>>>>
-    {
+    ) -> Arc<
+        std::sync::RwLock<Option<Arc<crate::soul::actor::prompt_template::PromptTemplateConfig>>>,
+    > {
         self.rule_engine.prompt_config_handle()
     }
 
@@ -131,16 +132,16 @@ impl ReflectorSoul {
         true
     }
 
-    fn adaptive_needs_llm(
-        intent: &crate::models::Intent,
-        config: &GradedValidationConfig,
-    ) -> bool {
+    fn adaptive_needs_llm(intent: &crate::models::Intent, config: &GradedValidationConfig) -> bool {
         let action_data = match &intent.action_data {
             Some(d) => d,
             None => return false,
         };
 
-        if let Some(field_name) = config.adaptive_field_mapping.get(intent.action_type.as_str()) {
+        if let Some(field_name) = config
+            .adaptive_field_mapping
+            .get(intent.action_type.as_str())
+        {
             match field_name.as_str() {
                 "target_location" => action_data
                     .get(field_name)
@@ -170,7 +171,10 @@ impl ReflectorSoul {
     }
 
     /// Layer 1：确定性 action_type 校验
-    fn validate_action_type(&self, intent: &crate::models::Intent) -> std::result::Result<(), String> {
+    fn validate_action_type(
+        &self,
+        intent: &crate::models::Intent,
+    ) -> std::result::Result<(), String> {
         if intent.action_type.as_str() == "休息" {
             return Ok(());
         }
@@ -266,7 +270,10 @@ impl ReflectorSoul {
     }
 
     /// Layer 1/2/3 统一出口
-    pub async fn validate_pipeline(&self, request: ValidationRequest) -> Result<PipelineValidationResult> {
+    pub async fn validate_pipeline(
+        &self,
+        request: ValidationRequest,
+    ) -> Result<PipelineValidationResult> {
         let ValidationRuntimeConfig {
             graded_config,
             consecutive_follow_count,
@@ -367,7 +374,8 @@ impl ReflectorSoul {
                     const SURVIVAL_OVERRIDE_THRESHOLD: i32 = 40;
                     let hunger = world_state.self_state.hunger();
                     let thirst = world_state.self_state.thirst();
-                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD || thirst < SURVIVAL_OVERRIDE_THRESHOLD {
+                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD || thirst < SURVIVAL_OVERRIDE_THRESHOLD
+                    {
                         layers.push(LayerResult {
                             layer: "layer3",
                             passed: true,
@@ -734,10 +742,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_pipeline_rejects_follow_loop_before_llm() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{"result":"approved","reason":"","narrative":"通过"}"#,
-        );
-        let reflector = ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let mock_client =
+            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
+        let reflector =
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
         let world_state = test_world_state();
         let request = ValidationRequest {
             intent: crate::models::Intent::new(
@@ -775,9 +783,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validator_trait_runs_full_pipeline() {
-        let mock_client = MockLlmClient::with_response(
-            r#"{"result":"approved","reason":"","narrative":"通过"}"#,
-        );
+        let mock_client =
+            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
         let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(
             test_world_building_rules(),
             mock_container(mock_client),

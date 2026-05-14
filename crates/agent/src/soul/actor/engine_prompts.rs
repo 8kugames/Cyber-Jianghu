@@ -9,8 +9,8 @@
 // - 构建动作描述/字段提示
 // ============================================================================
 
-use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 use crate::component::attention::FocusSummary;
+use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
 /// Lean prompt 构建参数（避免函数签名过长）
 pub(super) struct LeanPromptParams<'a> {
@@ -47,9 +47,13 @@ impl PromptSectionEstimate {
     }
 
     fn total_tokens(&self) -> usize {
-        self.system + self.persona + self.world_state
-            + self.action_descriptions + self.memory
-            + self.skill_instructions + self.other
+        self.system
+            + self.persona
+            + self.world_state
+            + self.action_descriptions
+            + self.memory
+            + self.skill_instructions
+            + self.other
     }
 }
 
@@ -115,7 +119,10 @@ impl super::CognitiveEngine {
             memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
             skill_instructions: PromptSectionEstimate::estimate_tokens(skill_instructions.len()),
             other: PromptSectionEstimate::estimate_tokens(
-                feedback_section.len() + summary_context.len() + outcome_section.len() + agent_name.len(),
+                feedback_section.len()
+                    + summary_context.len()
+                    + outcome_section.len()
+                    + agent_name.len(),
             ),
         };
 
@@ -135,8 +142,12 @@ impl super::CognitiveEngine {
         tracing::info!(
             "[prompt-section-estimate] total~{}tokens | persona={} world_state={} actions={} memory={} skills={} other={}",
             estimate.total_tokens(),
-            estimate.persona, estimate.world_state, estimate.action_descriptions,
-            estimate.memory, estimate.skill_instructions, estimate.other
+            estimate.persona,
+            estimate.world_state,
+            estimate.action_descriptions,
+            estimate.memory,
+            estimate.skill_instructions,
+            estimate.other
         );
 
         Ok(tmpl.render_all(&vars))
@@ -530,7 +541,10 @@ impl super::CognitiveEngine {
             memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
             skill_instructions: PromptSectionEstimate::estimate_tokens(skill_instructions.len()),
             other: PromptSectionEstimate::estimate_tokens(
-                feedback_section.len() + summary_context.len() + outcome_section.len() + agent_name.len(),
+                feedback_section.len()
+                    + summary_context.len()
+                    + outcome_section.len()
+                    + agent_name.len(),
             ),
         };
 
@@ -550,8 +564,12 @@ impl super::CognitiveEngine {
         tracing::info!(
             "[prompt-section-estimate][lean] total~{}tokens | persona={} world_state={} actions={} memory={} skills={} other={}",
             estimate.total_tokens(),
-            estimate.persona, estimate.world_state, estimate.action_descriptions,
-            estimate.memory, estimate.skill_instructions, estimate.other
+            estimate.persona,
+            estimate.world_state,
+            estimate.action_descriptions,
+            estimate.memory,
+            estimate.skill_instructions,
+            estimate.other
         );
 
         Ok(tmpl.render_all(&vars))

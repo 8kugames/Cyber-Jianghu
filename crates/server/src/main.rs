@@ -389,11 +389,10 @@ async fn main() -> Result<()> {
         )
         .route(
             "/api/dashboard/roles",
-            get(handlers::role::list_available_roles)
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    handlers::auth::require_read_token,
-                )),
+            get(handlers::role::list_available_roles).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
         )
         .route(
             "/api/dashboard/agent/{id}/roles/{role_key}",

@@ -55,10 +55,7 @@ impl AttentionController {
         let mut selected: Vec<FocusItem> = auto_focus
             .into_iter()
             .enumerate()
-            .map(|(i, change)| FocusItem {
-                change,
-                rank: i,
-            })
+            .map(|(i, change)| FocusItem { change, rank: i })
             .collect();
 
         let remaining_slots = max_items.saturating_sub(selected.len());
@@ -85,10 +82,7 @@ impl AttentionController {
 
     /// Phase 1: 规则过滤 (零 token)
     /// 返回 (auto_focus, candidates)
-    fn phase1_rule_filter(
-        &self,
-        changes: &[StateChange],
-    ) -> (Vec<StateChange>, Vec<StateChange>) {
+    fn phase1_rule_filter(&self, changes: &[StateChange]) -> (Vec<StateChange>, Vec<StateChange>) {
         let mut auto_focus = Vec::new();
         let mut candidates = Vec::new();
 
@@ -100,7 +94,10 @@ impl AttentionController {
                 (Urgency::Important, ChangeCategory::Survival) => true,
                 // Important + Social + 在社交目标中 -> 自动
                 (Urgency::Important, ChangeCategory::Social)
-                    if self.is_social_target(&change.description) => true,
+                    if self.is_social_target(&change.description) =>
+                {
+                    true
+                }
                 // 其余 -> candidate
                 _ => false,
             };
@@ -117,9 +114,7 @@ impl AttentionController {
 
     /// 检查变化是否涉及社交目标
     fn is_social_target(&self, description: &str) -> bool {
-        self.social_targets
-            .iter()
-            .any(|t| description.contains(t))
+        self.social_targets.iter().any(|t| description.contains(t))
     }
 
     /// 生成带工具提示的叙述摘要
@@ -206,12 +201,7 @@ mod tests {
                 "hp: 50 -> 20",
                 None,
             ),
-            make_change(
-                ChangeCategory::Environment,
-                Urgency::Info,
-                "天气变化",
-                None,
-            ),
+            make_change(ChangeCategory::Environment, Urgency::Info, "天气变化", None),
         ];
         let delta = make_delta(changes, false);
         let summary = ctrl.filter(&delta);
@@ -231,12 +221,7 @@ mod tests {
                 "hunger: 50 -> 30",
                 Some("query_world(section=inventory, filter=food)"),
             ),
-            make_change(
-                ChangeCategory::Environment,
-                Urgency::Info,
-                "无足轻重",
-                None,
-            ),
+            make_change(ChangeCategory::Environment, Urgency::Info, "无足轻重", None),
         ];
         let delta = make_delta(changes, false);
         let summary = ctrl.filter(&delta);
@@ -279,14 +264,12 @@ mod tests {
         let mut ctrl = AttentionController::new(default_config());
         ctrl.set_social_targets(HashSet::from(["张三".to_string()]));
 
-        let changes = vec![
-            make_change(
-                ChangeCategory::Social,
-                Urgency::Important,
-                "李四 出现",
-                None,
-            ),
-        ];
+        let changes = vec![make_change(
+            ChangeCategory::Social,
+            Urgency::Important,
+            "李四 出现",
+            None,
+        )];
         let delta = make_delta(changes, false);
         let summary = ctrl.filter(&delta);
 
@@ -367,12 +350,7 @@ mod tests {
                 "hp: 50 -> 20",
                 Some("query_world(section=state)"),
             ),
-            make_change(
-                ChangeCategory::Environment,
-                Urgency::Info,
-                "天气晴朗",
-                None,
-            ),
+            make_change(ChangeCategory::Environment, Urgency::Info, "天气晴朗", None),
         ];
         let delta = make_delta(changes, false);
         let summary = ctrl.filter(&delta);
@@ -380,7 +358,11 @@ mod tests {
         // 应包含紧急标签
         assert!(summary.narrative.contains("[紧迫]"));
         // 应包含工具提示
-        assert!(summary.narrative.contains("查询: query_world(section=state)"));
+        assert!(
+            summary
+                .narrative
+                .contains("查询: query_world(section=state)")
+        );
         // Info 级别的描述
         assert!(summary.narrative.contains("[信息]"));
         assert!(summary.narrative.contains("天气晴朗"));

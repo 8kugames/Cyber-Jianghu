@@ -20,8 +20,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, WsIntent};
-use crate::models::Intent;
 use crate::core::utils::build_world_context;
+use crate::models::Intent;
 use crate::soul::reflector::{
     PersonaInfo, PipelineValidationResult, ValidationRequest, ValidationRuntimeConfig, Validator,
 };
@@ -205,10 +205,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                                 error!("Failed to send intent: {}", e);
                                 submitted_tick.store(-1, Ordering::Release);
                             }
-                            debug!(
-                                "Intent approved and forwarded: narrative={:?}",
-                                narrative
-                            );
+                            debug!("Intent approved and forwarded: narrative={:?}", narrative);
                         }
                         Ok(Ok(PipelineValidationResult::Rejected { reason, .. })) => {
                             // 验证失败，重置 submitted_tick 允许客户端重试

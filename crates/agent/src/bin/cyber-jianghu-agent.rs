@@ -1030,12 +1030,21 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     if config.token_optimization.enabled {
         let delta_config = cyber_jianghu_agent::component::delta_engine::DeltaConfig {
             survival_thresholds: config.token_optimization.delta.survival_thresholds.clone(),
-            change_percentage_threshold: config.token_optimization.delta.change_percentage_threshold,
+            change_percentage_threshold: config
+                .token_optimization
+                .delta
+                .change_percentage_threshold,
         };
         let attention_config = config.token_optimization.attention.clone();
         builder = builder
-            .with_delta_engine(cyber_jianghu_agent::component::delta_engine::DeltaEngine::new(delta_config))
-            .with_attention_controller(cyber_jianghu_agent::component::attention::AttentionController::new(attention_config));
+            .with_delta_engine(
+                cyber_jianghu_agent::component::delta_engine::DeltaEngine::new(delta_config),
+            )
+            .with_attention_controller(
+                cyber_jianghu_agent::component::attention::AttentionController::new(
+                    attention_config,
+                ),
+            );
         info!("DeltaEngine + AttentionController 已初始化（Token 优化模式）");
     }
 

@@ -122,7 +122,8 @@ pub struct Agent {
     pub(crate) attention_controller: Option<crate::component::attention::AttentionController>,
 
     /// 当前 tick 的 FocusSummary（Delta + Attention 计算结果，供 prompt 构建使用）
-    pub(crate) current_focus_summary: Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
+    pub(crate) current_focus_summary:
+        Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
 
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
     pub(crate) device_config: Option<DeviceConfig>,
@@ -306,10 +307,21 @@ impl Agent {
     /// 初始化对话上下文管理器
     ///
     /// 从game_rules配置中读取参数，创建DialogueContextManager
-    pub fn init_dialogue_manager(&mut self, max_sessions: usize, max_rounds: usize, session_timeout_ticks: i64, dialogue_action_types: Vec<String>) {
+    pub fn init_dialogue_manager(
+        &mut self,
+        max_sessions: usize,
+        max_rounds: usize,
+        session_timeout_ticks: i64,
+        dialogue_action_types: Vec<String>,
+    ) {
         use crate::component::dialogue::DialogueContextManager;
         self.dialogue_manager = Some(std::sync::Arc::new(tokio::sync::RwLock::new(
-            DialogueContextManager::new(max_sessions, max_rounds, session_timeout_ticks, dialogue_action_types)
+            DialogueContextManager::new(
+                max_sessions,
+                max_rounds,
+                session_timeout_ticks,
+                dialogue_action_types,
+            ),
         )));
         info!(
             "Dialogue context manager initialized (max_sessions={}, max_rounds={}, timeout={})",

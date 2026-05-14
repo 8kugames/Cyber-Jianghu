@@ -593,7 +593,8 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
         .unwrap_or_default()
     };
 
-    let mut roles_map: std::collections::HashMap<Uuid, Vec<String>> = std::collections::HashMap::new();
+    let mut roles_map: std::collections::HashMap<Uuid, Vec<String>> =
+        std::collections::HashMap::new();
     for (aid, rk) in &role_rows {
         roles_map.entry(*aid).or_default().push(rk.clone());
     }
