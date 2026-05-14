@@ -116,7 +116,7 @@ pub struct StateChange {
     pub field: String,
     pub description: String,
     pub data: serde_json::Value,
-    pub tool_hint: Option<String>,  // "nearby_entities --id 张三"
+    pub tool_hint: Option<String>,  // "nearby_entities(id=张三)"
 }
 
 pub enum ChangeCategory { Survival, Social, Environment, Inventory, Location }
