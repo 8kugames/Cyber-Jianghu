@@ -11,6 +11,35 @@
 
 use cyber_jianghu_protocol::{ActionEffectInfo, ActionRequirementInfo, AvailableAction};
 
+// ============================================================================
+// Prompt Section Token 估算 (Phase 0a Instrumentation)
+// ============================================================================
+
+/// Prompt 各 section 的字符数 / 4 粗估 token 数
+#[derive(Debug, Clone, Default)]
+pub struct PromptSectionEstimate {
+    pub system: usize,
+    pub persona: usize,
+    pub world_state: usize,
+    pub action_descriptions: usize,
+    pub memory: usize,
+    pub skill_instructions: usize,
+    pub other: usize,
+}
+
+impl PromptSectionEstimate {
+    /// 字符数 / 4 粗估 tokens
+    fn estimate_tokens(chars: usize) -> usize {
+        chars / 4
+    }
+
+    fn total_tokens(&self) -> usize {
+        self.system + self.persona + self.world_state
+            + self.action_descriptions + self.memory
+            + self.skill_instructions + self.other
+    }
+}
+
 impl super::CognitiveEngine {
     /// 构建直连 WorldState 的 prompt（包含精确数据）
     ///
@@ -62,6 +91,21 @@ impl super::CognitiveEngine {
                 "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
             ))?;
 
+        // Phase 0a: prompt section token 估算（字符数 / 4，在 move 之前计算）
+        let estimate = PromptSectionEstimate {
+            system: PromptSectionEstimate::estimate_tokens(tool_calling_guidance.len()),
+            persona: PromptSectionEstimate::estimate_tokens(persona_desc.len()),
+            world_state: PromptSectionEstimate::estimate_tokens(world_state_section.len()),
+            action_descriptions: PromptSectionEstimate::estimate_tokens(
+                action_descriptions.len() + action_field_hints.len(),
+            ),
+            memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
+            skill_instructions: PromptSectionEstimate::estimate_tokens(skill_instructions.len()),
+            other: PromptSectionEstimate::estimate_tokens(
+                feedback_section.len() + summary_context.len() + outcome_section.len() + agent_name.len(),
+            ),
+        };
+
         let mut vars = std::collections::HashMap::new();
         vars.insert("feedback_section".to_string(), feedback_section);
         vars.insert("agent_name".to_string(), agent_name.to_string());
@@ -75,6 +119,12 @@ impl super::CognitiveEngine {
         vars.insert("outcome_section".to_string(), outcome_section);
         vars.insert("skill_instructions".to_string(), skill_instructions);
         vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
+        tracing::info!(
+            "[prompt-section-estimate] total~{}tokens | persona={} world_state={} actions={} memory={} skills={} other={}",
+            estimate.total_tokens(),
+            estimate.persona, estimate.world_state, estimate.action_descriptions,
+            estimate.memory, estimate.skill_instructions, estimate.other
+        );
 
         Ok(tmpl.render_all(&vars))
     }
