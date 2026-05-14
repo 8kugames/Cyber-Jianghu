@@ -181,6 +181,10 @@ pub struct CognitiveEngine {
     pub(super) world_state_store: std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>,
     /// 可用动作列表（供地魂 get_action_detail 工具使用）
     pub(super) available_actions: std::sync::RwLock<Vec<cyber_jianghu_protocol::types::entities::AvailableAction>>,
+    /// 当前 tick 的 FocusSummary（由 lifecycle 写入，供 lean prompt 读取）
+    pub(super) current_focus_summary: Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
+    /// Token 优化模式开关（由 config.token_optimization.enabled 控制）
+    pub(super) token_optimization_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl CognitiveEngine {
@@ -215,6 +219,8 @@ impl CognitiveEngine {
             relationship_store: std::sync::RwLock::new(None),
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            token_optimization_enabled: std::sync::atomic::AtomicBool::new(false),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -304,6 +310,8 @@ impl CognitiveEngine {
             relationship_store: std::sync::RwLock::new(None),
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            token_optimization_enabled: std::sync::atomic::AtomicBool::new(false),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -564,6 +572,57 @@ impl CognitiveEngine {
         *guard = actions;
     }
 
+    /// 设置 Token 优化模式开关（由 lifecycle 注入）
+    pub fn set_token_optimization_enabled(&self, enabled: bool) {
+        self.token_optimization_enabled.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 更新当前 tick 的 FocusSummary（由 lifecycle 在每 tick 写入）
+    pub async fn set_current_focus_summary(&self, summary: Option<crate::component::attention::FocusSummary>) {
+        *self.current_focus_summary.write().await = summary;
+    }
+
+    /// Task 9: Critical Focus Preload
+    ///
+    /// 当 FocusSummary 包含 Critical 紧急项时，预加载相关 WorldState 分区数据。
+    /// 在 think_direct() 内部调用，异步读取 WorldStateStore。
+    async fn preload_critical_data(&self, focus_summary: &crate::component::attention::FocusSummary) -> Option<String> {
+        // Clone Arc 在 lock 作用域内，避免跨 await 持有 std::sync::RwLockReadGuard
+        let store = {
+            let store_guard = self.world_state_store.read().unwrap();
+            store_guard.as_ref().cloned()?
+        };
+
+        let has_critical = focus_summary.items.iter()
+            .any(|i| i.change.urgency == crate::component::delta_engine::Urgency::Critical);
+        if !has_critical { return None; }
+
+        use std::collections::HashSet;
+        let categories: HashSet<_> = focus_summary.items.iter()
+            .filter(|i| i.change.urgency == crate::component::delta_engine::Urgency::Critical)
+            .map(|i| i.change.category.clone())
+            .collect();
+
+        let mut preloaded = String::from("\n### 紧急状态预加载\n");
+        for cat in &categories {
+            let section = match cat {
+                crate::component::delta_engine::ChangeCategory::Survival => "state",
+                crate::component::delta_engine::ChangeCategory::Social => "entities",
+                crate::component::delta_engine::ChangeCategory::Inventory => "inventory",
+                crate::component::delta_engine::ChangeCategory::Environment => "environment",
+                crate::component::delta_engine::ChangeCategory::Location => "environment",
+            };
+            let data = super::super::earth::state_tool::execute_query_world(section, None, &store).await;
+            if data["success"].as_bool().unwrap_or(false)
+                && let Ok(pretty) = serde_json::to_string_pretty(&data)
+            {
+                preloaded.push_str(&pretty);
+                preloaded.push('\n');
+            }
+        }
+        Some(preloaded)
+    }
+
     pub fn set_conversation_history(&mut self, history: ConversationHistory) {
         info!(
             "对话历史已注入: {} 轮, tokens≈{}",
@@ -733,14 +792,40 @@ impl CognitiveEngine {
 
         let use_tool_calling = self.llm_client.supports_tool_calling();
 
-        let prompt = self.build_direct_prompt(
-            world_state,
-            memory_context,
-            validation_feedback,
-            &persona_for_prompt,
-            &agent_name,
-            use_tool_calling,
-        )?;
+        // Token 优化路由：enabled 时使用 lean prompt，否则 full prompt
+        let prompt = if self.token_optimization_enabled.load(std::sync::atomic::Ordering::Relaxed) {
+            // 读取当前 tick 的 FocusSummary
+            let focus = self.current_focus_summary.read().await.clone();
+
+            // Task 9: Critical preload — 预加载 Critical 项的相关 WorldState 数据
+            let critical_preload = if let Some(ref fs) = focus {
+                self.preload_critical_data(fs).await
+            } else {
+                None
+            };
+
+            self.build_lean_direct_prompt(
+                super::engine_prompts::LeanPromptParams {
+                    world_state,
+                    memory_context,
+                    validation_feedback,
+                    persona_desc: &persona_for_prompt,
+                    agent_name: &agent_name,
+                    focus_summary: focus.as_ref(),
+                    critical_preload: critical_preload.as_deref(),
+                    use_tool_calling,
+                },
+            )?
+        } else {
+            self.build_direct_prompt(
+                world_state,
+                memory_context,
+                validation_feedback,
+                &persona_for_prompt,
+                &agent_name,
+                use_tool_calling,
+            )?
+        };
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {

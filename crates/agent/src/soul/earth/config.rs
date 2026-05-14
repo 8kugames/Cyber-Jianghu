@@ -14,6 +14,13 @@ pub struct EarthSoulConfig {
     pub tool_budget: ToolBudgetConfig,
     #[serde(default)]
     pub loop_guard: LoopGuardConfig,
+    /// LLM tool-calling 最大轮次（默认 2，避免 token 浪费）
+    #[serde(default = "default_max_tool_rounds")]
+    pub max_tool_rounds: usize,
+}
+
+fn default_max_tool_rounds() -> usize {
+    2
 }
 
 impl EarthSoulConfig {
