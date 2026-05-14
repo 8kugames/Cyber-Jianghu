@@ -115,6 +115,15 @@ pub struct Agent {
     /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
     pub(crate) world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
 
+    /// Delta Engine（增量检测，零 token）
+    pub(crate) delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
+
+    /// Attention Controller（规则过滤 + 轻量 LLM 排序）
+    pub(crate) attention_controller: Option<crate::component::attention::AttentionController>,
+
+    /// 当前 tick 的 FocusSummary（Delta + Attention 计算结果，供 prompt 构建使用）
+    pub(crate) current_focus_summary: Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
+
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
     pub(crate) device_config: Option<DeviceConfig>,
 
@@ -209,6 +218,9 @@ impl Agent {
             actor_llm_container: None,
             http_api_state: None,
             world_state_store: None,
+            delta_engine: None,
+            attention_controller: None,
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             device_config,
             character_config: None,
             cognitive_engine: None,
