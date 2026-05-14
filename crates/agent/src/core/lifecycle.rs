@@ -780,6 +780,9 @@ impl super::Agent {
                     }
 
                     // 更新 HTTP API 状态（供 Web Panel 查询）
+                    if let Some(ref store) = self.world_state_store {
+                        store.update(world_state.clone()).await;
+                    }
                     if let Some(ref api_state) = self.http_api_state {
                         let mut current = api_state.current_state.write().await;
                         *current = Some(world_state.clone());

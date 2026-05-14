@@ -8,3 +8,4 @@ pub mod llm;
 pub mod memory;
 pub mod persona;
 pub mod social;
+pub mod state_store;
