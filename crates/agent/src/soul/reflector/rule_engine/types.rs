@@ -326,6 +326,7 @@ mod tests {
             persona: PersonaInfo::default(),
             world_context: "test world".to_string(),
             world_state: None,
+            runtime: crate::soul::reflector::ValidationRuntimeConfig::default(),
         };
 
         let history_intents = vec![];
