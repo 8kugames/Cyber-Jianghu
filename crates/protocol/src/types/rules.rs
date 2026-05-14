@@ -82,6 +82,23 @@ pub struct GameRules {
     /// 每日 LLM 日志摘要提交配置
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_summary: Option<DailySummaryConfig>,
+
+    /// 对话上下文配置
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialogue_context: Option<DialogueContextConfig>,
+}
+
+/// 对话上下文配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DialogueContextConfig {
+    /// 最大活跃session数
+    pub max_sessions: usize,
+    /// 每session保留最大对话轮数
+    pub max_rounds_per_session: usize,
+    /// session超时tick数
+    pub session_timeout_ticks: i64,
+    /// 触发对话上下文追踪的动作类型列表
+    pub dialogue_action_types: Vec<String>,
 }
 
 /// 每日摘要提交配置
