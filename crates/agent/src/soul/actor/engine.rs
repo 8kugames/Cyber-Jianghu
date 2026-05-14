@@ -410,8 +410,12 @@ impl CognitiveEngine {
     }
 
     /// prompt_templates.json 搜索路径（load 和 save 共用）
-    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 3] {
+    /// 第一优先级：CYBER_JIANGHU_DATA_DIR（Server 写入路径，与 Server 写盘目标对称）
+    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 4] {
         [
+            std::env::var("CYBER_JIANGHU_DATA_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
                 .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
