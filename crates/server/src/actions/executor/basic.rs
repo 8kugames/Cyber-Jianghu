@@ -6,7 +6,9 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData, TeachData};
+use super::super::{
+    CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData, TeachData,
+};
 use crate::models::Intent;
 
 /// 基础动作执行器
@@ -394,8 +396,18 @@ impl BasicActionExecutor {
 
         // 传授者消耗体力（数据驱动）
         let stamina_cost = crate::game_data::registry()
-            .map(|cache| cache.get().game_rules.data.recipe_learning.teach_stamina_cost)
-            .unwrap_or_else(|| crate::game_data::types::unified_config::RecipeLearningConfig::default().teach_stamina_cost);
+            .map(|cache| {
+                cache
+                    .get()
+                    .game_rules
+                    .data
+                    .recipe_learning
+                    .teach_stamina_cost
+            })
+            .unwrap_or_else(|| {
+                crate::game_data::types::unified_config::RecipeLearningConfig::default()
+                    .teach_stamina_cost
+            });
         result.add_change(StateChange::StaminaChanged {
             agent_id: intent.agent_id,
             delta: -stamina_cost,
