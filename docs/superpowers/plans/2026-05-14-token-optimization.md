@@ -18,6 +18,11 @@
 5. **self_correct 修复**: 使用标准 multi-turn message，不伪造 tool_result
 6. **Multi-intent 兼容**: 显式处理 multi-intent pipeline
 
+**Triple-Review 投票结果 (2026-05-14):** 2/3 APPROVE (通过)
+- Architecture Voter: APPROVE — 符合项目惯例，数据驱动，无 YAGNI 违规
+- Scope Voter: APPROVE — 8 项用户需求全覆盖，无范围蔓延
+- Feasibility Voter: REJECT — self_correct 使用了不存在的 Conversation API（已修复：改为构造临时 Vec<ConversationTurn>）
+
 ---
 
 ## Token 经济学精算
@@ -204,30 +209,44 @@ for intent in approved_intents { self.submit_intent(intent).await; }
 
 - [ ] **Step 3: 实现 self_correct — 标准 multi-turn message**
 
+`ConversationInput` 是不可变值类型（`{summary, turns: &[ConversationTurn], current_prompt}`），不能动态 append。修正方案：构造临时 `Vec<ConversationTurn>` 扩展 turns。
+
 ```rust
 async fn self_correct(
     &self,
     rejected_intent: Intent,
     reason: String,
-    conversation: &mut Conversation,
+    original_input: &ConversationInput<'_>,
     tools: &[ToolDefinition],
     executor: &EarthToolExecutor,
 ) -> Result<Intent> {
-    // 注入拒绝原因为 user message（不伪造 tool_result）
-    conversation.add_assistant_message(serde_json::to_string(&rejected_intent)?);
-    conversation.add_user_message(format!(
-        "你的意图验证未通过。原因：{reason}。请修正后重新输出。"
-    ));
-    // 复用完整的 LLM 调用（含 tools），保持 tool calling 能力
-    self.llm_client.complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
-        "", // 空 system，已有 conversation context
-        conversation,
+    // 构造扩展的 turns: 原始 turns + 被拒 intent(assistant) + 拒绝原因(user)
+    let mut extended_turns: Vec<ConversationTurn> = original_input.turns.to_vec();
+    extended_turns.push(ConversationTurn {
+        role: "assistant".into(),
+        content: serde_json::to_string(&rejected_intent)?,
+    });
+    extended_turns.push(ConversationTurn {
+        role: "user".into(),
+        content: format!("你的意图验证未通过。原因：{reason}。请修正后重新输出。"),
+    });
+
+    let corrected_input = ConversationInput {
+        summary: original_input.summary,
+        turns: &extended_turns,
+        current_prompt: "请输出修正后的意图。",
+    };
+
+    self.llm_client.complete_json_with_tools::<DirectCognitiveResponse>(
+        &corrected_input,
         tools,
         executor,
         1,  // 自修正时限制 tool call 轮次
     ).await
 }
 ```
+
+注意: 需确认 `ConversationTurn` 的实际字段名（可能通过 ConversationHistory API 构造）。实现时从 `conversation_history.push_turn(tick_id, user, assistant)` 或直接构造 struct。
 
 - [ ] **Step 4: 实现 tick 级 LLM 失败计数器**
 
