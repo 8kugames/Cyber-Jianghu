@@ -122,7 +122,12 @@ impl EpisodicMemoryBackend {
     }
 
     /// 按事件类型查询记忆（排除已归档）
-    pub fn get_by_event_type(&self, event_type: &str, offset: usize, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn get_by_event_type(
+        &self,
+        event_type: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let store = self
             .store
             .lock()
