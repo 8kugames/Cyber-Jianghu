@@ -383,9 +383,15 @@ impl Default for RecipeLearningConfig {
     }
 }
 
-fn default_observation_threshold() -> i32 { 3 }
-fn default_observation_range() -> String { "same_node".to_string() }
-fn default_teach_stamina_cost() -> i32 { 10 }
+fn default_observation_threshold() -> i32 {
+    3
+}
+fn default_observation_range() -> String {
+    "same_node".to_string()
+}
+fn default_teach_stamina_cost() -> i32 {
+    10
+}
 
 /// Agent 状态配置（数据驱动）
 #[derive(Debug, Clone, Deserialize, Serialize)]
