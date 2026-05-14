@@ -114,7 +114,7 @@ pub async fn execute_query_world(
                 .inventory
                 .iter()
                 .filter(|item| {
-                    filter.map_or(true, |f| item.name.contains(f) || item.item_id.contains(f))
+                    filter.is_none_or(|f| item.name.contains(f) || item.item_id.contains(f))
                 })
                 .map(|item| {
                     serde_json::json!({
@@ -136,7 +136,7 @@ pub async fn execute_query_world(
             let entities: Vec<_> = ws
                 .entities
                 .iter()
-                .filter(|e| filter.map_or(true, |f| e.name.contains(f)))
+                .filter(|e| filter.is_none_or(|f| e.name.contains(f)))
                 .map(|e| {
                     serde_json::json!({
                         "id": e.id,
@@ -167,7 +167,7 @@ pub async fn execute_query_world(
                 .self_state
                 .attributes
                 .iter()
-                .filter(|(k, _)| filter.map_or(true, |f| k.contains(f)))
+                .filter(|(k, _)| filter.is_none_or(|f| k.contains(f)))
                 .map(|(k, &v)| (k.clone(), serde_json::json!(v)))
                 .collect();
             serde_json::json!({
