@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed — Agent 统一三层审查入口
+
+- **[BREAKING] Agent**: `ReflectorSoul` 三层审查成为运行时唯一入口，`Cognitive` 主循环、`Claw` WebSocket 验证、HTTP `/api/v1/validate` 统一走同一 `Validator::validate(ValidationRequest)` 链路
+- **[BREAKING] Agent**: `ValidationRequest` 新增 `runtime` 上下文，显式携带 `GradedValidationConfig`、连续 `follow` 计数与上限，避免不同运行模式各自拼装隐式校验条件
+- **Agent**: `Claw` 验证任务接入实时 `WorldState` 与最近 `GameRules`，不再以 `world_state=None` 退化为 LLM-only 校验
+- **Agent**: HTTP `/api/v1/validate` 接入当前 `WorldState` 与 `GameRules`，与主生命周期保持同构
+- **Agent**: 执行失败反馈继续通过统一 rejection 通道回灌人魂，不再保留平行的发送前规则拦截分支
+
 ### Changed — PromptTemplateConfig YAML→JSON 重构
 
 - **[BREAKING] Protocol**: `PromptTemplateConfig` 从 agent crate 迁移至 protocol crate（`cyber_jianghu_protocol::types::prompt_template`）。agent crate 的 `prompt_template.rs` 改为 re-export + 本地 YAML loading fallback
