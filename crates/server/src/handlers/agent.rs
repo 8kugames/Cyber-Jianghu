@@ -209,6 +209,7 @@ pub async fn agent_register(
         immediate_events,
         intent_batch,
         lifespan,
+        dialogue_context,
     ) = {
         let gd = state.game_data.get();
         (
@@ -234,6 +235,7 @@ pub async fn agent_register(
             gd.game_rules.data.immediate_events.clone(),
             gd.game_rules.data.intent_batch.clone(),
             gd.game_rules.data.lifespan.clone(),
+            gd.game_rules.data.dialogue_context.clone(),
         )
     };
     let game_rules = GameRules {
@@ -264,6 +266,7 @@ pub async fn agent_register(
             }
         }),
         daily_summary: None,
+        dialogue_context,
     };
 
     // 8. 获取叙事化配置（用于属性描述转换）

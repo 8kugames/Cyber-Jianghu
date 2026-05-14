@@ -189,6 +189,20 @@ data:
       # 每日摘要写入 episodic memory 的 importance (0.0-1.0)
       daily_summary_importance: 0.8
 
+  # 对话上下文配置
+  dialogue_context:
+    # 最大活跃session数
+    max_sessions: 10
+    # 每session保留最大对话轮数
+    max_rounds_per_session: 10
+    # session超时tick数，超时后标记为非活跃
+    session_timeout_ticks: 100
+    # 触发对话上下文追踪的动作类型
+    dialogue_action_types:
+      - "私语"
+      - "说话"
+      - "大喊"
+
   # Agent 状态定义（数据驱动）
   # 用于前端显示状态标签、颜色和描述
   agent_statuses:
