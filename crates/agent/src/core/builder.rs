@@ -371,6 +371,7 @@ impl AgentBuilder {
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,
+            current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 }
