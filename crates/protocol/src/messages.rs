@@ -108,6 +108,7 @@ pub struct DialogueSession {
 ///     lifespan: None,
 ///     calendar: None,
 ///     daily_summary: None,
+///     dialogue_context: None,
 /// };
 ///
 /// let msg = ServerMessage::Registered {
@@ -538,6 +539,7 @@ mod tests {
             lifespan: None,
             calendar: None,
             daily_summary: None,
+            dialogue_context: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -732,6 +734,7 @@ mod tests {
             lifespan: None,
             calendar: None,
             daily_summary: None,
+            dialogue_context: None,
         };
         let world_rules = WorldBuildingRules {
             version: "0.0.1-test".to_string(),
