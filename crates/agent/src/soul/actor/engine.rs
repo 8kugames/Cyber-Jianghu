@@ -750,6 +750,8 @@ impl CognitiveEngine {
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
                         recipe_details,
+                        world_state_store: None, // Will be injected in Task 6 lifecycle integration
+                        available_actions: vec![], // Will be injected in Task 8 lean prompt
                     },
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
