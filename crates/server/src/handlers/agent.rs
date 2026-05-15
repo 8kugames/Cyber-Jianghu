@@ -122,10 +122,19 @@ pub async fn agent_register(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // 4. 获取当前服务器的 tick_id（避免新 agent 累积"出生前"伤害）
-    let current_tick_id = crate::db::get_current_world_tick_id(&state.db_pool)
-        .await
-        .unwrap_or(0);
+    // 4. 获取当前服务器的 tick_id
+    // 优先使用 scheduler 实时计算的 tick_id（Arc<AtomicI64>），
+    // 仅在 scheduler 未启动时 fallback 到 DB 查询。
+    let current_tick_id = {
+        let live_tick = state.current_accepting_tick_id.load(std::sync::atomic::Ordering::Acquire);
+        if live_tick > 0 {
+            live_tick
+        } else {
+            crate::db::get_current_world_tick_id(&state.db_pool)
+                .await
+                .unwrap_or(0)
+        }
+    };
 
     // 5. 准备初始物品数据
     let initial_items = game_data::InitialInventoryRegistry::items();
