@@ -883,6 +883,7 @@ impl Default for DeltaConfig {
         survival_thresholds.insert("hunger".to_string(), 0.7);
         survival_thresholds.insert("thirst".to_string(), 0.7);
         survival_thresholds.insert("hp".to_string(), 0.3);
+        survival_thresholds.insert("stamina".to_string(), 0.2);
         Self {
             survival_thresholds,
             change_percentage_threshold: 0.1,
