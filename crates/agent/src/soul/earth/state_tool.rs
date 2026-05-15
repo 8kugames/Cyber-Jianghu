@@ -105,7 +105,10 @@ pub async fn execute_query_world(
     filter: Option<&str>,
     store: &WorldStateStore,
 ) -> serde_json::Value {
-    let ws = store.current().await;
+    let ws = match store.current().await {
+        Some(ws) => ws,
+        None => return serde_json::json!({ "success": false, "message": "WorldState 尚未初始化" }),
+    };
 
     match section {
         "inventory" => {
@@ -379,7 +382,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_inventory() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("inventory", None, &store).await;
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["total"], 1);
@@ -389,7 +393,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_inventory_with_filter() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("inventory", Some("馒头"), &store).await;
         assert!(result["success"].as_bool().unwrap());
         let items = result["items"].as_array().unwrap();
@@ -398,7 +403,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_entities() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("entities", None, &store).await;
         assert!(result["success"].as_bool().unwrap());
         let entities = result["entities"].as_array().unwrap();
@@ -408,7 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_environment() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("environment", None, &store).await;
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["location"]["node_id"], "village_square");
@@ -417,7 +424,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_state() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("state", None, &store).await;
         assert!(result["success"].as_bool().unwrap());
         let attrs = result["attributes"].as_object().unwrap();
@@ -427,7 +435,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_events() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("events", None, &store).await;
         assert!(result["success"].as_bool().unwrap());
         let events = result["events"].as_array().unwrap();
@@ -437,7 +446,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_query_world_unknown_section() {
-        let store = WorldStateStore::new(make_test_world_state());
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
         let result = execute_query_world("nonexistent", None, &store).await;
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["message"].as_str().unwrap().contains("nonexistent"));

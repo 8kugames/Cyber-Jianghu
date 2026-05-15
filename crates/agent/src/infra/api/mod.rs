@@ -205,7 +205,7 @@ pub struct HttpApiState {
     pub decision_context_snapshot:
         std::sync::Arc<tokio::sync::RwLock<Option<DecisionContextSnapshot>>>,
     /// WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
-    pub world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
+    pub world_state_store: Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
 }
 
 /// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）
@@ -295,8 +295,11 @@ pub fn http_decision(
             }
 
             // 更新 WorldStateStore（供 Delta Engine 使用）
-            if let Some(ref wss) = state.api_state.world_state_store {
-                wss.update(world_state.clone()).await;
+            {
+                let wss = state.api_state.world_state_store.read().unwrap().clone();
+                if let Some(wss) = wss {
+                    wss.update(world_state.clone()).await;
+                }
             }
 
             // 触发叙事更新（异步，不阻塞）
@@ -835,7 +838,7 @@ pub fn create_http_state(
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
-        world_state_store: None,
+        world_state_store: Arc::new(std::sync::RwLock::new(None)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {

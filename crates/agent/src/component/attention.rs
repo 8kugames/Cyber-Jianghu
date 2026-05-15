@@ -61,8 +61,8 @@ impl AttentionController {
         let remaining_slots = max_items.saturating_sub(selected.len());
 
         if remaining_slots > 0 && !candidates.is_empty() {
-            // TODO: Phase 2 LLM ranking will be called from lifecycle with LLM client access
-            // For now, candidates are taken in original order (newest first from Delta Engine)
+            // Phase 2 LLM ranking: 将由 lifecycle 在持有 LLM client 时调用。
+            // 当前行为：候选按原始顺序（Delta Engine 产出的最新优先）填充剩余槽位。
             for (i, change) in candidates.into_iter().take(remaining_slots).enumerate() {
                 selected.push(FocusItem {
                     change,

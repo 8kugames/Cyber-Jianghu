@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### Added — Token 优化：注意力门控 + Tool-First 架构
+
+- **Agent**: `TokenOptimizationConfig` 配置模块，所有参数外部化（`agent.yaml` 的 `token_optimization` 段），默认 `enabled: true`
+- **Agent**: `WorldStateStore` 组件 — Agent 侧 WorldState 本地落存，prev/curr 双版本，供 Delta Engine 做增量检测
+- **Agent**: `DeltaEngine` — 纯规则 prev vs curr 对比，5 类变化检测（survival/location/inventory/entities/skill），数据驱动阈值
+- **Agent**: `AttentionController` — 两阶段过滤（规则自动聚焦 + LLM 排序占位）产出 `FocusSummary`
+- **Agent**: Lean Prompt 模式 — 人魂 prompt 从完整 WorldState + 动作描述 → FocusSummary + Action Index + Skill Index
+- **Agent**: 3 个新 EarthSoul tool calling 工具：`get_action_detail`、`query_world`、`list_skills`，按需取用详情
+- **Agent**: `token_tracking.rs` 扩展 — `LlmComponent` 枚举 + `ComponentMetrics` 结构体，按组件维度追踪 token 消耗
+
+### Changed — Token 优化：ReflectorSoul 重试循环优化
+
+- **[BREAKING] Agent**: `ReflectorSoul` 验证流程从 13 轮重试循环改为固定流程：generate → validate → self_correct once → chaos_fallback。`token_optimization.enabled=true` 时 `max_retries=1`，`false` 时保持原 `max_retries=12`
+- **Agent**: `lifecycle.rs` 新增 `self_correct_intent()` 方法，复用 decision callback 进行一次自我修正
+
 ### Changed — Agent 统一三层审查入口
 
 - **[BREAKING] Agent**: `ReflectorSoul` 三层审查成为运行时唯一入口，`Cognitive` 主循环、`Claw` WebSocket 验证、HTTP `/api/v1/validate` 统一走同一 `Validator::validate(ValidationRequest)` 链路
