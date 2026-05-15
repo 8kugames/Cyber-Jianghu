@@ -167,6 +167,15 @@
 
 ### P1 重要特性
 
+- [x] **[Token 优化：注意力门控 + Tool-First](../../crates/agent/docs/architecture/p1_major/token_optimization.md)**: 从架构层面降低 LLM Token 消耗（目标 60-75% 削减）。
+  - [x] **WorldStateStore**: Agent 侧 WorldState 本地落存，prev/curr 双版本，供 Delta Engine 增量检测。
+  - [x] **DeltaEngine**: 纯规则 prev vs curr 对比，5 类变化检测（survival/location/inventory/entities/skill），数据驱动阈值（`DeltaConfig.survival_thresholds`）。
+  - [x] **AttentionController**: 两阶段过滤（规则自动聚焦 + LLM 排序占位）产出 `FocusSummary`，替代完整 WorldState 注入 prompt。
+  - [x] **Lean Prompt**: 人魂 prompt 从完整 WorldState + 动作描述 → FocusSummary + Action Index + Skill Index，详情由地魂 tool calling 按需取用。
+  - [x] **3 个新 EarthSoul 工具**: `get_action_detail`（动作详情）、`query_world`（世界状态分区查询）、`list_skills`（已掌握技能索引）。
+  - [x] **ReflectorSoul 重试优化**: 验证流程从 13 轮重试循环改为 generate → validate → self_correct once → chaos_fallback。
+  - [x] **Token 按组件追踪**: `LlmComponent` 枚举 + `ComponentMetrics`，按组件维度追踪 token 消耗。
+  - [x] 全部参数外部化（`agent.yaml` 的 `token_optimization` 段），默认 `enabled: true`。Cognitive/Claw 零差分。
 - [x] **[模型网关与调度](../../crates/agent/docs/architecture/p1_major/model_gateway.md)**: 统一的 LLM 客户端池，支持主备模型无缝切换及 Token 消耗监控。
   - [x] `prefer_stream` 全局流式优化：支持流式的模型跳过 400 降级，直接走 streaming。
   - [x] Token 统计修复：单模型场景 `UsageTrackingStream` 包装 + 非 streaming 路径估算兜底。

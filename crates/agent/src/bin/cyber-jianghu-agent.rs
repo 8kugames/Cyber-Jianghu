@@ -1027,7 +1027,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     }
 
     // DeltaEngine + AttentionController（Token 优化模式）
-    if config.token_optimization.enabled {
+    let token_opt_enabled = config.token_optimization.enabled;
+    let world_state_store = std::sync::Arc::new(
+        cyber_jianghu_agent::component::state_store::WorldStateStore::new(),
+    );
+
+    if token_opt_enabled {
         let delta_config = cyber_jianghu_agent::component::delta_engine::DeltaConfig {
             survival_thresholds: config.token_optimization.delta.survival_thresholds.clone(),
             change_percentage_threshold: config
@@ -1037,6 +1042,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         };
         let attention_config = config.token_optimization.attention.clone();
         builder = builder
+            .with_world_state_store(world_state_store.clone())
             .with_delta_engine(
                 cyber_jianghu_agent::component::delta_engine::DeltaEngine::new(delta_config),
             )
@@ -1049,6 +1055,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     }
 
     let mut agent = builder.build();
+
+    // 注入 world_state_store 到 HttpApiState（供 Claw 模式 Delta Engine 使用）
+    if token_opt_enabled {
+        *api_state.world_state_store.write().unwrap() = Some(world_state_store.clone());
+        info!("world_state_store 已注入 HttpApiState");
+    }
 
     // 注入 relationship_store 到 HttpApiState
     if let Some(store) = agent.relationship_store() {
