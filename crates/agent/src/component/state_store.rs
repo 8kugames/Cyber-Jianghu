@@ -18,39 +18,48 @@ use tokio::sync::RwLock;
 
 /// Agent 侧 WorldState 存储（含 prev/curr，供 Delta Engine 使用）
 ///
-/// 内部状态: `(Option<WorldState>, WorldState)` = `(prev, curr)`
-/// - 首次 new 后 prev = None（无历史）
-/// - 每次 update: prev <- 旧 curr, curr <- new_state
+/// 内部状态: `Option<(Option<WorldState>, WorldState)>` = `Option<(prev, curr)>`
+/// - 首次 new 后内部为 None（等待首次 update 注入 WorldState）
+/// - 每次 update: 首次设置 curr，后续 prev <- 旧 curr, curr <- new_state
 #[derive(Clone)]
 pub struct WorldStateStore {
-    state: Arc<RwLock<(Option<WorldState>, WorldState)>>,
+    state: Arc<RwLock<Option<(Option<WorldState>, WorldState)>>>,
 }
 
 impl WorldStateStore {
-    /// 创建新 store，传入初始 WorldState 作为 curr
-    ///
-    /// prev 为 None，表示首次 tick 无历史数据
-    pub fn new(initial: WorldState) -> Self {
+    /// 创建空 store（懒初始化，等待首次 update 注入 WorldState）
+    pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new((None, initial))),
+            state: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// 原子更新: prev <- curr, curr <- new_state
+    /// 原子更新: 首次设置 curr，后续 prev <- 旧 curr, curr <- new_state
     pub async fn update(&self, new_state: WorldState) {
         let mut guard = self.state.write().await;
-        let prev = std::mem::replace(&mut guard.1, new_state);
-        guard.0 = Some(prev);
+        match guard.take() {
+            None => {
+                // 首次 update：无 prev
+                *guard = Some((None, new_state));
+            }
+            Some((_, old_curr)) => {
+                *guard = Some((Some(old_curr), new_state));
+            }
+        }
     }
 
-    /// 获取当前 WorldState（clone）
-    pub async fn current(&self) -> WorldState {
-        self.state.read().await.1.clone()
+    /// 获取当前 WorldState（首次 update 前返回 None）
+    pub async fn current(&self) -> Option<WorldState> {
+        self.state.read().await.as_ref().map(|(_, curr)| curr.clone())
     }
 
     /// 获取上一个 WorldState（首次 update 前返回 None）
     pub async fn previous(&self) -> Option<WorldState> {
-        self.state.read().await.0.clone()
+        self.state
+            .read()
+            .await
+            .as_ref()
+            .and_then(|(prev, _)| prev.clone())
     }
 }
 
@@ -106,30 +115,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_previous_is_none_initially() {
-        let store = WorldStateStore::new(make_world_state(1));
+    async fn test_empty_before_first_update() {
+        let store = WorldStateStore::new();
+        assert!(store.current().await.is_none());
         assert!(store.previous().await.is_none());
-        assert_eq!(store.current().await.tick_id, 1);
     }
 
     #[tokio::test]
-    async fn test_update_sets_curr_and_prev() {
-        let store = WorldStateStore::new(make_world_state(1));
-        store.update(make_world_state(2)).await;
+    async fn test_first_update_sets_curr_no_prev() {
+        let store = WorldStateStore::new();
+        store.update(make_world_state(1)).await;
+        assert_eq!(store.current().await.unwrap().tick_id, 1);
+        assert!(store.previous().await.is_none());
+    }
 
-        assert_eq!(store.current().await.tick_id, 2);
-        let prev = store.previous().await;
-        assert!(prev.is_some());
-        assert_eq!(prev.unwrap().tick_id, 1);
+    #[tokio::test]
+    async fn test_second_update_sets_prev() {
+        let store = WorldStateStore::new();
+        store.update(make_world_state(1)).await;
+        store.update(make_world_state(2)).await;
+        assert_eq!(store.current().await.unwrap().tick_id, 2);
+        assert_eq!(store.previous().await.unwrap().tick_id, 1);
     }
 
     #[tokio::test]
     async fn test_current_returns_latest() {
-        let store = WorldStateStore::new(make_world_state(1));
+        let store = WorldStateStore::new();
+        store.update(make_world_state(1)).await;
         store.update(make_world_state(2)).await;
         store.update(make_world_state(3)).await;
-
-        assert_eq!(store.current().await.tick_id, 3);
+        assert_eq!(store.current().await.unwrap().tick_id, 3);
         assert_eq!(store.previous().await.unwrap().tick_id, 2);
     }
 }
