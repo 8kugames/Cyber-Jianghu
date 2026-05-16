@@ -1,6 +1,6 @@
 // ============================================================================
 // Attention Controller -- 规则过滤 + 轻量 LLM 排序
-// 两阶段架构: Phase 1 (规则过滤, 零 token) + Phase 2 (可选轻量 LLM 排序)
+// 规则过滤注意力控制器：Critical/Important 自动纳入焦点，其余按原始顺序填充。
 // ============================================================================
 
 use crate::component::delta_engine::{ChangeCategory, StateChange, StateDelta, Urgency};
@@ -61,8 +61,7 @@ impl AttentionController {
         let remaining_slots = max_items.saturating_sub(selected.len());
 
         if remaining_slots > 0 && !candidates.is_empty() {
-            // Phase 2 LLM ranking: 将由 lifecycle 在持有 LLM client 时调用。
-            // 当前行为：候选按原始顺序（Delta Engine 产出的最新优先）填充剩余槽位。
+            // 非关键候选按 Delta Engine 产出顺序填充剩余槽位
             for (i, change) in candidates.into_iter().take(remaining_slots).enumerate() {
                 selected.push(FocusItem {
                     change,
@@ -163,8 +162,6 @@ mod tests {
             max_focus_items: 5,
             first_tick_focus_cap: 15,
             critical_auto_include: true,
-            enable_llm_ranking: true,
-            llm_ranking_model: "haiku".to_string(),
         }
     }
 

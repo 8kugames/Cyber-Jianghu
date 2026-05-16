@@ -359,11 +359,6 @@ impl super::Agent {
             engine.set_world_state_store(store.clone());
         }
 
-        // 注入 Token 优化模式开关到 CognitiveEngine（供 lean prompt 路由使用）
-        if let Some(ref engine) = self.cognitive_engine {
-            engine.set_token_optimization_enabled(self.config.token_optimization.enabled);
-        }
-
         // 初始化对话上下文管理器（Fail-Fast: dialogue_context 段存在时所有字段必填）
         if self.dialogue_manager.is_none() {
             #[allow(clippy::collapsible_if)]

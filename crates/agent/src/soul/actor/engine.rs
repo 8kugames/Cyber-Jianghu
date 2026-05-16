@@ -186,8 +186,6 @@ pub struct CognitiveEngine {
     /// 当前 tick 的 FocusSummary（由 lifecycle 写入，供 lean prompt 读取）
     pub(super) current_focus_summary:
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
-    /// Token 优化模式开关（由 config.token_optimization.enabled 控制）
-    pub(super) token_optimization_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl CognitiveEngine {
@@ -223,7 +221,6 @@ impl CognitiveEngine {
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
-            token_optimization_enabled: std::sync::atomic::AtomicBool::new(false),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -314,7 +311,6 @@ impl CognitiveEngine {
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
-            token_optimization_enabled: std::sync::atomic::AtomicBool::new(false),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -523,8 +519,8 @@ impl CognitiveEngine {
     /// 加载动作列表（用于缓存 + 别名映射）
     fn load_actions_list() -> (String, String, ActionAliasMap, FieldAliasMap) {
         let available_actions = load_available_actions_from_file();
-        let descriptions = Self::build_action_descriptions(&available_actions);
-        let field_hints = Self::build_action_field_hints(&available_actions);
+        let descriptions = Self::build_action_index_pub(&available_actions);
+        let field_hints = String::new();
         let alias_map = ActionAliasMap::from_actions(&available_actions);
         let field_map = FieldAliasMap::from_actions(&available_actions);
         (descriptions, field_hints, alias_map, field_map)
@@ -579,12 +575,6 @@ impl CognitiveEngine {
     ) {
         let mut guard = self.available_actions.write().unwrap();
         *guard = actions;
-    }
-
-    /// 设置 Token 优化模式开关（由 lifecycle 注入）
-    pub fn set_token_optimization_enabled(&self, enabled: bool) {
-        self.token_optimization_enabled
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 更新当前 tick 的 FocusSummary（由 lifecycle 在每 tick 写入）
@@ -745,8 +735,8 @@ impl CognitiveEngine {
         }
 
         // 同时更新 prompt cache 中的动作描述
-        let descriptions = Self::build_action_descriptions(actions);
-        let field_hints = Self::build_action_field_hints(actions);
+        let descriptions = Self::build_action_index_pub(actions);
+        let field_hints = String::new();
         {
             let mut cache = self.prompt_cache.write().unwrap();
             cache.update_action_descriptions(descriptions, field_hints);
@@ -815,41 +805,24 @@ impl CognitiveEngine {
 
         let use_tool_calling = self.llm_client.supports_tool_calling();
 
-        // Token 优化路由：enabled 时使用 lean prompt，否则 full prompt
-        let prompt = if self
-            .token_optimization_enabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            // 读取当前 tick 的 FocusSummary
-            let focus = self.current_focus_summary.read().await.clone();
-
-            // Task 9: Critical preload — 预加载 Critical 项的相关 WorldState 数据
-            let critical_preload = if let Some(ref fs) = focus {
-                self.preload_critical_data(fs).await
-            } else {
-                None
-            };
-
-            self.build_lean_direct_prompt(super::engine_prompts::LeanPromptParams {
-                world_state,
-                memory_context,
-                validation_feedback,
-                persona_desc: &persona_for_prompt,
-                agent_name: &agent_name,
-                focus_summary: focus.as_ref(),
-                critical_preload: critical_preload.as_deref(),
-                use_tool_calling,
-            })?
+        // FocusSummary + Critical preload
+        let focus = self.current_focus_summary.read().await.clone();
+        let critical_preload = if let Some(ref fs) = focus {
+            self.preload_critical_data(fs).await
         } else {
-            self.build_direct_prompt(
-                world_state,
-                memory_context,
-                validation_feedback,
-                &persona_for_prompt,
-                &agent_name,
-                use_tool_calling,
-            )?
+            None
         };
+
+        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
+            world_state,
+            memory_context,
+            validation_feedback,
+            persona_desc: &persona_for_prompt,
+            agent_name: &agent_name,
+            focus_summary: focus.as_ref(),
+            critical_preload: critical_preload.as_deref(),
+            use_tool_calling,
+        })?;
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
@@ -1168,13 +1141,18 @@ impl CognitiveEngine {
             cache.get_persona_simple().to_string()
         };
 
-        let prompt = self.build_legacy_prompt(
-            tick_id,
+        // 降级：无 WorldState，用空占位。build_prompt 会走 build_world_state_section 降级路径。
+        let empty_ws = super::engine_prompts::empty_world_state();
+        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
+            world_state: &empty_ws,
             memory_context,
             validation_feedback,
-            &persona_for_prompt,
-            &agent_name,
-        )?;
+            persona_desc: &persona_for_prompt,
+            agent_name: &agent_name,
+            focus_summary: None,
+            critical_preload: None,
+            use_tool_calling: false,
+        })?;
 
         let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
         let response_json = serde_json::to_string(&response)?;
@@ -1439,12 +1417,12 @@ impl CognitiveEngine {
         narrative
     }
 
-    /// 获取 action descriptions 和 field hints（公开接口）
+    /// 获取 Action Index（公开接口，供 API enrichment 使用）
     pub fn get_action_context(&self) -> (String, String) {
         let cache = self.prompt_cache.read().unwrap();
         (
             cache.get_action_descriptions().to_string(),
-            cache.get_action_field_hints().to_string(),
+            String::new(),
         )
     }
 
