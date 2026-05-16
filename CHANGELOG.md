@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Changed — 联调测试 0515 优化
+
+- **Agent**: `LoopGuard` 渐进策略：第 1 次重复 tool call → 注入警告到 tool result，第 2 次重复 → 截断。默认阈值 `max_same_tool_consecutive` 3→2，`max_total_calls` 10→6
+- **Agent**: Prompt 强化 tool/action 边界区分 — 在 YAML 模板、lean prompt `tool_calling_guidance`、action index 头部三处明确声明工具名不是动作名，防止模型把 `query_world` 当 action_type
+- **Agent**: Action Index 从 `name+description` 降为 `name-only`，描述通过 `get_action_detail` 按需查询。Prompt actions 段从 ~1146 tokens → ~60 tokens（-95%）
+
 ### Added — Token 优化：注意力门控 + Tool-First 架构
 
 - **Agent**: `TokenOptimizationConfig` 配置模块，所有参数外部化（`agent.yaml` 的 `token_optimization` 段），默认 `enabled: true`

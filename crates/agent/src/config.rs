@@ -828,15 +828,13 @@ pub struct ReflectorOptConfig {
     pub chaos_on_llm_fail: u32,
 }
 
-/// Attention Controller 配置（后续任务填充）
+/// Attention Controller 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AttentionConfig {
     pub max_focus_items: usize,
     pub first_tick_focus_cap: usize,
     pub critical_auto_include: bool,
-    pub enable_llm_ranking: bool,
-    pub llm_ranking_model: String,
 }
 
 /// Delta Engine 配置（后续任务填充）
@@ -871,8 +869,6 @@ impl Default for AttentionConfig {
             max_focus_items: 5,
             first_tick_focus_cap: 15,
             critical_auto_include: true,
-            enable_llm_ranking: true,
-            llm_ranking_model: "haiku".to_string(),
         }
     }
 }

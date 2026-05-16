@@ -1,30 +1,24 @@
 // ============================================================================
-// Prompt 缓存模块 - 人魂 Prompt 叙事冗余优化
+// Prompt 缓存模块 - 人魂 Prompt 静态数据缓存
 // ============================================================================
 //
-// 人魂信息隔离后仅保留静态缓存：
-// - Layer 1: persona（首轮完整，后续摘要）
-// - Layer 2: actions_list（进程生命周期内不变）
+// 仅保留：
+// - persona（首轮完整，后续摘要）
+// - Action Index（name-only，进程生命周期内不变）
 //
-// 半静态缓存（inventory/locations/entities/nearby_items）已移除，
-// 这些数据由人魂直接从 WorldState 获取（直连模式）。
+// 动态数据（WorldState/Skills）由 FocusSummary + 地魂 tool calling 按需获取。
 // ============================================================================
 
 use crate::component::persona::DynamicPersona;
 
 /// Prompt 缓存状态
 ///
-/// 仅保留 persona 差异化和 actions_list 静态缓存。
-/// 人魂信息隔离：不再缓存任何外部世界数据。
+/// 仅保留 persona 差异化缓存和 Action Index（name-only）。
 pub struct PromptCache {
     persona_desc: String,
     persona_summary: String,
-    /// 动作描述列表（用于"可做之事"部分）
+    /// Action Index（name-only，详情通过地魂 get_action_detail 按需查询）
     action_descriptions: String,
-    /// 动作字段 schema（用于"action_data 字段要求"部分）
-    action_field_hints: String,
-    /// 兼容旧 prompt 的合并列表
-    actions_list: String,
     persona_initialized: bool,
 }
 
@@ -33,18 +27,14 @@ impl PromptCache {
     pub fn new(
         persona_desc: String,
         action_descriptions: String,
-        action_field_hints: String,
+        _action_field_hints: String,
         persona: &DynamicPersona,
     ) -> Self {
         let persona_summary = Self::build_structured_summary(persona);
-        // 兼容旧 prompt：合并两个列表
-        let actions_list = format!("{}\n\n{}", action_descriptions, action_field_hints);
         Self {
             persona_desc,
             persona_summary,
             action_descriptions,
-            action_field_hints,
-            actions_list,
             persona_initialized: false,
         }
     }
@@ -118,29 +108,14 @@ impl PromptCache {
     pub fn update_action_descriptions(
         &mut self,
         action_descriptions: String,
-        action_field_hints: String,
+        _action_field_hints: String,
     ) {
         self.action_descriptions = action_descriptions;
-        self.action_field_hints = action_field_hints;
-        self.actions_list = format!(
-            "{}\n\n{}",
-            self.action_descriptions, self.action_field_hints
-        );
     }
 
-    /// 获取 actions_list（兼容旧 prompt）
-    pub fn get_actions_list(&self) -> &str {
-        &self.actions_list
-    }
-
-    /// 获取动作描述列表（"可做之事"部分）
+    /// 获取 Action Index（name-only）
     pub fn get_action_descriptions(&self) -> &str {
         &self.action_descriptions
-    }
-
-    /// 获取动作字段 schema（"action_data 字段要求"部分）
-    pub fn get_action_field_hints(&self) -> &str {
-        &self.action_field_hints
     }
 
     /// 获取 persona_initialized 状态（调试用）

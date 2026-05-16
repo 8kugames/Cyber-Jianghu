@@ -1081,11 +1081,11 @@ impl DirectLlmClient {
             messages.push(msg.clone());
 
             for tc in tool_calls {
-                // Loop guard check (F2)
+                // Loop guard check (F2) — 渐进策略：Warn → Terminate
                 if let Some(ref mut g) = guard {
                     match g.check(&tc.function.name) {
                         crate::soul::earth::loop_guard::LoopGuardAction::Terminate => {
-                            warn!("[地魂] Loop guard 终止: tool={}", tc.function.name);
+                            warn!("[地魂] Loop guard 截断: 连续调用 '{}' 超限", tc.function.name);
                             return self.forced_text_exit(&model, messages).await;
                         }
                         crate::soul::earth::loop_guard::LoopGuardAction::Warn(_) => {
@@ -1107,12 +1107,13 @@ impl DirectLlmClient {
                     }
                 };
 
-                // 将 LoopGuard Warn 作为 tool result 前缀注入（不改变消息序列）
+                // 将 LoopGuard Warn 作为 tool result 前缀注入
                 if let Some(ref mut g) = guard
                     && let Some(warning) = g.take_pending_warning()
                 {
                     raw_result = format!("[系统提示] {}\n{}", warning, raw_result);
                 }
+
 
                 // Budget truncation (F1)
                 let truncated = match &mut budget {
