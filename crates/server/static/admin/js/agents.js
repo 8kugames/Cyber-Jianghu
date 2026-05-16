@@ -721,10 +721,7 @@ function renderServerSoulInline(label, data, type) {
       var targetId = ad.target_agent_id;
 
       if (at === "说话" || at === "speak") {
-        var speakLabel = targetId ? "对某人说话" : "向众人说话";
-        if (targetId) {
-          speakLabel = "对" + resolveTargetName(targetId) + "说话";
-        }
+        var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向众人说话";
         html +=
           '<div class="soul-text">' +
           escapeHtml(speakLabel) +
