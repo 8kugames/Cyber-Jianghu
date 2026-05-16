@@ -86,8 +86,8 @@ impl Default for LoopGuardConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_same_tool_consecutive: 3,
-            max_total_calls: 10,
+            max_same_tool_consecutive: 2,
+            max_total_calls: 6,
         }
     }
 }

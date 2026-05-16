@@ -1,5 +1,5 @@
 // ============================================================================
-// Token Usage Tracking (per provider-model + per-component)
+// Token Usage Tracking (per provider-model)
 // ============================================================================
 
 use serde::{Deserialize, Serialize};
@@ -9,62 +9,6 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use super::direct_client::LlmProvider;
-
-// ============================================================================
-// Per-Component Token Metrics (Phase 0a Instrumentation)
-// ============================================================================
-
-/// LLM 调用的组件标签 — 用于追踪每个组件的 token 消耗
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum LlmComponent {
-    CognitiveEngine,
-    AttentionController,
-    ReflectorLayer3,
-    ToolCalling,
-    SocialProcessing,
-}
-
-/// 单个组件的 token 聚合指标
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ComponentMetrics {
-    pub call_count: u64,
-    pub total_input_tokens: u64,
-    pub total_output_tokens: u64,
-}
-
-static COMPONENT_STATS: OnceLock<Mutex<HashMap<LlmComponent, ComponentMetrics>>> = OnceLock::new();
-
-fn component_stats() -> &'static Mutex<HashMap<LlmComponent, ComponentMetrics>> {
-    COMPONENT_STATS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// 记录带组件标签的 token 使用量（不破坏现有 record_token_usage 签名）
-pub fn record_token_usage_with_component(
-    provider: &LlmProvider,
-    model: &str,
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    component: LlmComponent,
-) {
-    // 同时记录到 per-model 统计
-    record_token_usage(provider, model, prompt_tokens, completion_tokens);
-
-    // 记录到 per-component 统计
-    if let Ok(mut stats) = component_stats().lock() {
-        let entry = stats.entry(component).or_default();
-        entry.call_count += 1;
-        entry.total_input_tokens += prompt_tokens;
-        entry.total_output_tokens += completion_tokens;
-    }
-}
-
-/// 获取所有组件指标的快照（不清除）
-pub fn snapshot_component_stats() -> HashMap<LlmComponent, ComponentMetrics> {
-    match component_stats().lock() {
-        Ok(stats) => stats.clone(),
-        Err(_) => HashMap::new(),
-    }
-}
 
 /// Per-model token stats
 struct PerModelStats {
