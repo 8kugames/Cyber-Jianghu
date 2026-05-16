@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
@@ -45,6 +46,7 @@ pub struct AgentBuilder {
     /// 与 ClawDecisionState 共享，用于运行时动态切换 LLM Client
     llm_container: Option<LlmClientContainer>,
     dialogue_client: Option<DialogueClient>,
+    dialogue_manager: Option<Arc<tokio::sync::RwLock<DialogueContextManager>>>,
     relationship_store: Option<RelationshipStore>,
     validator: Option<Arc<dyn Validator>>,
     /// 重连请求接收通道
@@ -63,6 +65,12 @@ pub struct AgentBuilder {
     immediate_handler: Option<std::sync::Arc<ImmediateEventHandler>>,
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
+    /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
+    world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
+    /// Delta Engine（增量检测，零 token）
+    delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
+    /// Attention Controller（规则过滤 + 轻量 LLM 排序）
+    attention_controller: Option<crate::component::attention::AttentionController>,
 }
 
 impl AgentBuilder {
@@ -79,6 +87,7 @@ impl AgentBuilder {
             llm_client: None,
             llm_container: None,
             dialogue_client: None,
+            dialogue_manager: None,
             relationship_store: None,
             validator: None,
             reconnect_rx: None,
@@ -89,6 +98,9 @@ impl AgentBuilder {
             data_dir: PathBuf::from("."),
             immediate_handler: None,
             chaos_generator: None,
+            world_state_store: None,
+            delta_engine: None,
+            attention_controller: None,
         }
     }
 
@@ -141,8 +153,8 @@ impl AgentBuilder {
         self
     }
 
-    /// 设置验证器
-    pub fn with_validator(mut self, validator: Arc<dyn Validator>) -> Self {
+    /// 设置统一意图审查器
+    pub fn with_intent_auditor(mut self, validator: Arc<dyn Validator>) -> Self {
         self.validator = Some(validator);
         self
     }
@@ -213,6 +225,33 @@ impl AgentBuilder {
     /// 设置混沌意图生成器（Sanity 混沌硬逻辑）
     pub fn with_chaos_generator(mut self, generator: crate::soul::actor::ChaosGenerator) -> Self {
         self.chaos_generator = Some(generator);
+        self
+    }
+
+    /// 设置 WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
+    pub fn with_world_state_store(
+        mut self,
+        store: Arc<crate::component::state_store::WorldStateStore>,
+    ) -> Self {
+        self.world_state_store = Some(store);
+        self
+    }
+
+    /// 设置 Delta Engine（增量检测，零 token）
+    pub fn with_delta_engine(
+        mut self,
+        engine: crate::component::delta_engine::DeltaEngine,
+    ) -> Self {
+        self.delta_engine = Some(engine);
+        self
+    }
+
+    /// 设置 Attention Controller（规则过滤 + 轻量 LLM 排序）
+    pub fn with_attention_controller(
+        mut self,
+        ctrl: crate::component::attention::AttentionController,
+    ) -> Self {
+        self.attention_controller = Some(ctrl);
         self
     }
 
@@ -342,6 +381,7 @@ impl AgentBuilder {
             decision_with_chain_callback: self.decision_with_chain_callback,
             memory_manager,
             dialogue_client: self.dialogue_client,
+            dialogue_manager: self.dialogue_manager,
             relationship_store: self.relationship_store,
             validator: self.validator,
             last_rejection_reason: None,
@@ -364,10 +404,14 @@ impl AgentBuilder {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,
+            world_state_store: self.world_state_store,
+            delta_engine: self.delta_engine,
+            attention_controller: self.attention_controller,
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 }

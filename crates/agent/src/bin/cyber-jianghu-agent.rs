@@ -2,7 +2,7 @@
 // Cyber-Jianghu Agent CLI
 // ============================================================================
 //
-// 连接赛博江湖游戏世界的 Agent CLI
+// 连接虚境：江湖游戏世界的 Agent CLI
 //
 // ## 架构说明
 //
@@ -57,7 +57,7 @@ use cyber_jianghu_protocol::{EraSettings, Intent, ServerMessage, WorldBuildingRu
 
 #[derive(Parser)]
 #[command(name = "cyber-jianghu-agent")]
-#[command(about = "赛博江湖 Agent - 连接游戏世界", long_about = None)]
+#[command(about = "虚境：江湖 Agent - 连接游戏世界", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -1026,7 +1026,41 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         info!("即时事件处理器已创建");
     }
 
+    // DeltaEngine + AttentionController（Token 优化模式）
+    let token_opt_enabled = config.token_optimization.enabled;
+    let world_state_store = std::sync::Arc::new(
+        cyber_jianghu_agent::component::state_store::WorldStateStore::new(),
+    );
+
+    if token_opt_enabled {
+        let delta_config = cyber_jianghu_agent::component::delta_engine::DeltaConfig {
+            survival_thresholds: config.token_optimization.delta.survival_thresholds.clone(),
+            change_percentage_threshold: config
+                .token_optimization
+                .delta
+                .change_percentage_threshold,
+        };
+        let attention_config = config.token_optimization.attention.clone();
+        builder = builder
+            .with_world_state_store(world_state_store.clone())
+            .with_delta_engine(
+                cyber_jianghu_agent::component::delta_engine::DeltaEngine::new(delta_config),
+            )
+            .with_attention_controller(
+                cyber_jianghu_agent::component::attention::AttentionController::new(
+                    attention_config,
+                ),
+            );
+        info!("DeltaEngine + AttentionController 已初始化（Token 优化模式）");
+    }
+
     let mut agent = builder.build();
+
+    // 注入 world_state_store 到 HttpApiState（供 Claw 模式 Delta Engine 使用）
+    if token_opt_enabled {
+        *api_state.world_state_store.write().unwrap() = Some(world_state_store.clone());
+        info!("world_state_store 已注入 HttpApiState");
+    }
 
     // 注入 relationship_store 到 HttpApiState
     if let Some(store) = agent.relationship_store() {
@@ -1095,6 +1129,11 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                             let mut validator_guard = shared_state.intent_validator.write().await;
                             *validator_guard = Some(validator.clone());
                             info!("Validator injected into WsSharedState");
+                        }
+                        {
+                            let game_rules = api_state_clone.game_rules.read().await.clone();
+                            let mut guard = shared_state.game_rules.write().await;
+                            *guard = game_rules;
                         }
 
                         if let Some(ref persona) = persona_clone {
@@ -1255,7 +1294,10 @@ fn start_claw_server(
     let (reconnect_tx, _) =
         tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
-    let ws_state = WsDecisionState::new();
+    let max_consecutive_follow = cyber_jianghu_agent::config::Config::from_file(config_path())
+        .map(|c| c.llm.max_consecutive_follow)
+        .unwrap_or(cyber_jianghu_agent::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW);
+    let ws_state = WsDecisionState::new(max_consecutive_follow);
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
     // 统一认知模式下外部 Intent 已被 server.rs 拦截，无需启动验证任务
     // CAS 去重逻辑保留在 WsDecisionState 中作为通用安全机制

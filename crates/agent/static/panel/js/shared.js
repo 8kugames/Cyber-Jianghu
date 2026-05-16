@@ -1,4 +1,4 @@
-// 赛博江湖 - Agent Web Panel 共享模块
+// 虚境：江湖 - Agent Web Panel 共享模块
 
 const API_BASE = `${window.location.protocol}//${window.location.host}`;
 const DEFAULT_TIMEOUT_MS = 10000;

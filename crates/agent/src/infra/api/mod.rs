@@ -72,7 +72,7 @@ use crate::component::memory::{MemoryManager, MemoryManagerConfig};
 use crate::component::persona::dynamic_persona::ThreadSafePersona;
 use crate::component::social::{DialogueClient, DialogueEventHandler};
 use crate::component::social::{NarrativeGenerator, RelationshipStore};
-use crate::soul::reflector::{RuleEngineValidator, Validator};
+use crate::soul::reflector::Validator;
 
 // 重导出 review 模块的公共 API（已迁移至 soul::reflector::store）
 pub use crate::soul::reflector::store::ReviewStore;
@@ -158,8 +158,10 @@ pub struct HttpApiState {
     pub memory_manager: Arc<tokio::sync::RwLock<Option<Arc<tokio::sync::RwLock<MemoryManager>>>>>,
     /// 记忆管理器基础配置模板（用于热切角色）
     pub memory_config_template: Option<crate::component::memory::MemoryManagerConfig>,
-    /// 意图验证器，验证意图是否符合人设
+    /// 统一意图审查器，供 HTTP validate 与 Claw WS 共用
     pub intent_validator: Option<Arc<dyn Validator>>,
+    /// 最近一份 GameRules（用于构造分级审查上下文）
+    pub game_rules: Arc<RwLock<Option<cyber_jianghu_protocol::GameRules>>>,
     /// 叙事生成器（可选，仅在有 LlmClient 时可用）
     pub narrative_generator: Option<Arc<NarrativeGenerator>>,
     /// 动态人设（可选）
@@ -202,6 +204,8 @@ pub struct HttpApiState {
     /// 上一次决策上下文快照（供 /api/v1/context enrichment 使用）
     pub decision_context_snapshot:
         std::sync::Arc<tokio::sync::RwLock<Option<DecisionContextSnapshot>>>,
+    /// WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
+    pub world_state_store: Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
 }
 
 /// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）
@@ -288,6 +292,14 @@ pub fn http_decision(
 
                 let mut last_update = state.api_state.last_state_update.write().await;
                 *last_update = Some(std::time::Instant::now());
+            }
+
+            // 更新 WorldStateStore（供 Delta Engine 使用）
+            {
+                let wss = state.api_state.world_state_store.read().unwrap().clone();
+                if let Some(wss) = wss {
+                    wss.update(world_state.clone()).await;
+                }
             }
 
             // 触发叙事更新（异步，不阻塞）
@@ -719,9 +731,8 @@ pub fn create_http_state(
         dialogue_handler,
     )));
 
-    // 初始化意图验证器（使用默认规则引擎验证器）
-    let intent_validator =
-        Some(Arc::new(RuleEngineValidator::with_default_config()) as Arc<dyn Validator>);
+    // 初始化统一意图审查器（默认为空，待 Agent 启动后注入 ReflectorSoul）
+    let intent_validator = None;
 
     let narrative_config = {
         if let Some(home) = dirs::home_dir() {
@@ -794,6 +805,7 @@ pub fn create_http_state(
         memory_manager,
         memory_config_template: Some(memory_config_template),
         intent_validator,
+        game_rules: Arc::new(RwLock::new(None)),
         narrative_generator: None,
         dynamic_persona: None,
         review_store: None, // 由 Player Agent 通过 builder 设置
@@ -826,6 +838,7 @@ pub fn create_http_state(
         actual_port,
         llm_container: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         decision_context_snapshot: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        world_state_store: Arc::new(std::sync::RwLock::new(None)),
     };
 
     let decision_state = Arc::new(HttpDecisionState {

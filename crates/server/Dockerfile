@@ -138,7 +138,8 @@ EXPOSE 23333
 ENV RUST_LOG=info \
     CYBER_JIANGHU_CONFIG_DIR=/app/config \
     CYBER_JIANGHU_STATIC_DIR=/app/static \
-    CYBER_JIANGHU_LOGS_DIR=/app/logs
+    CYBER_JIANGHU_LOGS_DIR=/app/logs \
+    CYBER_JIANGHU_DATA_DIR=/app/data
 
 # 容器入口点（以 root 运行来修复权限，然后切换用户执行）
 # 注意：容器以 root 启动，entrypoint 会检查权限并切换到 cyberjianghu 用户运行服务

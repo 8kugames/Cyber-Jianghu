@@ -6,7 +6,9 @@
 // ============================================================================
 
 use super::super::{ActionExecutionResult, StateChange};
-use super::super::{CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData};
+use super::super::{
+    CraftData, DropData, GatherData, MoveData, PickupData, ShoutData, SpeakData, TeachData,
+};
 use crate::models::Intent;
 
 /// 基础动作执行器
@@ -353,6 +355,63 @@ impl BasicActionExecutor {
         // 真正的材料扣除（如果有）应当在 state_processor 的 ItemCrafted 结算中异步完成。
         // MVP 阶段暂时不强制在 execute_craft 中检查材料充足，由 state_processor 处理，
         // 或后续重构时引入异步 DB 检查。
+
+        result
+    }
+
+    /// 执行传授动作
+    pub(super) fn execute_teach(
+        intent: &Intent,
+        action_data: Option<serde_json::Value>,
+    ) -> ActionExecutionResult {
+        let data: TeachData = deserialize_action_data!(action_data, intent, TeachData, "传授");
+
+        let student_id = match uuid::Uuid::parse_str(&data.target_agent_id) {
+            Ok(id) => id,
+            Err(_) => {
+                return ActionExecutionResult::failure(
+                    format!("无效的目标 ID: {}", data.target_agent_id),
+                    intent.action_type.to_string(),
+                    Some(intent.intent_id),
+                );
+            }
+        };
+
+        let recipe_name = crate::game_data::registry::RecipeRegistry::get(&data.recipe_id)
+            .map(|r| r.name)
+            .unwrap_or_else(|| data.recipe_id.clone());
+
+        let mut result = ActionExecutionResult::success(
+            format!("传授配方「{}」", recipe_name),
+            intent.action_type.to_string(),
+            Some(intent.intent_id),
+        );
+
+        // 学生习得配方
+        result.add_change(StateChange::RecipeLearned {
+            agent_id: student_id,
+            recipe_id: data.recipe_id.clone(),
+            source: "taught".to_string(),
+        });
+
+        // 传授者消耗体力（数据驱动）
+        let stamina_cost = crate::game_data::registry()
+            .map(|cache| {
+                cache
+                    .get()
+                    .game_rules
+                    .data
+                    .recipe_learning
+                    .teach_stamina_cost
+            })
+            .unwrap_or_else(|| {
+                crate::game_data::types::unified_config::RecipeLearningConfig::default()
+                    .teach_stamina_cost
+            });
+        result.add_change(StateChange::StaminaChanged {
+            agent_id: intent.agent_id,
+            delta: -stamina_cost,
+        });
 
         result
     }

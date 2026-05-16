@@ -15,7 +15,8 @@ pub use client::mock::MockLlmClient;
 pub use client::{ConversationInput, ConversationTurn, FallbackLlmClient, LlmClient, LlmClientExt};
 pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider, OpenClawConfig};
 pub use token_tracking::{
-    ModelTokenStats, persist_and_reset, record_failure, record_token_usage, snapshot_all_stats,
+    ModelTokenStats, persist_and_reset, record_failure,
+    record_token_usage, snapshot_all_stats,
 };
 pub use tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 

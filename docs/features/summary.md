@@ -127,7 +127,7 @@
     - [x] 直连世界状态生成因果推导链，结合环境上下文、记忆和社交关系生成 Intent。
     - [x] 内置低 San 值混沌行为注入器，模拟精神崩溃时的非理性行为（如发疯、喃喃自语）。
   - [x] **地魂 (EarthSoul)**：对接物理世界的”工具执行池”。
-    - [x] 负责将人魂意图转换为系统 API 调用，并在决策中途按需获取外部数据。
+    - [x] 负责提供工具调用能力，并在决策中途按需获取外部数据；最终 Intent 发送由 Agent 生命周期层完成，不由地魂发包。
     - [x] **工具调用安全机制 (F1/F2/F3)**:
       - [x] F1 ToolResultBudget: per-tool + aggregate 字符配额，`.chars().count()` Unicode 安全截断，50 字预留截断标记。
       - [x] F2 LoopGuard: 连续相同工具调用检测，Warn→Terminate 两级升级，`pending_warning` 跨 `tool_calls` 清零防泄漏。
@@ -139,8 +139,9 @@
     - [x] 关系查询工具 (`get_relationship`, `list_relationships`)：供 LLM 查询人际关系（UUID/名字查找，好感度过滤）
     - [x] 社交事件记录工具 (`record_social_event`)：供 LLM 主动记录社交互动和好感度变化，避免撑爆 System Prompt。
   - [x] **天魂 (ReflectorSoul)**：三段式“自我审查官”。
-    - [x] Layer 1 动作校验：基础 ActionType 与参数合法性验证。
-    - [x] Layer 2 物理规则审查 (RuleEngine)：YAML 配置驱动的世界观刚性规则和物理可行性检验（如禁止穿墙、禁止使用不存在的物品）。
+    - [x] 三层审查统一由 ReflectorSoul 执行，驳回原因会回灌给人魂重新提交。
+    - [x] Layer 1 动作校验：基础 ActionType 合法性验证。
+    - [x] Layer 2 物理规则审查 (RuleEngine)：本地确定性规则校验（如连续 follow 限制、物品/地点 ID 校验），当前不是 YAML 热加载的通用物理引擎。
     - [x] Layer 3 角色 OOC 审查：基于 LLM 的人物性格符合度动态拦截，按严重程度分类 OOC 等级。
       - [x] 角色名排除：验证 prompt 包含角色名 + 穿越排除说明，防止历史人物同名被误判。
 - [x] **[认知流转引擎 (CognitiveEngine)](../../crates/agent/docs/architecture/p0_core/cognitive_engine.md)**: 将环境感知转化为具体行动的思考中枢。
@@ -166,6 +167,15 @@
 
 ### P1 重要特性
 
+- [x] **[Token 优化：注意力门控 + Tool-First](../../crates/agent/docs/architecture/p1_major/token_optimization.md)**: 从架构层面降低 LLM Token 消耗（目标 60-75% 削减）。
+  - [x] **WorldStateStore**: Agent 侧 WorldState 本地落存，prev/curr 双版本，供 Delta Engine 增量检测。
+  - [x] **DeltaEngine**: 纯规则 prev vs curr 对比，5 类变化检测（survival/location/inventory/entities/skill），数据驱动阈值（`DeltaConfig.survival_thresholds`）。
+  - [x] **AttentionController**: 两阶段过滤（规则自动聚焦 + LLM 排序占位）产出 `FocusSummary`，替代完整 WorldState 注入 prompt。
+  - [x] **Lean Prompt**: 人魂 prompt 从完整 WorldState + 动作描述 → FocusSummary + Action Index + Skill Index，详情由地魂 tool calling 按需取用。
+  - [x] **3 个新 EarthSoul 工具**: `get_action_detail`（动作详情）、`query_world`（世界状态分区查询）、`list_skills`（已掌握技能索引）。
+  - [x] **ReflectorSoul 重试优化**: 验证流程从 13 轮重试循环改为 generate → validate → self_correct once → chaos_fallback。
+  - [x] **Token 按组件追踪**: `LlmComponent` 枚举 + `ComponentMetrics`，按组件维度追踪 token 消耗。
+  - [x] 全部参数外部化（`agent.yaml` 的 `token_optimization` 段），默认 `enabled: true`。Cognitive/Claw 零差分。
 - [x] **[模型网关与调度](../../crates/agent/docs/architecture/p1_major/model_gateway.md)**: 统一的 LLM 客户端池，支持主备模型无缝切换及 Token 消耗监控。
   - [x] `prefer_stream` 全局流式优化：支持流式的模型跳过 400 降级，直接走 streaming。
   - [x] Token 统计修复：单模型场景 `UsageTrackingStream` 包装 + 非 streaming 路径估算兜底。

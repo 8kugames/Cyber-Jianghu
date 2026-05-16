@@ -481,11 +481,16 @@ async function loadCharacterIntoDrawer(char) {
     const expData = await apiGet(
       "/api/v1/character/soul-cycles?agent_id=" +
         char.agent_id +
-        "&page=1&limit=1000",
+        "&page=1&limit=50",
     );
     const recordsMap = expData.records || {};
     const immMap = expData.immediate_intents || {};
-    const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
+    const hasMore = expData.has_more;
+    const total = expData.total || 0;
+    let expHtml = renderDrawerSoulCycles(recordsMap, immMap);
+    if (hasMore) {
+      expHtml += `<p class="no-data" style="margin-top:8px;">另有 ${total - 50} 条更早记录（完整记录在历史页）</p>`;
+    }
     html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">经历日志</div>
@@ -723,6 +728,15 @@ async function loadCharacter() {
             .join("")
         : "-";
 
+    // 技能标签
+    const skillsEl = document.getElementById("skills");
+    skillsEl.innerHTML =
+      data.skills && data.skills.length > 0
+        ? data.skills
+            .map((s) => `<span class="info-tag skill-tag" title="${escapeHtml(s.skill_id || "")}">${escapeHtml(s.name)}</span>`)
+            .join("")
+        : "-";
+
     // 属性
     renderAttributes(data.attributes, data.derived_attributes);
 
@@ -813,10 +827,8 @@ function generateAttributesHtml(attributes, derivedAttributes) {
         if (keys.includes(key)) return cat;
       }
     }
-    if (!attributeMeta) {
-      console.warn("[renderAttributes] attributeMeta 未加载，属性将落入'其他属性'分组");
-    }
-    return null;
+    // attributeMeta 未加载时默认归入 primary，避免 warn 且保持功能正常
+    return "primary";
   };
 
   const primary = [];
@@ -1057,12 +1069,19 @@ function renderSoulInline(label, data, type) {
           : {};
       const content = ad.content || "";
       const targetId = ad.target_agent_id;
+      const resolveName = (id) => {
+        if (!id) return null;
+        const c = allCharacters.find((c) => c.agent_id === id);
+        const shortId = id.substring(0, 8);
+        return c ? `${c.name}（${shortId}）` : `${shortId}...`;
+      };
 
       if (at === "speak") {
-        const label = targetId ? `对某人说话` : `向众人说话`;
-        html += `<div class="soul-text">${escapeHtml(label)}："${escapeHtml(content)}"</div>`;
+        const targetName = targetId ? resolveName(targetId) : "众人";
+        html += `<div class="soul-text">对 ${escapeHtml(targetName)} 说话："${escapeHtml(content)}"</div>`;
       } else if (at === "whisper") {
-        html += `<div class="soul-text">向某人密语："${escapeHtml(content)}"</div>`;
+        const targetName = targetId ? resolveName(targetId) : "某人";
+        html += `<div class="soul-text">向 ${escapeHtml(targetName)} 密语："${escapeHtml(content)}"</div>`;
       } else if (at === "shout") {
         html += `<div class="soul-text">大声喊道："${escapeHtml(content)}"</div>`;
       } else {
@@ -1384,6 +1403,9 @@ document.addEventListener("DOMContentLoaded", () => {
         showError("角色已死亡");
         showDeathModal(null);
       }
+      // 同步更新 death-notice 气泡（与 Modal 同时显示，避免视觉跳跃）
+      const deathNotice = document.getElementById("death-notice");
+      if (deathNotice) deathNotice.classList.remove("hidden");
       // 同步更新世界树中当前角色的状态
       const currentChar = allCharacters.find((c) => c.is_current);
       if (currentChar) {
@@ -1747,8 +1769,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // 自动刷新：每秒 1 次（增量刷新，避免闪烁）
-  let lastRefreshData = null;
+  let lastRefreshTickId = null;
+  let lastRefreshLocation = null;
+  let lastRefreshWorldTime = null;
+  let lastRefreshTickId = null;
+  let lastRefreshLocation = null;
+  let lastRefreshWorldTime = null;
+  let lastRefreshAttrsHash = null;
+  let lastRefreshDerivedHash = null;
+  let lastRefreshInvHash = null;
   let refreshTimer = null;
+  let refreshInitialized = false;
   function startRefreshTimer() {
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(async () => {
@@ -1775,18 +1806,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await apiGet("/api/v1/character");
 
       // 记录当前数据用于下次比较
-      const newDataHash = JSON.stringify({
-        tick_id: data.tick_id,
-        location: data.location,
-        world_time: data.world_time,
-        attributes: data.attributes,
-        derived_attributes: data.derived_attributes,
-        inventory: data.inventory,
-      });
+      const newAttrsHash = JSON.stringify(data.attributes || {});
+      const newDerivedHash = JSON.stringify(data.derived_attributes || {});
+      const newInvHash = JSON.stringify(data.inventory || []);
 
-      // 数据没变化，跳过
-      if (newDataHash === lastRefreshData) return;
-      lastRefreshData = newDataHash;
+      // 数据没变化，跳过（首次刷新必须执行以初始化 last* 变量）
+      if (refreshInitialized &&
+          data.tick_id === lastRefreshTickId &&
+          data.location === lastRefreshLocation &&
+          data.world_time === lastRefreshWorldTime &&
+          newAttrsHash === lastRefreshAttrsHash &&
+          newDerivedHash === lastRefreshDerivedHash &&
+          newInvHash === lastRefreshInvHash) return;
+      refreshInitialized = true;
+      lastRefreshTickId = data.tick_id;
+      lastRefreshLocation = data.location;
+      lastRefreshWorldTime = data.world_time;
+      lastRefreshAttrsHash = newAttrsHash;
+      lastRefreshDerivedHash = newDerivedHash;
+      lastRefreshInvHash = newInvHash;
 
       // 更新高频变化字段（tick、位置、时间）
       updateField("tick-id", data.tick_id);

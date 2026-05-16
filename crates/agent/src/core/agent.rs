@@ -12,6 +12,7 @@ use tokio::sync::{Mutex, broadcast};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
@@ -65,10 +66,13 @@ pub struct Agent {
     /// 对话客户端（可选）
     pub(crate) dialogue_client: Option<DialogueClient>,
 
+    /// 对话上下文管理器（替代WorkingMemory存储对话）
+    pub(crate) dialogue_manager: Option<Arc<tokio::sync::RwLock<DialogueContextManager>>>,
+
     /// 关系存储（可选）
     pub(crate) relationship_store: Option<RelationshipStore>,
 
-    /// 意图审查器（ReflectorSoul，可选）
+    /// 统一意图审查器（运行时唯一入口）
     pub(crate) validator: Option<std::sync::Arc<dyn Validator>>,
 
     /// 上一次 ReflectorSoul 驳回原因（跨 tick 传递给 ActorSoul）
@@ -108,6 +112,19 @@ pub struct Agent {
     /// HTTP API 状态（可选，用于更新 current_state 供 Web Panel 查询）
     pub(crate) http_api_state: Option<std::sync::Arc<crate::infra::api::HttpApiState>>,
 
+    /// WorldState 本地落存（含 prev/curr，供 Delta Engine 使用）
+    pub(crate) world_state_store: Option<Arc<crate::component::state_store::WorldStateStore>>,
+
+    /// Delta Engine（增量检测，零 token）
+    pub(crate) delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
+
+    /// Attention Controller（规则过滤 + 轻量 LLM 排序）
+    pub(crate) attention_controller: Option<crate::component::attention::AttentionController>,
+
+    /// 当前 tick 的 FocusSummary（Delta + Attention 计算结果，供 prompt 构建使用）
+    pub(crate) current_focus_summary:
+        Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
+
     /// 设备身份配置（从 device.yaml 加载，或运行时注册生成）
     pub(crate) device_config: Option<DeviceConfig>,
 
@@ -135,9 +152,6 @@ pub struct Agent {
     /// 即时事件缓冲区（Fn callback 写入，主循环消费写入工作记忆）
     pub(crate) immediate_event_buffer: Arc<Mutex<Vec<cyber_jianghu_protocol::WorldEvent>>>,
 
-    /// RuleEngine 缓存（避免每 tick 重建）
-    pub(crate) rule_engine: crate::soul::reflector::rule_engine::RuleEngine,
-
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
 
@@ -146,6 +160,9 @@ pub struct Agent {
 
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
+
+    /// 当前 tick_id（原子计数，WS callback / 主循环共享）
+    pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl Agent {
@@ -187,6 +204,7 @@ impl Agent {
             decision_with_chain_callback: None,
             memory_manager: None,
             dialogue_client: None,
+            dialogue_manager: None,
             relationship_store: None,
             validator: None,
             last_rejection_reason: None,
@@ -200,6 +218,10 @@ impl Agent {
             llm_chaos_active: false,
             actor_llm_container: None,
             http_api_state: None,
+            world_state_store: None,
+            delta_engine: None,
+            attention_controller: None,
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             device_config,
             character_config: None,
             cognitive_engine: None,
@@ -209,10 +231,10 @@ impl Agent {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(Mutex::new(None)),
             immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
-            rule_engine: crate::soul::reflector::rule_engine::RuleEngine::with_default_config(),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: None,
+            current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 
@@ -282,6 +304,31 @@ impl Agent {
         );
     }
 
+    /// 初始化对话上下文管理器
+    ///
+    /// 从game_rules配置中读取参数，创建DialogueContextManager
+    pub fn init_dialogue_manager(
+        &mut self,
+        max_sessions: usize,
+        max_rounds: usize,
+        session_timeout_ticks: i64,
+        dialogue_action_types: Vec<String>,
+    ) {
+        use crate::component::dialogue::DialogueContextManager;
+        self.dialogue_manager = Some(std::sync::Arc::new(tokio::sync::RwLock::new(
+            DialogueContextManager::new(
+                max_sessions,
+                max_rounds,
+                session_timeout_ticks,
+                dialogue_action_types,
+            ),
+        )));
+        info!(
+            "Dialogue context manager initialized (max_sessions={}, max_rounds={}, timeout={})",
+            max_sessions, max_rounds, session_timeout_ticks
+        );
+    }
+
     /// 获取 Agent ID
     pub async fn agent_id(&self) -> Option<Uuid> {
         self.client.agent_id().await
@@ -308,10 +355,10 @@ impl Agent {
         self.relationship_store.as_mut()
     }
 
-    /// 设置验证器
-    pub fn set_validator(&mut self, validator: std::sync::Arc<dyn Validator>) {
+    /// 设置统一意图审查器
+    pub fn set_intent_auditor(&mut self, validator: std::sync::Arc<dyn Validator>) {
         self.validator = Some(validator);
-        info!("Validator set for agent '{}'", self.character_name());
+        info!("Intent auditor set for agent '{}'", self.character_name());
     }
 
     /// 设置带反馈的决策回调

@@ -26,7 +26,9 @@ mod realtime;
 mod scheduler;
 
 // 导出公共API
-pub use broadcaster::{build_initial_world_state, build_reactive_world_state, send_to_agent};
+pub use broadcaster::{
+    build_initial_world_state, build_reactive_world_state, build_recipe_details, send_to_agent,
+};
 pub use event_manager::SharedEventManager;
 pub use lessons::{fetch_lessons_for_broadcast, record_death_lesson};
 pub use processor::StateProcessor;

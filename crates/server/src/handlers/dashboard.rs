@@ -526,6 +526,7 @@ pub struct AgentListEntry {
     pub max_hp: i32,
     pub attributes: std::collections::HashMap<String, i32>,
     pub birth_attributes: std::collections::HashMap<String, i32>,
+    pub roles: Vec<String>,
 }
 
 /// 获取所有 agents（统一列表，数据驱动）
@@ -578,6 +579,26 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
         .await
         .unwrap_or_default();
 
+    let agent_ids: Vec<Uuid> = rows.iter().map(|r| r.get::<Uuid, _>("agent_id")).collect();
+
+    let role_rows = if agent_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT agent_id, role_key FROM agent_assigned_roles WHERE agent_id = ANY($1)",
+        )
+        .bind(&agent_ids)
+        .fetch_all(&state.db_pool)
+        .await
+        .unwrap_or_default()
+    };
+
+    let mut roles_map: std::collections::HashMap<Uuid, Vec<String>> =
+        std::collections::HashMap::new();
+    for (aid, rk) in &role_rows {
+        roles_map.entry(*aid).or_default().push(rk.clone());
+    }
+
     let mut agents = Vec::new();
 
     for row in rows {
@@ -628,6 +649,7 @@ pub async fn get_all_agents(State(state): State<Arc<AppState>>) -> Json<Vec<Agen
             max_hp: row.get("max_hp"),
             attributes,
             birth_attributes,
+            roles: roles_map.remove(&agent_id).unwrap_or_default(),
         });
     }
 
@@ -687,10 +709,9 @@ pub struct AgentDetail {
     pub attributes: std::collections::HashMap<String, i32>,
     /// 当前年龄（游戏年），NULL = 不朽
     pub age: Option<i64>,
-    /// 寿元上限（游戏年），NULL = 无上限
     pub max_age: Option<i64>,
-    /// 纪传体传记（死亡/归隐时生成）
     pub biography: Option<String>,
+    pub roles: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -746,6 +767,14 @@ pub async fn get_agent_details(
             is_equipped: row.get("is_equipped"),
         })
         .collect();
+
+    let roles = sqlx::query_scalar::<_, String>(
+        "SELECT role_key FROM agent_assigned_roles WHERE agent_id = $1 ORDER BY role_key",
+    )
+    .bind(agent_id)
+    .fetch_all(&state.db_pool)
+    .await
+    .unwrap_or_default();
 
     let (
         location,
@@ -919,6 +948,7 @@ pub async fn get_agent_details(
         age,
         max_age,
         biography: agent_row.get("biography"),
+        roles,
     }))
 }
 
@@ -1144,6 +1174,8 @@ pub struct ExperienceStreamQuery {
     pub action_type: Option<String>,
     pub from_tick: Option<i64>,
     pub to_tick: Option<i64>,
+    /// 结果过滤: "success" | "failed" | 空=全部
+    pub result: Option<String>,
 }
 
 /// 经历日志流水条目
@@ -1177,7 +1209,8 @@ pub struct ExperienceStreamResponse {
 
 /// GET /api/dashboard/experiences
 ///
-/// 返回所有成功的 agent 动作日志（全局视图），用于经历日志流水
+/// 返回 agent 动作日志（全局视图），用于经历日志流水。
+/// 默认只返回成功记录，传 result=all 查看全部。
 pub async fn get_experiences(
     State(state): State<Arc<AppState>>,
     Query(params): Query<ExperienceStreamQuery>,
@@ -1192,8 +1225,10 @@ pub async fn get_experiences(
     let action_type_filter = params.action_type;
     let from_tick_filter = params.from_tick;
     let to_tick_filter = params.to_tick;
+    // result 过滤: None/空 → 只看成功, "failed" → 只看失败, "all" → 全部
+    let result_filter = params.result.as_deref().unwrap_or("success");
 
-    // 查询总数：使用与 main query 一致的 LATERAL JOIN 逻辑
+    // 查询总数
     let total: i64 = sqlx::query_scalar(
         r#"
         WITH action_with_location AS (
@@ -1207,7 +1242,7 @@ pub async fn get_experiences(
                 ORDER BY st2.tick_id DESC
                 LIMIT 1
             ) loc ON true
-            WHERE a.result = 'success'
+            WHERE ($6::text = 'all' OR a.result = $6)
               AND ($1::uuid IS NULL OR a.agent_id = $1)
               AND ($3::text IS NULL OR a.action_type = $3)
               AND ($4::bigint IS NULL OR a.tick_id >= $4)
@@ -1223,6 +1258,7 @@ pub async fn get_experiences(
     .bind(&action_type_filter)
     .bind(from_tick_filter)
     .bind(to_tick_filter)
+    .bind(result_filter)
     .fetch_one(&state.db_pool)
     .await
     .unwrap_or(0);
@@ -1243,14 +1279,14 @@ pub async fn get_experiences(
             ORDER BY st2.tick_id DESC
             LIMIT 1
         ) loc ON true
-        WHERE a.result = 'success'
+        WHERE ($6::text = 'all' OR a.result = $6)
           AND ($1::uuid IS NULL OR a.agent_id = $1)
           AND ($2::text IS NULL OR loc.node_id = $2)
           AND ($3::text IS NULL OR a.action_type = $3)
           AND ($4::bigint IS NULL OR a.tick_id >= $4)
           AND ($5::bigint IS NULL OR a.tick_id <= $5)
         ORDER BY a.tick_id DESC
-        LIMIT $6 OFFSET $7
+        LIMIT $7 OFFSET $8
         "#,
     )
     .bind(agent_id_filter)
@@ -1258,6 +1294,7 @@ pub async fn get_experiences(
     .bind(&action_type_filter)
     .bind(from_tick_filter)
     .bind(to_tick_filter)
+    .bind(result_filter)
     .bind(limit as i64)
     .bind(offset as i64)
     .fetch_all(&state.db_pool)

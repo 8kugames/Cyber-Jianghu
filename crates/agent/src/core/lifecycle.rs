@@ -119,7 +119,7 @@ impl super::Agent {
 
         // 设置 Prompt 模板配置更新回调
         let cognitive_engine_for_prompt = self.cognitive_engine.clone();
-        let rule_engine_prompt_config = self.rule_engine.prompt_config_handle();
+        let validator_for_prompt = self.validator.clone();
         self.client
             .set_prompt_template_callback(Arc::new(
                 move |config: cyber_jianghu_protocol::PromptTemplateConfig| {
@@ -133,9 +133,8 @@ impl super::Agent {
                         engine.save_prompt_template_to_disk();
                     }
                     // 更新天魂 RuleEngine reject 反馈模板
-                    {
-                        let mut guard = rule_engine_prompt_config.write().unwrap();
-                        *guard = Some(std::sync::Arc::new(config));
+                    if let Some(ref validator) = validator_for_prompt {
+                        validator.update_prompt_config(std::sync::Arc::new(config));
                     }
                 },
             ))
@@ -344,10 +343,33 @@ impl super::Agent {
 
         // 更新游戏规则
         self.config.update_game_rules(game_rules.clone());
+        if let Some(ref api_state) = self.http_api_state {
+            *api_state.game_rules.write().await = Some(game_rules.clone());
+        }
 
         // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
         if let Some(ref engine) = self.cognitive_engine {
             engine.update_action_aliases(&game_rules.available_actions);
+            // 注入 available_actions 供地魂 get_action_detail 工具使用
+            engine.set_available_actions(game_rules.available_actions.clone());
+        }
+
+        // 注入 WorldStateStore 到 CognitiveEngine（供地魂 query_world 工具使用）
+        if let (Some(engine), Some(store)) = (&self.cognitive_engine, &self.world_state_store) {
+            engine.set_world_state_store(store.clone());
+        }
+
+        // 初始化对话上下文管理器（Fail-Fast: dialogue_context 段存在时所有字段必填）
+        if self.dialogue_manager.is_none() {
+            #[allow(clippy::collapsible_if)]
+            if let Some(ref config) = game_rules.dialogue_context {
+                self.init_dialogue_manager(
+                    config.max_sessions,
+                    config.max_rounds_per_session,
+                    config.session_timeout_ticks,
+                    config.dialogue_action_types.clone(),
+                );
+            }
         }
 
         // 启动时主动拉取 prompt_templates 并写盘
@@ -361,9 +383,11 @@ impl super::Agent {
         let prev_callback = self.client.get_server_msg_callback().await;
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
-        let event_buffer = self.immediate_event_buffer.clone();
+        let _event_buffer = self.immediate_event_buffer.clone(); // 保留用于Future ImmediateEvent扩展
         let memory_manager = self.memory_manager.clone();
+        let dialogue_manager = self.dialogue_manager.clone();
         let game_rules = self.config.game_rules.clone();
+        let current_tick = self.current_tick.clone();
         let callback: Arc<dyn Fn(ServerMessage) + Send + Sync> =
             Arc::new(move |msg: ServerMessage| {
                 // 1. 验证错误反馈
@@ -387,57 +411,96 @@ impl super::Agent {
                         h.handle_server_message(msg).await;
                     });
                 }
-                // 2b. Dialogue（whisper 密语）：写入即时事件缓冲区 → 工作记忆
-                if let ServerMessage::Dialogue { message, .. } = &msg {
+                // 2b. Dialogue: 写入 DialogueContextManager（统一 game tick 时间域）
+                if let ServerMessage::Dialogue { message } = &msg {
+                    use crate::component::dialogue::DialogueRole;
                     use cyber_jianghu_protocol::DialogueMessage;
-                    let (desc, from_id) = match message {
-                        DialogueMessage::Request {
-                            opening_remark,
-                            from_agent_id,
-                            ..
-                        } => (
-                            format!("收到密语请求: {}", opening_remark),
-                            Some(*from_agent_id),
-                        ),
-                        DialogueMessage::Content {
-                            content,
-                            from_agent_id,
-                            ..
-                        } => (format!("密语内容: {}", content), Some(*from_agent_id)),
-                        DialogueMessage::Accept { from_agent_id, .. } => {
-                            ("密语对话已接受".to_string(), Some(*from_agent_id))
-                        }
-                        DialogueMessage::Reject {
-                            reason,
-                            from_agent_id,
-                            ..
-                        } => (
-                            format!("密语对话被拒绝: {}", reason.as_deref().unwrap_or("无理由")),
-                            Some(*from_agent_id),
-                        ),
-                        DialogueMessage::End { from_agent_id, .. } => {
-                            ("密语对话已结束".to_string(), Some(*from_agent_id))
-                        }
-                    };
-                    let buf = event_buffer.clone();
+
+                    let dm = dialogue_manager.clone();
+                    let dialogue_message = message.clone();
+                    let tick = current_tick.load(std::sync::atomic::Ordering::Relaxed);
+
                     tokio::spawn(async move {
-                        let mut meta = serde_json::json!({
-                            "action": "whisper",
-                        });
-                        if let Some(fid) = from_id {
-                            meta.as_object_mut().unwrap().insert(
-                                "from_agent_id".to_string(),
-                                serde_json::json!(fid.to_string()),
-                            );
-                        }
-                        let world_event = cyber_jianghu_protocol::WorldEvent {
-                            event_type: cyber_jianghu_protocol::WorldEventType::PrivateDialogue,
-                            tick_id: 0,
-                            description: desc,
-                            metadata: meta,
+                        let Some(ref dm) = dm else {
+                            return;
                         };
-                        let mut guard = buf.lock().await;
-                        guard.push(world_event);
+                        let mut guard = dm.write().await;
+
+                        match dialogue_message {
+                            DialogueMessage::Content {
+                                session_id,
+                                from_agent_id,
+                                content,
+                            } => {
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    &content,
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Request {
+                                from_agent_id,
+                                opening_remark,
+                                ..
+                            } => {
+                                let session_id = format!(
+                                    "request_{}_{}",
+                                    from_agent_id,
+                                    chrono::Utc::now().timestamp()
+                                );
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    &opening_remark,
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Accept {
+                                session_id,
+                                from_agent_id,
+                            } => {
+                                let pending_id = format!(
+                                    "{}{}",
+                                    crate::component::dialogue::PENDING_SESSION_PREFIX,
+                                    from_agent_id
+                                );
+                                guard.migrate_session(
+                                    &pending_id,
+                                    &session_id,
+                                    from_agent_id,
+                                    tick,
+                                );
+                                guard.add_message(
+                                    &session_id,
+                                    from_agent_id,
+                                    DialogueRole::Partner,
+                                    "[对方接受了对话请求]",
+                                    tick,
+                                );
+                            }
+                            DialogueMessage::Reject {
+                                session_id,
+                                from_agent_id,
+                                reason,
+                            } => {
+                                let pending_id = format!(
+                                    "{}{}",
+                                    crate::component::dialogue::PENDING_SESSION_PREFIX,
+                                    from_agent_id
+                                );
+                                guard.close_session(&pending_id);
+                                warn!(
+                                    "Dialogue rejected by {}: session={}, reason={:?}",
+                                    from_agent_id, session_id, reason
+                                );
+                            }
+                            DialogueMessage::End { session_id, .. } => {
+                                guard.end_session(&session_id);
+                            }
+                        }
                     });
                 }
                 // 2c. DailySummaryData：存储到 episodic memory（服务器侧权威动作统计）
@@ -630,6 +693,11 @@ impl super::Agent {
                     };
 
                     // 更新即时事件处理器 tick_id + Session Triage 生命周期管理
+                    self.current_tick.store(world_state.tick_id, std::sync::atomic::Ordering::Relaxed);
+                    if let Some(ref dm) = self.dialogue_manager {
+                        let mut guard = dm.write().await;
+                        guard.cleanup_timed_out(world_state.tick_id);
+                    }
                     if let Some(ref handler) = self.immediate_handler {
                         handler.set_tick_id(world_state.tick_id).await;
                         let game_day = Self::compute_game_day(
@@ -753,6 +821,37 @@ impl super::Agent {
                     }
 
                     // 更新 HTTP API 状态（供 Web Panel 查询）
+                    if let Some(ref store) = self.world_state_store {
+                        store.update(world_state.clone()).await;
+                    }
+
+                    // Delta Engine + Attention Controller（Token 优化模式）
+                    let focus_summary = if self.config.token_optimization.enabled {
+                        if let (Some(store), Some(delta_engine), Some(attention_ctrl)) =
+                            (&self.world_state_store, &self.delta_engine, &self.attention_controller)
+                        {
+                            let prev = store.previous().await;
+                            let delta = delta_engine.compute(prev.as_ref(), &world_state);
+                            let summary = attention_ctrl.filter(&delta);
+                            Some(summary)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    if let Some(ref summary) = focus_summary {
+                        *self.current_focus_summary.write().await = Some(summary.clone());
+                        // 同步写入 CognitiveEngine 的 current_focus_summary（供 lean prompt 使用）
+                        if let Some(ref engine) = self.cognitive_engine {
+                            engine.set_current_focus_summary(Some(summary.clone())).await;
+                        }
+                    } else {
+                        // 无 focus_summary 时清空 CognitiveEngine 的缓存
+                        if let Some(ref engine) = self.cognitive_engine {
+                            engine.set_current_focus_summary(None).await;
+                        }
+                    }
                     if let Some(ref api_state) = self.http_api_state {
                         let mut current = api_state.current_state.write().await;
                         *current = Some(world_state.clone());
@@ -863,7 +962,15 @@ impl super::Agent {
                                 let delay_ticks = self.rebirth_delay_ticks;
                                 let tick_secs = self.get_tick_duration().await.as_secs();
                                 let delay_ms = delay_ticks as u64 * tick_secs * 1000;
-                                let old_agent_id = world_state.agent_id.unwrap_or_default();
+                                // world_state.agent_id 在 agent 死亡后可能为 None
+                                // （server 不返回 dead agent 的 agent_id），
+                                // 此时从 character_config 获取最后已知的 agent_id，
+                                // 避免 nil UUID 导致 auto-rebirth API 永久失败。
+                                let old_agent_id = world_state.agent_id
+                                    .or_else(|| {
+                                        self.character_config.as_ref().and_then(|c| c.agent_id)
+                                    })
+                                    .unwrap_or_default();
                                 let http_url = self.config.server.http_url.clone();
                                 let api_state = self.http_api_state.clone();
 
@@ -893,71 +1000,77 @@ impl super::Agent {
                                         .unwrap_or(30)
                                 );
 
-                                info!(
-                                    "自动转世重生已调度: agent={}, delay={} ticks ({}s)",
-                                    old_agent_id, delay_ticks, delay_ms / 1000
-                                );
-
-                                tokio::spawn(async move {
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-                                    info!("自动转世重生: 调用 auto-rebirth API (old_agent={})", old_agent_id);
-
-                                    let client = reqwest::Client::new();
-                                    let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
-                                    let body = serde_json::json!({
-                                        "device_id": device_id,
-                                        "auth_token": auth_token,
-                                        "old_agent_id": old_agent_id,
-                                        "name": name,
-                                        "system_prompt": system_prompt,
-                                    });
-
-                                    for attempt in 0..retry_max {
-                                        match client.post(&url).json(&body).send().await {
-                                            Ok(resp) if resp.status().is_success() => {
-                                                // 解析响应，提取 new_agent_id
-                                                let data: serde_json::Value = resp.json().await.unwrap_or_default();
-                                                let new_id = data["new_agent_id"]
-                                                    .as_str()
-                                                    .and_then(|s| s.parse::<uuid::Uuid>().ok())
-                                                    .unwrap_or(uuid::Uuid::nil());
-
-                                                info!(
-                                                    "自动转世重生成功: old_agent={} → new_agent={}",
-                                                    old_agent_id, new_id
-                                                );
-
-                                                if let Some(ref api_state) = api_state {
-                                                    *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
-                                                    api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
-                                                    api_state.rebirth_notify.notify_waiters();
-                                                }
-                                                return;
-                                            }
-                                            Ok(resp) => {
-                                                let status = resp.status();
-                                                let resp_body = resp.text().await.unwrap_or_default();
-                                                warn!(
-                                                    "自动转世重生服务端拒绝 (attempt {}/{}): status={}, body={}",
-                                                    attempt + 1, retry_max, status, resp_body
-                                                );
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    "自动转世重生网络错误 (attempt {}/{}): {}",
-                                                    attempt + 1, retry_max, e
-                                                );
-                                            }
-                                        }
-                                        if attempt + 1 < retry_max {
-                                            tokio::time::sleep(retry_interval).await;
-                                        }
-                                    }
-                                    tracing::error!(
-                                        "自动转世重生最终失败: old_agent={}, 所有 {} 次重试用尽",
-                                        old_agent_id, retry_max
+                                if old_agent_id == uuid::Uuid::nil() {
+                                    warn!(
+                                        "自动转世重生跳过: 无法获取有效的 old_agent_id \
+                                         (world_state.agent_id=None, api_state.agent_id=None)"
                                     );
-                                });
+                                } else {
+                                    info!(
+                                        "自动转世重生已调度: agent={}, delay={} ticks ({}s)",
+                                        old_agent_id, delay_ticks, delay_ms / 1000
+                                    );
+
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                                        info!("自动转世重生: 调用 auto-rebirth API (old_agent={})", old_agent_id);
+
+                                        let client = reqwest::Client::new();
+                                        let url = format!("{}/api/v1/agent/auto-rebirth", http_url);
+                                        let body = serde_json::json!({
+                                            "device_id": device_id,
+                                            "auth_token": auth_token,
+                                            "old_agent_id": old_agent_id,
+                                            "name": name,
+                                            "system_prompt": system_prompt,
+                                        });
+
+                                        for attempt in 0..retry_max {
+                                            match client.post(&url).json(&body).send().await {
+                                                Ok(resp) if resp.status().is_success() => {
+                                                    let data: serde_json::Value = resp.json().await.unwrap_or_default();
+                                                    let new_id = data["new_agent_id"]
+                                                        .as_str()
+                                                        .and_then(|s| s.parse::<uuid::Uuid>().ok())
+                                                        .unwrap_or(uuid::Uuid::nil());
+
+                                                    info!(
+                                                        "自动转世重生成功: old_agent={} → new_agent={}",
+                                                        old_agent_id, new_id
+                                                    );
+
+                                                    if let Some(ref api_state) = api_state {
+                                                        *api_state.pending_rebirth_agent_id.write().await = Some(new_id);
+                                                        api_state.is_dead.store(false, std::sync::atomic::Ordering::Relaxed);
+                                                        api_state.rebirth_notify.notify_waiters();
+                                                    }
+                                                    return;
+                                                }
+                                                Ok(resp) => {
+                                                    let status = resp.status();
+                                                    let resp_body = resp.text().await.unwrap_or_default();
+                                                    warn!(
+                                                        "自动转世重生服务端拒绝 (attempt {}/{}): status={}, body={}",
+                                                        attempt + 1, retry_max, status, resp_body
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "自动转世重生网络错误 (attempt {}/{}): {}",
+                                                        attempt + 1, retry_max, e
+                                                    );
+                                                }
+                                            }
+                                            if attempt + 1 < retry_max {
+                                                tokio::time::sleep(retry_interval).await;
+                                            }
+                                        }
+                                        tracing::error!(
+                                            "自动转世重生最终失败: old_agent={}, 所有 {} 次重试用尽",
+                                            old_agent_id, retry_max
+                                        );
+                                    });
+                                }
                             }
 
                             continue;
@@ -1039,8 +1152,20 @@ impl super::Agent {
                             warn!("Failed to run forgetting mechanism: {}", e);
                         }
 
-                    // 4. 构建增强的世界状态（包含记忆上下文 + deferred 对话）
+                    // 4. 构建增强的世界状态（包含记忆上下文 + 对话上下文）
                     let mut memory_context = self.get_memory_context().await;
+
+                    // 4.x 拼接对话上下文
+                    let dialogue_section = if let Some(ref dm) = self.dialogue_manager {
+                        let guard = dm.read().await;
+                        guard.get_active_sessions_context()
+                    } else {
+                        String::new()
+                    };
+
+                    if !dialogue_section.is_empty() {
+                        memory_context = format!("{}\n\n# 活跃对话\n{}\n", memory_context, dialogue_section);
+                    }
 
                     // 4.1 交易议价提示（经济引导，非生存干预）
                     // 附近有其他人且有银两时注入交易建议（关系感知）
@@ -1222,13 +1347,24 @@ impl super::Agent {
                         *api_state.decision_context_snapshot.write().await = Some(snapshot);
                     }
 
-                    // 5. 三魂循环：人魂决策 → 天魂审核 → 驳回则重试
-                    // 循环直到审查通过或达到最大重试次数
-                    let max_retries = self.config.game_rules
-                        .as_ref()
-                        .and_then(|g| g.intent_batch.as_ref())
-                        .map(|b| b.max_retries)
-                        .unwrap_or(12);
+                    // 5. 三魂循环：generate -> validate -> self_correct once -> chaos_fallback
+                    // Token 优化：消灭 13 轮重试循环，固定为最多 2 次 LLM 调用
+                    // 提前提取优化配置（避免后续 borrow 冲突）
+                    let (opt_enabled, opt_self_correction, opt_chaos_on_double_reject, opt_chaos_on_llm_fail) = {
+                        let opt = &self.config.token_optimization;
+                        (opt.enabled, opt.reflector.self_correction, opt.reflector.chaos_on_double_reject, opt.reflector.chaos_on_llm_fail)
+                    };
+                    let max_retries: i32 = if opt_enabled {
+                        // 优化模式：最多 self_correct 一次（attempt 0=初始, 1=纠正）
+                        1
+                    } else {
+                        // 旧模式：保留原有重试上限
+                        self.config.game_rules
+                            .as_ref()
+                            .and_then(|g| g.intent_batch.as_ref())
+                            .map(|b| b.max_retries)
+                            .unwrap_or(12)
+                    };
                     let _max_intents = self.config.game_rules
                         .as_ref()
                         .and_then(|g| g.intent_batch.as_ref())
@@ -1236,11 +1372,14 @@ impl super::Agent {
                         .unwrap_or(5);
                     let agent_id = world_state.agent_id.unwrap_or_default();
                     let mut final_intent = None;
+                    let mut final_intent_validated = false;
+
+                    // tick 级 LLM 失败计数器（优化模式下使用）
+                    let mut tick_llm_fail_count: u32 = 0;
 
                     for attempt in 0..=max_retries {
 
                         // 5a. 人魂 (ActorSoul) 决策 — 直连 WorldState，输出结构化 Intent
-                        // 优先使用 decision_with_chain_callback（人魂直连 WorldState）
                         let (raw_intent, _cognitive_chain) = {
                             let tick_id = world_state.tick_id;
                             let agent_id = world_state.agent_id.unwrap_or_default();
@@ -1297,7 +1436,6 @@ impl super::Agent {
                                 &renhun_narrative,
                                 renhun_thought_log,
                             ).await;
-                            // 记录游戏内时间和现实时间
                             let world_time_str = Self::format_world_time(&world_state.world_time);
                             recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                         } else {
@@ -1307,14 +1445,7 @@ impl super::Agent {
                             );
                         }
 
-                        // 5b. 翻译步骤已消除 — 人魂直接输出结构化 Intent
-
-                        // 5b'. speak 即时通道检测
-                        // 人魂直连后，speak intent 直接从 raw_intent 提取（不再依赖翻译层拆分）
-                        // 翻译层已消除，直接使用 raw_intent
-
-                        // 5c. 天魂 (ReflectorSoul) 审核 — 直接审查人魂输出的结构化 Intent
-                        // 分级审核策略：根据 action_type 决定审核级别（Always/Adaptive/Skip）
+                        // 5c. 天魂 (ReflectorSoul) 审核 — 分级审核策略
                         let graded_config = self.config.game_rules
                             .as_ref()
                             .and_then(|g| g.intent_batch.as_ref())
@@ -1322,13 +1453,12 @@ impl super::Agent {
 
                         let mut approved_intents = Vec::new();
                         let mut batch_rejection: Option<String> = None;
-                        let mut batch_layers: Vec<super::reflector_ext::LayerResult> = Vec::new();
+                        let mut batch_layers: Vec<crate::soul::reflector::LayerResult> = Vec::new();
                         let mut batch_narrative: Option<String> = None;
 
                         // multi-intent pipeline: primary + subsequent intents + chaos
                         let max_per_tick = _max_intents;
                         let mut all_raw_intents: Vec<Intent> = {
-                            // llm_chaos_active 时排除认知 fallback（"休息"），仅使用混沌 intents
                             let mut intents: Vec<Intent> = if self.llm_chaos_active {
                                 Vec::new()
                             } else {
@@ -1341,7 +1471,6 @@ impl super::Agent {
                                     intents.push(i.clone());
                                 }
                             }
-                            // Sanity 混沌：低理智时注入随机 intents（数据驱动，从 available_actions 中选取）
                             if let Some(ref mut generator) = self.chaos_generator {
                                 let remaining = max_per_tick.saturating_sub(intents.len());
                                 if remaining > 0 {
@@ -1353,7 +1482,6 @@ impl super::Agent {
                                     intents.extend(chaos_intents);
                                 }
                             }
-                            // LLM 失败混沌：配额耗尽时注入生存导向的随机 intents
                             if self.llm_chaos_active
                                 && let Some(ref mut generator) = self.chaos_generator
                             {
@@ -1371,7 +1499,7 @@ impl super::Agent {
                             intents
                         };
 
-                        // 托梦标记：本 tick 有活跃托梦时，标记所有 intent
+                        // 托梦标记
                         if let Some(ref dream) = active_dream {
                             let dream_trunc = self
                                 .cognitive_engine
@@ -1388,7 +1516,7 @@ impl super::Agent {
                             }
                         }
 
-                        // 处理人魂判断的重要记忆固化
+                        // 重要记忆固化
                         #[allow(clippy::collapsible_if)]
                         if let Some(ref chain) = _cognitive_chain
                             && chain.should_remember == Some(true)
@@ -1409,74 +1537,105 @@ impl super::Agent {
                                 }
                         }
 
+                        // 逐 intent 审查 + self-correction（优化模式）
                         for intent in all_raw_intents {
-                            // 分级决策：Chaos intent 跳过 LLM（降级行为不需要语义审核）
-                            let skip_llm = intent.chaos_marker.is_some()
-                                || Self::should_skip_llm_validation(
-                                    &intent, graded_config.as_ref(),
-                                );
-
-                            if skip_llm {
-                                // 仅做 Layer 1 (action_type) + Layer 2 (RuleEngine)
-                                match self.validate_rules_only(&intent, &world_state).await {
-                                    Ok(()) => {
-                                        // 记录通过的两个 layer
-                                        if batch_layers.is_empty() {
-                                            batch_layers.push(super::reflector_ext::LayerResult {
-                                                layer: "layer1",
-                                                passed: true,
-                                                detail: None,
-                                            });
-                                            batch_layers.push(super::reflector_ext::LayerResult {
-                                                layer: "layer2",
-                                                passed: true,
-                                                detail: None,
-                                            });
-                                        }
-                                        approved_intents.push(intent);
-                                    }
-                                    Err(reason) => {
-                                        warn!("Tick {} 分级审核（Skip）驳回: {}", world_state.tick_id, reason);
-                                        batch_rejection = Some(reason.clone());
-                                        batch_layers.push(super::reflector_ext::LayerResult {
-                                            layer: "layer1",
-                                            passed: true,
-                                            detail: None,
-                                        });
-                                        batch_layers.push(super::reflector_ext::LayerResult {
-                                            layer: "layer2",
-                                            passed: false,
-                                            detail: Some(reason),
-                                        });
-                                    }
+                            match self
+                                .validate_with_reflector(intent, &world_state, graded_config.as_ref())
+                                .await?
+                            {
+                                crate::soul::reflector::PipelineValidationResult::Approved {
+                                    intent: approved,
+                                    layers,
+                                    narrative,
+                                } => {
+                                    batch_layers = layers;
+                                    batch_narrative = narrative;
+                                    approved_intents.push(approved);
                                 }
-                            } else {
-                                // 完整三层审查（含 LLM）
-                                match self.validate_with_reflector(intent, &world_state).await? {
-                                    super::reflector_ext::ReflectorResult::Approved { intent: approved, layers, narrative } => {
-                                        batch_layers = layers;
-                                        batch_narrative = narrative;
-                                        approved_intents.push(approved);
-                                    }
-                                    super::reflector_ext::ReflectorResult::Rejected { reason, layers } => {
-                                        batch_layers = layers;
-                                        batch_rejection = Some(reason.clone());
-                                        // 叙事化驳回原因
-                                        let narrated = super::Agent::narrativize_rejection(&reason);
-                                        self.last_rejection_reason = Some(narrated.clone());
-                                        warn!("Tick {} 第 {} 次天魂审查驳回: {}", world_state.tick_id, attempt, reason);
+                                crate::soul::reflector::PipelineValidationResult::Rejected {
+                                    reason,
+                                    layers,
+                                } => {
+                                    batch_layers = layers;
+                                    let rejection_reason = reason.clone();
+                                    self.set_rejection_feedback(reason.clone());
+                                    warn!(
+                                        "Tick {} attempt {} 天魂审查驳回: {}",
+                                        world_state.tick_id, attempt, rejection_reason
+                                    );
+
+                                    // 优化模式：self-correct 一次后直接 chaos_fallback
+                                    if opt_enabled
+                                        && opt_self_correction
+                                        && tick_llm_fail_count < opt_chaos_on_llm_fail
+                                    {
+                                        match self.self_correct_intent(
+                                            &world_state, &memory_context, &rejection_reason,
+                                        ).await {
+                                            Ok(corrected_intent) => {
+                                                match self.validate_with_reflector(
+                                                    corrected_intent, &world_state, graded_config.as_ref(),
+                                                ).await? {
+                                                    crate::soul::reflector::PipelineValidationResult::Approved {
+                                                        intent: approved, layers: l2, narrative: n2,
+                                                    } => {
+                                                        batch_layers = l2;
+                                                        batch_narrative = n2;
+                                                        approved_intents.push(approved);
+                                                    }
+                                                    crate::soul::reflector::PipelineValidationResult::Rejected {
+                                                        reason: reason2, ..
+                                                    } => {
+                                                        warn!(
+                                                            "Tick {} self-correct 后仍被驳回: {}",
+                                                            world_state.tick_id, reason2
+                                                        );
+                                                        if opt_chaos_on_double_reject {
+                                                            approved_intents.push(
+                                                                self.chaos_fallback_intent(
+                                                                    &world_state, agent_id,
+                                                                    format!("self-correct 后仍被驳回: {}", reason2),
+                                                                )
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tick_llm_fail_count += 1;
+                                                warn!(
+                                                    "Tick {} self-correct LLM 失败 ({}): {}",
+                                                    world_state.tick_id, tick_llm_fail_count, e
+                                                );
+                                                approved_intents.push(
+                                                    self.chaos_fallback_intent(
+                                                        &world_state, agent_id,
+                                                        format!("self-correct LLM 失败: {}", e),
+                                                    )
+                                                );
+                                            }
+                                        }
+                                    } else if opt_enabled && opt_chaos_on_double_reject {
+                                        approved_intents.push(
+                                            self.chaos_fallback_intent(
+                                                &world_state, agent_id,
+                                                format!("意图被驳回（跳过 self-correct）: {}", rejection_reason),
+                                            )
+                                        );
+                                    } else {
+                                        // 旧模式：记录 batch_rejection 以触发重试
+                                        batch_rejection = Some(rejection_reason);
                                     }
                                 }
                             }
 
-                            // primary intent 被驳回则终止批次（Pipeline 语义）
-                            if batch_rejection.is_some() {
+                            // 旧模式：primary intent 被驳回则终止批次（Pipeline 语义）
+                            if !opt_enabled && batch_rejection.is_some() {
                                 break;
                             }
                         }
 
                         if !approved_intents.is_empty() {
-                            // 记录天魂审查结果
                             if let Some(recorder) = self.soul_recorder().await {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
@@ -1500,19 +1659,20 @@ impl super::Agent {
                                     pipeline.action_data.as_ref().map(|d| serde_json::to_string(d).unwrap_or_default()).as_deref(),
                                 ).await;
                                 final_intent = Some(pipeline);
+                                final_intent_validated = true;
                             } else {
                                 let pipeline = Self::assemble_pipeline(approved_intents.clone());
                                 final_intent = Some(pipeline);
+                                final_intent_validated = true;
                             }
-                            // 暂存 approved intents，供下一轮天魂生成叙事用
                             if let Ok(mut saved) = last_intents_for_narrative.lock() {
                                 saved.clone_from(&approved_intents);
                             } else {
                                 warn!("暂存 approved_intents 失败：Mutex lock 获取失败");
                             }
                             break;
-                        } else if let Some(reason) = batch_rejection {
-                            // 记录驳回
+                        } else if let Some(reason) = batch_rejection.clone() {
+                            // 仅旧模式会进入此分支
                             if let Some(recorder) = self.soul_recorder().await {
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
@@ -1611,13 +1771,43 @@ impl super::Agent {
                                 .await;
                         }
 
-                    // 6. 天魂验证 + 发送意图
-                    // 天魂唯一出入口：ALL intents 离开 Agent 前必须经过天魂验证
-                    // 正常三魂循环产出的 intent 已通过 5c 审查，此处验证 idle fallback 路径
-                    if let Err(reason) = self.validate_rules_only(&final_intent, &world_state).await {
-                        warn!("Tick {} 最终 intent 被天魂规则验证驳回: {}，跳过发送", world_state.tick_id, reason);
-                    } else {
-                        if let Err(e) = self.client.send_intent(&final_intent).await {
+                    let graded_config = self.config.game_rules
+                        .as_ref()
+                        .and_then(|g| g.intent_batch.as_ref())
+                        .map(|b| b.llm_validation.clone());
+
+                    // 6. 发送意图
+                    if !final_intent_validated {
+                        match self
+                            .validate_with_reflector(
+                                final_intent.clone(),
+                                &world_state,
+                                graded_config.as_ref(),
+                            )
+                            .await?
+                        {
+                            crate::soul::reflector::PipelineValidationResult::Approved {
+                                intent: approved,
+                                ..
+                            } => {
+                                final_intent = approved;
+                            }
+                            crate::soul::reflector::PipelineValidationResult::Rejected { reason, .. } => {
+                                self.set_rejection_feedback(reason.clone());
+                                warn!(
+                                    "Tick {} fallback intent 被天魂驳回，改用 chaos fallback: {}",
+                                    world_state.tick_id, reason
+                                );
+                                final_intent = self.chaos_fallback_intent(
+                                    &world_state,
+                                    agent_id,
+                                    format!("fallback 被天魂驳回: {}", reason),
+                                );
+                            }
+                        }
+                    }
+
+                    if let Err(e) = self.client.send_intent(&final_intent).await {
                             error!("Failed to send intent: {}", e);
                             if let Err(reconnect_err) = self.reconnect().await {
                                 error!("Reconnect failed: {}", reconnect_err);
@@ -1627,6 +1817,48 @@ impl super::Agent {
                                 "Intent sent successfully: tick={}, action={}, agent={}",
                                 final_intent.tick_id, final_intent.action_type, final_intent.agent_id
                             );
+
+                            // 记录 Agent 自身对话消息（原子化：write lock 内解析 session_id）
+                            {
+                                use crate::component::dialogue::DialogueRole;
+                                if let Some(ref dm) = self.dialogue_manager {
+                                    let action_type_str = final_intent.action_type.as_str();
+                                    let is_dialogue = {
+                                        let dm = dm.read().await;
+                                        dm.is_dialogue_action(action_type_str)
+                                    };
+                                    if is_dialogue {
+                                        let content = final_intent.action_data
+                                            .as_ref()
+                                            .and_then(|d| d.get("content"))
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or("");
+                                        if !content.is_empty() {
+                                            let target_id = final_intent.action_data
+                                                .as_ref()
+                                                .and_then(|d| d.get("target_agent_id"))
+                                                .and_then(|t| t.as_str())
+                                                .and_then(|s| Uuid::parse_str(s).ok());
+                                            let tick = self.current_tick.load(std::sync::atomic::Ordering::Relaxed);
+                                            let mut guard = dm.write().await;
+                                            let session_id = if let Some(tid) = target_id {
+                                                guard.get_session_id_by_partner(&tid)
+                                                    .map(|s| s.to_string())
+                                                    .unwrap_or_else(|| format!("{}{}", crate::component::dialogue::PENDING_SESSION_PREFIX, tid))
+                                            } else {
+                                                format!("speak_{}", chrono::Utc::now().timestamp())
+                                            };
+                                            guard.add_message(
+                                                &session_id,
+                                                final_intent.agent_id,
+                                                DialogueRole::Own,
+                                                content,
+                                                tick,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
 
                             // 实时模式：等待 ExecutionResult（server 立即处理后的反馈）
                             // Server 同时会发送 reactive WorldState（交互驱动即时推送），
@@ -1799,9 +2031,10 @@ impl super::Agent {
                                         }
                                         // 注入失败原因到下轮推理上下文
                                         let reason = result.error.unwrap_or_default();
-                                        self.last_rejection_reason = Some(
-                                            format!("[意图执行失败: {}]", reason)
-                                        );
+                                        {
+                                            let mut guard = self.server_error_feedback.lock().await;
+                                            *guard = Some(format!("[意图执行失败: {}]", reason));
+                                        }
                                         // Outcome 写回：更新 summary window
                                         if let Some(ref engine) = self.cognitive_engine {
                                             engine.update_summary_outcome(format!("失败: {}", reason));
@@ -1925,7 +2158,7 @@ impl super::Agent {
                                 let max_retries = self.config.llm.soul_cycle_report_retries;
                                 let base_delay = self.config.llm.soul_cycle_report_base_delay_ms;
                                 for attempt in 0..max_retries {
-                                    match self.client.send_soul_cycle_report(tick_id_for_report, metadata.clone()).await {
+                                    match self.client.send_soul_cycle_report(tick_id_for_report, 0, metadata.clone()).await {
                                         Ok(()) => {
                                             debug!("三魂循环元数据上报成功: tick={}", tick_id_for_report);
                                             reported = true;
@@ -1941,6 +2174,76 @@ impl super::Agent {
                                 }
                                 if !reported {
                                     error!("三魂循环元数据上报最终失败: tick={}", tick_id_for_report);
+                                }
+
+                                // 7.6 上报后续 intent 的简化元数据（subsequent intents 不经过三魂审查）
+                                let subsequent_count = final_intent.subsequent_intents.len();
+                                if subsequent_count > 0 {
+                                    let world_time = metadata.world_time.clone();
+                                    for (idx, subsequent) in final_intent.subsequent_intents.iter().enumerate() {
+                                        let pipe_seq = (idx + 1) as i32;
+                                        // Subsequent intents bypass soul review: simplified metadata with single passed cycle
+                                        let simplified_metadata = cyber_jianghu_protocol::SoulCycleMetadata {
+                                            world_time: world_time.clone(),
+                                            cycles: vec![cyber_jianghu_protocol::SoulCycleAttempt {
+                                                attempt: 0,
+                                                renhun: cyber_jianghu_protocol::RenhunReport {
+                                                    narrative: Some("后续意图".to_string()),
+                                                    thought_log: None,
+                                                },
+                                                tianhun: cyber_jianghu_protocol::TianhunReport {
+                                                    result: Some("通过".to_string()),
+                                                    layers: vec![
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer1".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer2".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                        cyber_jianghu_protocol::LayerReport {
+                                                            layer: "layer3".to_string(),
+                                                            passed: true,
+                                                            detail: None,
+                                                        },
+                                                    ],
+                                                    reason: None,
+                                                    narrative: Some(format!("后续动作: {}", subsequent.action_type)),
+                                                },
+                                                final_intent: Some(cyber_jianghu_protocol::FinalIntentReport {
+                                                    intent_id: Some(subsequent.intent_id.to_string()),
+                                                    action_type: Some(subsequent.action_type.to_string()),
+                                                    action_data: subsequent.action_data.clone(),
+                                                    chaos_marker: subsequent.chaos_marker.clone(),
+                                                    dream_marker: subsequent.dream_marker.clone(),
+                                                }),
+                                            }],
+                                            immediate_intents: vec![],
+                                        };
+
+                                        let mut reported = false;
+                                        for attempt in 0..max_retries {
+                                            match self.client.send_soul_cycle_report(tick_id_for_report, pipe_seq, simplified_metadata.clone()).await {
+                                                Ok(()) => {
+                                                    debug!("后续意图元数据上报成功: tick={}, pipe_seq={}, action={}", tick_id_for_report, pipe_seq, subsequent.action_type);
+                                                    reported = true;
+                                                    break;
+                                                }
+                                                Err(e) => {
+                                                    warn!("后续意图元数据上报失败 (尝试 {}/{}): tick={}, pipe_seq={}, err={}", attempt + 1, max_retries, tick_id_for_report, pipe_seq, e);
+                                                    if attempt + 1 < max_retries {
+                                                        tokio::time::sleep(tokio::time::Duration::from_millis(base_delay * (1 << attempt))).await;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !reported {
+                                            error!("后续意图元数据上报最终失败: tick={}, pipe_seq={}", tick_id_for_report, pipe_seq);
+                                        }
+                                    }
                                 }
                             }
 
@@ -1960,7 +2263,6 @@ impl super::Agent {
                                 }
                             }
                         }
-                    }
                 }
             }
 

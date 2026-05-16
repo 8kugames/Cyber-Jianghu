@@ -18,9 +18,10 @@ mod social;
 pub mod utils;
 
 // 重新导出核心类型
+pub use crate::soul::reflector::{LayerResult, PipelineValidationResult};
 pub use agent::Agent;
 pub use builder::AgentBuilder;
-pub use reflector_ext::{LayerResult, PersonaValidationResult, ReflectorResult};
+pub use reflector_ext::PersonaValidationResult;
 
 // 从 soul::actor 重导出认知引擎类型
 pub use crate::soul::actor::{

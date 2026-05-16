@@ -83,7 +83,6 @@ pub use core::{Agent, AgentBuilder};
 pub use soul::actor::{
     CognitiveChain, CognitiveEngine, CognitiveEngineConfig, CognitiveStage, StageOutput,
 };
-pub use soul::reflector::rule_engine::RuleEngine as RuleEngineValidator;
 pub use soul::reflector::rule_engine::{
     Rule, RuleCondition, RuleEngine, RuleEngineConfig, RuleType, RuleValidationContext,
     RuleValidationResult,
@@ -118,7 +117,7 @@ pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
 // 配置
 pub use config::{
     AgentRole, CharacterConfig, Config, DeviceConfig, GoalsConfig, LanguageStyleConfig,
-    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig,
+    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig, TokenOptimizationConfig,
 };
 pub use models::{ActionType, Intent, WorldEvent, WorldState};
 

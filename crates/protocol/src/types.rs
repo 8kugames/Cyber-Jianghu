@@ -147,6 +147,7 @@ mod tests {
                 skills: vec![],
                 age_years: None,
                 max_age: None,
+                recipe_details: vec![],
             },
             entities: vec![],
             nearby_items: vec![],

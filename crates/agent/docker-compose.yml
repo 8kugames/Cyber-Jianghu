@@ -56,6 +56,9 @@ services:
 
       # 游戏服务器 HTTP URL
       CYBER_JIANGHU_SERVER_HTTP_URL: ${SERVER_HTTP_URL:-http://cyber-jianghu-server:23333}
+
+      # 数据持久化目录（token 统计、SQLite、记忆等）
+      CYBER_JIANGHU_DATA_DIR: /app/data
     ports:
       # WebSocket + HTTP API 端口 - OpenClaw 通过 WebSocket 连接，HTTP API 用于辅助功能
       # 多 Agent 实例时，映射不同宿主机端口：23341:23340, 23342:23340 等

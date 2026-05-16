@@ -216,6 +216,14 @@ pub struct GameRulesData {
     /// key: skill_id, value: 触发条件（action categories + 最小成功次数）
     #[serde(default)]
     pub skill_acquisition: SkillAcquisitionConfig,
+
+    /// 配方学习配置
+    #[serde(default)]
+    pub recipe_learning: RecipeLearningConfig,
+
+    /// 对话上下文配置
+    #[serde(default)]
+    pub dialogue_context: Option<cyber_jianghu_protocol::DialogueContextConfig>,
 }
 
 /// 死因到建议文本的映射（数据驱动，来自 game_rules.yaml）
@@ -353,6 +361,42 @@ pub struct SkillAcquisitionEntry {
 /// value: 习得条件
 pub type SkillAcquisitionConfig = HashMap<String, SkillAcquisitionEntry>;
 
+/// 配方学习配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RecipeLearningConfig {
+    /// 观察学习阈值（看到他人使用某配方制造 N 次后自动习得）
+    #[serde(default = "default_observation_threshold")]
+    pub observation_threshold: i32,
+
+    /// 观察范围（"same_node" = 同一 node_id）
+    #[serde(default = "default_observation_range")]
+    pub observation_range: String,
+
+    /// 传授配方消耗体力
+    #[serde(default = "default_teach_stamina_cost")]
+    pub teach_stamina_cost: i32,
+}
+
+impl Default for RecipeLearningConfig {
+    fn default() -> Self {
+        Self {
+            observation_threshold: default_observation_threshold(),
+            observation_range: default_observation_range(),
+            teach_stamina_cost: default_teach_stamina_cost(),
+        }
+    }
+}
+
+fn default_observation_threshold() -> i32 {
+    3
+}
+fn default_observation_range() -> String {
+    "same_node".to_string()
+}
+fn default_teach_stamina_cost() -> i32 {
+    10
+}
+
 /// Agent 状态配置（数据驱动）
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AgentStatusConfig {
@@ -386,6 +430,10 @@ pub struct ChronicleRulesData {
     /// 传记生成周期（游戏日）
     #[serde(default = "default_days_per_period")]
     pub days_per_period: i32,
+
+    /// 空周期模板（当本周期无活动时使用）
+    #[serde(default = "default_empty_period_template")]
+    pub empty_period_template: String,
 }
 
 fn default_highlight_threshold() -> i32 {
@@ -396,11 +444,16 @@ fn default_days_per_period() -> i32 {
     7
 }
 
+fn default_empty_period_template() -> String {
+    "此间风平浪静，江湖无事。".to_string()
+}
+
 impl Default for ChronicleRulesData {
     fn default() -> Self {
         Self {
             highlight_threshold: default_highlight_threshold(),
             days_per_period: default_days_per_period(),
+            empty_period_template: default_empty_period_template(),
         }
     }
 }
@@ -490,6 +543,10 @@ pub struct RebirthRulesData {
     /// 重生重试间隔（秒）
     #[serde(default = "default_rebirth_retry_interval")]
     pub retry_interval_secs: u64,
+
+    /// 重生时是否重置配方知识
+    #[serde(default = "default_true")]
+    pub reset_recipes: bool,
 }
 
 fn default_rebirth_retry_max() -> u32 {
@@ -508,6 +565,7 @@ impl Default for RebirthRulesData {
             spawn_location: String::new(),
             retry_max_attempts: default_rebirth_retry_max(),
             retry_interval_secs: default_rebirth_retry_interval(),
+            reset_recipes: true,
         }
     }
 }
@@ -784,6 +842,36 @@ pub type ItemsData = Vec<crate::game_data::types::ItemConfigEntry>;
 /// 配方配置数据
 pub type RecipesData = std::collections::HashMap<String, crate::game_data::types::RecipeDefinition>;
 
+/// 初始配方配置数据
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InitialRecipesData {
+    /// 所有新角色的默认配方
+    #[serde(default)]
+    pub default: Vec<InitialRecipeEntry>,
+
+    /// 角色专属配方（匹配 agent_name）
+    #[serde(default)]
+    pub roles: Vec<RoleRecipesConfig>,
+}
+
+/// 初始配方条目
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct InitialRecipeEntry {
+    pub recipe_id: String,
+}
+
+/// 角色专属配方配置
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RoleRecipesConfig {
+    /// 角色名关键字（匹配 agent_name）
+    pub role_key: String,
+    /// 角色描述
+    #[serde(default)]
+    pub description: String,
+    /// 该角色的配方列表
+    pub recipes: Vec<InitialRecipeEntry>,
+}
+
 /// 动作配置数据
 pub type ActionsData =
     std::collections::HashMap<String, crate::game_data::types::ActionConfigEntry>;
@@ -818,6 +906,9 @@ pub type UnifiedNetworkConfig = UnifiedConfig<NetworkConfigData>;
 
 /// 统一初始背包配置
 pub type UnifiedInitialInventoryConfig = UnifiedConfig<super::inventory::InitialInventoryData>;
+
+/// 统一初始配方配置
+pub type UnifiedInitialRecipesConfig = UnifiedConfig<InitialRecipesData>;
 
 /// 统一世界构建规则配置
 pub type UnifiedWorldBuildingRulesConfig = UnifiedConfig<WorldBuildingRulesData>;

@@ -375,6 +375,35 @@ async fn main() -> Result<()> {
             ),
         )
         .route(
+            "/api/dashboard/agent/{id}/roles",
+            get(handlers::role::get_agent_roles_handler)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_read_token,
+                ))
+                .post(handlers::role::assign_role_handler)
+                .layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                )),
+        )
+        .route(
+            "/api/dashboard/roles",
+            get(handlers::role::list_available_roles).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                handlers::auth::require_read_token,
+            )),
+        )
+        .route(
+            "/api/dashboard/agent/{id}/roles/{role_key}",
+            delete(handlers::role::remove_role_handler).layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    handlers::auth::require_write_token,
+                ),
+            ),
+        )
+        .route(
             "/api/v1/agent/{id}/context",
             get(handlers::context::get_agent_context),
         )

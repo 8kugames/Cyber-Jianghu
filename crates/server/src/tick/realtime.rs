@@ -794,6 +794,10 @@ impl IntentWorker {
 
             let gd = self.game_data_cache.snapshot();
             let loc = self.game_data_cache.location_snapshot();
+            let recipe_ids = crate::db::get_known_recipe_ids(&self.db_pool, target_id)
+                .await
+                .unwrap_or_default();
+            let recipe_details = super::broadcaster::build_recipe_details(&recipe_ids);
             let world_state = super::broadcaster::build_reactive_world_state(
                 state,
                 &co_located,
@@ -806,6 +810,7 @@ impl IntentWorker {
                 &loc,
                 &recent_actions_map,
                 events.clone(),
+                recipe_details,
             );
 
             if let Err(e) = super::send_to_agent(

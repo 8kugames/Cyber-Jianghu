@@ -59,11 +59,17 @@ fn model_key(provider: &LlmProvider, model: &str) -> String {
     format!("{}/{}", provider.as_str(), model)
 }
 
-const TOKEN_LOG_DIR: &str = ".cyber-jianghu/logs";
 const TOKEN_LOG_FILE: &str = "token_cost_count.tmp";
 
 fn log_file_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(TOKEN_LOG_DIR).join(TOKEN_LOG_FILE))
+    // 优先使用 CYBER_JIANGHU_DATA_DIR（Docker 挂载，容器重启后持久化）
+    let data_dir = std::env::var("CYBER_JIANGHU_DATA_DIR")
+        .ok()
+        .map(PathBuf::from);
+    let log_dir = data_dir
+        .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu")))
+        .map(|d| d.join("logs"));
+    log_dir.map(|d| d.join(TOKEN_LOG_FILE))
 }
 
 /// Record token usage for a specific provider-model

@@ -7,6 +7,35 @@
 
 ## [Unreleased]
 
+### Changed — 联调测试 0515 优化
+
+- **Agent**: `LoopGuard` 渐进策略：第 1 次重复 tool call → 注入警告到 tool result，第 2 次重复 → 截断。默认阈值 `max_same_tool_consecutive` 3→2，`max_total_calls` 10→6
+- **Agent**: Prompt 强化 tool/action 边界区分 — 在 YAML 模板、lean prompt `tool_calling_guidance`、action index 头部三处明确声明工具名不是动作名，防止模型把 `query_world` 当 action_type
+- **Agent**: Action Index 从 `name+description` 降为 `name-only`，描述通过 `get_action_detail` 按需查询。Prompt actions 段从 ~1146 tokens → ~60 tokens（-95%）
+
+### Added — Token 优化：注意力门控 + Tool-First 架构
+
+- **Agent**: `TokenOptimizationConfig` 配置模块，所有参数外部化（`agent.yaml` 的 `token_optimization` 段），默认 `enabled: true`
+- **Agent**: `WorldStateStore` 组件 — Agent 侧 WorldState 本地落存，prev/curr 双版本，供 Delta Engine 做增量检测
+- **Agent**: `DeltaEngine` — 纯规则 prev vs curr 对比，5 类变化检测（survival/location/inventory/entities/skill），数据驱动阈值
+- **Agent**: `AttentionController` — 两阶段过滤（规则自动聚焦 + LLM 排序占位）产出 `FocusSummary`
+- **Agent**: Lean Prompt 模式 — 人魂 prompt 从完整 WorldState + 动作描述 → FocusSummary + Action Index + Skill Index
+- **Agent**: 3 个新 EarthSoul tool calling 工具：`get_action_detail`、`query_world`、`list_skills`，按需取用详情
+- **Agent**: `token_tracking.rs` 扩展 — `LlmComponent` 枚举 + `ComponentMetrics` 结构体，按组件维度追踪 token 消耗
+
+### Changed — Token 优化：ReflectorSoul 重试循环优化
+
+- **[BREAKING] Agent**: `ReflectorSoul` 验证流程从 13 轮重试循环改为固定流程：generate → validate → self_correct once → chaos_fallback。`token_optimization.enabled=true` 时 `max_retries=1`，`false` 时保持原 `max_retries=12`
+- **Agent**: `lifecycle.rs` 新增 `self_correct_intent()` 方法，复用 decision callback 进行一次自我修正
+
+### Changed — Agent 统一三层审查入口
+
+- **[BREAKING] Agent**: `ReflectorSoul` 三层审查成为运行时唯一入口，`Cognitive` 主循环、`Claw` WebSocket 验证、HTTP `/api/v1/validate` 统一走同一 `Validator::validate(ValidationRequest)` 链路
+- **[BREAKING] Agent**: `ValidationRequest` 新增 `runtime` 上下文，显式携带 `GradedValidationConfig`、连续 `follow` 计数与上限，避免不同运行模式各自拼装隐式校验条件
+- **Agent**: `Claw` 验证任务接入实时 `WorldState` 与最近 `GameRules`，不再以 `world_state=None` 退化为 LLM-only 校验
+- **Agent**: HTTP `/api/v1/validate` 接入当前 `WorldState` 与 `GameRules`，与主生命周期保持同构
+- **Agent**: 执行失败反馈继续通过统一 rejection 通道回灌人魂，不再保留平行的发送前规则拦截分支
+
 ### Changed — PromptTemplateConfig YAML→JSON 重构
 
 - **[BREAKING] Protocol**: `PromptTemplateConfig` 从 agent crate 迁移至 protocol crate（`cyber_jianghu_protocol::types::prompt_template`）。agent crate 的 `prompt_template.rs` 改为 re-export + 本地 YAML loading fallback

@@ -20,23 +20,30 @@ var refreshInterval = null;
 var smoothTimeConfig = null;
 var smoothTimeAnimationId = null;
 
+// authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
+var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
+
 // Check for token in URL
 var urlParams = new URLSearchParams(window.location.search);
 if (urlParams.has("token")) {
     authToken = urlParams.get("token");
     localStorage.setItem("admin_token", authToken);
     window.history.replaceState({}, document.title, window.location.pathname);
-    // Resolve token type async (URL token doesn't go through login endpoint)
+    // Resolve token type async; only mark as verified after server confirms token is valid
     fetch(API.ADMIN + "/session", { headers: { Authorization: "Bearer " + authToken } })
         .then(function (r) { return r.ok ? r.json() : {}; })
         .then(function (data) {
+            if (data.authenticated) {
+                authVerified = true;
+                if (typeof window !== "undefined") window.authVerified = true;
+            }
             if (data.token_type) {
                 authTokenType = data.token_type;
                 localStorage.setItem("admin_token_type", authTokenType);
             }
         })
         .catch(function (e) {
-            console.warn("[Session] Failed to resolve token type:", e);
+            console.error("[Session] URL token validation failed:", e);
         });
 }
 
@@ -198,4 +205,23 @@ function formatAttributeShort(key, value, attrs) {
         return name + ":" + value + "/" + attrs[maxKey];
     }
     return name + ":" + value;
+}
+
+// 天魂三层审查标签中文映射（history.html + agents.js 共用）
+var LAYER_NAMES = {
+    layer1: "动作审查",
+    layer2: "规则校验",
+    layer3: "意图审查",
+};
+
+// 解析 target_agent_id → 角色名称（agent_id）（history.html + agents.js 共用）
+function resolveTargetName(targetId) {
+    if (!targetId) return "某人";
+    if (typeof allAgentsMap !== "undefined" && allAgentsMap && allAgentsMap[targetId]) {
+        var agent = allAgentsMap[targetId];
+        var name = agent.name || targetId;
+        var shortId = targetId.substring(0, 8);
+        return name + "（" + shortId + "）";
+    }
+    return targetId.substring(0, 8) + "...";
 }

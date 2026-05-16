@@ -339,6 +339,7 @@ impl MemoryStore {
     pub fn get_memories_by_type(
         &self,
         event_type: &str,
+        offset: usize,
         limit: usize,
     ) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
@@ -347,13 +348,18 @@ impl MemoryStore {
                 "SELECT * FROM client_memories
              WHERE agent_id = ?1 AND event_type = ?2 AND is_archived = FALSE
              ORDER BY created_at DESC
-             LIMIT ?3",
+             LIMIT ?3 OFFSET ?4",
             )
             .context("Failed to prepare query")?;
 
         let memories = stmt
             .query_map(
-                params![self.agent_id.to_string(), event_type, limit as i64],
+                params![
+                    self.agent_id.to_string(),
+                    event_type,
+                    limit as i64,
+                    offset as i64
+                ],
                 Self::row_to_memory,
             )
             .context("Failed to execute query")?;

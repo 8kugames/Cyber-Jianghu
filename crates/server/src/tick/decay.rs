@@ -363,12 +363,8 @@ pub fn compute_starting_age_ticks() -> i64 {
             * time_config.days_per_season as i64
             * time_config.seasons_per_year as i64;
 
-        let real_seconds_per_tick = gd
-            .game_rules
-            .data
-            .agent_state
-            .tick
-            .real_seconds_per_tick as i64;
+        let real_seconds_per_tick =
+            gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64;
         let real_seconds_per_game_hour = real_seconds_per_tick * ticks_per_hour;
         let real_seconds_per_year = real_seconds_per_game_hour * hours_per_year;
         if real_seconds_per_year > 0 {

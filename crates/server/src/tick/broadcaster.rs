@@ -121,6 +121,16 @@ impl Broadcaster {
             }
         };
 
+        // 批量加载所有 Agent 的已知配方（单次 DB 查询）
+        let recipe_ids_map = match crate::db::batch_get_known_recipe_ids(db_pool, &agent_ids).await
+        {
+            Ok(map) => map,
+            Err(e) => {
+                warn!("批量加载配方失败: {}", e);
+                HashMap::new()
+            }
+        };
+
         // 批量加载所有节点的地面物品（单次 DB 查询）
         let node_ids: Vec<String> = agent_states
             .iter()
@@ -242,6 +252,7 @@ impl Broadcaster {
                 &loc_registry,
                 &recent_actions_map,
                 &emergence_config,
+                recipe_ids_map.get(&agent_state.agent_id),
             );
 
             // 注入教训（所有 Agent 共享）
@@ -287,6 +298,7 @@ impl Broadcaster {
         location_registry: &crate::game_data::LocationRegistry,
         recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
         emergence_config: &crate::game_data::types::unified_config::EmergenceConfig,
+        known_recipe_ids: Option<&Vec<String>>,
     ) -> WorldState {
         // 游戏时间计算（数据驱动）
         let (year, month, day, hour) = compute_game_time(tick_id);
@@ -494,6 +506,12 @@ impl Broadcaster {
                         .lifespan
                         .as_ref()
                         .map(|l| l.max_age as u32),
+                    recipe_details: build_recipe_details(
+                        known_recipe_ids
+                            .as_ref()
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]),
+                    ),
                 }
             },
             entities, // 包含同节点的其他Agent
@@ -504,6 +522,49 @@ impl Broadcaster {
             lessons_learned: vec![],      // 广播路径通过外层赋值注入
         }
     }
+}
+
+/// 从已知配方 ID 列表构建 RecipeDetail 列表
+pub fn build_recipe_details(
+    known_recipe_ids: &[String],
+) -> Vec<cyber_jianghu_protocol::types::entities::RecipeDetail> {
+    known_recipe_ids
+        .iter()
+        .filter_map(|recipe_id| {
+            let recipe = crate::game_data::registry::RecipeRegistry::get(recipe_id)?;
+            let result_item_config =
+                crate::game_data::registry::ItemRegistry::get(&recipe.result_item);
+            let materials: Vec<cyber_jianghu_protocol::types::entities::RecipeMaterialInfo> =
+                recipe
+                    .materials
+                    .iter()
+                    .map(|m| {
+                        let item_config = crate::game_data::registry::ItemRegistry::get(&m.item_id);
+                        cyber_jianghu_protocol::types::entities::RecipeMaterialInfo {
+                            item_id: m.item_id.clone(),
+                            item_name: item_config
+                                .as_ref()
+                                .map(|c| c.name.clone())
+                                .unwrap_or_else(|| m.item_id.clone()),
+                            quantity: m.quantity,
+                        }
+                    })
+                    .collect();
+            Some(cyber_jianghu_protocol::types::entities::RecipeDetail {
+                recipe_id: recipe_id.clone(),
+                name: recipe.name,
+                description: recipe.description,
+                materials,
+                result_item: recipe.result_item.clone(),
+                result_item_name: result_item_config
+                    .as_ref()
+                    .map(|c| c.name.clone())
+                    .unwrap_or_else(|| recipe.result_item.clone()),
+                result_quantity: recipe.result_quantity,
+                stamina_cost: recipe.stamina_cost,
+            })
+        })
+        .collect()
 }
 
 /// 从 tick_id（秒数）计算游戏时间
@@ -611,6 +672,7 @@ pub fn build_reactive_world_state(
     location_registry: &crate::game_data::LocationRegistry,
     recent_actions_map: &HashMap<Uuid, Vec<cyber_jianghu_protocol::RecentAction>>,
     events: Vec<crate::models::WorldEvent>,
+    recipe_details: Vec<cyber_jianghu_protocol::types::entities::RecipeDetail>,
 ) -> crate::models::WorldState {
     let (year, month, day, hour) = compute_game_time(tick_id);
     let current_node_id = &agent_state.node_id;
@@ -750,6 +812,7 @@ pub fn build_reactive_world_state(
                 .lifespan
                 .as_ref()
                 .map(|l| l.max_age as u32),
+            recipe_details,
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -771,6 +834,7 @@ pub fn build_initial_world_state(
     initial_inventory: Vec<crate::models::InventoryItem>,
     nearby_items: Vec<cyber_jianghu_protocol::SceneItem>,
     override_tick_id: Option<i64>,
+    recipe_details: Vec<cyber_jianghu_protocol::types::entities::RecipeDetail>,
 ) -> crate::models::WorldState {
     let tick_id = override_tick_id.unwrap_or(agent_state.tick_id);
 
@@ -891,6 +955,7 @@ pub fn build_initial_world_state(
                 .lifespan
                 .as_ref()
                 .map(|l| l.max_age as u32),
+            recipe_details,
         },
         entities: vec![], // 连接时不含其他 agent
         nearby_items,

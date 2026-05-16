@@ -20,8 +20,11 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::protocol::{DownstreamMessage, ServerErrorCode, WsIntent};
+use crate::core::utils::build_world_context;
 use crate::models::Intent;
-use crate::soul::reflector::{PersonaInfo, ValidationRequest, ValidationResult, Validator};
+use crate::soul::reflector::{
+    PersonaInfo, PipelineValidationResult, ValidationRequest, ValidationRuntimeConfig, Validator,
+};
 
 // ============================================================================
 // WebSocket 验证请求
@@ -53,8 +56,14 @@ pub struct ValidationTaskParams {
     pub submitted_tick: Arc<AtomicI64>,
     /// 意图验证器（可选，RwLock 支持运行时更新）
     pub intent_validator: Arc<RwLock<Option<Arc<dyn Validator>>>>,
+    /// 最近一份 WorldState
+    pub current_world_state: Arc<RwLock<Option<Arc<cyber_jianghu_protocol::WorldState>>>>,
+    /// 最近一份 GameRules
+    pub game_rules: Arc<RwLock<Option<cyber_jianghu_protocol::GameRules>>>,
     /// 人设信息（可选，RwLock 支持运行时更新）
     pub persona: Arc<RwLock<Option<PersonaInfo>>>,
+    /// 最大连续跟随次数（从配置读取）
+    pub max_consecutive_follow: usize,
 }
 
 /// 启动验证任务
@@ -74,7 +83,10 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
     let current_tick = params.current_tick;
     let submitted_tick = params.submitted_tick;
     let intent_validator = params.intent_validator;
+    let current_world_state = params.current_world_state;
+    let game_rules = params.game_rules;
     let persona = params.persona;
+    let max_consecutive_follow = params.max_consecutive_follow;
 
     tokio::spawn(async move {
         debug!("Validation task started");
@@ -148,6 +160,18 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                 }
                 (Some(validator), Some(persona_info)) => {
                     // 4. 构建验证请求
+                    let world_state = current_world_state.read().await.clone();
+                    let world_state = world_state.as_ref().map(|state| (**state).clone());
+                    let graded_config = game_rules
+                        .read()
+                        .await
+                        .as_ref()
+                        .and_then(|rules| rules.intent_batch.as_ref())
+                        .map(|batch| batch.llm_validation.clone());
+                    // [TRAP_DEBT: TICKET-102] Claw WebSocket 验证层无法直接读取 Agent 主循环中的内存状态
+                    // 传入 0 会导致绕过连续动作的防刷屏拦截（如连续 follow）。
+                    // 预计修复：将 WsSharedState 接入对连续动作计数的同步，或下沉计数至共享状态。
+                    // 预计偿还时间：2026-06-01
                     let validation_req = ValidationRequest {
                         intent: Intent::new(
                             Uuid::nil(), // agent_id 暂时用 nil
@@ -156,8 +180,16 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                             req.intent.action_data.clone(),
                         ),
                         persona: persona_info.clone(),
-                        world_context: format!("tick: {}", req.intent.tick_id),
-                        world_state: None,
+                        world_context: world_state
+                            .as_ref()
+                            .map(build_world_context)
+                            .unwrap_or_else(|| format!("tick: {}", req.intent.tick_id)),
+                        world_state,
+                        runtime: ValidationRuntimeConfig {
+                            graded_config,
+                            consecutive_follow_count: 0,
+                            max_consecutive_follow,
+                        },
                     };
 
                     // 5. 带超时的验证（10 秒）
@@ -167,21 +199,15 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                     )
                     .await
                     {
-                        Ok(Ok(ValidationResult::Approved { reason, narrative })) => {
+                        Ok(Ok(PipelineValidationResult::Approved { narrative, .. })) => {
                             // submitted_tick 已通过 CAS 设置
                             if let Err(e) = intent_tx.send(req.intent).await {
                                 error!("Failed to send intent: {}", e);
                                 submitted_tick.store(-1, Ordering::Release);
                             }
-                            debug!(
-                                "Intent approved and forwarded: reason={:?}, narrative={}",
-                                reason, narrative
-                            );
+                            debug!("Intent approved and forwarded: narrative={:?}", narrative);
                         }
-                        Ok(Ok(ValidationResult::Rejected {
-                            reason,
-                            rejection_type: _,
-                        })) => {
+                        Ok(Ok(PipelineValidationResult::Rejected { reason, .. })) => {
                             // 验证失败，重置 submitted_tick 允许客户端重试
                             submitted_tick.store(-1, Ordering::Release);
 
@@ -253,6 +279,13 @@ async fn send_server_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::soul::reflector::{
+        LayerResult, PersonaInfo, PipelineValidationResult, ValidationRequest, Validator,
+    };
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use cyber_jianghu_protocol::WorldBuildingRules;
+    use std::sync::Arc as StdArc;
 
     // ========================================================================
     // CAS 去重逻辑测试
@@ -344,5 +377,130 @@ mod tests {
         // 客户端应该可以重试
         let result = submitted_tick.compare_exchange(-1, 100, Ordering::AcqRel, Ordering::Acquire);
         assert!(result == Ok(-1), "CAS should succeed after failure reset");
+    }
+
+    struct EchoValidator;
+
+    #[async_trait]
+    impl Validator for EchoValidator {
+        async fn validate(&self, request: ValidationRequest) -> Result<PipelineValidationResult> {
+            let has_world_state = request.world_state.is_some();
+            let has_graded_config = request.runtime.graded_config.is_some();
+            Ok(PipelineValidationResult::Approved {
+                intent: request.intent,
+                layers: vec![LayerResult {
+                    layer: "test",
+                    passed: has_world_state && has_graded_config,
+                    detail: Some(format!(
+                        "world_state={}, graded={}",
+                        has_world_state, has_graded_config
+                    )),
+                }],
+                narrative: None,
+            })
+        }
+
+        async fn validate_persona(
+            &self,
+            _persona: &PersonaInfo,
+        ) -> Result<crate::soul::reflector::ValidationResult> {
+            unreachable!()
+        }
+
+        async fn update_rules(&self, _rules: WorldBuildingRules) {}
+    }
+
+    #[tokio::test]
+    async fn test_validation_task_builds_full_runtime_context() {
+        let (validation_tx, validation_rx) = mpsc::channel(1);
+        let (intent_tx, mut intent_rx) = mpsc::channel(1);
+        let current_tick = Arc::new(AtomicI64::new(42));
+        let submitted_tick = Arc::new(AtomicI64::new(-1));
+        let intent_validator = Arc::new(RwLock::new(Some(
+            StdArc::new(EchoValidator) as StdArc<dyn Validator>
+        )));
+        let current_world_state = Arc::new(RwLock::new(Some(StdArc::new(
+            cyber_jianghu_protocol::WorldState {
+                event_type: "world_state".to_string(),
+                tick_id: 42,
+                agent_id: None,
+                world_time: cyber_jianghu_protocol::WorldTime {
+                    year: 1,
+                    month: 1,
+                    day: 1,
+                    hour: 1,
+                    minute: 0,
+                    second: 0,
+                    weather: "晴".to_string(),
+                },
+                location: cyber_jianghu_protocol::Location {
+                    node_id: "a".to_string(),
+                    name: "地点A".to_string(),
+                    node_type: "inn".to_string(),
+                    adjacent_nodes: vec![],
+                    gatherable_items: vec![],
+                },
+                self_state: cyber_jianghu_protocol::AgentSelfState {
+                    attributes: std::collections::HashMap::new(),
+                    derived_attributes: std::collections::HashMap::new(),
+                    attribute_descriptions: std::collections::HashMap::new(),
+                    status_effects: vec![],
+                    inventory: vec![],
+                    skills: vec![],
+                    age_years: None,
+                    max_age: None,
+                    recipe_details: vec![],
+                },
+                entities: vec![],
+                nearby_items: vec![],
+                events_log: vec![],
+                private_dialogue_log: vec![],
+                last_execution_summary: None,
+                lessons_learned: vec![],
+            },
+        ))));
+        let game_rules = Arc::new(RwLock::new(Some(cyber_jianghu_protocol::GameRules {
+            tick_duration_secs: 60,
+            available_actions: vec![],
+            initial_items: vec![],
+            survival_actions: vec![],
+            version: "test".to_string(),
+            last_updated: "2026-01-01T00:00:00Z".to_string(),
+            intent_batch: Some(cyber_jianghu_protocol::IntentBatchConfig {
+                max_intents_per_tick: 1,
+                max_retries: 1,
+                pipeline_execution_enabled: true,
+                partial_execution_enabled: true,
+                llm_validation: cyber_jianghu_protocol::GradedValidationConfig::default(),
+                llm_chaos_threshold: 1,
+            }),
+            immediate_events: None,
+            rebirth_delay_ticks: 0,
+            rebirth_retry_max_attempts: 0,
+            rebirth_retry_interval_secs: 0,
+            lifespan: None,
+            calendar: None,
+            daily_summary: None,
+            dialogue_context: None,
+        })));
+        let persona = Arc::new(RwLock::new(Some(PersonaInfo::default())));
+        let params = ValidationTaskParams {
+            validation_rx,
+            intent_tx,
+            current_tick,
+            submitted_tick,
+            intent_validator,
+            current_world_state,
+            game_rules,
+            persona,
+            max_consecutive_follow: 5,
+        };
+
+        let handle = spawn_validation_task(params);
+        drop(handle);
+
+        // 只验证请求构造与通过转发，不验证 ws 回包
+        drop(validation_tx);
+        assert!(intent_rx.recv().await.is_none());
     }
 }

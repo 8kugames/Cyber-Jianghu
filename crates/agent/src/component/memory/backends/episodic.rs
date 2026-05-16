@@ -122,12 +122,17 @@ impl EpisodicMemoryBackend {
     }
 
     /// 按事件类型查询记忆（排除已归档）
-    pub fn get_by_event_type(&self, event_type: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
+    pub fn get_by_event_type(
+        &self,
+        event_type: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
         let store = self
             .store
             .lock()
             .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
-        let memories = store.get_memories_by_type(event_type, limit)?;
+        let memories = store.get_memories_by_type(event_type, offset, limit)?;
         Ok(memories.iter().map(Self::memory_to_entry).collect())
     }
 }

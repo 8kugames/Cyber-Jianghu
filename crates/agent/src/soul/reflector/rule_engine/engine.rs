@@ -7,7 +7,8 @@ use super::registry::{RuleRegistry, RuleSet};
 use super::types::{Rule, RuleValidationContext, extract_ids_from_world_state};
 use crate::soul::actor::prompt_template::PromptTemplateConfig;
 use crate::soul::reflector::{
-    PersonaInfo, RejectionType, ValidationRequest, ValidationResult, Validator,
+    LayerResult, PersonaInfo, PipelineValidationResult, RejectionType, ValidationRequest,
+    ValidationResult, Validator,
 };
 use async_trait::async_trait;
 use cyber_jianghu_protocol::WorldBuildingRules;
@@ -44,7 +45,10 @@ pub struct RuleEngine {
 
 #[async_trait]
 impl Validator for RuleEngine {
-    async fn validate(&self, request: ValidationRequest) -> anyhow::Result<ValidationResult> {
+    async fn validate(
+        &self,
+        request: ValidationRequest,
+    ) -> anyhow::Result<PipelineValidationResult> {
         // 构建验证上下文
         let tick_id = request.intent.tick_id;
         let (available_item_ids, reachable_node_ids) = request
@@ -65,7 +69,39 @@ impl Validator for RuleEngine {
         };
 
         // 调用内部验证逻辑
-        self.validate_context(&context).await
+        match self.validate_context(&context).await? {
+            ValidationResult::Approved { .. } => Ok(PipelineValidationResult::Approved {
+                intent: context.intent,
+                layers: vec![
+                    LayerResult {
+                        layer: "layer1",
+                        passed: true,
+                        detail: Some("rule_engine_only".to_string()),
+                    },
+                    LayerResult {
+                        layer: "layer2",
+                        passed: true,
+                        detail: Some("rule_engine_only".to_string()),
+                    },
+                ],
+                narrative: None,
+            }),
+            ValidationResult::Rejected { reason, .. } => Ok(PipelineValidationResult::Rejected {
+                reason: reason.clone(),
+                layers: vec![
+                    LayerResult {
+                        layer: "layer1",
+                        passed: true,
+                        detail: Some("rule_engine_only".to_string()),
+                    },
+                    LayerResult {
+                        layer: "layer2",
+                        passed: false,
+                        detail: Some(reason),
+                    },
+                ],
+            }),
+        }
     }
 
     async fn validate_persona(&self, _persona: &PersonaInfo) -> anyhow::Result<ValidationResult> {
@@ -172,8 +208,12 @@ impl RuleEngine {
     }
 
     /// 加载 reject 反馈模板配置
+    /// 第一优先级：CYBER_JIANGHU_DATA_DIR（Server 写入路径，与 Server 写盘目标对称）
     fn load_prompt_config() -> Option<Arc<PromptTemplateConfig>> {
         let search_paths: Vec<Option<std::path::PathBuf>> = vec![
+            std::env::var("CYBER_JIANGHU_DATA_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
                 .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),

@@ -52,6 +52,16 @@ pub async fn validate_action(
     // 验证通用需求
     validate_generic_requirements(intent, agent_state, db_pool).await?;
 
+    // 制造动作：校验配方知晓度
+    if action_str == "制造" {
+        validate_recipe_knowledge(intent, agent_state, db_pool).await?;
+    }
+
+    // 传授动作：校验传授者配方知晓度 + 同地点 + 防自传授
+    if action_str == "传授" {
+        validate_teach_recipe(intent, agent_state, all_states, db_pool).await?;
+    }
+
     // 动作冷却检查 — 需要 actions.yaml 添加 cooldown 字段
     // + AgentState.last_action_ticks: HashMap<String, i64>
     // + current_tick - last_action_ticks[action_type] >= cooldown
@@ -338,6 +348,108 @@ fn validate_field(intent: &Intent, field_validation: &FieldValidation) -> Result
         _ => {
             // 未知验证类型，跳过
         }
+    }
+
+    Ok(())
+}
+
+/// 校验制造动作的配方知晓度
+async fn validate_recipe_knowledge(
+    intent: &Intent,
+    agent_state: &AgentState,
+    db_pool: &DbPool,
+) -> Result<(), GameError> {
+    let recipe_id = intent
+        .action_data
+        .as_ref()
+        .and_then(|d| d.get("recipe_id"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            intent
+                .action_data
+                .as_ref()
+                .and_then(|d| d.get("item_id"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("");
+
+    if recipe_id.is_empty() {
+        return Ok(());
+    }
+
+    let known = crate::db::get_known_recipe_ids(db_pool, agent_state.agent_id)
+        .await
+        .unwrap_or_default();
+
+    // recipe_id 或 item_id 匹配：LLM 可能传配方 ID 或产物 ID
+    let knows = known.iter().any(|r| {
+        r == recipe_id
+            || crate::game_data::registry::RecipeRegistry::get(r)
+                .map(|def| def.result_item == recipe_id)
+                .unwrap_or(false)
+    });
+
+    if !knows {
+        return Err(GameError::InvalidActionData {
+            reason: format!("你尚未学会配方「{}」", recipe_id),
+        });
+    }
+
+    Ok(())
+}
+
+/// 校验传授动作：传授者配方知晓度 + 同地点 + 防自传授
+async fn validate_teach_recipe(
+    intent: &Intent,
+    agent_state: &AgentState,
+    all_states: &[AgentState],
+    db_pool: &DbPool,
+) -> Result<(), GameError> {
+    let action_data = normalize_action_data(&intent.action_data);
+    let recipe_id = action_data
+        .as_ref()
+        .and_then(|d| d.get("recipe_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if recipe_id.is_empty() {
+        return Err(GameError::InvalidActionData {
+            reason: "传授需要指定配方 ID（recipe_id）".to_string(),
+        });
+    }
+
+    // 防自传授
+    let target_id_str = action_data
+        .as_ref()
+        .and_then(|d| d.get("target_agent_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if let Ok(target_uuid) = uuid::Uuid::parse_str(target_id_str) {
+        if target_uuid == agent_state.agent_id {
+            return Err(GameError::InvalidActionData {
+                reason: "不能向自己传授配方".to_string(),
+            });
+        }
+
+        // 同地点校验
+        let same_location = all_states
+            .iter()
+            .any(|s| s.agent_id == target_uuid && s.node_id == agent_state.node_id);
+        if !same_location {
+            return Err(GameError::InvalidActionData {
+                reason: "目标人物不在同一地点，无法传授".to_string(),
+            });
+        }
+    }
+
+    // 传授者必须知道该配方
+    let known = crate::db::get_known_recipe_ids(db_pool, agent_state.agent_id)
+        .await
+        .unwrap_or_default();
+    if !known.contains(&recipe_id.to_string()) {
+        return Err(GameError::InvalidActionData {
+            reason: format!("你尚未学会配方「{}」，无法传授", recipe_id),
+        });
     }
 
     Ok(())

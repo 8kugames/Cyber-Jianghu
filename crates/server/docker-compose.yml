@@ -15,7 +15,7 @@ services:
   # PostgreSQL 数据库
   # ============================================================================
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: cyber-jianghu-postgres
     restart: unless-stopped
     environment:
@@ -75,6 +75,8 @@ services:
       - ./config:/app/config
       # 日志持久化
       - ./logs:/app/logs
+      # 运行时数据持久化（运行时产物如 prompt_templates.json）
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:23333/health"]
       interval: 30s

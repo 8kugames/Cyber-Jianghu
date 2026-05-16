@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>赛博江湖 - 设置</title>
+        <title>虚境：江湖 - 设置</title>
         <link rel="stylesheet" href="style.css" />
         <style>
             .stats-grid {
@@ -154,7 +154,7 @@
     <body class="full-width-page">
         <div class="container">
             <header>
-                <h1>赛博江湖</h1>
+                <h1>虚境：江湖</h1>
                 <nav class="nav-tabs">
                     <a href="welcome.html" class="nav-tab">首页</a>
                     <a href="character.html" class="nav-tab">角色</a>
@@ -342,11 +342,13 @@
                     var totalInput = 0;
                     var totalOutput = 0;
                     var totalCalls = 0;
+                    var totalFailures = 0;
                     if (Array.isArray(data)) {
                         data.forEach(function(item) {
                             totalInput += item.prompt_tokens || 0;
                             totalOutput += item.completion_tokens || 0;
                             totalCalls += item.calls || 0;
+                            totalFailures += item.failures || 0;
                         });
                     }
                     document.getElementById("stat-input-tokens").textContent =
@@ -355,7 +357,8 @@
                         formatNumber(totalOutput);
                     document.getElementById("stat-total-cost").textContent =
                         formatNumber(totalCalls);
-                    document.getElementById("stat-error-count").textContent = "-";
+                    document.getElementById("stat-error-count").textContent =
+                        formatNumber(totalFailures);
                 } catch (err) {
                     console.error("加载 Token 统计失败:", err);
                 }

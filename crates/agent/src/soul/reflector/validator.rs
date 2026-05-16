@@ -14,10 +14,15 @@ use tracing::{debug, info, warn};
 use crate::component::llm::LlmClientExt;
 use crate::infra::api::thinking_log;
 use crate::runtime::claw::LlmClientContainer;
-use cyber_jianghu_protocol::WorldBuildingRules;
+use crate::soul::actor::prompt_template::PromptTemplateConfig;
+use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules};
 
 use super::prompt::ObserverPrompt;
-use super::types::{LlmValidationResponse, PersonaInfo, ValidationRequest, ValidationResult};
+use super::rule_engine::{RuleEngine, RuleValidationContext, types::extract_ids_from_world_state};
+use super::types::{
+    LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionType,
+    ValidationRequest, ValidationResult, ValidationRuntimeConfig,
+};
 
 // ============================================================================
 // 验证器 Trait（类型擦除）
@@ -29,20 +34,23 @@ use super::types::{LlmValidationResponse, PersonaInfo, ValidationRequest, Valida
 #[async_trait]
 pub trait Validator: Send + Sync {
     /// 验证意图
-    async fn validate(&self, request: ValidationRequest) -> Result<ValidationResult>;
+    async fn validate(&self, request: ValidationRequest) -> Result<PipelineValidationResult>;
 
     /// 验证人设
     async fn validate_persona(&self, persona: &PersonaInfo) -> Result<ValidationResult>;
 
     /// 更新世界观规则
     async fn update_rules(&self, rules: WorldBuildingRules);
+
+    /// 更新 reject 反馈模板
+    fn update_prompt_config(&self, _config: Arc<PromptTemplateConfig>) {}
 }
 
 /// 为 ReflectorSoul 实现 Validator trait
 #[async_trait]
 impl Validator for ReflectorSoul {
-    async fn validate(&self, request: ValidationRequest) -> Result<ValidationResult> {
-        self.validate(request).await
+    async fn validate(&self, request: ValidationRequest) -> Result<PipelineValidationResult> {
+        self.validate_pipeline(request).await
     }
 
     async fn validate_persona(&self, persona: &PersonaInfo) -> Result<ValidationResult> {
@@ -51,6 +59,10 @@ impl Validator for ReflectorSoul {
 
     async fn update_rules(&self, rules: WorldBuildingRules) {
         self.update_rules(rules).await
+    }
+
+    fn update_prompt_config(&self, config: Arc<PromptTemplateConfig>) {
+        self.update_prompt_config(config);
     }
 }
 
@@ -65,6 +77,8 @@ pub struct ReflectorSoul {
     llm_container: LlmClientContainer,
     /// 观察者 prompt 模板
     observer_prompt: ObserverPrompt,
+    /// Layer 2 规则引擎
+    rule_engine: RuleEngine,
 }
 
 impl ReflectorSoul {
@@ -74,13 +88,322 @@ impl ReflectorSoul {
             rules: Arc::new(RwLock::new(rules)),
             llm_container,
             observer_prompt: ObserverPrompt::new(),
+            rule_engine: RuleEngine::with_default_config(),
         }
     }
 
-    /// 验证意图
-    ///
-    /// 返回包含叙事的结果，避免额外 LLM 调用
-    pub async fn validate(&self, request: ValidationRequest) -> Result<ValidationResult> {
+    /// 暴露 RuleEngine 的 reject 模板配置句柄，供生命周期回调热更新
+    pub fn prompt_config_handle(
+        &self,
+    ) -> Arc<
+        std::sync::RwLock<Option<Arc<crate::soul::actor::prompt_template::PromptTemplateConfig>>>,
+    > {
+        self.rule_engine.prompt_config_handle()
+    }
+
+    /// 从 Server 下发更新 reject 反馈模板
+    pub fn update_prompt_config(
+        &self,
+        config: Arc<crate::soul::actor::prompt_template::PromptTemplateConfig>,
+    ) {
+        self.rule_engine.update_prompt_config(config);
+    }
+
+    /// 判断 Intent 是否应跳过 LLM 审核（分级审核策略）
+    pub fn should_skip_llm_validation(
+        intent: &crate::models::Intent,
+        config: Option<&GradedValidationConfig>,
+    ) -> bool {
+        let Some(config) = config else {
+            return false;
+        };
+
+        let action_str = intent.action_type.as_str().to_string();
+        if config.skip_types.contains(&action_str) {
+            return true;
+        }
+        if config.always_types.contains(&action_str) {
+            return false;
+        }
+        if config.adaptive_types.contains(&action_str) {
+            return !Self::adaptive_needs_llm(intent, config);
+        }
+
+        true
+    }
+
+    fn adaptive_needs_llm(intent: &crate::models::Intent, config: &GradedValidationConfig) -> bool {
+        let action_data = match &intent.action_data {
+            Some(d) => d,
+            None => return false,
+        };
+
+        if let Some(field_name) = config
+            .adaptive_field_mapping
+            .get(intent.action_type.as_str())
+        {
+            match field_name.as_str() {
+                "target_location" => action_data
+                    .get(field_name)
+                    .and_then(|v| v.as_str())
+                    .map(|loc| {
+                        config
+                            .restricted_area_keywords
+                            .iter()
+                            .any(|k| loc.contains(k.as_str()))
+                    })
+                    .unwrap_or(false),
+                "item_id" => action_data
+                    .get(field_name)
+                    .and_then(|v| v.as_str())
+                    .map(|id| {
+                        config
+                            .high_value_item_keywords
+                            .iter()
+                            .any(|k| id.contains(k.as_str()))
+                    })
+                    .unwrap_or(false),
+                _ => true,
+            }
+        } else {
+            true
+        }
+    }
+
+    /// Layer 1：确定性 action_type 校验
+    fn validate_action_type(
+        &self,
+        intent: &crate::models::Intent,
+    ) -> std::result::Result<(), String> {
+        if intent.action_type.as_str() == "休息" {
+            return Ok(());
+        }
+
+        if intent.action_type.as_str() == "narrative" {
+            tracing::error!(
+                "narrative sentinel 泄漏到 ReflectorSoul.validate_action_type，强制拒绝"
+            );
+            return Err("意图格式异常：narrative 未被翻译".to_string());
+        }
+
+        let actions = crate::infra::api::cognitive_context::load_available_actions_from_file();
+        if actions.is_empty() {
+            return Ok(());
+        }
+
+        let valid_names: Vec<&str> = actions.iter().map(|a| a.action.as_str()).collect();
+        if valid_names.contains(&intent.action_type.as_str()) {
+            return Ok(());
+        }
+
+        let action_input = intent.action_type.as_str().to_lowercase();
+        for action in &actions {
+            if action.name.to_lowercase() == action_input {
+                return Ok(());
+            }
+            if action
+                .aliases
+                .iter()
+                .any(|alias| alias.to_lowercase() == action_input)
+            {
+                return Ok(());
+            }
+        }
+
+        let suggestion = actions
+            .iter()
+            .find(|action| {
+                let name_lower = action.name.to_lowercase();
+                name_lower.contains(&action_input) || action_input.contains(&name_lower)
+            })
+            .map(|action| action.name.as_str())
+            .unwrap_or("休息");
+
+        Err(format!(
+            "action '{}' 不在合法列表中，合法值: [{}]，最接近: '{}'",
+            intent.action_type,
+            valid_names.join(", "),
+            suggestion,
+        ))
+    }
+
+    /// Layer 2：RuleEngine 规则校验
+    async fn validate_with_rule_engine(
+        &self,
+        request: &ValidationRequest,
+        consecutive_follow_count: usize,
+        max_consecutive_follow: usize,
+    ) -> std::result::Result<(), String> {
+        if request.intent.action_type.as_str() == "follow"
+            && consecutive_follow_count >= max_consecutive_follow
+        {
+            return Err(format!(
+                "已连续跟随 {} 次，请尝试其他行为（如 说话、采集、休息）",
+                max_consecutive_follow
+            ));
+        }
+
+        let Some(world_state) = request.world_state.as_ref() else {
+            return Ok(());
+        };
+
+        let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
+        let context = RuleValidationContext {
+            intent: request.intent.clone(),
+            persona_info: request.persona.clone(),
+            world_context: request.world_context.clone(),
+            tick_id: world_state.tick_id,
+            history_intents: vec![],
+            attributes: std::collections::HashMap::new(),
+            available_item_ids,
+            reachable_node_ids,
+        };
+
+        match self.rule_engine.validate_context(&context).await {
+            Ok(ValidationResult::Approved { .. }) => Ok(()),
+            Ok(ValidationResult::Rejected { reason, .. }) => Err(reason),
+            Err(e) => {
+                tracing::warn!("RuleEngine error, bypassing: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    /// Layer 1/2/3 统一出口
+    pub async fn validate_pipeline(
+        &self,
+        request: ValidationRequest,
+    ) -> Result<PipelineValidationResult> {
+        let ValidationRuntimeConfig {
+            graded_config,
+            consecutive_follow_count,
+            max_consecutive_follow,
+        } = request.runtime.clone();
+        let mut layers = Vec::with_capacity(3);
+
+        match self.validate_action_type(&request.intent) {
+            Ok(()) => layers.push(LayerResult {
+                layer: "layer1",
+                passed: true,
+                detail: None,
+            }),
+            Err(reason) => {
+                layers.push(LayerResult {
+                    layer: "layer1",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                return Ok(PipelineValidationResult::Rejected { reason, layers });
+            }
+        }
+
+        match self
+            .validate_with_rule_engine(&request, consecutive_follow_count, max_consecutive_follow)
+            .await
+        {
+            Ok(()) => layers.push(LayerResult {
+                layer: "layer2",
+                passed: true,
+                detail: None,
+            }),
+            Err(reason) => {
+                layers.push(LayerResult {
+                    layer: "layer2",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                return Ok(PipelineValidationResult::Rejected { reason, layers });
+            }
+        }
+
+        if request.intent.chaos_marker.is_some()
+            || Self::should_skip_llm_validation(&request.intent, graded_config.as_ref())
+        {
+            layers.push(LayerResult {
+                layer: "layer3",
+                passed: true,
+                detail: Some("llm validation skipped".to_string()),
+            });
+            return Ok(PipelineValidationResult::Approved {
+                intent: request.intent,
+                layers,
+                narrative: None,
+            });
+        }
+
+        let llm_result = match self.validate_llm(request.clone()).await {
+            Ok(result) => result,
+            Err(e) => {
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: Some(format!("LLM error, bypassed: {}", e)),
+                });
+                return Ok(PipelineValidationResult::Approved {
+                    intent: request.intent,
+                    layers,
+                    narrative: None,
+                });
+            }
+        };
+
+        match llm_result {
+            ValidationResult::Approved { narrative, .. } => {
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: true,
+                    detail: None,
+                });
+                Ok(PipelineValidationResult::Approved {
+                    intent: request.intent,
+                    layers,
+                    narrative: if narrative.is_empty() {
+                        None
+                    } else {
+                        Some(narrative)
+                    },
+                })
+            }
+            ValidationResult::Rejected {
+                reason,
+                rejection_type,
+            } => {
+                if matches!(rejection_type, RejectionType::OutOfCharacter)
+                    && let Some(world_state) = request.world_state.as_ref()
+                {
+                    const SURVIVAL_OVERRIDE_THRESHOLD: i32 = 40;
+                    let hunger = world_state.self_state.hunger();
+                    let thirst = world_state.self_state.thirst();
+                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD || thirst < SURVIVAL_OVERRIDE_THRESHOLD
+                    {
+                        layers.push(LayerResult {
+                            layer: "layer3",
+                            passed: true,
+                            detail: Some(format!(
+                                "survival_override: hunger={}, thirst={} < {}",
+                                hunger, thirst, SURVIVAL_OVERRIDE_THRESHOLD
+                            )),
+                        });
+                        return Ok(PipelineValidationResult::Approved {
+                            intent: request.intent,
+                            layers,
+                            narrative: None,
+                        });
+                    }
+                }
+
+                layers.push(LayerResult {
+                    layer: "layer3",
+                    passed: false,
+                    detail: Some(reason.clone()),
+                });
+                Ok(PipelineValidationResult::Rejected { reason, layers })
+            }
+        }
+    }
+
+    /// 仅执行 LLM 审查
+    async fn validate_llm(&self, request: ValidationRequest) -> Result<ValidationResult> {
         let rules = self.rules.read().await.clone();
 
         // 构建验证 prompt
@@ -242,8 +565,14 @@ impl LlmValidationResponse {
 mod tests {
     use super::*;
     use crate::component::llm::MockLlmClient;
+    use cyber_jianghu_protocol::{
+        AdjacentNode, AgentSelfState, Entity, GradedValidationConfig, InventoryItem, Location,
+        SceneItem, WorldState, WorldTime,
+    };
+    use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::RwLock;
+    use uuid::Uuid;
 
     fn mock_container(client: MockLlmClient) -> LlmClientContainer {
         Arc::new(RwLock::new(Arc::new(client)))
@@ -265,6 +594,76 @@ mod tests {
         }
     }
 
+    fn test_world_state() -> WorldState {
+        let mut attributes = HashMap::new();
+        attributes.insert("hunger".to_string(), 80);
+        attributes.insert("thirst".to_string(), 80);
+
+        WorldState {
+            event_type: "world_state".to_string(),
+            tick_id: 1,
+            agent_id: Some(Uuid::new_v4()),
+            world_time: WorldTime {
+                year: 1,
+                month: 1,
+                day: 1,
+                hour: 8,
+                minute: 0,
+                second: 0,
+                weather: "晴".to_string(),
+            },
+            location: Location {
+                node_id: "loc_a".to_string(),
+                name: "地点A".to_string(),
+                node_type: "inn".to_string(),
+                adjacent_nodes: vec![AdjacentNode {
+                    node_id: "loc_b".to_string(),
+                    name: "地点B".to_string(),
+                    travel_cost: 1,
+                    aliases: vec![],
+                }],
+                gatherable_items: vec![],
+            },
+            self_state: AgentSelfState {
+                attributes,
+                derived_attributes: HashMap::new(),
+                attribute_descriptions: HashMap::new(),
+                status_effects: vec![],
+                inventory: vec![InventoryItem {
+                    item_id: "馒头".to_string(),
+                    name: "馒头".to_string(),
+                    item_type: "food".to_string(),
+                    quantity: 1,
+                    is_equipped: false,
+                    aliases: vec![],
+                }],
+                skills: vec![],
+                age_years: None,
+                max_age: None,
+                recipe_details: vec![],
+            },
+            entities: vec![Entity {
+                id: Uuid::new_v4(),
+                name: "路人甲".to_string(),
+                distance: 0,
+                state: "alive".to_string(),
+                hostile: false,
+                recent_actions: vec![],
+            }],
+            nearby_items: vec![SceneItem {
+                item_id: "木棍".to_string(),
+                name: "木棍".to_string(),
+                item_type: "weapon".to_string(),
+                quantity: 1,
+                aliases: vec![],
+            }],
+            events_log: vec![],
+            private_dialogue_log: vec![],
+            last_execution_summary: None,
+            lessons_learned: vec![],
+        }
+    }
+
     #[tokio::test]
     async fn test_validate_approved() {
         let mock_client = MockLlmClient::with_response(
@@ -283,14 +682,14 @@ mod tests {
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
+            runtime: ValidationRuntimeConfig::default(),
         };
 
         let result = validator.validate(request).await.unwrap();
 
         match result {
-            ValidationResult::Approved { reason, narrative } => {
-                assert_eq!(reason, Some("行为符合武侠世界观".to_string()));
-                assert_eq!(narrative, "李四决定在客栈休息");
+            PipelineValidationResult::Approved { narrative, .. } => {
+                assert_eq!(narrative, Some("李四决定在客栈休息".to_string()));
             }
             _ => panic!("Expected Approved"),
         }
@@ -314,20 +713,14 @@ mod tests {
             persona: PersonaInfo::default(),
             world_context: "龙门客栈".to_string(),
             world_state: None,
+            runtime: ValidationRuntimeConfig::default(),
         };
 
         let result = validator.validate(request).await.unwrap();
 
         match result {
-            ValidationResult::Rejected {
-                reason,
-                rejection_type,
-            } => {
+            PipelineValidationResult::Rejected { reason, .. } => {
                 assert_eq!(reason, "使用了魔法，违反力量体系");
-                assert_eq!(
-                    rejection_type,
-                    super::super::types::RejectionType::PowerSystemViolation
-                );
             }
             _ => panic!("Expected Rejected"),
         }
@@ -345,5 +738,84 @@ mod tests {
         // Test that update_rules doesn't panic
         let new_rules = test_world_building_rules();
         validator.update_rules(new_rules).await;
+    }
+
+    #[tokio::test]
+    async fn test_validate_pipeline_rejects_follow_loop_before_llm() {
+        let mock_client =
+            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
+        let reflector =
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let world_state = test_world_state();
+        let request = ValidationRequest {
+            intent: crate::models::Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "follow",
+                Some(serde_json::json!({"target_agent_id": Uuid::new_v4()})),
+            ),
+            persona: PersonaInfo::default(),
+            world_context: "测试地点".to_string(),
+            world_state: Some(world_state),
+            runtime: ValidationRuntimeConfig {
+                graded_config: Some(GradedValidationConfig::default()),
+                consecutive_follow_count: 3,
+                max_consecutive_follow: 3,
+            },
+        };
+
+        let result = reflector.validate_pipeline(request).await.unwrap();
+
+        match result {
+            PipelineValidationResult::Rejected { reason, layers } => {
+                assert!(reason.contains("已连续跟随 3 次"));
+                assert_eq!(layers.len(), 2);
+                assert_eq!(layers[0].layer, "layer1");
+                assert!(layers[0].passed);
+                assert_eq!(layers[1].layer, "layer2");
+                assert!(!layers[1].passed);
+            }
+            PipelineValidationResult::Approved { .. } => {
+                panic!("follow loop should be rejected before llm");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validator_trait_runs_full_pipeline() {
+        let mock_client =
+            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
+        let validator: Arc<dyn Validator> = Arc::new(ReflectorSoul::new(
+            test_world_building_rules(),
+            mock_container(mock_client),
+        ));
+        let world_state = test_world_state();
+        let request = ValidationRequest {
+            intent: crate::models::Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "follow",
+                Some(serde_json::json!({"target_agent_id": Uuid::new_v4()})),
+            ),
+            persona: PersonaInfo::default(),
+            world_context: "测试地点".to_string(),
+            world_state: Some(world_state),
+            runtime: ValidationRuntimeConfig {
+                graded_config: Some(GradedValidationConfig::default()),
+                consecutive_follow_count: 3,
+                max_consecutive_follow: 3,
+            },
+        };
+
+        match validator.validate(request).await.unwrap() {
+            PipelineValidationResult::Rejected { reason, layers } => {
+                assert!(reason.contains("已连续跟随 3 次"));
+                assert_eq!(layers.len(), 2);
+                assert_eq!(layers[1].layer, "layer2");
+            }
+            PipelineValidationResult::Approved { .. } => {
+                panic!("trait validator should run full pipeline");
+            }
+        }
     }
 }

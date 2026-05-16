@@ -32,7 +32,10 @@ use uuid::Uuid;
 
 use crate::config::{CharacterConfig, CharacterStatus};
 
-use crate::soul::reflector::{PersonaInfo, ValidationRequest, ValidationResult};
+use crate::core::utils::build_world_context;
+use crate::soul::reflector::{
+    PersonaInfo, PipelineValidationResult, ValidationRequest, ValidationRuntimeConfig,
+};
 use cyber_jianghu_protocol::{ActionType, Intent, ServerMessage};
 
 use super::cognitive_context::{CognitiveContext, CognitiveContextBuilder};
@@ -863,9 +866,13 @@ pub(super) async fn get_recent_memory_handler(
     Json(memories_to_json_response(&memories)).into_response()
 }
 
+const DEFAULT_PAGE_SIZE: usize = 20;
+const MAX_PAGE_SIZE: usize = 100;
+
 /// 获取每日摘要记忆
 pub(super) async fn get_daily_summaries_handler(
     State(state): State<HttpApiState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let guard = state.memory_manager.read().await;
     let mm = match guard.as_ref() {
@@ -879,11 +886,23 @@ pub(super) async fn get_daily_summaries_handler(
         }
     };
 
+    let page: usize = params
+        .get("page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .min(MAX_PAGE_SIZE);
+    let offset = (page - 1) * limit;
+
     let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
 
-    match service.get_daily_summaries(50) {
-        Ok(memories) => {
+    match service.get_daily_summaries(offset, limit) {
+        Ok((memories, has_more)) => {
             let results: Vec<serde_json::Value> = memories
                 .iter()
                 .map(|m| {
@@ -899,6 +918,9 @@ pub(super) async fn get_daily_summaries_handler(
             Json(serde_json::json!({
                 "summaries": results,
                 "count": results.len(),
+                "has_more": has_more,
+                "page": page,
+                "limit": limit,
             }))
             .into_response()
         }
@@ -1062,35 +1084,51 @@ pub(super) async fn validate_intent_handler(
         values: req.persona_values.unwrap_or_default(),
     };
 
-    let world_state = state.current_state.read().await;
+    let world_state = state.current_state.read().await.clone();
     let world_context = world_state
         .as_ref()
-        .map(|ws| format!("Tick: {}, Location: {:?}", ws.tick_id, ws.location))
+        .map(build_world_context)
         .unwrap_or_else(|| "No world state available".to_string());
-    drop(world_state);
+    let graded_config = state
+        .game_rules
+        .read()
+        .await
+        .as_ref()
+        .and_then(|rules| rules.intent_batch.as_ref())
+        .map(|batch| batch.llm_validation.clone());
+
+    // [TRAP_DEBT: TICKET-101] HTTP API 是无状态游离端点，无法获取内存中的连续跟随计数
+    // 当前传入 0，意味着通过 HTTP 提交的单次意图将绕过防刷屏限制。
+    // 预计修复方案：在 HttpApiState 中补充对 Agent 状态的只读引用，或由调用方传入。
+    // 预计偿还时间：2026-06-01
+    let max_consecutive_follow = crate::config::Config::from_file(&state.config_path)
+        .map(|c| c.llm.max_consecutive_follow)
+        .unwrap_or(crate::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW);
 
     let validation_req = ValidationRequest {
         intent,
         persona: persona_info,
         world_context,
-        world_state: None,
+        world_state,
+        runtime: ValidationRuntimeConfig {
+            graded_config,
+            consecutive_follow_count: 0,
+            max_consecutive_follow,
+        },
     };
 
     match validator.validate(validation_req).await {
-        Ok(ValidationResult::Approved { reason, narrative }) => Json(ValidateResponse {
+        Ok(PipelineValidationResult::Approved { narrative, .. }) => Json(ValidateResponse {
             valid: true,
-            reason,
+            reason: None,
             rejection_type: None,
-            narrative: Some(narrative),
+            narrative,
         })
         .into_response(),
-        Ok(ValidationResult::Rejected {
-            reason,
-            rejection_type,
-        }) => Json(ValidateResponse {
+        Ok(PipelineValidationResult::Rejected { reason, .. }) => Json(ValidateResponse {
             valid: false,
             reason: Some(reason),
-            rejection_type: Some(rejection_type.as_str().to_string()),
+            rejection_type: None,
             narrative: None,
         })
         .into_response(),
@@ -4990,10 +5028,6 @@ pub(crate) async fn generate_biography_for_agent(
         }
     };
 
-    if timeline.is_empty() && daily_summaries.is_empty() {
-        anyhow::bail!("无经历数据，无法生成传记");
-    }
-
     // 3. 构建 prompt
     let char_info = format!(
         "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
@@ -5004,6 +5038,13 @@ pub(crate) async fn generate_biography_for_agent(
         character.personality.join("、"),
         character.values.join("、"),
     );
+
+    // 构建经历日志段落（有数据则用，无数据则留空让 LLM 基于人物信息虚构）
+    let timeline_section = if timeline.is_empty() {
+        "（无经历日志）".to_string()
+    } else {
+        timeline
+    };
 
     let daily_section = if daily_summaries.is_empty() {
         String::new()
@@ -5018,7 +5059,7 @@ pub(crate) async fn generate_biography_for_agent(
 {char_info}
 
 ## 经历日志（按时间顺序）
-{timeline}
+{timeline_section}
 {daily_section}
 
 ## 撰写要求
@@ -5031,7 +5072,7 @@ pub(crate) async fn generate_biography_for_agent(
 
 请直接输出传记正文："#,
         char_info = char_info,
-        timeline = timeline,
+        timeline_section = timeline_section,
         daily_section = daily_section,
     );
 

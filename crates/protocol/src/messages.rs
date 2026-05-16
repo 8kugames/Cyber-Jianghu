@@ -108,6 +108,7 @@ pub struct DialogueSession {
 ///     lifespan: None,
 ///     calendar: None,
 ///     daily_summary: None,
+///     dialogue_context: None,
 /// };
 ///
 /// let msg = ServerMessage::Registered {
@@ -338,6 +339,8 @@ pub enum ClientMessage {
         /// Agent ID（可选）
         #[serde(skip_serializing_if = "Option::is_none")]
         agent_id: Option<Uuid>,
+        /// Pipeline 序列号（对应同一 tick 内的多个 intent）
+        pipe_seq: i32,
         /// 三魂循环完整元数据
         metadata: SoulCycleMetadata,
     },
@@ -536,6 +539,7 @@ mod tests {
             lifespan: None,
             calendar: None,
             daily_summary: None,
+            dialogue_context: None,
         };
         let msg = ServerMessage::Registered {
             agent_id,
@@ -592,6 +596,7 @@ mod tests {
                 inventory: vec![],
                 age_years: None,
                 max_age: None,
+                recipe_details: vec![],
             },
             entities: vec![],
             nearby_items: vec![],
@@ -729,6 +734,7 @@ mod tests {
             lifespan: None,
             calendar: None,
             daily_summary: None,
+            dialogue_context: None,
         };
         let world_rules = WorldBuildingRules {
             version: "0.0.1-test".to_string(),

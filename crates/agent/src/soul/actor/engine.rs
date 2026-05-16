@@ -177,6 +177,15 @@ pub struct CognitiveEngine {
     >,
     /// 关系存储（用于地魂 get_relationship / list_relationships / record_social_event）
     pub(super) relationship_store: std::sync::RwLock<Option<RelationshipStore>>,
+    /// WorldState 本地落存（供地魂 query_world / get_action_detail 工具使用）
+    pub(super) world_state_store:
+        std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>,
+    /// 可用动作列表（供地魂 get_action_detail 工具使用）
+    pub(super) available_actions:
+        std::sync::RwLock<Vec<cyber_jianghu_protocol::types::entities::AvailableAction>>,
+    /// 当前 tick 的 FocusSummary（由 lifecycle 写入，供 lean prompt 读取）
+    pub(super) current_focus_summary:
+        Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
 }
 
 impl CognitiveEngine {
@@ -209,6 +218,9 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+            world_state_store: std::sync::RwLock::new(None),
+            available_actions: std::sync::RwLock::new(Vec::new()),
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -296,6 +308,9 @@ impl CognitiveEngine {
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
+            world_state_store: std::sync::RwLock::new(None),
+            available_actions: std::sync::RwLock::new(Vec::new()),
+            current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -410,8 +425,12 @@ impl CognitiveEngine {
     }
 
     /// prompt_templates.json 搜索路径（load 和 save 共用）
-    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 3] {
+    /// 第一优先级：CYBER_JIANGHU_DATA_DIR（Server 写入路径，与 Server 写盘目标对称）
+    fn prompt_template_search_paths() -> [Option<std::path::PathBuf>; 4] {
         [
+            std::env::var("CYBER_JIANGHU_DATA_DIR")
+                .ok()
+                .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
             std::env::var("CYBER_JIANGHU_CONFIG_DIR")
                 .ok()
                 .map(|d| std::path::PathBuf::from(d).join("prompt_templates.json")),
@@ -500,8 +519,8 @@ impl CognitiveEngine {
     /// 加载动作列表（用于缓存 + 别名映射）
     fn load_actions_list() -> (String, String, ActionAliasMap, FieldAliasMap) {
         let available_actions = load_available_actions_from_file();
-        let descriptions = Self::build_action_descriptions(&available_actions);
-        let field_hints = Self::build_action_field_hints(&available_actions);
+        let descriptions = Self::build_action_index_pub(&available_actions);
+        let field_hints = String::new();
         let alias_map = ActionAliasMap::from_actions(&available_actions);
         let field_map = FieldAliasMap::from_actions(&available_actions);
         (descriptions, field_hints, alias_map, field_map)
@@ -538,6 +557,83 @@ impl CognitiveEngine {
     pub fn set_relationship_store(&self, store: RelationshipStore) {
         let mut guard = self.relationship_store.write().unwrap();
         *guard = Some(store);
+    }
+
+    /// 设置 WorldStateStore（由 lifecycle 注入，供地魂 query_world 工具使用）
+    pub fn set_world_state_store(
+        &self,
+        store: Arc<crate::component::state_store::WorldStateStore>,
+    ) {
+        let mut guard = self.world_state_store.write().unwrap();
+        *guard = Some(store);
+    }
+
+    /// 设置可用动作列表（由 lifecycle 注入，供地魂 get_action_detail 工具使用）
+    pub fn set_available_actions(
+        &self,
+        actions: Vec<cyber_jianghu_protocol::types::entities::AvailableAction>,
+    ) {
+        let mut guard = self.available_actions.write().unwrap();
+        *guard = actions;
+    }
+
+    /// 更新当前 tick 的 FocusSummary（由 lifecycle 在每 tick 写入）
+    pub async fn set_current_focus_summary(
+        &self,
+        summary: Option<crate::component::attention::FocusSummary>,
+    ) {
+        *self.current_focus_summary.write().await = summary;
+    }
+
+    /// Task 9: Critical Focus Preload
+    ///
+    /// 当 FocusSummary 包含 Critical 紧急项时，预加载相关 WorldState 分区数据。
+    /// 在 think_direct() 内部调用，异步读取 WorldStateStore。
+    async fn preload_critical_data(
+        &self,
+        focus_summary: &crate::component::attention::FocusSummary,
+    ) -> Option<String> {
+        // Clone Arc 在 lock 作用域内，避免跨 await 持有 std::sync::RwLockReadGuard
+        let store = {
+            let store_guard = self.world_state_store.read().unwrap();
+            store_guard.as_ref().cloned()?
+        };
+
+        let has_critical = focus_summary
+            .items
+            .iter()
+            .any(|i| i.change.urgency == crate::component::delta_engine::Urgency::Critical);
+        if !has_critical {
+            return None;
+        }
+
+        use std::collections::HashSet;
+        let categories: HashSet<_> = focus_summary
+            .items
+            .iter()
+            .filter(|i| i.change.urgency == crate::component::delta_engine::Urgency::Critical)
+            .map(|i| i.change.category.clone())
+            .collect();
+
+        let mut preloaded = String::from("\n### 紧急状态预加载\n");
+        for cat in &categories {
+            let section = match cat {
+                crate::component::delta_engine::ChangeCategory::Survival => "state",
+                crate::component::delta_engine::ChangeCategory::Social => "entities",
+                crate::component::delta_engine::ChangeCategory::Inventory => "inventory",
+                crate::component::delta_engine::ChangeCategory::Environment => "environment",
+                crate::component::delta_engine::ChangeCategory::Location => "environment",
+            };
+            let data =
+                super::super::earth::state_tool::execute_query_world(section, None, &store).await;
+            if data["success"].as_bool().unwrap_or(false)
+                && let Ok(pretty) = serde_json::to_string_pretty(&data)
+            {
+                preloaded.push_str(&pretty);
+                preloaded.push('\n');
+            }
+        }
+        Some(preloaded)
     }
 
     pub fn set_conversation_history(&mut self, history: ConversationHistory) {
@@ -639,8 +735,8 @@ impl CognitiveEngine {
         }
 
         // 同时更新 prompt cache 中的动作描述
-        let descriptions = Self::build_action_descriptions(actions);
-        let field_hints = Self::build_action_field_hints(actions);
+        let descriptions = Self::build_action_index_pub(actions);
+        let field_hints = String::new();
         {
             let mut cache = self.prompt_cache.write().unwrap();
             cache.update_action_descriptions(descriptions, field_hints);
@@ -709,14 +805,24 @@ impl CognitiveEngine {
 
         let use_tool_calling = self.llm_client.supports_tool_calling();
 
-        let prompt = self.build_direct_prompt(
+        // FocusSummary + Critical preload
+        let focus = self.current_focus_summary.read().await.clone();
+        let critical_preload = if let Some(ref fs) = focus {
+            self.preload_critical_data(fs).await
+        } else {
+            None
+        };
+
+        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
             world_state,
             memory_context,
             validation_feedback,
-            &persona_for_prompt,
-            &agent_name,
+            persona_desc: &persona_for_prompt,
+            agent_name: &agent_name,
+            focus_summary: focus.as_ref(),
+            critical_preload: critical_preload.as_deref(),
             use_tool_calling,
-        )?;
+        })?;
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
@@ -739,11 +845,17 @@ impl CognitiveEngine {
             if use_tool_calling {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
                 let memory_manager = self.memory_manager.read().unwrap().clone();
+                let recipe_details = world_state.self_state.recipe_details.clone();
+                let world_state_store = self.world_state_store.read().unwrap().clone();
+                let available_actions = self.available_actions.read().unwrap().clone();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().unwrap().clone(),
                         memory_manager,
                         relationship_store: self.relationship_store.read().unwrap().clone(),
+                        recipe_details,
+                        world_state_store,
+                        available_actions,
                     },
                 );
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
@@ -1029,13 +1141,18 @@ impl CognitiveEngine {
             cache.get_persona_simple().to_string()
         };
 
-        let prompt = self.build_legacy_prompt(
-            tick_id,
+        // 降级：无 WorldState，用空占位。build_prompt 会走 build_world_state_section 降级路径。
+        let empty_ws = super::engine_prompts::empty_world_state();
+        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
+            world_state: &empty_ws,
             memory_context,
             validation_feedback,
-            &persona_for_prompt,
-            &agent_name,
-        )?;
+            persona_desc: &persona_for_prompt,
+            agent_name: &agent_name,
+            focus_summary: None,
+            critical_preload: None,
+            use_tool_calling: false,
+        })?;
 
         let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
         let response_json = serde_json::to_string(&response)?;
@@ -1300,12 +1417,12 @@ impl CognitiveEngine {
         narrative
     }
 
-    /// 获取 action descriptions 和 field hints（公开接口）
+    /// 获取 Action Index（公开接口，供 API enrichment 使用）
     pub fn get_action_context(&self) -> (String, String) {
         let cache = self.prompt_cache.read().unwrap();
         (
             cache.get_action_descriptions().to_string(),
-            cache.get_action_field_hints().to_string(),
+            String::new(),
         )
     }
 
