@@ -1069,12 +1069,19 @@ function renderSoulInline(label, data, type) {
           : {};
       const content = ad.content || "";
       const targetId = ad.target_agent_id;
+      const resolveName = (id) => {
+        if (!id) return null;
+        const c = allCharacters.find((c) => c.agent_id === id);
+        const shortId = id.substring(0, 8);
+        return c ? `${c.name}（${shortId}）` : `${shortId}...`;
+      };
 
       if (at === "speak") {
-        const label = targetId ? `对某人说话` : `向众人说话`;
-        html += `<div class="soul-text">${escapeHtml(label)}："${escapeHtml(content)}"</div>`;
+        const targetName = targetId ? resolveName(targetId) : "众人";
+        html += `<div class="soul-text">对 ${escapeHtml(targetName)} 说话："${escapeHtml(content)}"</div>`;
       } else if (at === "whisper") {
-        html += `<div class="soul-text">向某人密语："${escapeHtml(content)}"</div>`;
+        const targetName = targetId ? resolveName(targetId) : "某人";
+        html += `<div class="soul-text">向 ${escapeHtml(targetName)} 密语："${escapeHtml(content)}"</div>`;
       } else if (at === "shout") {
         html += `<div class="soul-text">大声喊道："${escapeHtml(content)}"</div>`;
       } else {
