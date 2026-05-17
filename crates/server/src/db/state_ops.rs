@@ -668,24 +668,26 @@ pub struct AgentDailyActionStats {
 
 /// 查询指定 Agent 在指定游戏日的动作统计
 ///
-/// 将 tick_id 范围映射到 game_day：
-///   tick_start = (game_day - 1) * ticks_per_day + 1
-///   tick_end = game_day * ticks_per_day
-/// 其中 ticks_per_day = ticks_per_hour * hours_per_day = 1 * 12 = 12（配置值）
-///
-/// 注意：本函数假设所有 tick_id 从 1 开始递增。
+/// 将 game_day 映射回 tick_id 范围（真实秒数）：
+///   tick_start = (game_day - 1) * ticks_per_day_real_secs + 1
+///   tick_end = game_day * ticks_per_day_real_secs
+/// 其中 ticks_per_day_real_secs = ticks_per_hour * hours_per_day * real_seconds_per_tick
 pub async fn get_agent_daily_action_stats(
     pool: &PgPool,
     agent_id: uuid::Uuid,
     game_day: i64,
 ) -> Result<Option<AgentDailyActionStats>> {
-    // 从 game_rules 获取 ticks_per_day 配置
-    let ticks_per_day = crate::game_data::registry::TimeRegistry::get_config()
-        .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64)
-        .unwrap_or(12); // 降级默认值
+    // tick_id 是真实秒数，需乘以 real_seconds_per_tick 转换
+    let real_seconds_per_tick = crate::game_data::registry_or_error()
+        .ok()
+        .map(|r| r.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64)
+        .unwrap_or(60);
+    let ticks_per_day_real_secs = crate::game_data::registry::TimeRegistry::get_config()
+        .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64 * real_seconds_per_tick)
+        .unwrap_or(720);
 
-    let tick_start = (game_day - 1) * ticks_per_day + 1;
-    let tick_end = game_day * ticks_per_day;
+    let tick_start = (game_day - 1) * ticks_per_day_real_secs + 1;
+    let tick_end = game_day * ticks_per_day_real_secs;
 
     // 动作类型统计
     let count_rows = sqlx::query(
