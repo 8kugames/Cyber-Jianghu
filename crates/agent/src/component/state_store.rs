@@ -18,20 +18,21 @@ use tokio::sync::RwLock;
 
 /// Agent 侧 WorldState 存储（含 prev/curr，供 Delta Engine 使用）
 ///
+/// prev/curr WorldState pair
+type WorldStatePair = (Option<WorldState>, WorldState);
+
 /// 内部状态: `Option<(Option<WorldState>, WorldState)>` = `Option<(prev, curr)>`
 /// - 首次 new 后内部为 None（等待首次 update 注入 WorldState）
 /// - 每次 update: 首次设置 curr，后续 prev <- 旧 curr, curr <- new_state
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct WorldStateStore {
-    state: Arc<RwLock<Option<(Option<WorldState>, WorldState)>>>,
+    state: Arc<RwLock<Option<WorldStatePair>>>,
 }
 
 impl WorldStateStore {
     /// 创建空 store（懒初始化，等待首次 update 注入 WorldState）
     pub fn new() -> Self {
-        Self {
-            state: Arc::new(RwLock::new(None)),
-        }
+        Self::default()
     }
 
     /// 原子更新: 首次设置 curr，后续 prev <- 旧 curr, curr <- new_state
