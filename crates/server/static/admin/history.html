@@ -324,20 +324,31 @@
             }
 
             .exp-table th {
-                background: var(--bg-level-1);
-                padding: 10px 12px;
+                background: var(--bg-level-2);
+                padding: 8px 10px;
                 text-align: left;
                 font-weight: 600;
+                font-size: 11px;
                 color: var(--text-secondary);
                 border-bottom: 1px solid var(--border-color);
                 white-space: nowrap;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+            }
+
+            .exp-table th.soul-th {
+                color: var(--accent);
+                letter-spacing: 0.3px;
             }
 
             .exp-table td {
-                padding: 10px 12px;
+                padding: 8px 10px;
                 border-bottom: 1px solid var(--border-subtle);
                 color: var(--text-primary);
                 vertical-align: top;
+                font-size: 12px;
+                line-height: 1.5;
             }
 
             .exp-table tr:last-child td {
@@ -345,67 +356,32 @@
             }
 
             .exp-table tr:hover td {
-                background: var(--bg-level-1);
+                background: rgba(20, 184, 166, 0.04);
             }
 
-            .exp-table tr.exp-master-row {
-                cursor: pointer;
+            .soul-cell {
+                max-width: 220px;
+                min-width: 140px;
             }
 
-            .exp-table tr.exp-master-row:hover td {
-                background: var(--bg-level-2);
-            }
-
-            .exp-expand-arrow {
-                display: inline-block;
-                width: 16px;
-                text-align: center;
-                color: var(--text-subtle);
-                font-size: 10px;
-                transition: transform 0.15s;
-            }
-
-            .exp-master-row.exp-expanded .exp-expand-arrow {
-                transform: rotate(90deg);
-            }
-
-            .exp-detail-row td {
-                padding: 0 !important;
-                border-bottom: 1px solid var(--border-subtle) !important;
-                background: var(--bg-level-1);
-            }
-
-            .exp-detail-content {
-                display: grid;
-                grid-template-columns: 1fr 1fr 1fr 1.5fr;
-                gap: 0;
-                padding: 12px 16px;
-            }
-
-            .exp-detail-cell {
-                padding: 8px 12px;
-                border-right: 1px solid var(--border-subtle);
-            }
-
-            .exp-detail-cell:last-child {
-                border-right: none;
-            }
-
-            .exp-detail-label {
-                font-size: 10px;
-                font-weight: 600;
-                color: var(--accent);
-                text-transform: uppercase;
-                letter-spacing: 0.3px;
-                margin-bottom: 6px;
-            }
-
-            .exp-detail-body {
+            .soul-cell-inner {
+                max-height: 100px;
+                overflow-y: auto;
                 font-size: 12px;
                 line-height: 1.5;
-                color: var(--text-primary);
-                max-height: 200px;
+            }
+
+            .narrative-cell {
+                max-width: 280px;
+                min-width: 180px;
+            }
+
+            .narrative-cell-inner {
+                max-height: 100px;
                 overflow-y: auto;
+                font-size: 12px;
+                line-height: 1.6;
+                color: var(--text-secondary);
             }
 
             .result-badge {
@@ -994,11 +970,14 @@
                 <table class="exp-table">
                     <thead>
                         <tr>
-                            <th></th>
                             <th>Tick</th>
                             <th>角色</th>
                             <th>位置</th>
                             <th>动作</th>
+                            <th class="soul-th">人魂</th>
+                            <th class="soul-th">天魂</th>
+                            <th class="soul-th">地魂</th>
+                            <th class="soul-th">叙事</th>
                             <th>结果</th>
                             <th>时间</th>
                         </tr>
@@ -1496,9 +1475,9 @@
                 } catch (e) {
                     if (e.name === "ApiError") {
                         // 401 已由 apiFetch 弹 auth modal，500 已由 apiFetch showToast
-                        tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败"}</p></td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败"}</p></td></tr>`;
                     } else {
-                        tbody.innerHTML = `<tr><td colspan="7" class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></td></tr>`;
+                        tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></td></tr>`;
                     }
                 } finally {
                     loading.style.display = "none";
@@ -1517,7 +1496,7 @@
                 empty.style.display = "none";
                 if (tableWrap) tableWrap.classList.remove("hidden");
                 tbody.innerHTML = experiences
-                    .map((e, idx) => {
+                    .map((e) => {
                         const metadata = e.soul_cycle_metadata || {};
                         const cycles = metadata.cycles || [];
                         const isSuccess = e.result === "success";
@@ -1527,43 +1506,25 @@
                             ? new Date(e.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
                             : "-";
 
-                        // 主行
-                        let html = `<tr class="exp-master-row" data-exp-idx="${idx}" onclick="toggleExpDetail(${idx})">` +
-                            `<td><span class="exp-expand-arrow">&#9654;</span></td>` +
+                        const renhunHtml = renderRenhunCell(cycles, e);
+                        const tianhunHtml = renderTianhunCell(cycles, e);
+                        const dihunHtml = renderDihunCell(cycles, e);
+                        const narrativeHtml = e.narrative ? escapeHtml(e.narrative) : '<span style="color:var(--text-subtle)">-</span>';
+
+                        return `<tr>` +
                             `<td><span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span></td>` +
                             `<td>${escapeHtml(e.agent_name || "-")}</td>` +
                             `<td>${escapeHtml(getLocationName(e.location || "-"))}</td>` +
                             `<td><span class="exp-action-badge">${escapeHtml(e.action_type_display || e.action_type || "-")}</span></td>` +
+                            `<td class="soul-cell"><div class="soul-cell-inner">${renhunHtml}</div></td>` +
+                            `<td class="soul-cell"><div class="soul-cell-inner">${tianhunHtml}</div></td>` +
+                            `<td class="soul-cell"><div class="soul-cell-inner">${dihunHtml}</div></td>` +
+                            `<td class="narrative-cell"><div class="narrative-cell-inner">${narrativeHtml}</div></td>` +
                             `<td>${resultBadge}</td>` +
                             `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
                             `</tr>`;
-
-                        // 详情行（默认隐藏）
-                        const renhunHtml = renderRenhunCell(cycles, e);
-                        const tianhunHtml = renderTianhunCell(cycles, e);
-                        const dihunHtml = renderDihunCell(cycles, e);
-                        const narrativeHtml = e.narrative ? escapeHtml(e.narrative) : '<span style="color:var(--text-subtle)">无叙事</span>';
-
-                        html += `<tr class="exp-detail-row" id="exp-detail-${idx}" style="display:none"><td colspan="7">` +
-                            `<div class="exp-detail-content">` +
-                            `<div class="exp-detail-cell"><div class="exp-detail-label">人魂 · 行动之魂</div><div class="exp-detail-body">${renhunHtml}</div></div>` +
-                            `<div class="exp-detail-cell"><div class="exp-detail-label">天魂 · 守护之魂</div><div class="exp-detail-body">${tianhunHtml}</div></div>` +
-                            `<div class="exp-detail-cell"><div class="exp-detail-label">地魂 · 能力之魂</div><div class="exp-detail-body">${dihunHtml}</div></div>` +
-                            `<div class="exp-detail-cell"><div class="exp-detail-label">叙事</div><div class="exp-detail-body">${narrativeHtml}</div></div>` +
-                            `</div></td></tr>`;
-
-                        return html;
                     })
                     .join("");
-            }
-
-            function toggleExpDetail(idx) {
-                const row = document.querySelector(`.exp-master-row[data-exp-idx="${idx}"]`);
-                const detail = document.getElementById(`exp-detail-${idx}`);
-                if (!row || !detail) return;
-                const isExpanded = row.classList.contains("exp-expanded");
-                row.classList.toggle("exp-expanded", !isExpanded);
-                detail.style.display = isExpanded ? "none" : "";
             }
 
             // LAYER_NAMES 已移至 utils.js（全局共享）
