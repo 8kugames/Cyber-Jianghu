@@ -814,15 +814,20 @@ impl TickScheduler {
             }
 
             // 2.5 游戏日边界推送：每个游戏日结束时向所有在线 Agent 推送动作统计
-            let ticks_per_day = crate::game_data::registry::TimeRegistry::get_config()
-                .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64)
-                .unwrap_or(12);
-            if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day == 0 {
-                let game_day = self.current_tick_id / ticks_per_day;
+            // tick_id 是真实秒数（非 tick 计数），需乘以 real_seconds_per_tick 转换
+            let real_seconds_per_tick = {
+                let gd = self.game_data_cache.get();
+                gd.game_rules.data.agent_state.tick.real_seconds_per_tick as i64
+            };
+            let ticks_per_day_real_secs = crate::game_data::registry::TimeRegistry::get_config()
+                .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64 * real_seconds_per_tick)
+                .unwrap_or(720);
+            if self.current_tick_id > 0 && self.current_tick_id % ticks_per_day_real_secs == 0 {
+                let game_day = self.current_tick_id / ticks_per_day_real_secs;
                 self.broadcast_daily_summaries(game_day).await;
             }
 
-            // 3. 群像传记：每 168 tick (7 游戏日) 生成一次
+            // 3. 群像传记：每 period_ticks 真实秒 (默认 7 游戏日) 生成一次
             let period_ticks = crate::chronicle::ChronicleConfig::default().period_ticks;
             if self.current_tick_id > 0 && self.current_tick_id % period_ticks == 0 {
                 let period_start = self.current_tick_id - period_ticks + 1;
@@ -894,7 +899,7 @@ impl TickScheduler {
 
     /// 游戏日边界：向所有在线 Agent 推送上一游戏日的动作统计
     ///
-    /// 在 game_day 结束时（tick_id % ticks_per_day == 0）调用，
+    /// 在 game_day 结束时（tick_id % ticks_per_day_real_secs == 0）调用，
     /// 从 agent_action_logs 聚合数据，通过 WebSocket 发送给各 Agent。
     /// 注意：本方法仅推送数据，不写入 agent_daily_summaries 表。
     /// agent_daily_summaries 的叙事摘要由 SessionTriageEngine 在游戏日切换时生成。
