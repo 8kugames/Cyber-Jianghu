@@ -7,7 +7,7 @@
 // ============================================================================
 
 use anyhow::Result;
-use cyber_jianghu_protocol::{CalendarConfig, ServerMessage, WorldTime};
+use cyber_jianghu_protocol::{CalendarConfig, Entity, ServerMessage, WorldTime};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -1422,28 +1422,14 @@ impl super::Agent {
                         // 如果 final_intent 已被设置（如 speak 即时通道），退出
                         if final_intent.is_some() { break; }
 
-                        // 记录人魂输出（可读简述）
+                        // 预计算人魂叙述（审查通过后才记录）
                         let renhun_narrative = Self::summarize_intent(
                             raw_intent.action_type.as_str(),
                             raw_intent.action_data.as_ref(),
                             &world_state.location.name,
+                            &world_state.entities,
                         );
                         let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
-                        if let Some(recorder) = self.soul_recorder().await {
-                            recorder.record_renhun(
-                                world_state.tick_id,
-                                attempt,
-                                &renhun_narrative,
-                                renhun_thought_log,
-                            ).await;
-                            let world_time_str = Self::format_world_time(&world_state.world_time);
-                            recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
-                        } else {
-                            tracing::warn!(
-                                "[soul_cycle] recorder unavailable at tick {}, skipping renhun record",
-                                world_state.tick_id
-                            );
-                        }
 
                         // 5c. 天魂 (ReflectorSoul) 审核 — 分级审核策略
                         let graded_config = self.config.game_rules
@@ -1637,6 +1623,14 @@ impl super::Agent {
 
                         if !approved_intents.is_empty() {
                             if let Some(recorder) = self.soul_recorder().await {
+                                recorder.record_renhun(
+                                    world_state.tick_id,
+                                    attempt,
+                                    &renhun_narrative,
+                                    renhun_thought_log,
+                                ).await;
+                                let world_time_str = Self::format_world_time(&world_state.world_time);
+                                recorder.record_world_time(world_state.tick_id, attempt, &world_time_str).await;
                                 let layer1 = batch_layers.iter().find(|l| l.layer == "layer1");
                                 let layer2 = batch_layers.iter().find(|l| l.layer == "layer2");
                                 let layer3 = batch_layers.iter().find(|l| l.layer == "layer3");
@@ -2365,21 +2359,35 @@ impl super::Agent {
         action_type: &str,
         action_data: Option<&serde_json::Value>,
         location: &str,
+        entities: &[Entity],
     ) -> String {
         let data = action_data.cloned().unwrap_or(serde_json::Value::Null);
+
+        let resolve_name = |target_id: &str| -> String {
+            if let Ok(uuid) = target_id.parse::<uuid::Uuid>()
+                && let Some(entity) = entities.iter().find(|e| e.id == uuid)
+            {
+                return format!("{}（{}）", entity.name, &target_id[..8]);
+            }
+            target_id.chars().take(8).collect::<String>() + "..."
+        };
 
         match action_type {
             "说话" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let target = data.get("target_agent_id").and_then(|v| v.as_str());
                 match target {
-                    Some(_) => format!("对某人说话：{}", content),
+                    Some(tid) => format!("对{}说话：{}", resolve_name(tid), content),
                     None => format!("向在场众人说话：{}", content),
                 }
             }
             "私语" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                format!("向某人密语：{}", content)
+                let target = data.get("target_agent_id").and_then(|v| v.as_str());
+                match target {
+                    Some(tid) => format!("向{}密语：{}", resolve_name(tid), content),
+                    None => format!("向某人密语：{}", content),
+                }
             }
             "大喊" => {
                 let content = data.get("content").and_then(|v| v.as_str()).unwrap_or("");
