@@ -191,24 +191,36 @@ impl ReflectorSoul {
             return Ok(());
         }
 
-        let valid_names: Vec<&str> = actions.iter().map(|a| a.action.as_str()).collect();
-        if valid_names.contains(&intent.action_type.as_str()) {
+        // 查找匹配的 action 定义
+        let action_input = intent.action_type.as_str().to_lowercase();
+        let matched = actions.iter().find(|a| {
+            a.action == intent.action_type.as_str()
+                || a.name.to_lowercase() == action_input
+                || a.aliases
+                    .iter()
+                    .any(|alias| alias.to_lowercase() == action_input)
+        });
+
+        if let Some(action) = matched {
+            // 校验 required_fields
+            for field in &action.required_fields {
+                let has_field = intent
+                    .action_data
+                    .as_ref()
+                    .and_then(|d| d.get(field))
+                    .map(|v| !v.is_null())
+                    .unwrap_or(false);
+                if !has_field {
+                    return Err(format!(
+                        "动作 '{}' 缺少必需字段: {}",
+                        action.name, field
+                    ));
+                }
+            }
             return Ok(());
         }
 
-        let action_input = intent.action_type.as_str().to_lowercase();
-        for action in &actions {
-            if action.name.to_lowercase() == action_input {
-                return Ok(());
-            }
-            if action
-                .aliases
-                .iter()
-                .any(|alias| alias.to_lowercase() == action_input)
-            {
-                return Ok(());
-            }
-        }
+        let valid_names: Vec<&str> = actions.iter().map(|a| a.action.as_str()).collect();
 
         let suggestion = actions
             .iter()
