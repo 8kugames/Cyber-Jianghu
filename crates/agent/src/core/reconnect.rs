@@ -240,7 +240,7 @@ impl super::Agent {
                             // 更新游戏规则
                             self.config.update_game_rules(game_rules.clone());
 
-                            // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
+                            // 热更新认知引擎的动作列表缓存
                             if let Some(ref engine) = self.cognitive_engine {
                                 engine.update_action_aliases(&game_rules.available_actions);
                             }

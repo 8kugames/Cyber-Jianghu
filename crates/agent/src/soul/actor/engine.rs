@@ -20,7 +20,6 @@ use super::prompt_cache::PromptCache;
 use super::prompt_template::PromptTemplateConfig;
 use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
-use super::translation::{ActionAliasMap, EntityTranslationRegistry, FieldAliasMap};
 use crate::component::llm::conversation::ConversationHistory;
 use crate::component::llm::{ConversationInput, ConversationTurn, LlmClient, LlmClientExt};
 use crate::component::persona::DynamicPersona;
@@ -165,10 +164,6 @@ pub struct CognitiveEngine {
     runtime_prompt_template: std::sync::RwLock<Option<PromptTemplateConfig>>,
     /// 行动结果记忆（Hermes 模式）
     pub(super) outcome_memory: Option<crate::component::memory::OutcomeMemory>,
-    /// action_type 别名映射（中文/别名 → 英文 canonical）
-    pub(super) action_alias_map: std::sync::RwLock<ActionAliasMap>,
-    /// action_data 字段别名映射（中文/别名 → 英文 canonical）
-    pub(super) field_alias_map: std::sync::RwLock<FieldAliasMap>,
     /// SKILL.md body 缓存（skill_id → body content），避免每 tick 重复 IO
     pub(super) skill_cache: std::sync::RwLock<std::collections::HashMap<String, String>>,
     /// 记忆管理器引用（用于地魂 search_memory / recall_archived）
@@ -192,7 +187,7 @@ impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints, alias_map, field_map) =
+        let (action_descriptions, action_field_hints) =
             Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
@@ -213,8 +208,6 @@ impl CognitiveEngine {
             prompt_template,
             runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
-            action_alias_map: std::sync::RwLock::new(alias_map),
-            field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
@@ -282,7 +275,7 @@ impl CognitiveEngine {
         window_size: usize,
     ) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints, alias_map, field_map) =
+        let (action_descriptions, action_field_hints) =
             Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
@@ -303,8 +296,6 @@ impl CognitiveEngine {
             prompt_template,
             runtime_prompt_template: std::sync::RwLock::new(None),
             outcome_memory: None,
-            action_alias_map: std::sync::RwLock::new(alias_map),
-            field_alias_map: std::sync::RwLock::new(field_map),
             skill_cache: std::sync::RwLock::new(std::collections::HashMap::new()),
             memory_manager: std::sync::RwLock::new(None),
             relationship_store: std::sync::RwLock::new(None),
@@ -516,14 +507,12 @@ impl CognitiveEngine {
             .llm_param("actor_direct", key, default)
     }
 
-    /// 加载动作列表（用于缓存 + 别名映射）
-    fn load_actions_list() -> (String, String, ActionAliasMap, FieldAliasMap) {
+    /// 加载动作列表（用于缓存）
+    fn load_actions_list() -> (String, String) {
         let available_actions = load_available_actions_from_file();
         let descriptions = Self::build_action_index_pub(&available_actions);
         let field_hints = String::new();
-        let alias_map = ActionAliasMap::from_actions(&available_actions);
-        let field_map = FieldAliasMap::from_actions(&available_actions);
-        (descriptions, field_hints, alias_map, field_map)
+        (descriptions, field_hints)
     }
 
     /// 使用默认配置创建
@@ -718,23 +707,8 @@ impl CognitiveEngine {
         }
     }
 
-    /// 更新动作别名映射（收到 game_rules_update 后调用）
-    ///
-    /// 热更新 alias map 和 field alias map，无需重建引擎。
+    /// 更新动作列表（收到 game_rules_update 后调用）
     pub fn update_action_aliases(&self, actions: &[cyber_jianghu_protocol::AvailableAction]) {
-        let new_alias_map = ActionAliasMap::from_actions(actions);
-        let new_field_map = FieldAliasMap::from_actions(actions);
-
-        {
-            let mut alias_guard = self.action_alias_map.write().unwrap();
-            *alias_guard = new_alias_map;
-        }
-        {
-            let mut field_guard = self.field_alias_map.write().unwrap();
-            *field_guard = new_field_map;
-        }
-
-        // 同时更新 prompt cache 中的动作描述
         let descriptions = Self::build_action_index_pub(actions);
         let field_hints = String::new();
         {
@@ -742,7 +716,7 @@ impl CognitiveEngine {
             cache.update_action_descriptions(descriptions, field_hints);
         }
 
-        info!("动作别名映射已更新: {} 个动作", actions.len());
+        info!("动作列表已更新: {} 个动作", actions.len());
     }
 
     /// 获取 Outcome Memory 经验教训 prompt 段
@@ -1004,34 +978,18 @@ impl CognitiveEngine {
         chain.add_stage(planning);
 
         // 构建结构化 Intents（从 actions 数组，向后兼容旧格式）
-        // 翻译硬边界：中文/别名 → canonical 中文，ReflectorSoul 只看到 canonical
-        let entity_registry = EntityTranslationRegistry::from_world_state(world_state);
-        let actions = response.get_actions();
-        let translated_actions: Vec<DirectCognitiveAction> = actions
+        // LLM 必须精确输出 canonical action_type 和精确 ID，不做翻译
+        let raw_actions = response.get_actions();
+        let parsed_actions: Vec<DirectCognitiveAction> = raw_actions
             .iter()
             .map(|a| {
-                let action_type = self
-                    .action_alias_map
-                    .read()
-                    .unwrap()
-                    .translate(&a.action_type)
-                    .ok_or_else(|| anyhow::anyhow!("未识别的动作类型: {}", a.action_type))?;
-                let mut action_data = a.action_data.clone();
-                if let Some(ref mut data) = action_data {
-                    self.field_alias_map
-                        .read()
-                        .unwrap()
-                        .translate_data(&action_type, data);
-                    // entity-alias 翻译：所有已注册字段的值 (target_location, item_id, target_agent_id)
-                    entity_registry.translate(data);
-                }
                 Ok(DirectCognitiveAction {
-                    action_type,
-                    action_data,
+                    action_type: a.action_type.clone(),
+                    action_data: a.action_data.clone(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let intents: Vec<Intent> = translated_actions
+        let intents: Vec<Intent> = parsed_actions
             .iter()
             .map(|a| {
                 Intent::new(
@@ -1044,7 +1002,7 @@ impl CognitiveEngine {
             })
             .collect();
 
-        let primary_action = &translated_actions[0];
+        let primary_action = &parsed_actions[0];
         let decision = super::stages::StageOutput::with_metadata(
             CognitiveStage::Decision,
             format!(
@@ -1052,8 +1010,8 @@ impl CognitiveEngine {
                 response.thought_process,
                 primary_action.action_type,
                 primary_action.action_data,
-                if translated_actions.len() > 1 {
-                    format!(" (+{} 后续)", translated_actions.len() - 1)
+                if parsed_actions.len() > 1 {
+                    format!(" (+{} 后续)", parsed_actions.len() - 1)
                 } else {
                     String::new()
                 }
@@ -1077,7 +1035,7 @@ impl CognitiveEngine {
             tick_id,
             chain.duration_ms,
             primary_action.action_type,
-            translated_actions.len()
+            parsed_actions.len()
         );
 
         thinking_log::log_thinking(&agent_name, tick_id, &chain.summarize());
@@ -1198,22 +1156,10 @@ impl CognitiveEngine {
         chain.add_stage(planning);
 
         // 旧式路径也支持多 action 格式
-        // 翻译硬边界：中文/别名 → 英文 canonical
+        // LLM 必须精确输出，不做翻译
         let actions = response.get_actions();
-        let translated_type = self
-            .action_alias_map
-            .read()
-            .unwrap()
-            .translate(&actions[0].action_type)
-            .unwrap_or_else(|| actions[0].action_type.clone());
-        let mut action_data = actions[0].action_data.clone();
-        if let Some(ref mut data) = action_data {
-            self.field_alias_map
-                .read()
-                .unwrap()
-                .translate_data(&translated_type, data);
-        }
-        let intent = Intent::new(agent_id, tick_id, translated_type, action_data)
+        let action_data = actions[0].action_data.clone();
+        let intent = Intent::new(agent_id, tick_id, actions[0].action_type.clone(), action_data)
             .with_thought(response.thought_process.clone());
 
         let decision = super::stages::StageOutput::with_metadata(

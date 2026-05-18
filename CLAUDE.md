@@ -232,7 +232,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/core/social.rs` - Social event processing + LLM favorability evaluation
 - `src/soul/actor/engine.rs` - CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
 - `src/soul/actor/chain.rs` - CognitiveChain (causal reasoning trace)
-- `src/soul/actor/translation.rs` - Chinese LLM boundary translation (aliases → canonical)
+- `src/soul/actor/translation.rs` - Translation layer disabled (design: LLM must output precise values)
 - `src/soul/actor/chaos.rs` - Sanity chaos generator (low-sanity random behavior)
 - `src/soul/actor/prompt_template.rs` - YAML-driven prompt template loader
 - `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)

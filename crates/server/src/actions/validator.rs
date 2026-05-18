@@ -80,20 +80,18 @@ fn validate_by_rules(
     all_states: &[AgentState],
     validation: &ActionValidation,
 ) -> Result<(), GameError> {
-    // 规范化 action_data（LLM 字段名容错：message→content, target_uuid→target_agent_id）
-    let action_data_normalized = normalize_action_data(&intent.action_data);
+    let action_data = intent.action_data.clone();
 
-    // 构造临时 Intent 用于后续验证（使用 normalized action_data）
-    let normalized_intent = Intent {
-        action_data: action_data_normalized.clone(),
+    // 构造临时 Intent 用于后续验证
+    let temp_intent = Intent {
+        action_data: action_data.clone(),
         ..intent.clone()
     };
 
     // 验证必需的字段
     for field in &validation.required_fields {
-        // 字段名容错：target_id 缺失但 item_id 存在时视为通过（gather 常见误用）
-        if !has_field(&action_data_normalized, field) {
-            if field == "target_id" && has_field(&action_data_normalized, "item_id") {
+        if !has_field(&action_data, field) {
+            if field == "target_id" && has_field(&action_data, "item_id") {
                 continue;
             }
             tracing::warn!(
@@ -108,19 +106,19 @@ fn validate_by_rules(
         }
     }
 
-    // 验证字段规则（使用 normalized data）
+    // 验证字段规则
     for field_validation in &validation.field_validations {
-        validate_field(&normalized_intent, field_validation)?;
+        validate_field(&temp_intent, field_validation)?;
     }
 
-    // 验证目标 Agent（使用 normalized data）
+    // 验证目标 Agent
     if validation.requires_target.unwrap_or(false) {
-        validate_target_exists(&normalized_intent, all_states)?;
+        validate_target_exists(&temp_intent, all_states)?;
     }
 
-    // 验证目标存活（使用 normalized data）
+    // 验证目标存活
     if validation.requires_target_alive.unwrap_or(false) {
-        validate_target_alive(&normalized_intent, all_states)?;
+        validate_target_alive(&temp_intent, all_states)?;
     }
 
     Ok(())
@@ -178,35 +176,6 @@ fn has_field(action_data: &Option<serde_json::Value>, field: &str) -> bool {
         return obj.contains_key(field);
     }
     false
-}
-
-/// LLM 常见字段名容错映射
-///
-/// LLM 经常将字段名搞错，例如：
-/// - content → message（speak/whisper/shout）
-/// - target_agent_id → target_uuid / character_id / target_id
-///
-/// 返回规范化后的 action_data，将错误的字段名修正为正确名称
-pub fn normalize_action_data(action_data: &Option<serde_json::Value>) -> Option<serde_json::Value> {
-    let mut data = action_data.clone()?;
-    let obj = data.as_object_mut()?;
-
-    // message → content
-    if let Some(val) = obj.remove("message") {
-        obj.entry("content".to_string()).or_insert(val);
-    }
-
-    // target_uuid → target_agent_id
-    if let Some(val) = obj.remove("target_uuid") {
-        obj.entry("target_agent_id".to_string()).or_insert(val);
-    }
-
-    // character_id → target_agent_id（仅当 target_agent_id 不存在时）
-    if let Some(val) = obj.remove("character_id") {
-        obj.entry("target_agent_id".to_string()).or_insert(val);
-    }
-
-    Some(data)
 }
 
 /// 获取字段的字符串值
@@ -405,7 +374,7 @@ async fn validate_teach_recipe(
     all_states: &[AgentState],
     db_pool: &DbPool,
 ) -> Result<(), GameError> {
-    let action_data = normalize_action_data(&intent.action_data);
+    let action_data = &intent.action_data;
     let recipe_id = action_data
         .as_ref()
         .and_then(|d| d.get("recipe_id"))

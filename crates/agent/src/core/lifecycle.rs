@@ -347,7 +347,7 @@ impl super::Agent {
             *api_state.game_rules.write().await = Some(game_rules.clone());
         }
 
-        // 热更新认知引擎的动作别名映射（翻译层依赖 AvailableAction）
+        // 热更新认知引擎的动作列表缓存
         if let Some(ref engine) = self.cognitive_engine {
             engine.update_action_aliases(&game_rules.available_actions);
             // 注入 available_actions 供地魂 get_action_detail 工具使用

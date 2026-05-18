@@ -191,14 +191,11 @@ impl ReflectorSoul {
             return Ok(());
         }
 
-        // 查找匹配的 action 定义
+        // 查找匹配的 action 定义（精确匹配 action 或 name，不做 alias 匹配）
         let action_input = intent.action_type.as_str().to_lowercase();
         let matched = actions.iter().find(|a| {
             a.action == intent.action_type.as_str()
                 || a.name.to_lowercase() == action_input
-                || a.aliases
-                    .iter()
-                    .any(|alias| alias.to_lowercase() == action_input)
         });
 
         if let Some(action) = matched {

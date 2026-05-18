@@ -20,7 +20,6 @@ use super::types::StateChange;
 use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
 
-use super::validator::normalize_action_data;
 
 use basic::BasicActionExecutor;
 use combat::CombatActionExecutor;
@@ -60,8 +59,8 @@ impl ActionExecutor {
             }
         };
 
-        // 2. 规范化 action_data（LLM 字段名容错）
-        let action_data = normalize_action_data(&intent.action_data);
+        // 2. 直接使用 action_data（LLM 必须输出精准字段名）
+        let action_data = intent.action_data.clone();
 
         // 3. 执行特定逻辑（数据驱动：字符串匹配）
         let mut result = match intent.action_type.as_str() {
