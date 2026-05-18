@@ -23,7 +23,7 @@ pub fn get_action_detail_definition() -> ToolDefinition {
             "properties": {
                 "action_type": {
                     "type": "string",
-                    "description": "动作类型名称（如 attack, gather, craft 等），支持别名匹配"
+                    "description": "动作类型名称（如 攻击, 采集, 制造 等），必须是可用动作列表中的精确名称"
                 }
             },
             "required": ["action_type"]
@@ -64,19 +64,14 @@ pub fn list_skills_definition() -> ToolDefinition {
 
 /// 执行 get_action_detail
 ///
-/// 查找顺序：精确匹配 action 字段 → 精确匹配 name 字段 → 别名匹配
+/// 查找顺序：精确匹配 action 字段 → 精确匹配 name 字段
 pub fn execute_get_action_detail(
     action_type: &str,
     available_actions: &[AvailableAction],
 ) -> serde_json::Value {
     let action = available_actions
         .iter()
-        .find(|a| a.action == action_type || a.name == action_type)
-        .or_else(|| {
-            available_actions
-                .iter()
-                .find(|a| a.aliases.iter().any(|alias| alias == action_type))
-        });
+        .find(|a| a.action == action_type || a.name == action_type);
 
     match action {
         Some(a) => serde_json::json!({
@@ -235,7 +230,7 @@ mod tests {
 
     // ---- get_action_detail ----
 
-    fn make_action(action: &str, name: &str, aliases: Vec<&str>) -> AvailableAction {
+    fn make_action(action: &str, name: &str) -> AvailableAction {
         AvailableAction {
             action: action.to_string(),
             name: name.to_string(),
@@ -244,7 +239,7 @@ mod tests {
             valid_targets: None,
             required_fields: vec![],
             ooc_risk: "low".to_string(),
-            aliases: aliases.into_iter().map(|s| s.to_string()).collect(),
+            aliases: vec![],
             field_aliases: HashMap::new(),
             requirements: vec![],
             effects: vec![],
@@ -254,8 +249,8 @@ mod tests {
     #[test]
     fn test_get_action_detail_exact_match() {
         let actions = vec![
-            make_action("attack", "攻击", vec!["打"]),
-            make_action("gather", "采集", vec!["采"]),
+            make_action("attack", "攻击"),
+            make_action("gather", "采集"),
         ];
         let result = execute_get_action_detail("attack", &actions);
         assert!(result["success"].as_bool().unwrap());
@@ -265,23 +260,15 @@ mod tests {
 
     #[test]
     fn test_get_action_detail_name_match() {
-        let actions = vec![make_action("attack", "攻击", vec!["打"])];
+        let actions = vec![make_action("attack", "攻击")];
         let result = execute_get_action_detail("攻击", &actions);
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["action"], "attack");
     }
 
     #[test]
-    fn test_get_action_detail_alias_match() {
-        let actions = vec![make_action("attack", "攻击", vec!["打", "攻击目标"])];
-        let result = execute_get_action_detail("打", &actions);
-        assert!(result["success"].as_bool().unwrap());
-        assert_eq!(result["action"], "attack");
-    }
-
-    #[test]
     fn test_get_action_detail_not_found() {
-        let actions = vec![make_action("attack", "攻击", vec![])];
+        let actions = vec![make_action("attack", "攻击")];
         let result = execute_get_action_detail("nonexistent", &actions);
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["message"].as_str().unwrap().contains("nonexistent"));
