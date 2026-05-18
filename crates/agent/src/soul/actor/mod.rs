@@ -15,7 +15,7 @@ pub mod prompt_cache; // Prompt 缓存模块 - 叙事冗余优化
 pub mod prompt_template; // Prompt 模板配置加载器
 pub mod stages;
 pub mod summary_window; // 滑动上下文窗口 - 叙事冗余优化
-pub mod translation; // 中文 LLM 边界翻译层
+pub mod translation; // 翻译层已禁用（设计决策：要求 LLM 精准表述）
 
 pub use chain::CognitiveChain;
 pub use chaos::{ChaosConfig, ChaosGenerator};
