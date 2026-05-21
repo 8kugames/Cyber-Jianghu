@@ -81,6 +81,21 @@ pub trait LlmClient: Send + Sync {
         false
     }
 
+    /// 原始消息交换：发送消息列表 + 可选工具定义，返回 LLM 响应
+    ///
+    /// 这是 LLM 接入点的唯一抽象 — DirectLlmClient 用 HTTP，
+    /// OpenClawBridge 用 WebSocket。循环逻辑不应在此。
+    #[allow(private_interfaces)]
+    async fn send_chat_exchange(
+        &self,
+        messages: Vec<super::openai_types::ChatMessage>,
+        tools: Option<&[super::tool_types::ToolDefinition]>,
+        config: super::openai_types::ChatExchangeConfig,
+    ) -> Result<super::openai_types::ChatExchangeResponse> {
+        let _ = (messages, tools, config);
+        anyhow::bail!("Chat exchange not supported by this LLM client")
+    }
+
     /// 强制切换到下一个模型（用于连续 idle 时主动换模型）
     ///
     /// 返回 `true` 表示成功切换，`false` 表示只有单模型无法切换。
@@ -1078,6 +1093,7 @@ impl FallbackLlmClient {
     }
 }
 
+#[allow(private_interfaces)]
 #[async_trait]
 impl LlmClient for FallbackLlmClient {
     fn force_rotate_model(&self) -> bool {
@@ -1106,6 +1122,20 @@ impl LlmClient for FallbackLlmClient {
 
     fn supports_tool_calling(&self) -> bool {
         self.active_client().supports_tool_calling()
+    }
+
+    async fn send_chat_exchange(
+        &self,
+        messages: Vec<super::openai_types::ChatMessage>,
+        tools: Option<&[super::tool_types::ToolDefinition]>,
+        config: super::openai_types::ChatExchangeConfig,
+    ) -> Result<super::openai_types::ChatExchangeResponse> {
+        // NOTE: 当前 tool loop 路径不经过此处 — run_tool_loop 拿到的是底层
+        // DirectLlmClient 的 &dyn LlmClient，fallback 在外层 complete_with_tools
+        // 的 call_with_fallback 中以整体重试实现。
+        self.active_client()
+            .send_chat_exchange(messages, tools, config)
+            .await
     }
 
     fn provider_name(&self) -> String {

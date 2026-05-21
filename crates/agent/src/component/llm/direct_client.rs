@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// 全局 LLM 停止标志
 static LLM_DISABLED: AtomicBool = AtomicBool::new(false);
@@ -933,253 +933,6 @@ impl DirectLlmClient {
         }
     }
 
-    /// 使用 tool calling 的多轮对话
-    async fn call_openai_compatible_api_with_tools(
-        &self,
-        system: &str,
-        prompt: &str,
-        tools: &[ToolDefinition],
-        executor: &dyn ToolExecutor,
-        max_rounds: usize,
-    ) -> Result<String> {
-        let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
-        self.run_tool_loop(messages, tools, executor, max_rounds)
-            .await
-    }
-
-    /// 使用对话历史 + tool calling 的组合调用
-    async fn call_with_conversation_and_tools(
-        &self,
-        system: &str,
-        input: super::client::ConversationInput<'_>,
-        tools: &[ToolDefinition],
-        executor: &dyn ToolExecutor,
-        max_rounds: usize,
-    ) -> Result<String> {
-        let messages = super::client::build_conversation_messages(
-            system,
-            input.summary,
-            input.turns,
-            input.current_prompt,
-        );
-        self.run_tool_loop(messages, tools, executor, max_rounds)
-            .await
-    }
-
-    /// Tool-calling 循环核心逻辑
-    ///
-    /// 接收预构建的消息列表，执行多轮 tool-calling 直到 LLM 返回文本或超时。
-    /// 集成 ToolResultBudget（F1）、LoopGuard（F2）、Error Signaling（F3）。
-    async fn run_tool_loop(
-        &self,
-        messages: Vec<ChatMessage>,
-        tools: &[ToolDefinition],
-        executor: &dyn ToolExecutor,
-        max_rounds: usize,
-    ) -> Result<String> {
-        let model = self.config.get_model_with_default();
-        let mut messages = messages;
-
-        // 仅在 enabled == true 时创建 budget 和 guard
-        let mut budget = self
-            .earth_soul_config
-            .as_ref()
-            .filter(|c| c.tool_budget.enabled)
-            .map(|c| crate::soul::earth::budget::ToolResultBudget::new(&c.tool_budget));
-        let mut guard = self
-            .earth_soul_config
-            .as_ref()
-            .filter(|c| c.loop_guard.enabled)
-            .map(|c| crate::soul::earth::loop_guard::LoopGuard::new(&c.loop_guard));
-
-        for round in 0..max_rounds {
-            // Pre-check: budget exhausted
-            if let Some(ref b) = budget
-                && b.is_exhausted()
-            {
-                warn!(
-                    "[地魂] Tool result 预算耗尽 ({} chars), 提前退出",
-                    b.used_chars()
-                );
-                return self.forced_text_exit(&model, messages).await;
-            }
-
-            if round == 0 {
-                let tool_names: Vec<&str> =
-                    tools.iter().map(|t| t.function.name.as_str()).collect();
-                info!(
-                    "[地魂] Tool loop 开始, tools={:?}, max_rounds={}",
-                    tool_names, max_rounds
-                );
-            }
-
-            let request = OpenAIRequest {
-                model: model.clone(),
-                messages: messages.clone(),
-                temperature: Some(self.config.temperature),
-                max_tokens: Some(self.config.max_tokens),
-                tools: Some(tools.to_vec()),
-                tool_choice: Some(serde_json::json!("auto")),
-                enable_thinking: self.config.enable_thinking,
-                stream: None,
-                stream_options: None,
-            };
-
-            let response_data = self.send_request(&request).await?;
-
-            let choice = response_data
-                .choices
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("LLM returned empty response"))?;
-            let msg = &choice.message;
-
-            debug!(
-                "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
-                msg.tool_calls
-                    .as_ref()
-                    .map(|tc| format!(
-                        "{:?}",
-                        tc.iter()
-                            .map(|t| t.function.name.clone())
-                            .collect::<Vec<_>>()
-                    ))
-                    .unwrap_or_else(|| "None".to_string()),
-                msg.content.as_ref().map(|c| c.len()).unwrap_or(0),
-                msg.content
-                    .as_ref()
-                    .map(|c| c.chars().take(100).collect::<String>())
-                    .unwrap_or_default(),
-            );
-
-            let has_tool_calls = msg
-                .tool_calls
-                .as_ref()
-                .map(|tc| !tc.is_empty())
-                .unwrap_or(false);
-
-            if !has_tool_calls {
-                let content = msg.content.clone().unwrap_or_default();
-                info!(
-                    "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars), preview: {}",
-                    content.len(),
-                    content.chars().take(200).collect::<String>()
-                );
-                return Ok(content);
-            }
-
-            let tool_calls = msg.tool_calls.as_ref().unwrap();
-            let call_names: Vec<&str> = tool_calls
-                .iter()
-                .map(|tc| tc.function.name.as_str())
-                .collect();
-            info!(
-                "[地魂] LLM 请求调用 {} 个 tool: {:?}",
-                tool_calls.len(),
-                call_names
-            );
-
-            messages.push(msg.clone());
-
-            for tc in tool_calls {
-                // Loop guard check (F2) — 渐进策略：Warn → Terminate
-                if let Some(ref mut g) = guard {
-                    match g.check(&tc.function.name) {
-                        crate::soul::earth::loop_guard::LoopGuardAction::Terminate => {
-                            warn!("[地魂] Loop guard 截断: 连续调用 '{}' 超限", tc.function.name);
-                            return self.forced_text_exit(&model, messages).await;
-                        }
-                        crate::soul::earth::loop_guard::LoopGuardAction::Warn(_) => {
-                            warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
-                        }
-                        crate::soul::earth::loop_guard::LoopGuardAction::Proceed => {}
-                    }
-                }
-
-                // Execute + error signaling (F3)
-                let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
-                info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
-
-                let mut raw_result = match executor.execute(&tc.function.name, &args).await {
-                    Ok(val) => val.to_string(),
-                    Err(e) => {
-                        warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
-                        format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e)
-                    }
-                };
-
-                // 将 LoopGuard Warn 作为 tool result 前缀注入
-                if let Some(ref mut g) = guard
-                    && let Some(warning) = g.take_pending_warning()
-                {
-                    raw_result = format!("[系统提示] {}\n{}", warning, raw_result);
-                }
-
-
-                // Budget truncation (F1)
-                let truncated = match &mut budget {
-                    Some(b) => {
-                        if b.is_exhausted() {
-                            crate::soul::earth::budget::ToolResultBudget::exhausted_message()
-                                .to_string()
-                        } else {
-                            b.truncate(&tc.function.name, &raw_result)
-                        }
-                    }
-                    None => raw_result,
-                };
-
-                info!(
-                    "[地魂] Tool {} 结果: {}",
-                    tc.function.name,
-                    truncated.chars().take(200).collect::<String>()
-                );
-
-                messages.push(ChatMessage::tool_result(
-                    &tc.id,
-                    &tc.function.name,
-                    &truncated,
-                ));
-            }
-        }
-
-        // Max rounds exhausted → forced text exit
-        warn!(
-            "[地魂] Tool loop 耗尽 max_rounds ({}), 执行强制文本退出",
-            max_rounds
-        );
-        self.forced_text_exit(&model, messages).await
-    }
-
-    /// 强制文本退出：不发送 tool 定义，迫使模型基于已积累上下文输出文本决策
-    async fn forced_text_exit(&self, model: &str, messages: Vec<ChatMessage>) -> Result<String> {
-        warn!("[地魂] 执行强制文本退出");
-
-        let request = OpenAIRequest {
-            model: model.to_string(),
-            messages,
-            temperature: Some(self.config.temperature),
-            max_tokens: Some(self.config.max_tokens),
-            tools: None,
-            tool_choice: None,
-            enable_thinking: self.config.enable_thinking,
-            stream: None,
-            stream_options: None,
-        };
-
-        let response_data = self.send_request(&request).await?;
-        let content = response_data
-            .choices
-            .first()
-            .and_then(|c| c.message.content.clone())
-            .unwrap_or_default();
-
-        if content.is_empty() {
-            warn!("[地魂] 强制文本退出返回空内容，agent 本轮可能无决策");
-        }
-
-        Ok(content)
-    }
-
     /// 使用对话历史完成调用（长窗口）
     ///
     /// 构建 system (含摘要) + 历史轮次 + 当前 prompt 的完整消息列表。
@@ -1233,6 +986,7 @@ impl DirectLlmClient {
     }
 }
 
+#[allow(private_interfaces)]
 #[async_trait]
 impl LlmClient for DirectLlmClient {
     async fn complete(&self, prompt: &str) -> Result<String> {
@@ -1269,6 +1023,34 @@ impl LlmClient for DirectLlmClient {
         true
     }
 
+    async fn send_chat_exchange(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Option<&[ToolDefinition]>,
+        config: super::openai_types::ChatExchangeConfig,
+    ) -> Result<super::openai_types::ChatExchangeResponse> {
+        let request = OpenAIRequest {
+            model: config.model,
+            messages,
+            temperature: Some(config.temperature),
+            max_tokens: Some(config.max_tokens),
+            tools: tools.map(|t| t.to_vec()),
+            tool_choice: tools.and(Some(serde_json::json!("auto"))),
+            enable_thinking: config.enable_thinking,
+            stream: None,
+            stream_options: None,
+        };
+        let response = self.send_request(&request).await?;
+        let choice = response
+            .choices
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("LLM returned empty response"))?;
+        Ok(super::openai_types::ChatExchangeResponse {
+            content: choice.message.content.clone(),
+            tool_calls: choice.message.tool_calls.clone(),
+        })
+    }
+
     fn provider_name(&self) -> String {
         self.config.provider.as_str().to_string()
     }
@@ -1292,8 +1074,17 @@ impl LlmClient for DirectLlmClient {
         if is_llm_disabled() {
             anyhow::bail!("LLM 调用已被停止");
         }
-        self.call_openai_compatible_api_with_tools(system, prompt, tools, executor, max_rounds)
-            .await
+        let messages = vec![ChatMessage::system(system), ChatMessage::user(prompt)];
+        let config = super::openai_types::ChatExchangeConfig {
+            model: self.config.get_model_with_default(),
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+            enable_thinking: self.config.enable_thinking,
+        };
+        crate::soul::earth::tool_loop::run_tool_loop(
+            self, messages, tools, executor, max_rounds, self.earth_soul_config.as_ref(), config,
+        )
+        .await
     }
 
     async fn complete_with_conversation_and_tools(
@@ -1307,8 +1098,22 @@ impl LlmClient for DirectLlmClient {
         if is_llm_disabled() {
             anyhow::bail!("LLM 调用已被停止");
         }
-        self.call_with_conversation_and_tools(system, input, tools, executor, max_rounds)
-            .await
+        let messages = super::client::build_conversation_messages(
+            system,
+            input.summary,
+            input.turns,
+            input.current_prompt,
+        );
+        let config = super::openai_types::ChatExchangeConfig {
+            model: self.config.get_model_with_default(),
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+            enable_thinking: self.config.enable_thinking,
+        };
+        crate::soul::earth::tool_loop::run_tool_loop(
+            self, messages, tools, executor, max_rounds, self.earth_soul_config.as_ref(), config,
+        )
+        .await
     }
 
     fn complete_streaming<'a>(
