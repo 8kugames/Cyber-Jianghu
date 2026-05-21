@@ -144,7 +144,8 @@ impl super::CognitiveEngine {
         let tool_calling_guidance = if use_tool_calling {
             // prompt 声明次数 < max_tool_rounds（留出 Warn→Terminate 余量）
             "## 输出格式\n\
-            直接输出以下 JSON。工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
+            直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
+            工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
             你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n\n\
             重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
             action_type 只能填\"可用动作\"列表中的名称（说话、移动、进食等），绝对不能填工具名称。\n".to_string()

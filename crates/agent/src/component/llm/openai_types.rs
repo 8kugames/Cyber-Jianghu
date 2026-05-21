@@ -119,6 +119,30 @@ pub(crate) struct OpenAIChoice {
 }
 
 // ============================================================================
+// LLM 消息交换抽象（mode-agnostic）
+// ============================================================================
+
+/// LLM 原始消息交换的统一响应
+///
+/// 与 LLM 接入方式（HTTP / WebSocket）无关的响应类型，
+/// 由 `send_chat_exchange` trait 方法返回。
+pub(crate) struct ChatExchangeResponse {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<super::tool_types::ToolCall>>,
+}
+
+/// LLM 消息交换的调用参数
+///
+/// 只包含 LLM 层面的配置，不包含 agent 逻辑（LoopGuard/Budget 等）。
+#[derive(Clone)]
+pub(crate) struct ChatExchangeConfig {
+    pub model: String,
+    pub temperature: f32,
+    pub max_tokens: u32,
+    pub enable_thinking: Option<bool>,
+}
+
+// ============================================================================
 // SSE 流式响应类型
 // ============================================================================
 
