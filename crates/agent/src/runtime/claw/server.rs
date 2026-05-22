@@ -58,7 +58,7 @@ async fn ws_handler(
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body("Only localhost connections allowed (set CYBER_JIANGHU_WS_ALLOW_EXTERNAL=1 to allow)".into())
-            .unwrap();
+            .expect("valid HTTP response");
     }
 
     // 安全：单连接限制
@@ -71,7 +71,7 @@ async fn ws_handler(
         return Response::builder()
             .status(StatusCode::CONFLICT)
             .body("Only one OpenClaw connection allowed".into())
-            .unwrap();
+            .expect("valid HTTP response");
     }
 
     debug!("WebSocket connection request from {}", addr);
