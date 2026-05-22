@@ -874,7 +874,7 @@ impl TickScheduler {
             for event in entry.value() {
                 self.event_manager
                     .lock()
-                    .unwrap()
+                    .expect("lock poisoned")
                     .add_event_for_agent(agent_id, event.clone());
             }
         }
@@ -990,7 +990,7 @@ impl TickScheduler {
         let offset = FixedOffset::east_opt(offset_seconds)
             .with_context(|| format!("无效的时区偏移量: {}", timezone_offset))?;
 
-        let datetime = date.and_hms_opt(0, 0, 0).unwrap();
+        let datetime = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
         let datetime_with_tz = datetime
             .and_local_timezone(offset)
             .single()

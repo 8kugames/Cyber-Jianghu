@@ -546,7 +546,7 @@ pub async fn apply_state_change(
                     });
                     if let Some(target) = target_agent_id {
                         meta.as_object_mut()
-                            .unwrap()
+                            .expect("meta is always a JSON object")
                             .insert("target_agent_id".to_string(), serde_json::json!(target));
                     }
 
