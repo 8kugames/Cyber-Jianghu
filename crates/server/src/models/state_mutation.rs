@@ -183,7 +183,7 @@ impl AgentState {
             // 顺便提供上限值
             let max_value = crate::game_data::types::StatusComponent::evaluate_max_value(
                 &attr.metadata.max_value_formula,
-                255.0,
+                crate::game_data::types::DEFAULT_STATUS_MAX_VALUE,
                 &context,
             ) as i32
                 + self.status.max_modifiers.get(name).copied().unwrap_or(0);
