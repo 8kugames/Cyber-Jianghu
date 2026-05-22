@@ -94,7 +94,7 @@ pub fn apply_decay_and_environmental_damage(
             return (agent_states, vec![], vec![], vec![]);
         }
     };
-    let location_registry = registry.location_registry.read().unwrap();
+    let location_registry = registry.location_registry.read().expect("rwlock poisoned");
 
     for state in &mut agent_states {
         let was_alive = state.is_alive;

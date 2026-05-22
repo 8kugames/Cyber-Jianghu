@@ -62,7 +62,7 @@ impl GameDataCache {
 
     /// 获取位置注册表快照（owned, Send-safe）
     pub fn location_snapshot(&self) -> LocationRegistry {
-        self.location_registry.read().unwrap().clone()
+        self.location_registry.read().expect("rwlock poisoned").clone()
     }
 
     /// 仅更新动作配置（用于热重载）
@@ -527,7 +527,7 @@ mod tests {
 
         let arc = cache.clone_arc();
         // 验证 Arc 可以正常使用
-        let guard = arc.read().unwrap();
+        let guard = arc.read().expect("rwlock poisoned");
         assert_eq!(guard.game_rules.version, "2.0.0");
     }
 
