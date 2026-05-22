@@ -1,12 +1,8 @@
-use axum::{
-    Json,
-    extract::State,
-};
+use axum::{Json, extract::State};
 use serde::Serialize;
 use std::sync::Arc;
 
 use crate::state::AppState;
-
 
 #[derive(Serialize)]
 pub struct CleanupResult {
@@ -61,4 +57,3 @@ pub async fn cleanup_offline_agents(
 // ============================================================================
 // Agent Experiences API
 // ============================================================================
-

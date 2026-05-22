@@ -194,8 +194,7 @@ impl ReflectorSoul {
         // 查找匹配的 action 定义（精确匹配 action 或 name，不做 alias 匹配）
         let action_input = intent.action_type.as_str().to_lowercase();
         let matched = actions.iter().find(|a| {
-            a.action == intent.action_type.as_str()
-                || a.name.to_lowercase() == action_input
+            a.action == intent.action_type.as_str() || a.name.to_lowercase() == action_input
         });
 
         if let Some(action) = matched {
@@ -208,10 +207,7 @@ impl ReflectorSoul {
                     .map(|v| !v.is_null())
                     .unwrap_or(false);
                 if !has_field {
-                    return Err(format!(
-                        "动作 '{}' 缺少必需字段: {}",
-                        action.name, field
-                    ));
+                    return Err(format!("动作 '{}' 缺少必需字段: {}", action.name, field));
                 }
             }
             return Ok(());

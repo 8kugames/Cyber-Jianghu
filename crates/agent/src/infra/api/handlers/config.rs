@@ -1,7 +1,6 @@
 // 配置管理 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -12,9 +11,9 @@ use tracing::{error, info};
 
 use crate::config::CharacterStatus;
 
-use super::dto;
 use super::HttpApiState;
 use super::character_helpers::{get_active_character, list_characters_from_fs};
+use super::dto;
 
 /// 配置信息响应
 #[derive(Debug, Serialize)]

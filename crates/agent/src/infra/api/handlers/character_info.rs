@@ -1,7 +1,6 @@
 // 角色信息 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::{Path as AxumPath, State},
     http::StatusCode,
@@ -15,8 +14,8 @@ use uuid::Uuid;
 use crate::config::CharacterStatus;
 
 use super::HttpApiState;
-use super::character_helpers::{get_active_character, get_character_by_id_sync};
 use super::basic::ErrorResponse;
+use super::character_helpers::{get_active_character, get_character_by_id_sync};
 
 /// 角色信息响应（合并配置文件 + WorldState 实时数据）
 #[derive(Debug, Serialize)]

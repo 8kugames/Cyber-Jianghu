@@ -12,8 +12,8 @@ mod character_info;
 mod character_register;
 mod config;
 mod discovery;
-mod llm_config;
 mod lifespan;
+mod llm_config;
 mod memory;
 mod multi_character;
 mod relationship;
@@ -24,11 +24,11 @@ mod validate;
 // Re-export parent module items for sub-module access via `super::xxx`
 pub(super) use super::HttpApiState;
 pub(super) use super::IntentRequest;
-pub(super) use super::dto;
 pub(super) use super::cognitive_context;
 pub(super) use super::context;
-pub(super) use super::service;
+pub(super) use super::dto;
 pub(super) use super::intent_history;
+pub(super) use super::service;
 pub(super) use super::soul_cycle_recorder;
 
 // Re-export all public items from sub-modules
@@ -38,8 +38,8 @@ pub(crate) use character_info::*;
 pub(crate) use character_register::*;
 pub(crate) use config::*;
 pub(crate) use discovery::*;
-pub(crate) use llm_config::*;
 pub(crate) use lifespan::*;
+pub(crate) use llm_config::*;
 pub(crate) use memory::*;
 pub(crate) use multi_character::*;
 pub(crate) use relationship::*;
