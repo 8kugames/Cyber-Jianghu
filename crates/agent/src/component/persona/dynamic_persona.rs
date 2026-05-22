@@ -40,7 +40,7 @@ impl Default for PersonaState {
             stress_level: 0,
             last_updated: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("system time is always after UNIX_EPOCH")
                 .as_secs() as i64,
         }
     }
@@ -185,7 +185,7 @@ impl DynamicPersona {
         self.current_state.current_emotion = emotion;
         self.current_state.last_updated = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time is always after UNIX_EPOCH")
             .as_secs() as i64;
     }
 
@@ -194,7 +194,7 @@ impl DynamicPersona {
         self.current_state.current_goal = Some(goal);
         self.current_state.last_updated = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time is always after UNIX_EPOCH")
             .as_secs() as i64;
     }
 
@@ -205,7 +205,7 @@ impl DynamicPersona {
         }
         self.current_state.last_updated = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time is always after UNIX_EPOCH")
             .as_secs() as i64;
     }
 

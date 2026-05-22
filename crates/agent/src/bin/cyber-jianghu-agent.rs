@@ -590,7 +590,7 @@ async fn await_character_loop(server_dir: &Path) -> Result<()> {
             && c.agent_id.is_some()
             && c.status == CharacterStatus::Alive
         {
-            info!("Character found: {} ({})", c.name, c.agent_id.unwrap());
+            info!("Character found: {} ({})", c.name, c.agent_id.expect("character must have agent_id"));
             return Ok(());
         }
 
@@ -748,7 +748,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     let data_dir = server_dir
         .join("characters")
-        .join(character.agent_id.unwrap().to_string())
+        .join(character.agent_id.expect("character must have agent_id").to_string())
         .join("data");
 
     let persona_info = Some(cyber_jianghu_agent::soul::reflector::PersonaInfo {
@@ -982,7 +982,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .reconnect_tx
         .as_ref()
         .map(|tx| tx.subscribe())
-        .unwrap();
+        .expect("reconnect_tx must be initialized");
 
     let mut builder = AgentBuilder::new(config_for_builder, decision)
         .device_config(device.clone())
