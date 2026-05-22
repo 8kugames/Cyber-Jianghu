@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Key Features
 
-- **Three-Soul Architecture**: ActorSoul (action) → Earth Soul (tool calling) → ReflectorSoul (guardian/validation)
+- **Three-Soul Architecture**: ActorSoul (action, with embedded EarthSoul tool calling) → ReflectorSoul (guardian/validation). EarthSoul is not a separate pipeline step — it runs inside ActorSoul's LLM inference loop
 - **Multi-Intent Pipeline**: Single tick can submit multiple Intents, executed in order with rollback on failure
 - **Survival-Driven Emergence**: Hunger, resource scarcity, permanent death — pressure drives complex social structures
 - **Device-Character Separation**: Supports rebirth, one device manages multiple characters
@@ -198,11 +198,11 @@ The agent crate implements a **unified Agent SDK** with cognitive engine, memory
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
   直连 WorldState    三层审查
-  地魂 tool calling 工具池（独立模块）
+  内嵌 EarthSoul tool calling（LLM 推理中按需调用）
 ```
 
-- **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain, driven by CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
-- **地魂** (能力之魂): tool calling 工具池，行动落地层（独立模块 `soul/earth/`）
+- **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain, driven by CognitiveEngine (single LLM call with four-stage structured output: Perception→Motivation→Planning→Decision)
+- **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中（`soul/earth/`）。LLM 在推理过程中按需调用工具（`query_world`, `search_memory`, `get_action_detail` 等），非独立管道步骤
 - **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type validation) → Layer 2 (RuleEngine validation) → Layer 3 (LLM intent review). Rejection feedback is narrative-化, ActorSoul only sees natural language
 
 #### Decision Context Pipeline
@@ -218,10 +218,10 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 
 #### Memory System (Three-Tier Architecture)
 
-- **Working Memory**: Short-term context, recent events
-- **Episodic Memory**: Event-based memories with timestamps (SQLite)
-- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance)
-- **Outcome Memory (Hermes)**: SQLite action result learning
+- **Working Memory**: Short-term context, recent events — auto-injected into every decision prompt
+- **Episodic Memory**: Event-based memories with timestamps (SQLite) — top 10 by importance auto-injected per tick
+- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance) — on-demand retrieval via EarthSoul `search_memory` tool, NOT auto-injected per tick (avoids per-tick vector search overhead)
+- **Outcome Memory (Hermes)**: SQLite action result learning — feeds back via DecisionContextSnapshot and memory narrative synthesis
 
 #### Key Agent Modules
 
