@@ -30,7 +30,7 @@ use cyber_jianghu_protocol::{
 // ============================================================================
 
 const INTENT_BATCH_MAX_PER_TICK: usize = 5;
-const INTENT_BATCH_MAX_RETRIES: i32 = 3;
+const INTENT_BATCH_MAX_RETRIES: i32 = 12; // 与 game_rules.yaml intent_batch.max_retries 默认值对齐
 const INTENT_BATCH_MINIMUM_PER_TICK: usize = 1;
 const INTENT_BATCH_LLM_CHAOS_THRESHOLD: u32 = 12;
 
