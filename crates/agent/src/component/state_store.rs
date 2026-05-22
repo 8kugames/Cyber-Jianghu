@@ -51,7 +51,11 @@ impl WorldStateStore {
 
     /// 获取当前 WorldState（首次 update 前返回 None）
     pub async fn current(&self) -> Option<WorldState> {
-        self.state.read().await.as_ref().map(|(_, curr)| curr.clone())
+        self.state
+            .read()
+            .await
+            .as_ref()
+            .map(|(_, curr)| curr.clone())
     }
 
     /// 获取上一个 WorldState（首次 update 前返回 None）

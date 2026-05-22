@@ -680,7 +680,14 @@ pub async fn get_agent_daily_action_stats(
     // tick_id 是真实秒数，需乘以 real_seconds_per_tick 转换
     let real_seconds_per_tick = crate::game_data::registry_or_error()
         .ok()
-        .map(|r| r.get().game_rules.data.agent_state.tick.real_seconds_per_tick as i64)
+        .map(|r| {
+            r.get()
+                .game_rules
+                .data
+                .agent_state
+                .tick
+                .real_seconds_per_tick as i64
+        })
         .unwrap_or(60);
     let ticks_per_day_real_secs = crate::game_data::registry::TimeRegistry::get_config()
         .map(|c| c.ticks_per_hour as i64 * c.hours_per_day as i64 * real_seconds_per_tick)

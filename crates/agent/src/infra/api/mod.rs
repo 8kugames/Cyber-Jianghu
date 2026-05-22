@@ -205,7 +205,8 @@ pub struct HttpApiState {
     pub decision_context_snapshot:
         std::sync::Arc<tokio::sync::RwLock<Option<DecisionContextSnapshot>>>,
     /// WorldStateStore（Agent 侧 WorldState 本地落存，供 Delta Engine 使用）
-    pub world_state_store: Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
+    pub world_state_store:
+        Arc<std::sync::RwLock<Option<Arc<crate::component::state_store::WorldStateStore>>>>,
 }
 
 /// 决策上下文快照（lifecycle 每轮写入，HTTP API 读取）

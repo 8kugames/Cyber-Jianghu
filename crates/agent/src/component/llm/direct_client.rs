@@ -1082,7 +1082,13 @@ impl LlmClient for DirectLlmClient {
             enable_thinking: self.config.enable_thinking,
         };
         crate::soul::earth::tool_loop::run_tool_loop(
-            self, messages, tools, executor, max_rounds, self.earth_soul_config.as_ref(), config,
+            self,
+            messages,
+            tools,
+            executor,
+            max_rounds,
+            self.earth_soul_config.as_ref(),
+            config,
         )
         .await
     }
@@ -1111,7 +1117,13 @@ impl LlmClient for DirectLlmClient {
             enable_thinking: self.config.enable_thinking,
         };
         crate::soul::earth::tool_loop::run_tool_loop(
-            self, messages, tools, executor, max_rounds, self.earth_soul_config.as_ref(), config,
+            self,
+            messages,
+            tools,
+            executor,
+            max_rounds,
+            self.earth_soul_config.as_ref(),
+            config,
         )
         .await
     }

@@ -1,11 +1,7 @@
 // 传记端点
 // ============================================================================
 
-
-use axum::{
-    extract::State,
-    response::Json,
-};
+use axum::{extract::State, response::Json};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 

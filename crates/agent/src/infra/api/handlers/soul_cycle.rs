@@ -1,7 +1,6 @@
 // 三魂循环记录 API
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -13,9 +12,8 @@ use uuid::Uuid;
 
 use crate::config::{CharacterConfig, CharacterStatus};
 
-
 use super::HttpApiState;
-use super::character_helpers::{get_device_id};
+use super::character_helpers::get_device_id;
 
 /// Layer 结果条目
 #[derive(Debug, Serialize)]

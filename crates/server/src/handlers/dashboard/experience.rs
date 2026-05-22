@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-
 /// 经历日志条目
 #[derive(Debug, serde::Serialize)]
 pub struct ExperienceEntry {

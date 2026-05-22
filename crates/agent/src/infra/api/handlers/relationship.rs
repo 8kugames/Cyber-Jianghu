@@ -1,7 +1,6 @@
 // 关系 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::{Path as AxumPath, State},
     http::StatusCode,
@@ -10,9 +9,9 @@ use axum::{
 use tracing::error;
 use uuid::Uuid;
 
+use super::HttpApiState;
 use super::dto::RelationshipUpdateRequest;
 use super::service::RelationshipService;
-use super::HttpApiState;
 
 /// 获取所有关系
 pub(crate) async fn get_relationships_handler(

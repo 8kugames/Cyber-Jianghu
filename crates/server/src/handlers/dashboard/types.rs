@@ -1,6 +1,5 @@
 use serde::Serialize;
 
-
 #[derive(Serialize)]
 pub struct DashboardStats {
     pub current_active_agents: i64,
@@ -48,4 +47,3 @@ pub struct WorldTime {
     /// 天道历格式文本
     pub text: String,
 }
-

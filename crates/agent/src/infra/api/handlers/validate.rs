@@ -1,7 +1,6 @@
 // 验证 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -16,9 +15,9 @@ use crate::soul::reflector::{
 };
 use cyber_jianghu_protocol::Intent;
 
-use super::dto::{ValidateRequest, ValidateResponse};
 use super::HttpApiState;
-use super::basic::{resolve_tick_id_or_reject};
+use super::basic::resolve_tick_id_or_reject;
+use super::dto::{ValidateRequest, ValidateResponse};
 
 /// 验证 Intent（数据驱动）
 pub(crate) async fn validate_intent_handler(

@@ -1,15 +1,14 @@
 // 寿命 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json},
 };
 
-use super::dto::LifespanResponse;
 use super::HttpApiState;
+use super::dto::LifespanResponse;
 
 /// 获取寿命状态（从 Server 下发的 WorldState 读取）
 pub(crate) async fn get_lifespan_handler(State(state): State<HttpApiState>) -> impl IntoResponse {

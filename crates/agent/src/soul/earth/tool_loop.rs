@@ -12,8 +12,8 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::component::llm::{LlmClient, ChatMessage, ChatExchangeConfig};
 use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
+use crate::component::llm::{ChatExchangeConfig, ChatMessage, LlmClient};
 
 use super::budget::ToolResultBudget;
 use super::config::EarthSoulConfig;
@@ -67,15 +67,19 @@ pub(crate) async fn run_tool_loop(
 
         debug!(
             "[地魂] API 响应: tool_calls={}, content_len={}, content_preview={}",
-            response.tool_calls
+            response
+                .tool_calls
                 .as_ref()
                 .map(|tc| format!(
                     "{:?}",
-                    tc.iter().map(|t| t.function.name.clone()).collect::<Vec<_>>()
+                    tc.iter()
+                        .map(|t| t.function.name.clone())
+                        .collect::<Vec<_>>()
                 ))
                 .unwrap_or_else(|| "None".to_string()),
             response.content.as_ref().map(|c| c.len()).unwrap_or(0),
-            response.content
+            response
+                .content
                 .as_ref()
                 .map(|c| c.chars().take(100).collect::<String>())
                 .unwrap_or_default(),
@@ -134,8 +138,7 @@ pub(crate) async fn run_tool_loop(
                                 "[系统截断] 连续调用超限，本次调用已取消",
                             ));
                         }
-                        return forced_text_exit(llm, messages, llm_config.clone())
-                            .await;
+                        return forced_text_exit(llm, messages, llm_config.clone()).await;
                     }
                     LoopGuardAction::Warn(_) => {
                         warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
@@ -152,10 +155,7 @@ pub(crate) async fn run_tool_loop(
                 Ok(val) => val.to_string(),
                 Err(e) => {
                     warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
-                    format!(
-                        "[工具调用失败] 工具: {} | 原因: {}",
-                        tc.function.name, e
-                    )
+                    format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e)
                 }
             };
 
@@ -184,7 +184,11 @@ pub(crate) async fn run_tool_loop(
                 truncated.chars().take(200).collect::<String>()
             );
 
-            messages.push(ChatMessage::tool_result(&tc.id, &tc.function.name, &truncated));
+            messages.push(ChatMessage::tool_result(
+                &tc.id,
+                &tc.function.name,
+                &truncated,
+            ));
         }
     }
 

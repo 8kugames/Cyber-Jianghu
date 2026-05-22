@@ -1,7 +1,4 @@
-use axum::{
-    Json,
-    extract::State,
-};
+use axum::{Json, extract::State};
 use chrono::Utc;
 use sqlx::Row;
 use std::sync::Arc;

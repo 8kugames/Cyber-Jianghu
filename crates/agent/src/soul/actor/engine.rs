@@ -187,8 +187,7 @@ impl CognitiveEngine {
     /// 创建新的认知引擎
     pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints) =
-            Self::load_actions_list();
+        let (action_descriptions, action_field_hints) = Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
@@ -275,8 +274,7 @@ impl CognitiveEngine {
         window_size: usize,
     ) -> Self {
         let persona_desc = config.persona.generate_description();
-        let (action_descriptions, action_field_hints) =
-            Self::load_actions_list();
+        let (action_descriptions, action_field_hints) = Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
@@ -1159,8 +1157,13 @@ impl CognitiveEngine {
         // LLM 必须精确输出，不做翻译
         let actions = response.get_actions();
         let action_data = actions[0].action_data.clone();
-        let intent = Intent::new(agent_id, tick_id, actions[0].action_type.clone(), action_data)
-            .with_thought(response.thought_process.clone());
+        let intent = Intent::new(
+            agent_id,
+            tick_id,
+            actions[0].action_type.clone(),
+            action_data,
+        )
+        .with_thought(response.thought_process.clone());
 
         let decision = super::stages::StageOutput::with_metadata(
             CognitiveStage::Decision,
@@ -1366,10 +1369,7 @@ impl CognitiveEngine {
     /// 获取 Action Index（公开接口，供 API enrichment 使用）
     pub fn get_action_context(&self) -> (String, String) {
         let cache = self.prompt_cache.read().unwrap();
-        (
-            cache.get_action_descriptions().to_string(),
-            String::new(),
-        )
+        (cache.get_action_descriptions().to_string(), String::new())
     }
 
     /// 获取详细滑动窗口上下文（用于调试）
