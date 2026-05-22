@@ -72,7 +72,7 @@ pub async fn websocket_handler(
                 return Response::builder()
                     .status(500)
                     .body("Internal server error".into())
-                    .unwrap();
+                    .expect("valid HTTP response");
             }
         };
 
@@ -81,7 +81,7 @@ pub async fn websocket_handler(
         return Response::builder()
             .status(401)
             .body("Unauthorized".into())
-            .unwrap();
+            .expect("valid HTTP response");
     }
 
     // 2. 更新设备最后在线时间
