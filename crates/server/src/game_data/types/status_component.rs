@@ -217,8 +217,11 @@ impl StatusComponent {
 
         let current = attr.value.get();
         let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
-        let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, DEFAULT_STATUS_MAX_VALUE, context)
-            as i32
+        let max_value = Self::evaluate_max_value(
+            &attr.metadata.max_value_formula,
+            DEFAULT_STATUS_MAX_VALUE,
+            context,
+        ) as i32
             + self.max_modifiers.get(name).copied().unwrap_or(0);
 
         let new_value = (current + delta).clamp(min_value, max_value);

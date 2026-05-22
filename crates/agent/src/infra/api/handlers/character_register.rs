@@ -1,7 +1,6 @@
 // 角色注册 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -12,10 +11,9 @@ use tracing::{error, info, warn};
 
 use crate::config::{CharacterConfig, CharacterStatus};
 
-
 use super::HttpApiState;
-use super::character_helpers::{get_device_id, save_character};
 use super::basic::ErrorResponse;
+use super::character_helpers::{get_device_id, save_character};
 
 /// 角色注册请求（从 CLI 接收）
 #[derive(Debug, Deserialize)]

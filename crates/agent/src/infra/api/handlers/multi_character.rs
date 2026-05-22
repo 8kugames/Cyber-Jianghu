@@ -1,7 +1,6 @@
 // 多角色管理 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -13,9 +12,8 @@ use uuid::Uuid;
 
 use crate::config::CharacterStatus;
 
-
 use super::HttpApiState;
-use super::character_helpers::{list_characters_from_fs};
+use super::character_helpers::list_characters_from_fs;
 
 /// 角色列表响应
 #[derive(Debug, Serialize)]

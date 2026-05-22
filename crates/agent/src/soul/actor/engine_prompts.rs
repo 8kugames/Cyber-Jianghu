@@ -20,7 +20,12 @@ pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
         tick_id: 0,
         agent_id: None,
         world_time: WorldTime {
-            year: 1, month: 1, day: 1, hour: 0, minute: 0, second: 0,
+            year: 1,
+            month: 1,
+            day: 1,
+            hour: 0,
+            minute: 0,
+            second: 0,
             weather: "晴".to_string(),
         },
         location: Location {
@@ -342,9 +347,7 @@ impl super::CognitiveEngine {
     }
 
     /// Skill Index: 仅名称，通过 skill_view 按需查询
-    fn build_skill_index(
-        skill_cache: &std::collections::HashMap<String, String>,
-    ) -> String {
+    fn build_skill_index(skill_cache: &std::collections::HashMap<String, String>) -> String {
         if skill_cache.is_empty() {
             return String::new();
         }

@@ -248,10 +248,7 @@ mod tests {
 
     #[test]
     fn test_get_action_detail_exact_match() {
-        let actions = vec![
-            make_action("attack", "攻击"),
-            make_action("gather", "采集"),
-        ];
+        let actions = vec![make_action("attack", "攻击"), make_action("gather", "采集")];
         let result = execute_get_action_detail("attack", &actions);
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["action"], "attack");

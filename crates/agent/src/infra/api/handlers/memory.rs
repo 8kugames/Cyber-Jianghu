@@ -1,7 +1,6 @@
 // 记忆 API Handlers
 // ============================================================================
 
-
 use axum::{
     extract::State,
     http::StatusCode,
@@ -9,8 +8,8 @@ use axum::{
 };
 use tracing::error;
 
-use super::service::{MemoryService, memories_to_json_response};
 use super::HttpApiState;
+use super::service::{MemoryService, memories_to_json_response};
 
 /// 获取近期记忆
 pub(crate) async fn get_recent_memory_handler(

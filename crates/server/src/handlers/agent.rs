@@ -126,7 +126,9 @@ pub async fn agent_register(
     // 优先使用 scheduler 实时计算的 tick_id（Arc<AtomicI64>），
     // 仅在 scheduler 未启动时 fallback 到 DB 查询。
     let current_tick_id = {
-        let live_tick = state.current_accepting_tick_id.load(std::sync::atomic::Ordering::Acquire);
+        let live_tick = state
+            .current_accepting_tick_id
+            .load(std::sync::atomic::Ordering::Acquire);
         if live_tick > 0 {
             live_tick
         } else {

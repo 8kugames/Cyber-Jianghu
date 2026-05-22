@@ -1,7 +1,6 @@
 // Helper Functions for Character Management
 // ============================================================================
 
-
 use std::path::Path;
 use tracing::warn;
 use uuid::Uuid;
@@ -12,7 +11,9 @@ use super::HttpApiState;
 use anyhow::Context;
 
 /// List all characters from filesystem
-pub(crate) fn list_characters_from_fs(characters_dir: &Path) -> Result<Vec<CharacterConfig>, anyhow::Error> {
+pub(crate) fn list_characters_from_fs(
+    characters_dir: &Path,
+) -> Result<Vec<CharacterConfig>, anyhow::Error> {
     if !characters_dir.exists() {
         return Ok(vec![]);
     }
@@ -59,7 +60,10 @@ pub(crate) fn get_character_by_id_sync(
 }
 
 /// Save character config to its directory
-pub(crate) fn save_character(config: &CharacterConfig, characters_dir: &Path) -> Result<(), anyhow::Error> {
+pub(crate) fn save_character(
+    config: &CharacterConfig,
+    characters_dir: &Path,
+) -> Result<(), anyhow::Error> {
     let agent_id = config
         .agent_id
         .map(|id| id.to_string())

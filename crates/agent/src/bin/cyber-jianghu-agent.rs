@@ -1028,9 +1028,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // DeltaEngine + AttentionController（Token 优化模式）
     let token_opt_enabled = config.token_optimization.enabled;
-    let world_state_store = std::sync::Arc::new(
-        cyber_jianghu_agent::component::state_store::WorldStateStore::new(),
-    );
+    let world_state_store =
+        std::sync::Arc::new(cyber_jianghu_agent::component::state_store::WorldStateStore::new());
 
     if token_opt_enabled {
         let delta_config = cyber_jianghu_agent::component::delta_engine::DeltaConfig {

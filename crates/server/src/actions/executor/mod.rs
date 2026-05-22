@@ -20,7 +20,6 @@ use super::types::StateChange;
 use crate::game_data::{ActionEffect, ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
 
-
 use basic::BasicActionExecutor;
 use combat::CombatActionExecutor;
 use interaction::InteractionActionExecutor;

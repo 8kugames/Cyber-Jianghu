@@ -1,14 +1,10 @@
-use axum::{
-    Json,
-    extract::State,
-};
+use axum::{Json, extract::State};
 use serde::Serialize;
 use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::state::AppState;
-
 
 // 逻辑拆分：
 // 1. 在线 agent：最新 tick 在线且存活
