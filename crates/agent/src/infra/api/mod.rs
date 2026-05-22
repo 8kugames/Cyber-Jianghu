@@ -65,7 +65,7 @@ pub struct ReconnectRequest {
 }
 
 // 导入 handlers 中的 DreamState
-pub use handlers::DreamState;
+pub(crate) use handlers::DreamState;
 
 // 导入 AI 模块类型
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
