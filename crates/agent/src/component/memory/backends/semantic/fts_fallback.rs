@@ -85,7 +85,7 @@ impl FtsFallback {
     }
 
     pub fn rebuild_index(&self) -> Result<()> {
-        let fts_conn = self.fts_conn.lock().unwrap();
+        let fts_conn = self.fts_conn.lock().expect("lock poisoned");
 
         fts_conn
             .execute(
@@ -99,7 +99,7 @@ impl FtsFallback {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClientMemory>> {
-        let episodic_conn = self.episodic_conn.lock().unwrap();
+        let episodic_conn = self.episodic_conn.lock().expect("lock poisoned");
 
         let fts_query = self.prepare_query(query);
 
@@ -153,7 +153,7 @@ impl FtsFallback {
     }
 
     pub fn search_like(&self, pattern: &str, limit: usize) -> Result<Vec<ClientMemory>> {
-        let episodic_conn = self.episodic_conn.lock().unwrap();
+        let episodic_conn = self.episodic_conn.lock().expect("lock poisoned");
 
         let like_pattern = format!("%{}%", pattern);
 
@@ -233,7 +233,7 @@ impl FtsFallback {
     }
 
     pub fn is_available(&self) -> bool {
-        let fts_conn = self.fts_conn.lock().unwrap();
+        let fts_conn = self.fts_conn.lock().expect("lock poisoned");
         fts_conn
             .execute("SELECT 1 FROM memories_fts LIMIT 1", [])
             .is_ok()
@@ -244,7 +244,7 @@ impl FtsFallback {
             return Ok(Vec::new());
         }
 
-        let episodic_conn = self.episodic_conn.lock().unwrap();
+        let episodic_conn = self.episodic_conn.lock().expect("lock poisoned");
         let agent_id_str = self.agent_id.to_string();
 
         let mut memories = Vec::new();
@@ -289,7 +289,7 @@ impl FtsFallback {
     }
 
     pub fn stats(&self) -> Result<FtsStats> {
-        let fts_conn = self.fts_conn.lock().unwrap();
+        let fts_conn = self.fts_conn.lock().expect("lock poisoned");
 
         let count: i64 = fts_conn
             .query_row("SELECT COUNT(*) FROM memories_fts", [], |row| row.get(0))

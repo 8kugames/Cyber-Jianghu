@@ -301,7 +301,7 @@ pub(crate) async fn switch_character_handler(
                     .into_response();
             }
         };
-        *state.relationship_store.write().unwrap() = new_rel;
+        *state.relationship_store.write().expect("rwlock poisoned") = new_rel;
 
         // 3. Memory Manager (Fail Fast)
         if let Some(template) = &state.memory_config_template {

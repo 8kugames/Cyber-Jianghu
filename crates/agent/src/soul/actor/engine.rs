@@ -220,7 +220,7 @@ impl CognitiveEngine {
 
     /// 设置 NarrativeSummaryWindow 窗口大小
     pub fn set_narrative_window_size(&self, size: usize) {
-        let mut window = self.summary_window.write().unwrap();
+        let mut window = self.summary_window.write().expect("rwlock poisoned");
         *window = NarrativeSummaryWindow::new(size);
     }
 
@@ -235,7 +235,7 @@ impl CognitiveEngine {
         skills: Vec<cyber_jianghu_protocol::types::SkillContent>,
         removed_items: Vec<String>,
     ) {
-        let mut cache = self.skill_cache.write().unwrap();
+        let mut cache = self.skill_cache.write().expect("rwlock poisoned");
         let skills_count = skills.len();
         let removed_count = removed_items.len();
 
@@ -335,7 +335,7 @@ impl CognitiveEngine {
                             return;
                         }
                     };
-                let mut cache = self.skill_cache.write().unwrap();
+                let mut cache = self.skill_cache.write().expect("rwlock poisoned");
                 let count = cached.len();
                 *cache = cached;
                 tracing::info!("从 skill_cache.json 加载了 {} 个技能", count);
@@ -349,7 +349,7 @@ impl CognitiveEngine {
     /// 持久化 skill 缓存到本地文件
     fn persist_skill_cache_to_disk(&self) {
         let path = Self::skill_cache_path();
-        let cache = self.skill_cache.read().unwrap().clone();
+        let cache = self.skill_cache.read().expect("rwlock poisoned").clone();
         if cache.is_empty() {
             return;
         }
@@ -437,7 +437,7 @@ impl CognitiveEngine {
     /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 JSON 配置。
     pub fn prompt_template(&self) -> PromptTemplateConfig {
         // runtime override 优先
-        if let Some(runtime) = self.runtime_prompt_template.read().unwrap().as_ref() {
+        if let Some(runtime) = self.runtime_prompt_template.read().expect("rwlock poisoned").as_ref() {
             return runtime.clone();
         }
         self.prompt_template.clone()
@@ -445,7 +445,7 @@ impl CognitiveEngine {
 
     /// 从 Server 下发的 PromptTemplateConfig 直接更新（JSON 路径）
     pub fn update_prompt_template_from_config(&self, config: PromptTemplateConfig) {
-        let mut guard = self.runtime_prompt_template.write().unwrap();
+        let mut guard = self.runtime_prompt_template.write().expect("rwlock poisoned");
         *guard = Some(config);
         info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
     }
@@ -520,7 +520,7 @@ impl CognitiveEngine {
 
     /// 更新 Agent 名称（注册新角色后调用）
     pub fn update_agent_name(&self, new_name: &str) {
-        let mut config = self.config.write().unwrap();
+        let mut config = self.config.write().expect("rwlock poisoned");
         config.agent_name = new_name.to_string();
         config.persona.name = new_name.to_string();
         info!("认知引擎 agent_name 已更新: {}", new_name);
@@ -536,13 +536,13 @@ impl CognitiveEngine {
         &self,
         manager: std::sync::Arc<tokio::sync::RwLock<crate::component::memory::MemoryManager>>,
     ) {
-        let mut mem_guard = self.memory_manager.write().unwrap();
+        let mut mem_guard = self.memory_manager.write().expect("rwlock poisoned");
         *mem_guard = Some(manager);
     }
 
     /// 设置对话历史（由 lifecycle 在注册后注入）
     pub fn set_relationship_store(&self, store: RelationshipStore) {
-        let mut guard = self.relationship_store.write().unwrap();
+        let mut guard = self.relationship_store.write().expect("rwlock poisoned");
         *guard = Some(store);
     }
 
@@ -551,7 +551,7 @@ impl CognitiveEngine {
         &self,
         store: Arc<crate::component::state_store::WorldStateStore>,
     ) {
-        let mut guard = self.world_state_store.write().unwrap();
+        let mut guard = self.world_state_store.write().expect("rwlock poisoned");
         *guard = Some(store);
     }
 
@@ -560,7 +560,7 @@ impl CognitiveEngine {
         &self,
         actions: Vec<cyber_jianghu_protocol::types::entities::AvailableAction>,
     ) {
-        let mut guard = self.available_actions.write().unwrap();
+        let mut guard = self.available_actions.write().expect("rwlock poisoned");
         *guard = actions;
     }
 
@@ -582,7 +582,7 @@ impl CognitiveEngine {
     ) -> Option<String> {
         // Clone Arc 在 lock 作用域内，避免跨 await 持有 std::sync::RwLockReadGuard
         let store = {
-            let store_guard = self.world_state_store.read().unwrap();
+            let store_guard = self.world_state_store.read().expect("rwlock poisoned");
             store_guard.as_ref().cloned()?
         };
 
@@ -710,7 +710,7 @@ impl CognitiveEngine {
         let descriptions = Self::build_action_index_pub(actions);
         let field_hints = String::new();
         {
-            let mut cache = self.prompt_cache.write().unwrap();
+            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
             cache.update_action_descriptions(descriptions, field_hints);
         }
 
@@ -727,13 +727,13 @@ impl CognitiveEngine {
 
     /// 更新 Agent 人设（rebirth 后调用）
     pub fn update_persona(&self, name: &str, system_prompt: &str) {
-        let mut config = self.config.write().unwrap();
+        let mut config = self.config.write().expect("rwlock poisoned");
         config.agent_name = name.to_string();
         config.persona.name = name.to_string();
         config.persona.base_description = system_prompt.to_string();
 
         let new_desc = config.persona.generate_description();
-        let mut cache = self.prompt_cache.write().unwrap();
+        let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
         cache.invalidate_persona(new_desc, &config.persona);
 
         info!(
@@ -759,7 +759,7 @@ impl CognitiveEngine {
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
         let (agent_name, persona) = {
-            let cfg = self.config.read().unwrap();
+            let cfg = self.config.read().expect("rwlock poisoned");
             (cfg.agent_name.clone(), cfg.persona.clone())
         };
         let tick_id = world_state.tick_id;
@@ -771,7 +771,7 @@ impl CognitiveEngine {
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
         let persona_for_prompt = {
-            let mut cache = self.prompt_cache.write().unwrap();
+            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
             cache.get_persona_simple().to_string()
         };
 
@@ -799,7 +799,7 @@ impl CognitiveEngine {
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
             let conv_data = self.conversation_history.as_ref().map(|history| {
-                let h = history.lock().unwrap();
+                let h = history.lock().expect("lock poisoned");
                 (
                     h.get_turns()
                         .iter()
@@ -816,15 +816,15 @@ impl CognitiveEngine {
 
             if use_tool_calling {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
-                let memory_manager = self.memory_manager.read().unwrap().clone();
+                let memory_manager = self.memory_manager.read().expect("rwlock poisoned").clone();
                 let recipe_details = world_state.self_state.recipe_details.clone();
-                let world_state_store = self.world_state_store.read().unwrap().clone();
-                let available_actions = self.available_actions.read().unwrap().clone();
+                let world_state_store = self.world_state_store.read().expect("rwlock poisoned").clone();
+                let available_actions = self.available_actions.read().expect("rwlock poisoned").clone();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
-                        skill_cache: self.skill_cache.read().unwrap().clone(),
+                        skill_cache: self.skill_cache.read().expect("rwlock poisoned").clone(),
                         memory_manager,
-                        relationship_store: self.relationship_store.read().unwrap().clone(),
+                        relationship_store: self.relationship_store.read().expect("rwlock poisoned").clone(),
                         recipe_details,
                         world_state_store,
                         available_actions,
@@ -1083,7 +1083,7 @@ impl CognitiveEngine {
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
         let (agent_name, persona) = {
-            let cfg = self.config.read().unwrap();
+            let cfg = self.config.read().expect("rwlock poisoned");
             (cfg.agent_name.clone(), cfg.persona.clone())
         };
 
@@ -1093,7 +1093,7 @@ impl CognitiveEngine {
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
         let persona_for_prompt = {
-            let mut cache = self.prompt_cache.write().unwrap();
+            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
             cache.get_persona_simple().to_string()
         };
 
@@ -1368,7 +1368,7 @@ impl CognitiveEngine {
 
     /// 获取 Action Index（公开接口，供 API enrichment 使用）
     pub fn get_action_context(&self) -> (String, String) {
-        let cache = self.prompt_cache.read().unwrap();
+        let cache = self.prompt_cache.read().expect("rwlock poisoned");
         (cache.get_action_descriptions().to_string(), String::new())
     }
 

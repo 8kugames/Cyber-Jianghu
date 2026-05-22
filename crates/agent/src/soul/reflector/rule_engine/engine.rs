@@ -261,7 +261,7 @@ impl RuleEngine {
 
     /// 从 Server 下发更新 prompt 配置
     pub fn update_prompt_config(&self, config: Arc<PromptTemplateConfig>) {
-        let mut guard = self.prompt_config.write().unwrap();
+        let mut guard = self.prompt_config.write().expect("rwlock poisoned");
         *guard = Some(config);
     }
 
@@ -282,7 +282,7 @@ impl RuleEngine {
         };
 
         // 尝试使用模板配置
-        let guard = self.prompt_config.read().unwrap();
+        let guard = self.prompt_config.read().expect("rwlock poisoned");
         if let Some(config) = guard.as_ref()
             && let Some(tmpl) = config.get_template("reject_feedback")
         {

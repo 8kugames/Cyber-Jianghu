@@ -297,7 +297,7 @@ pub fn http_decision(
 
             // 更新 WorldStateStore（供 Delta Engine 使用）
             {
-                let wss = state.api_state.world_state_store.read().unwrap().clone();
+                let wss = state.api_state.world_state_store.read().expect("rwlock poisoned").clone();
                 if let Some(wss) = wss {
                     wss.update(world_state.clone()).await;
                 }
@@ -974,7 +974,7 @@ impl HttpApiState {
             return; // 没有 LlmClient，跳过
         };
 
-        let store_guard = self.relationship_store.read().unwrap();
+        let store_guard = self.relationship_store.read().expect("rwlock poisoned");
         let Some(store) = store_guard.as_ref() else {
             return;
         };

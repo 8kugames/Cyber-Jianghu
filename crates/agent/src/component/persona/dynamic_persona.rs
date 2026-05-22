@@ -242,7 +242,7 @@ impl ThreadSafePersona {
     where
         F: FnOnce(&DynamicPersona) -> R,
     {
-        let guard = self.inner.read().unwrap();
+        let guard = self.inner.read().expect("rwlock poisoned");
         f(&guard)
     }
 
@@ -251,13 +251,13 @@ impl ThreadSafePersona {
     where
         F: FnOnce(&mut DynamicPersona) -> R,
     {
-        let mut guard = self.inner.write().unwrap();
+        let mut guard = self.inner.write().expect("rwlock poisoned");
         f(&mut guard)
     }
 
     /// 获取克隆的人设
     pub fn clone_persona(&self) -> DynamicPersona {
-        let guard = self.inner.read().unwrap();
+        let guard = self.inner.read().expect("rwlock poisoned");
         (*guard).clone()
     }
 }

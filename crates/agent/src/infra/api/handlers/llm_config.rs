@@ -498,7 +498,7 @@ pub(crate) async fn get_cognitive_context_handler(
                 (None, None)
             };
 
-            let store_arc = state.relationship_store.read().unwrap().clone();
+            let store_arc = state.relationship_store.read().expect("rwlock poisoned").clone();
             let relationship_store = store_arc.as_deref();
             let cognitive_context =
                 builder.build_with_persona(world_state, persona_ref.as_ref(), relationship_store);

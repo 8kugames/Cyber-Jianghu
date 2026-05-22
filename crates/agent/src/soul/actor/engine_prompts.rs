@@ -136,13 +136,13 @@ impl super::CognitiveEngine {
         };
 
         // Action Index: name-only，详情通过 get_action_detail 按需查询
-        let actions = self.available_actions.read().unwrap();
+        let actions = self.available_actions.read().expect("rwlock poisoned");
         let action_descriptions = Self::build_action_index_pub(&actions);
         drop(actions);
 
         // Skill Index: name-only，详情通过 skill_view 按需查询
         let skill_instructions = {
-            let cache = self.skill_cache.read().unwrap();
+            let cache = self.skill_cache.read().expect("rwlock poisoned");
             Self::build_skill_index(&cache)
         };
 

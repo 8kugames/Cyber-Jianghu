@@ -310,11 +310,11 @@ mod tests {
         }
 
         fn on_dialogue_accepted(&self, session_id: String) {
-            self.accepted.lock().unwrap().push(session_id);
+            self.accepted.lock().expect("lock poisoned").push(session_id);
         }
 
         fn on_dialogue_rejected(&self, session_id: String, reason: Option<String>) {
-            self.rejected.lock().unwrap().push((session_id, reason));
+            self.rejected.lock().expect("lock poisoned").push((session_id, reason));
         }
 
         fn on_dialogue_message(&self, session_id: String, from_agent_id: Uuid, content: String) {
@@ -325,7 +325,7 @@ mod tests {
         }
 
         fn on_dialogue_ended(&self, session_id: String, by_agent: Uuid) {
-            self.ended.lock().unwrap().push((session_id, by_agent));
+            self.ended.lock().expect("lock poisoned").push((session_id, by_agent));
         }
     }
 
@@ -455,7 +455,7 @@ mod tests {
 
         client.handle_message(message);
 
-        let requests = handler.requests_received.lock().unwrap();
+        let requests = handler.requests_received.lock().expect("lock poisoned");
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].0, from_id);
         assert_eq!(requests[0].1, "你好");
@@ -476,7 +476,7 @@ mod tests {
 
         client.handle_message(message);
 
-        let messages = handler.messages.lock().unwrap();
+        let messages = handler.messages.lock().expect("lock poisoned");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].0, "test-session");
         assert_eq!(messages[0].1, from_id);
