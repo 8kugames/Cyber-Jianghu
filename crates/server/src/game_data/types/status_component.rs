@@ -8,6 +8,8 @@
 use crate::game_data::types::attributes::{
     Attribute, AttributeCollection, AttributeMetadata, AttributeType, AttributeValue,
 };
+
+pub const DEFAULT_STATUS_MAX_VALUE: f32 = 255.0;
 use crate::game_data::types::attributes_config::AttributesConfig;
 use crate::game_data::types::unified_attributes::UnifiedAttributesConfig;
 use serde::{Deserialize, Serialize};
@@ -215,7 +217,7 @@ impl StatusComponent {
 
         let current = attr.value.get();
         let min_value = attr.metadata.min_value.unwrap_or(0.0) as i32;
-        let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, 255.0, context)
+        let max_value = Self::evaluate_max_value(&attr.metadata.max_value_formula, DEFAULT_STATUS_MAX_VALUE, context)
             as i32
             + self.max_modifiers.get(name).copied().unwrap_or(0);
 
