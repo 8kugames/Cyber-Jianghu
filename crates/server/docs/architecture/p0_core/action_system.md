@@ -9,10 +9,19 @@
 ## 2. 核心机制
 ### 2.1 动作分类
 系统预定义了标准化的动作分类处理管线：
-- **基础动作 (Basic)**：休息 (rest)、说话 (speak)、移动 (move)、大喊 (shout)、拾取 (pickup)、丢弃 (drop)。
-- **战斗动作 (Combat)**：攻击 (attack)、逃跑 (flee)。
-- **交互/生活动作 (Interaction)**：使用物品 (use)、给予 (give)、偷窃 (steal)、修炼 (practice)。
-- *预留/排期动作*：采集、制造、下毒、防御、跟随等。
+- **基础动作 (Basic)**：休息 (rest)、说话 (speak)、移动 (move)、大喊 (shout)、拾取 (pickup)、丢弃 (drop)、采集 (gather)、制造 (craft)、传授 (teach)。
+- **战斗动作 (Combat)**：攻击 (attack)、使用物品 (use)、逃跑 (flee)。
+- **交互/生活动作 (Interaction)**：给予 (give)、偷窃 (steal)、打坐 (meditate)、修炼 (practice)、私语 (whisper)。
+
+> **设计决策: 为何没有 trade 动作**
+>
+> `trade` (两方协商交易) 在早期 PRD 中列出，但经审视后**主动移除**。
+>
+> 理由: 交易是社会行为而非物理动作。天道 (Server) 是物理引擎，不应裁决"公平交易"。
+> 交易的涌现路径: A `give` B 支付 → B `give` A 货物 (或反序)。两次 `give` 之间**不存在原子性保证**——
+> B 可以拿了钱不给货 (欺诈)。这正是设计意图: 信任、信誉、暴力讨债等社会机制应从这种脆弱性中涌现。
+>
+> 配置定义共 19 种动作 (`actions.yaml`)，其中 14 种有自定义 executor，其余走通用 effects 管线。
 
 ### 2.2 验证管线
 所有动作都经过标准的验证宏或函数：
