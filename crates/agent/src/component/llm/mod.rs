@@ -114,7 +114,7 @@ pub fn build_fallback_client(
         fb = fb.with_idle_threshold(llm_config.idle_rotate_threshold as usize);
         Arc::new(fb)
     } else {
-        llm_clients.into_iter().next().unwrap()
+        llm_clients.into_iter().next().expect("at least one LLM client must be configured")
     };
 
     Ok(llm_arc)

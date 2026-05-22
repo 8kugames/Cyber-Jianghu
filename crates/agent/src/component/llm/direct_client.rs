@@ -328,7 +328,7 @@ impl DirectLlmClientConfig {
         if let Some(model) = &self.model {
             model.clone()
         } else if self.provider.default_model().is_some() {
-            self.provider.default_model().unwrap().to_string()
+            self.provider.default_model().expect("provider must have default model").to_string()
         } else {
             "default".to_string()
         }

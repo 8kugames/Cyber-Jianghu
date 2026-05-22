@@ -587,7 +587,7 @@ pub(crate) async fn death_events_handler(State(state): State<HttpApiState>) -> i
         .header("Connection", "keep-alive")
         .header("X-Accel-Buffering", "no")
         .body(body)
-        .unwrap()
+        .expect("valid HTTP response")
 }
 
 // ============================================================================
