@@ -98,7 +98,7 @@ async fn handle_socket(socket: WebSocket, state: WsSharedState) {
     let _intent_tx = state.intent_tx.clone();
 
     // 获取上行消息接收通道（用于转发 OpenClawBridge 的 LLM 请求）
-    let upstream_rx = state.upstream_rx.lock().unwrap().take();
+    let upstream_rx = state.upstream_rx.lock().expect("lock poisoned").take();
     let llm_response_tx = state.llm_response_tx.clone();
 
     // 使用 Arc<AtomicBool> 来共享活跃状态

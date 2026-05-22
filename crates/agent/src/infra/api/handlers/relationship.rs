@@ -17,7 +17,7 @@ use super::service::RelationshipService;
 pub(crate) async fn get_relationships_handler(
     State(state): State<HttpApiState>,
 ) -> impl IntoResponse {
-    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store_arc = state.relationship_store.read().expect("rwlock poisoned").clone();
     let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
@@ -50,7 +50,7 @@ pub(crate) async fn get_relationship_handler(
     State(state): State<HttpApiState>,
     AxumPath(id): AxumPath<String>,
 ) -> impl IntoResponse {
-    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store_arc = state.relationship_store.read().expect("rwlock poisoned").clone();
     let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
@@ -87,7 +87,7 @@ pub(crate) async fn update_relationship_handler(
     State(state): State<HttpApiState>,
     Json(req): Json<RelationshipUpdateRequest>,
 ) -> impl IntoResponse {
-    let store_arc = state.relationship_store.read().unwrap().clone();
+    let store_arc = state.relationship_store.read().expect("rwlock poisoned").clone();
     let store = match store_arc.as_ref() {
         Some(s) => s,
         None => {
