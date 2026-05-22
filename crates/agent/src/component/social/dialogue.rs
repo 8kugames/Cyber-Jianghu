@@ -305,7 +305,7 @@ mod tests {
         fn on_dialogue_request(&self, from_agent_id: Uuid, opening_remark: String) {
             self.requests_received
                 .lock()
-                .unwrap()
+                    .expect("lock poisoned")
                 .push((from_agent_id, opening_remark));
         }
 
@@ -320,7 +320,7 @@ mod tests {
         fn on_dialogue_message(&self, session_id: String, from_agent_id: Uuid, content: String) {
             self.messages
                 .lock()
-                .unwrap()
+                    .expect("lock poisoned")
                 .push((session_id, from_agent_id, content));
         }
 

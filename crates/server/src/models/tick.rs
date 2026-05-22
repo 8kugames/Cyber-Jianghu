@@ -93,7 +93,7 @@ impl TickLog {
     /// 标记Tick完成
     pub fn complete(&mut self, agents_processed: i32, actions_executed: i32) {
         self.completed_at = Some(Utc::now());
-        self.duration_ms = Some((self.completed_at.unwrap() - self.started_at).num_milliseconds());
+        self.duration_ms = Some((self.completed_at.expect("tick must be completed before calculating duration") - self.started_at).num_milliseconds());
         self.agents_processed = agents_processed;
         self.actions_executed = actions_executed;
         self.status = TickStatus::Completed;
@@ -102,7 +102,7 @@ impl TickLog {
     /// 标记Tick失败（F-06）
     pub fn fail(&mut self, error_message: &str) {
         self.completed_at = Some(Utc::now());
-        self.duration_ms = Some((self.completed_at.unwrap() - self.started_at).num_milliseconds());
+        self.duration_ms = Some((self.completed_at.expect("tick must be completed before calculating duration") - self.started_at).num_milliseconds());
         self.status = TickStatus::Failed;
         self.error_message = Some(error_message.to_string());
     }

@@ -202,7 +202,7 @@ impl Broadcaster {
         for agent_state in agent_states {
             let events = event_manager
                 .lock()
-                .unwrap()
+                    .expect("lock poisoned")
                 .get_events_for_agent(agent_state.agent_id);
             let inventory = agent_inventories
                 .get(&agent_state.agent_id)
