@@ -50,19 +50,19 @@ impl EventManager {
 
     /// 为指定 Agent 添加事件
     pub fn add_event_for_agent(&self, agent_id: Uuid, event: WorldEvent) {
-        let mut guard = self.events.lock().unwrap();
+        let mut guard = self.events.lock().expect("lock poisoned");
         guard.entry(agent_id).or_default().push(event);
     }
 
     /// 获取 Agent 的本 Tick 事件列表
     pub fn get_events_for_agent(&self, agent_id: Uuid) -> Vec<WorldEvent> {
-        let guard = self.events.lock().unwrap();
+        let guard = self.events.lock().expect("lock poisoned");
         guard.get(&agent_id).cloned().unwrap_or_default()
     }
 
     /// 清空本 Tick 的所有事件
     pub fn clear(&self) {
-        let mut guard = self.events.lock().unwrap();
+        let mut guard = self.events.lock().expect("lock poisoned");
         guard.clear();
     }
 }
