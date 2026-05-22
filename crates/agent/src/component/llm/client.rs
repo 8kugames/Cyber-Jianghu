@@ -885,8 +885,8 @@ impl FallbackLlmClient {
     /// 返回 true 表示发生了切换，false 表示未达到阈值。
     pub fn record_idle(&self) -> bool {
         let current_idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
-        let mut idle_counts = self.idle_counts.lock().unwrap();
-        let mut disabled = self.disabled_models.lock().unwrap();
+        let mut idle_counts = self.idle_counts.lock().expect("lock poisoned");
+        let mut disabled = self.disabled_models.lock().expect("lock poisoned");
 
         // 增加当前模型的 idle 计数
         idle_counts[current_idx] += 1;
@@ -916,7 +916,7 @@ impl FallbackLlmClient {
     /// 跳过已标记为不可用的模型。如果所有模型都不可用，则保持当前状态。
     fn rotate_to_next_available(&self) {
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
-        let disabled = self.disabled_models.lock().unwrap();
+        let disabled = self.disabled_models.lock().expect("lock poisoned");
 
         for offset in 1..=self.clients.len() {
             let idx = (start + offset) % self.clients.len();
@@ -934,7 +934,7 @@ impl FallbackLlmClient {
     /// 重置当前模型的 idle 计数（当模型返回非 idle 结果时调用）
     pub fn reset_idle_count(&self) {
         let current_idx = self.active.load(std::sync::atomic::Ordering::Relaxed);
-        let mut idle_counts = self.idle_counts.lock().unwrap();
+        let mut idle_counts = self.idle_counts.lock().expect("lock poisoned");
         let old_count = idle_counts[current_idx];
         if old_count > 0 {
             idle_counts[current_idx] = 0;
@@ -1335,18 +1335,18 @@ pub mod mock {
 
         /// 更新预设响应
         pub fn set_response(&self, response: &str) {
-            *self.response.lock().unwrap() = response.to_string();
+            *self.response.lock().expect("lock poisoned") = response.to_string();
         }
     }
 
     #[async_trait]
     impl LlmClient for MockLlmClient {
         async fn complete(&self, _prompt: &str) -> Result<String> {
-            Ok(self.response.lock().unwrap().clone())
+            Ok(self.response.lock().expect("lock poisoned").clone())
         }
 
         async fn complete_with_system(&self, _system: &str, _prompt: &str) -> Result<String> {
-            Ok(self.response.lock().unwrap().clone())
+            Ok(self.response.lock().expect("lock poisoned").clone())
         }
     }
 }

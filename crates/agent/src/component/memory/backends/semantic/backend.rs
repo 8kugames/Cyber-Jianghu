@@ -73,23 +73,23 @@ impl SemanticMemoryBackend {
     }
 
     pub fn is_vector_mode(&self) -> bool {
-        *self.use_vector.lock().unwrap()
+        *self.use_vector.lock().expect("lock poisoned")
     }
 
     pub fn fallback_to_fts(&self) {
-        *self.use_vector.lock().unwrap() = false;
+        *self.use_vector.lock().expect("lock poisoned") = false;
         tracing::info!("Semantic memory fallback to FTS mode");
     }
 
     pub fn try_upgrade_to_vector(&self) {
         if self.embedder.is_available() {
-            *self.use_vector.lock().unwrap() = true;
+            *self.use_vector.lock().expect("lock poisoned") = true;
             tracing::info!("Semantic memory upgraded to vector mode");
         }
     }
 
     pub fn search_fts_only(&self, query: &str, limit: usize) -> Result<Vec<(i64, f32)>> {
-        let fts = self.fts_fallback.lock().unwrap();
+        let fts = self.fts_fallback.lock().expect("lock poisoned");
         let results = fts.search(query, limit)?;
         Ok(results
             .into_iter()
@@ -119,7 +119,7 @@ impl SemanticMemoryBackend {
                 }
 
                 // HnswVectorStore::search() 内部处理 rebuild，无需重复
-                let mut vector_store = self.vector_store.lock().unwrap();
+                let mut vector_store = self.vector_store.lock().expect("lock poisoned");
                 match vector_store.search(&vector, params.limit) {
                     Ok(results) => {
                         tracing::debug!("Vector search returned {} results", results.len());
@@ -136,7 +136,7 @@ impl SemanticMemoryBackend {
         }
 
         tracing::debug!("Using FTS fallback for query: {}", params.query);
-        let fts = self.fts_fallback.lock().unwrap();
+        let fts = self.fts_fallback.lock().expect("lock poisoned");
         let results = fts.search(&params.query, params.limit)?;
         Ok(results
             .into_iter()
@@ -188,7 +188,7 @@ impl MemoryBackend for SemanticMemoryBackend {
         // 写入 embedding blob 到 episodic DB
         let encoded = HnswVectorStore::encode_vector(&embedding);
         {
-            let conn = self.episodic_conn.lock().unwrap();
+            let conn = self.episodic_conn.lock().expect("lock poisoned");
             conn.execute(
                 "UPDATE client_memories SET embedding = ?1 WHERE id = ?2",
                 rusqlite::params![encoded, mem_id],
@@ -198,7 +198,7 @@ impl MemoryBackend for SemanticMemoryBackend {
 
         // 添加到 HNSW 内存索引
         {
-            let mut vs = self.vector_store.lock().unwrap();
+            let mut vs = self.vector_store.lock().expect("lock poisoned");
             vs.add(mem_id, embedding)?;
         }
 
@@ -211,11 +211,11 @@ impl MemoryBackend for SemanticMemoryBackend {
     }
 
     async fn count(&self) -> Result<usize> {
-        Ok(self.vector_store.lock().unwrap().len())
+        Ok(self.vector_store.lock().expect("lock poisoned").len())
     }
 
     async fn clear(&mut self) -> Result<()> {
-        self.vector_store.lock().unwrap().clear();
+        self.vector_store.lock().expect("lock poisoned").clear();
         Ok(())
     }
 }
@@ -253,7 +253,7 @@ impl SemanticSearchable for SemanticMemoryBackend {
             match results {
                 Ok(results) if !results.is_empty() => {
                     tracing::info!("Vector search returned {} results", results.len());
-                    let fts = self.fts_fallback.lock().unwrap();
+                    let fts = self.fts_fallback.lock().expect("lock poisoned");
                     let ids: Vec<i64> = results.into_iter().map(|(id, _)| id).collect();
                     let memories = fts.get_memories_by_ids(&ids)?;
                     return Ok(memories
@@ -272,7 +272,7 @@ impl SemanticSearchable for SemanticMemoryBackend {
             tracing::debug!("Embedding unavailable, using FTS fallback");
         }
 
-        let fts = self.fts_fallback.lock().unwrap();
+        let fts = self.fts_fallback.lock().expect("lock poisoned");
         let memories = fts.search(query, limit)?;
         tracing::debug!("FTS search returned {} results", memories.len());
 

@@ -94,7 +94,7 @@ pub(crate) async fn get_context_handler(State(state): State<HttpApiState>) -> im
     match current.as_ref() {
         Some(world_state) => {
             let context = {
-                let store_arc = state.relationship_store.read().unwrap().clone();
+                let store_arc = state.relationship_store.read().expect("rwlock poisoned").clone();
                 if let Some(store) = store_arc.as_ref() {
                     generate_context_markdown(world_state, store, dream_thought.as_deref())
                 } else {

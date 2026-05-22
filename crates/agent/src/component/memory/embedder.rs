@@ -45,18 +45,18 @@ impl EmbedderService {
         if LocalEmbedder::is_model_available() {
             match LocalEmbedder::load() {
                 Ok(embedder) => {
-                    *self.local_embedder.lock().unwrap() = Some(embedder);
-                    *self.status.lock().unwrap() = EmbedderStatus::Local;
+                    *self.local_embedder.lock().expect("lock poisoned") = Some(embedder);
+                    *self.status.lock().expect("lock poisoned") = EmbedderStatus::Local;
                     tracing::info!("Local embedder loaded successfully");
                 }
                 Err(e) => {
                     tracing::warn!("Failed to load local embedder: {}", e);
-                    *self.status.lock().unwrap() = EmbedderStatus::Unavailable;
+                    *self.status.lock().expect("lock poisoned") = EmbedderStatus::Unavailable;
                 }
             }
         } else {
             tracing::warn!("Local embedder model not available, vector search disabled");
-            *self.status.lock().unwrap() = EmbedderStatus::Unavailable;
+            *self.status.lock().expect("lock poisoned") = EmbedderStatus::Unavailable;
         }
 
         self.initialized.store(true, Ordering::SeqCst);
@@ -70,7 +70,7 @@ impl EmbedderService {
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         self.initialize()?;
 
-        let status = *self.status.lock().unwrap();
+        let status = *self.status.lock().expect("lock poisoned");
         if status != EmbedderStatus::Local {
             return Err(anyhow::anyhow!("Embedder service unavailable"));
         }
@@ -78,7 +78,7 @@ impl EmbedderService {
         let embedder = self.local_embedder.clone();
         let text = text.to_owned();
         tokio::task::spawn_blocking(move || {
-            let guard = embedder.lock().unwrap();
+            let guard = embedder.lock().expect("lock poisoned");
             match guard.as_ref() {
                 Some(e) => e.embed(&text),
                 None => Err(anyhow::anyhow!("Local embedder not available")),
@@ -92,7 +92,7 @@ impl EmbedderService {
     pub async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         self.initialize()?;
 
-        let status = *self.status.lock().unwrap();
+        let status = *self.status.lock().expect("lock poisoned");
         if status != EmbedderStatus::Local {
             return Err(anyhow::anyhow!("Embedder service unavailable"));
         }
@@ -101,7 +101,7 @@ impl EmbedderService {
         let texts: Vec<String> = texts.iter().map(|s| (*s).to_owned()).collect();
         tokio::task::spawn_blocking(move || {
             let refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-            let guard = embedder.lock().unwrap();
+            let guard = embedder.lock().expect("lock poisoned");
             match guard.as_ref() {
                 Some(e) => e.embed_batch(&refs),
                 None => Err(anyhow::anyhow!("Local embedder not available")),
@@ -113,12 +113,12 @@ impl EmbedderService {
 
     /// 获取当前状态
     pub fn status(&self) -> EmbedderStatus {
-        *self.status.lock().unwrap()
+        *self.status.lock().expect("lock poisoned")
     }
 
     /// 检查服务是否可用
     pub fn is_available(&self) -> bool {
-        *self.status.lock().unwrap() == EmbedderStatus::Local
+        *self.status.lock().expect("lock poisoned") == EmbedderStatus::Local
     }
 
     /// 获取嵌入向量维度

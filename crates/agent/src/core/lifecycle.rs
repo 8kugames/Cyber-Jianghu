@@ -654,7 +654,7 @@ impl super::Agent {
                                             engine.set_relationship_store(new_store.clone());
                                         }
                                         // 同步更新 HttpApiState 引用
-                                        *api_state.relationship_store.write().unwrap() = Some(Arc::new(new_store));
+                                        *api_state.relationship_store.write().expect("rwlock poisoned") = Some(Arc::new(new_store));
                                         info!("转世重生: RelationshipStore 已重初始化 (new_id={})", new_id);
                                     }
                                     Err(e) => {
@@ -1262,7 +1262,7 @@ impl super::Agent {
 
                     // 4.5 天魂执行叙事生成（上一轮行动结果，用于 memory_context 和 soul_cycle_record 回填）
                     {
-                        let last_intents = last_intents_for_narrative.lock().unwrap().clone();
+                        let last_intents = last_intents_for_narrative.lock().expect("lock poisoned").clone();
 
                         // 数据驱动的上轮行动摘要：从 soul_cycle_recorder 读取上轮人魂叙事
                         let last_action_summary = if !last_intents.is_empty() {
