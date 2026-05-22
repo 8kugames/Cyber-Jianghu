@@ -697,7 +697,7 @@ impl TickScheduler {
                 ];
                 let msg = &messages[tick_id as usize % messages.len()];
 
-                self.event_manager.lock().unwrap().add_event_for_agent(
+                self.event_manager.lock().expect("lock poisoned").add_event_for_agent(
                     *agent_id,
                     crate::models::WorldEvent {
                         event_type: cyber_jianghu_protocol::WorldEventType::SystemNotification,
@@ -866,7 +866,7 @@ impl TickScheduler {
             .map(|r| r.value().clone())
             .collect();
 
-        self.event_manager.lock().unwrap().clear();
+        self.event_manager.lock().expect("lock poisoned").clear();
 
         // drain grant-items 跨请求缓冲事件（clear 后注入，确保本 tick 可见）
         for entry in self.vendor_pending_events.iter() {

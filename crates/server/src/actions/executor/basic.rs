@@ -75,7 +75,7 @@ impl BasicActionExecutor {
             }
         };
 
-        let location_registry = registry.location_registry.read().unwrap();
+        let location_registry = registry.location_registry.read().expect("rwlock poisoned");
 
         // 验证目标位置存在
         if !location_registry.node_exists(&data.target_location) {
@@ -275,7 +275,7 @@ impl BasicActionExecutor {
                 );
             }
         };
-        let location_registry = registry.location_registry.read().unwrap();
+        let location_registry = registry.location_registry.read().expect("rwlock poisoned");
 
         // 校验当前位置是否可以采集该物品
         let can_gather = location_registry

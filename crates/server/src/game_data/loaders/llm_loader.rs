@@ -82,7 +82,7 @@ static LLM_CONFIG_CACHE: RwLock<Option<LlmConfig>> = RwLock::new(None);
 /// 2. 直接 LlmConfig 格式（向后兼容）
 pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
     // 尝试从缓存读取
-    if let Some(cached) = LLM_CONFIG_CACHE.read().unwrap().as_ref() {
+    if let Some(cached) = LLM_CONFIG_CACHE.read().expect("rwlock poisoned").as_ref() {
         return Ok(cached.clone());
     }
 
@@ -110,7 +110,7 @@ pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
     };
 
     // 写入缓存
-    *LLM_CONFIG_CACHE.write().unwrap() = Some(config.clone());
+    *LLM_CONFIG_CACHE.write().expect("rwlock poisoned") = Some(config.clone());
 
     Ok(config)
 }
@@ -118,5 +118,5 @@ pub fn load_llm(config_dir: &Path) -> Result<LlmConfig> {
 /// 清除 LLM 配置缓存（用于热重载）
 #[allow(dead_code)]
 pub fn clear_llm_cache() {
-    *LLM_CONFIG_CACHE.write().unwrap() = None;
+    *LLM_CONFIG_CACHE.write().expect("rwlock poisoned") = None;
 }
