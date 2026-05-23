@@ -305,27 +305,36 @@ mod tests {
         fn on_dialogue_request(&self, from_agent_id: Uuid, opening_remark: String) {
             self.requests_received
                 .lock()
-                    .expect("lock poisoned")
+                .expect("lock poisoned")
                 .push((from_agent_id, opening_remark));
         }
 
         fn on_dialogue_accepted(&self, session_id: String) {
-            self.accepted.lock().expect("lock poisoned").push(session_id);
+            self.accepted
+                .lock()
+                .expect("lock poisoned")
+                .push(session_id);
         }
 
         fn on_dialogue_rejected(&self, session_id: String, reason: Option<String>) {
-            self.rejected.lock().expect("lock poisoned").push((session_id, reason));
+            self.rejected
+                .lock()
+                .expect("lock poisoned")
+                .push((session_id, reason));
         }
 
         fn on_dialogue_message(&self, session_id: String, from_agent_id: Uuid, content: String) {
             self.messages
                 .lock()
-                    .expect("lock poisoned")
+                .expect("lock poisoned")
                 .push((session_id, from_agent_id, content));
         }
 
         fn on_dialogue_ended(&self, session_id: String, by_agent: Uuid) {
-            self.ended.lock().expect("lock poisoned").push((session_id, by_agent));
+            self.ended
+                .lock()
+                .expect("lock poisoned")
+                .push((session_id, by_agent));
         }
     }
 

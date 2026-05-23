@@ -590,7 +590,11 @@ async fn await_character_loop(server_dir: &Path) -> Result<()> {
             && c.agent_id.is_some()
             && c.status == CharacterStatus::Alive
         {
-            info!("Character found: {} ({})", c.name, c.agent_id.expect("character must have agent_id"));
+            info!(
+                "Character found: {} ({})",
+                c.name,
+                c.agent_id.expect("character must have agent_id")
+            );
             return Ok(());
         }
 
@@ -748,7 +752,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     let data_dir = server_dir
         .join("characters")
-        .join(character.agent_id.expect("character must have agent_id").to_string())
+        .join(
+            character
+                .agent_id
+                .expect("character must have agent_id")
+                .to_string(),
+        )
         .join("data");
 
     let persona_info = Some(cyber_jianghu_agent::soul::reflector::PersonaInfo {
@@ -810,7 +819,12 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         }
         RuntimeMode::Claw => {
             let setup = _early_claw_setup.expect("early claw setup must exist");
-            let llm_response_rx = setup.shared_state.llm_response_rx.lock().expect("lock poisoned").take();
+            let llm_response_rx = setup
+                .shared_state
+                .llm_response_rx
+                .lock()
+                .expect("lock poisoned")
+                .take();
 
             let openclaw_bridge = Arc::new(OpenClawBridge::new(
                 setup.shared_state.upstream_tx.clone(),
@@ -1057,13 +1071,19 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // 注入 world_state_store 到 HttpApiState（供 Claw 模式 Delta Engine 使用）
     if token_opt_enabled {
-        *api_state.world_state_store.write().expect("rwlock poisoned") = Some(world_state_store.clone());
+        *api_state
+            .world_state_store
+            .write()
+            .expect("rwlock poisoned") = Some(world_state_store.clone());
         info!("world_state_store 已注入 HttpApiState");
     }
 
     // 注入 relationship_store 到 HttpApiState
     if let Some(store) = agent.relationship_store() {
-        *api_state.relationship_store.write().expect("rwlock poisoned") = Some(Arc::new(store.clone()));
+        *api_state
+            .relationship_store
+            .write()
+            .expect("rwlock poisoned") = Some(Arc::new(store.clone()));
         info!("relationship_store 已注入 HttpApiState");
     }
 

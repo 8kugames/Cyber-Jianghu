@@ -62,8 +62,9 @@ impl DeviceConfig {
 
 /// 计算服务器目录 key（从 WebSocket URL 派生）
 pub fn server_key(ws_url: &str) -> String {
-    let url =
-        Url::parse(ws_url).unwrap_or_else(|_| Url::parse(&format!("ws://{}", ws_url)).expect("ws:// prefix always produces valid URL"));
+    let url = Url::parse(ws_url).unwrap_or_else(|_| {
+        Url::parse(&format!("ws://{}", ws_url)).expect("ws:// prefix always produces valid URL")
+    });
     let host = url.host_str().unwrap_or("localhost");
     let port = url.port().map(|p| format!("-{}", p)).unwrap_or_default();
     format!("{}{}", host.replace(['.', ':', '[', ']'], "-"), port)

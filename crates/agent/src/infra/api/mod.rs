@@ -297,7 +297,12 @@ pub fn http_decision(
 
             // 更新 WorldStateStore（供 Delta Engine 使用）
             {
-                let wss = state.api_state.world_state_store.read().expect("rwlock poisoned").clone();
+                let wss = state
+                    .api_state
+                    .world_state_store
+                    .read()
+                    .expect("rwlock poisoned")
+                    .clone();
                 if let Some(wss) = wss {
                     wss.update(world_state.clone()).await;
                 }

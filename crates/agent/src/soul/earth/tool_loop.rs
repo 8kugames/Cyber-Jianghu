@@ -101,7 +101,10 @@ pub(crate) async fn run_tool_loop(
             return Ok(content);
         }
 
-        let tool_calls = response.tool_calls.as_ref().expect("tool_calls must exist when finish_reason is tool_calls");
+        let tool_calls = response
+            .tool_calls
+            .as_ref()
+            .expect("tool_calls must exist when finish_reason is tool_calls");
         let call_names: Vec<&str> = tool_calls
             .iter()
             .map(|tc| tc.function.name.as_str())

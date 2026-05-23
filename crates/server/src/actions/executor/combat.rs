@@ -272,7 +272,7 @@ impl CombatActionExecutor {
         if !registry
             .location_registry
             .read()
-                    .expect("rwlock poisoned")
+            .expect("rwlock poisoned")
             .node_exists(&data.target_location)
         {
             return ActionExecutionResult::failure(
@@ -286,7 +286,7 @@ impl CombatActionExecutor {
         if !registry
             .location_registry
             .read()
-                    .expect("rwlock poisoned")
+            .expect("rwlock poisoned")
             .is_connected(current_location, &data.target_location)
         {
             return ActionExecutionResult::failure(

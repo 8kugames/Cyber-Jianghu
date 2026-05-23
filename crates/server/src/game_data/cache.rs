@@ -62,7 +62,10 @@ impl GameDataCache {
 
     /// 获取位置注册表快照（owned, Send-safe）
     pub fn location_snapshot(&self) -> LocationRegistry {
-        self.location_registry.read().expect("rwlock poisoned").clone()
+        self.location_registry
+            .read()
+            .expect("rwlock poisoned")
+            .clone()
     }
 
     /// 仅更新动作配置（用于热重载）
