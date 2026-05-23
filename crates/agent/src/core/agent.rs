@@ -556,11 +556,16 @@ impl Agent {
             return Intent::new(uuid::Uuid::nil(), 0, "休息", None);
         }
         if intents.len() == 1 {
-            return intents.into_iter().next().expect("intent list must not be empty");
+            return intents
+                .into_iter()
+                .next()
+                .expect("intent list must not be empty");
         }
 
         let mut iter = intents.into_iter();
-        let mut primary = iter.next().expect("intent iterator must have at least one item");
+        let mut primary = iter
+            .next()
+            .expect("intent iterator must have at least one item");
         primary.subsequent_intents = iter.collect();
         primary
     }
