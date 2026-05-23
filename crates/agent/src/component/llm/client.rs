@@ -318,7 +318,8 @@ fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
 
     // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
     let self_closing_re =
-        regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*").expect("static regex is valid");
+        regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*")
+            .expect("static regex is valid");
     let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
 
     if cleaned == response {

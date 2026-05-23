@@ -437,7 +437,12 @@ impl CognitiveEngine {
     /// 优先返回 Server ConfigUpdate 下发的配置，其次返回本地 JSON 配置。
     pub fn prompt_template(&self) -> PromptTemplateConfig {
         // runtime override 优先
-        if let Some(runtime) = self.runtime_prompt_template.read().expect("rwlock poisoned").as_ref() {
+        if let Some(runtime) = self
+            .runtime_prompt_template
+            .read()
+            .expect("rwlock poisoned")
+            .as_ref()
+        {
             return runtime.clone();
         }
         self.prompt_template.clone()
@@ -445,7 +450,10 @@ impl CognitiveEngine {
 
     /// 从 Server 下发的 PromptTemplateConfig 直接更新（JSON 路径）
     pub fn update_prompt_template_from_config(&self, config: PromptTemplateConfig) {
-        let mut guard = self.runtime_prompt_template.write().expect("rwlock poisoned");
+        let mut guard = self
+            .runtime_prompt_template
+            .write()
+            .expect("rwlock poisoned");
         *guard = Some(config);
         info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
     }
@@ -818,13 +826,25 @@ impl CognitiveEngine {
                 // 地魂 tool-calling 路径（主路径）：LLM 可调用 skill_view / search_memory 等工具
                 let memory_manager = self.memory_manager.read().expect("rwlock poisoned").clone();
                 let recipe_details = world_state.self_state.recipe_details.clone();
-                let world_state_store = self.world_state_store.read().expect("rwlock poisoned").clone();
-                let available_actions = self.available_actions.read().expect("rwlock poisoned").clone();
+                let world_state_store = self
+                    .world_state_store
+                    .read()
+                    .expect("rwlock poisoned")
+                    .clone();
+                let available_actions = self
+                    .available_actions
+                    .read()
+                    .expect("rwlock poisoned")
+                    .clone();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().expect("rwlock poisoned").clone(),
                         memory_manager,
-                        relationship_store: self.relationship_store.read().expect("rwlock poisoned").clone(),
+                        relationship_store: self
+                            .relationship_store
+                            .read()
+                            .expect("rwlock poisoned")
+                            .clone(),
                         recipe_details,
                         world_state_store,
                         available_actions,

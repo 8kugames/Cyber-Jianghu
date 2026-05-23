@@ -247,7 +247,7 @@ impl SemanticSearchable for SemanticMemoryBackend {
             let results = self
                 .vector_store
                 .lock()
-                    .expect("lock poisoned")
+                .expect("lock poisoned")
                 .search(&query_vector, limit);
 
             match results {
