@@ -225,7 +225,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 
 #### Key Agent Modules
 
-- `src/core/lifecycle.rs` - Main decision loop (orchestrator), context assembly, snapshot write
+- `src/core/lifecycle/` - Main decision loop (mod.rs orchestrator + 7 sub-modules: callbacks, context, death, helpers, reporting, soul_cycle, tick)
 - `src/core/agent.rs` - Agent struct with all component references
 - `src/core/builder.rs` - AgentBuilder (fluent API)
 - `src/core/reflector_ext.rs` - ReflectorSoul three-layer validation + graded audit
