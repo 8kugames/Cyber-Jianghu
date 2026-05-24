@@ -272,7 +272,7 @@ graph TB
 
     handlers --> agent["agent.rs"]
     handlers --> auth["auth.rs"]
-    handlers --> dashboard["dashboard.rs"]
+    handlers --> dashboard["dashboard/"]
     handlers --> context["context.rs"]
     handlers --> chronicle["chronicle.rs"]
     handlers --> config["config_*.rs"]
@@ -310,7 +310,7 @@ graph TB
 
     core --> agent["agent.rs"]
     core --> builder["builder.rs"]
-    core --> lifecycle["lifecycle.rs"]
+    core --> lifecycle["lifecycle/"]
 
     soul --> actor["actor/"]
     soul --> reflector["reflector/"]

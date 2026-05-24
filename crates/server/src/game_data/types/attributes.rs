@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use super::status_component::DEFAULT_STATUS_MAX_VALUE;
+
 // 从 protocol 重新导出核心类型
 // 注意：AttributeComponent, StatusComponent, DerivedAttributeComponent 由 server crate 自定义实现
 pub use cyber_jianghu_protocol::{
@@ -182,7 +184,7 @@ impl StatusComponentExt for StatusComponent {
         for attr in self.collection.attributes.values_mut() {
             if let Some(decay) = attr.metadata.decay_per_tick {
                 let current = attr.get_value();
-                let new_value = (current as f32 + decay).floor().clamp(0.0, 255.0) as i32;
+                let new_value = (current as f32 + decay).floor().clamp(0.0, DEFAULT_STATUS_MAX_VALUE) as i32;
                 attr.set_value(new_value);
             }
         }
