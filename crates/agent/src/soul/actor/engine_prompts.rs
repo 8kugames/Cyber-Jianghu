@@ -194,8 +194,9 @@ impl super::CognitiveEngine {
         vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
 
         tracing::info!(
-            "[prompt-estimate] total~{}tokens | persona={} world_state={} actions={} memory={} skills={} other={}",
+            "[prompt-estimate] total~{}tokens (tools={}) | persona={} world_state={} actions={} memory={} skills={} other={}",
             estimate.total_tokens(),
+            params.use_tool_calling,
             estimate.persona,
             estimate.world_state,
             estimate.action_descriptions,

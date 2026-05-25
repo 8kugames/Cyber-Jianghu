@@ -506,6 +506,18 @@ impl super::super::Agent {
                 self.character_name(),
                 self.consecutive_llm_failures
             );
+
+            // 连续失败达到 chaos 阈值时，主动轮换模型（避免 sticky 到坏模型无法恢复）
+            if let Some(ref container) = self.actor_llm_container {
+                let llm = container.read().await;
+                if llm.force_rotate_model() {
+                    warn!(
+                        "LLM 连续失败 {} 次，主动轮换模型（agent={}）",
+                        self.consecutive_llm_failures,
+                        self.character_name(),
+                    );
+                }
+            }
         } else if !self.llm_chaos_active && was_chaos_active {
             info!(
                 "LLM chaos 模式解除: agent={}, LLM 恢复正常",
