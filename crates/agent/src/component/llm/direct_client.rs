@@ -646,6 +646,15 @@ impl DirectLlmClient {
         // 空内容检测：SSE 流正常完成但 delta content 为空（content filtering 等）
         // 当 LLM 返回 tool_calls 而非 content 时，不应视为空响应
         if content.trim().is_empty() && !has_tool_calls {
+            tracing::warn!(
+                "[地魂] 空响应诊断: has_tool_calls={}, tool_calls_count={}, content_len={}, has_real_usage={}, pt={}, ct={}",
+                has_tool_calls,
+                tool_calls.len(),
+                content.len(),
+                has_real,
+                pt,
+                ct,
+            );
             if pt > 0 {
                 record_token_usage(
                     &self.config.provider,
