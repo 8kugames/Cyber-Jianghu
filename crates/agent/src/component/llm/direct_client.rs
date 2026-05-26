@@ -620,7 +620,7 @@ impl DirectLlmClient {
         }
 
         let (pt, ct, has_real) = acc.token_stats();
-        let (content, tool_calls) = acc.into_parts();
+        let (content, tool_calls, reasoning_content) = acc.into_parts();
 
         // 诊断：检测 content 中的 UTF-8 mojibake（Latin-1 双重编码）
         if content.contains("Ã") || content.contains("Â") {
@@ -642,15 +642,18 @@ impl DirectLlmClient {
 
         // tool_calls 存在时不算空响应
         let has_tool_calls = !tool_calls.is_empty();
+        let has_reasoning = !reasoning_content.trim().is_empty();
 
         // 空内容检测：SSE 流正常完成但 delta content 为空（content filtering 等）
-        // 当 LLM 返回 tool_calls 而非 content 时，不应视为空响应
-        if content.trim().is_empty() && !has_tool_calls {
+        // 当 LLM 返回 tool_calls 或 reasoning_content 时，不应视为空响应
+        if content.trim().is_empty() && !has_tool_calls && !has_reasoning {
             tracing::warn!(
-                "[地魂] 空响应诊断: has_tool_calls={}, tool_calls_count={}, content_len={}, has_real_usage={}, pt={}, ct={}",
+                "[地魂] 空响应诊断: has_tool_calls={}, tool_calls_count={}, content_len={}, has_reasoning={}, reasoning_len={}, has_real_usage={}, pt={}, ct={}",
                 has_tool_calls,
                 tool_calls.len(),
                 content.len(),
+                has_reasoning,
+                reasoning_content.len(),
                 has_real,
                 pt,
                 ct,
@@ -722,10 +725,16 @@ impl DirectLlmClient {
             choices: vec![super::openai_types::OpenAIChoice {
                 message: super::openai_types::ChatMessage {
                     role: "assistant".to_string(),
-                    content: if content.trim().is_empty() {
-                        None
-                    } else {
+                    content: if !content.trim().is_empty() {
                         Some(content)
+                    } else if !reasoning_content.trim().is_empty() {
+                        tracing::info!(
+                            "[地魂] content 为空但 reasoning_content 存在 ({} chars)，使用 reasoning 作为响应",
+                            reasoning_content.len()
+                        );
+                        Some(reasoning_content)
+                    } else {
+                        None
                     },
                     tool_calls: if has_tool_calls {
                         Some(tool_calls)

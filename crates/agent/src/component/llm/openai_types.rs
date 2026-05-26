@@ -171,6 +171,10 @@ pub(crate) struct OpenAIDelta {
     /// 流式 tool_calls 增量（首个 chunk 含 id/name，后续 chunk 含 arguments 片段）
     #[serde(default)]
     pub tool_calls: Option<Vec<super::tool_types::StreamToolCallDelta>>,
+    /// 推理/思考内容（SenseNova、DeepSeek 等模型在 thinking 模式下返回）
+    /// 这些 token 计入 completion_tokens 但不进入 content 字段
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
 }
 
 #[cfg(test)]
