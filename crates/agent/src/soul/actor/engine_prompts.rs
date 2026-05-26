@@ -153,7 +153,7 @@ impl super::CognitiveEngine {
             工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
             你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n\n\
             重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
-            action_type 只能填\"可用动作\"列表中的名称（说话、移动、进食等），绝对不能填工具名称。\n".to_string()
+            action_type 只能填\"可用动作\"列表中的名称，绝对不能填工具名称。\n".to_string()
         } else {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
         };
@@ -185,7 +185,20 @@ impl super::CognitiveEngine {
         vars.insert("persona".to_string(), persona_desc.to_string());
         vars.insert("world_state_section".to_string(), world_state_section);
         vars.insert("memory_section".to_string(), memory_section);
-        vars.insert("dialogue_section".to_string(), String::new());
+        let dialogue_section_value = self
+            .dialogue_context
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        // 无活跃对话时不注入空标题（避免 "## 活跃对话" 后无内容的误导）
+        vars.insert(
+            "dialogue_section".to_string(),
+            if dialogue_section_value.is_empty() {
+                "（当前无活跃对话）".to_string()
+            } else {
+                dialogue_section_value
+            },
+        );
         vars.insert("summary_context".to_string(), summary_context);
         vars.insert("action_descriptions".to_string(), action_descriptions);
         vars.insert("action_field_hints".to_string(), String::new());
@@ -333,7 +346,8 @@ impl super::CognitiveEngine {
         }
         let mut s = String::from(
             "## 可用动作 (查询详情: get_action_detail(action_name))\n\
-             以下是你能执行的动作。action_type 必须是下面的名称，不能是工具名。\n\
+             你只能执行以下列表中的动作，action_type 必须严格等于其中某个名称。\n\
+             工具名（query_world/get_action_detail/list_skills/skill_view）不是动作。\n\
              需要了解某动作的具体字段和效果时，调用 get_action_detail。\n\n",
         );
         for action in actions {

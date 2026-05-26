@@ -1,6 +1,9 @@
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tracing::{info, warn};
 
 use super::super::reconnect::save_character_config_to_fs;
+use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::memory::backend::MemoryBackend;
 
 impl super::super::Agent {
@@ -14,6 +17,11 @@ impl super::super::Agent {
             let mut guard = dm.write().await;
             guard.cleanup_timed_out(world_state.tick_id);
         }
+        // 延迟初始化: game_rules 在 build 之后才从 Server 到达
+        if self.immediate_handler.is_none() {
+            self.try_init_immediate_handler().await;
+        }
+
         if let Some(ref handler) = self.immediate_handler {
             handler.set_tick_id(world_state.tick_id).await;
             let game_day = Self::compute_game_day(
@@ -23,6 +31,7 @@ impl super::super::Agent {
                     .as_ref()
                     .and_then(|g| g.calendar.as_ref()),
             );
+            handler.set_game_day(game_day).await;
 
             let need_spawn = match self.session_triage_handle {
                 None => true,
@@ -30,7 +39,6 @@ impl super::super::Agent {
             };
             if need_spawn {
                 let prev_game_day = self.session_triage_game_day.take();
-                handler.set_game_day(game_day).await;
                 self.session_triage_game_day = Some(game_day);
                 if let Some(old_handle) = self.session_triage_handle.take() {
                     match old_handle.await {
@@ -204,6 +212,36 @@ impl super::super::Agent {
                         warn!("Failed to save character last_connected time: {}", e);
                     }
                 });
+            }
+        }
+    }
+
+    /// 延迟初始化 ImmediateEventHandler（game_rules 配置到达后创建）
+    async fn try_init_immediate_handler(&mut self) {
+        let game_rules = match self.client.game_rules().await {
+            Some(gr) => gr,
+            None => return,
+        };
+        let immediate_events = match game_rules.immediate_events {
+            Some(ref ie) => ie,
+            None => return,
+        };
+        let triage_config = match immediate_events.event_triage {
+            Some(ref cfg) => cfg,
+            None => return,
+        };
+        if triage_config.pre_filter.fallback_thresholds().is_err() {
+            warn!("event_triage.pre_filter 阈值无效，跳过延迟初始化");
+            return;
+        }
+        let notify = Arc::new(Notify::new());
+        match EventStore::open(&self.data_dir, triage_config, notify) {
+            Ok(store) => {
+                let handler = Arc::new(ImmediateEventHandler::new(Arc::new(store)));
+                self.set_immediate_handler(handler);
+            }
+            Err(e) => {
+                warn!("EventStore 延迟初始化失败: {}", e);
             }
         }
     }
