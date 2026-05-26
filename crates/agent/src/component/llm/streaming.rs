@@ -26,6 +26,8 @@ pub enum StreamChunk {
     Delta(String),
     /// tool_calls 增量（SSE delta.tool_calls 中的单项）
     ToolCallDelta(super::tool_types::StreamToolCallDelta),
+    /// 推理/思考内容增量（SenseNova、DeepSeek 等模型的 reasoning_content）
+    ReasoningDelta(String),
     /// 流结束（含 token 用量）
     Done {
         prompt_tokens: u64,
@@ -129,13 +131,11 @@ impl Stream for UsageTrackingStream {
 /// 将 StreamChunk 累积为完整响应文本
 pub struct StreamAccumulator {
     content: String,
+    reasoning_content: String,
     prompt_tokens: u64,
     completion_tokens: u64,
-    /// 是否已收到实际 usage 数据
     has_real_usage: bool,
-    /// 流式 tool_calls 累积器
     tool_call_acc: super::tool_types::StreamToolCallAccumulator,
-    /// 是否收到过 tool_calls delta
     has_tool_calls: bool,
 }
 
@@ -149,6 +149,7 @@ impl StreamAccumulator {
     pub fn new() -> Self {
         Self {
             content: String::new(),
+            reasoning_content: String::new(),
             prompt_tokens: 0,
             completion_tokens: 0,
             has_real_usage: false,
@@ -161,6 +162,7 @@ impl StreamAccumulator {
     pub fn push(&mut self, chunk: StreamChunk) {
         match chunk {
             StreamChunk::Delta(text) => self.content.push_str(&text),
+            StreamChunk::ReasoningDelta(text) => self.reasoning_content.push_str(&text),
             StreamChunk::ToolCallDelta(delta) => {
                 self.has_tool_calls = true;
                 self.tool_call_acc.push(&delta);
@@ -225,8 +227,14 @@ impl StreamAccumulator {
         self.tool_call_acc.into_tool_calls()
     }
 
-    /// 同时消费 content 和 tool_calls
-    pub fn into_parts(self) -> (String, Vec<super::tool_types::ToolCall>) {
+    /// 同时消费 content、tool_calls 和 reasoning_content
+    pub fn into_parts(self) -> (String, Vec<super::tool_types::ToolCall>, String) {
+        let tool_calls = self.tool_call_acc.into_tool_calls();
+        (self.content, tool_calls, self.reasoning_content)
+    }
+
+    /// 消费 content 和 tool_calls（不含 reasoning）
+    pub fn into_content_and_tool_calls(self) -> (String, Vec<super::tool_types::ToolCall>) {
         let tool_calls = self.tool_call_acc.into_tool_calls();
         (self.content, tool_calls)
     }
@@ -301,6 +309,12 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                                     has_content = true;
                                     completion_content.push_str(content);
                                     yield Ok(StreamChunk::Delta(content.clone()));
+                                }
+                                if let Some(ref reasoning) = choice.delta.reasoning_content
+                                    && !reasoning.is_empty()
+                                {
+                                    has_content = true;
+                                    yield Ok(StreamChunk::ReasoningDelta(reasoning.clone()));
                                 }
                                 if let Some(ref tool_calls) = choice.delta.tool_calls {
                                     for tc in tool_calls {

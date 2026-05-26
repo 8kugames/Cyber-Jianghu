@@ -819,6 +819,9 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 // Fallback LLM 客户端（403/超时自动降级）
 // ============================================================================
 
+/// 429 disable 的恢复间隔（1 小时）
+const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
+
 /// Fallback LLM 客户端
 ///
 /// 主模型 403（额度耗尽）或超时时，自动切换到备用模型。
@@ -836,8 +839,8 @@ pub struct FallbackLlmClient {
     idle_counts: Arc<std::sync::Mutex<Vec<usize>>>,
     /// 旋转阈值
     idle_threshold: usize,
-    /// 标记为不可用的模型索引集合
-    disabled_models: Arc<std::sync::Mutex<std::collections::HashSet<usize>>>,
+    /// 标记为不可用的模型索引 + disable 时间戳
+    disabled_models: Arc<std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>>,
 }
 
 impl FallbackLlmClient {
@@ -855,7 +858,7 @@ impl FallbackLlmClient {
             active: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             idle_counts: Arc::new(std::sync::Mutex::new(vec![0; count])),
             idle_threshold: 5, // 默认阈值
-            disabled_models: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            disabled_models: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -895,7 +898,7 @@ impl FallbackLlmClient {
 
         if count >= self.idle_threshold {
             // 标记当前模型为不可用
-            disabled.insert(current_idx);
+            disabled.insert(current_idx, std::time::Instant::now());
             tracing::warn!(
                 "LLM 模型 #{} 连续 idle {} 次，达到阈值 {}，标记为不可用",
                 current_idx,
@@ -921,7 +924,7 @@ impl FallbackLlmClient {
 
         for offset in 1..=self.clients.len() {
             let idx = (start + offset) % self.clients.len();
-            if !disabled.contains(&idx) {
+            if !disabled.contains_key(&idx) {
                 let old = self.active.load(std::sync::atomic::Ordering::Relaxed);
                 self.active.store(idx, std::sync::atomic::Ordering::Relaxed);
                 tracing::warn!("LLM idle 旋转：模型 #{} → #{} (跳过不可用模型)", old, idx);
@@ -930,6 +933,44 @@ impl FallbackLlmClient {
         }
 
         tracing::error!("所有 LLM 模型都已标记为不可用，保持当前模型");
+    }
+
+    /// 标记指定模型为不可用（429 circuit breaker 等）
+    fn disable_model(&self, idx: usize, reason: &str) {
+        let mut disabled = self.disabled_models.lock().expect("lock poisoned");
+        if disabled.insert(idx, std::time::Instant::now()).is_none() {
+            tracing::warn!(
+                "LLM 模型 #{} 标记为不可用 (原因: {})，已禁用模型: {:?}",
+                idx,
+                reason,
+                disabled.keys().collect::<Vec<_>>()
+            );
+            drop(disabled);
+            self.rotate_to_next_available();
+        }
+    }
+
+    fn reenable_expired(&self) {
+        let mut disabled = self.disabled_models.lock().expect("lock poisoned");
+        let now = std::time::Instant::now();
+        let expired: Vec<usize> = disabled
+            .iter()
+            .filter(|&(_, ts)| now.duration_since(*ts).as_secs() >= RATE_LIMIT_BACKOFF_SECS)
+            .map(|(&idx, _)| idx)
+            .collect();
+
+        for idx in &expired {
+            disabled.remove(idx);
+        }
+        drop(disabled);
+
+        if !expired.is_empty() {
+            tracing::info!(
+                "429 circuit breaker 恢复: 模型 {:?} 已重新激活 (冷却期 {}s 已过)",
+                expired,
+                RATE_LIMIT_BACKOFF_SECS
+            );
+        }
     }
 
     /// 重置当前模型的 idle 计数（当模型返回非 idle 结果时调用）
@@ -999,6 +1040,7 @@ impl FallbackLlmClient {
         F: Fn(Arc<dyn LlmClient>) -> Fut,
         Fut: std::future::Future<Output = Result<String>>,
     {
+        self.reenable_expired();
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
         let mut last_err = None;
 
@@ -1029,8 +1071,10 @@ impl FallbackLlmClient {
                             "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
                         );
                     }
+                    if err_msg.contains("429") {
+                        self.disable_model(idx, "429 rate limit");
+                    }
                     if !should {
-                        // 非 fallback 类错误（如 JSON 解析失败），直接返回
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -1055,6 +1099,7 @@ impl FallbackLlmClient {
         F: Fn(Arc<dyn LlmClient>) -> Fut,
         Fut: std::future::Future<Output = Result<super::streaming::LlmStream>>,
     {
+        self.reenable_expired();
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
         let mut last_err = None;
 
@@ -1082,6 +1127,10 @@ impl FallbackLlmClient {
                         should,
                         e
                     );
+                    let err_msg = format!("{:#}", &e);
+                    if err_msg.contains("429") {
+                        self.disable_model(idx, "429 rate limit");
+                    }
                     if !should {
                         return Err(e);
                     }
