@@ -449,7 +449,7 @@ const DEFAULT_RECONNECT_DELAY_SECS: u64 = 5;
 const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;
 const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
 const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
-const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 3;
+pub(crate) const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 5;
 const DEFAULT_ENABLE_STREAMING: bool = true;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -688,7 +688,7 @@ fn default_working_memory_size() -> usize {
 }
 
 fn default_episodic_threshold() -> f32 {
-    0.5
+    0.3
 }
 
 fn default_forgetting_interval_ticks() -> i64 {
@@ -700,7 +700,7 @@ impl Default for MemoryConfig {
         Self {
             enabled: true,
             working_memory_size: 20,
-            episodic_threshold: 0.5,
+            episodic_threshold: 0.3,
             forgetting_interval_ticks: 84,
         }
     }

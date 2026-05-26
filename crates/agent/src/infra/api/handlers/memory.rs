@@ -29,7 +29,7 @@ pub(crate) async fn get_recent_memory_handler(
 
     let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
-    let memories = service.get_recent();
+    let memories = service.get_recent().await;
 
     Json(memories_to_json_response(&memories)).into_response()
 }

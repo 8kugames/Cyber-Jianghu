@@ -6,6 +6,7 @@
 // ============================================================================
 
 use anyhow::Result;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, broadcast};
@@ -138,6 +139,9 @@ pub struct Agent {
     /// 优先于 character_config.name，解决本地无 character.yaml 时显示"(未创建)"的问题
     pub(crate) server_assigned_name: Option<String>,
 
+    /// 角色数据目录（SQLite 数据库存放路径）
+    pub(crate) data_dir: PathBuf,
+
     /// 即时事件处理器（处理 ImmediateEvent）
     pub(crate) immediate_handler: Option<Arc<ImmediateEventHandler>>,
 
@@ -226,6 +230,7 @@ impl Agent {
             character_config: None,
             cognitive_engine: None,
             server_assigned_name: None,
+            data_dir: PathBuf::from("."),
             immediate_handler: None,
             session_triage_handle: None,
             session_triage_game_day: None,

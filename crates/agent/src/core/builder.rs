@@ -332,6 +332,7 @@ impl AgentBuilder {
             let config = self.memory_config.unwrap_or_else(|| MemoryManagerConfig {
                 agent_id,
                 db_dir: self.data_dir.clone(),
+                episodic_threshold: self.config.memory.episodic_threshold,
                 ..Default::default()
             });
 
@@ -397,6 +398,7 @@ impl AgentBuilder {
             http_api_state: self.http_api_state,
             device_config: self.device_config,
             character_config: self.character_config,
+            data_dir: self.data_dir,
             cognitive_engine: self.cognitive_engine,
             server_assigned_name: None,
             immediate_handler: self.immediate_handler,

@@ -252,6 +252,36 @@ impl ReflectorSoul {
             return Ok(());
         };
 
+        if let Some(target_id) = request
+            .intent
+            .action_data
+            .as_ref()
+            .and_then(|d| d.get("target_agent_id"))
+            .and_then(|v| v.as_str())
+        {
+            let parsed = uuid::Uuid::parse_str(target_id).map_err(|_| {
+                format!(
+                    "target_agent_id '{}' 不是合法的 UUID，请使用附近实体中提供的精确 ID",
+                    target_id
+                )
+            })?;
+
+            let nearby_ids: Vec<uuid::Uuid> =
+                world_state.entities.iter().map(|e| e.id).collect();
+            if !nearby_ids.contains(&parsed) {
+                let nearby_names: Vec<String> = world_state
+                    .entities
+                    .iter()
+                    .map(|e| format!("{} ({})", e.name, e.id))
+                    .collect();
+                return Err(format!(
+                    "目标 {} 不在附近实体中。当前附近的角色: [{}]",
+                    target_id,
+                    nearby_names.join(", ")
+                ));
+            }
+        }
+
         let (available_item_ids, reachable_node_ids) = extract_ids_from_world_state(world_state);
         let context = RuleValidationContext {
             intent: request.intent.clone(),
