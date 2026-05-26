@@ -8,7 +8,7 @@ use anyhow::Result;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::component::memory::backend::MemoryBackend;
+use crate::component::memory::backend::{MemoryBackend, SearchableBackend};
 use crate::component::memory::{MemoryEntry, MemoryManager};
 
 /// 记忆服务
@@ -22,9 +22,13 @@ impl<'a> MemoryService<'a> {
         Self { manager }
     }
 
-    /// 获取近期记忆（工作记忆）
-    pub fn get_recent(&self) -> Vec<MemoryEntry> {
-        self.manager.working().to_vec()
+    /// 获取近期记忆（情景记忆叙事摘要）
+    pub async fn get_recent(&self) -> Vec<MemoryEntry> {
+        self.manager
+            .episodic()
+            .get_top_by_importance(20)
+            .await
+            .unwrap_or_default()
     }
 
     /// 搜索归档记忆

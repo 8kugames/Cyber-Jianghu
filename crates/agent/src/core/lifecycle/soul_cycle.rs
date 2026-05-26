@@ -75,9 +75,20 @@ impl super::super::Agent {
         // tick 级 LLM 失败计数器（优化模式下使用）
         let mut tick_llm_fail_count: u32 = 0;
 
+        // 注入对话上下文到 CognitiveEngine（供 build_prompt 的 {dialogue_section} 使用）
+        if let Some(ref engine) = self.cognitive_engine {
+            let dialogue_ctx = if let Some(ref dm) = self.dialogue_manager {
+                let guard = dm.read().await;
+                guard.get_active_sessions_context()
+            } else {
+                String::new()
+            };
+            engine.set_dialogue_context(dialogue_ctx);
+        }
+
         for attempt in 0..=max_retries {
             // 5a. 人魂 (ActorSoul) 决策 — 直连 WorldState，输出结构化 Intent
-            let (raw_intent, _cognitive_chain) = {
+            let (raw_intent, cognitive_chain) = {
                 let tick_id = world_state.tick_id;
                 let agent_id = world_state.agent_id.unwrap_or_default();
                 let decision_future = async {
@@ -154,7 +165,7 @@ impl super::super::Agent {
                 } else {
                     vec![raw_intent.clone()]
                 };
-                if let Some(ref chain) = _cognitive_chain
+                if let Some(ref chain) = cognitive_chain
                     && let Some(ref multi) = chain.multi_intents
                 {
                     for i in multi.iter().take(max_per_tick.saturating_sub(1)) {
@@ -220,7 +231,7 @@ impl super::super::Agent {
 
             // 重要记忆固化
             #[allow(clippy::collapsible_if)]
-            if let Some(ref chain) = _cognitive_chain
+            if let Some(ref chain) = cognitive_chain
                 && chain.should_remember == Some(true)
                 && let Some(ref content) = chain.memory_content
                 && let Some(ref mm) = self.memory_manager
@@ -241,6 +252,7 @@ impl super::super::Agent {
 
             // 逐 intent 审查 + self-correction（优化模式）
             for intent in all_raw_intents {
+                let intent_for_summary = intent.clone();
                 match self
                     .validate_with_reflector(intent, world_state, graded_config.as_ref())
                     .await?
@@ -250,6 +262,12 @@ impl super::super::Agent {
                         layers,
                         narrative,
                     } => {
+                        // 审查通过后推入 summary window（validated=true）
+                        if let Some(ref chain) = cognitive_chain
+                            && let Some(ref engine) = self.cognitive_engine
+                        {
+                            engine.push_summary_to_window(chain, &approved, true);
+                        }
                         batch_layers = layers;
                         batch_narrative = narrative;
                         approved_intents.push(approved);
@@ -258,6 +276,12 @@ impl super::super::Agent {
                         reason,
                         layers,
                     } => {
+                        // 驳回的 intent 记录到 action_history（validated=false）
+                        if let Some(ref chain) = cognitive_chain
+                            && let Some(ref engine) = self.cognitive_engine
+                        {
+                            engine.push_summary_to_window(chain, &intent_for_summary, false);
+                        }
                         batch_layers = layers;
                         let rejection_reason = reason.clone();
                         self.set_rejection_feedback(reason.clone());
@@ -289,6 +313,12 @@ impl super::super::Agent {
                                             layers: l2,
                                             narrative: n2,
                                         } => {
+                                            // self-correct 审查通过后推入 summary window
+                                            if let Some(ref chain) = cognitive_chain
+                                                && let Some(ref engine) = self.cognitive_engine
+                                            {
+                                                engine.push_summary_to_window(chain, &approved, true);
+                                            }
                                             batch_layers = l2;
                                             batch_narrative = n2;
                                             approved_intents.push(approved);

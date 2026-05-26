@@ -155,6 +155,8 @@ pub struct CognitiveEngine {
     pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
+    /// 当前 tick 的对话上下文（由 lifecycle 注入，build_prompt 读取）
+    pub(super) dialogue_context: std::sync::RwLock<String>,
     /// 对话历史（长窗口，SQLite 持久化）
     conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
     /// Prompt 模板配置（从 YAML 加载，启动时 fail-fast）
@@ -202,7 +204,8 @@ impl CognitiveEngine {
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
-            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(3)),
+            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(crate::config::DEFAULT_NARRATIVE_WINDOW_SIZE)),
+            dialogue_context: std::sync::RwLock::new(String::new()),
             conversation_history: None,
             prompt_template,
             runtime_prompt_template: std::sync::RwLock::new(None),
@@ -290,6 +293,7 @@ impl CognitiveEngine {
             enable_streaming: true,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
             summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(window_size)),
+            dialogue_context: std::sync::RwLock::new(String::new()),
             conversation_history: None,
             prompt_template,
             runtime_prompt_template: std::sync::RwLock::new(None),
@@ -1045,8 +1049,6 @@ impl CognitiveEngine {
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
-        self.push_summary_to_window(&chain, &intents[0]);
-
         info!(
             "[{}-{}] 人魂直连认知完成，耗时 {}ms，决策: {} ({} 个 action)",
             agent_name,
@@ -1202,8 +1204,6 @@ impl CognitiveEngine {
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
-        self.push_summary_to_window(&chain, &intent);
-
         info!(
             "[{}-{}] 旧式认知完成，耗时 {}ms",
             agent_name, tick_id, chain.duration_ms
@@ -1219,15 +1219,18 @@ impl CognitiveEngine {
     // ========================================================================
 
     /// 将认知结果添加到滑动上下文窗口
-    fn push_summary_to_window(&self, chain: &CognitiveChain, intent: &Intent) {
-        let decision = intent.action_type.as_str().to_string();
+    ///
+    /// 由 lifecycle 在 ReflectorSoul 审查通过后调用（validated=true）。
+    /// `validated=false` 用于记录被驳回的 intent（不参与行为重复检测）。
+    pub fn push_summary_to_window(&self, chain: &CognitiveChain, intent: &Intent, validated: bool) {
+        let decision = self.enrich_decision(intent);
 
         let perception = chain
             .get_stage(CognitiveStage::Perception)
             .map(|s| {
                 s.content
                     .chars()
-                    .take(self.truncation("summary_window", 50))
+                    .take(self.truncation("summary_window_perception", 30))
                     .collect()
             })
             .unwrap_or_default();
@@ -1237,7 +1240,7 @@ impl CognitiveEngine {
             .map(|s| {
                 s.content
                     .chars()
-                    .take(self.truncation("summary_window", 50))
+                    .take(self.truncation("summary_window_motivation", 20))
                     .collect()
             })
             .unwrap_or_default();
@@ -1248,15 +1251,30 @@ impl CognitiveEngine {
             motivation,
             decision,
             outcome: "执行中".to_string(),
+            validated,
         };
 
-        self.push_summary(summary);
+        self.push_summary(summary, validated);
+    }
+
+    /// 为携带 content 字段的 action 从 action_data 提取内容摘要
+    fn enrich_decision(&self, intent: &Intent) -> String {
+        let action_type = intent.action_type.as_str();
+
+        if let Some(data) = intent.action_data.as_ref()
+            && let Some(content) = data.get("content").and_then(|v| v.as_str())
+        {
+            let limit = self.truncation("summary_window_decision", 40);
+            let content_preview: String = content.chars().take(limit).collect();
+            return format!("{}: \"{}\"", action_type, content_preview);
+        }
+        action_type.to_string()
     }
 
     /// 添加摘要到滑动窗口
-    pub fn push_summary(&self, summary: NarrativeSummary) {
+    pub fn push_summary(&self, summary: NarrativeSummary, validated: bool) {
         if let Ok(mut window) = self.summary_window.write() {
-            window.push(summary);
+            window.push(summary, validated);
         }
     }
 
@@ -1271,6 +1289,13 @@ impl CognitiveEngine {
     pub fn record_outcome(&self, record: crate::component::memory::OutcomeRecord) {
         if let Some(ref mem) = self.outcome_memory {
             mem.record(record);
+        }
+    }
+
+    /// 设置当前 tick 的对话上下文（由 lifecycle 每轮注入）
+    pub fn set_dialogue_context(&self, context: String) {
+        if let Ok(mut guard) = self.dialogue_context.write() {
+            *guard = context;
         }
     }
 

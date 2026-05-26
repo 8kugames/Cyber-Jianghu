@@ -49,7 +49,7 @@ impl Default for MemoryManagerConfig {
             agent_id: Uuid::nil(),
             db_dir: PathBuf::from("."),
             working_memory_size: 20,
-            episodic_threshold: 0.5,
+            episodic_threshold: 0.3,
             ebbinghaus_config: EbbinghausConfig::default(),
             narrative_min_events: 1,
         }
@@ -284,9 +284,10 @@ impl MemoryManager {
     }
 
     /// 构建 LLM 上下文
+    ///
+    /// 只展示 episodic 记忆（LLM 叙事摘要），不暴露 working memory 流水账。
+    /// working memory 保留供 outcome memory / summary window 等内部使用。
     pub async fn build_llm_context(&self) -> String {
-        let working_context = self.working.build_context();
-
         // 获取重要的情景记忆
         let episodic_memories = self
             .episodic
@@ -295,37 +296,24 @@ impl MemoryManager {
             .unwrap_or_default();
 
         let episodic_summary = if episodic_memories.is_empty() {
-            "暂无重要记忆".to_string()
+            return String::new();
         } else {
             episodic_memories
                 .iter()
                 .enumerate()
                 .map(|(i, m)| {
-                    // event_type 标注来源，帮助 LLM 区分"听闻" vs "直接观察"
-                    let source_tag = match m.event_type.as_str() {
-                        "public_message" | "social_interaction" => "[听闻]",
-                        "action_result" | "state_change" => "[观察]",
-                        "environmental_change" => "[环境]",
-                        "death_notification" => "[系统]",
-                        _ => "",
-                    };
                     format!(
-                        "{}. [Tick {}] {} {} (重要性: {:.1})",
+                        "{}. [Tick {}] {}",
                         i + 1,
                         m.tick_id,
-                        source_tag,
                         m.content,
-                        m.importance_score
                     )
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
         };
 
-        format!(
-            "# 最近事件（工作记忆）\n{}\n\n# 重要记忆（情景记忆）\n{}",
-            working_context, episodic_summary
-        )
+        format!("### 近期记忆\n{}", episodic_summary)
     }
 
     /// 获取记忆统计
@@ -396,7 +384,7 @@ mod tests {
     fn test_config_default() {
         let config = MemoryManagerConfig::default();
         assert_eq!(config.working_memory_size, 20);
-        assert_eq!(config.episodic_threshold, 0.5);
+        assert_eq!(config.episodic_threshold, 0.3);
     }
 
     #[tokio::test]
@@ -459,17 +447,32 @@ mod tests {
 
         let mut manager = MemoryManager::new(config).unwrap();
 
-        let events = vec![WorldEvent {
+        // SystemNotification importance=0.2 < threshold=0.3 → 不进入 episodic
+        let low_events = vec![WorldEvent {
             event_type: WorldEventType::SystemNotification,
             tick_id: 1,
             description: "你吃了馒头".to_string(),
             metadata: json!({}),
         }];
+        manager.process_events(&low_events, None).await.unwrap();
 
-        manager.process_events(&events, None).await.unwrap();
+        // 无 episodic 记忆时应返回空字符串（不再展示 working memory 流水账）
+        let context = manager.build_llm_context().await;
+        assert!(context.is_empty(), "低价值事件不应出现在 LLM 上下文中");
+
+        // PublicMessage importance=0.7 ≥ threshold=0.3 → 进入 episodic
+        let high_events = vec![WorldEvent {
+            event_type: WorldEventType::PublicMessage,
+            tick_id: 2,
+            description: "张三向你问好".to_string(),
+            metadata: json!({}),
+        }];
+        manager.process_events(&high_events, None).await.unwrap();
 
         let context = manager.build_llm_context().await;
-        assert!(context.contains("你吃了馒头"));
-        assert!(context.contains("最近事件"));
+        assert!(
+            !context.is_empty(),
+            "高价值事件应产生 episodic 记忆并出现在 LLM 上下文中"
+        );
     }
 }

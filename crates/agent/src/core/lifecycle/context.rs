@@ -5,7 +5,7 @@
 // 从 WorldState 构建完整的记忆上下文：
 //   - 消费 rejection 反馈 + 即时事件
 //   - 处理世界事件 + 社交事件 + 遗忘
-//   - 拼接对话上下文 + 交易提示 + triage 事件
+//   - 拼接交易提示 + triage 事件
 //
 // 调用路径: run() → build_tick_memory_context() → (memory_context, trade_hints)
 // ============================================================================
@@ -79,20 +79,8 @@ impl super::super::Agent {
             warn!("Failed to run forgetting mechanism: {}", e);
         }
 
-        // 4. 构建增强的世界状态（包含记忆上下文 + 对话上下文）
+        // 4. 构建增强的世界状态（包含记忆上下文）
         let mut memory_context = self.get_memory_context().await;
-
-        // 4.x 拼接对话上下文
-        let dialogue_section = if let Some(ref dm) = self.dialogue_manager {
-            let guard = dm.read().await;
-            guard.get_active_sessions_context()
-        } else {
-            String::new()
-        };
-
-        if !dialogue_section.is_empty() {
-            memory_context = format!("{}\n\n# 活跃对话\n{}\n", memory_context, dialogue_section);
-        }
 
         // 4.1 交易议价提示（经济引导，非生存干预）
         // 附近有其他人且有银两时注入交易建议（关系感知）
