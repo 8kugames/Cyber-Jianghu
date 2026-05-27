@@ -190,6 +190,39 @@ templates:
     truncation:
       max_items: 5
 
+  # 游戏日结束：江湖日记模板
+  # SessionTriageEngine 在游戏日切换时用此模板生成叙事性每日摘要
+  # 变量：{agent_name}, {date}, {personality}, {memories}, {relationships}, {world_context}, {events}
+  daily_diary:
+    required_sections:
+      - system
+    sections:
+      system: |
+        你是{agent_name}的江湖日记执笔人。{date}，今日将尽，请为{agent_name}撰写今日的江湖日记。
+
+        今日经历（记忆）：
+        {memories}
+
+        社交关系：
+        {relationships}
+
+        世界环境：
+        {world_context}
+
+        江湖纪事：
+        {events}
+
+        写作要求：
+        1. 以"我"的第一人称视角
+        2. 语言古朴典雅，武侠风格，体现{personality}
+        3. 300-500字
+        4. 涵盖：今日做了什么、遇到了谁、有何感悟、关系变化
+        5. 不要罗列事件清单，要叙事性反思
+
+        输出 JSON：
+        {{"diary": "..."}}
+    truncation: {}
+
 # 记忆叙事合成配置（data-driven）
 # PromptTemplateConfig 顶级字段，与 templates 同级
 memory_narrative:
