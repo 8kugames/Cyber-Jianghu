@@ -189,6 +189,7 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                             graded_config,
                             consecutive_follow_count: 0,
                             max_consecutive_follow,
+                            recent_same_type_decisions: vec![],
                         },
                     };
 

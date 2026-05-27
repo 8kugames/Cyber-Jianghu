@@ -450,6 +450,8 @@ const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;
 const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
 const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
 pub(crate) const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 5;
+/// 语义去重历史窗口：比较最近 N 条同类 intent 的语义相似度
+pub(crate) const DEFAULT_SEMANTIC_DEDUP_HISTORY: usize = 3;
 const DEFAULT_ENABLE_STREAMING: bool = true;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

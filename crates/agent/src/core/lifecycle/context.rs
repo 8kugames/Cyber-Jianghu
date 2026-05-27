@@ -42,23 +42,6 @@ impl super::super::Agent {
             }
         }
 
-        // 1.7 消费即时事件缓冲区（ImmediateEvent 即时写入工作记忆）
-        let immediate_events = {
-            let mut guard = self.immediate_event_buffer.lock().await;
-            if guard.is_empty() {
-                Vec::new()
-            } else {
-                guard.drain(..).collect()
-            }
-        };
-        if !immediate_events.is_empty() {
-            debug!("消费 {} 个即时事件到工作记忆", immediate_events.len());
-            // 即时事件不经过叙事合成（直接工作记忆）
-            if let Err(e) = self.process_events(&immediate_events, None).await {
-                warn!("即时事件写入记忆失败: {}", e);
-            }
-        }
-
         // 2. 处理事件并更新记忆（叙事合成）
         // 先 clone Arc 让 borrow 立即结束，避免与后续的 &mut self 冲突
         let cognitive_engine_ref = self.cognitive_engine.as_ref().cloned();

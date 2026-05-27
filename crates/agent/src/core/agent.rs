@@ -153,9 +153,6 @@ pub struct Agent {
     /// Server 验证错误反馈通道（Fn callback 写入，主循环消费）
     pub(crate) server_error_feedback: Arc<Mutex<Option<String>>>,
 
-    /// 即时事件缓冲区（Fn callback 写入，主循环消费写入工作记忆）
-    pub(crate) immediate_event_buffer: Arc<Mutex<Vec<cyber_jianghu_protocol::WorldEvent>>>,
-
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
 
@@ -235,7 +232,6 @@ impl Agent {
             session_triage_handle: None,
             session_triage_game_day: None,
             server_error_feedback: Arc::new(Mutex::new(None)),
-            immediate_event_buffer: Arc::new(Mutex::new(Vec::new())),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: None,

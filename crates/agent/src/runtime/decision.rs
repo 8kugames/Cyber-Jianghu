@@ -88,10 +88,30 @@ pub fn cognitive_decision_with_chain(
                             "Tick {} @ {}",
                             world_state.tick_id, &world_state.location.node_id,
                         );
+                        // assistant 字段携带实际内容，让 LLM 在对话历史中看到自己说过什么
+                        // 截断防止 token 膨胀（200 中文字 ≈ 300 tokens，8 轮 ≈ 2400 tokens ≈ 7.5% 窗口）
+                        const ASSISTANT_SUMMARY_CHAR_LIMIT: usize = 200;
+                        let assistant_summary = match final_intent
+                            .action_data
+                            .as_ref()
+                            .and_then(|d| d.get("content"))
+                            .and_then(|v| v.as_str())
+                        {
+                            Some(content) if !content.is_empty() => format!(
+                                "{}: {}",
+                                final_intent.action_type,
+                                content
+                                    .chars()
+                                    .filter(|c| !c.is_control())
+                                    .take(ASSISTANT_SUMMARY_CHAR_LIMIT)
+                                    .collect::<String>()
+                            ),
+                            _ => final_intent.action_type.to_string(),
+                        };
                         engine.push_conversation_turn(
                             world_state.tick_id,
                             ws_summary,
-                            final_intent.action_type.to_string(),
+                            assistant_summary,
                         );
 
                         // CognitiveValidator: 验证认知链质量

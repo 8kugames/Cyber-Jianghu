@@ -405,7 +405,6 @@ impl AgentBuilder {
             session_triage_handle: None,
             session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
-            immediate_event_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             consecutive_idle_count: 0,
             consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,

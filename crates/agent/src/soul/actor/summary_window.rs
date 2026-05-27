@@ -99,6 +99,30 @@ impl NarrativeSummaryWindow {
         self.summaries.iter().collect()
     }
 
+    /// 获取最近 N 条同 action_type 的 validated 摘要的 full_decision
+    ///
+    /// 用于语义去重：提取最近同类意图的完整内容，供 LLM 比较语义相似度。
+    /// 匹配规则：full_decision 以 "action_type:" 或 "action_type：" 开头，
+    /// 或 full_decision 等于 action_type（无 content 的纯动作）。
+    pub fn get_recent_same_type_decisions(
+        &self,
+        action_type: &str,
+        limit: usize,
+    ) -> Vec<String> {
+        self.summaries
+            .iter()
+            .rev()
+            .filter(|s| s.validated)
+            .filter(|s| {
+                s.full_decision == action_type
+                    || s.full_decision.starts_with(&format!("{}:", action_type))
+                    || s.full_decision.starts_with(&format!("{}：", action_type))
+            })
+            .take(limit)
+            .map(|s| s.full_decision.clone())
+            .collect()
+    }
+
     /// 清空窗口
     pub fn clear(&mut self) {
         self.summaries.clear();
@@ -250,8 +274,10 @@ pub struct NarrativeSummary {
     pub perception: String,
     /// 动机摘要
     pub motivation: String,
-    /// 决策摘要（叙事意图）
+    /// 决策摘要（截断，用于 prompt 显示）
     pub decision: String,
+    /// 完整决策内容（未截断，用于语义去重比较）
+    pub full_decision: String,
     /// 执行结果
     pub outcome: String,
     /// 是否通过 ReflectorSoul 审查
@@ -260,12 +286,16 @@ pub struct NarrativeSummary {
 
 impl NarrativeSummary {
     /// 创建简化的摘要
+    ///
+    /// `decision` 参数应为 "action_type: content" 格式，或纯 action_type。
+    /// 两个字段（decision / full_decision）使用相同值，由调用方保证格式。
     pub fn simple(tick_id: i64, decision: &str, outcome: &str) -> Self {
         Self {
             tick_id,
             perception: String::new(),
             motivation: String::new(),
             decision: decision.to_string(),
+            full_decision: decision.to_string(),
             outcome: outcome.to_string(),
             validated: true,
         }
