@@ -112,6 +112,7 @@ pub(crate) async fn validate_intent_handler(
             graded_config,
             consecutive_follow_count: 0,
             max_consecutive_follow,
+            recent_same_type_decisions: vec![],
         },
     };
 
