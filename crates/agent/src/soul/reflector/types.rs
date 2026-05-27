@@ -151,6 +151,8 @@ pub struct ValidationRuntimeConfig {
     pub consecutive_follow_count: usize,
     /// 连续 follow 上限
     pub max_consecutive_follow: usize,
+    /// 最近同类 intent 的完整决策内容（用于语义去重）
+    pub recent_same_type_decisions: Vec<String>,
 }
 
 /// 验证请求
@@ -271,6 +273,7 @@ mod tests {
                 graded_config: Some(GradedValidationConfig::default()),
                 consecutive_follow_count: 2,
                 max_consecutive_follow: 5,
+                recent_same_type_decisions: vec![],
             },
         };
 

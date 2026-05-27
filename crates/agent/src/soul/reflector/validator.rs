@@ -313,8 +313,9 @@ impl ReflectorSoul {
             graded_config,
             consecutive_follow_count,
             max_consecutive_follow,
+            recent_same_type_decisions,
         } = request.runtime.clone();
-        let mut layers = Vec::with_capacity(3);
+        let mut layers = Vec::with_capacity(4);
 
         match self.validate_action_type(&request.intent) {
             Ok(()) => layers.push(LayerResult {
@@ -348,6 +349,28 @@ impl ReflectorSoul {
                     detail: Some(reason.clone()),
                 });
                 return Ok(PipelineValidationResult::Rejected { reason, layers });
+            }
+        }
+
+        // 语义去重（Layer 2.5）：LLM 比较新 intent 与最近同类 intent 的语义相似度
+        if !recent_same_type_decisions.is_empty() && request.intent.chaos_marker.is_none() {
+            match self
+                .validate_semantic_dedup(&request.intent, &recent_same_type_decisions)
+                .await
+            {
+                Ok(()) => layers.push(LayerResult {
+                    layer: "semantic_dedup",
+                    passed: true,
+                    detail: None,
+                }),
+                Err(reason) => {
+                    layers.push(LayerResult {
+                        layer: "semantic_dedup",
+                        passed: false,
+                        detail: Some(reason.clone()),
+                    });
+                    return Ok(PipelineValidationResult::Rejected { reason, layers });
+                }
             }
         }
 
@@ -483,6 +506,66 @@ impl ReflectorSoul {
         }
 
         Ok(result)
+    }
+
+    /// 语义去重检查：用 LLM 判断新 intent 是否与最近同类 intent 语义重复
+    ///
+    /// 仅在 recent_same_type_decisions 非空时调用（三重门控：有 content、有同类历史、非 chaos）。
+    /// LLM 不可用时降级通过（不因去重失败阻塞正常流程）。
+    async fn validate_semantic_dedup(
+        &self,
+        intent: &crate::models::Intent,
+        recent_decisions: &[String],
+    ) -> std::result::Result<(), String> {
+        let current_content = intent
+            .action_data
+            .as_ref()
+            .and_then(|d| d.get("content"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if current_content.is_empty() {
+            return Ok(());
+        }
+
+        // 截断每条历史防止 prompt 膨胀（200 字 ≈ 100 tokens）
+        const DEDUP_HISTORY_CHAR_LIMIT: usize = 200;
+        let history_lines: String = recent_decisions
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let truncated: String = s.chars().take(DEDUP_HISTORY_CHAR_LIMIT).collect();
+                format!("{}. {}", i + 1, truncated)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let prompt = format!(
+            "判断以下新意图是否与最近的意图在语义上重复（表达相同的意思、讨论相同的话题）。\n\n\
+             新意图: {}「{}」\n\n\
+             最近的类似意图:\n{}\n\n\
+             只回答一个词: REPEAT（语义重复）或 NOVEL（新内容）",
+            intent.action_type, current_content, history_lines
+        );
+
+        let llm_client = self.llm_container.read().await.clone();
+        match llm_client.complete_with_system("你是语义去重审查员。", &prompt).await {
+            Ok(response) => {
+                // NOVEL 优先：响应同时包含两词时视为新颖（宽放策略，避免误拦）
+                let answer = response.trim().to_uppercase();
+                if answer.contains("REPEAT") && !answer.contains("NOVEL") {
+                    debug!("Semantic dedup rejected: {}", response.trim());
+                    return Err(
+                        "你最近的意图在内容上重复（都在说类似的事），请换个话题或行为".to_string()
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Semantic dedup LLM failed, bypassed: {}", e);
+                Ok(())
+            }
+        }
     }
 
     /// 更新世界观规则（服务端广播时调用）
@@ -796,6 +879,7 @@ mod tests {
                 graded_config: Some(GradedValidationConfig::default()),
                 consecutive_follow_count: 3,
                 max_consecutive_follow: 3,
+                recent_same_type_decisions: vec![],
             },
         };
 
@@ -839,6 +923,7 @@ mod tests {
                 graded_config: Some(GradedValidationConfig::default()),
                 consecutive_follow_count: 3,
                 max_consecutive_follow: 3,
+                recent_same_type_decisions: vec![],
             },
         };
 

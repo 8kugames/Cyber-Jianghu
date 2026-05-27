@@ -43,6 +43,12 @@ impl super::Agent {
             });
         };
 
+        let recent_same_type_decisions = self
+            .cognitive_engine
+            .as_ref()
+            .map(|e| e.get_recent_same_type_decisions(intent.action_type.as_str(), crate::config::DEFAULT_SEMANTIC_DEDUP_HISTORY))
+            .unwrap_or_default();
+
         let request = crate::soul::reflector::ValidationRequest {
             intent,
             persona: self.extract_persona(),
@@ -52,6 +58,7 @@ impl super::Agent {
                 graded_config: graded_config.cloned(),
                 consecutive_follow_count: self.consecutive_follow_count as usize,
                 max_consecutive_follow: self.config.llm.max_consecutive_follow,
+                recent_same_type_decisions,
             },
         };
 

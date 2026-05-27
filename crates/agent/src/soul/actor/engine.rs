@@ -1223,7 +1223,11 @@ impl CognitiveEngine {
     /// 由 lifecycle 在 ReflectorSoul 审查通过后调用（validated=true）。
     /// `validated=false` 用于记录被驳回的 intent（不参与行为重复检测）。
     pub fn push_summary_to_window(&self, chain: &CognitiveChain, intent: &Intent, validated: bool) {
-        let decision = self.enrich_decision(intent);
+        let full_decision = self.enrich_decision_full(intent);
+        let decision: String = full_decision
+            .chars()
+            .take(self.truncation("summary_window_decision", 40))
+            .collect();
 
         let perception = chain
             .get_stage(CognitiveStage::Perception)
@@ -1250,6 +1254,7 @@ impl CognitiveEngine {
             perception,
             motivation,
             decision,
+            full_decision,
             outcome: "执行中".to_string(),
             validated,
         };
@@ -1257,16 +1262,14 @@ impl CognitiveEngine {
         self.push_summary(summary, validated);
     }
 
-    /// 为携带 content 字段的 action 从 action_data 提取内容摘要
-    fn enrich_decision(&self, intent: &Intent) -> String {
+    /// 完整版 enrich_decision（不截断，用于语义去重比较）
+    fn enrich_decision_full(&self, intent: &Intent) -> String {
         let action_type = intent.action_type.as_str();
 
         if let Some(data) = intent.action_data.as_ref()
             && let Some(content) = data.get("content").and_then(|v| v.as_str())
         {
-            let limit = self.truncation("summary_window_decision", 40);
-            let content_preview: String = content.chars().take(limit).collect();
-            return format!("{}: \"{}\"", action_type, content_preview);
+            return format!("{}: \"{}\"", action_type, content);
         }
         action_type.to_string()
     }
@@ -1432,6 +1435,20 @@ impl CognitiveEngine {
         if let Ok(mut window) = self.summary_window.write() {
             window.clear();
         }
+    }
+
+    /// 获取最近 N 条同 action_type 的 validated 摘要的完整决策内容
+    ///
+    /// 用于 ReflectorSoul 语义去重：比较新 intent 与最近同类 intent 的语义相似度。
+    pub fn get_recent_same_type_decisions(
+        &self,
+        action_type: &str,
+        limit: usize,
+    ) -> Vec<String> {
+        self.summary_window
+            .read()
+            .map(|sw| sw.get_recent_same_type_decisions(action_type, limit))
+            .unwrap_or_default()
     }
 
     /// 获取窗口大小

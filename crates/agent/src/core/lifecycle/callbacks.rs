@@ -109,7 +109,6 @@ impl super::super::Agent {
         let prev_callback = self.client.get_server_msg_callback().await;
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
-        let _event_buffer = self.immediate_event_buffer.clone();
         let memory_manager = self.memory_manager.clone();
         let dialogue_manager = self.dialogue_manager.clone();
         let game_rules = self.config.game_rules.clone();
