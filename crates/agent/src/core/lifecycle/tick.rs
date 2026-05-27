@@ -138,6 +138,13 @@ impl super::super::Agent {
                 }
                 if let Some(ref llm_container) = self.actor_llm_container {
                     let triage_config = handler.event_store().config().clone();
+
+                    let diary_prompt = self.cognitive_engine.as_ref().and_then(|engine| {
+                        let config = engine.prompt_template();
+                        let tmpl = config.get_template("daily_diary")?;
+                        tmpl.sections.get("system").cloned()
+                    });
+
                     let engine = crate::component::immediate::SessionTriageEngine::new(
                         handler.event_store().clone(),
                         llm_container.clone(),
@@ -147,6 +154,10 @@ impl super::super::Agent {
                         game_day,
                         handler.current_game_day(),
                         Some(world_state.world_time.clone()),
+                        self.memory_manager.clone(),
+                        self.relationship_store.clone(),
+                        self.world_state_store.clone(),
+                        diary_prompt,
                     );
                     self.session_triage_handle = Some(tokio::spawn(engine.run()));
                     info!(

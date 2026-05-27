@@ -13,6 +13,10 @@ use tracing::{debug, error, info, warn};
 use cyber_jianghu_protocol::{EventTriageConfig, EventTriagePreFilter, WorldTime};
 
 use crate::component::llm::LlmClientExt;
+use crate::component::memory::backend::SearchableBackend;
+use crate::component::memory::MemoryManager;
+use crate::component::social::RelationshipStore;
+use crate::component::state_store::WorldStateStore;
 use crate::runtime::claw::LlmClientContainer;
 use crate::soul::reflector::PersonaInfo;
 
@@ -73,6 +77,20 @@ pub struct SessionTriageEngine {
 
     /// 世界时间（用于天道历日期格式化）
     world_time: Option<WorldTime>,
+
+    // ── 日记数据源（component 层，非 soul 层） ──
+
+    /// 情景记忆管理器（获取今日重要记忆）
+    memory_manager: Option<Arc<RwLock<MemoryManager>>>,
+
+    /// 社交关系存储（获取关系快照）
+    relationship_store: Option<RelationshipStore>,
+
+    /// 世界状态存储（获取附近实体、位置）
+    world_state_store: Option<Arc<WorldStateStore>>,
+
+    /// 日记提示词模板（从 prompt_templates.yaml 的 daily_diary 条目加载）
+    diary_prompt: Option<String>,
 }
 
 impl SessionTriageEngine {
@@ -87,6 +105,10 @@ impl SessionTriageEngine {
         game_day: i64,
         current_game_day: Arc<RwLock<i64>>,
         world_time: Option<WorldTime>,
+        memory_manager: Option<Arc<RwLock<MemoryManager>>>,
+        relationship_store: Option<RelationshipStore>,
+        world_state_store: Option<Arc<WorldStateStore>>,
+        diary_prompt: Option<String>,
     ) -> Self {
         Self {
             event_store,
@@ -98,6 +120,10 @@ impl SessionTriageEngine {
             current_game_day,
             next_batch_id: 1,
             world_time,
+            memory_manager,
+            relationship_store,
+            world_state_store,
+            diary_prompt,
         }
     }
 
@@ -380,8 +406,165 @@ event_id 必须是以下值之一：{event_ids}"#,
             .collect()
     }
 
-    /// 游戏日结束：生成摘要
+    /// 游戏日结束：日记路径（多数据源） → 纯事件回述降级
     async fn produce_daily_summary(&self) -> anyhow::Result<String> {
+        if self.diary_prompt.is_some()
+            && (self.memory_manager.is_some()
+                || self.relationship_store.is_some()
+                || self.world_state_store.is_some())
+        {
+            return self.produce_diary_with_stores().await;
+        }
+        self.produce_event_summary().await
+    }
+
+    /// 多数据源江湖日记（情景记忆+关系+世界状态+事件）
+    async fn produce_diary_with_stores(&self) -> anyhow::Result<String> {
+        // 1. 收集数据源
+        let memories = self.query_diary_memories().await;
+        let relationships = self.query_diary_relationships().await;
+        let world_context = self.query_diary_world_context().await;
+
+        // 2. 日期格式化
+        let date_str = self
+            .world_time
+            .as_ref()
+            .map(|wt| wt.to_chinese())
+            .unwrap_or_else(|| format!("游戏日 {}", self.game_day));
+
+        // 3. 事件数据（复用原有 triage 结果）
+        let events_str = match self
+            .event_store
+            .query_triaged_async(self.config.context.clone(), self.game_day)
+            .await
+        {
+            Ok(triaged) => {
+                let all: Vec<String> = triaged
+                    .urgent
+                    .iter()
+                    .chain(triaged.batch.iter())
+                    .map(|e| e.description.clone())
+                    .collect();
+                if all.is_empty() {
+                    "无特殊事件".to_string()
+                } else {
+                    all.join("；")
+                }
+            }
+            Err(_) => "无特殊事件".to_string(),
+        };
+
+        // 4. 从模板变量渲染提示词
+        let template = match self.diary_prompt.as_ref() {
+            Some(t) => t,
+            None => return self.produce_event_summary().await,
+        };
+
+        let personality = self.personality_str();
+        let prompt = template
+            .replace("{agent_name}", &self.agent_name)
+            .replace("{date}", &date_str)
+            .replace("{personality}", &personality)
+            .replace("{memories}", &memories)
+            .replace("{relationships}", &relationships)
+            .replace("{world_context}", &world_context)
+            .replace("{events}", &events_str);
+
+        // 5. 单次 LLM 调用
+        let llm = self.llm_container.read().await;
+        let llm_ref = llm.clone();
+        drop(llm);
+
+        let result: serde_json::Value = llm_ref
+            .complete_json_with_system(&prompt, "")
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM 日记生成失败: {}", e))?;
+
+        let diary = result
+            .get("diary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("摘要生成失败")
+            .to_string();
+
+        // 6. 清理过期事件
+        if let Err(e) = self.event_store.cleanup_old_async(self.game_day).await {
+            warn!("清理过期事件失败: {}", e);
+        }
+
+        Ok(diary)
+    }
+
+    /// 查询当日重要记忆（重要性降序，上限 20 条）
+    async fn query_diary_memories(&self) -> String {
+        let mm = match self.memory_manager.as_ref() {
+            Some(mm) => mm,
+            None => return String::new(),
+        };
+        let guard = mm.read().await;
+        match guard.episodic().get_top_by_importance(20).await {
+            Ok(memories) if !memories.is_empty() => memories
+                .iter()
+                .enumerate()
+                .map(|(i, m)| format!("{}. {}", i + 1, m.content))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        }
+    }
+
+    /// 查询社交关系快照
+    async fn query_diary_relationships(&self) -> String {
+        let store = match self.relationship_store.as_ref() {
+            Some(s) => s,
+            None => return String::new(),
+        };
+        match store.get_all_relationships() {
+            Ok(rels) if !rels.is_empty() => rels
+                .iter()
+                .map(|r| {
+                    let fav = if r.favorability >= 30 {
+                        "友善"
+                    } else if r.favorability <= -30 {
+                        "敌对"
+                    } else {
+                        "中立"
+                    };
+                    format!("{}（{}，好感度{}）", r.target_name, fav, r.favorability)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        }
+    }
+
+    /// 查询世界状态上下文
+    async fn query_diary_world_context(&self) -> String {
+        let store = match self.world_state_store.as_ref() {
+            Some(s) => s,
+            None => return String::new(),
+        };
+        let ws = match store.current().await {
+            Some(ws) => ws,
+            None => return String::new(),
+        };
+        let mut parts = Vec::new();
+        parts.push(format!("当前位置：{}", ws.location.name));
+        if !ws.entities.is_empty() {
+            let names: Vec<String> = ws
+                .entities
+                .iter()
+                .map(|e| e.name.clone())
+                .filter(|n| !n.is_empty())
+                .collect();
+            if !names.is_empty() {
+                parts.push(format!("附近的人：{}", names.join("、")));
+            }
+        }
+        parts.join("\n")
+    }
+
+    /// 游戏日结束：纯事件回述（diary 的降级路径）
+    async fn produce_event_summary(&self) -> anyhow::Result<String> {
         // 查询当日所有已 triage 的事件（按 game_day 过滤）
         let triaged = self
             .event_store
