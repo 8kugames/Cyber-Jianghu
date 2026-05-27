@@ -60,6 +60,14 @@
       "truncation": {
         "max_items": 5
       }
+    },
+    "daily_diary": {
+      "llm_parameters": {},
+      "required_sections": ["system"],
+      "sections": {
+        "system": "你是{agent_name}的江湖日记执笔人。{date}，今日将尽，请为{agent_name}撰写今日的江湖日记。\n\n今日经历（记忆）：\n{memories}\n\n社交关系：\n{relationships}\n\n世界环境：\n{world_context}\n\n江湖纪事：\n{events}\n\n写作要求：\n1. 以\"我\"的第一人称视角\n2. 语言古朴典雅，武侠风格，体现{personality}\n3. 300-500字\n4. 涵盖：今日做了什么、遇到了谁、有何感悟、关系变化\n5. 不要罗列事件清单，要叙事性反思\n\n输出 JSON：\n{\"diary\": \"...\"}\n"
+      },
+      "truncation": {}
     }
   },
   "version": "0.0.1"
