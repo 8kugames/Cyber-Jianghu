@@ -25,6 +25,15 @@ pub struct LlmConfig {
     pub temperature: f32,
     /// 最大 token 数
     pub max_tokens: i32,
+    /// 上下文窗口大小
+    #[serde(default = "default_context_window_tokens")]
+    pub context_window_tokens: u32,
+}
+
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
+
+fn default_context_window_tokens() -> u32 {
+    DEFAULT_CONTEXT_WINDOW_TOKENS
 }
 
 /// 完整 LLM 配置包装（包含 meta 信息）
@@ -54,6 +63,7 @@ pub struct LlmConfigPublic {
     pub model: String,
     pub temperature: f32,
     pub max_tokens: i32,
+    pub context_window_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +89,7 @@ impl Default for LlmConfigWrapper {
                 model: "qwen2.5:14b".to_string(),
                 temperature: 0.8,
                 max_tokens: 4096,
+                context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             },
         }
     }
@@ -108,6 +119,7 @@ fn public_llm_config(config: LlmConfigWrapper) -> LlmConfigResponse {
             model: config.data.model,
             temperature: config.data.temperature,
             max_tokens: config.data.max_tokens,
+            context_window_tokens: config.data.context_window_tokens,
         },
     }
 }

@@ -541,6 +541,12 @@ impl Agent {
                 );
                 // 切换后重置计数器，给新模型机会
                 self.consecutive_idle_count = 0;
+                // 同步新模型的 context_window_tokens 到 ConversationHistory
+                let new_tokens = llm.context_window_tokens() as usize;
+                drop(llm);
+                if let Some(ref engine) = self.cognitive_engine {
+                    engine.update_conversation_max_tokens(new_tokens);
+                }
             }
         }
     }

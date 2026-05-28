@@ -439,10 +439,13 @@ pub struct FallbackModelConfig {
     /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
+    /// 模型上下文窗口大小（None = 使用全局 context_window_tokens）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
 }
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
-const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.8;
+const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.75;
 const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
 const DEFAULT_RECONNECT_DELAY_SECS: u64 = 5;
 const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;

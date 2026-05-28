@@ -232,7 +232,9 @@ pub(crate) async fn generate_character_handler(
     if let Some(ref base_url) = config.llm.base_url {
         client_config = client_config.with_base_url(base_url);
     }
-    client_config = client_config.with_temperature(0.9);
+    client_config = client_config
+        .with_temperature(0.9)
+        .with_context_window_tokens(config.llm.context_window_tokens);
 
     let llm_client = match DirectLlmClient::new(client_config) {
         Ok(c) => c,

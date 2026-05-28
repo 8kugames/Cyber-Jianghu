@@ -290,6 +290,74 @@
                             />
                         </div>
 
+                        <div class="form-row" style="display:flex;gap:12px;flex-wrap:wrap;">
+                            <div class="form-group" style="flex:1;min-width:120px;">
+                                <label for="llm-temperature">Temperature</label>
+                                <input type="number" id="llm-temperature"
+                                    class="form-input" min="0" max="2" step="0.1" value="0.7" />
+                                <p class="hint">控制随机性 (0=确定, 2=创意)</p>
+                            </div>
+                            <div class="form-group" style="flex:1;min-width:120px;">
+                                <label for="llm-max-tokens">最大 Token</label>
+                                <input type="number" id="llm-max-tokens"
+                                    class="form-input" min="256" max="32768" step="256" value="8192" />
+                                <p class="hint">单次回复最大长度</p>
+                            </div>
+                            <div class="form-group" style="flex:1;min-width:120px;">
+                                <label for="llm-context-window">上下文窗口</label>
+                                <input type="number" id="llm-context-window"
+                                    class="form-input" min="4096" max="1048576" step="1024" value="32000" />
+                                <p class="hint">模型上下文窗口大小 (tokens)</p>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                <input type="checkbox" id="llm-enable-streaming" checked />
+                                启用流式输出
+                            </label>
+                        </div>
+
+                        <details style="margin-top:12px;border:1px solid var(--border-color);border-radius:6px;padding:10px;">
+                            <summary style="cursor:pointer;font-weight:500;">高级参数</summary>
+                            <div style="margin-top:12px;display:flex;flex-direction:column;gap:12px;">
+                                <div class="form-group">
+                                    <label for="llm-summary-trigger">摘要触发比例</label>
+                                    <input type="number" id="llm-summary-trigger"
+                                        class="form-input" min="0.3" max="0.95" step="0.05" value="0.75" />
+                                    <p class="hint">上下文占用比例达到此值时触发摘要压缩</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm-keep-turns">保留最近轮次</label>
+                                    <input type="number" id="llm-keep-turns"
+                                        class="form-input" min="1" max="20" step="1" value="4" />
+                                    <p class="hint">摘要压缩后保留的最近对话轮数</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm-idle-rotate">空闲轮换阈值</label>
+                                    <input type="number" id="llm-idle-rotate"
+                                        class="form-input" min="0" max="100" step="1" value="24" />
+                                    <p class="hint">连续空闲 tick 数达到此值后轮换模型</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm-enable-thinking">思考模式</label>
+                                    <select id="llm-enable-thinking" class="form-input">
+                                        <option value="">默认</option>
+                                        <option value="true">开启</option>
+                                        <option value="false">关闭</option>
+                                    </select>
+                                    <p class="hint">部分模型支持的思考/推理模式</p>
+                                </div>
+                                <div class="form-group">
+                                    <label for="llm-fallback-models">备用模型列表</label>
+                                    <textarea id="llm-fallback-models"
+                                        class="form-input" rows="3"
+                                        placeholder="每行一个模型名称，如:&#10;deepseek-chat&#10;qwen-max"></textarea>
+                                    <p class="hint">主模型不可用时的备选模型</p>
+                                </div>
+                            </div>
+                        </details>
+
                         <div class="form-actions">
                             <button type="submit" id="save-llm-btn">
                                 保存配置
@@ -482,12 +550,53 @@
                             document.getElementById("llm-api-key").value ||
                             null;
 
+                        var temperature = parseFloat(
+                            document.getElementById("llm-temperature").value
+                        );
+                        var max_tokens = parseInt(
+                            document.getElementById("llm-max-tokens").value
+                        );
+                        var context_window_tokens = parseInt(
+                            document.getElementById("llm-context-window").value
+                        );
+                        var enable_streaming = document.getElementById(
+                            "llm-enable-streaming"
+                        ).checked;
+                        var summary_trigger_ratio = parseFloat(
+                            document.getElementById("llm-summary-trigger").value
+                        );
+                        var keep_recent_turns = parseInt(
+                            document.getElementById("llm-keep-turns").value
+                        );
+                        var idle_rotate_threshold = parseInt(
+                            document.getElementById("llm-idle-rotate").value
+                        );
+                        var thinkingVal = document.getElementById(
+                            "llm-enable-thinking"
+                        ).value;
+                        var enable_thinking = thinkingVal === "" ? null : thinkingVal === "true";
+                        var fallbackText = document.getElementById(
+                            "llm-fallback-models"
+                        ).value.trim();
+                        var fallback_models = fallbackText
+                            ? fallbackText.split("\n").map(function(s) { return s.trim(); }).filter(Boolean)
+                            : null;
+
                         await apiPost("/api/v1/config/llm", {
                             actor: {
                                 provider: provider,
                                 model: model,
                                 base_url: base_url,
-                                api_key: api_key,
+                                api_key: api_key || "",
+                                temperature: isNaN(temperature) ? null : temperature,
+                                max_tokens: isNaN(max_tokens) ? null : max_tokens,
+                                context_window_tokens: isNaN(context_window_tokens) ? null : context_window_tokens,
+                                enable_streaming: enable_streaming,
+                                enable_thinking: enable_thinking,
+                                summary_trigger_ratio: isNaN(summary_trigger_ratio) ? null : summary_trigger_ratio,
+                                keep_recent_turns: isNaN(keep_recent_turns) ? null : keep_recent_turns,
+                                idle_rotate_threshold: isNaN(idle_rotate_threshold) ? null : idle_rotate_threshold,
+                                fallback_models: fallback_models,
                             },
                             reflector: null,
                             reflector_inherits_actor: true,
@@ -533,12 +642,31 @@
 
                     var llmData = await apiGet("/api/v1/config/llm");
                     if (llmData && llmData.actor) {
+                        var a = llmData.actor;
                         document.getElementById("llm-provider").value =
-                            llmData.actor.provider;
+                            a.provider;
                         document.getElementById("llm-model").value =
-                            llmData.actor.model || "";
+                            a.model || "";
                         document.getElementById("llm-base-url").value =
-                            llmData.actor.base_url || "";
+                            a.base_url || "";
+                        document.getElementById("llm-temperature").value =
+                            a.temperature ?? 0.7;
+                        document.getElementById("llm-max-tokens").value =
+                            a.max_tokens ?? 8192;
+                        document.getElementById("llm-context-window").value =
+                            a.context_window_tokens ?? 32000;
+                        document.getElementById("llm-enable-streaming").checked =
+                            a.enable_streaming !== false;
+                        document.getElementById("llm-summary-trigger").value =
+                            a.summary_trigger_ratio ?? 0.75;
+                        document.getElementById("llm-keep-turns").value =
+                            a.keep_recent_turns ?? 4;
+                        document.getElementById("llm-idle-rotate").value =
+                            a.idle_rotate_threshold ?? 24;
+                        document.getElementById("llm-enable-thinking").value =
+                            a.enable_thinking == null ? "" : String(a.enable_thinking);
+                        document.getElementById("llm-fallback-models").value =
+                            (a.fallback_models || []).join("\n");
                         document
                             .getElementById("llm-provider")
                             .dispatchEvent(new Event("change"));

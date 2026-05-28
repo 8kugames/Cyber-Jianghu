@@ -176,6 +176,20 @@ pub struct LlmConfigInfo {
     pub model: String,
     pub base_url: Option<String>,
     pub has_api_key: bool,
+    // 生成参数
+    pub temperature: f32,
+    pub max_tokens: u32,
+    pub context_window_tokens: u32,
+    pub enable_streaming: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
+    // 压缩参数
+    pub summary_trigger_ratio: f64,
+    pub keep_recent_turns: u32,
+    // 轮换参数
+    pub idle_rotate_threshold: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
 }
 
 /// LLM 配置响应
@@ -202,6 +216,18 @@ pub struct LlmConfigUpdateDetails {
     pub model: String,
     pub base_url: Option<String>,
     pub api_key: String,
+    // 可选生成参数（None = 保持原值）
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub context_window_tokens: Option<u32>,
+    pub enable_streaming: Option<bool>,
+    pub enable_thinking: Option<bool>,
+    // 可选压缩参数
+    pub summary_trigger_ratio: Option<f64>,
+    pub keep_recent_turns: Option<u32>,
+    // 可选轮换参数
+    pub idle_rotate_threshold: Option<u32>,
+    pub fallback_models: Option<Vec<String>>,
 }
 
 // ============================================================================

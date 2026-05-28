@@ -31,6 +31,15 @@ pub struct LlmConfig {
     /// HTTP 连接超时（秒）
     #[serde(default = "default_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
+    /// 上下文窗口大小
+    #[serde(default = "default_context_window_tokens")]
+    pub context_window_tokens: u32,
+}
+
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
+
+fn default_context_window_tokens() -> u32 {
+    DEFAULT_CONTEXT_WINDOW_TOKENS
 }
 
 fn default_request_timeout_secs() -> u64 {
@@ -68,6 +77,7 @@ impl Default for LlmConfig {
             max_tokens: 2000,
             request_timeout_secs: 120,
             connect_timeout_secs: 30,
+            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
         }
     }
 }

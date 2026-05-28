@@ -181,8 +181,8 @@ impl ConversationHistory {
                 format!(
                     "[Tick {}]\n输入: {}\n决策: {}",
                     t.tick_id,
-                    truncate_str(&t.user, 300),
-                    truncate_str(&t.assistant, 300),
+                    &t.user,
+                    &t.assistant,
                 )
             })
             .collect();
@@ -190,7 +190,7 @@ impl ConversationHistory {
         let existing = self.summary.as_deref().unwrap_or("");
 
         format!(
-            "请将以下AI角色的近期对话历史压缩为简洁摘要（不超过500字），\
+            "请将以下AI角色的近期对话历史压缩为简洁摘要，\
              保留关键决策、关系变化、重要事件、位置移动、物品变动。\n\n\
              当前摘要:\n{}\n\n\
              新增对话:\n{}\n\n\
@@ -294,6 +294,11 @@ impl ConversationHistory {
         Ok(())
     }
 
+    /// 更新上下文窗口上限（模型切换后调用）
+    pub fn update_max_tokens(&mut self, max_tokens: usize) {
+        self.max_tokens = max_tokens;
+    }
+
     /// 更新 system message (persona 变更时调用)
     pub fn update_system_message(&mut self, msg: &str) {
         self.system_message = msg.to_string();
@@ -366,13 +371,6 @@ fn estimate_tokens(text: &str) -> usize {
         }
     }
     (cn as f64 * 1.5 + ascii as f64 * 0.25) as usize
-}
-
-fn truncate_str(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    s.chars().take(max).collect()
 }
 
 // ============================================================================

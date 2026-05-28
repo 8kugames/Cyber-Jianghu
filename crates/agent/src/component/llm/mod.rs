@@ -40,12 +40,14 @@ pub fn build_fallback_client(
         for (i, mc) in llm_config.models.iter().enumerate() {
             let max_tokens = mc.max_tokens.unwrap_or(llm_config.max_tokens);
             let enable_thinking = mc.enable_thinking.or(llm_config.enable_thinking);
+            let context_window_tokens = mc.context_window_tokens.unwrap_or(llm_config.context_window_tokens);
             match build_direct_client_with_max_tokens(
                 llm_config,
                 Some(mc.model.as_str()),
                 prefer_stream,
                 max_tokens,
                 enable_thinking,
+                context_window_tokens,
                 earth_soul_config.clone(),
             ) {
                 Ok(client) => {
@@ -123,7 +125,7 @@ pub fn build_fallback_client(
     Ok(llm_arc)
 }
 
-/// 构建 DirectLlmClient（共享全局 max_tokens + enable_thinking）
+/// 构建 DirectLlmClient（共享全局 max_tokens + enable_thinking + context_window_tokens）
 fn build_direct_client(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
@@ -136,17 +138,19 @@ fn build_direct_client(
         prefer_stream,
         llm_config.max_tokens,
         llm_config.enable_thinking,
+        llm_config.context_window_tokens,
         earth_soul_config,
     )
 }
 
-/// 构建 DirectLlmClient（指定 max_tokens + enable_thinking）
+/// 构建 DirectLlmClient（指定 max_tokens + enable_thinking + context_window_tokens）
 fn build_direct_client_with_max_tokens(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
     prefer_stream: bool,
     max_tokens: u32,
     enable_thinking: Option<bool>,
+    context_window_tokens: u32,
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
@@ -164,7 +168,8 @@ fn build_direct_client_with_max_tokens(
     client_config = client_config
         .with_temperature(llm_config.temperature)
         .with_max_tokens(max_tokens)
-        .with_enable_thinking(enable_thinking);
+        .with_enable_thinking(enable_thinking)
+        .with_context_window_tokens(context_window_tokens);
 
     let mut client = DirectLlmClient::new(client_config)?;
     if let Some(esc) = earth_soul_config {

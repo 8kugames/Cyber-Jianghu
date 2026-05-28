@@ -710,6 +710,16 @@ impl CognitiveEngine {
         }
     }
 
+    /// 更新对话历史的上下文窗口上限（模型切换后调用）
+    pub fn update_conversation_max_tokens(&self, max_tokens: usize) {
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+        {
+            h.update_max_tokens(max_tokens);
+            tracing::info!("对话历史上下文窗口已更新: max_tokens={}", max_tokens);
+        }
+    }
+
     /// 更新对话历史的 system message (persona 变更时)
     pub fn update_conversation_system_message(&self, msg: &str) {
         if let Some(ref history) = self.conversation_history
