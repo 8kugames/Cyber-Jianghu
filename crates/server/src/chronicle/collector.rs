@@ -115,6 +115,7 @@ async fn collect_agents(
     period_end: i64,
 ) -> Result<Vec<AgentInfo>> {
     // 批量查询：一次获取所有活跃 agent 的基本信息
+    // 过滤条件：剔除在前一轮已死亡/归隐的角色（本轮死亡/归隐仍参与）
     let rows = sqlx::query(
         r#"
         SELECT
@@ -131,6 +132,12 @@ async fn collect_agents(
             WHERE s.agent_id = a.agent_id AND s.tick_id <= $2
             ORDER BY s.tick_id DESC LIMIT 1
         ) latest_state ON true
+        WHERE COALESCE(
+            (SELECT s.is_alive FROM agent_states s
+             WHERE s.agent_id = a.agent_id AND s.tick_id < $1
+             ORDER BY s.tick_id DESC LIMIT 1),
+            true
+        ) = true
         GROUP BY a.agent_id, a.name, latest_state.node_id
         ORDER BY a.name
         "#,
