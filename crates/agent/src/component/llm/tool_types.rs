@@ -111,10 +111,19 @@ pub struct StreamToolCallDelta {
 /// 流式 tool_calls function 增量
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct StreamToolCallFunctionDelta {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_as_default")]
     pub arguments: String,
+}
+
+/// serde 反序列化：将 `null` 视为类型的 Default 值（对 String 即 ""）
+fn deserialize_null_as_default<'de, D, T>(de: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de> + Default,
+{
+    Option::<T>::deserialize(de).map(|v| v.unwrap_or_default())
 }
 
 /// 流式 tool_calls 累积器 — 按 index 合并增量 chunk 为完整 ToolCall
