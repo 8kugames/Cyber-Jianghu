@@ -46,7 +46,12 @@ impl super::Agent {
         let recent_same_type_decisions = self
             .cognitive_engine
             .as_ref()
-            .map(|e| e.get_recent_same_type_decisions(intent.action_type.as_str(), crate::config::DEFAULT_SEMANTIC_DEDUP_HISTORY))
+            .map(|e| {
+                e.get_recent_same_type_decisions(
+                    intent.action_type.as_str(),
+                    crate::config::DEFAULT_SEMANTIC_DEDUP_HISTORY,
+                )
+            })
             .unwrap_or_default();
 
         let request = crate::soul::reflector::ValidationRequest {

@@ -266,8 +266,7 @@ impl ReflectorSoul {
                 )
             })?;
 
-            let nearby_ids: Vec<uuid::Uuid> =
-                world_state.entities.iter().map(|e| e.id).collect();
+            let nearby_ids: Vec<uuid::Uuid> = world_state.entities.iter().map(|e| e.id).collect();
             if !nearby_ids.contains(&parsed) {
                 let nearby_names: Vec<String> = world_state
                     .entities
@@ -549,14 +548,17 @@ impl ReflectorSoul {
         );
 
         let llm_client = self.llm_container.read().await.clone();
-        match llm_client.complete_with_system("你是语义去重审查员。", &prompt).await {
+        match llm_client
+            .complete_with_system("你是语义去重审查员。", &prompt)
+            .await
+        {
             Ok(response) => {
                 // NOVEL 优先：响应同时包含两词时视为新颖（宽放策略，避免误拦）
                 let answer = response.trim().to_uppercase();
                 if answer.contains("REPEAT") && !answer.contains("NOVEL") {
                     debug!("Semantic dedup rejected: {}", response.trim());
                     return Err(
-                        "你最近的意图在内容上重复（都在说类似的事），请换个话题或行为".to_string()
+                        "你最近的意图在内容上重复（都在说类似的事），请换个话题或行为".to_string(),
                     );
                 }
                 Ok(())

@@ -1064,6 +1064,17 @@ impl FallbackLlmClient {
 
         for offset in 0..self.clients.len() {
             let idx = (start + offset) % self.clients.len();
+
+            // 跳过已被 circuit breaker 禁用的模型（短锁，不跨 await）
+            if self
+                .disabled_models
+                .lock()
+                .expect("lock poisoned")
+                .contains_key(&idx)
+            {
+                continue;
+            }
+
             let client = self.clients[idx].clone();
 
             match f(client).await {
@@ -1091,6 +1102,8 @@ impl FallbackLlmClient {
                     }
                     if err_msg.contains("429") {
                         self.disable_model(idx, "429 rate limit");
+                    } else if err_msg.contains("response content is empty") {
+                        self.disable_model(idx, "empty response");
                     }
                     if !should {
                         return Err(e);
@@ -1123,6 +1136,17 @@ impl FallbackLlmClient {
 
         for offset in 0..self.clients.len() {
             let idx = (start + offset) % self.clients.len();
+
+            // 跳过已被 circuit breaker 禁用的模型（短锁，不跨 await）
+            if self
+                .disabled_models
+                .lock()
+                .expect("lock poisoned")
+                .contains_key(&idx)
+            {
+                continue;
+            }
+
             let client = self.clients[idx].clone();
 
             match f(client.clone()).await {
@@ -1148,6 +1172,8 @@ impl FallbackLlmClient {
                     let err_msg = format!("{:#}", &e);
                     if err_msg.contains("429") {
                         self.disable_model(idx, "429 rate limit");
+                    } else if err_msg.contains("response content is empty") {
+                        self.disable_model(idx, "empty response");
                     }
                     if !should {
                         return Err(e);

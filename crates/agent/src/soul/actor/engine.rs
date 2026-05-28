@@ -204,7 +204,9 @@ impl CognitiveEngine {
             config: std::sync::RwLock::new(config),
             enable_streaming: true,
             prompt_cache: std::sync::RwLock::new(prompt_cache),
-            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(crate::config::DEFAULT_NARRATIVE_WINDOW_SIZE)),
+            summary_window: std::sync::RwLock::new(NarrativeSummaryWindow::new(
+                crate::config::DEFAULT_NARRATIVE_WINDOW_SIZE,
+            )),
             dialogue_context: std::sync::RwLock::new(String::new()),
             conversation_history: None,
             prompt_template,
@@ -1440,11 +1442,7 @@ impl CognitiveEngine {
     /// 获取最近 N 条同 action_type 的 validated 摘要的完整决策内容
     ///
     /// 用于 ReflectorSoul 语义去重：比较新 intent 与最近同类 intent 的语义相似度。
-    pub fn get_recent_same_type_decisions(
-        &self,
-        action_type: &str,
-        limit: usize,
-    ) -> Vec<String> {
+    pub fn get_recent_same_type_decisions(&self, action_type: &str, limit: usize) -> Vec<String> {
         self.summary_window
             .read()
             .map(|sw| sw.get_recent_same_type_decisions(action_type, limit))
