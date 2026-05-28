@@ -25,6 +25,10 @@ pub struct AgentDailySummary {
     pub game_day: i64,
     pub summary: String,
     pub created_at: i64,
+    /// 服务端格式化的游戏内时间字符串，由 handler 在查询后填充
+    #[serde(default)]
+    #[sqlx(default)]
+    pub formatted_time: String,
 }
 
 /// 序列化属性为 JSONB，包含 _skills 数组
