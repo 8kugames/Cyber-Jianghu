@@ -20,6 +20,7 @@
 ## 3. 架构约束
 - 两者必须共享完全一致的构建管线（`AgentBuilder`）、三魂架构和记忆系统。
 - 除网络请求层的实现类（`DirectLlmClient` vs `OpenClawBridge`）不同外，绝不允许存在任何 Agent 本身游戏机制或认知能力上的差分。
+- LLM 交互通过 `LlmClient` trait 的 `send_chat_exchange` 方法抽象，DirectLlmClient 用 HTTP，OpenClawBridge 用 WebSocket。地魂 `tool_loop.rs` 的共享循环逻辑通过此抽象实现模式无关。
 
 ## 4. 代码入口
 - 模式切换入口: `crates/agent/src/bin/cyber-jianghu-agent.rs`

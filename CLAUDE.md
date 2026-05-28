@@ -169,9 +169,14 @@ Key server modules:
 - `src/actions/` - Action execution with data-driven ActionType
 - `src/game_data/` - Config loading, caching, and formula evaluation
 - `src/websocket/` - WebSocket connection management
-- `src/handlers/` - HTTP API endpoints
+- `src/handlers/` - HTTP API endpoints (含 `dashboard/` 子模块: agents, experience, maintenance, stats, status_config, types)
 - `src/state.rs` - Shared AppState, AgentStateCache, rate limiting
 - `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
+- `src/dialogue/` - Dialogue system
+- `src/inventory/` - Inventory management
+- `src/items/` - Item definitions and registry
+- `src/models/` - Database models (AgentState, Agent, etc.)
+- `src/db/` - Database connection pool and migrations
 
 ### Agent Architecture
 
@@ -207,7 +212,7 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
 
 #### Decision Context Pipeline
 
-`lifecycle.rs` assembles complete decision context each tick:
+`lifecycle/` (mod.rs + 7 sub-modules) assembles complete decision context each tick:
 
 1. Memory context (three-tier memory + survival warnings + sanity + deferred dialogue + dream)
 2. Summary context (action history sliding window)
@@ -232,17 +237,17 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/core/social.rs` - Social event processing + LLM favorability evaluation
 - `src/soul/actor/engine.rs` - CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
 - `src/soul/actor/chain.rs` - CognitiveChain (causal reasoning trace)
-- `src/soul/actor/translation.rs` - Translation layer disabled (design: LLM must output precise values)
+- `src/soul/actor/translation.rs` - Translation layer cleared (alias accommodation removed; LLM must output precise values, ReflectorSoul rejects incorrect output)
 - `src/soul/actor/chaos.rs` - Sanity chaos generator (low-sanity random behavior)
 - `src/soul/actor/prompt_template.rs` - YAML-driven prompt template loader
 - `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
 - `src/soul/actor/summary_window.rs` - Sliding context window for action history
 - `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
-- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层
+- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环，从 DirectLlmClient 提取）
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
 - `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
-- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` + `OpenClawBridge`)
+- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` + `OpenClawBridge`)。`LlmClient` trait 含 `send_chat_exchange` 方法支持模式无关原始消息交换，429 circuit breaker 1h 自动恢复
 - `src/component/social/` - RelationshipStore (SQLite, social graph)
 - `src/component/immediate/` - ImmediateEventHandler (instant event processing)
 - `src/infra/transport/` - WebSocket communication layer
@@ -472,7 +477,7 @@ use super::builder::AgentBuilder;
 
 ### Admin Web Panel
 - `GET /admin/` - Main dashboard
-- `GET /admin/{*path}` - Admin panel routes (served from `crates/server/src/admin/`)
+- `GET /admin/{*path}` - Admin panel routes (served from `crates/server/static/admin/`)
 
 ## Quick Start Guides
 

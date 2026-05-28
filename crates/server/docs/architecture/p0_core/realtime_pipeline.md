@@ -24,4 +24,4 @@
 
 ## 4. 代码入口
 - 管道入口: `crates/server/src/tick/realtime.rs` (IntentWorker)
-- 路由处理: `crates/server/src/handlers.rs` (WebSocket 意图接收)
+- 路由处理: `crates/server/src/handlers/` (HTTP/WebSocket handler 模块目录，含 dashboard/ 子目录)

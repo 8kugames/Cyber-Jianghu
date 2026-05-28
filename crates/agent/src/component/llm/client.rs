@@ -409,58 +409,205 @@ fn find_first_json_end(s: &str) -> Option<usize> {
     None
 }
 
-/// LLM JSON 归一化预处理
+/// LLM JSON 单遍结构化修复
 ///
-/// 确定性文本变换，将 LLM 输出的常见非标 JSON 模式归一化为合法 JSON。
-/// 在 serde_json::from_str 之前调用，消除因模型输出质量导致的解析失败。
+/// 合并归一化 + 括号平衡为单遍状态机，消除两阶段状态漂移。
 ///
-/// 处理范围：
-/// 1. 中文全角引号 "" → ""
+/// 核心原理：JSON 语法是确定性的——字符串闭合引号后**必须**跟随结构字符
+/// （, } ] :）或空白+结构字符。不满足此条件的引号为字符串内嵌内容 → 转义。
+///
+/// 处理范围（单遍完成）：
+/// 1. 中文引号 "" → " （字符串外）
 /// 2. 单行注释 // ... → 移除
-/// 3. 尾部逗号 → 移除
-/// 4. 未闭合引号/括号 → 修补
-fn normalize_llm_json(json_str: &str) -> String {
-    let mut result = String::with_capacity(json_str.len());
-    let mut chars = json_str.chars().peekable();
-    let mut in_string = false;
+/// 3. 字符串内嵌未转义 " → 转义为 \"（key/value 上下文分别判定）
+/// 4. 括号 {}[] 深度追踪 + 自动补全
+/// 5. 尾部逗号/引号清理
+///
+/// 引号闭合判定规则（JSON 语法确定性）：
+/// - key 闭合引号后：, } ] : 均合法（key 总是跟 : 配对）
+/// - value 闭合引号后：仅 , } ] 合法（value 不跟 :）
+///   通过 expect_key/in_key 追踪 key vs value 上下文。
+///
+/// 已知限制：无法区分「key 缺失闭合引号」和「值内嵌引号」，
+/// 如 "appearance: "text" 会被整体视为一个 key 字符串。
+fn repair_llm_json(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len();
+    let mut result = String::with_capacity(input.len() + 32);
+    let mut i = 0;
 
-    while let Some(c) = chars.next() {
+    // 状态
+    let mut in_string = false;
+    // key vs value 上下文：{ 或 , 后期望 key，: 后期望 value
+    let mut expect_key = false;
+    let mut in_key = false;
+    // 括号栈：追踪 {} [] 嵌套（同时用于平衡补全）
+    let mut bracket_stack: Vec<char> = Vec::new();
+
+    while i < len {
+        let c = chars[i];
+
         if in_string {
-            if c == '\\' {
+            // 转义序列：原样透传
+            if c == '\\' && i + 1 < len {
                 result.push('\\');
-                if let Some(next) = chars.next() {
-                    result.push(next);
-                }
+                i += 1;
+                result.push(chars[i]);
+                i += 1;
                 continue;
             }
-            if c == '"' {
-                in_string = false;
+
+            // 遇到 " 或中文右引号：判断是字符串闭合还是值内未转义引号
+            if c == '"' || c == '\u{201d}' {
+                // 跳过空白，找到下一个有意义的字符
+                let mut j = i + 1;
+                while j < len && matches!(chars[j], ' ' | '\t' | '\n' | '\r') {
+                    j += 1;
+                }
+                let next_meaningful = if j < len { Some(chars[j]) } else { None };
+
+                // 闭合判定规则（基于 JSON 语法确定性规则）：
+                // - key 闭合引号后必须跟 : → , } ] : 均合法
+                // - value 闭合引号后必须跟 , } ] → 仅 , } ] 合法
+                let is_closing = if in_key {
+                    next_meaningful.is_none_or(|ch| matches!(ch, ',' | '}' | ']' | ':'))
+                } else {
+                    next_meaningful.is_none_or(|ch| matches!(ch, ',' | '}' | ']'))
+                };
+
+                if is_closing {
+                    in_string = false;
+                    in_key = false;
+                    result.push('"');
+                } else {
+                    // 值内未转义引号 → 转义
+                    result.push_str("\\\"");
+                }
+                i += 1;
+                continue;
             }
+
             result.push(c);
+            i += 1;
             continue;
         }
 
+        // === 结构上下文 ===
         match c {
             '"' => {
                 in_string = true;
+                in_key = expect_key;
                 result.push('"');
             }
-            // 中文左/右引号 → "
-            '\u{201c}' | '\u{201d}' => {
+            '\u{201c}' => {
+                // 中文左引号 → ASCII 开引号
+                in_string = true;
+                in_key = expect_key;
                 result.push('"');
             }
-            // 单行注释 // ... \n → 移除到行尾
-            '/' if chars.peek() == Some(&'/') => {
-                for nc in chars.by_ref() {
-                    if nc == '\n' {
+            '\u{201d}' => {
+                // 中文右引号 → ASCII 闭引号
+                in_string = false;
+                in_key = false;
+                result.push('"');
+            }
+            '{' => {
+                bracket_stack.push('{');
+                expect_key = true;
+                result.push('{');
+            }
+            '}' => {
+                // 移除尾逗号：, } → }
+                if result.ends_with(',') {
+                    result.pop();
+                    result = result.trim_end().to_string();
+                }
+                // 括号平衡：弹出到匹配的 {
+                if bracket_stack.is_empty() {
+                    i += 1;
+                    continue;
+                }
+                while let Some(&top) = bracket_stack.last() {
+                    if top == '{' {
+                        bracket_stack.pop();
                         break;
                     }
+                    bracket_stack.pop();
+                    result.push(']');
                 }
+                result.push('}');
+                expect_key = false;
+
+                // }, { 模式：连续对象间自动补全中间缺失的 }
+                let mut peek = i + 1;
+                while peek < len && matches!(chars[peek], ' ' | '\t' | '\n' | '\r') {
+                    peek += 1;
+                }
+                if peek < len && chars[peek] == ',' {
+                    peek += 1;
+                    while peek < len && matches!(chars[peek], ' ' | '\t' | '\n' | '\r') {
+                        peek += 1;
+                    }
+                    if peek < len && chars[peek] == '{' {
+                        while bracket_stack.last() == Some(&'{') {
+                            bracket_stack.pop();
+                            result.push('}');
+                        }
+                    }
+                }
+            }
+            '[' => {
+                bracket_stack.push('[');
+                expect_key = false;
+                result.push('[');
+            }
+            ']' => {
+                // 移除尾逗号：, ] → ]
+                if result.ends_with(',') {
+                    result.pop();
+                    result = result.trim_end().to_string();
+                }
+                if bracket_stack.is_empty() {
+                    i += 1;
+                    continue;
+                }
+                while let Some(&top) = bracket_stack.last() {
+                    if top == '[' {
+                        bracket_stack.pop();
+                        break;
+                    }
+                    bracket_stack.pop();
+                    result.push('}');
+                }
+                result.push(']');
+            }
+            ':' => {
+                expect_key = false;
+                result.push(':');
+            }
+            ',' => {
+                // 数组内 , 后不期望 key，对象内 , 后期望 key
+                expect_key = bracket_stack.last() == Some(&'{');
+                result.push(',');
+            }
+            // 单行注释 → 移除
+            '/' if i + 1 < len && chars[i + 1] == '/' => {
+                i += 2;
+                while i < len && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
             }
             _ => {
                 result.push(c);
             }
         }
+        i += 1;
+    }
+
+    // 闭合未关闭的字符串
+    if in_string {
+        result.push('"');
     }
 
     // 尾部清理
@@ -468,16 +615,16 @@ fn normalize_llm_json(json_str: &str) -> String {
 
     // 移除数组/对象闭合后的多余引号：]" → ], }" → }
     let bytes = fixed.as_bytes();
-    let len = bytes.len();
-    if len >= 2 {
-        let last = bytes[len - 1];
-        let prev = bytes[len - 2];
+    let blen = bytes.len();
+    if blen >= 2 {
+        let last = bytes[blen - 1];
+        let prev = bytes[blen - 2];
         if last == b'"' && (prev == b']' || prev == b'}') {
             fixed.pop();
         }
     }
 
-    // 移除尾部逗号（在 } 或 ] 前的）
+    // 移除尾部逗号
     while let Some(last) = fixed.chars().last() {
         if last == ',' {
             fixed.pop();
@@ -487,59 +634,30 @@ fn normalize_llm_json(json_str: &str) -> String {
         }
     }
 
-    // 修复未闭合引号（奇数个 "）
-    let quote_count = fixed.chars().filter(|&c| c == '"').count();
-    if quote_count % 2 != 0 {
-        fixed.push('"');
-    }
-
-    // 闭合未关闭的括号
-    let open_brackets = fixed.chars().filter(|&c| c == '[').count() as i32;
-    let close_brackets = fixed.chars().filter(|&c| c == ']').count() as i32;
-    let open_braces = fixed.chars().filter(|&c| c == '{').count() as i32;
-    let close_braces = fixed.chars().filter(|&c| c == '}').count() as i32;
-
-    for _ in 0..(open_brackets - close_brackets).max(0) {
-        fixed.push(']');
-    }
-    for _ in 0..(open_braces - close_braces).max(0) {
-        fixed.push('}');
+    // 补全剩余未闭合的括号
+    while let Some(top) = bracket_stack.pop() {
+        fixed.push(if top == '{' { '}' } else { ']' });
     }
 
     fixed
 }
 
-/// 解析 LLM 响应为结构化类型（带归一化预处理 + 括号平衡修复）
-///
-/// 流程：extract_json_str → normalize_llm_json → 括号平衡修复 → serde 解析
-///
-/// 括号平衡修复：逐字符追踪 {}[] 嵌套深度（跳过字符串内部），
-/// 当遇到 ] 或 } 试图闭合但深度不匹配时，自动补全缺失的闭合符号。
-/// 这是确定性的 — 不猜测，直接修正嵌套错误。
+/// 解析 LLM 响应为结构化类型（单遍修复 → serde 解析）
 fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> {
     let raw_json = extract_json_str(response);
-    let json_str = normalize_llm_json(&raw_json);
+    let json_str = repair_llm_json(&raw_json);
 
-    // 第一轮：严格解析
+    // 直接解析
     if let Ok(parsed) = serde_json::from_str::<D>(&json_str) {
         return Ok(parsed);
     }
 
-    // 第二轮：括号平衡修复
-    let balanced = balance_braces(&json_str);
-    if balanced != json_str
-        && let Ok(parsed) = serde_json::from_str::<D>(&balanced)
-    {
-        tracing::warn!("JSON repaired via brace balancing");
-        return Ok(parsed);
-    }
-
-    // 全部失败，输出诊断信息
-    let strict_err = match serde_json::from_str::<D>(&json_str) {
+    // 解析失败，输出诊断信息
+    let parse_err = match serde_json::from_str::<D>(&json_str) {
         Ok(_) => unreachable!(),
         Err(e) => e,
     };
-    let error_line = strict_err.line();
+    let error_line = parse_err.line();
     let lines: Vec<&str> = json_str.lines().collect();
     let start = error_line.saturating_sub(4);
     let end = (error_line + 2).min(lines.len());
@@ -555,114 +673,14 @@ fn parse_json_response<D: DeserializeOwned + Send>(response: &str) -> Result<D> 
         .join("\n");
 
     tracing::error!(
-        error_type = ?strict_err.classify(),
-        error_msg = %strict_err,
+        error_type = ?parse_err.classify(),
+        error_msg = %parse_err,
         line = error_line,
-        column = strict_err.column(),
+        column = parse_err.column(),
         json_len = json_str.len(),
         "\n{error_snippet}\n--- Full JSON ---\n{json_str}"
     );
-    Err(strict_err.into())
-}
-
-/// 括号平衡修复：确定性深度追踪 + 自动补全
-///
-/// 逐字符追踪 {}[] 嵌套深度（跳过字符串和转义序列），
-/// 核心逻辑：遇到 `}` 时只弹出一个 `{`（不跨类型），遇到 `]` 时只弹出一个 `[`。
-/// 栈空时遇到闭合符号 → 丢弃（LLM 多余输出）。
-/// 额外修复：当 `}` 后跟随 `,` + `{`，如果栈深度表明当前对象未闭合，立即补 `}`。
-fn balance_braces(json: &str) -> String {
-    let chars: Vec<char> = json.chars().collect();
-    let len = chars.len();
-    let mut result = String::with_capacity(json.len() + 32);
-    let mut stack: Vec<char> = Vec::new();
-    let mut in_string = false;
-    let mut i = 0;
-
-    while i < len {
-        let c = chars[i];
-
-        if in_string {
-            result.push(c);
-            if c == '\\' && i + 1 < len {
-                i += 1;
-                result.push(chars[i]);
-            } else if c == '"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        match c {
-            '"' => {
-                in_string = true;
-                result.push('"');
-            }
-            '{' | '[' => {
-                stack.push(c);
-                result.push(c);
-            }
-            '}' => {
-                if stack.is_empty() {
-                    i += 1;
-                    continue;
-                }
-                while let Some(&top) = stack.last() {
-                    if top == '{' {
-                        stack.pop();
-                        break;
-                    }
-                    stack.pop();
-                    result.push(']');
-                }
-                result.push('}');
-
-                // }, { 模式：action_data 的 } 关闭后，紧跟 ,{ 表示下一个元素
-                let mut peek = i + 1;
-                while peek < len && chars[peek].is_whitespace() {
-                    peek += 1;
-                }
-                if peek < len && chars[peek] == ',' {
-                    peek += 1;
-                    while peek < len && chars[peek].is_whitespace() {
-                        peek += 1;
-                    }
-                    if peek < len && chars[peek] == '{' {
-                        while stack.last() == Some(&'{') {
-                            stack.pop();
-                            result.push('}');
-                        }
-                    }
-                }
-            }
-            ']' => {
-                if stack.is_empty() {
-                    i += 1;
-                    continue;
-                }
-                while let Some(&top) = stack.last() {
-                    if top == '[' {
-                        stack.pop();
-                        break;
-                    }
-                    stack.pop();
-                    result.push('}');
-                }
-                result.push(']');
-            }
-            _ => {
-                result.push(c);
-            }
-        }
-        i += 1;
-    }
-
-    while let Some(top) = stack.pop() {
-        result.push(if top == '{' { '}' } else { ']' });
-    }
-
-    result
+    Err(parse_err.into())
 }
 
 #[async_trait]
@@ -1555,5 +1573,100 @@ mod tests {
         // 自闭合标签被移除，但思考文本仍在（非标签包裹无法剥离）
         assert!(!result.contains("<think"), "think 标签应被移除");
         assert!(result.contains("\"action_type\": \"drink\""), "JSON 应保留");
+    }
+
+    // ========================================================================
+    // repair_llm_json tests
+    // ========================================================================
+
+    #[test]
+    fn test_repair_valid_json_passthrough() {
+        let input = r#"{"name": "test", "age": 25}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["name"], "test");
+        assert_eq!(parsed["age"], 25);
+    }
+
+    #[test]
+    fn test_repair_embedded_unescaped_quotes() {
+        // 实际 LongCat-2.0-Preview 输出：identity 值内含未转义 ASCII "
+        let input = r#"{"identity": "曾是江湖上赫赫有名的"追魂针"沈三"}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed["identity"].as_str().unwrap().contains("追魂针"));
+        assert!(parsed["identity"].as_str().unwrap().contains("沈三"));
+    }
+
+    #[test]
+    fn test_repair_embedded_quotes_before_comma() {
+        let input = r#"{"desc": "他说"完毕"后离开", "name": "test"}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed["desc"].as_str().unwrap().contains("完毕"));
+        assert_eq!(parsed["name"], "test");
+    }
+
+    #[test]
+    fn test_repair_chinese_quotes_as_delimiters() {
+        let input = "{\u{201c}name\u{201d}: \u{201c}test\u{201d}}";
+        let result = repair_llm_json(input);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&result).is_ok(),
+            "Chinese quotes should produce valid JSON, got: {}",
+            result
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["name"], "test");
+    }
+
+    #[test]
+    fn test_repair_unbalanced_brackets() {
+        let input = r#"{"a": {"b": 1"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"]["b"], 1);
+    }
+
+    #[test]
+    fn test_repair_trailing_comma() {
+        let input = r#"{"a": 1,}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"], 1);
+    }
+
+    #[test]
+    fn test_repair_line_comment() {
+        let input = "{\n  \"a\": 1 // comment\n}";
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"], 1);
+    }
+
+    #[test]
+    fn test_repair_string_at_end_of_input() {
+        // 字符串值在输入末尾闭合，next_meaningful = None
+        let input = r#"{"a": "test"}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"], "test");
+    }
+
+    #[test]
+    fn test_repair_unclosed_string() {
+        let input = r#"{"a": "test"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["a"], "test");
+    }
+
+    #[test]
+    fn test_repair_quote_before_colon_in_value() {
+        // " 后跟 : 不应被误判为闭合（已从匹配集中移除 :）
+        let input = r#"{"desc": "a:b"}"#;
+        let result = repair_llm_json(input);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["desc"], "a:b");
     }
 }

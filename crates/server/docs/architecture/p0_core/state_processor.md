@@ -30,5 +30,10 @@
 - 绝对禁止越过 StateProcessor 直接修改 DashMap 中的 AgentState。
 
 ## 4. 代码入口
-- 处理器定义: `crates/server/src/tick/processor/mod.rs`
-- Saga 实现: `crates/server/src/tick/processor/executor.rs`
+- 处理器定义: `crates/server/src/tick/processor/processor.rs`
+- Saga 执行器: `crates/server/src/tick/processor/executor.rs`
+- 事件处理: `crates/server/src/tick/processor/events.rs`
+- 变异器: `crates/server/src/tick/processor/mutator.rs`
+- 状态解析: `crates/server/src/tick/processor/resolver.rs`
+- 技能变异: `crates/server/src/tick/processor/skill_mutator.rs`
+- 模块入口: `crates/server/src/tick/processor/mod.rs`

@@ -405,7 +405,7 @@
             .tick-badge {
                 font-family: monospace;
                 font-size: 12px;
-                color: var(--accent);
+                /*color: var(--accent);*/
             }
 
             .mono-text {
@@ -1163,11 +1163,9 @@
                     renderChronicles(chronicles);
                 } catch (e) {
                     if (e.name === "ApiError") {
-                        container.innerHTML =
-                            `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
+                        container.innerHTML = `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
                     } else {
-                        container.innerHTML =
-                            `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
+                        container.innerHTML = `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
                     }
                 }
             }
@@ -1379,7 +1377,8 @@
                 if (!expFiltersLoaded) await initExpFilters();
                 if (!experiencesLoaded) await loadExperiences();
                 // 确保 location 映射已加载
-                if (!Object.keys(locationNames).length) await initLocationMapping();
+                if (!Object.keys(locationNames).length)
+                    await initLocationMapping();
             }
 
             async function initExpFilters() {
@@ -1453,13 +1452,15 @@
                 const aid = document.getElementById("filter-agent").value;
                 const loc = document.getElementById("filter-location").value;
                 const act = document.getElementById("filter-action").value;
-                const resultVal = document.getElementById("filter-result").value;
+                const resultVal =
+                    document.getElementById("filter-result").value;
                 const from = document.getElementById("filter-from-tick").value;
                 const to = document.getElementById("filter-to-tick").value;
                 if (aid) params.set("agent_id", aid);
                 if (loc) params.set("location", loc);
                 if (act) params.set("action_type", act);
-                if (resultVal && resultVal !== "success") params.set("result", resultVal);
+                if (resultVal && resultVal !== "success")
+                    params.set("result", resultVal);
                 if (from) params.set("from_tick", from);
                 if (to) params.set("to_tick", to);
 
@@ -1503,15 +1504,23 @@
                         const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
                         const timeStr = e.created_at
-                            ? new Date(e.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                            ? new Date(e.created_at).toLocaleString("zh-CN", {
+                                  month: "2-digit",
+                                  day: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                              })
                             : "-";
 
                         const renhunHtml = renderRenhunCell(cycles, e);
                         const tianhunHtml = renderTianhunCell(cycles, e);
                         const dihunHtml = renderDihunCell(cycles, e);
-                        const narrativeHtml = e.narrative ? escapeHtml(e.narrative) : '<span style="color:var(--text-subtle)">-</span>';
+                        const narrativeHtml = e.narrative
+                            ? escapeHtml(e.narrative)
+                            : '<span style="color:var(--text-subtle)">-</span>';
 
-                        return `<tr>` +
+                        return (
+                            `<tr>` +
                             `<td><span class="tick-badge">T${escapeHtml(e.tick_id || "-")}</span></td>` +
                             `<td>${escapeHtml(e.agent_name || "-")}</td>` +
                             `<td>${escapeHtml(getLocationName(e.location || "-"))}</td>` +
@@ -1522,7 +1531,8 @@
                             `<td class="narrative-cell"><div class="narrative-cell-inner">${narrativeHtml}</div></td>` +
                             `<td>${resultBadge}</td>` +
                             `<td class="mono-text">${escapeHtml(timeStr)}</td>` +
-                            `</tr>`;
+                            `</tr>`
+                        );
                     })
                     .join("");
             }
@@ -1584,16 +1594,20 @@
             }
 
             // 地魂 action_type 中文映射（数据库存中文，非英文）
-            var DIHUN_SPEAK_TYPES = { "说话": true, "speak": true };
-            var DIHUN_WHISPER_TYPES = { "私语": true, "whisper": true };
-            var DIHUN_SHOUT_TYPES = { "大喊": true, "shout": true };
+            var DIHUN_SPEAK_TYPES = { 说话: true, speak: true };
+            var DIHUN_WHISPER_TYPES = { 私语: true, whisper: true };
+            var DIHUN_SHOUT_TYPES = { 大喊: true, shout: true };
 
             // 解析 action_data（兼容 string / object / null）
             function parseActionData(raw) {
                 if (!raw) return {};
                 if (typeof raw === "object") return raw;
                 if (typeof raw === "string") {
-                    try { return JSON.parse(raw); } catch(e) { return {}; }
+                    try {
+                        return JSON.parse(raw);
+                    } catch (e) {
+                        return {};
+                    }
                 }
                 return {};
             }
@@ -1629,7 +1643,8 @@
                     // final_intent.action_data 为空时 fallback 到顶层 action_data
                     if (!fiData.content && entry.action_data) {
                         const fallback = parseActionData(entry.action_data);
-                        if (fallback.content) fiData = { ...fiData, ...fallback };
+                        if (fallback.content)
+                            fiData = { ...fiData, ...fallback };
                     }
                     const fiContent = fiData.content || "";
                     let fiText = "";
@@ -1638,8 +1653,7 @@
                     else if (DIHUN_WHISPER_TYPES[fiActionType] && fiContent) {
                         const name = resolveTargetName(fiData.target_agent_id);
                         fiText = `向${escapeHtml(name)}密语: "${escapeHtml(fiContent)}"`;
-                    }
-                    else if (DIHUN_SHOUT_TYPES[fiActionType] && fiContent)
+                    } else if (DIHUN_SHOUT_TYPES[fiActionType] && fiContent)
                         fiText = `大喊: "${escapeHtml(fiContent)}"`;
                     else {
                         fiText = escapeHtml(getActionTypeDisplay(fiActionType));
@@ -1713,8 +1727,9 @@
                 params.set("limit", sumPageSize);
                 const agentFilterVal =
                     document.getElementById("sum-agent-filter").value;
-                const gameDayVal =
-                    document.getElementById("sum-game-day-filter").value;
+                const gameDayVal = document.getElementById(
+                    "sum-game-day-filter",
+                ).value;
                 if (agentFilterVal) params.set("agent_id", agentFilterVal);
                 if (gameDayVal) params.set("game_day", gameDayVal);
 
@@ -1730,23 +1745,29 @@
                     updateSumPagination();
                 } catch (e) {
                     if (e.name === "ApiError") {
-                        container.innerHTML =
-                            `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
+                        container.innerHTML = `<div class="empty-state"><p>${e.message === "UNAUTHORIZED" ? "请先登录" : "请求失败，请稍后重试"}</p></div>`;
                     } else {
-                        container.innerHTML =
-                            `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
+                        container.innerHTML = `<div class="empty-state"><p>加载失败: ${escapeHtml(e.message)}</p></div>`;
                     }
                 }
             }
 
             // 客户端文本即时过滤（不影响 sumTotal/分页，仅在当前页内筛选显示）
             function applySumTextFilter() {
-                const q = document.getElementById("sum-search-input").value.toLowerCase().trim();
+                const q = document
+                    .getElementById("sum-search-input")
+                    .value.toLowerCase()
+                    .trim();
                 if (q) {
-                    renderSummaries(summariesData.filter(s =>
-                        (s.summary || "").toLowerCase().includes(q) ||
-                        getAgentName(s.agent_id).toLowerCase().includes(q)
-                    ));
+                    renderSummaries(
+                        summariesData.filter(
+                            (s) =>
+                                (s.summary || "").toLowerCase().includes(q) ||
+                                getAgentName(s.agent_id)
+                                    .toLowerCase()
+                                    .includes(q),
+                        ),
+                    );
                 } else {
                     renderSummaries(summariesData);
                 }
@@ -1791,7 +1812,10 @@
             function getAgentName(agentId) {
                 if (!agentId) return "未知角色";
                 if (allAgentsMap && allAgentsMap[agentId])
-                    return allAgentsMap[agentId].name || `Agent ${agentId.substring(0, 8)}`;
+                    return (
+                        allAgentsMap[agentId].name ||
+                        `Agent ${agentId.substring(0, 8)}`
+                    );
                 return `Agent ${agentId.substring(0, 8)}`;
             }
 
@@ -1833,7 +1857,6 @@
                     })
                     .join("");
             }
-
 
             function updateSumPagination() {
                 const totalPages = Math.ceil(sumTotal / sumPageSize);
