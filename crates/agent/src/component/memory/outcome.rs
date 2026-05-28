@@ -241,7 +241,7 @@ impl OutcomeMemory {
                     .iter()
                     .find(|r| matches!(r.result, OutcomeResult::Failed(_)))
             {
-                let short_reason: String = reason.chars().take(30).collect();
+                let short_reason = reason.clone();
                 lines.push(format!(
                     "- {} → 失败（{}）[{}次]",
                     at, short_reason, fail_count

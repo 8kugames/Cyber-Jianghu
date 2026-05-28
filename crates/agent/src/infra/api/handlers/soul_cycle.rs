@@ -379,14 +379,14 @@ pub(crate) async fn rebirth_character_handler(
         info!(
             "[rebirth] Server 归隐响应: status={}, body={}",
             status,
-            &body[..body.len().min(200)]
+            &body[..body.len().min(2000)]
         );
     } else {
         // 非 401 错误：仍继续本地清理（server 可能暂时不可达，但本地状态需清理）
         warn!(
             "[rebirth] Server 归隐非预期状态: status={}, body={}，继续本地清理",
             status,
-            &body[..body.len().min(200)]
+            &body[..body.len().min(2000)]
         );
     }
 
@@ -682,9 +682,7 @@ pub(crate) async fn dream_character_handler(
             duration: req.duration,
         },
     );
-    if dream.records.len() > 200 {
-        dream.records.truncate(200);
-    }
+    // dream records 容量不设上限，由 dream duration 自然限制
     dream.save_to_file(&dream_data_dir(&state, agent_id).await, &agent_id);
 
     Json(DreamResponse {

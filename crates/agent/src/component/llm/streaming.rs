@@ -339,7 +339,7 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                                 "[SSE 解析失败] chunk #{}: {} (data: {})",
                                 chunk_count + 1,
                                 e,
-                                &data[..data.len().min(200)]
+                                &data[..data.len().min(2000)]
                             );
                         }
                     }

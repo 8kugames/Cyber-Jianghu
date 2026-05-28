@@ -48,8 +48,8 @@ pub fn log_llm(agent_name: &str, tick_id: i64, stage: &str, prompt: &str, respon
             "\n[{}] [{} - Tick {}] LLM: {}",
             timestamp, agent_name, tick_id, stage
         );
-        let prompt_preview = if prompt.len() > 500 {
-            let mut end = 500;
+        let prompt_preview = if prompt.len() > 5000 {
+            let mut end = 5000;
             while end > 0 && !prompt.is_char_boundary(end) {
                 end -= 1;
             }
