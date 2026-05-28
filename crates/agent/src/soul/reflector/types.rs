@@ -147,10 +147,6 @@ impl RejectionType {
 pub struct ValidationRuntimeConfig {
     /// 分级 LLM 校验配置
     pub graded_config: Option<cyber_jianghu_protocol::GradedValidationConfig>,
-    /// 连续 follow 次数
-    pub consecutive_follow_count: usize,
-    /// 连续 follow 上限
-    pub max_consecutive_follow: usize,
     /// 最近同类 intent 的完整决策内容（用于语义去重）
     pub recent_same_type_decisions: Vec<String>,
 }
@@ -271,14 +267,10 @@ mod tests {
             }),
             runtime: ValidationRuntimeConfig {
                 graded_config: Some(GradedValidationConfig::default()),
-                consecutive_follow_count: 2,
-                max_consecutive_follow: 5,
                 recent_same_type_decisions: vec![],
             },
         };
 
-        assert_eq!(request.runtime.consecutive_follow_count, 2);
-        assert_eq!(request.runtime.max_consecutive_follow, 5);
         assert!(request.runtime.graded_config.is_some());
         assert!(request.world_state.is_some());
     }

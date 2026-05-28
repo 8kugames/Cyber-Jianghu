@@ -473,7 +473,6 @@ impl super::super::Agent {
                     world_state.tick_id
                 );
                 self.consecutive_idle_count += 1;
-                self.consecutive_follow_count = 0;
                 self.maybe_rotate_model().await;
                 self.chaos_fallback_intent(
                     world_state,
