@@ -21,7 +21,7 @@ use super::prompt::ObserverPrompt;
 use super::rule_engine::{RuleEngine, RuleValidationContext, types::extract_ids_from_world_state};
 use super::types::{
     LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionType,
-    ValidationRequest, ValidationResult, ValidationRuntimeConfig,
+    ValidationRequest, ValidationResult,
 };
 
 // ============================================================================
@@ -297,11 +297,8 @@ impl ReflectorSoul {
         &self,
         request: ValidationRequest,
     ) -> Result<PipelineValidationResult> {
-        let ValidationRuntimeConfig {
-            graded_config,
-            recent_same_type_decisions,
-        } = request.runtime.clone();
-        let mut layers = Vec::with_capacity(4);
+        let graded_config = request.runtime.graded_config.clone();
+        let mut layers = Vec::with_capacity(3);
 
         match self.validate_action_type(&request.intent) {
             Ok(()) => layers.push(LayerResult {
@@ -335,28 +332,6 @@ impl ReflectorSoul {
                     detail: Some(reason.clone()),
                 });
                 return Ok(PipelineValidationResult::Rejected { reason, layers });
-            }
-        }
-
-        // 语义去重（Layer 2.5）：LLM 比较新 intent 与最近同类 intent 的语义相似度
-        if !recent_same_type_decisions.is_empty() && request.intent.chaos_marker.is_none() {
-            match self
-                .validate_semantic_dedup(&request.intent, &recent_same_type_decisions)
-                .await
-            {
-                Ok(()) => layers.push(LayerResult {
-                    layer: "semantic_dedup",
-                    passed: true,
-                    detail: None,
-                }),
-                Err(reason) => {
-                    layers.push(LayerResult {
-                        layer: "semantic_dedup",
-                        passed: false,
-                        detail: Some(reason.clone()),
-                    });
-                    return Ok(PipelineValidationResult::Rejected { reason, layers });
-                }
             }
         }
 
@@ -450,12 +425,20 @@ impl ReflectorSoul {
     async fn validate_llm(&self, request: ValidationRequest) -> Result<ValidationResult> {
         let rules = self.rules.read().await.clone();
 
-        // 构建验证 prompt
+        let recent_decisions = &request.runtime.recent_same_type_decisions;
+        let recent_ref = if recent_decisions.is_empty() {
+            None
+        } else {
+            Some(recent_decisions.as_slice())
+        };
+
+        // 构建验证 prompt（条件注入语义去重指令）
         let prompt = self.observer_prompt.build_validation_prompt(
             &request.intent,
             &request.persona,
             &rules,
             &request.world_context,
+            recent_ref,
         );
 
         debug!("Validation prompt:\n{}", prompt);
@@ -492,69 +475,6 @@ impl ReflectorSoul {
         }
 
         Ok(result)
-    }
-
-    /// 语义去重检查：用 LLM 判断新 intent 是否与最近同类 intent 语义重复
-    ///
-    /// 仅在 recent_same_type_decisions 非空时调用（三重门控：有 content、有同类历史、非 chaos）。
-    /// LLM 不可用时降级通过（不因去重失败阻塞正常流程）。
-    async fn validate_semantic_dedup(
-        &self,
-        intent: &crate::models::Intent,
-        recent_decisions: &[String],
-    ) -> std::result::Result<(), String> {
-        let current_content = intent
-            .action_data
-            .as_ref()
-            .and_then(|d| d.get("content"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        if current_content.is_empty() {
-            return Ok(());
-        }
-
-        // 截断每条历史防止 prompt 膨胀（200 字 ≈ 100 tokens）
-        const DEDUP_HISTORY_CHAR_LIMIT: usize = 200;
-        let history_lines: String = recent_decisions
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let truncated: String = s.chars().take(DEDUP_HISTORY_CHAR_LIMIT).collect();
-                format!("{}. {}", i + 1, truncated)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let prompt = format!(
-            "判断以下新意图是否与最近的意图在语义上重复（表达相同的意思、讨论相同的话题）。\n\n\
-             新意图: {}「{}」\n\n\
-             最近的类似意图:\n{}\n\n\
-             只回答一个词: REPEAT（语义重复）或 NOVEL（新内容）",
-            intent.action_type, current_content, history_lines
-        );
-
-        let llm_client = self.llm_container.read().await.clone();
-        match llm_client
-            .complete_with_system("你是语义去重审查员。", &prompt)
-            .await
-        {
-            Ok(response) => {
-                // NOVEL 优先：响应同时包含两词时视为新颖（宽放策略，避免误拦）
-                let answer = response.trim().to_uppercase();
-                if answer.contains("REPEAT") && !answer.contains("NOVEL") {
-                    debug!("Semantic dedup rejected: {}", response.trim());
-                    return Err(
-                        "你刚才已经说过类似的话了，换个角度或做点别的吧".to_string(),
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                warn!("Semantic dedup LLM failed, bypassed: {}", e);
-                Ok(())
-            }
-        }
     }
 
     /// 更新世界观规则（服务端广播时调用）
@@ -671,6 +591,7 @@ impl LlmValidationResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::soul::reflector::types::ValidationRuntimeConfig;
     use crate::component::llm::MockLlmClient;
     use cyber_jianghu_protocol::{
         AdjacentNode, AgentSelfState, Entity, GradedValidationConfig, InventoryItem, Location,
@@ -878,6 +799,80 @@ mod tests {
             }
             PipelineValidationResult::Rejected { reason, .. } => {
                 panic!("valid intent should be approved, got: {}", reason);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_layer3_rejects_semantic_repeat() {
+        let mock_client = MockLlmClient::with_response(
+            r#"{"result":"rejected","reason":"重复自我介绍","rejection_type":"semantic_repeat"}"#,
+        );
+        let validator = ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let world_state = test_world_state();
+
+        let request = ValidationRequest {
+            intent: crate::models::Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "speak",
+                Some(serde_json::json!({"content": "在下沈暮烟，行走江湖"})),
+            ),
+            persona: PersonaInfo::default(),
+            world_context: "测试地点".to_string(),
+            world_state: Some(world_state),
+            runtime: ValidationRuntimeConfig {
+                graded_config: None,
+                recent_same_type_decisions: vec![
+                    "说话：你好，我叫沈暮烟".to_string(),
+                    "说话：在下沈暮烟".to_string(),
+                ],
+            },
+        };
+
+        match validator.validate_pipeline(request).await.unwrap() {
+            PipelineValidationResult::Rejected { reason, layers } => {
+                assert_eq!(reason, "重复自我介绍");
+                let layer3 = layers.last().expect("should have layer3");
+                assert_eq!(layer3.layer, "layer3");
+                assert!(!layer3.passed);
+            }
+            PipelineValidationResult::Approved { .. } => {
+                panic!("semantic repeat should be rejected");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_dedup_section_when_empty_history() {
+        let mock_client =
+            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
+        let validator = ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let world_state = test_world_state();
+
+        // 无历史数据时，prompt 不含去重指令，正常通过
+        let request = ValidationRequest {
+            intent: crate::models::Intent::new(
+                world_state.agent_id.unwrap_or_default(),
+                world_state.tick_id,
+                "speak",
+                Some(serde_json::json!({"content": "初次见面"})),
+            ),
+            persona: PersonaInfo::default(),
+            world_context: "测试地点".to_string(),
+            world_state: Some(world_state),
+            runtime: ValidationRuntimeConfig {
+                graded_config: None,
+                recent_same_type_decisions: vec![],
+            },
+        };
+
+        match validator.validate_pipeline(request).await.unwrap() {
+            PipelineValidationResult::Approved { layers, .. } => {
+                assert!(layers.iter().all(|l| l.passed));
+            }
+            PipelineValidationResult::Rejected { reason, .. } => {
+                panic!("no history should not trigger dedup rejection: {}", reason);
             }
         }
     }

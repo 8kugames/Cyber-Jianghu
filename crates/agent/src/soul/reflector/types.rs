@@ -110,6 +110,8 @@ pub enum RejectionType {
     OutOfCharacter,
     /// 元游戏行为（打破第四面墙）
     MetaGaming,
+    /// 语义重复（车轱辘话）
+    SemanticRepeat,
     /// 其他原因
     Other,
 }
@@ -122,6 +124,7 @@ impl RejectionType {
             "power_system_violation" => Self::PowerSystemViolation,
             "out_of_character" => Self::OutOfCharacter,
             "meta_gaming" => Self::MetaGaming,
+            "semantic_repeat" => Self::SemanticRepeat,
             _ => Self::Other,
         }
     }
@@ -133,6 +136,7 @@ impl RejectionType {
             Self::PowerSystemViolation => "power_system_violation",
             Self::OutOfCharacter => "out_of_character",
             Self::MetaGaming => "meta_gaming",
+            Self::SemanticRepeat => "semantic_repeat",
             Self::Other => "other",
         }
     }
@@ -206,7 +210,26 @@ mod tests {
             RejectionType::parse("out_of_character"),
             RejectionType::OutOfCharacter
         );
+        assert_eq!(
+            RejectionType::parse("semantic_repeat"),
+            RejectionType::SemanticRepeat
+        );
         assert_eq!(RejectionType::parse("unknown"), RejectionType::Other);
+    }
+
+    #[test]
+    fn test_rejection_type_roundtrip() {
+        let types = [
+            RejectionType::EraViolation,
+            RejectionType::PowerSystemViolation,
+            RejectionType::OutOfCharacter,
+            RejectionType::MetaGaming,
+            RejectionType::SemanticRepeat,
+            RejectionType::Other,
+        ];
+        for rt in &types {
+            assert_eq!(RejectionType::parse(rt.as_str()), *rt);
+        }
     }
 
     #[test]
