@@ -15,6 +15,7 @@ pub mod models;
 pub mod paths;
 pub mod state;
 pub mod tick;
+pub mod time_utils;
 pub mod websocket;
 
 // 导出需要在 main.rs 中使用的函数/类型
