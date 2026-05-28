@@ -138,7 +138,7 @@ pub(crate) async fn run_tool_loop(
                             messages.push(ChatMessage::tool_result(
                                 &remaining.id,
                                 &remaining.function.name,
-                                "[系统截断] 连续调用超限，本次调用已取消",
+                                "[已获知足够信息，直接回答]",
                             ));
                         }
                         return forced_text_exit(llm, messages, llm_config.clone()).await;
@@ -213,7 +213,7 @@ async fn forced_text_exit(
 
     // 追加引导消息，防止模型在 tools 被移除后返回空响应
     messages.push(ChatMessage::user(
-        "工具调用已结束。请直接输出你的决策 JSON，不要再调用任何工具。",
+        "你已充分了解周围情况。现在请做出你的决定。",
     ));
 
     let response = llm.send_chat_exchange(messages, None, llm_config).await?;
