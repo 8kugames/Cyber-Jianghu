@@ -105,7 +105,14 @@ function formatRealTime(ts) {
 // 加载属性元数据（分类信息，从 narrative_config 解析）
 async function loadAttributeMeta() {
   try {
-    attributeMeta = await apiGet("/api/v1/attribute-meta");
+    const res = await fetch("/api/v1/attribute-meta");
+    // 503 = config 未就绪，保持 null 以便重试机制工作
+    if (res.status === 503) return;
+    const data = await res.json();
+    // 仅缓存非空结果，避免 {} 绕过 !attributeMeta 守卫
+    if (data && data.display_names && Object.keys(data.display_names).length > 0) {
+      attributeMeta = data;
+    }
   } catch (err) {
     console.error("加载属性元数据失败:", err);
   }
@@ -780,14 +787,15 @@ async function loadCharacter() {
 // 渲染单个属性行
 function renderAttrItem(key, attr, withMax) {
   let name = key;
-  if (attr && attr.name) {
-    name = attr.name;
-  } else if (
+  // attributeMeta.display_names 是显示名的权威来源，优先于 attr.name
+  if (
     attributeMeta &&
     attributeMeta.display_names &&
     attributeMeta.display_names[key]
   ) {
     name = attributeMeta.display_names[key];
+  } else if (attr && attr.name) {
+    name = attr.name;
   }
 
   if (attr && typeof attr === "object" && attr.current !== undefined) {
@@ -1429,8 +1437,8 @@ document.addEventListener("DOMContentLoaded", () => {
       // 防抖：避免短时间内多次刷新
       if (window._tickRefreshTimer) clearTimeout(window._tickRefreshTimer);
       window._tickRefreshTimer = setTimeout(async () => {
-        // 确保 attributeMeta 已加载（防止 SSE reconnect 期间竞态）
-        if (!attributeMeta) {
+        // 确保 attributeMeta 已加载且包含有效数据（防止 SSE reconnect 期间竞态）
+        if (!attributeMeta || !Object.keys(attributeMeta.display_names || {}).length) {
           await loadAttributeMeta();
         }
         await loadCharacter();
@@ -1800,6 +1808,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // 增量刷新：只更新变化的字段
   async function incrementalRefresh() {
     try {
+      // 确保 attributeMeta 有效后再渲染属性
+      if (!attributeMeta || !Object.keys(attributeMeta.display_names || {}).length) {
+        await loadAttributeMeta();
+        if (!attributeMeta) return; // 仍未就绪，跳过本轮
+      }
+
       const data = await apiGet("/api/v1/character");
 
       // 记录当前数据用于下次比较

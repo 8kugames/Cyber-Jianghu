@@ -435,6 +435,18 @@ pub(crate) async fn get_attribute_meta_handler(
         narrative
     };
 
+    // 503 信号：让前端重试而非永久缓存空结果
+    if narrative.is_none() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "narrative_config 尚未就绪",
+                "retry": true
+            })),
+        )
+            .into_response();
+    }
+
     let categories = narrative
         .as_ref()
         .map(|c| c.attribute_categories.clone())
@@ -478,6 +490,17 @@ fn enrich_attributes_with_descriptions(
     narrative_config: &Option<cyber_jianghu_protocol::NarrativeConfig>,
 ) -> Option<serde_json::Value> {
     let attrs = raw_attributes?;
+
+    // 无叙事配置时返回原生格式，避免填充英文 key 污染前端的 display_names 回落
+    if narrative_config.is_none()
+        || narrative_config
+            .as_ref()
+            .map(|c| c.attributes.is_empty())
+            .unwrap_or(true)
+    {
+        return Some(attrs);
+    }
+
     let attrs_obj = attrs.as_object()?;
 
     // 预先收集所有 _max 字段
