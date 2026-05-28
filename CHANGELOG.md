@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### Added — LLM 配置 Web UI 完善
+
+- **Agent**: `FallbackModelConfig` 新增 `context_window_tokens` 字段，支持 per-model 上下文窗口配置（默认使用全局 32K）
+- **Agent**: Web Panel LLM 配置页暴露全部缺失字段 — temperature、max_tokens、context_window_tokens、enable_streaming（基础区），summary_trigger_ratio、keep_recent_turns、idle_rotate_threshold、enable_thinking、fallback_models（高级区，collapsible）
+- **Agent**: `llm_config_to_info()` + `apply_llm_update()` helper 函数消除 handler 逐字段构造代码重复
+- **Server**: LLM 配置页新增 `context_window_tokens` 字段
+- **Server**: `config_llm.rs` + `llm_loader.rs` 双 LlmConfig struct 同步增加 `context_window_tokens`
+
+### Changed — 语义去重合并到 Layer 3
+
+- **Agent**: Layer 2.5（`validate_semantic_dedup` 独立 LLM 调用）合并到 Layer 3 单次 LLM 调用，节省 1 次往返/tick
+- **Agent**: `RejectionType` 新增 `SemanticRepeat` 变体，`build_validation_prompt()` 条件注入去重指令
+- **Agent**: `OBSERVER_SYSTEM_PROMPT` 补充 `semantic_repeat` 拒绝类型和去重审核原则
+
+### Changed — 截断审计与清理
+
+- **Agent**: 日志截断值 × 10（`streaming.rs`、`direct_client.rs`、`tool_loop.rs`、`thinking_log.rs`、`soul_cycle.rs`）
+- **Agent**: 移除非日志截断 — `outcome.rs` 完整失败原因、`relationship_narrative.rs` 完整描述、`soul_cycle.rs` 完整 dream 文本、`biography.rs` 完整叙事、`llm_config.rs` 完整 persona 描述
+- **Agent**: `conversation.rs` 移除 `truncate_str()` 函数和 `"不超过500字"` prompt 限制
+- **Agent**: `prompt.rs` `sanitize_for_prompt()` 移除 500 字符截断，仅保留模板转义
+- **Agent**: `DEFAULT_SUMMARY_TRIGGER_RATIO` 0.8 → 0.75
+
 ### Changed — 代码质量与模块化重构
 
 - **Agent**: `lifecycle.rs` 2502行 → 8文件模块目录（`callbacks`, `context`, `death`, `helpers`, `reporting`, `soul_cycle`, `tick` + `mod.rs`），800行上限

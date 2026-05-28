@@ -109,6 +109,7 @@ $RECYCLE.BIN/
 
 # 运行时数据（服务器产物，与源代码目录分离）
 .data/
+.*
 
 agent.yaml
 scripts/test/
