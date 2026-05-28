@@ -21,16 +21,14 @@
 - **模板渲染**：基于 `prompt_templates.yaml` 动态渲染。
 - **Persona 缓存**：缓存角色的静态背景和性格，避免每 Tick 重复构建字符串。
 
-### 2.4 别名翻译映射 (Alias Translation)
-- 内置中英翻译字典，纠正 LLM 产生的格式幻觉。
-- **动作名映射**：如 LLM 幻觉的"攻击某人"映射为"attack"。
-- **字段映射**：如 LLM 幻觉的 "destination" 映射为 "target_location"。
-- **对象 ID 解析**：从 WorldState 字典中查找周围实体名称，自动将其转换为 UUID / NodeID / ItemID。
+### 2.4 LLM 输出精度要求 (Zero Alias)
+- LLM 必须精确输出 `action_type`（canonical 英文名）、`action_data` 字段名（英文原名）和字段值（从 WorldState 直接复制的精确 ID）。
+- 不提供任何别名翻译或容错机制。错误输出由 ReflectorSoul 拒绝并反馈，LLM 从 rejection 中学习。
 
 ## 3. 架构约束
-- 必须具备极高的容错性，对 LLM 输出的脏数据进行清洗映射，不能因为多了一个括号就导致整个 Agent 崩溃重启。
 - 推理过程必须是异步的，且需设置严格的超时机制。
+- LLM 输出不合规时由天魂（ReflectorSoul）驳回，人魂重试而非翻译修正。
 
 ## 4. 代码入口
 - 认知引擎主类: `crates/agent/src/soul/actor/engine.rs`
-- 翻译与幻觉修正: `crates/agent/src/soul/actor/translation.rs`
+- 翻译层已清空: `crates/agent/src/soul/actor/translation.rs`（仅保留空壳，alias 机制已移除）
