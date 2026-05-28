@@ -505,13 +505,54 @@
                 align-items: center;
             }
 
-            .summaries-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-                gap: 16px;
+            /* Timeline */
+            .timeline-container {
+                position: relative;
+                padding-left: 40px;
             }
 
-            .summary-card {
+            .timeline-container::before {
+                content: '';
+                position: absolute;
+                left: 18px;
+                top: 0;
+                bottom: 0;
+                width: 2px;
+                background: var(--border-color);
+            }
+
+            .timeline-item {
+                position: relative;
+                margin-bottom: 20px;
+                animation: timeline-fade-in 0.3s ease;
+            }
+
+            .timeline-dot {
+                position: absolute;
+                left: -28px;
+                top: 20px;
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                background: var(--accent);
+                border: 2px solid var(--bg-base);
+                z-index: 1;
+            }
+
+            .timeline-dot::after {
+                content: '';
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent);
+                opacity: 0.3;
+                animation: timeline-dot-pulse 2s ease-in-out infinite;
+            }
+
+            .timeline-content {
                 background: var(--card-bg);
                 border: 1px solid var(--card-border);
                 border-radius: var(--radius-lg);
@@ -520,26 +561,36 @@
                 box-shadow: var(--card-shadow);
             }
 
-            .summary-card:hover {
+            .timeline-content:hover {
                 border-color: var(--accent);
                 box-shadow: var(--card-shadow-hover);
                 transform: translateY(-2px);
             }
 
-            .summary-header {
+            .timeline-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: flex-start;
-                margin-bottom: 12px;
+                margin-bottom: 8px;
+                gap: 12px;
             }
 
-            .summary-agent {
+            .timeline-agent {
                 font-size: 15px;
                 font-weight: 600;
                 color: var(--accent);
+                flex-shrink: 0;
             }
 
-            .summary-game-day {
+            .timeline-agent-id {
+                font-size: 11px;
+                color: var(--text-subtle);
+                font-family: monospace;
+                font-weight: 400;
+                margin-left: 6px;
+            }
+
+            .timeline-calendar {
                 padding: 3px 9px;
                 background: var(--accent-muted);
                 color: var(--accent);
@@ -547,21 +598,23 @@
                 font-size: 11px;
                 font-weight: 600;
                 border: 1px solid rgba(20, 184, 166, 0.2);
+                white-space: nowrap;
+                flex-shrink: 0;
             }
 
-            .summary-meta {
+            .timeline-meta {
                 font-size: 12px;
                 color: var(--text-secondary);
-                margin-bottom: 12px;
+                margin-bottom: 10px;
             }
 
-            .summary-content {
+            .timeline-body {
                 font-size: 13px;
                 color: var(--text-primary);
                 line-height: 1.6;
                 white-space: pre-wrap;
                 word-break: break-word;
-                max-height: 200px;
+                max-height: 160px;
                 overflow-y: hidden;
                 padding: 10px;
                 background: var(--bg-level-2);
@@ -571,7 +624,7 @@
                 transition: max-height 0.3s ease;
             }
 
-            .summary-content.expanded {
+            .timeline-body.expanded {
                 max-height: none;
                 overflow-y: auto;
             }
@@ -594,6 +647,16 @@
             .summary-expand-btn:hover {
                 border-color: var(--accent);
                 color: var(--accent);
+            }
+
+            @keyframes timeline-fade-in {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            @keyframes timeline-dot-pulse {
+                0%, 100% { opacity: 0.3; transform: scale(1); }
+                50% { opacity: 0.6; transform: scale(1.3); }
             }
 
             /* ========== Shared ========== */
@@ -851,8 +914,7 @@
             }
 
             @media (max-width: 768px) {
-                .chronicles-grid,
-                .summaries-grid {
+                .chronicles-grid {
                     grid-template-columns: 1fr;
                 }
                 .detail-grid {
@@ -1045,7 +1107,7 @@
                 </button>
             </div>
 
-            <div id="summaries-container" class="summaries-grid">
+            <div id="summaries-container" class="timeline-container">
                 <div class="loading">加载中...</div>
             </div>
 
@@ -1188,12 +1250,12 @@
                 container.innerHTML = list
                     .map(
                         (c) => `
-                <div class="chronicle-card" data-chronicle-id="${escapeHtml(c.chronicle_id)}">
-                    <div class="chronicle-header">
-                        <span class="chronicle-id">${escapeHtml(c.season)} · 第${escapeHtml(c.game_day_start)}-${escapeHtml(c.game_day_end)}日</span>
-                        <span class="chronicle-season">${escapeHtml(c.chronicle_id)}</span>
-                    </div>
-                    <div class="chronicle-period">第${escapeHtml(c.game_day_start)}日 - 第${escapeHtml(c.game_day_end)}日</div>
+                    <div class="chronicle-card" data-chronicle-id="${escapeHtml(c.chronicle_id)}">
+                        <div class="chronicle-header">
+                                <span class="chronicle-id">${escapeHtml(c.season)} · ${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date, c.game_day_start, c.game_day_end))}</span>
+                            <span class="chronicle-season">${escapeHtml(c.chronicle_id)}</span>
+                        </div>
+                        <div class="chronicle-period">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date, c.game_day_start, c.game_day_end))}</div>
                     <div class="chronicle-stats">
                         <div class="chr-stat-item"><div class="chr-stat-value">${escapeHtml(c.agent_count)}</div><div class="chr-stat-label">江湖儿女</div></div>
                         <div class="chr-stat-item"><div class="chr-stat-value">${escapeHtml(c.actions_count)}</div><div class="chr-stat-label">行动次数</div></div>
@@ -1272,7 +1334,7 @@
                 <div class="detail-section">
                     <h3>基本统计</h3>
                     <div class="detail-grid">
-                        <div class="detail-item"><div class="label">周期</div><div class="value">第${escapeHtml(c.game_day_start)} - ${escapeHtml(c.game_day_end)}日</div></div>
+                        <div class="detail-item"><div class="label">周期</div><div class="value">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date, c.game_day_start, c.game_day_end))}</div></div>
                         <div class="detail-item"><div class="label">江湖儿女</div><div class="value">${escapeHtml(c.agent_count)}</div></div>
                         <div class="detail-item"><div class="label">行动次数</div><div class="value">${escapeHtml(c.actions_count)}</div></div>
                         <div class="detail-item"><div class="label">陨落人数</div><div class="value">${escapeHtml(c.deaths)}</div></div>
@@ -1404,7 +1466,8 @@
                         agents.forEach((a) => {
                             const opt = document.createElement("option");
                             opt.value = a.id;
-                            opt.textContent = a.name;
+                            const shortId = a.id ? a.id.substring(0, 8) : '';
+                            opt.textContent = `${a.name} (${shortId}...)`;
                             agentFrag.appendChild(opt);
                             if (a.location && a.location !== "unknown")
                                 locSet.add(a.location);
@@ -1804,9 +1867,39 @@
                     if (a.agent_id) allAgentsMap[a.agent_id] = a;
                     const opt = document.createElement("option");
                     opt.value = a.id;
-                    opt.textContent = a.name;
+                    const shortId = a.id ? a.id.substring(0, 8) : '';
+                    opt.textContent = `${a.name} (${shortId}...)`;
                     sel.appendChild(opt);
                 });
+            }
+
+            // 群像传记范围格式化：用服务端预格式化的日期字符串构造简短范围
+            // "一七三四年元月一日至十日"（同一年月时缩短）或 "一七三四年元月一日至一七三四年二月五日"
+            function formatChronicleRange(startDate, endDate, startGameDay, endGameDay) {
+                const DAYS_PER_SEASON = 10;
+                const SEASONS_PER_YEAR = 4;
+                const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS_PER_YEAR;
+
+                function sameYearMonth(gd1, gd2) {
+                    var gd0_1 = gd1 - 1, gd0_2 = gd2 - 1;
+                    return Math.floor(gd0_1 / DAYS_PER_YEAR) === Math.floor(gd0_2 / DAYS_PER_YEAR) &&
+                           Math.floor((gd0_1 % DAYS_PER_YEAR) / DAYS_PER_SEASON) === Math.floor((gd0_2 % DAYS_PER_YEAR) / DAYS_PER_SEASON);
+                }
+
+                if (sameYearMonth(startGameDay, endGameDay)) {
+                    // 取 startDate 的年月前缀，从 endDate 中剥离出纯日部分
+                    var prefix = startDate.match(/^.+?[元二三四五六七八九十]月/);
+                    if (prefix) {
+                        return startDate + '至' + endDate.slice(prefix[0].length);
+                    }
+                }
+                return startDate + '至' + endDate;
+            }
+
+            // 兼容降级：服务端未返回 formatted_time 时的备用格式化
+            // 正常情况下不会被调用，API 返回的格式化字段优先
+            function formatCalendarDate(gameDay) {
+                return '[第' + gameDay + '日]';
             }
 
             function getAgentName(agentId) {
@@ -1844,15 +1937,26 @@
                             hour: "2-digit",
                             minute: "2-digit",
                         });
+                        const agentName = getAgentName(s.agent_id);
+                        const agentShortId = s.agent_id
+                            ? s.agent_id.substring(0, 8)
+                            : '';
+                        const calTime = s.formatted_time || formatCalendarDate(s.game_day);
                         return `
-                    <div class="summary-card">
-                        <div class="summary-header">
-                            <span class="summary-agent">${escapeHtml(getAgentName(s.agent_id))}</span>
-                            <span class="summary-game-day">第${escapeHtml(s.game_day)}日</span>
+                    <div class="timeline-item">
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <span class="timeline-agent">
+                                    ${escapeHtml(agentName)}
+                                    <span class="timeline-agent-id">(${escapeHtml(agentShortId)}...)</span>
+                                </span>
+                                <span class="timeline-calendar">${escapeHtml(calTime)}</span>
+                            </div>
+                            <div class="timeline-meta">存档时间: ${escapeHtml(dateStr)}</div>
+                            <div class="timeline-body" data-sum-expanded="false">${escapeHtml(s.summary || "")}</div>
+                            <button class="summary-expand-btn" onclick="toggleSummaryExpand(this)">展开全文</button>
                         </div>
-                        <div class="summary-meta">存档时间: ${escapeHtml(dateStr)}</div>
-                        <div class="summary-content" data-sum-expanded="false">${escapeHtml(s.summary || "")}</div>
-                        <button class="summary-expand-btn" onclick="toggleSummaryExpand(this)">展开全文</button>
                     </div>`;
                     })
                     .join("");
