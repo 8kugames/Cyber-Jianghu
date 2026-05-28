@@ -246,4 +246,51 @@ mod tests {
         assert_eq!(tc.call_type, "function");
         assert_eq!(tc.function.name, "get_inventory");
     }
+
+    #[test]
+    fn test_stream_function_delta_null_fields() {
+        // LongCat 首个 tool_call chunk 发送 arguments: null
+        let json = r#"{"name": "search_memory", "arguments": null}"#;
+        let delta: StreamToolCallFunctionDelta = serde_json::from_str(json).unwrap();
+        assert_eq!(delta.name, "search_memory");
+        assert_eq!(delta.arguments, "");
+    }
+
+    #[test]
+    fn test_stream_function_delta_both_null() {
+        let json = r#"{"name": null, "arguments": null}"#;
+        let delta: StreamToolCallFunctionDelta = serde_json::from_str(json).unwrap();
+        assert_eq!(delta.name, "");
+        assert_eq!(delta.arguments, "");
+    }
+
+    #[test]
+    fn test_stream_accumulator_null_then_content() {
+        let mut acc = StreamToolCallAccumulator::new();
+        // 首个 chunk: arguments=null → ""
+        acc.push(&StreamToolCallDelta {
+            id: Some("call_1".to_string()),
+            index: 0,
+            call_type: Some("function".to_string()),
+            function: StreamToolCallFunctionDelta {
+                name: "get_action_detail".to_string(),
+                arguments: String::new(), // null → ""
+            },
+        });
+        // 后续 chunk: arguments 片段
+        acc.push(&StreamToolCallDelta {
+            id: None,
+            index: 0,
+            call_type: None,
+            function: StreamToolCallFunctionDelta {
+                name: String::new(),
+                arguments: r#"{"action_type":"采集"}"#.to_string(),
+            },
+        });
+        let calls = acc.into_tool_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].function.name, "get_action_detail");
+        assert_eq!(calls[0].function.arguments, r#"{"action_type":"采集"}"#);
+    }
 }
