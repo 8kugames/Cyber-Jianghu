@@ -252,7 +252,6 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
         let mut last_usage: Option<(u64, u64)> = None;
         let mut completion_content = String::new();
         let mut chunk_count: u64 = 0;
-        let mut raw_chunks = String::with_capacity(2048);
 
         while let Some(chunk_result) = futures_util::StreamExt::next(&mut stream).await {
             let bytes = match chunk_result {
@@ -281,14 +280,6 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                     let data = &line[6..];
 
                     if data == "[DONE]" {
-                        // 空响应诊断：有 chunks 但无 content，输出原始 SSE 数据
-                        if completion_content.trim().is_empty() && chunk_count > 0 {
-                            tracing::warn!(
-                                "[SSE 空响应诊断] {} chunks received but content is empty. Raw chunks:\n{}",
-                                chunk_count,
-                                &raw_chunks[..raw_chunks.len().min(1500)]
-                            );
-                        }
                         // [DONE] 不携带 usage，使用最后记录的 usage
                         if let Some((pt, ct)) = last_usage {
                             yield Ok(StreamChunk::Done {
@@ -307,11 +298,6 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                     match serde_json::from_str::<OpenAIStreamResponse>(data) {
                         Ok(resp) => {
                             chunk_count += 1;
-                            // 累积原始 chunk 用于空响应诊断
-                            if chunk_count <= 8 {
-                                raw_chunks.push_str(data);
-                                raw_chunks.push('\n');
-                            }
                             let mut has_content = false;
                             let has_tool_calls = resp.choices.iter().any(|c| {
                                 c.delta.tool_calls.as_ref().is_some_and(|tc| !tc.is_empty())
