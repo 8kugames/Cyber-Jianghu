@@ -596,19 +596,21 @@ event_id 必须是以下值之一：{event_ids}"#,
             .take(10)
             .collect();
 
-        // LLM生成叙事化摘要
+        // LLM 生成事实性摘要（禁止文学加工）
         let prompt = format!(
-            r#"你是{agent_name}的史官，为{date_str}撰写江湖起居注。
+            r#"你是{agent_name}，为{date_str}撰写今日纪要。
 
 当日他人交互：
 紧急事件（{urgent_count}条）：{urgent_events}
 一般事件（{batch_count}条）：{batch_events}
 
 要求：
-1. 以"我"为中心视角
-2. 语言古朴典雅，武侠风格
-3. 400-600字，纯叙事散文
-4. 叙事化整合，不要事件计数
+1. 以"我"的第一人称视角
+2. 语言简洁直白，避免修饰
+3. 150-300字
+4. 基于以下事件，按时间顺序总结今日发生的事
+5. 在事实基础上做简短归纳
+6. 禁止：编造事件、文学加工、心理描写
 
 返回JSON：{{"narrative": "..."}}"#,
             agent_name = self.agent_name,
@@ -626,7 +628,7 @@ event_id 必须是以下值之一：{event_ids}"#,
         let result: serde_json::Value = llm_ref
             .complete_json_with_system(
                 &format!(
-                    "你是{agent_name}的史官，为{date_str}撰写江湖起居注。",
+                    "你是{agent_name}，为{date_str}撰写今日纪要。",
                     agent_name = self.agent_name,
                     date_str = date_str
                 ),
