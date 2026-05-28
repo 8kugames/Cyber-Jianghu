@@ -138,6 +138,8 @@ pub async fn store_with_llm(
         births: data.births,
         status: status.to_string(),
         created_at: chrono::Utc::now(),
+        formatted_start_date: crate::time_utils::game_day_to_chinese(data.game_day_start as i64),
+        formatted_end_date: crate::time_utils::game_day_to_chinese(data.game_day_end as i64),
     })
 }
 
@@ -217,21 +219,27 @@ pub async fn list_chronicles(
 
     let chronicles: Vec<ChronicleMeta> = rows
         .iter()
-        .map(|r| ChronicleMeta {
-            id: r.get("id"),
-            chronicle_id: r.get("chronicle_id"),
-            period_start: r.get("period_start"),
-            period_end: r.get("period_end"),
-            game_day_start: r.get("game_day_start"),
-            game_day_end: r.get("game_day_end"),
-            season: r.get("season"),
-            summary_preview: super::truncate_text(&r.get::<String, _>("summary"), 200),
-            agent_count: r.get("agent_count"),
-            actions_count: r.get("actions_count"),
-            deaths: r.get("deaths"),
-            births: r.get("births"),
-            status: r.get("status"),
-            created_at: r.get("created_at"),
+        .map(|r| {
+            let game_day_start: i32 = r.get("game_day_start");
+            let game_day_end: i32 = r.get("game_day_end");
+            ChronicleMeta {
+                id: r.get("id"),
+                chronicle_id: r.get("chronicle_id"),
+                period_start: r.get("period_start"),
+                period_end: r.get("period_end"),
+                game_day_start,
+                game_day_end,
+                season: r.get("season"),
+                summary_preview: super::truncate_text(&r.get::<String, _>("summary"), 200),
+                agent_count: r.get("agent_count"),
+                actions_count: r.get("actions_count"),
+                deaths: r.get("deaths"),
+                births: r.get("births"),
+                status: r.get("status"),
+                created_at: r.get("created_at"),
+                formatted_start_date: crate::time_utils::game_day_to_chinese(game_day_start as i64),
+                formatted_end_date: crate::time_utils::game_day_to_chinese(game_day_end as i64),
+            }
         })
         .collect();
 
@@ -329,6 +337,8 @@ pub async fn get_chronicle(
                 births: r.get("births"),
                 status: r.get("status"),
                 created_at: r.get("created_at"),
+                formatted_start_date: crate::time_utils::game_day_to_chinese(r.get::<i32, _>("game_day_start") as i64),
+                formatted_end_date: crate::time_utils::game_day_to_chinese(r.get::<i32, _>("game_day_end") as i64),
             }))
         }
         None => Ok(None),
@@ -374,4 +384,10 @@ pub struct ChronicleMeta {
     pub births: i32,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 服务端格式化的游戏内日期字符串（由 list_chronicles 填充）
+    #[serde(default)]
+    pub formatted_start_date: String,
+    /// 服务端格式化的游戏内日期字符串（由 list_chronicles 填充）
+    #[serde(default)]
+    pub formatted_end_date: String,
 }
