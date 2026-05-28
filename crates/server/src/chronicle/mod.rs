@@ -49,6 +49,12 @@ pub struct Chronicle {
     pub births: i32,
     pub status: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// 服务端格式化的游戏内日期字符串（由 get_chronicle 填充）
+    #[serde(default)]
+    pub formatted_start_date: String,
+    /// 服务端格式化的游戏内日期字符串（由 get_chronicle 填充）
+    #[serde(default)]
+    pub formatted_end_date: String,
 }
 
 /// 关键事件
