@@ -441,7 +441,6 @@ pub struct FallbackModelConfig {
     pub enable_thinking: Option<bool>,
 }
 const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
-pub const DEFAULT_MAX_CONSECUTIVE_FOLLOW: usize = 5;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
 const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.8;
 const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
@@ -477,9 +476,6 @@ pub struct LlmConfig {
     /// 连续 idle tick 数达到此阈值后主动切换到下一个模型
     #[serde(default = "default_idle_rotate_threshold")]
     pub idle_rotate_threshold: u32,
-    /// 连续 follow 次数达到此阈值后驳回（社交死循环防护）
-    #[serde(default = "default_max_consecutive_follow")]
-    pub max_consecutive_follow: usize,
 
     /// 上下文窗口 token 数（用于长窗口对话）
     #[serde(default = "default_context_window_tokens")]
@@ -525,10 +521,6 @@ pub struct LlmConfig {
 
 fn default_idle_rotate_threshold() -> u32 {
     DEFAULT_IDLE_ROTATE_THRESHOLD
-}
-
-fn default_max_consecutive_follow() -> usize {
-    DEFAULT_MAX_CONSECUTIVE_FOLLOW
 }
 
 fn default_context_window_tokens() -> u32 {
@@ -591,7 +583,6 @@ impl Default for LlmConfig {
             fallback_models: Vec::new(),
             models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
-            max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
             keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
@@ -633,7 +624,6 @@ impl LlmConfig {
                 .unwrap_or_default(),
             models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
-            max_consecutive_follow: DEFAULT_MAX_CONSECUTIVE_FOLLOW,
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
             keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,

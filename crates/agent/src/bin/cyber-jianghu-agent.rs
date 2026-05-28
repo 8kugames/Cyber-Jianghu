@@ -1313,10 +1313,7 @@ fn start_claw_server(
     let (reconnect_tx, _) =
         tokio::sync::broadcast::channel::<cyber_jianghu_agent::infra::api::ReconnectRequest>(64);
 
-    let max_consecutive_follow = cyber_jianghu_agent::config::Config::from_file(config_path())
-        .map(|c| c.llm.max_consecutive_follow)
-        .unwrap_or(cyber_jianghu_agent::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW);
-    let ws_state = WsDecisionState::new(max_consecutive_follow);
+    let ws_state = WsDecisionState::new();
     let shared_state = Arc::new(WsSharedState::from(&ws_state));
     // 统一认知模式下外部 Intent 已被 server.rs 拦截，无需启动验证任务
     // CAS 去重逻辑保留在 WsDecisionState 中作为通用安全机制

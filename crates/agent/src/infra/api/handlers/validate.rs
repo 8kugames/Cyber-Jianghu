@@ -97,12 +97,6 @@ pub(crate) async fn validate_intent_handler(
 
     // [TRAP_DEBT: TICKET-101] HTTP API 是无状态游离端点，无法获取内存中的连续跟随计数
     // 当前传入 0，意味着通过 HTTP 提交的单次意图将绕过防刷屏限制。
-    // 预计修复方案：在 HttpApiState 中补充对 Agent 状态的只读引用，或由调用方传入。
-    // 预计偿还时间：2026-06-01
-    let max_consecutive_follow = crate::config::Config::from_file(&state.config_path)
-        .map(|c| c.llm.max_consecutive_follow)
-        .unwrap_or(crate::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW);
-
     let validation_req = ValidationRequest {
         intent,
         persona: persona_info,
@@ -110,8 +104,6 @@ pub(crate) async fn validate_intent_handler(
         world_state,
         runtime: ValidationRuntimeConfig {
             graded_config,
-            consecutive_follow_count: 0,
-            max_consecutive_follow,
             recent_same_type_decisions: vec![],
         },
     };

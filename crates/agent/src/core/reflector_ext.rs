@@ -61,8 +61,6 @@ impl super::Agent {
             world_state: Some(world_state.clone()),
             runtime: crate::soul::reflector::ValidationRuntimeConfig {
                 graded_config: graded_config.cloned(),
-                consecutive_follow_count: self.consecutive_follow_count as usize,
-                max_consecutive_follow: self.config.llm.max_consecutive_follow,
                 recent_same_type_decisions,
             },
         };

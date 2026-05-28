@@ -236,17 +236,7 @@ impl ReflectorSoul {
     async fn validate_with_rule_engine(
         &self,
         request: &ValidationRequest,
-        consecutive_follow_count: usize,
-        max_consecutive_follow: usize,
     ) -> std::result::Result<(), String> {
-        if request.intent.action_type.as_str() == "follow"
-            && consecutive_follow_count >= max_consecutive_follow
-        {
-            return Err(
-                "你一路跟在后面走了很久，不如停下来做点别的事".to_string(),
-            );
-        }
-
         let Some(world_state) = request.world_state.as_ref() else {
             return Ok(());
         };
@@ -309,8 +299,6 @@ impl ReflectorSoul {
     ) -> Result<PipelineValidationResult> {
         let ValidationRuntimeConfig {
             graded_config,
-            consecutive_follow_count,
-            max_consecutive_follow,
             recent_same_type_decisions,
         } = request.runtime.clone();
         let mut layers = Vec::with_capacity(4);
@@ -332,7 +320,7 @@ impl ReflectorSoul {
         }
 
         match self
-            .validate_with_rule_engine(&request, consecutive_follow_count, max_consecutive_follow)
+            .validate_with_rule_engine(&request)
             .await
         {
             Ok(()) => layers.push(LayerResult {
@@ -860,48 +848,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_validate_pipeline_rejects_follow_loop_before_llm() {
-        let mock_client =
-            MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
-        let reflector =
-            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
-        let world_state = test_world_state();
-        let request = ValidationRequest {
-            intent: crate::models::Intent::new(
-                world_state.agent_id.unwrap_or_default(),
-                world_state.tick_id,
-                "follow",
-                Some(serde_json::json!({"target_agent_id": Uuid::new_v4()})),
-            ),
-            persona: PersonaInfo::default(),
-            world_context: "测试地点".to_string(),
-            world_state: Some(world_state),
-            runtime: ValidationRuntimeConfig {
-                graded_config: Some(GradedValidationConfig::default()),
-                consecutive_follow_count: 3,
-                max_consecutive_follow: 3,
-                recent_same_type_decisions: vec![],
-            },
-        };
-
-        let result = reflector.validate_pipeline(request).await.unwrap();
-
-        match result {
-            PipelineValidationResult::Rejected { reason, layers } => {
-                assert!(reason.contains("跟在后面"));
-                assert_eq!(layers.len(), 2);
-                assert_eq!(layers[0].layer, "layer1");
-                assert!(layers[0].passed);
-                assert_eq!(layers[1].layer, "layer2");
-                assert!(!layers[1].passed);
-            }
-            PipelineValidationResult::Approved { .. } => {
-                panic!("follow loop should be rejected before llm");
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn test_validator_trait_runs_full_pipeline() {
         let mock_client =
             MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
@@ -914,28 +860,24 @@ mod tests {
             intent: crate::models::Intent::new(
                 world_state.agent_id.unwrap_or_default(),
                 world_state.tick_id,
-                "follow",
-                Some(serde_json::json!({"target_agent_id": Uuid::new_v4()})),
+                "speak",
+                Some(serde_json::json!({"content": "你好"})),
             ),
             persona: PersonaInfo::default(),
             world_context: "测试地点".to_string(),
             world_state: Some(world_state),
             runtime: ValidationRuntimeConfig {
                 graded_config: Some(GradedValidationConfig::default()),
-                consecutive_follow_count: 3,
-                max_consecutive_follow: 3,
                 recent_same_type_decisions: vec![],
             },
         };
 
         match validator.validate(request).await.unwrap() {
-            PipelineValidationResult::Rejected { reason, layers } => {
-                assert!(reason.contains("跟在后面"));
-                assert_eq!(layers.len(), 2);
-                assert_eq!(layers[1].layer, "layer2");
+            PipelineValidationResult::Approved { layers, .. } => {
+                assert!(layers.iter().all(|l| l.passed), "all layers should pass");
             }
-            PipelineValidationResult::Approved { .. } => {
-                panic!("trait validator should run full pipeline");
+            PipelineValidationResult::Rejected { reason, .. } => {
+                panic!("valid intent should be approved, got: {}", reason);
             }
         }
     }

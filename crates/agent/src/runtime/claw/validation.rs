@@ -62,8 +62,6 @@ pub struct ValidationTaskParams {
     pub game_rules: Arc<RwLock<Option<cyber_jianghu_protocol::GameRules>>>,
     /// 人设信息（可选，RwLock 支持运行时更新）
     pub persona: Arc<RwLock<Option<PersonaInfo>>>,
-    /// 最大连续跟随次数（从配置读取）
-    pub max_consecutive_follow: usize,
 }
 
 /// 启动验证任务
@@ -86,7 +84,6 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
     let current_world_state = params.current_world_state;
     let game_rules = params.game_rules;
     let persona = params.persona;
-    let max_consecutive_follow = params.max_consecutive_follow;
 
     tokio::spawn(async move {
         debug!("Validation task started");
@@ -187,8 +184,6 @@ pub fn spawn_validation_task(params: ValidationTaskParams) -> tokio::task::JoinH
                         world_state,
                         runtime: ValidationRuntimeConfig {
                             graded_config,
-                            consecutive_follow_count: 0,
-                            max_consecutive_follow,
                             recent_same_type_decisions: vec![],
                         },
                     };
@@ -494,7 +489,6 @@ mod tests {
             current_world_state,
             game_rules,
             persona,
-            max_consecutive_follow: 5,
         };
 
         let handle = spawn_validation_task(params);
