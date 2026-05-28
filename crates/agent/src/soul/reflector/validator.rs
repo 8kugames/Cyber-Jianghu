@@ -242,10 +242,9 @@ impl ReflectorSoul {
         if request.intent.action_type.as_str() == "follow"
             && consecutive_follow_count >= max_consecutive_follow
         {
-            return Err(format!(
-                "已连续跟随 {} 次，请尝试其他行为（如 说话、采集、休息）",
-                max_consecutive_follow
-            ));
+            return Err(
+                "你一路跟在后面走了很久，不如停下来做点别的事".to_string(),
+            );
         }
 
         let Some(world_state) = request.world_state.as_ref() else {
@@ -558,7 +557,7 @@ impl ReflectorSoul {
                 if answer.contains("REPEAT") && !answer.contains("NOVEL") {
                     debug!("Semantic dedup rejected: {}", response.trim());
                     return Err(
-                        "你最近的意图在内容上重复（都在说类似的事），请换个话题或行为".to_string(),
+                        "你刚才已经说过类似的话了，换个角度或做点别的吧".to_string(),
                     );
                 }
                 Ok(())
@@ -889,7 +888,7 @@ mod tests {
 
         match result {
             PipelineValidationResult::Rejected { reason, layers } => {
-                assert!(reason.contains("已连续跟随 3 次"));
+                assert!(reason.contains("跟在后面"));
                 assert_eq!(layers.len(), 2);
                 assert_eq!(layers[0].layer, "layer1");
                 assert!(layers[0].passed);
@@ -931,7 +930,7 @@ mod tests {
 
         match validator.validate(request).await.unwrap() {
             PipelineValidationResult::Rejected { reason, layers } => {
-                assert!(reason.contains("已连续跟随 3 次"));
+                assert!(reason.contains("跟在后面"));
                 assert_eq!(layers.len(), 2);
                 assert_eq!(layers[1].layer, "layer2");
             }

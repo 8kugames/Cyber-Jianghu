@@ -309,7 +309,7 @@ fn generate_impl(
                     .unwrap_or_default(),
                 None => String::new(),
             };
-            sections.push(format!("- **{}**{}{}", entity.name, dist, rel));
+            sections.push(format!("- **{}** `{}`{}{}", entity.name, entity.id, dist, rel));
         }
     } else {
         sections.push("无".to_string());
