@@ -146,12 +146,8 @@ async fn collect_soul_cycle_timeline(
 
             // 人魂叙事（简短摘要）
             if let Some(ref narrative) = rec.renhun_narrative {
-                let truncated: String = narrative.chars().take(150).collect();
-                let ellipsis = if narrative.chars().count() > 150 {
-                    "..."
-                } else {
-                    ""
-                };
+                let truncated = narrative.clone();
+                let ellipsis = "";
                 lines.push(format!("  感知：{}{}", truncated, ellipsis));
             }
         }
