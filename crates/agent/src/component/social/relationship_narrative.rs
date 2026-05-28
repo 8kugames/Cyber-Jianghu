@@ -117,10 +117,7 @@ impl NarrativeGenerator {
 
         // 验证长度
         let char_count = description.chars().count();
-        if char_count > 20 {
-            // 截断到 20 字
-            Ok(description.chars().take(20).collect())
-        } else if char_count == 0 {
+        if char_count == 0 {
             // fallback 到默认描述
             Ok("素不相识".to_string())
         } else {
@@ -247,8 +244,8 @@ mod tests {
         let client = MockLlmClient::with_response(long_desc);
         let generator = NarrativeGenerator::new(Arc::new(client));
         let result = generator.extract_description(long_desc).unwrap();
-        assert_eq!(result.chars().count(), 20);
-        // 验证内容被截断而非默认值
+        // 不再截断，应返回完整内容
+        assert_eq!(result, long_desc);
         assert_ne!(result, "素不相识");
     }
 

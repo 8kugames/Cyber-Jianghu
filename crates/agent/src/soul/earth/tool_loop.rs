@@ -81,7 +81,7 @@ pub(crate) async fn run_tool_loop(
             response
                 .content
                 .as_ref()
-                .map(|c| c.chars().take(100).collect::<String>())
+                .map(|c| c.chars().take(1000).collect::<String>())
                 .unwrap_or_default(),
         );
 
@@ -96,7 +96,7 @@ pub(crate) async fn run_tool_loop(
             info!(
                 "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars), preview: {}",
                 content.len(),
-                content.chars().take(200).collect::<String>()
+                content.chars().take(2000).collect::<String>()
             );
             return Ok(content);
         }
@@ -184,7 +184,7 @@ pub(crate) async fn run_tool_loop(
             info!(
                 "[地魂] Tool {} 结果: {}",
                 tc.function.name,
-                truncated.chars().take(200).collect::<String>()
+                truncated.chars().take(2000).collect::<String>()
             );
 
             messages.push(ChatMessage::tool_result(
