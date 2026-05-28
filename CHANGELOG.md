@@ -28,6 +28,12 @@
 - **Agent**: 429 circuit breaker 1h 自动恢复 — `disabled_models` 从 `HashSet<usize>` 改为 `HashMap<usize, Instant>` 记录禁用时间戳，冷却期 3600s 后自动 re-enable。streaming fallback 路径补充 429 检测
 - **Agent**: `reasoning_content` SSE 捕获 — `OpenAIDelta` 新增 `reasoning_content` 字段，`StreamChunk::ReasoningDelta` + `StreamAccumulator` 累积推理内容，`into_parts()` 返回 3-tuple（content, tool_calls, reasoning_content）
 - **Agent**: 空响应 reasoning 兜底 — content 为空但 reasoning_content 非空时用 reasoning 内容作为输出
+- **Agent**: SSE 流式 tool_call `arguments: null` 反序列化修复 — `StreamToolCallFunctionDelta` 的 name/arguments 字段新增 `deserialize_null_as_default`，将 null 映射为空字符串。之前 LongCat 首个 tool_call chunk 发送 `arguments: null` 导致整个 chunk 被 serde 静默丢弃
+- **Agent**: circuit breaker fallback 跳过已禁用模型 — `call_with_fallback`/`call_streaming_with_fallback` 循环中跳过 `disabled_models` 中的模型；空响应也触发 `disable_model`
+- **Agent**: target_agent_id 不可见修复 — 附近实体列表加入 UUID，LLM 能正确填写 target_agent_id
+- **Agent**: 叙事化拒绝反馈 — 所有 ReflectorSoul/EarthSoul 拒绝文本改为叙事风格，不再暴露规则数字
+- **Agent**: 删除 `max_consecutive_follow` 配置和 follow 循环特殊拦截（语义去重已覆盖同场景）
+- **Agent**: 删除行为锁定警告（`get_repetition_warning` + `action_history` 重复检测），ReflectorSoul 硬拦截足够
 - **Agent**: 联调诊断修复 — LLM chaos 主动轮换、prompt-estimate 可观测性日志、空响应诊断日志
 - **Server**: `INTENT_BATCH_MAX_RETRIES` fallback 3→12，与 `game_rules.yaml` 默认值对齐
 
