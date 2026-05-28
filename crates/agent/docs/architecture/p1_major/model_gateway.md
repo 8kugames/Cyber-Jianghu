@@ -11,10 +11,16 @@
 - 当主模型（如调用国外的 OpenAI）发生超时、触发并发限流 (Rate Limit) 或 5xx 错误时，网关会自动无缝切换到备用模型（如本地部署的 Ollama 或国内大模型）。
 - 切换对上层的认知引擎完全透明，保障游戏的流畅运行。
 
-### 2.2 自动重试机制
+### 2.2 429 Circuit Breaker
+- HTTP 429 (Rate Limit) 触发时，标记该模型为不可用并记录禁用时间戳（`disabled_models: HashMap<usize, Instant>`）。
+- 冷却期 1 小时后自动恢复（`RATE_LIMIT_BACKOFF_SECS=3600`）。
+- 每次 fallback 调用前执行 `reenable_expired()` 检查并恢复过期模型。
+- streaming 路径同步检测 429，与 non-streaming 路径行为一致。
+
+### 2.3 自动重试机制
 - 内置指数退避（Exponential Backoff）重试策略，处理网络瞬断和偶发的幻觉输出。
 
-### 2.3 Token 消耗监控
+### 2.4 Token 消耗监控
 - 拦截并解析 API 返回的 `usage` 字段。
 - 记录和统计每次决策的算力消耗（Prompt Tokens, Completion Tokens），输出到监控日志中，为后续的成本优化提供依据。
 
@@ -24,4 +30,5 @@
 
 ## 4. 代码入口
 - 接口定义: `crates/agent/src/component/llm/client.rs`
-- 备用网关实现: `crates/agent/src/component/llm/fallback.rs`
+- 直接客户端: `crates/agent/src/component/llm/direct_client.rs`
+- 备用网关实现: `crates/agent/src/component/llm/client.rs`（FallbackLlmClient 在同一文件）
