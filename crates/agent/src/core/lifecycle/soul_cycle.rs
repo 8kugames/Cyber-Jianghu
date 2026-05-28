@@ -216,12 +216,7 @@ impl super::super::Agent {
 
             // 托梦标记
             if let Some(dream) = active_dream {
-                let dream_trunc = self
-                    .cognitive_engine
-                    .as_ref()
-                    .map(|e| e.truncation("dream_marker_thought", 50))
-                    .unwrap_or(50);
-                let summary: String = dream.chars().take(dream_trunc).collect();
+                let summary = dream.to_string();
                 for intent in &mut all_raw_intents {
                     intent.dream_marker = Some(cyber_jianghu_protocol::types::DreamMarker {
                         thought: summary.clone(),
@@ -545,6 +540,11 @@ impl super::super::Agent {
                         self.consecutive_llm_failures,
                         self.character_name(),
                     );
+                    let new_tokens = llm.context_window_tokens() as usize;
+                    drop(llm);
+                    if let Some(ref engine) = self.cognitive_engine {
+                        engine.update_conversation_max_tokens(new_tokens);
+                    }
                 }
             }
         } else if !self.llm_chaos_active && was_chaos_active {

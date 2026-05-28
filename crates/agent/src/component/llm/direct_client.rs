@@ -192,6 +192,8 @@ pub struct DirectLlmClientConfig {
     pub prefer_stream: bool,
     /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
     pub enable_thinking: Option<bool>,
+    /// 上下文窗口大小（tokens）
+    pub context_window_tokens: u32,
 }
 
 impl DirectLlmClientConfig {
@@ -216,6 +218,7 @@ impl DirectLlmClientConfig {
             max_tokens: 4096,
             prefer_stream: false,
             enable_thinking: None,
+            context_window_tokens: 32000,
         }
     }
 
@@ -266,6 +269,12 @@ impl DirectLlmClientConfig {
     /// 设置 enable_thinking 参数（DashScope/Kimi 等模型需要）
     pub fn with_enable_thinking(mut self, enable_thinking: Option<bool>) -> Self {
         self.enable_thinking = enable_thinking;
+        self
+    }
+
+    /// 设置上下文窗口大小
+    pub fn with_context_window_tokens(mut self, tokens: u32) -> Self {
+        self.context_window_tokens = tokens;
         self
     }
 
@@ -526,11 +535,11 @@ impl DirectLlmClient {
             .context("LLM response body is not valid UTF-8")?;
         debug!(
             "[地魂] raw_body 前200字符: {}",
-            raw_body.chars().take(200).collect::<String>()
+            raw_body.chars().take(2000).collect::<String>()
         );
         if request.tools.is_some() {
             let tool_calls_preview = if let Some(tc_start) = raw_body.find("\"tool_calls\"") {
-                &raw_body[tc_start..raw_body.len().min(tc_start + 300)]
+                &raw_body[tc_start..raw_body.len().min(tc_start + 3000)]
             } else {
                 "tool_calls field NOT FOUND in response"
             };
@@ -1042,6 +1051,10 @@ impl LlmClient for DirectLlmClient {
 
     fn supports_tool_calling(&self) -> bool {
         true
+    }
+
+    fn context_window_tokens(&self) -> u32 {
+        self.config.context_window_tokens
     }
 
     async fn send_chat_exchange(

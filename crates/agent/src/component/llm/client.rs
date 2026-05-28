@@ -120,6 +120,11 @@ pub trait LlmClient: Send + Sync {
         // 默认不做任何操作
     }
 
+    /// 获取模型的上下文窗口大小（tokens）
+    fn context_window_tokens(&self) -> u32 {
+        32000
+    }
+
     /// 获取 provider 名称（用于 token 统计）
     ///
     /// 默认实现返回 "unknown"。
@@ -1238,6 +1243,10 @@ impl LlmClient for FallbackLlmClient {
 
     fn model_name(&self) -> String {
         self.active_client().model_name()
+    }
+
+    fn context_window_tokens(&self) -> u32 {
+        self.active_client().context_window_tokens()
     }
 
     fn provider_info(&self) -> (super::direct_client::LlmProvider, String) {

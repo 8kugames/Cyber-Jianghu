@@ -87,6 +87,62 @@ pub(crate) async fn get_openclaw_defaults_handler() -> impl IntoResponse {
     }
 }
 
+fn llm_config_to_info(c: &crate::config::LlmConfig) -> dto::LlmConfigInfo {
+    dto::LlmConfigInfo {
+        provider: c.provider.clone(),
+        model: c.model.clone().unwrap_or_default(),
+        base_url: c.base_url.clone(),
+        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+        temperature: c.temperature,
+        max_tokens: c.max_tokens,
+        context_window_tokens: c.context_window_tokens,
+        enable_streaming: c.enable_streaming,
+        enable_thinking: c.enable_thinking,
+        summary_trigger_ratio: c.summary_trigger_ratio,
+        keep_recent_turns: c.keep_recent_turns,
+        idle_rotate_threshold: c.idle_rotate_threshold,
+        fallback_models: c.fallback_models.clone(),
+    }
+}
+
+fn apply_llm_update(target: &mut crate::config::LlmConfig, update: &dto::LlmConfigUpdateDetails) {
+    target.provider = update.provider.clone();
+    target.base_url = update.base_url.clone();
+    target.api_key = if update.api_key.is_empty() {
+        None
+    } else {
+        Some(update.api_key.clone())
+    };
+    target.model = Some(update.model.clone());
+    if let Some(v) = update.temperature {
+        target.temperature = v;
+    }
+    if let Some(v) = update.max_tokens {
+        target.max_tokens = v;
+    }
+    if let Some(v) = update.context_window_tokens {
+        target.context_window_tokens = v;
+    }
+    if let Some(v) = update.enable_streaming {
+        target.enable_streaming = v;
+    }
+    if let Some(v) = update.enable_thinking {
+        target.enable_thinking = Some(v);
+    }
+    if let Some(v) = update.summary_trigger_ratio {
+        target.summary_trigger_ratio = v;
+    }
+    if let Some(v) = update.keep_recent_turns {
+        target.keep_recent_turns = v;
+    }
+    if let Some(v) = update.idle_rotate_threshold {
+        target.idle_rotate_threshold = v;
+    }
+    if let Some(ref v) = update.fallback_models {
+        target.fallback_models = v.clone();
+    }
+}
+
 /// GET /api/v1/config/llm - 返回当前 LLM 配置
 pub(crate) async fn get_llm_config_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let config = match crate::config::Config::from_file(&state.config_path) {
@@ -104,19 +160,8 @@ pub(crate) async fn get_llm_config_handler(State(state): State<HttpApiState>) ->
         }
     };
 
-    let actor = dto::LlmConfigInfo {
-        provider: config.llm.provider.clone(),
-        model: config.llm.model.clone().unwrap_or_default(),
-        base_url: config.llm.base_url.clone(),
-        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
-    };
-
-    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
-        provider: c.provider.clone(),
-        model: c.model.clone().unwrap_or_default(),
-        base_url: c.base_url.clone(),
-        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
-    });
+    let actor = llm_config_to_info(&config.llm);
+    let reflector = config.llm_reflector.as_ref().map(llm_config_to_info);
 
     let response = dto::LlmConfigResponse {
         actor,
@@ -248,7 +293,8 @@ pub(crate) async fn update_llm_config_handler(
             Some(req.actor.api_key.clone())
         },
     )
-    .with_model(&req.actor.model);
+    .with_model(&req.actor.model)
+    .with_context_window_tokens(req.actor.context_window_tokens.unwrap_or(32000));
 
     let test_config = if let Some(ref url) = req.actor.base_url {
         test_config.with_base_url(url)
@@ -315,61 +361,17 @@ pub(crate) async fn update_llm_config_handler(
     let backup = config.clone();
 
     // 6. 更新 LLM 配置
-    config.llm = crate::config::LlmConfig {
-        provider: req.actor.provider.clone(),
-        base_url: req.actor.base_url.clone(),
-        api_key: if req.actor.api_key.is_empty() {
-            None
-        } else {
-            Some(req.actor.api_key.clone())
-        },
-        model: Some(req.actor.model.clone()),
-        temperature: config.llm.temperature,
-        max_tokens: config.llm.max_tokens,
-        fallback_models: config.llm.fallback_models.clone(),
-        models: config.llm.models.clone(),
-        idle_rotate_threshold: config.llm.idle_rotate_threshold,
-        context_window_tokens: config.llm.context_window_tokens,
-        summary_trigger_ratio: config.llm.summary_trigger_ratio,
-        keep_recent_turns: config.llm.keep_recent_turns,
-        reconnect_delay_secs: config.llm.reconnect_delay_secs,
-        execution_result_timeout_ms: config.llm.execution_result_timeout_ms,
-        soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
-        soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
-        narrative_window_size: config.llm.narrative_window_size,
-        enable_streaming: config.llm.enable_streaming,
-        enable_thinking: config.llm.enable_thinking,
-    };
+    apply_llm_update(&mut config.llm, &req.actor);
 
     // 更新 reflector 配置
     if req.reflector_inherits_actor {
         config.llm_reflector = None;
     } else if let Some(ref reflector) = req.reflector {
-        config.llm_reflector = Some(crate::config::LlmConfig {
-            provider: reflector.provider.clone(),
-            base_url: reflector.base_url.clone(),
-            api_key: if reflector.api_key.is_empty() {
-                None
-            } else {
-                Some(reflector.api_key.clone())
-            },
-            model: Some(reflector.model.clone()),
-            temperature: config.llm.temperature,
-            max_tokens: config.llm.max_tokens,
-            fallback_models: Vec::new(),
-            models: Vec::new(),
-            idle_rotate_threshold: config.llm.idle_rotate_threshold,
-            context_window_tokens: config.llm.context_window_tokens,
-            summary_trigger_ratio: config.llm.summary_trigger_ratio,
-            keep_recent_turns: config.llm.keep_recent_turns,
-            reconnect_delay_secs: config.llm.reconnect_delay_secs,
-            execution_result_timeout_ms: config.llm.execution_result_timeout_ms,
-            soul_cycle_report_retries: config.llm.soul_cycle_report_retries,
-            soul_cycle_report_base_delay_ms: config.llm.soul_cycle_report_base_delay_ms,
-            narrative_window_size: config.llm.narrative_window_size,
-            enable_streaming: config.llm.enable_streaming,
-            enable_thinking: config.llm.enable_thinking,
-        });
+        let mut reflector_config = config.llm.clone();
+        reflector_config.fallback_models.clear();
+        reflector_config.models.clear();
+        apply_llm_update(&mut reflector_config, reflector);
+        config.llm_reflector = Some(reflector_config);
     }
 
     // 7. 保存配置（save_to_file 已内置原子写入）
@@ -394,19 +396,8 @@ pub(crate) async fn update_llm_config_handler(
     );
 
     // 8. 返回更新后的配置
-    let actor = dto::LlmConfigInfo {
-        provider: config.llm.provider.clone(),
-        model: config.llm.model.clone().unwrap_or_default(),
-        base_url: config.llm.base_url.clone(),
-        has_api_key: config.llm.api_key.as_ref().is_some_and(|k| !k.is_empty()),
-    };
-
-    let reflector = config.llm_reflector.as_ref().map(|c| dto::LlmConfigInfo {
-        provider: c.provider.clone(),
-        model: c.model.clone().unwrap_or_default(),
-        base_url: c.base_url.clone(),
-        has_api_key: c.api_key.as_ref().is_some_and(|k| !k.is_empty()),
-    });
+    let actor = llm_config_to_info(&config.llm);
+    let reflector = config.llm_reflector.as_ref().map(llm_config_to_info);
 
     let response = dto::LlmConfigResponse {
         actor,
@@ -488,7 +479,7 @@ pub(crate) async fn get_cognitive_context_handler(
                     let info = CognitivePersonaInfo {
                         name: p.name.clone(),
                         personality: p.traits.keys().take(3).cloned().collect(),
-                        description: p.base_description.chars().take(100).collect(),
+                        description: p.base_description.clone(),
                     };
                     (Some(info), Some(p.clone()))
                 })
