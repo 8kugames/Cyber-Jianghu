@@ -50,7 +50,7 @@ pub async fn list_summaries(
         .and_then(|s| Uuid::parse_str(s).ok());
     let game_day = params.game_day;
 
-    let summaries = db::list_agent_daily_summaries(
+    let mut summaries = db::list_agent_daily_summaries(
         &state.db_pool,
         agent_id,
         game_day,
@@ -62,6 +62,11 @@ pub async fn list_summaries(
         tracing::error!("查询 agent_daily_summaries 列表失败: {}", e);
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    // 填充格式化时间（服务端统一入口，避免前端重复实现）
+    for s in &mut summaries {
+        s.formatted_time = crate::time_utils::game_day_to_chinese(s.game_day);
+    }
 
     let total = db::count_agent_daily_summaries(&state.db_pool, agent_id, game_day)
         .await
@@ -98,13 +103,18 @@ pub async fn get_by_agent(
     let limit = params_q.limit.unwrap_or(20).clamp(1, 100) as i64;
     let offset = ((page - 1) as i64) * limit;
 
-    let summaries =
+    let mut summaries =
         db::get_agent_daily_summaries_by_agent(&state.db_pool, agent_id, Some(limit), Some(offset))
             .await
             .map_err(|e| {
                 tracing::error!("查询 Agent {} daily_summaries 失败: {}", agent_id, e);
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR
             })?;
+
+    // 填充格式化时间（服务端统一入口）
+    for s in &mut summaries {
+        s.formatted_time = crate::time_utils::game_day_to_chinese(s.game_day);
+    }
 
     let total = db::count_agent_daily_summaries(&state.db_pool, Some(agent_id), None)
         .await
