@@ -13,8 +13,8 @@ use tracing::{debug, error, info, warn};
 use cyber_jianghu_protocol::{EventTriageConfig, EventTriagePreFilter, WorldTime};
 
 use crate::component::llm::LlmClientExt;
-use crate::component::memory::backend::SearchableBackend;
 use crate::component::memory::MemoryManager;
+use crate::component::memory::backend::SearchableBackend;
 use crate::component::social::RelationshipStore;
 use crate::component::state_store::WorldStateStore;
 use crate::runtime::claw::LlmClientContainer;
@@ -79,7 +79,6 @@ pub struct SessionTriageEngine {
     world_time: Option<WorldTime>,
 
     // ── 日记数据源（component 层，非 soul 层） ──
-
     /// 情景记忆管理器（获取今日重要记忆）
     memory_manager: Option<Arc<RwLock<MemoryManager>>>,
 

@@ -104,11 +104,7 @@ impl NarrativeSummaryWindow {
     /// 用于语义去重：提取最近同类意图的完整内容，供 LLM 比较语义相似度。
     /// 匹配规则：full_decision 以 "action_type:" 或 "action_type：" 开头，
     /// 或 full_decision 等于 action_type（无 content 的纯动作）。
-    pub fn get_recent_same_type_decisions(
-        &self,
-        action_type: &str,
-        limit: usize,
-    ) -> Vec<String> {
+    pub fn get_recent_same_type_decisions(&self, action_type: &str, limit: usize) -> Vec<String> {
         self.summaries
             .iter()
             .rev()
@@ -159,7 +155,10 @@ impl NarrativeSummaryWindow {
             .map(|(i, s)| {
                 let age = if i == 0 { "刚" } else { "之前" };
                 if s.motivation.is_empty() {
-                    format!("- [{}] {} → {} [{}]", age, s.perception, s.decision, s.outcome)
+                    format!(
+                        "- [{}] {} → {} [{}]",
+                        age, s.perception, s.decision, s.outcome
+                    )
                 } else {
                     format!(
                         "- [{}] {} | {} → {} [{}]",
