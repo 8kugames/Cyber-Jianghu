@@ -301,14 +301,7 @@ impl MemoryManager {
             episodic_memories
                 .iter()
                 .enumerate()
-                .map(|(i, m)| {
-                    format!(
-                        "{}. [Tick {}] {}",
-                        i + 1,
-                        m.tick_id,
-                        m.content,
-                    )
-                })
+                .map(|(i, m)| format!("{}. [Tick {}] {}", i + 1, m.tick_id, m.content,))
                 .collect::<Vec<_>>()
                 .join("\n")
         };
