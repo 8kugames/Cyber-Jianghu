@@ -50,8 +50,8 @@ impl LoopGuard {
                 // 第 1 次重复：警告
                 self.warned_tools.insert(tool_name.to_string());
                 let msg = format!(
-                    "你已经连续{}次调用'{}'工具，结果相同。请直接基于已有信息做出决策，不要再重复调用。",
-                    consecutive, tool_name
+                    "你对'{}'已经了解得够多了，该看看其他方面了",
+                    tool_name
                 );
                 self.pending_warning = Some(msg.clone());
                 return LoopGuardAction::Warn(msg);
@@ -106,7 +106,6 @@ mod tests {
         match action {
             LoopGuardAction::Warn(msg) => {
                 assert!(msg.contains("query_world"));
-                assert!(msg.contains("连续2次"));
             }
             other => panic!("Expected Warn, got {:?}", action_name(&other)),
         }
