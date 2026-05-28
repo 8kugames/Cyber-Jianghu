@@ -70,13 +70,11 @@ pub struct WsDecisionState {
 
     /// Agent ID
     pub agent_id: Arc<AtomicI64>, // 存储 as i64
-    /// 最大连续跟随次数（从配置读取）
-    pub max_consecutive_follow: usize,
 }
 
 impl WsDecisionState {
     /// 创建新的 WebSocket 决策状态
-    pub fn new(max_consecutive_follow: usize) -> Self {
+    pub fn new() -> Self {
         let (state_tx, _) = broadcast::channel(1);
         let (tick_closed_tx, _) = broadcast::channel(16);
         let (server_msg_tx, _) = broadcast::channel(32);
@@ -94,7 +92,6 @@ impl WsDecisionState {
             current_tick: Arc::new(AtomicI64::new(0)),
             tick_duration_ms: Arc::new(AtomicU64::new(DEFAULT_TICK_DURATION_SECS * 1000)),
             agent_id: Arc::new(AtomicI64::new(0)),
-            max_consecutive_follow,
         }
     }
 
@@ -221,7 +218,6 @@ impl WsDecisionState {
             current_world_state: shared_state.current_world_state.clone(),
             game_rules: shared_state.game_rules.clone(),
             persona: shared_state.persona.clone(),
-            max_consecutive_follow: shared_state.max_consecutive_follow,
         };
 
         spawn_validation_task(params)
@@ -230,7 +226,7 @@ impl WsDecisionState {
 
 impl Default for WsDecisionState {
     fn default() -> Self {
-        Self::new(crate::config::DEFAULT_MAX_CONSECUTIVE_FOLLOW)
+        Self::new()
     }
 }
 
@@ -342,9 +338,6 @@ pub struct WsSharedState {
 
     /// 验证请求发送通道（容量 1，强制背压）
     pub validation_tx: mpsc::Sender<WsValidationRequest>,
-
-    /// 最大连续跟随次数（从配置读取）
-    pub max_consecutive_follow: usize,
 }
 
 impl WsSharedState {
@@ -398,7 +391,6 @@ impl From<&WsDecisionState> for WsSharedState {
             llm_response_tx,
             llm_response_rx: Arc::new(std::sync::Mutex::new(Some(llm_response_rx))),
             upstream_rx: Arc::new(std::sync::Mutex::new(Some(upstream_rx))),
-            max_consecutive_follow: state.max_consecutive_follow,
         }
     }
 }

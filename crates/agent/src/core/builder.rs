@@ -406,7 +406,6 @@ impl AgentBuilder {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(tokio::sync::Mutex::new(None)),
             consecutive_idle_count: 0,
-            consecutive_follow_count: 0,
             chaos_generator: self.chaos_generator,
             world_state_store: self.world_state_store,
             delta_engine: self.delta_engine,

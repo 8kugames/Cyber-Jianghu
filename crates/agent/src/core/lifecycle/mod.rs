@@ -836,12 +836,6 @@ impl super::Agent {
 
                             if final_intent.action_type.as_str() != "休息" {
                                 self.consecutive_idle_count = 0;
-                                // 连续 follow 计数（社交死循环防护）
-                                if final_intent.action_type.as_str() == "follow" {
-                                    self.consecutive_follow_count += 1;
-                                } else {
-                                    self.consecutive_follow_count = 0;
-                                }
                                 if let Some(ref container) = self.actor_llm_container {
                                     let llm = container.read().await;
                                     llm.reset_idle_count();

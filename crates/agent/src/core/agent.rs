@@ -156,9 +156,6 @@ pub struct Agent {
     /// 连续 idle tick 计数（无有效 intent 或 intent 为 idle 时递增）
     pub(crate) consecutive_idle_count: u32,
 
-    /// 连续 follow 计数（社交死循环防护）
-    pub(crate) consecutive_follow_count: u32,
-
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
 
@@ -233,7 +230,6 @@ impl Agent {
             session_triage_game_day: None,
             server_error_feedback: Arc::new(Mutex::new(None)),
             consecutive_idle_count: 0,
-            consecutive_follow_count: 0,
             chaos_generator: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
