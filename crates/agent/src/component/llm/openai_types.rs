@@ -122,13 +122,27 @@ pub(crate) struct OpenAIResponse {
     pub model: Option<String>,
 }
 
-/// Token 用量
+/// Token 用量明细（嵌套格式，MiniMax / DeepSeek / OpenAI 兼容）
+#[derive(Debug, Deserialize, Default)]
+pub(crate) struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenAIUsage {
     #[serde(default)]
     pub prompt_tokens: u64,
     #[serde(default)]
     pub completion_tokens: u64,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+}
+
+impl OpenAIUsage {
+    pub fn cache_hit_tokens(&self) -> Option<u64> {
+        self.prompt_tokens_details.as_ref()?.cached_tokens
+    }
 }
 
 /// 响应选项
