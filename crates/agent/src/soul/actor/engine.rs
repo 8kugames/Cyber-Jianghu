@@ -905,7 +905,7 @@ impl CognitiveEngine {
                                 },
                                 &tools,
                                 &executor,
-                                self.llm_param("max_tool_rounds", 3),
+                                self.llm_param("max_tool_rounds", 2),
                             )
                             .await?
                     }
@@ -917,7 +917,7 @@ impl CognitiveEngine {
                                 &prompt,
                                 &tools,
                                 &executor,
-                                self.llm_param("max_tool_rounds", 3),
+                                self.llm_param("max_tool_rounds", 2),
                             )
                             .await?
                     }
