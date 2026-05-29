@@ -43,10 +43,12 @@ pub type LlmStream = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>;
 /// 包装流，自动记录 token 用量
 ///
 /// 当流产出 `Done` 或 `DoneEstimation` chunk 时，自动调用 `record_token_usage`。
+/// `prompt_chars` 用于服务端未返回 usage 时估算 prompt tokens。
 pub struct UsageTrackingStream {
     inner: LlmStream,
     provider: super::direct_client::LlmProvider,
     model: String,
+    prompt_chars: u64,
     recorded: bool,
 }
 
@@ -55,11 +57,13 @@ impl UsageTrackingStream {
         inner: LlmStream,
         provider: super::direct_client::LlmProvider,
         model: String,
+        prompt_chars: u64,
     ) -> Self {
         Self {
             inner,
             provider,
             model,
+            prompt_chars,
             recorded: false,
         }
     }
@@ -101,18 +105,20 @@ impl Stream for UsageTrackingStream {
                         );
                     } else if let Ok(StreamChunk::DoneEstimation { completion_chars }) = &result {
                         self.recorded = true;
-                        let est_tokens = (completion_chars / 3).max(1);
+                        let est_pt = (self.prompt_chars / 3).max(1);
+                        let est_ct = (completion_chars / 3).max(1);
                         super::token_tracking::record_token_usage(
                             &self.provider,
                             &self.model,
-                            0,
-                            est_tokens,
+                            est_pt,
+                            est_ct,
                         );
                         tracing::debug!(
-                            "UsageTrackingStream recorded (est): provider={}, model={}, completion_est={}",
+                            "UsageTrackingStream recorded (est): provider={}, model={}, prompt_est={}, completion_est={}",
                             self.provider.as_str(),
                             self.model,
-                            est_tokens
+                            est_pt,
+                            est_ct
                         );
                     }
                 }

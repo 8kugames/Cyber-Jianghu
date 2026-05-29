@@ -185,9 +185,9 @@ pub struct NarrativeSummary {
     pub perception: String,
     /// 动机摘要
     pub motivation: String,
-    /// 决策摘要（截断，用于 prompt 显示）
+    /// 决策内容（完整，用于 prompt 显示和语义去重）
     pub decision: String,
-    /// 完整决策内容（未截断，用于语义去重比较）
+    /// 完整决策内容（与 decision 相同，保留字段兼容性）
     pub full_decision: String,
     /// 执行结果
     pub outcome: String,

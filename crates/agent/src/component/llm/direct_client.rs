@@ -350,10 +350,22 @@ impl DirectLlmClientConfig {
 /// Direct LLM 客户端
 ///
 /// 直接调用 LLM Provider API
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DirectLlmClient {
     config: DirectLlmClientConfig,
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
+    /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等模型需要回传）
+    last_reasoning_content: std::sync::Mutex<Option<String>>,
+}
+
+impl Clone for DirectLlmClient {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            earth_soul_config: self.earth_soul_config.clone(),
+            last_reasoning_content: std::sync::Mutex::new(None),
+        }
+    }
 }
 
 impl DirectLlmClient {
@@ -368,6 +380,7 @@ impl DirectLlmClient {
         Ok(Self {
             config,
             earth_soul_config: None,
+            last_reasoning_content: std::sync::Mutex::new(None),
         })
     }
 
@@ -378,6 +391,17 @@ impl DirectLlmClient {
     ) -> Self {
         self.earth_soul_config = Some(config);
         self
+    }
+
+    /// 获取当前使用的模型名称
+    pub fn take_last_reasoning_content(&self) -> Option<String> {
+        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
+    }
+
+    fn save_reasoning_content(&self, rc: Option<String>) {
+        if let Ok(mut g) = self.last_reasoning_content.lock() {
+            *g = rc;
+        }
     }
 
     /// 获取当前使用的模型名称
@@ -698,38 +722,62 @@ impl DirectLlmClient {
 
         // 记录流式 token 用量
         if pt > 0 || ct > 0 {
+            // 当服务端未返回 usage（如 MiniMax），DoneEstimation 只估算了 completion，
+            // pt=0 但 ct>0；需要根据请求内容补算 prompt。
+            let final_pt = if pt == 0 && !has_real {
+                let prompt_chars: usize = request
+                    .messages
+                    .iter()
+                    .filter_map(|m| m.content.as_ref().map(|c| c.len()))
+                    .sum();
+                (prompt_chars as u64 / 3).max(1)
+            } else {
+                pt
+            };
             record_token_usage(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
-                pt,
+                final_pt,
                 ct,
             );
             debug!(
                 "Stream token usage: provider={}, model={}, prompt={}, completion={}, real_usage={}",
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
-                pt,
+                final_pt,
                 ct,
                 has_real
             );
         } else if !has_real {
-            // 服务端未返回 usage，使用估算值
+            // pt==0 且 ct==0 且无 usage（空响应降级），按请求内容全量估算
+            let prompt_chars: usize = request
+                .messages
+                .iter()
+                .filter_map(|m| m.content.as_ref().map(|c| c.len()))
+                .sum();
+            let est_pt = (prompt_chars as u64 / 3).max(1);
             let est_ct = (content.len() as u64 / 3).max(1);
             record_token_usage(
                 &self.config.provider,
                 &self.config.get_model_with_default(),
-                0,
+                est_pt,
                 est_ct,
             );
             debug!(
-                "Stream token usage (estimated): provider={}, model={}, prompt=0, completion={}",
+                "Stream token usage (estimated fallback): provider={}, model={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
+                est_pt,
                 est_ct
             );
         }
 
         // 组装为 OpenAIResponse 格式（与 send_request 返回一致）
+        let rc = if !reasoning_content.trim().is_empty() {
+            Some(reasoning_content.clone())
+        } else {
+            None
+        };
         Ok(OpenAIResponse {
             choices: vec![super::openai_types::OpenAIChoice {
                 message: super::openai_types::ChatMessage {
@@ -752,6 +800,7 @@ impl DirectLlmClient {
                     },
                     tool_call_id: None,
                     name: None,
+                    reasoning_content: rc,
                 },
             }],
             usage: None,
@@ -1082,6 +1131,7 @@ impl LlmClient for DirectLlmClient {
         Ok(super::openai_types::ChatExchangeResponse {
             content: choice.message.content.clone(),
             tool_calls: choice.message.tool_calls.clone(),
+            reasoning_content: choice.message.reasoning_content.clone(),
         })
     }
 
@@ -1095,6 +1145,10 @@ impl LlmClient for DirectLlmClient {
 
     fn provider_info(&self) -> (LlmProvider, String) {
         (self.config.provider, self.config.get_model_with_default())
+    }
+
+    fn take_last_reasoning_content(&self) -> Option<String> {
+        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
     }
 
     async fn complete_with_tools(
@@ -1115,7 +1169,7 @@ impl LlmClient for DirectLlmClient {
             max_tokens: self.config.max_tokens,
             enable_thinking: self.config.enable_thinking,
         };
-        crate::soul::earth::tool_loop::run_tool_loop(
+        let result = crate::soul::earth::tool_loop::run_tool_loop(
             self,
             messages,
             tools,
@@ -1124,7 +1178,9 @@ impl LlmClient for DirectLlmClient {
             self.earth_soul_config.as_ref(),
             config,
         )
-        .await
+        .await?;
+        self.save_reasoning_content(result.reasoning_content);
+        Ok(result.content)
     }
 
     async fn complete_with_conversation_and_tools(
@@ -1150,7 +1206,7 @@ impl LlmClient for DirectLlmClient {
             max_tokens: self.config.max_tokens,
             enable_thinking: self.config.enable_thinking,
         };
-        crate::soul::earth::tool_loop::run_tool_loop(
+        let result = crate::soul::earth::tool_loop::run_tool_loop(
             self,
             messages,
             tools,
@@ -1159,7 +1215,9 @@ impl LlmClient for DirectLlmClient {
             self.earth_soul_config.as_ref(),
             config,
         )
-        .await
+        .await?;
+        self.save_reasoning_content(result.reasoning_content);
+        Ok(result.content)
     }
 
     fn complete_streaming<'a>(
@@ -1173,11 +1231,13 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
+            let prompt_chars = (system.len() + prompt.len()) as u64;
             let stream = self.complete_streaming(system, prompt).await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                prompt_chars,
             );
             Ok(tracking.into_llm_stream())
         })
@@ -1196,6 +1256,18 @@ impl LlmClient for DirectLlmClient {
             if is_llm_disabled() {
                 anyhow::bail!("LLM 调用已被停止");
             }
+            let prompt_chars = {
+                let mut total = system.len();
+                if let Some(s) = summary {
+                    total += s.len();
+                }
+                for turn in turns {
+                    total += turn.user.len();
+                    total += turn.assistant.len();
+                }
+                total += current_prompt.len();
+                total as u64
+            };
             let stream = self
                 .complete_conversation_streaming(system, summary, turns, current_prompt)
                 .await?;
@@ -1203,6 +1275,7 @@ impl LlmClient for DirectLlmClient {
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                prompt_chars,
             );
             Ok(tracking.into_llm_stream())
         })

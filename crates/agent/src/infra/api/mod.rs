@@ -35,7 +35,6 @@ pub mod cognitive_context;
 mod context;
 mod dto;
 pub(crate) mod handlers;
-pub mod intent_history;
 pub mod service;
 pub mod soul_cycle_recorder;
 pub mod thinking_log;
@@ -168,8 +167,6 @@ pub struct HttpApiState {
     pub dynamic_persona: Option<Arc<ThreadSafePersona>>,
     /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
     pub review_store: Option<Arc<ReviewStore>>,
-    /// Intent 历史存储，记录每个 tick 的 thought_log 和 observer_thought
-    pub intent_history: Arc<RwLock<Option<Arc<intent_history::IntentHistoryStore>>>>,
     /// 三魂循环记录器注册表，按 agent_id 隔离
     /// 支持多角色：当前角色写入 + 所有角色读取
     pub soul_cycle_registrar:
@@ -310,18 +307,6 @@ pub fn http_decision(
 
             // 触发叙事更新（异步，不阻塞）
             state.api_state.maybe_update_narratives(&world_state).await;
-
-            // 持久化 events_log 到 IntentHistory（供经历日志查询）
-            if let Some(history) = state.api_state.intent_history.read().await.as_ref() {
-                let world_time_str = serde_json::to_string(&world_state.world_time).ok();
-                for (i, event) in world_state.events_log.iter().enumerate() {
-                    let tick_id =
-                        world_state.tick_id - (world_state.events_log.len() - i - 1) as i64;
-                    history
-                        .record_event(tick_id, &event.description, world_time_str.clone())
-                        .await;
-                }
-            }
 
             // 广播 Tick 更新事件（供 Web Panel SSE 实时刷新）
             let _ = state.api_state.tick_update_tx.send(world_state.tick_id);
@@ -815,19 +800,6 @@ pub fn create_http_state(
         narrative_generator: None,
         dynamic_persona: None,
         review_store: None, // 由 Player Agent 通过 builder 设置
-        intent_history: Arc::new(RwLock::new(match intent_history::IntentHistoryStore::open(
-            current_agent_id,
-            &data_dir_clone.join(format!("intent_history_{}.db", current_agent_id)),
-        ) {
-            Ok(store) => Some(Arc::new(store)),
-            Err(e) => {
-                tracing::error!("Failed to open IntentHistoryStore: {}", e);
-                // Depending on context, we might want to panic here if it's a hard requirement,
-                // but since this is state creation, we'll log it and leave it None to avoid crashing
-                // the whole node on startup if a single agent's DB is corrupted.
-                None
-            }
-        })),
         soul_cycle_registrar: soul_cycle_registrar.clone(),
         data_dir: data_dir_clone.clone(),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),

@@ -74,23 +74,21 @@ impl ObserverPrompt {
         // 语义去重段落：仅在有三重门控通过的历史数据时注入
         let dedup_section = match recent_same_type_decisions {
             Some(decisions) if !decisions.is_empty() => {
-                // 来源: 200 字符约 100 tokens，基于中文 token 效率测算
-                const DEDUP_DECISION_CHAR_LIMIT: usize = 200;
                 let history_lines: String = decisions
                     .iter()
                     .enumerate()
-                    .map(|(i, s)| {
-                        let truncated: String = s.chars().take(DEDUP_DECISION_CHAR_LIMIT).collect();
-                        format!("{}. {}", i + 1, truncated)
-                    })
+                    .map(|(i, s)| format!("{}. {}", i + 1, s))
                     .collect::<Vec<_>>()
                     .join("\n");
                 format!(
                     "\n## 语义去重检查\n\
-                     该角色最近的类似意图：\n{}\n\n\
-                     如果新意图与这些意图在语义上重复（表达相同的意思、讨论相同的话题），\
-                     请拒绝并设 rejection_type 为 \"semantic_repeat\"。\
-                     语义内容不同则正常通过。",
+                     该角色最近一条类似意图：\n{}\n\n\
+                     如果新意图与这条意图在语义上重复（对同一人物说相同的话、对同一话题重复相同请求），\
+                     请拒绝并设 rejection_type 为 \"semantic_repeat\"。\n\
+                     以下情况不算重复，应正常通过：\n\
+                     - 目标人物不同（向不同的人说类似的话）\n\
+                     - 核心诉求不同（虽然话题相关但具体请求不同）\n\
+                     - 时间/情境已变化（之前被拒绝后换了新角度或新理由）",
                     history_lines
                 )
             }

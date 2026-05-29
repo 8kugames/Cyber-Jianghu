@@ -49,6 +49,9 @@ pub(crate) struct ChatMessage {
     /// tool 结果消息的 name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// DeepSeek/SenseNova 等模型的思考内容，多轮对话必须回传
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 impl ChatMessage {
@@ -59,6 +62,7 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            reasoning_content: None,
         }
     }
 
@@ -69,9 +73,11 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            reasoning_content: None,
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn assistant(content: &str) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -79,6 +85,18 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             name: None,
+            reasoning_content: None,
+        }
+    }
+
+    pub(crate) fn assistant_with_reasoning(content: &str, reasoning: Option<String>) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: Some(content.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+            reasoning_content: reasoning,
         }
     }
 
@@ -89,6 +107,7 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: Some(tool_call_id.to_string()),
             name: Some(name.to_string()),
+            reasoning_content: None,
         }
     }
 }
@@ -129,6 +148,7 @@ pub(crate) struct OpenAIChoice {
 pub(crate) struct ChatExchangeResponse {
     pub content: Option<String>,
     pub tool_calls: Option<Vec<super::tool_types::ToolCall>>,
+    pub reasoning_content: Option<String>,
 }
 
 /// LLM 消息交换的调用参数
