@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Changed — Schema-Driven 角色生成约束 [BREAKING]
+
+- **Agent**: `CharacterGenerationConfig` 从 18 个独立字段改为 schema-driven 设计：`FieldSpec` enum (string/integer/enum/enum_array) + `fields` 列表。Prompt 和 validate 共享同一 YAML schema，结构上消除 prompt/validate mismatch
+- **Agent**: 删除手写 `CharacterRegisterValidationError` (14 variants)、手写 prompt template (~30 行)、`default_age()`/`default_gender()` serde defaults
+- **Agent**: `Config` 移除 `Default` derive + `Config::from_env()`，`character_generation` 为必填字段（缺失即 fail-fast）
+- **Agent**: `register_character_handler` 改为 `Json<serde_json::Value>` + schema 验证 + 反序列化，与 `generate_character_handler` 共享 `validate_against_schema()`
+- **BREAKING**: 所有 `agent.yaml` 必须包含 `character_generation.fields` 列表，旧格式（age_min/age_max 等）不再兼容
+
 ### Fixed — 联调测试问题修复
 
 - **Agent**: 429 限流 early-exit — `decision.rs` retry loop 检测 429/rate_limit 立即中断重试，防止 OOM (exit 137)
