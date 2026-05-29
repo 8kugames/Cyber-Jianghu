@@ -1,11 +1,14 @@
 // ============================================================================
-// 认知引擎 Prompt 构建
+// 认知引擎 Prompt 构建 — 三区域分区
 // ============================================================================
 //
-// 单一入口: build_prompt()
+// build_system_message()   → Immutable Prefix (persona + rules + output format)
+// build_semi_static_message() → Semi-Static (action index + skill index)
+// build_tick_message()     → Volatile (world state + memory + summary + dialogue)
+//
 // 策略: FocusSummary 替代完整 WorldState, name-only Action Index, Skill Index。
 // LLM 通过地魂 tool calling (get_action_detail / query_world / skill_view) 按需获取详情。
-// 模板由 prompt_templates.json 定义（本地加载或 WS ConfigUpdate 下发）。
+// 模板由 prompt_templates.yaml 定义（本地加载或 WS ConfigUpdate 下发）。
 
 use crate::component::attention::FocusSummary;
 use cyber_jianghu_protocol::AvailableAction;
@@ -55,16 +58,13 @@ pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
     }
 }
 
-/// Prompt 构建参数
-pub(super) struct PromptParams<'a> {
+/// Tick 级 volatile prompt 参数
+pub(super) struct TickMessageParams<'a> {
     pub world_state: &'a cyber_jianghu_protocol::WorldState,
     pub memory_context: &'a str,
     pub validation_feedback: Option<&'a str>,
-    pub persona_desc: &'a str,
-    pub agent_name: &'a str,
     pub focus_summary: Option<&'a FocusSummary>,
     pub critical_preload: Option<&'a str>,
-    pub use_tool_calling: bool,
 }
 
 /// Prompt 各 section token 估算
@@ -96,21 +96,111 @@ impl PromptSectionEstimate {
 }
 
 impl super::CognitiveEngine {
-    /// 唯一 prompt 构建入口
-    pub(super) fn build_prompt(&self, params: PromptParams<'_>) -> anyhow::Result<String> {
-        let PromptParams {
+    // ========================================================================
+    // 三区域 Prompt 构建
+    // ========================================================================
+
+    /// [Immutable Prefix] system message: persona + survival rules + narrative limits + task + output format
+    ///
+    /// 仅在初始化和人设更新时调用。输出在 tick 间 byte-identical。
+    /// feedback_section 明确排除 — 它是 volatile 内容。
+    pub(super) fn build_system_message(&self, use_tool_calling: bool) -> String {
+        let (agent_name, persona_desc) = {
+            let cfg = self.config.read().expect("rwlock poisoned");
+            let persona_for_prompt = {
+                let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                cache.get_persona_simple().to_string()
+            };
+            (cfg.agent_name.clone(), persona_for_prompt)
+        };
+
+        let tool_calling_guidance = if use_tool_calling {
+            "## 输出格式\n\
+            直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
+            工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
+            你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n\n\
+            重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
+            action_type 只能填\"可用动作\"列表中的名称，绝对不能填工具名称。\n".to_string()
+        } else {
+            "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
+        };
+
+        // 手动组装 system 内容：header (不含 feedback) + survival_rules + narrative_limits + task + output_format
+        let mut parts = String::new();
+
+        // header（不含 feedback_section）
+        parts.push_str(&format!("你是 {agent_name}。\n{persona_desc}\n\n"));
+
+        // 从模板渲染静态 sections
+        let prompt_template = self.prompt_template();
+        if let Some(tmpl) = prompt_template.get_template("actor_direct") {
+            // survival_rules / narrative_limits / task sections 不依赖变量
+            let empty_vars = std::collections::HashMap::new();
+            if let Some(rendered) = tmpl.render_section("survival_rules", &empty_vars) {
+                parts.push_str(&rendered);
+            }
+            if let Some(rendered) = tmpl.render_section("narrative_limits", &empty_vars) {
+                parts.push_str(&rendered);
+            }
+            if let Some(rendered) = tmpl.render_section("task", &empty_vars) {
+                parts.push_str(&rendered);
+            }
+            // output_format 需要 tool_calling_guidance + action_field_hints
+            let mut vars = std::collections::HashMap::new();
+            vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
+            vars.insert("action_field_hints".to_string(), String::new());
+            if let Some(rendered) = tmpl.render_section("output_format", &vars) {
+                parts.push_str(&rendered);
+            }
+        } else {
+            // 降级：无模板时用硬编码内容
+            parts.push_str(&tool_calling_guidance);
+        }
+
+        parts
+    }
+
+    /// [Semi-Static] action index + skill index
+    ///
+    /// 在初始化和配置更新时调用。变更频率低于 tick，远高于 persona。
+    pub(super) fn build_semi_static_message(&self) -> String {
+        let mut parts = String::new();
+
+        // Action Index: name-only
+        let actions = self.available_actions.read().expect("rwlock poisoned");
+        let action_descriptions = Self::build_action_index_pub(&actions);
+        drop(actions);
+        if !action_descriptions.is_empty() {
+            parts.push_str(&action_descriptions);
+            parts.push('\n');
+        }
+
+        // Skill Index: name-only
+        let skill_instructions = {
+            let cache = self.skill_cache.read().expect("rwlock poisoned");
+            Self::build_skill_index(&cache)
+        };
+        if !skill_instructions.is_empty() {
+            parts.push_str(&skill_instructions);
+        }
+
+        parts
+    }
+
+    /// [Volatile] tick 级动态内容: feedback + world state + memory + summary + outcome + dialogue
+    ///
+    /// 每 tick 调用一次。内容随 tick 变化。
+    pub(super) fn build_tick_message(&self, params: TickMessageParams<'_>) -> anyhow::Result<String> {
+        let TickMessageParams {
             world_state,
             memory_context,
             validation_feedback,
-            persona_desc,
-            agent_name,
             focus_summary,
             critical_preload,
-            use_tool_calling,
         } = params;
 
         let feedback_section = match validation_feedback {
-            Some(fb) => format!("\n[验证反馈]: {}\n", fb),
+            Some(fb) => format!("[验证反馈]: {}\n", fb),
             None => String::new(),
         };
 
@@ -123,7 +213,7 @@ impl super::CognitiveEngine {
         let summary_context = self.get_summary_context();
         let outcome_section = self.get_outcome_context();
 
-        // FocusSummary 替代完整 WorldState，无 summary 时降级到完整模式
+        // FocusSummary 替代完整 WorldState
         let world_state_section = match focus_summary {
             Some(fs) => {
                 let mut narrative = format!("### 焦点状态\n{}\n", fs.narrative);
@@ -135,90 +225,70 @@ impl super::CognitiveEngine {
             None => self.build_world_state_section(world_state),
         };
 
-        // Action Index: name-only，详情通过 get_action_detail 按需查询
-        let actions = self.available_actions.read().expect("rwlock poisoned");
-        let action_descriptions = Self::build_action_index_pub(&actions);
-        drop(actions);
-
-        // Skill Index: name-only，详情通过 skill_view 按需查询
-        let skill_instructions = {
-            let cache = self.skill_cache.read().expect("rwlock poisoned");
-            Self::build_skill_index(&cache)
-        };
-
-        let tool_calling_guidance = if use_tool_calling {
-            // prompt 次数 == max_tool_rounds == max_same_tool_consecutive（LoopGuard Warn→Terminate 提供余量）
-            "## 输出格式\n\
-            直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
-            工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
-            你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n\n\
-            重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
-            action_type 只能填\"可用动作\"列表中的名称，绝对不能填工具名称。\n".to_string()
-        } else {
-            "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
-        };
-
-        let prompt_template = self.prompt_template();
-        let tmpl = prompt_template.get_template("actor_direct")
-            .ok_or_else(|| anyhow::anyhow!(
-                "actor_direct 模板未加载 — 本地 prompt_templates.json 未找到或 WS ConfigUpdate 尚未到达"
-            ))?;
-
-        let estimate = PromptSectionEstimate {
-            system: PromptSectionEstimate::estimate_tokens(tool_calling_guidance.len()),
-            persona: PromptSectionEstimate::estimate_tokens(persona_desc.len()),
-            world_state: PromptSectionEstimate::estimate_tokens(world_state_section.len()),
-            action_descriptions: PromptSectionEstimate::estimate_tokens(action_descriptions.len()),
-            memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
-            skill_instructions: PromptSectionEstimate::estimate_tokens(skill_instructions.len()),
-            other: PromptSectionEstimate::estimate_tokens(
-                feedback_section.len()
-                    + summary_context.len()
-                    + outcome_section.len()
-                    + agent_name.len(),
-            ),
-        };
-
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("feedback_section".to_string(), feedback_section);
-        vars.insert("agent_name".to_string(), agent_name.to_string());
-        vars.insert("persona".to_string(), persona_desc.to_string());
-        vars.insert("world_state_section".to_string(), world_state_section);
-        vars.insert("memory_section".to_string(), memory_section);
+        // dialogue context
         let dialogue_section_value = self
             .dialogue_context
             .read()
             .map(|g| g.clone())
             .unwrap_or_default();
-        // 无活跃对话时不注入空标题（避免 "## 活跃对话" 后无内容的误导）
-        vars.insert(
-            "dialogue_section".to_string(),
-            if dialogue_section_value.is_empty() {
-                "（当前无活跃对话）".to_string()
-            } else {
-                dialogue_section_value
-            },
-        );
-        vars.insert("summary_context".to_string(), summary_context);
-        vars.insert("action_descriptions".to_string(), action_descriptions);
-        vars.insert("action_field_hints".to_string(), String::new());
-        vars.insert("outcome_section".to_string(), outcome_section);
-        vars.insert("skill_instructions".to_string(), skill_instructions);
-        vars.insert("tool_calling_guidance".to_string(), tool_calling_guidance);
+        let dialogue_section = if dialogue_section_value.is_empty() {
+            "（当前无活跃对话）".to_string()
+        } else {
+            dialogue_section_value
+        };
 
+        // 从模板渲染 volatile sections
+        let prompt_template = self.prompt_template();
+        let tmpl = prompt_template.get_template("actor_direct")
+            .ok_or_else(|| anyhow::anyhow!(
+                "actor_direct 模板未加载 — 本地 prompt_templates.yaml 未找到或 WS ConfigUpdate 尚未到达"
+            ))?;
+
+        let mut result = String::new();
+
+        // feedback section（独立于模板，直接拼接）
+        if !feedback_section.is_empty() {
+            result.push_str(&feedback_section);
+        }
+
+        // world_state section
+        let mut ws_vars = std::collections::HashMap::new();
+        ws_vars.insert("world_state_section".to_string(), world_state_section.clone());
+        ws_vars.insert("memory_section".to_string(), memory_section.clone());
+        ws_vars.insert("summary_context".to_string(), summary_context.clone());
+        ws_vars.insert("outcome_section".to_string(), outcome_section.clone());
+        if let Some(rendered) = tmpl.render_section("world_state", &ws_vars) {
+            result.push_str(&rendered);
+        }
+
+        // dialogue section
+        let mut dlg_vars = std::collections::HashMap::new();
+        dlg_vars.insert("dialogue_section".to_string(), dialogue_section);
+        if let Some(rendered) = tmpl.render_section("dialogue_context", &dlg_vars) {
+            result.push_str(&rendered);
+        }
+
+        // token 估算日志
+        let estimate = PromptSectionEstimate {
+            system: 0,
+            persona: 0,
+            world_state: PromptSectionEstimate::estimate_tokens(result.len()),
+            action_descriptions: 0,
+            memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
+            skill_instructions: 0,
+            other: PromptSectionEstimate::estimate_tokens(
+                feedback_section.len() + summary_context.len() + outcome_section.len(),
+            ),
+        };
         tracing::info!(
-            "[prompt-estimate] total~{}tokens (tools={}) | persona={} world_state={} actions={} memory={} skills={} other={}",
+            "[prompt-estimate] tick_msg~{}tokens | world_state={} memory={} other={}",
             estimate.total_tokens(),
-            params.use_tool_calling,
-            estimate.persona,
             estimate.world_state,
-            estimate.action_descriptions,
             estimate.memory,
-            estimate.skill_instructions,
             estimate.other
         );
 
-        Ok(tmpl.render_all(&vars))
+        Ok(result)
     }
 
     /// 构建 WorldState 完整数据段（无 FocusSummary 时的降级路径）
