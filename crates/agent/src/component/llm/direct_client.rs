@@ -590,19 +590,21 @@ impl DirectLlmClient {
             );
         }
         if let Some(ref usage) = response_data.usage {
+            let cache_hit = usage.cache_hit_tokens().unwrap_or(0);
             record_token_usage(
                 &self.config.provider,
                 &model,
                 usage.prompt_tokens,
                 usage.completion_tokens,
-                0,
+                cache_hit,
             );
             debug!(
-                "Token usage: provider={}, model={}, prompt={}, completion={}",
+                "Token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}",
                 self.config.provider.as_str(),
                 model,
                 usage.prompt_tokens,
-                usage.completion_tokens
+                usage.completion_tokens,
+                cache_hit,
             );
         } else {
             // API 未返回 usage，按字符长度估算（中文 ~1.5 char/token，英文 ~4 char/token，取中间值 3）
@@ -745,14 +747,15 @@ impl DirectLlmClient {
                 &self.config.get_model_with_default(),
                 final_pt,
                 ct,
-                0,
+                cache_hit,
             );
             debug!(
-                "Stream token usage: provider={}, model={}, prompt={}, completion={}, real_usage={}",
+                "Stream token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
                 self.config.provider.as_str(),
                 self.config.get_model_with_default(),
                 final_pt,
                 ct,
+                cache_hit,
                 has_real
             );
         } else if !has_real {
