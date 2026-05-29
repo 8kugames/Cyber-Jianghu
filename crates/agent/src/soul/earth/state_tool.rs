@@ -65,6 +65,7 @@ pub fn list_skills_definition() -> ToolDefinition {
 /// 执行 get_action_detail
 ///
 /// 查找顺序：精确匹配 action 字段 → 精确匹配 name 字段
+/// 返回动作详情 + 基于 required_fields 动态生成的示例
 pub fn execute_get_action_detail(
     action_type: &str,
     available_actions: &[AvailableAction],
@@ -74,22 +75,66 @@ pub fn execute_get_action_detail(
         .find(|a| a.action == action_type || a.name == action_type);
 
     match action {
-        Some(a) => serde_json::json!({
-            "success": true,
-            "action": a.action,
-            "name": a.name,
-            "description": a.description,
-            "category": a.category,
-            "required_fields": a.required_fields,
-            "valid_targets": a.valid_targets,
-            "requirements": a.requirements,
-            "effects": a.effects,
-        }),
+        Some(a) => {
+            let example = build_action_example(&a.action, &a.required_fields);
+            serde_json::json!({
+                "success": true,
+                "action": a.action,
+                "name": a.name,
+                "description": a.description,
+                "category": a.category,
+                "required_fields": a.required_fields,
+                "valid_targets": a.valid_targets,
+                "requirements": a.requirements,
+                "effects": a.effects,
+                "example": example,
+            })
+        }
         None => serde_json::json!({
             "success": false,
             "message": format!("未找到动作: {}。请使用可用动作列表中的名称。", action_type)
         }),
     }
+}
+
+/// 根据 required_fields 动态生成 action 示例
+///
+/// 按字段组合模式匹配，生成带注释的 JSON 示例。
+/// target_agent_id 字段额外标注 UUID 规则。
+fn build_action_example(action_type: &str, required_fields: &[String]) -> String {
+    let has_target_agent_id = required_fields.iter().any(|f| f == "target_agent_id");
+    let has_item_id = required_fields.iter().any(|f| f == "item_id");
+    let has_content = required_fields.iter().any(|f| f == "content");
+    let has_target_location = required_fields.iter().any(|f| f == "target_location");
+    let has_quantity = required_fields.iter().any(|f| f == "quantity");
+
+    let mut fields = Vec::new();
+    if has_target_agent_id {
+        fields.push("\"target_agent_id\": \"(从附近的人列表复制UUID，不要填角色名字)\"".to_string());
+    }
+    if has_target_location {
+        fields.push("\"target_location\": \"(从可前往的地点列表复制)\"".to_string());
+    }
+    if has_item_id {
+        fields.push("\"item_id\": \"(从背包或附近物品列表复制)\"".to_string());
+    }
+    if has_quantity {
+        fields.push("\"quantity\": 1".to_string());
+    }
+    if has_content {
+        fields.push("\"content\": \"...\"".to_string());
+    }
+
+    let fields_str = if fields.is_empty() {
+        String::new()
+    } else {
+        fields.join(", ")
+    };
+
+    format!(
+        "{{\"actions\": [{{\"action_type\": \"{}\", \"action_data\": {{{}}}}}]}}",
+        action_type, fields_str
+    )
 }
 
 /// 执行 query_world
