@@ -261,6 +261,13 @@ pub trait LlmClientExt {
     /// 完成一次结构化输出调用（JSON 模式）
     async fn complete_json<T: DeserializeOwned + Send>(&self, prompt: &str) -> Result<T>;
 
+    /// 完成一次结构化输出调用（JSON 模式，per-call config 覆盖 temperature 等）
+    async fn complete_json_with_config<T: DeserializeOwned + Send>(
+        &self,
+        prompt: &str,
+        config: super::openai_types::ChatExchangeConfig,
+    ) -> Result<T>;
+
     /// 完成一次结构化输出调用（JSON 模式，system + user 分离）
     async fn complete_json_with_system<T: DeserializeOwned + Send>(
         &self,
@@ -703,6 +710,17 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     async fn complete_json<D: DeserializeOwned + Send>(&self, prompt: &str) -> Result<D> {
         let response = self.complete(prompt).await?;
         parse_json_response::<D>(&response)
+    }
+
+    async fn complete_json_with_config<D: DeserializeOwned + Send>(
+        &self,
+        prompt: &str,
+        config: super::openai_types::ChatExchangeConfig,
+    ) -> Result<D> {
+        let messages = vec![super::openai_types::ChatMessage::user(prompt)];
+        let response = self.send_chat_exchange(messages, None, config).await?;
+        let content = response.content.unwrap_or_default();
+        parse_json_response::<D>(&content)
     }
 
     async fn complete_json_with_system<D: DeserializeOwned + Send>(
