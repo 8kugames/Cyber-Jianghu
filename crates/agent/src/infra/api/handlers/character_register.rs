@@ -414,7 +414,6 @@ pub(crate) async fn generate_character_handler(
     body: Option<Json<GenerateCharacterRequest>>,
 ) -> impl IntoResponse {
     let body = body.map(|b| b.0).unwrap_or_default();
-    use crate::component::llm::LlmClientExt;
 
     // 1. 读取配置文件
     let config = match crate::config::Config::from_file(&state.config_path) {
@@ -482,7 +481,15 @@ pub(crate) async fn generate_character_handler(
         goals: GoalsRequest,
     }
 
-    match llm_client.complete_json::<serde_json::Value>(&prompt).await {
+    // 3. 使用 per-call config 覆盖 temperature（角色生成是创意任务）
+    use crate::component::llm::LlmClientExt;
+    let chat_config = crate::component::llm::ChatExchangeConfig {
+        model: llm_client.model_name(),
+        temperature: 0.9,
+        max_tokens: 2048,
+        enable_thinking: None,
+    };
+    match llm_client.complete_json_with_config::<serde_json::Value>(&prompt, chat_config).await {
         Ok(json_value) => {
             // Schema validation before deserialization
             if let Err(errors) = validate_against_schema(&json_value, &config.character_generation.fields) {

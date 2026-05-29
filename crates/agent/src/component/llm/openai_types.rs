@@ -155,7 +155,7 @@ pub(crate) struct ChatExchangeResponse {
 ///
 /// 只包含 LLM 层面的配置，不包含 agent 逻辑（LoopGuard/Budget 等）。
 #[derive(Clone)]
-pub(crate) struct ChatExchangeConfig {
+pub struct ChatExchangeConfig {
     pub model: String,
     pub temperature: f32,
     pub max_tokens: u32,
