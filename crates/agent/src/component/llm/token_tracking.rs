@@ -14,6 +14,7 @@ use super::direct_client::LlmProvider;
 struct PerModelStats {
     prompt_tokens: u64,
     completion_tokens: u64,
+    cache_hit_tokens: u64,
     calls: u64,
     failures: u64,
 }
@@ -23,14 +24,16 @@ impl PerModelStats {
         Self {
             prompt_tokens: 0,
             completion_tokens: 0,
+            cache_hit_tokens: 0,
             calls: 0,
             failures: 0,
         }
     }
 
-    fn record(&mut self, prompt: u64, completion: u64) {
+    fn record(&mut self, prompt: u64, completion: u64, cache_hit: u64) {
         self.prompt_tokens += prompt;
         self.completion_tokens += completion;
+        self.cache_hit_tokens += cache_hit;
         self.calls += 1;
     }
 }
@@ -47,6 +50,8 @@ pub struct ModelTokenStats {
     pub calls: u64,
     #[serde(default)]
     pub failures: u64,
+    #[serde(default)]
+    pub cache_hit_tokens: u64,
 }
 
 static TOKEN_STATS: OnceLock<Mutex<HashMap<String, PerModelStats>>> = OnceLock::new();
@@ -78,13 +83,14 @@ pub fn record_token_usage(
     model: &str,
     prompt_tokens: u64,
     completion_tokens: u64,
+    cache_hit: u64,
 ) {
     let key = model_key(provider, model);
     if let Ok(mut stats) = token_stats().lock() {
         stats
             .entry(key)
             .or_insert_with(PerModelStats::new)
-            .record(prompt_tokens, completion_tokens);
+            .record(prompt_tokens, completion_tokens, cache_hit);
     }
 }
 
@@ -121,6 +127,7 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
                 total_tokens: total,
                 calls: s.calls,
                 failures: s.failures,
+                cache_hit_tokens: s.cache_hit_tokens,
             }
         })
         .collect()
@@ -153,6 +160,7 @@ pub fn persist_and_reset() {
                 existing.total_tokens += s.prompt_tokens + s.completion_tokens;
                 existing.calls += s.calls;
                 existing.failures += s.failures;
+                existing.cache_hit_tokens += s.cache_hit_tokens;
             } else {
                 merged.insert(key, s.clone());
             }
