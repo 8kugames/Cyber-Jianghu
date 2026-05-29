@@ -1637,6 +1637,16 @@ mod tests {
         assert!(result.contains("\"action_type\": \"drink\""), "JSON 应保留");
     }
 
+    #[test]
+    fn test_strip_minimax_think_paired_with_attrs() {
+        // MiniMax M2.7 配对 think 标签：opening/closing 均含属性
+        let input = r#"<think HTaming>分析角色特征...</think HTaming>{"name": "测试", "age": 25}"#;
+        let result = strip_thinking_tags(input);
+        assert!(!result.contains("<think"), "think tag should be removed: {}", result);
+        assert!(!result.contains("HTaming"), "think content should be removed: {}", result);
+        assert!(result.contains(r#""name": "测试""#), "JSON should be preserved: {}", result);
+    }
+
     // ========================================================================
     // repair_llm_json tests
     // ========================================================================
