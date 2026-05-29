@@ -112,6 +112,7 @@ pub fn cognitive_decision_with_chain(
                             world_state.tick_id,
                             ws_summary,
                             assistant_summary,
+                            engine.take_last_reasoning_content(),
                         );
 
                         // CognitiveValidator: 验证认知链质量
@@ -143,7 +144,7 @@ pub fn cognitive_decision_with_chain(
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
 
-                        // Prompt 超长是确定性的，重试无意义
+                        // 确定性失败，重试无意义
                         let err_msg = &last_error;
                         if err_msg.contains("exceeds max context window")
                             || err_msg.contains("Prompt too long")
@@ -151,6 +152,14 @@ pub fn cognitive_decision_with_chain(
                             || err_msg.contains("maximum context length")
                         {
                             warn!("[cognitive] Prompt exceeds context window, aborting retries");
+                            break;
+                        }
+                        // 429 限流是配额级问题，持续重试只会加剧内存压力
+                        if err_msg.contains("429")
+                            || err_msg.contains("rate_limit")
+                            || err_msg.contains("Too Many Requests")
+                        {
+                            warn!("[cognitive] Rate limited (429), aborting retries to prevent OOM");
                             break;
                         }
                     }

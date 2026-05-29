@@ -398,17 +398,34 @@ impl super::super::Agent {
                         )
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());
+                    // 构建 pipeline 完整视图：primary + subsequent intents
+                    let pipeline_actions: Vec<serde_json::Value> = std::iter::once(
+                        serde_json::json!({
+                            "action_type": pipeline.action_type,
+                            "action_data": pipeline.action_data,
+                        }),
+                    )
+                    .chain(
+                        pipeline.subsequent_intents.iter().map(|si| {
+                            serde_json::json!({
+                                "action_type": si.action_type,
+                                "action_data": si.action_data,
+                            })
+                        }),
+                    )
+                    .collect();
+                    let action_type_display = pipeline_actions
+                        .iter()
+                        .filter_map(|a| a.get("action_type").and_then(|v| v.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(" → ");
                     recorder
                         .record_final_intent(
                             world_state.tick_id,
                             attempt,
                             Some(&pipeline.intent_id.to_string()),
-                            Some(pipeline.action_type.as_str()),
-                            pipeline
-                                .action_data
-                                .as_ref()
-                                .map(|d| serde_json::to_string(d).unwrap_or_default())
-                                .as_deref(),
+                            Some(&action_type_display),
+                            Some(&serde_json::to_string(&pipeline_actions).unwrap_or_default()),
                         )
                         .await;
                     final_intent = Some(pipeline);
@@ -552,21 +569,6 @@ impl super::super::Agent {
                 "LLM chaos 模式解除: agent={}, LLM 恢复正常",
                 self.character_name()
             );
-        }
-
-        // 记录 Intent 到经历日志（供 Web Panel 查询）
-        if let Some(ref api_state) = self.http_api_state
-            && let Some(history) = api_state.intent_history.read().await.as_ref()
-        {
-            history
-                .record_intent(
-                    final_intent.tick_id,
-                    0,
-                    final_intent.intent_id,
-                    final_intent.action_type.to_string(),
-                    final_intent.thought_log.clone(),
-                )
-                .await;
         }
 
         Ok(SoulCycleResult {

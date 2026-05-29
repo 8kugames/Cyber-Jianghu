@@ -22,6 +22,7 @@ use std::sync::Arc;
 pub struct ConversationTurn {
     pub user: String,
     pub assistant: String,
+    pub reasoning_content: Option<String>,
 }
 
 /// 对话输入参数（用于减少函数参数数量）
@@ -52,7 +53,10 @@ pub fn build_conversation_messages(
     let mut messages = vec![ChatMessage::system(&system_content)];
     for turn in turns {
         messages.push(ChatMessage::user(&turn.user));
-        messages.push(ChatMessage::assistant(&turn.assistant));
+        messages.push(ChatMessage::assistant_with_reasoning(
+            &turn.assistant,
+            turn.reasoning_content.clone(),
+        ));
     }
     messages.push(ChatMessage::user(current_prompt));
     messages
@@ -145,6 +149,11 @@ pub trait LlmClient: Send + Sync {
             super::direct_client::LlmProvider::OpenClaw,
             "unknown".to_string(),
         )
+    }
+
+    /// 取回最近一次 LLM 调用的 reasoning_content（DeepSeek 等模型需要回传多轮对话）
+    fn take_last_reasoning_content(&self) -> Option<String> {
+        None
     }
 
     /// 使用 tool calling 的多轮对话
@@ -1253,6 +1262,10 @@ impl LlmClient for FallbackLlmClient {
         self.active_client().provider_info()
     }
 
+    fn take_last_reasoning_content(&self) -> Option<String> {
+        self.active_client().take_last_reasoning_content()
+    }
+
     async fn complete_with_tools(
         &self,
         system: &str,
@@ -1357,6 +1370,7 @@ impl LlmClient for FallbackLlmClient {
 
             let system = system.to_string();
             let prompt = prompt.to_string();
+            let prompt_chars = (system.len() + prompt.len()) as u64;
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
@@ -1367,7 +1381,7 @@ impl LlmClient for FallbackLlmClient {
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
             let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model);
+                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
             Ok(tracking_stream.into_llm_stream())
         })
     }
@@ -1388,6 +1402,18 @@ impl LlmClient for FallbackLlmClient {
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
+            let prompt_chars = {
+                let mut total = system.len();
+                if let Some(ref s) = summary_owned {
+                    total += s.len();
+                }
+                for turn in &turns {
+                    total += turn.user.len();
+                    total += turn.assistant.len();
+                }
+                total += current_prompt.len();
+                total as u64
+            };
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
@@ -1409,7 +1435,7 @@ impl LlmClient for FallbackLlmClient {
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
             let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model);
+                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
             Ok(tracking_stream.into_llm_stream())
         })
     }

@@ -16,6 +16,12 @@ use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
 use crate::component::llm::{ChatExchangeConfig, ChatMessage, LlmClient};
 
 use super::budget::ToolResultBudget;
+/// tool loop 的返回结果
+pub(crate) struct ToolLoopResult {
+    pub content: String,
+    pub reasoning_content: Option<String>,
+}
+
 use super::config::EarthSoulConfig;
 use super::loop_guard::{LoopGuard, LoopGuardAction};
 
@@ -31,7 +37,7 @@ pub(crate) async fn run_tool_loop(
     max_rounds: usize,
     earth_config: Option<&EarthSoulConfig>,
     llm_config: ChatExchangeConfig,
-) -> Result<String> {
+) -> Result<ToolLoopResult> {
     let mut messages = messages;
 
     let mut budget = earth_config
@@ -98,7 +104,10 @@ pub(crate) async fn run_tool_loop(
                 content.len(),
                 content.chars().take(2000).collect::<String>()
             );
-            return Ok(content);
+            return Ok(ToolLoopResult {
+                content,
+                reasoning_content: response.reasoning_content,
+            });
         }
 
         let tool_calls = response
@@ -122,6 +131,7 @@ pub(crate) async fn run_tool_loop(
             tool_calls: Some(tool_calls.clone()),
             tool_call_id: None,
             name: None,
+            reasoning_content: response.reasoning_content.clone(),
         });
 
         for (i, tc) in tool_calls.iter().enumerate() {
@@ -208,7 +218,7 @@ async fn forced_text_exit(
     llm: &dyn LlmClient,
     mut messages: Vec<ChatMessage>,
     llm_config: ChatExchangeConfig,
-) -> Result<String> {
+) -> Result<ToolLoopResult> {
     warn!("[地魂] 执行强制文本退出");
 
     // 追加引导消息，防止模型在 tools 被移除后返回空响应
@@ -223,5 +233,8 @@ async fn forced_text_exit(
         warn!("[地魂] 强制文本退出返回空内容，agent 本轮可能无决策");
     }
 
-    Ok(content)
+    Ok(ToolLoopResult {
+        content,
+        reasoning_content: response.reasoning_content,
+    })
 }

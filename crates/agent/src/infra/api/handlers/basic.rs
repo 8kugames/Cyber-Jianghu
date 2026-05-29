@@ -222,19 +222,6 @@ pub(crate) async fn submit_intent_handler(
         intent
     };
 
-    // 记录到 IntentHistoryStore（用于经历日志查询）
-    if let Some(history) = state.intent_history.read().await.as_ref() {
-        history
-            .record_intent(
-                tick_id,
-                0,
-                intent.intent_id,
-                action_type_str,
-                req.thought_log.clone(),
-            )
-            .await;
-    }
-
     let intent_id = intent.intent_id;
     let submitted_tick = tick_id;
     let submitted_action = intent.action_type.to_string();

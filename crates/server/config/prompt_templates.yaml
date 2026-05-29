@@ -73,6 +73,12 @@ templates:
         - 平衡你的行为：探索新地点、与附近的人交流、修炼武功、寻找资源——不要只专注于单一活动
         - 当你的生存需求得到满足时，根据你的性格和价值观去探索世界、建立关系、追寻目标
 
+        ## 目标切换（元认知）
+        - 如果连续 3 次尝试向同一目标（同一人物/同一问题/同一资源）发起行动均未成功，你必须立即放弃该目标，换一个完全不同的方向
+        - 被拒绝、被无视、无响应、语义重复被拦截——均视为"未成功"
+        - 切换方向包括但不限于：换一个交流对象、换一个地点探索、换一种行动类型、暂时放弃当前议题去做其他事
+        - 即使当前目标看似最合理，连续失败意味着当前策略无效——坚持只会浪费行动机会
+
       narrative_limits: |
         ## 叙事限制
         - 叙事只能引用"背包物品"或"附近可见物品"中确实存在的物品
@@ -129,26 +135,38 @@ templates:
 
         ### actions 规则：
         - **action_type 只能填"可用动作"列表中出现的名称，只能从列表中选一个填入。工具名称（query_world、get_action_detail、list_skills、skill_view）不是动作。**
-        - actions 数组包含 1-3 个按顺序执行的动作
-        - 大多数情况只需要 1 个动作
-        - 只有需要连续操作时才输出多个（如：先拾取再进食，先移动再采集）
-        - 后续动作依赖前一个动作的成功（如拾取失败则进食不会执行）
+        - actions 数组包含 1-5 个按顺序执行的动作
+        - **优先规划多步连续动作**：当你有明确的多步计划时，应一次性输出 2-5 个动作，而非只输出第一步
+        - 后续动作依赖前一个动作的成功（如拾取失败则进食不会执行），因此只编排有依赖关系的连续动作
         - 每个动作的 动作数据 中的所有 ID（item_id, target_location, target_agent_id 等）必须从世界状态数据中直接复制，不要编造、不要使用中文名或别名
 
         ### 示例（请严格参考格式，action_data 字段名必须使用英文原名）：
-        单动作 - 说话：
+        说话：
         {"actions": [{"action_type": "说话", "action_data": {"content": "各位好汉，在下有礼了。"}}]}
 
-        单动作 - 移动：
-        {"actions": [{"action_type": "移动", "action_data": {"target_location": "龙门厨房"}}]}
+        移动后探索：
+        {"actions": [
+          {"action_type": "移动", "action_data": {"target_location": "龙门厨房"}},
+          {"action_type": "观察", "action_data": {}}
+        ]}
 
-        单动作 - 进食：
-        {"actions": [{"action_type": "进食", "action_data": {"item_id": "馒头"}}]}
-
-        多动作 - 拾取后进食：
+        拾取后进食：
         {"actions": [
           {"action_type": "拾取", "action_data": {"item_id": "馒头"}},
           {"action_type": "进食", "action_data": {"item_id": "馒头"}}
+        ]}
+
+        移动后采集再制作：
+        {"actions": [
+          {"action_type": "移动", "action_data": {"target_location": "后山小溪"}},
+          {"action_type": "采集", "action_data": {"item_id": "木材"}},
+          {"action_type": "制作", "action_data": {"item_id": "木碗"}}
+        ]}
+
+        进食后说话：
+        {"actions": [
+          {"action_type": "进食", "action_data": {"item_id": "馒头"}},
+          {"action_type": "说话", "action_data": {"content": "吃饱了，在下有礼了。"}}
         ]}
 
         ### action_data 字段要求：
@@ -158,16 +176,10 @@ templates:
         ## 活跃对话
         {dialogue_section}
 
-    # 截断长度配置（消除 .take(N) 魔法数字）
+    # 结构限制配置（非字符截断）
     truncation:
       planning_description: 100
-      content_hint: 30
-      summary_window: 50
-      dream_marker_thought: 50
       tool_calling_history_turns: 8
-      summary_window_perception: 30
-      summary_window_motivation: 20
-      summary_window_decision: 40
 
     # LLM 调用参数配置（独立于 truncation，语义分离）
     llm_parameters:

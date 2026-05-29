@@ -261,28 +261,7 @@ pub(crate) async fn switch_character_handler(
                 .into_response();
         }
 
-        // 1. Intent History (Fail Fast)
-        let new_history = match super::intent_history::IntentHistoryStore::open(
-            agent_id,
-            &data_dir.join(format!("intent_history_{}.db", agent_id)),
-        ) {
-            Ok(store) => Some(std::sync::Arc::new(store)),
-            Err(e) => {
-                tracing::error!("切换角色失败: 无法打开 IntentHistoryStore - {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(SwitchCharacterResponse {
-                        success: false,
-                        message: format!("意图历史数据库加载失败: {}", e),
-                        character: None,
-                    }),
-                )
-                    .into_response();
-            }
-        };
-        *state.intent_history.write().await = new_history;
-
-        // 2. Relationship Store (Fail Fast)
+        // 1. Relationship Store (Fail Fast)
         let new_rel = match crate::component::social::RelationshipStore::open(
             agent_id,
             &data_dir.join(format!("relationships_{}.db", agent_id)),
@@ -303,7 +282,7 @@ pub(crate) async fn switch_character_handler(
         };
         *state.relationship_store.write().expect("rwlock poisoned") = new_rel;
 
-        // 3. Memory Manager (Fail Fast)
+        // 2. Memory Manager (Fail Fast)
         if let Some(template) = &state.memory_config_template {
             let mut config = template.clone();
             config.agent_id = agent_id;

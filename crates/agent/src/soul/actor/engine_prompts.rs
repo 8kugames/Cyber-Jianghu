@@ -226,13 +226,6 @@ impl super::CognitiveEngine {
         &self,
         world_state: &cyber_jianghu_protocol::WorldState,
     ) -> String {
-        let content_hint_len = self
-            .prompt_template()
-            .get_template("actor_direct")
-            .and_then(|t| t.truncation.get("content_hint"))
-            .copied()
-            .unwrap_or(30);
-
         let mut ws_parts = Vec::new();
 
         ws_parts.push(format!("- Tick: {}", world_state.tick_id));
@@ -283,10 +276,7 @@ impl super::CognitiveEngine {
                     let content_hint = action
                         .content
                         .as_ref()
-                        .map(|c| {
-                            let truncated: String = c.chars().take(content_hint_len).collect();
-                            format!("「{}」", truncated)
-                        })
+                        .map(|c| format!("「{}」", c))
                         .unwrap_or_default();
                     let display_name = &action.action_type;
                     ws_parts.push(format!(

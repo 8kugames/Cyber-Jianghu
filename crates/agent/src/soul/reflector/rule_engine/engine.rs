@@ -355,6 +355,17 @@ impl RuleEngine {
             });
         }
 
+        // 自引用检查：不能对自己使用定向动作
+        if let Some(ref action_data) = context.intent.action_data
+            && let Some(target_id) = action_data.get("target_agent_id").and_then(|v| v.as_str())
+            && target_id == context.intent.agent_id.to_string()
+        {
+            return Ok(ValidationResult::Rejected {
+                reason: "不能对自己使用该动作，请选择附近的他人作为目标".to_string(),
+                rejection_type: RejectionType::Other,
+            });
+        }
+
         // 逐条评估规则
         for rule in &rules {
             let rule_result = self.evaluate_rule(rule, context).await?;
