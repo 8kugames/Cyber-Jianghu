@@ -12,6 +12,7 @@
 // ============================================================================
 
 pub mod budget;
+pub mod compactor;
 pub mod config;
 mod executor;
 pub mod loop_guard;

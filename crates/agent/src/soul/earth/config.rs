@@ -2,11 +2,11 @@
 // EarthSoul 配置 — Tool Result Budget & Loop Guard
 // ============================================================================
 //
-// 所有阈值从 agent.yaml 读取，零魔法值。
+// Tool budget 从 context_window_tokens 推导（per_tool_ratio × aggregate_ratio），
+// 不独立硬编码字符数阈值。数据驱动，零魔法值。
 // enabled: true（默认）确保新安装的 agent 自动获得防护。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EarthSoulConfig {
@@ -28,14 +28,20 @@ impl EarthSoulConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.tool_budget.enabled {
             anyhow::ensure!(
-                self.tool_budget.aggregate_max_chars >= 100,
-                "earth_soul.tool_budget.aggregate_max_chars 必须 >= 100，当前: {}",
-                self.tool_budget.aggregate_max_chars
+                (0.01..=0.50).contains(&self.tool_budget.per_tool_ratio),
+                "earth_soul.tool_budget.per_tool_ratio 必须在 0.01..=0.50 范围内，当前: {}",
+                self.tool_budget.per_tool_ratio
             );
             anyhow::ensure!(
-                self.tool_budget.default_max_result_chars >= 50,
-                "earth_soul.tool_budget.default_max_result_chars 必须 >= 50，当前: {}",
-                self.tool_budget.default_max_result_chars
+                (0.01..=0.50).contains(&self.tool_budget.aggregate_ratio),
+                "earth_soul.tool_budget.aggregate_ratio 必须在 0.01..=0.50 范围内，当前: {}",
+                self.tool_budget.aggregate_ratio
+            );
+            anyhow::ensure!(
+                self.tool_budget.per_tool_ratio <= self.tool_budget.aggregate_ratio,
+                "earth_soul.tool_budget.per_tool_ratio ({}) 必须 <= aggregate_ratio ({})",
+                self.tool_budget.per_tool_ratio,
+                self.tool_budget.aggregate_ratio,
             );
         }
         if self.loop_guard.enabled {
@@ -54,22 +60,35 @@ impl EarthSoulConfig {
     }
 }
 
+/// Tool result budget 配置 — 从 context_window_tokens 推导
+///
+/// 推导公式: `chars = context_window_tokens × ratio × 4 (chars/token)`
+/// 不再使用独立硬编码的 default_max_result_chars / aggregate_max_chars。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolBudgetConfig {
     pub enabled: bool,
-    pub default_max_result_chars: usize,
-    pub aggregate_max_chars: usize,
-    pub per_tool: HashMap<String, usize>,
+    /// 单条 tool result 占 context window 的比例
+    #[serde(default = "default_per_tool_ratio")]
+    pub per_tool_ratio: f64,
+    /// 单次 loop 所有 tool results 占 context window 的比例
+    #[serde(default = "default_aggregate_ratio")]
+    pub aggregate_ratio: f64,
+}
+
+fn default_per_tool_ratio() -> f64 {
+    0.03
+}
+fn default_aggregate_ratio() -> f64 {
+    0.10
 }
 
 impl Default for ToolBudgetConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            default_max_result_chars: 2000,
-            aggregate_max_chars: 8000,
-            per_tool: HashMap::new(),
+            per_tool_ratio: default_per_tool_ratio(),
+            aggregate_ratio: default_aggregate_ratio(),
         }
     }
 }

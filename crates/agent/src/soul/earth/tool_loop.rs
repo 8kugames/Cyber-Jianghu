@@ -42,7 +42,7 @@ pub(crate) async fn run_tool_loop(
 
     let mut budget = earth_config
         .filter(|c| c.tool_budget.enabled)
-        .map(|c| ToolResultBudget::new(&c.tool_budget));
+        .map(|c| ToolResultBudget::new(&c.tool_budget, llm.context_window_tokens()));
     let mut guard = earth_config
         .filter(|c| c.loop_guard.enabled)
         .map(|c| LoopGuard::new(&c.loop_guard));
@@ -164,43 +164,52 @@ pub(crate) async fn run_tool_loop(
             let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
             info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
 
-            let mut raw_result = match executor.execute(&tc.function.name, &args).await {
-                Ok(val) => val.to_string(),
+            let raw_result = match executor.execute(&tc.function.name, &args).await {
+                Ok(val) => val,
                 Err(e) => {
                     warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
-                    format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e)
+                    let error_str =
+                        format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
+                    messages.push(ChatMessage::tool_result(
+                        &tc.id,
+                        &tc.function.name,
+                        &error_str,
+                    ));
+                    continue;
                 }
             };
 
-            // 将 LoopGuard Warn 作为 tool result 前缀注入
-            if let Some(ref mut g) = guard
-                && let Some(warning) = g.take_pending_warning()
-            {
-                raw_result = format!("[系统提示] {}\n{}", warning, raw_result);
-            }
-
-            // Budget truncation (F1)
-            let truncated = match &mut budget {
+            // Budget 处理 (F1) — JSON 感知：紧凑化 → 字符截断兜底
+            let processed = match &mut budget {
                 Some(b) => {
                     if b.is_exhausted() {
                         ToolResultBudget::exhausted_message().to_string()
                     } else {
-                        b.truncate(&tc.function.name, &raw_result)
+                        b.process(&tc.function.name, &raw_result)
                     }
                 }
-                None => raw_result,
+                None => raw_result.to_string(),
+            };
+
+            // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
+            let final_result = if let Some(ref mut g) = guard
+                && let Some(warning) = g.take_pending_warning()
+            {
+                format!("[系统提示] {}\n{}", warning, processed)
+            } else {
+                processed
             };
 
             info!(
                 "[地魂] Tool {} 结果: {}",
                 tc.function.name,
-                truncated.chars().take(2000).collect::<String>()
+                final_result.chars().take(2000).collect::<String>()
             );
 
             messages.push(ChatMessage::tool_result(
                 &tc.id,
                 &tc.function.name,
-                &truncated,
+                &final_result,
             ));
         }
     }
