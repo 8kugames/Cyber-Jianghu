@@ -49,6 +49,14 @@ pub struct CharacterRegisterRequest {
     pub system_prompt: Option<String>,
 }
 
+/// POST /api/v1/character/generate 请求体
+#[derive(Debug, Deserialize, Default)]
+pub(crate) struct GenerateCharacterRequest {
+    /// 指定姓氏（可选，用于批量创建时保证多样性）
+    #[serde(default)]
+    pub surname_hint: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub(crate) struct LanguageStyleRequest {
     #[serde(default)]
@@ -174,10 +182,12 @@ pub struct CharacterRegisterResponse {
 ///
 /// POST /api/v1/character/generate - 使用 LLM 自动生成角色
 ///
-/// 调用配置的 LLM 生成一个符合世界观的武侠角色，返回完整角色信息供用户确认
+/// 可选 JSON body: `{ "surname_hint": "柳" }` — 指定姓氏，用于批量创建时保证多样性
 pub(crate) async fn generate_character_handler(
     State(state): State<HttpApiState>,
+    body: Option<Json<GenerateCharacterRequest>>,
 ) -> impl IntoResponse {
+    let body = body.map(|b| b.0).unwrap_or_default();
     use crate::component::llm::{
         DirectLlmClient, DirectLlmClientConfig, LlmClientExt, LlmProvider,
     };
@@ -251,7 +261,21 @@ pub(crate) async fn generate_character_handler(
     };
 
     // 4. 构建角色生成 prompt
-    let prompt = r#"你是一个武侠角色生成器。请生成一个符合以下世界观的角色：
+    // 当调用者未指定姓氏时，生成随机序号让 LLM 从百家姓中定位，
+    // 用外部熵打破 LLM 对高频姓氏的先验分布趋同。
+    // 百家姓全文共 504 个单姓（赵钱孙李…）
+    const BAIJIA_XING_COUNT: u32 = 504;
+    let surname_constraint = match &body.surname_hint {
+        Some(hint) => format!("姓氏必须为\"{}\"", hint),
+        None => {
+            let index = {
+                use rand::RngExt;
+                rand::rng().random_range(1u32..=BAIJIA_XING_COUNT) as usize
+            };
+            format!("从百家姓中选第{}个姓氏作为角色姓氏", index)
+        }
+    };
+    let prompt = format!(r#"你是一个武侠角色生成器。请生成一个符合以下世界观的角色：
 
 ## 世界观
 时代：武侠架空世界，冷兵器时代。世界使用独立"天道历"纪年，与现实朝代无关。
@@ -259,13 +283,11 @@ pub(crate) async fn generate_character_handler(
 禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
 
 ## 核心要求
-1. **多样性**：生成的每个角色必须在姓名、身份背景、性格、价值观、语言风格、目标等方面与常见角色有明显差异
-2. **避免重复**：不要生成重复或相似的角色，不同角色应该有截然不同的背景故事和个性
-3. **真实性**：角色应该像一个真实的人，有复杂的动机和独特的说话方式
+1. **多样性**：生成的角色必须在姓名、身份背景、性格、价值观、语言风格、目标等方面与常见武侠角色有明显差异
+2. **真实性**：角色应该像一个真实的人，有复杂的动机和独特的说话方式
 
 ## 字段要求
-- name: 姓名（2-6个汉字）
-- age: 年龄（16-60的整数）
+- name: 姓名（2-4个汉字），{surname_constraint}
 - gender: 性别（"男"或"女"）
 - appearance: 外貌描述（20-50字），要有特色
 - identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字），要有独特的故事
@@ -279,7 +301,7 @@ pub(crate) async fn generate_character_handler(
   - long_term: 长远目标（不超过100字），要有野心或深度
 
 ## 输出格式
-请严格输出 JSON，不要包含其他文字。"#;
+请严格输出 JSON，不要包含其他文字。"#);
 
     // 5. 调用 LLM 生成角色
     #[derive(Debug, Serialize, Deserialize)]
@@ -295,7 +317,7 @@ pub(crate) async fn generate_character_handler(
         goals: GoalsRequest,
     }
 
-    match llm_client.complete_json::<GeneratedCharacter>(prompt).await {
+    match llm_client.complete_json::<GeneratedCharacter>(&prompt).await {
         Ok(character) => {
             info!("[character] LLM 生成角色成功: {}", character.name);
             (StatusCode::OK, Json(character)).into_response()

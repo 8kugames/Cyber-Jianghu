@@ -183,6 +183,8 @@ pub struct CognitiveEngine {
     /// 当前 tick 的 FocusSummary（由 lifecycle 写入，供 lean prompt 读取）
     pub(super) current_focus_summary:
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
+    /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等需要回传多轮对话）
+    last_reasoning_content: std::sync::Mutex<Option<String>>,
 }
 
 impl CognitiveEngine {
@@ -218,6 +220,7 @@ impl CognitiveEngine {
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            last_reasoning_content: std::sync::Mutex::new(None),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -306,6 +309,7 @@ impl CognitiveEngine {
             world_state_store: std::sync::RwLock::new(None),
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            last_reasoning_content: std::sync::Mutex::new(None),
         };
         engine.load_skill_cache_from_disk();
         engine
@@ -647,13 +651,24 @@ impl CognitiveEngine {
     }
 
     /// 添加一轮对话到历史
-    pub fn push_conversation_turn(&self, tick_id: i64, user: String, assistant: String) {
+    pub fn push_conversation_turn(
+        &self,
+        tick_id: i64,
+        user: String,
+        assistant: String,
+        reasoning_content: Option<String>,
+    ) {
         if let Some(ref history) = self.conversation_history
             && let Ok(mut h) = history.lock()
-            && let Err(e) = h.push_turn(tick_id, user, assistant)
+            && let Err(e) = h.push_turn(tick_id, user, assistant, reasoning_content)
         {
             tracing::warn!("对话历史写入失败: {}", e);
         }
+    }
+
+    /// 取回最近一次 LLM 调用的 reasoning_content
+    pub fn take_last_reasoning_content(&self) -> Option<String> {
+        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
     }
 
     /// 检查是否需要 summary 压缩
@@ -830,6 +845,7 @@ impl CognitiveEngine {
                         .map(|t| ConversationTurn {
                             user: t.user.clone(),
                             assistant: t.assistant.clone(),
+                            reasoning_content: t.reasoning_content.clone(),
                         })
                         .collect::<Vec<_>>(),
                     h.get_system_message().to_string(),
@@ -966,6 +982,10 @@ impl CognitiveEngine {
                 }
             }
         };
+        // 保存 reasoning_content 供 push_conversation_turn 使用
+        if let Ok(mut rc) = self.last_reasoning_content.lock() {
+            *rc = self.llm_client.take_last_reasoning_content();
+        }
         let response_json = serde_json::to_string(&response)?;
 
         // 构建 CognitiveChain 的 4 个 stage（从统一响应中提取）
@@ -1236,29 +1256,16 @@ impl CognitiveEngine {
     /// `validated=false` 用于记录被驳回的 intent（不参与行为重复检测）。
     pub fn push_summary_to_window(&self, chain: &CognitiveChain, intent: &Intent, validated: bool) {
         let full_decision = self.enrich_decision_full(intent);
-        let decision: String = full_decision
-            .chars()
-            .take(self.truncation("summary_window_decision", 40))
-            .collect();
+        let decision = full_decision.clone();
 
         let perception = chain
             .get_stage(CognitiveStage::Perception)
-            .map(|s| {
-                s.content
-                    .chars()
-                    .take(self.truncation("summary_window_perception", 30))
-                    .collect()
-            })
+            .map(|s| s.content.clone())
             .unwrap_or_default();
 
         let motivation = chain
             .get_stage(CognitiveStage::Motivation)
-            .map(|s| {
-                s.content
-                    .chars()
-                    .take(self.truncation("summary_window_motivation", 20))
-                    .collect()
-            })
+            .map(|s| s.content.clone())
             .unwrap_or_default();
 
         let summary = NarrativeSummary {
@@ -1416,11 +1423,6 @@ impl CognitiveEngine {
                 config.min_narrative_len
             );
             return FALLBACK_NARRATIVE.to_string();
-        }
-
-        // 6. 截断超长输出
-        if narrative.len() > config.max_narrative_len {
-            return narrative.chars().take(config.max_narrative_len).collect();
         }
 
         narrative

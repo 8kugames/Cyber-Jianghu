@@ -24,6 +24,7 @@ pub struct ConversationTurn {
     pub tick_id: i64,
     pub user: String,
     pub assistant: String,
+    pub reasoning_content: Option<String>,
 }
 
 /// 对话历史管理器
@@ -68,6 +69,7 @@ impl ConversationHistory {
                 tick_id INTEGER NOT NULL,
                 user_content TEXT NOT NULL,
                 assistant_content TEXT NOT NULL,
+                reasoning_content TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
             CREATE TABLE IF NOT EXISTS conv_summary (
@@ -77,6 +79,11 @@ impl ConversationHistory {
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );",
         )?;
+        // 迁移：旧表可能没有 reasoning_content 列
+        conn.execute_batch(
+            "ALTER TABLE conv_turns ADD COLUMN reasoning_content TEXT",
+        )
+        .ok(); // 列已存在时忽略错误
 
         let mut history = Self {
             conn,
@@ -117,13 +124,14 @@ impl ConversationHistory {
 
         // 加载轮次
         let mut stmt = self.conn.prepare(
-            "SELECT tick_id, user_content, assistant_content FROM conv_turns ORDER BY id ASC",
+            "SELECT tick_id, user_content, assistant_content, reasoning_content FROM conv_turns ORDER BY id ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(ConversationTurn {
                 tick_id: row.get(0)?,
                 user: row.get(1)?,
                 assistant: row.get(2)?,
+                reasoning_content: row.get(3)?,
             })
         })?;
 
@@ -136,10 +144,16 @@ impl ConversationHistory {
     }
 
     /// 添加一轮对话
-    pub fn push_turn(&mut self, tick_id: i64, user: String, assistant: String) -> Result<()> {
+    pub fn push_turn(
+        &mut self,
+        tick_id: i64,
+        user: String,
+        assistant: String,
+        reasoning_content: Option<String>,
+    ) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO conv_turns (tick_id, user_content, assistant_content) VALUES (?1, ?2, ?3)",
-            rusqlite::params![tick_id, user, assistant],
+            "INSERT INTO conv_turns (tick_id, user_content, assistant_content, reasoning_content) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![tick_id, user, assistant, reasoning_content],
         )?;
 
         let turn_tokens = estimate_tokens(&user) + estimate_tokens(&assistant);
@@ -149,6 +163,7 @@ impl ConversationHistory {
             tick_id,
             user,
             assistant,
+            reasoning_content,
         });
 
         debug!(
@@ -412,7 +427,7 @@ mod tests {
         // Add turns until summary needed
         for i in 0..10 {
             history
-                .push_turn(i, "用户消息".repeat(20), "助手回复".repeat(10))
+                .push_turn(i, "用户消息".repeat(20), "助手回复".repeat(10), None)
                 .unwrap();
         }
 
@@ -438,7 +453,7 @@ mod tests {
 
         for i in 0..5 {
             history
-                .push_turn(i, format!("用户消息 {}", i), format!("助手回复 {}", i))
+                .push_turn(i, format!("用户消息 {}", i), format!("助手回复 {}", i), None)
                 .unwrap();
         }
 
@@ -465,10 +480,10 @@ mod tests {
         {
             let mut history = ConversationHistory::new(&db_path, "sys", 10000, 2, 0.8).unwrap();
             history
-                .push_turn(1, "hello".to_string(), "world".to_string())
+                .push_turn(1, "hello".to_string(), "world".to_string(), None)
                 .unwrap();
             history
-                .push_turn(2, "foo".to_string(), "bar".to_string())
+                .push_turn(2, "foo".to_string(), "bar".to_string(), None)
                 .unwrap();
         }
 
@@ -486,7 +501,7 @@ mod tests {
         let db_path = dir.join("test.db");
         let mut history = ConversationHistory::new(&db_path, "sys", 10000, 2, 0.8).unwrap();
         history
-            .push_turn(1, "a".to_string(), "b".to_string())
+            .push_turn(1, "a".to_string(), "b".to_string(), None)
             .unwrap();
 
         history.clear().unwrap();

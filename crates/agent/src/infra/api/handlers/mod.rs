@@ -27,7 +27,6 @@ pub(super) use super::IntentRequest;
 pub(super) use super::cognitive_context;
 pub(super) use super::context;
 pub(super) use super::dto;
-pub(super) use super::intent_history;
 pub(super) use super::service;
 pub(super) use super::soul_cycle_recorder;
 

@@ -133,8 +133,6 @@ impl ReviewStore {
     }
 
     /// 获取待审查意图的 tick_id
-    ///
-    /// 用于在提交审查时更新 intent_history
     pub async fn get_tick_id(&self, intent_id: Uuid) -> Option<i64> {
         let pending = self.pending.read().await;
         pending.get(&intent_id).map(|e| e.intent.tick_id)
@@ -290,27 +288,11 @@ pub async fn submit_review(
         ));
     };
 
-    // 获取 pending entry 以获取 tick_id（用于更新 intent_history）
-    let tick_id = review_store.get_tick_id(intent_id).await;
-
     match review_store
         .submit_review(intent_id, submission.clone())
         .await
     {
         Ok(result) => {
-            // 更新 intent_history 中的 observer_thought
-            if let (Some(tick_id), Some(history)) =
-                (tick_id, api_state.intent_history.read().await.as_ref())
-            {
-                // 使用 reason 作为 observer_thought（审查原因即 Observer 的思维链）
-                history
-                    .update_observer_thought(tick_id, submission.reason.clone())
-                    .await;
-                info!(
-                    "[review] Updated observer thought for tick {} in intent_history",
-                    tick_id
-                );
-            }
             Ok(Json(result))
         }
         Err(e) => {
