@@ -713,121 +713,156 @@ impl super::Agent {
                             }
 
                             // 实时模式：等待 ExecutionResult（server 立即处理后的反馈）
-                            // Server 同时会发送 reactive WorldState（交互驱动即时推送），
-                            // 下一次 select 循环的 receive_world_state() 会立即收到（无需等 tick 广播）。
-                            // 使用 watch channel 阻塞等待，3s 超时（替代固定 sleep + 非阻塞 poll）
+                            // Pipeline 语义：失败只阻断后续 intent，前序成功 intent 已生效。
+                            // 使用 mpsc channel 收集全部多 intent 结果
                             match self.client.wait_for_execution_result(self.config.llm.execution_result_timeout_ms).await {
-                                Ok(Some(result)) => {
-                                    // 快照数据提取（在分支消费 result 之前）
-                                    let exec_success = result.success;
-                                    let exec_error = result.error.clone();
+                                Ok(results) if !results.is_empty() => {
+                                    let success_count = results.iter().filter(|r| r.success).count();
+                                    let total = results.len();
+                                    let all_success = success_count == total;
+                                    let first_failure = results.iter().find(|r| !r.success);
 
-                                    if result.success {
-                                        debug!(
-                                            "ExecutionResult: tick={}, intent={}, success",
-                                            result.tick_id, result.intent_id
-                                        );
-                                        // Outcome 写回：更新 summary window
-                                        if let Some(ref engine) = self.cognitive_engine {
-                                            engine.update_summary_outcome(format!("成功: {}", final_intent.action_type));
-                                        }
-                                        // Outcome Memory 记录成功经验
-                                        if let Some(ref engine) = self.cognitive_engine {
-                                            engine.record_outcome(crate::component::memory::OutcomeRecord {
-                                                action_type: final_intent.action_type.to_string(),
-                                                action_data: final_intent.action_data.clone(),
-                                                result: crate::component::memory::OutcomeResult::Success,
-                                                context_hash: crate::component::memory::compute_context_hash(&world_state),
-                                                tick_id: final_intent.tick_id,
-                                            });
-                                        }
-                                    } else {
-                                        warn!(
-                                            "ExecutionResult: tick={}, intent={}, FAILED: {}",
-                                            result.tick_id,
-                                            result.intent_id,
-                                            result.error.as_deref().unwrap_or("unknown")
-                                        );
-                                        // BUG-4b: intent 失败且 agent 已死亡 → 立即触发死亡处理
-                                        // 场景：认知循环进行中收到 AgentDied WS 回调，is_dead=true，
-                                        // 认知完成后提交 intent 被拒绝。此时 DashMap 已移除 dead agent，
-                                        // 后续 WorldState 永不到达，tick 循环将挂起。
-                                        if !self.death_reported {
-                                            let is_dead_now = self.http_api_state.as_ref()
-                                                .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
-                                                .unwrap_or(false);
-                                            if is_dead_now {
-                                                let reason_str = result.error.as_deref().unwrap_or("");
-                                                warn!(
-                                                    "Agent '{}' 检测到死亡（intent 失败后）: {}",
-                                                    self.character_name(), reason_str
-                                                );
-                                                self.death_reported = true;
-                                                self.death_tick_id = Some(world_state.tick_id);
+                                    debug!(
+                                        "ExecutionResult: tick={}, {}/{} success",
+                                        results[0].tick_id, success_count, total
+                                    );
 
-                                                // 读取 rebirth_delay_ticks（WS 回调已写入）
+                                    // 建立 intent_id → (action_type, action_data) 映射表
+                                    let intent_map: std::collections::HashMap<uuid::Uuid, (&cyber_jianghu_protocol::ActionType, &Option<serde_json::Value>)> = {
+                                        let mut map = std::collections::HashMap::new();
+                                        map.insert(final_intent.intent_id, (&final_intent.action_type, &final_intent.action_data));
+                                        for si in &final_intent.subsequent_intents {
+                                            map.insert(si.intent_id, (&si.action_type, &si.action_data));
+                                        }
+                                        map
+                                    };
+
+                                    // BUG-4b: intent 失败且 agent 已死亡 → 立即触发死亡处理
+                                    if !self.death_reported && first_failure.is_some() {
+                                        let is_dead_now = self.http_api_state.as_ref()
+                                            .map(|s| s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
+                                            .unwrap_or(false);
+                                        if is_dead_now {
+                                            let reason_str = first_failure.and_then(|r| r.error.as_deref()).unwrap_or("");
+                                            warn!(
+                                                "Agent '{}' 检测到死亡（intent 失败后）: {}",
+                                                self.character_name(), reason_str
+                                            );
+                                            self.death_reported = true;
+                                            self.death_tick_id = Some(world_state.tick_id);
+
+                                            if let Some(ref api_state) = self.http_api_state {
+                                                self.rebirth_delay_ticks = api_state
+                                                    .rebirth_delay_ticks.load(std::sync::atomic::Ordering::Relaxed);
+                                            }
+
+                                            if let Some(ref mut char_cfg) = self.character_config {
+                                                char_cfg.status = crate::config::CharacterStatus::Dead;
                                                 if let Some(ref api_state) = self.http_api_state {
-                                                    self.rebirth_delay_ticks = api_state
-                                                        .rebirth_delay_ticks.load(std::sync::atomic::Ordering::Relaxed);
-                                                }
-
-                                                // 持久化死亡状态
-                                                if let Some(ref mut char_cfg) = self.character_config {
-                                                    char_cfg.status = crate::config::CharacterStatus::Dead;
-                                                    if let Some(ref api_state) = self.http_api_state {
-                                                        let characters_dir = api_state.character_dir.read().await.clone();
-                                                        if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
-                                                            warn!("Failed to persist death status: {}", e);
-                                                        }
+                                                    let characters_dir = api_state.character_dir.read().await.clone();
+                                                    if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                                                        warn!("Failed to persist death status: {}", e);
                                                     }
                                                 }
-
-                                                death::maybe_schedule_auto_rebirth(
-                                                    self,
-                                                    world_state.agent_id.unwrap_or_default(),
-                                                    &world_state,
-                                                    "（intent失败路径）",
-                                                ).await;
                                             }
+
+                                            death::maybe_schedule_auto_rebirth(
+                                                self,
+                                                world_state.agent_id.unwrap_or_default(),
+                                                &world_state,
+                                                "（intent失败路径）",
+                                            ).await;
                                         }
-                                    // 注入失败原因到下轮推理上下文
-                                        let reason = result.error.unwrap_or_default();
-                                        {
-                                            let mut guard = self.server_error_feedback.lock().await;
-                                            *guard = Some(format!("[意图执行失败: {}]", reason));
-                                        }
-                                        // Outcome 写回：更新 summary window
-                                        if let Some(ref engine) = self.cognitive_engine {
-                                            engine.update_summary_outcome(format!("失败: {}", reason));
-                                        }
-                                        // Outcome Memory 记录失败经验
+                                    }
+
+                                    // Outcome 写回：逐条记录每个 intent 的执行结果
+                                    let context_hash = crate::component::memory::compute_context_hash(&world_state);
+                                    for result in &results {
+                                        let (action_type, action_data) = intent_map
+                                            .get(&result.intent_id)
+                                            .map(|(at, ad)| (at.to_string(), (*ad).clone()))
+                                            .unwrap_or_else(|| ("unknown".to_string(), None));
+
                                         if let Some(ref engine) = self.cognitive_engine {
                                             engine.record_outcome(crate::component::memory::OutcomeRecord {
-                                                action_type: final_intent.action_type.to_string(),
-                                                action_data: final_intent.action_data.clone(),
-                                                result: crate::component::memory::OutcomeResult::Failed(reason.clone()),
-                                                context_hash: crate::component::memory::compute_context_hash(&world_state),
-                                                tick_id: final_intent.tick_id,
+                                                action_type: action_type.clone(),
+                                                action_data: action_data.clone(),
+                                                result: if result.success {
+                                                    crate::component::memory::OutcomeResult::Success
+                                                } else {
+                                                    crate::component::memory::OutcomeResult::Failed(
+                                                        result.error.clone().unwrap_or_default()
+                                                    )
+                                                },
+                                                context_hash: context_hash.clone(),
+                                                tick_id: result.tick_id,
                                             });
                                         }
                                     }
 
-                                    // 更新执行结果到快照（供 /api/v1/context enrichment 使用）
+                                    // Summary 更新
+                                    if let Some(ref engine) = self.cognitive_engine {
+                                        let label = if all_success {
+                                            format!("成功: {}", final_intent.action_type)
+                                        } else {
+                                            let failed_action = first_failure
+                                                .and_then(|r| intent_map.get(&r.intent_id))
+                                                .map(|(at, _)| at.to_string())
+                                                .unwrap_or_default();
+                                            format!(
+                                                "部分成功 ({}/{}): {} | 失败: {}",
+                                                success_count, total,
+                                                final_intent.action_type,
+                                                failed_action
+                                            )
+                                        };
+                                        engine.update_summary_outcome(label);
+                                    }
+
+                                    // 失败部分：注入失败原因到下轮推理上下文
+                                    if let Some(failed) = first_failure {
+                                        let reason = failed.error.clone().unwrap_or_default();
+                                        let failed_action = intent_map
+                                            .get(&failed.intent_id)
+                                            .map(|(at, _)| at.to_string())
+                                            .unwrap_or_default();
+                                        {
+                                            let mut guard = self.server_error_feedback.lock().await;
+                                            *guard = Some(format!(
+                                                "[pipeline 部分失败 ({}/{}): {} 失败原因: {}]",
+                                                success_count, total, failed_action, reason
+                                            ));
+                                        }
+                                    }
+
+                                    // 更新执行结果到快照
                                     if let Some(ref api_state) = self.http_api_state {
                                         let mut snapshot = api_state.decision_context_snapshot.write().await;
                                         if let Some(s) = snapshot.as_mut() {
+                                            let failed_action = first_failure
+                                                .and_then(|r| intent_map.get(&r.intent_id))
+                                                .map(|(at, _)| at.to_string());
                                             s.last_execution_result = Some(
                                                 crate::infra::api::ExecutionSummary {
                                                     action_type: final_intent.action_type.to_string(),
-                                                    success: exec_success,
-                                                    narrative: exec_error.unwrap_or_default(),
+                                                    success: all_success,
+                                                    narrative: if all_success {
+                                                        format!("{} intents all success", total)
+                                                    } else {
+                                                        format!(
+                                                            "{}/{} success, {} 失败: {}",
+                                                            success_count, total,
+                                                            failed_action.as_deref().unwrap_or("unknown"),
+                                                            first_failure.and_then(|r| r.error.clone()).unwrap_or_default()
+                                                        )
+                                                    },
                                                 }
                                             );
                                         }
                                     }
                                 }
-                                Ok(None) => {
-                                    debug!("ExecutionResult timeout (3s), server may be slow");
+                                Ok(_) => {
+                                    debug!("ExecutionResult timeout ({}ms), no results received", self.config.llm.execution_result_timeout_ms);
                                 }
                                 Err(e) => {
                                     debug!("ExecutionResult poll error: {}", e);
