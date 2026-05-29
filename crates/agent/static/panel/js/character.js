@@ -1068,37 +1068,52 @@ function renderSoulInline(label, data, type) {
       html += `<div class="soul-narrative">${escapeHtml(data.narrative)}</div>`;
     }
   } else if (type === "action") {
-    // 地魂：最终行动，speak/whisper 特殊展示
+    // 地魂：最终行动
     if (data.action_type) {
-      const at = data.action_type;
-      const ad =
-        data.action_data && typeof data.action_data === "object"
-          ? data.action_data
-          : {};
-      const content = ad.content || "";
-      const targetId = ad.target_agent_id;
+      const ad = data.action_data;
+      // 检测 pipeline 多意图数组 [{action_type, action_data}, ...]
+      const isPipeline = Array.isArray(ad) && ad.length > 0 && ad[0].action_type;
       const resolveName = (id) => {
         if (!id) return null;
         const c = allCharacters.find((c) => c.agent_id === id);
         const shortId = id.substring(0, 8);
         return c ? `${c.name}（${shortId}）` : `${shortId}...`;
       };
-
-      if (at === "speak") {
-        const targetName = targetId ? resolveName(targetId) : "众人";
-        html += `<div class="soul-text">对 ${escapeHtml(targetName)} 说话："${escapeHtml(content)}"</div>`;
-      } else if (at === "whisper") {
-        const targetName = targetId ? resolveName(targetId) : "某人";
-        html += `<div class="soul-text">向 ${escapeHtml(targetName)} 密语："${escapeHtml(content)}"</div>`;
-      } else if (at === "shout") {
-        html += `<div class="soul-text">大声喊道："${escapeHtml(content)}"</div>`;
-      } else {
-        html += `<div class="soul-text">${escapeHtml(getActionTypeDisplay(at))}`;
-        if (Object.keys(ad).length > 0) {
-          html += ` <span class="soul-params">${escapeHtml(JSON.stringify(ad))}</span>`;
+      const renderSingleAction = (at, actionData) => {
+        const adObj = actionData && typeof actionData === "object" && !Array.isArray(actionData) ? actionData : {};
+        const content = adObj.content || "";
+        const targetId = adObj.target_agent_id;
+        if (at === "speak") {
+          const targetName = targetId ? resolveName(targetId) : "众人";
+          return `对 ${escapeHtml(targetName)} 说话："${escapeHtml(content)}"`;
+        } else if (at === "whisper") {
+          const targetName = targetId ? resolveName(targetId) : "某人";
+          return `向 ${escapeHtml(targetName)} 密语："${escapeHtml(content)}"`;
+        } else if (at === "shout") {
+          return `大声喊道："${escapeHtml(content)}"`;
+        } else {
+          let s = escapeHtml(getActionTypeDisplay(at));
+          if (Object.keys(adObj).length > 0) {
+            s += ` <span class="soul-params">${escapeHtml(JSON.stringify(adObj))}</span>`;
+          }
+          return s;
         }
+      };
+
+      if (isPipeline && ad.length > 1) {
+        // 多意图 pipeline：逐步展示
+        html += `<div class="soul-pipeline">`;
+        ad.forEach((step, i) => {
+          html += `<div class="soul-pipeline-step"><span class="soul-pipeline-num">${i + 1}</span><span class="soul-text">${renderSingleAction(step.action_type, step.action_data)}</span></div>`;
+        });
         html += `</div>`;
+      } else {
+        // 单意图（或 pipeline 只有一个步骤）
+        const singleAt = isPipeline ? ad[0].action_type : data.action_type;
+        const singleAd = isPipeline ? ad[0].action_data : ad;
+        html += `<div class="soul-text">${renderSingleAction(singleAt, singleAd)}</div>`;
       }
+
       // 混沌标记徽章
       if (data.chaos_marker) {
         const cm = data.chaos_marker;
@@ -1281,23 +1296,25 @@ async function loadDialogueHistory(targetAgentId) {
     tickIds.forEach((tickId) => {
       const attempts = recordsMap[tickId];
       attempts.forEach((a) => {
-        // 检查最终行动中的 whisper/speak
-        if (a.final_intent) {
-          const at = a.final_intent.action_type;
-          const ad = (a.final_intent.action_data && typeof a.final_intent.action_data === "object")
-            ? a.final_intent.action_data : {};
-          const content = ad.content || "";
-          const tid = ad.target_agent_id;
-
-          // whisper 必须匹配 target_agent_id；speak 是公共说话，无 target，不纳入二人沟通记录
-          if (at === "whisper" && tid === targetAgentId) {
-            dialogues.push({
-              tick_id: tickId,
-              action_type: at,
-              content,
-              direction: "sent",
-            });
-          }
+        // 检查最终行动中的 whisper/speak（支持 pipeline 数组格式）
+        if (a.final_intent && a.final_intent.action_data) {
+          const rawAd = a.final_intent.action_data;
+          const steps = Array.isArray(rawAd) && rawAd.length > 0 && rawAd[0].action_type
+            ? rawAd : [{ action_type: a.final_intent.action_type, action_data: rawAd }];
+          steps.forEach((step) => {
+            if (step.action_type === "whisper") {
+              const adObj = (step.action_data && typeof step.action_data === "object" && !Array.isArray(step.action_data))
+                ? step.action_data : {};
+              if (adObj.target_agent_id === targetAgentId) {
+                dialogues.push({
+                  tick_id: tickId,
+                  action_type: "whisper",
+                  content: adObj.content || "",
+                  direction: "sent",
+                });
+              }
+            }
+          });
         }
 
         // 也检查即时意图

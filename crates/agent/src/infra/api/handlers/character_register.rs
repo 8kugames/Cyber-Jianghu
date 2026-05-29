@@ -288,6 +288,7 @@ pub(crate) async fn generate_character_handler(
 
 ## 字段要求
 - name: 姓名（2-4个汉字），{surname_constraint}
+- age: 年龄（16-60之间的整数）
 - gender: 性别（"男"或"女"）
 - appearance: 外貌描述（20-50字），要有特色
 - identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字），要有独特的故事

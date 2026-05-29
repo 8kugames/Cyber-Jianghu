@@ -1573,6 +1573,29 @@ button[type="button"]:disabled {
     color: var(--text-muted);
 }
 
+.soul-pipeline {
+    margin: 2px 0;
+    border-left: 2px solid var(--border-color);
+    padding-left: 8px;
+}
+.soul-pipeline-step {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 0;
+}
+.soul-pipeline-step + .soul-pipeline-step {
+    border-top: 1px dashed var(--border-color);
+}
+.soul-pipeline-num {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    min-width: 14px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
 .soul-layers {
     display: flex;
     flex-wrap: wrap;
