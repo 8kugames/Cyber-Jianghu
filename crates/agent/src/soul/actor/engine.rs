@@ -684,7 +684,10 @@ impl CognitiveEngine {
 
     /// 取回最近一次 LLM 调用的 reasoning_content
     pub fn take_last_reasoning_content(&self) -> Option<String> {
-        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
+        self.last_reasoning_content
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
     }
 
     /// 检查是否需要 summary 压缩

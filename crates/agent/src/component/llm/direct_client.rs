@@ -395,7 +395,10 @@ impl DirectLlmClient {
 
     /// 获取当前使用的模型名称
     pub fn take_last_reasoning_content(&self) -> Option<String> {
-        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
+        self.last_reasoning_content
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
     }
 
     fn save_reasoning_content(&self, rc: Option<String>) {
@@ -922,8 +925,13 @@ impl DirectLlmClient {
         turns: &[super::client::ConversationTurn],
         current_prompt: &str,
     ) -> Result<super::streaming::LlmStream> {
-        let messages =
-            super::client::build_conversation_messages(system, semi_static, summary, turns, current_prompt);
+        let messages = super::client::build_conversation_messages(
+            system,
+            semi_static,
+            summary,
+            turns,
+            current_prompt,
+        );
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
             model,
@@ -1035,8 +1043,13 @@ impl DirectLlmClient {
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<String> {
-        let messages =
-            super::client::build_conversation_messages(system, semi_static, summary, turns, current_prompt);
+        let messages = super::client::build_conversation_messages(
+            system,
+            semi_static,
+            summary,
+            turns,
+            current_prompt,
+        );
 
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
@@ -1162,7 +1175,10 @@ impl LlmClient for DirectLlmClient {
     }
 
     fn take_last_reasoning_content(&self) -> Option<String> {
-        self.last_reasoning_content.lock().ok().and_then(|mut g| g.take())
+        self.last_reasoning_content
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
     }
 
     async fn complete_with_tools(
@@ -1293,7 +1309,13 @@ impl LlmClient for DirectLlmClient {
                 total as u64
             };
             let stream = self
-                .complete_conversation_streaming(system, semi_static, summary, turns, current_prompt)
+                .complete_conversation_streaming(
+                    system,
+                    semi_static,
+                    summary,
+                    turns,
+                    current_prompt,
+                )
                 .await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,

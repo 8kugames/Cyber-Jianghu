@@ -316,10 +316,7 @@ impl ReflectorSoul {
             }
         }
 
-        match self
-            .validate_with_rule_engine(&request)
-            .await
-        {
+        match self.validate_with_rule_engine(&request).await {
             Ok(()) => layers.push(LayerResult {
                 layer: "layer2",
                 passed: true,
@@ -591,8 +588,8 @@ impl LlmValidationResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::soul::reflector::types::ValidationRuntimeConfig;
     use crate::component::llm::MockLlmClient;
+    use crate::soul::reflector::types::ValidationRuntimeConfig;
     use cyber_jianghu_protocol::{
         AdjacentNode, AgentSelfState, Entity, GradedValidationConfig, InventoryItem, Location,
         SceneItem, WorldState, WorldTime,
@@ -808,7 +805,8 @@ mod tests {
         let mock_client = MockLlmClient::with_response(
             r#"{"result":"rejected","reason":"重复自我介绍","rejection_type":"semantic_repeat"}"#,
         );
-        let validator = ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let validator =
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
         let world_state = test_world_state();
 
         let request = ValidationRequest {
@@ -847,7 +845,8 @@ mod tests {
     async fn test_no_dedup_section_when_empty_history() {
         let mock_client =
             MockLlmClient::with_response(r#"{"result":"approved","reason":"","narrative":"通过"}"#);
-        let validator = ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
+        let validator =
+            ReflectorSoul::new(test_world_building_rules(), mock_container(mock_client));
         let world_state = test_world_state();
 
         // 无历史数据时，prompt 不含去重指令，正常通过

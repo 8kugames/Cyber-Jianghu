@@ -251,7 +251,13 @@ mod tests {
         });
 
         let compacted = compact_tool_result("get_relationship", &value, 3840);
-        assert!(compacted["relationship"]["key_events"].as_array().unwrap().len() <= 20);
+        assert!(
+            compacted["relationship"]["key_events"]
+                .as_array()
+                .unwrap()
+                .len()
+                <= 20
+        );
         assert_eq!(compacted["relationship"]["name"], "张三");
     }
 

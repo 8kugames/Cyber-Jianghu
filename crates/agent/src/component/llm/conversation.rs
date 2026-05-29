@@ -82,10 +82,8 @@ impl ConversationHistory {
             );",
         )?;
         // 迁移：旧表可能没有 reasoning_content 列
-        conn.execute_batch(
-            "ALTER TABLE conv_turns ADD COLUMN reasoning_content TEXT",
-        )
-        .ok(); // 列已存在时忽略错误
+        conn.execute_batch("ALTER TABLE conv_turns ADD COLUMN reasoning_content TEXT")
+            .ok(); // 列已存在时忽略错误
 
         let mut history = Self {
             conn,
@@ -198,9 +196,7 @@ impl ConversationHistory {
             .map(|t| {
                 format!(
                     "[Tick {}]\n输入: {}\n决策: {}",
-                    t.tick_id,
-                    &t.user,
-                    &t.assistant,
+                    t.tick_id, &t.user, &t.assistant,
                 )
             })
             .collect();
@@ -475,7 +471,12 @@ mod tests {
 
         for i in 0..5 {
             history
-                .push_turn(i, format!("用户消息 {}", i), format!("助手回复 {}", i), None)
+                .push_turn(
+                    i,
+                    format!("用户消息 {}", i),
+                    format!("助手回复 {}", i),
+                    None,
+                )
                 .unwrap();
         }
 

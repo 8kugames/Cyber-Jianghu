@@ -30,7 +30,11 @@ pub fn game_day_to_chinese(game_day: i64) -> String {
 }
 
 /// 使用显式参数的游戏日格式化（纯函数，可测试）
-fn game_day_to_chinese_with_config(game_day: i64, days_per_season: i32, seasons_per_year: i32) -> String {
+fn game_day_to_chinese_with_config(
+    game_day: i64,
+    days_per_season: i32,
+    seasons_per_year: i32,
+) -> String {
     let days_per_season = days_per_season as i64;
     let seasons_per_year = seasons_per_year as i64;
     let days_per_year = seasons_per_year * days_per_season;
@@ -124,7 +128,10 @@ mod tests {
     #[test]
     fn test_game_day_1734() {
         // year=44, month=2, day=4
-        assert_eq!(game_day_to_chinese_with_config(1734, 10, 4), "四四年二月四日");
+        assert_eq!(
+            game_day_to_chinese_with_config(1734, 10, 4),
+            "四四年二月四日"
+        );
     }
 
     #[test]

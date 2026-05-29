@@ -175,7 +175,11 @@ mod tests {
     fn test_sanitize_preserves_long_input() {
         let long_input = "a".repeat(2000);
         let sanitized = sanitize_for_prompt(&long_input);
-        assert_eq!(sanitized.len(), 2000, "sanitize_for_prompt should not truncate");
+        assert_eq!(
+            sanitized.len(),
+            2000,
+            "sanitize_for_prompt should not truncate"
+        );
     }
 
     fn test_world_building_rules() -> cyber_jianghu_protocol::WorldBuildingRules {
@@ -232,15 +236,24 @@ mod tests {
         ];
 
         let with_dedup = prompt.build_validation_prompt(
-            &intent, &persona, &world_rules, world_context, Some(&decisions),
+            &intent,
+            &persona,
+            &world_rules,
+            world_context,
+            Some(&decisions),
         );
         assert!(with_dedup.contains("语义去重检查"), "应包含去重段落");
         assert!(with_dedup.contains("沈暮烟"), "应包含历史决策内容");
-        assert!(with_dedup.contains("semantic_repeat"), "应引导输出 semantic_repeat");
-
-        let without_dedup = prompt.build_validation_prompt(
-            &intent, &persona, &world_rules, world_context, None,
+        assert!(
+            with_dedup.contains("semantic_repeat"),
+            "应引导输出 semantic_repeat"
         );
-        assert!(!without_dedup.contains("语义去重检查"), "无历史时不应包含去重段落");
+
+        let without_dedup =
+            prompt.build_validation_prompt(&intent, &persona, &world_rules, world_context, None);
+        assert!(
+            !without_dedup.contains("语义去重检查"),
+            "无历史时不应包含去重段落"
+        );
     }
 }
