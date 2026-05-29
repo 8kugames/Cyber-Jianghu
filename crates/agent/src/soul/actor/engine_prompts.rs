@@ -147,7 +147,7 @@ impl super::CognitiveEngine {
         };
 
         let tool_calling_guidance = if use_tool_calling {
-            // prompt 声明次数 < max_tool_rounds（留出 Warn→Terminate 余量）
+            // prompt 次数 == max_tool_rounds == max_same_tool_consecutive（LoopGuard Warn→Terminate 提供余量）
             "## 输出格式\n\
             直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
             工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
