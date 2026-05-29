@@ -46,3 +46,68 @@ memory:
 
 # 角色类型: player | npc
 role: player
+
+# 角色生成配置（schema-driven，prompt 和 validate 共享同一约束定义）
+character_generation:
+  world_setting: "时代：武侠架空世界，冷兵器时代。世界使用独立\"天道历\"纪年，与现实朝代无关。允许的概念：内力、轻功、武功、点穴，暗器、毒术、医术、易容、阵法。禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。"
+  fields:
+    - path: name
+      type: string
+      required: true
+      min_chars: 2
+      max_chars: 20
+      prompt_text: "name ({min_chars}-{max_chars} chars), {surname_constraint}"
+    - path: age
+      type: integer
+      required: true
+      min: 16
+      max: 60
+    - path: gender
+      type: enum
+      required: true
+      options: ["男", "女"]
+    - path: appearance
+      type: string
+      required: false
+      min_chars: 20
+      max_chars: 50
+      prompt_text: "appearance ({min_chars}-{max_chars} chars), distinctive"
+    - path: identity
+      type: string
+      required: false
+      max_chars: 300
+      prompt_text: "background (max {max_chars} chars), unique story"
+    - path: personality
+      type: enum_array
+      required: true
+      options: ["豪爽", "沉稳", "机智", "冷漠", "善良", "阴险", "正义", "贪婪", "忠诚", "狡猾"]
+      min_count: 2
+      max_count: 4
+      extra_prompt: "avoid all-positive or all-negative, match background"
+    - path: values
+      type: enum_array
+      required: true
+      options: ["侠义", "财富", "权力", "自由", "荣誉", "知识", "爱情", "友情", "复仇", "和平"]
+      min_count: 1
+      max_count: 3
+      extra_prompt: "match background"
+    - path: language_style.tone
+      type: enum
+      required: true
+      options: ["豪迈", "温和", "冷漠", "狡黖", "文雅"]
+    - path: language_style.speech_patterns
+      type: enum_array
+      required: true
+      options: ["喜欢引用古诗词", "说话简洁", "喜欢用成语", "说话带方言", "喜欢开玩笑", "说话谨慎"]
+      min_count: 1
+      max_count: 3
+    - path: goals.short_term
+      type: string
+      required: false
+      max_chars: 100
+      prompt_text: "short-term goal (max {max_chars} chars), specific and personal"
+    - path: goals.long_term
+      type: string
+      required: false
+      max_chars: 100
+      prompt_text: "long-term goal (max {max_chars} chars), ambitious"

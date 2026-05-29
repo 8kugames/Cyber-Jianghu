@@ -417,11 +417,12 @@ fn save_server_config(
     ws_url: &str,
     http_url: Option<&str>,
 ) -> anyhow::Result<()> {
-    let mut config = if config_path.exists() {
-        crate::config::Config::from_file(config_path)?
-    } else {
-        crate::config::Config::default()
-    };
+    anyhow::ensure!(
+        config_path.exists(),
+        "配置文件不存在: {}（character_generation 为必填项，无法使用默认配置）",
+        config_path.display()
+    );
+    let mut config = crate::config::Config::from_file(config_path)?;
 
     config.server.ws_url = ws_url.to_string();
     if let Some(http) = http_url {
