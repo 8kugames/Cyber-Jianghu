@@ -449,19 +449,12 @@ pub(crate) async fn generate_character_handler(
     };
 
     // 4. 构建角色生成 prompt
-    // 当调用者未指定姓氏时，生成随机序号让 LLM 从百家姓中定位，
-    // 用外部熵打破 LLM 对高频姓氏的先验分布趋同。
-    // 百家姓全文共 504 个单姓（赵钱孙李…）
-    const BAIJIA_XING_COUNT: u32 = 504;
+    // 姓氏约束策略（纯 prompt 工程，零计数）：
+    //   - surname_hint 指定时 → 直接约束姓氏
+    //   - 未指定时 → 提示从百家姓中自由选取，不要求计数到第 N 个
     let surname_constraint = match &body.surname_hint {
         Some(hint) => format!("姓氏必须为\"{}\"", hint),
-        None => {
-            let index = {
-                use rand::RngExt;
-                rand::rng().random_range(1u32..=BAIJIA_XING_COUNT) as usize
-            };
-            format!("从百家姓中选第{}个姓氏作为角色姓氏", index)
-        }
+        None => "姓氏需从百家姓中选取".to_string(),
     };
     let mut extra_vars = std::collections::HashMap::new();
     extra_vars.insert("surname_constraint".into(), surname_constraint);
