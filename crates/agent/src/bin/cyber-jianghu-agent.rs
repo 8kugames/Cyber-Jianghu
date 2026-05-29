@@ -393,10 +393,9 @@ async fn main() -> Result<()> {
 // ============================================================================
 
 fn show_config() -> Result<()> {
-    let config = load_config()?.unwrap_or_else(|| {
-        warn!("配置文件不存在");
-        Config::default()
-    });
+    let config = load_config()?.ok_or_else(|| {
+        anyhow::anyhow!("配置文件不存在（character_generation 为必填项，无法使用默认配置）")
+    })?;
 
     println!("=== Agent 配置 ===\n");
 
@@ -453,7 +452,9 @@ fn show_config() -> Result<()> {
 }
 
 fn update_server_config(ws_url: Option<String>, http_url: Option<String>) -> Result<()> {
-    let mut config = load_config()?.unwrap_or_default();
+    let mut config = load_config()?.ok_or_else(|| {
+        anyhow::anyhow!("配置文件不存在（character_generation 为必填项，无法使用默认配置）")
+    })?;
 
     if let Some(ws) = ws_url {
         config.server.ws_url = ws;
@@ -611,10 +612,9 @@ async fn await_character_loop(server_dir: &Path) -> Result<()> {
 // ============================================================================
 
 async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()> {
-    let mut config = load_config()?.unwrap_or_else(|| {
-        info!("配置文件不存在，从环境变量加载");
-        Config::from_env().unwrap_or_default()
-    });
+    let mut config = load_config()?.ok_or_else(|| {
+        anyhow::anyhow!("配置文件不存在且无法从环境变量构造（character_generation 为必填项）")
+    })?;
 
     // Fail Fast: 校验 EarthSoul 配置
     config

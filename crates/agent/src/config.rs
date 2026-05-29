@@ -892,12 +892,63 @@ impl Default for ToolPreloadConfig {
     }
 }
 
+/// 角色生成约束 -- schema 驱动的单一数据源。
+///
+/// YAML 定义字段规格（path + type + constraints），prompt 和 validate 均从同一 schema 动态生成。
+/// 添加/修改约束只需改 YAML，零代码改动。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterGenerationConfig {
+    pub world_setting: String,
+    pub fields: Vec<FieldSpec>,
+}
+
+/// 字段约束类型 -- 4 种覆盖当前所有字段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FieldConstraints {
+    String {
+        required: bool,
+        #[serde(default)]
+        min_chars: usize,
+        max_chars: usize,
+        #[serde(default)]
+        prompt_text: Option<String>,
+    },
+    Integer {
+        required: bool,
+        min: u32,
+        max: u32,
+    },
+    Enum {
+        required: bool,
+        options: Vec<String>,
+        #[serde(default)]
+        prompt_text: Option<String>,
+    },
+    EnumArray {
+        required: bool,
+        options: Vec<String>,
+        min_count: usize,
+        max_count: usize,
+        #[serde(default)]
+        extra_prompt: Option<String>,
+    },
+}
+
+/// 字段规格 -- path 支持 dot notation（如 language_style.tone）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldSpec {
+    pub path: String,
+    #[serde(flatten)]
+    pub constraints: FieldConstraints,
+}
+
 // ============================================================================
 // 完整配置
 // ============================================================================
 
 /// 完整配置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// 服务器配置
     #[serde(default)]
@@ -955,6 +1006,9 @@ pub struct Config {
     /// Token 优化配置（总开关默认关闭）
     #[serde(default)]
     pub token_optimization: TokenOptimizationConfig,
+
+    /// 角色生成约束（必填，缺失时 serde 报错 fail-fast）
+    pub character_generation: CharacterGenerationConfig,
 }
 
 impl Config {
@@ -997,57 +1051,6 @@ impl Config {
         }
 
         Ok(())
-    }
-
-    /// 从环境变量加载配置（仅服务器连接信息）
-    pub fn from_env() -> Result<Self> {
-        let server = ServerConfig {
-            ws_url: std::env::var("CYBER_JIANGHU_SERVER_WS_URL")
-                .unwrap_or_else(|_| default_ws_url()),
-            http_url: std::env::var("CYBER_JIANGHU_SERVER_HTTP_URL")
-                .unwrap_or_else(|_| default_http_url()),
-        };
-
-        let runtime = RuntimeConfig {
-            mode: std::env::var("CYBER_JIANGHU_RUNTIME_MODE")
-                .ok()
-                .and_then(|m| match m.to_lowercase().as_str() {
-                    "claw" => Some(RuntimeMode::Claw),
-                    "cognitive" => Some(RuntimeMode::Cognitive),
-                    _ => None,
-                })
-                .unwrap_or_default(),
-            port: std::env::var("CYBER_JIANGHU_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(0),
-            llm_disabled: false,
-            auto_rebirth: true,
-        };
-
-        Ok(Config {
-            server,
-            runtime,
-            claw: ClawConfig::default(),
-            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
-            token_optimization: TokenOptimizationConfig::default(),
-            llm: LlmConfig::from_env(),
-            llm_reflector: None,
-            memory: MemoryConfig::default(),
-            role: AgentRole::default(),
-            review: None,
-            observer: None,
-            game_rules: None,
-            config_path: PathBuf::new(),
-            servers_dir: if let Ok(data_dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
-                PathBuf::from(data_dir).join("servers")
-            } else {
-                dirs::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".cyber-jianghu")
-                    .join("servers")
-            },
-        })
     }
 
     /// 获取重生延迟 tick 数（0 = 不自动重生）
@@ -1122,6 +1125,23 @@ impl Config {
 mod tests {
     use super::*;
 
+    /// 测试用 CharacterGenerationConfig (minimal schema)
+    fn test_cg() -> CharacterGenerationConfig {
+        CharacterGenerationConfig {
+            world_setting: "武侠架空世界".into(),
+            fields: vec![
+                FieldSpec {
+                    path: "age".into(),
+                    constraints: FieldConstraints::Integer {
+                        required: true,
+                        min: 16,
+                        max: 60,
+                    },
+                },
+            ],
+        }
+    }
+
     #[test]
     fn test_character_config_generate_system_prompt() {
         let character = CharacterConfig {
@@ -1157,10 +1177,21 @@ mod tests {
         llm.model = Some("qwen2.5:14b".to_string());
 
         let config = Config {
+            server: ServerConfig::default(),
+            runtime: RuntimeConfig::default(),
+            claw: ClawConfig::default(),
             llm,
             llm_reflector: None,
+            memory: MemoryConfig::default(),
+            role: AgentRole::default(),
+            review: None,
+            observer: None,
+            game_rules: None,
             config_path: PathBuf::from("/test/config.yaml"),
-            ..Default::default()
+            servers_dir: PathBuf::new(),
+            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
+            token_optimization: TokenOptimizationConfig::default(),
+            character_generation: test_cg(),
         };
         assert_eq!(
             config.get_reflector_llm_config().model,
@@ -1179,10 +1210,21 @@ mod tests {
         llm_reflector.model = Some("qwen2.5:32b".to_string());
 
         let config = Config {
+            server: ServerConfig::default(),
+            runtime: RuntimeConfig::default(),
+            claw: ClawConfig::default(),
             llm,
             llm_reflector: Some(llm_reflector),
+            memory: MemoryConfig::default(),
+            role: AgentRole::default(),
+            review: None,
+            observer: None,
+            game_rules: None,
             config_path: PathBuf::from("/test/config.yaml"),
-            ..Default::default()
+            servers_dir: PathBuf::new(),
+            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
+            token_optimization: TokenOptimizationConfig::default(),
+            character_generation: test_cg(),
         };
         assert_eq!(
             config.get_reflector_llm_config().model,
