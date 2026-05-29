@@ -11,6 +11,8 @@ use super::config::ToolBudgetConfig;
 
 /// 中文混合文本 chars/tokens 转换因子
 const CHARS_PER_TOKEN: f64 = 4.0;
+/// truncate 兜底时预留的标记空间（截断标记 ≈ 30 chars，留 50 余量）
+const TRUNCATION_MARKER_RESERVE: usize = 50;
 
 pub struct ToolResultBudget {
     per_tool_limit: usize,
@@ -37,7 +39,7 @@ impl ToolResultBudget {
         }
     }
 
-    /// JSON 感知的结果处理：先紧凑化，再字符截断兜底。
+    /// JSON 感知的结果处理：先紧凑化，再 JSON-safe 截断兜底。
     pub fn process(&mut self, tool_name: &str, value: &serde_json::Value) -> String {
         let json_str = value.to_string();
         let char_count = json_str.chars().count();
@@ -66,14 +68,14 @@ impl ToolResultBudget {
             return compact_str;
         }
 
-        // 3. 字符截断兜底
+        // 3. JSON-safe 截断兜底
         tracing::warn!(
             "[budget] {} 紧凑化后仍超预算: {}/{} chars",
             tool_name,
             compact_count,
             self.per_tool_limit
         );
-        self.truncate(&compact_str)
+        self.truncate_json(tool_name, &compact_str)
     }
 
     /// 检查给定字符数是否在预算内
@@ -95,22 +97,29 @@ impl ToolResultBudget {
         "[上下文预算耗尽: 工具结果总字符数已达上限，请基于已有信息做出决策]"
     }
 
-    /// 字符截断（内部 fallback）
-    fn truncate(&mut self, result: &str) -> String {
+    /// JSON-safe 截断：将截断内容包装为合法 JSON 对象，避免破坏 JSON 结构。
+    fn truncate_json(&mut self, tool_name: &str, json_str: &str) -> String {
         let remaining = self.aggregate_limit.saturating_sub(self.used);
         let effective_limit = self.per_tool_limit.min(remaining);
 
-        let char_count = result.chars().count();
+        let char_count = json_str.chars().count();
         if char_count <= effective_limit {
             self.used += char_count;
-            return result.to_string();
+            return json_str.to_string();
         }
 
-        let truncated_chars = effective_limit.saturating_sub(50);
-        let truncated: String = result.chars().take(truncated_chars).collect();
-        let truncated_count = truncated.chars().count();
-        let marker = format!("\n[截断: 原{}字, 显示{}字]", char_count, truncated_count);
-        let output = format!("{}...{}", truncated, marker);
+        // 预留空间给 JSON wrapper + 标记
+        let preview_budget = effective_limit.saturating_sub(TRUNCATION_MARKER_RESERVE + 80);
+        let preview: String = json_str.chars().take(preview_budget).collect();
+        let output = serde_json::json!({
+            "_truncated": true,
+            "tool": tool_name,
+            "preview": format!("{}…", preview),
+            "original_chars": char_count,
+            "hint": "原始数据已截断，请基于预览信息决策",
+        })
+        .to_string();
+
         self.used += output.chars().count();
         output
     }

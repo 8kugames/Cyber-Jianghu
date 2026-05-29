@@ -5,6 +5,12 @@
 // 所有结构限制从 budget_chars 推导（budget_chars = context_window_tokens × ratio × 4）。
 // 每种工具的紧凑化基于已知的 JSON 结构，使用每条目平均字符数来计算最大条目数。
 // 保证输出始终是合法 JSON。
+//
+// 推导方法论：
+//   AVG_*_CHARS 常量基于各工具返回的 JSON 结构测算（字段名+值的平均长度）。
+//   例如 entity = {"id":"uuid-8chars","name":"2-4汉字"} ≈ 60 chars。
+//   clamp 下限防止 budget 极小时结果为空；上限防止 budget 极大时数组膨胀。
+//   这些不是配置值而是结构常量——只要 JSON schema 不变，值就不需要调整。
 
 /// 对 tool 返回的 JSON 做 budget 感知的结构精简。
 ///
@@ -36,6 +42,11 @@ const AVG_MEMORY_CHARS: usize = 180;
 const AVG_REL_CHARS: usize = 100;
 // 每 key_event entry 平均字符数
 const AVG_KEY_EVENT_CHARS: usize = 80;
+
+/// memory content 占该条目预算的比例（剩余 ~20% 留给 tick_id/importance 等元数据）
+const MEMORY_CONTENT_RATIO: f64 = 0.8;
+/// skill content 占预算的比例（剩余 ~5% 留给 skill_id 等元数据）
+const SKILL_CONTENT_RATIO: f64 = 0.95;
 
 /// query_world 紧凑化
 fn compact_query_world(value: &serde_json::Value, budget: usize) -> serde_json::Value {
@@ -79,7 +90,7 @@ fn compact_memory(value: &serde_json::Value, budget: usize) -> serde_json::Value
     if let Some(memories) = v["memories"].as_array_mut() {
         let max_count = (budget / AVG_MEMORY_CHARS).clamp(1, 10);
         memories.truncate(max_count);
-        let content_limit = ((budget / max_count) as f64 * 0.8) as usize;
+        let content_limit = ((budget / max_count) as f64 * MEMORY_CONTENT_RATIO) as usize;
         for m in memories.iter_mut() {
             if let Some(content) = m.get("content").and_then(|c| c.as_str())
                 && content.chars().count() > content_limit
@@ -102,7 +113,7 @@ fn compact_skill(value: &serde_json::Value, budget: usize) -> serde_json::Value 
     let mut v = value.clone();
     if let Some(content) = v.get("content").and_then(|c| c.as_str()) {
         // content 使用 budget 的 95%（skill_id 等元数据占 ~5%）
-        let content_limit = (budget as f64 * 0.95) as usize;
+        let content_limit = (budget as f64 * SKILL_CONTENT_RATIO) as usize;
         if content.chars().count() > content_limit {
             let truncated: String = content.chars().take(content_limit).collect();
             if let Some(obj) = v.as_object_mut() {

@@ -243,7 +243,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
 - `src/soul/actor/summary_window.rs` - Sliding context window for action history
 - `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
-- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环，从 DirectLlmClient 提取）
+- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环）、`executor.rs`（工具分发调度）、`budget.rs`（从 context_window_tokens 推导的 tool result 预算）、`compactor.rs`（JSON 感知结构精简）、`loop_guard.rs`（防循环调用）、`config.rs`（EarthSoul 配置）、`*_tool.rs`（各工具实现：state/memory/skill/relationship/recipe）
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
 - `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
