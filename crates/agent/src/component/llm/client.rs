@@ -323,9 +323,10 @@ pub trait LlmClientExt {
 /// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
 /// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
 fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
-    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think*>, <reasoning>...</reasoning>, <thought>...</thought>
+    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>, <reasoning>...</reasoning>, <thought>...</thought>
+    // 闭合标签也允许属性（如 MiniMax 的 </think HTaming>）
     let paired_re = regex::Regex::new(
-        r"(?is)<(?:think_tag|think|reasoning|thought)[^>]*>.*?</(?:think_tag|think|reasoning|thought)\s*>"
+        r"(?is)<(?:think_tag|think|reasoning|thought)[^>]*>.*?</(?:think_tag|think|reasoning|thought)[^>]*>"
     ).expect("static regex is valid");
 
     let cleaned = paired_re.replace_all(response, "").to_string();
