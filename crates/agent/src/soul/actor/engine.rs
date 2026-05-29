@@ -148,14 +148,14 @@ impl DirectCognitiveResponse {
 /// 帮助 LLM 理解连续决策的上下文。
 pub struct CognitiveEngine {
     llm_client: Arc<dyn LlmClient>,
-    config: std::sync::RwLock<CognitiveEngineConfig>,
+    pub(super) config: std::sync::RwLock<CognitiveEngineConfig>,
     /// 流式 LLM 调用（默认启用，非流式作为降级路径）
     enable_streaming: bool,
     /// Prompt 缓存（分层缓存优化）
     pub(super) prompt_cache: std::sync::RwLock<PromptCache>,
     /// 滑动上下文窗口（保留最近 N 轮摘要）
     summary_window: std::sync::RwLock<NarrativeSummaryWindow>,
-    /// 当前 tick 的对话上下文（由 lifecycle 注入，build_prompt 读取）
+    /// 当前 tick 的对话上下文（由 lifecycle 注入，build_tick_message 读取）
     pub(super) dialogue_context: std::sync::RwLock<String>,
     /// 对话历史（长窗口，SQLite 持久化）
     conversation_history: Option<std::sync::Mutex<ConversationHistory>>,
@@ -185,6 +185,8 @@ pub struct CognitiveEngine {
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等需要回传多轮对话）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// Semi-static prompt 内容（action index + skill index），配置更新时重建
+    semi_static_message: std::sync::RwLock<String>,
 }
 
 impl CognitiveEngine {
@@ -221,8 +223,11 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            semi_static_message: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
+        // 初始化 semi-static 内容
+        engine.rebuild_semi_static();
         engine
     }
 
@@ -265,9 +270,12 @@ impl CognitiveEngine {
             cache.len()
         );
 
-        // drop lock before persisting
+        // drop lock before persisting and rebuilding
         drop(cache);
         self.persist_skill_cache_to_disk();
+        // 重建 semi-static 内容（skill index 变更）
+        self.rebuild_semi_static();
+        self.sync_semi_static_to_history();
     }
 
     /// 设置是否启用流式 LLM 调用
@@ -310,8 +318,11 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            semi_static_message: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
+        // 初始化 semi-static 内容
+        engine.rebuild_semi_static();
         engine
     }
 
@@ -648,6 +659,11 @@ impl CognitiveEngine {
             history.estimated_tokens(),
         );
         self.conversation_history = Some(std::sync::Mutex::new(history));
+        // 注入后同步 system message 和 semi-static
+        let use_tool_calling = self.llm_client.supports_tool_calling();
+        let system_msg = self.build_system_message(use_tool_calling);
+        self.update_conversation_system_message(&system_msg);
+        self.sync_semi_static_to_history();
     }
 
     /// 添加一轮对话到历史
@@ -753,6 +769,11 @@ impl CognitiveEngine {
             cache.update_action_descriptions(descriptions, field_hints);
         }
 
+        // 重建 semi-static 内容（action index 变更）
+        self.rebuild_semi_static();
+        // 同步到 ConversationHistory
+        self.sync_semi_static_to_history();
+
         info!("动作列表已更新: {} 个动作", actions.len());
     }
 
@@ -762,6 +783,29 @@ impl CognitiveEngine {
             .as_ref()
             .map(|m| m.to_prompt_context())
             .unwrap_or_default()
+    }
+
+    /// 重建 semi-static 内容并写入字段
+    ///
+    /// 由初始化、update_action_aliases、update_skill_cache 调用。
+    fn rebuild_semi_static(&self) {
+        let msg = self.build_semi_static_message();
+        let mut guard = self.semi_static_message.write().expect("rwlock poisoned");
+        *guard = msg;
+    }
+
+    /// 同步 semi-static 内容到 ConversationHistory
+    fn sync_semi_static_to_history(&self) {
+        let msg = self
+            .semi_static_message
+            .read()
+            .expect("rwlock poisoned")
+            .clone();
+        if let Some(ref history) = self.conversation_history
+            && let Ok(mut h) = history.lock()
+        {
+            h.set_semi_static_message(msg);
+        }
     }
 
     /// 更新 Agent 人设（rebirth 后调用）
@@ -774,6 +818,11 @@ impl CognitiveEngine {
         let new_desc = config.persona.generate_description();
         let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
         cache.invalidate_persona(new_desc, &config.persona);
+
+        // 重建 system message（persona 变更）
+        let use_tool_calling = self.llm_client.supports_tool_calling();
+        let system_msg = self.build_system_message(use_tool_calling);
+        self.update_conversation_system_message(&system_msg);
 
         info!(
             "认知引擎人设已更新: name={}, prompt_len={}",
@@ -791,6 +840,8 @@ impl CognitiveEngine {
     /// 单次 LLM 调用，直接从 WorldState 生成结构化 Intent。
     /// Prompt 包含精确数据（item_id、node_id、entity UUID），
     /// LLM 直接输出 action_type + action_data（不再走天魂翻译）。
+    ///
+    /// 三区域分区调用：system（Immutable Prefix）→ semi-static → tick（Volatile）
     pub async fn think_direct(
         &self,
         world_state: &WorldState,
@@ -809,11 +860,6 @@ impl CognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
-        let persona_for_prompt = {
-            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
-            cache.get_persona_simple().to_string()
-        };
-
         let use_tool_calling = self.llm_client.supports_tool_calling();
 
         // FocusSummary + Critical preload
@@ -824,16 +870,23 @@ impl CognitiveEngine {
             None
         };
 
-        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
+        // === 三区域 Prompt 构建 ===
+
+        // 1. tick message (volatile)
+        let tick_msg = self.build_tick_message(super::engine_prompts::TickMessageParams {
             world_state,
             memory_context,
             validation_feedback,
-            persona_desc: &persona_for_prompt,
-            agent_name: &agent_name,
             focus_summary: focus.as_ref(),
             critical_preload: critical_preload.as_deref(),
-            use_tool_calling,
         })?;
+
+        // 2. 读取 semi-static 内容（由 rebuild_semi_static 维护）
+        let semi_static = self
+            .semi_static_message
+            .read()
+            .expect("rwlock poisoned")
+            .clone();
 
         // 使用对话历史（长窗口）或单次调用
         let response: DirectCognitiveResponse = {
@@ -899,9 +952,9 @@ impl CognitiveEngine {
                             .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
                                 &system,
                                 ConversationInput {
-                                    semi_static: "",  // Task 8: wire up actual semi-static content
+                                    semi_static: &semi_static,
                                     turns: &turns,
-                                    current_prompt: &prompt,
+                                    current_prompt: &tick_msg,
                                 },
                                 &tools,
                                 &executor,
@@ -911,10 +964,14 @@ impl CognitiveEngine {
                     }
                     None => {
                         // Tool-calling 无对话历史（降级）
+                        let persona_for_prompt = {
+                            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                            cache.get_persona_simple().to_string()
+                        };
                         self.llm_client
                             .complete_json_with_tools::<DirectCognitiveResponse>(
                                 &persona_for_prompt,
-                                &prompt,
+                                &tick_msg,
                                 &tools,
                                 &executor,
                                 self.llm_param("max_tool_rounds", 2),
@@ -932,10 +989,10 @@ impl CognitiveEngine {
                                 .llm_client
                                 .complete_json_streaming_with_conversation(
                                     &system,
-                                    "",  // Task 8: wire up actual semi-static content
+                                    &semi_static,
                                     summary.as_deref(),
                                     &turns,
-                                    &prompt,
+                                    &tick_msg,
                                 )
                                 .await
                             {
@@ -945,10 +1002,10 @@ impl CognitiveEngine {
                                     self.llm_client
                                         .complete_json_with_conversation(
                                             &system,
-                                            "",  // Task 8: wire up actual semi-static content
+                                            &semi_static,
                                             summary.as_deref(),
                                             &turns,
-                                            &prompt,
+                                            &tick_msg,
                                         )
                                         .await?
                                 }
@@ -957,29 +1014,33 @@ impl CognitiveEngine {
                             self.llm_client
                                 .complete_json_with_conversation(
                                     &system,
-                                    "",  // Task 8: wire up actual semi-static content
+                                    &semi_static,
                                     summary.as_deref(),
                                     &turns,
-                                    &prompt,
+                                    &tick_msg,
                                 )
                                 .await?
                         }
                     }
                     None => {
+                        let persona_for_prompt = {
+                            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                            cache.get_persona_simple().to_string()
+                        };
                         if self.enable_streaming {
                             match self
                                 .llm_client
-                                .complete_json_streaming(&persona_for_prompt, &prompt)
+                                .complete_json_streaming(&persona_for_prompt, &tick_msg)
                                 .await
                             {
                                 Ok(resp) => resp,
                                 Err(e) => {
                                     tracing::warn!("流式调用失败，降级到非流式: {}", e);
-                                    self.llm_client.complete_json(&prompt).await?
+                                    self.llm_client.complete_json(&tick_msg).await?
                                 }
                             }
                         } else {
-                            self.llm_client.complete_json(&prompt).await?
+                            self.llm_client.complete_json(&tick_msg).await?
                         }
                     }
                 }
@@ -1080,7 +1141,7 @@ impl CognitiveEngine {
         chain.should_remember = response.should_remember;
         chain.memory_content = response.memory_content;
 
-        thinking_log::log_llm(&agent_name, tick_id, "Direct", &prompt, &response_json);
+        thinking_log::log_llm(&agent_name, tick_id, "Direct", &tick_msg, &response_json);
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
@@ -1149,25 +1210,17 @@ impl CognitiveEngine {
 
         let mut chain = CognitiveChain::from_persona(&persona, tick_id);
 
-        let persona_for_prompt = {
-            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
-            cache.get_persona_simple().to_string()
-        };
-
-        // 降级：无 WorldState，用空占位。build_prompt 会走 build_world_state_section 降级路径。
+        // 降级：无 WorldState，用空占位。build_tick_message 会走 build_world_state_section 降级路径。
         let empty_ws = super::engine_prompts::empty_world_state();
-        let prompt = self.build_prompt(super::engine_prompts::PromptParams {
+        let tick_msg = self.build_tick_message(super::engine_prompts::TickMessageParams {
             world_state: &empty_ws,
             memory_context,
             validation_feedback,
-            persona_desc: &persona_for_prompt,
-            agent_name: &agent_name,
             focus_summary: None,
             critical_preload: None,
-            use_tool_calling: false,
         })?;
 
-        let response: DirectCognitiveResponse = self.llm_client.complete_json(&prompt).await?;
+        let response: DirectCognitiveResponse = self.llm_client.complete_json(&tick_msg).await?;
         let response_json = serde_json::to_string(&response)?;
 
         let perception = super::stages::StageOutput::with_metadata(
@@ -1235,7 +1288,7 @@ impl CognitiveEngine {
         chain.should_remember = response.should_remember;
         chain.memory_content = response.memory_content;
 
-        thinking_log::log_llm(&agent_name, tick_id, "Legacy", &prompt, &response_json);
+        thinking_log::log_llm(&agent_name, tick_id, "Legacy", &tick_msg, &response_json);
 
         chain.duration_ms = start_time.elapsed().as_millis() as u64;
 
