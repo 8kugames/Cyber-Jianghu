@@ -117,8 +117,10 @@ struct ConnectionState {
     worldstate_tx: Option<tokio::sync::watch::Sender<Option<WorldState>>>,
     /// 注册通知通道（后台任务 → 主循环）
     registered_tx: Option<tokio::sync::watch::Sender<Option<RegistrationData>>>,
-    /// ExecutionResult 通道（后台任务 → 主循环）
-    execution_result_tx: Option<tokio::sync::watch::Sender<Option<ExecutionResultData>>>,
+    /// ExecutionResult 通道（后台任务 → 主循环，mpsc 保留全部结果）
+    execution_result_tx: Option<tokio::sync::mpsc::Sender<ExecutionResultData>>,
+    /// ExecutionResult 接收端（Arc<Mutex> 允许 &self 下异步访问）
+    execution_result_rx: Option<std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ExecutionResultData>>>>,
 }
 
 impl WebSocketClient {
@@ -146,6 +148,7 @@ impl WebSocketClient {
                 worldstate_tx: None,
                 registered_tx: None,
                 execution_result_tx: None,
+                execution_result_rx: None,
             })),
         }
     }
@@ -189,7 +192,7 @@ impl WebSocketClient {
                 let (worldstate_tx, _) = tokio::sync::watch::channel(None);
                 let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
                 let (registered_tx, _) = tokio::sync::watch::channel(None);
-                let (execution_result_tx, _) = tokio::sync::watch::channel(None);
+                let (execution_result_tx, execution_result_rx) = tokio::sync::mpsc::channel(16);
 
                 // 启动后台 WebSocket 任务（独占 ws）
                 let state_arc = self.state.clone();
@@ -208,6 +211,7 @@ impl WebSocketClient {
                 state.worldstate_tx = Some(worldstate_tx);
                 state.registered_tx = Some(registered_tx);
                 state.execution_result_tx = Some(execution_result_tx);
+                state.execution_result_rx = Some(std::sync::Arc::new(tokio::sync::Mutex::new(execution_result_rx)));
 
                 info!("Connected to server (background task started)");
                 Ok(())
@@ -432,58 +436,67 @@ impl WebSocketClient {
             .context("WorldState channel produced None")
     }
 
-    /// 接收 ExecutionResult（非阻塞，返回最新未读结果）
+    /// 接收 ExecutionResult（非阻塞，返回所有已缓存结果）
     ///
-    /// watch channel 保留最新值，连续多次调用不会阻塞。
-    /// 返回 None 表示没有新结果。
-    pub async fn try_receive_execution_result(&self) -> Result<Option<ExecutionResultData>> {
-        let rx = {
+    /// mpsc channel 保留全部结果。非阻塞 drain，返回空 Vec 表示无结果。
+    pub async fn try_receive_execution_result(&self) -> Result<Vec<ExecutionResultData>> {
+        let rx_arc = {
             let state = self.state.read().await;
             state
-                .execution_result_tx
+                .execution_result_rx
                 .as_ref()
                 .context("Not connected to server")?
-                .subscribe()
+                .clone()
         };
 
-        // 非阻塞：只检查是否有新值
-        match rx.has_changed() {
-            Ok(true) => Ok(rx.borrow().as_ref().cloned()),
-            Ok(false) => Ok(None),
-            Err(_) => {
-                anyhow::bail!("ExecutionResult channel closed")
-            }
+        let mut rx = rx_arc.lock().await;
+        let mut results = Vec::new();
+        while let Ok(data) = rx.try_recv() {
+            results.push(data);
         }
+        Ok(results)
     }
 
-    /// 等待 ExecutionResult（阻塞等待，带超时）
+    /// 等待 ExecutionResult（阻塞等待，带超时，收集全部多 intent 结果）
     ///
-    /// 使用 watch channel 的 changed() 方法等待 server 回传结果，
-    /// 超时后返回 None（不等同于失败，可能 server 正在处理）。
+    /// 等待首个结果（带超时），然后 drain 通道中剩余结果。
+    /// 返回空 Vec 表示超时无结果。
     pub async fn wait_for_execution_result(
         &self,
         timeout_ms: u64,
-    ) -> Result<Option<ExecutionResultData>> {
-        let mut rx = {
+    ) -> Result<Vec<ExecutionResultData>> {
+        let rx_arc = {
             let state = self.state.read().await;
             state
-                .execution_result_tx
+                .execution_result_rx
                 .as_ref()
                 .context("Not connected to server")?
-                .subscribe()
+                .clone()
         };
 
-        // 如果已有新值，直接返回
-        if rx.has_changed().unwrap_or(false) {
-            return Ok(rx.borrow().as_ref().cloned());
+        let mut rx = rx_arc.lock().await;
+
+        // 先 drain 已缓存的结果（可能 server 已发送完毕）
+        let mut results = Vec::new();
+        while let Ok(data) = rx.try_recv() {
+            results.push(data);
+        }
+        if !results.is_empty() {
+            return Ok(results);
         }
 
-        // 阻塞等待，带超时
-        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx.changed()).await
-        {
-            Ok(Ok(())) => Ok(rx.borrow().as_ref().cloned()),
-            Ok(Err(_)) => anyhow::bail!("ExecutionResult channel closed"),
-            Err(_) => Ok(None), // timeout
+        // 无缓存结果，等待首个结果（带超时）
+        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx.recv()).await {
+            Ok(Some(first)) => {
+                results.push(first);
+                // drain 后续结果（server 连续发送，应该已在缓冲区）
+                while let Ok(data) = rx.try_recv() {
+                    results.push(data);
+                }
+                Ok(results)
+            }
+            Ok(None) => anyhow::bail!("ExecutionResult channel closed"),
+            Err(_) => Ok(Vec::new()), // timeout
         }
     }
 
@@ -588,6 +601,7 @@ impl WebSocketClient {
             state.worldstate_tx = None;
             state.registered_tx = None;
             state.execution_result_tx = None;
+            state.execution_result_rx = None;
 
             handle
         };
@@ -828,13 +842,13 @@ async fn websocket_background_task(
                                     tick_id, intent_id, success
                                 );
                                 if let Some(ref tx) = exec_result_tx {
-                                    let _ = tx.send(Some(ExecutionResultData {
+                                    let _ = tx.try_send(ExecutionResultData {
                                         tick_id,
                                         intent_id,
                                         success,
                                         error: error.clone(),
                                         state_change_summary: state_change_summary.clone(),
-                                    }));
+                                    });
                                 }
                             }
                             Ok(ServerMessage::Error {
@@ -1020,7 +1034,7 @@ impl AgentClient {
         client.receive_world_state().await
     }
 
-    pub async fn try_receive_execution_result(&self) -> Result<Option<ExecutionResultData>> {
+    pub async fn try_receive_execution_result(&self) -> Result<Vec<ExecutionResultData>> {
         let client = self.client.read().await;
         client.try_receive_execution_result().await
     }
@@ -1028,7 +1042,7 @@ impl AgentClient {
     pub async fn wait_for_execution_result(
         &self,
         timeout_ms: u64,
-    ) -> Result<Option<ExecutionResultData>> {
+    ) -> Result<Vec<ExecutionResultData>> {
         let client = self.client.read().await;
         client.wait_for_execution_result(timeout_ms).await
     }
