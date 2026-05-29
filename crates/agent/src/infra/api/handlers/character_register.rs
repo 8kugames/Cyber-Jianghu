@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::config::{CharacterConfig, CharacterStatus};
+use crate::config::{CharacterConfig, CharacterGenerationConfig, CharacterStatus, FieldConstraints, FieldSpec};
 
 use super::HttpApiState;
 use super::basic::ErrorResponse;
@@ -21,10 +21,8 @@ pub struct CharacterRegisterRequest {
     /// 角色姓名
     pub name: String,
     /// 年龄
-    #[serde(default = "default_age")]
     pub age: u8,
     /// 性别
-    #[serde(default = "default_gender")]
     pub gender: String,
     /// 外貌描述
     #[serde(default)]
@@ -73,100 +71,328 @@ pub(crate) struct GoalsRequest {
     long_term: Option<String>,
 }
 
-fn default_age() -> u8 {
-    25
-}
-fn default_gender() -> String {
-    "男".to_string()
+
+
+
+// ============================================================================
+// Schema-driven prompt generation + validation
+// ============================================================================
+
+/// Resolve dot-notation path in JSON value (e.g. "language_style.tone")
+fn resolve_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
 }
 
-/// 角色注册验证错误
+/// Schema-driven validation error
 #[derive(Debug)]
-enum CharacterRegisterValidationError {
-    NameEmpty,
-    NameTooLong(usize),
-    AgeOutOfRange(u8),
-    InvalidGender(String),
-    IdentityTooLong(usize),
-    ShortTermGoalTooLong(usize),
-    LongTermGoalTooLong(usize),
+struct FieldValidationError {
+    path: String,
+    message: String,
 }
 
-impl std::fmt::Display for CharacterRegisterValidationError {
+impl std::fmt::Display for FieldValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NameEmpty => write!(f, "角色姓名不能为空"),
-            Self::NameTooLong(len) => write!(f, "角色姓名不能超过20字符（当前{}字符）", len),
-            Self::AgeOutOfRange(age) => write!(f, "年龄必须在1-100之间（当前{}）", age),
-            Self::InvalidGender(g) => write!(f, "性别仅允许“男”或“女”（当前：“{}”）", g),
-            Self::IdentityTooLong(len) => write!(f, "身份背景不能超过300字符（当前{}字符）", len),
-            Self::ShortTermGoalTooLong(len) => {
-                write!(f, "短期目标不能超过100字符（当前{}字符）", len)
+        write!(f, "{}: {}", self.path, self.message)
+    }
+}
+
+/// Validate JSON value against field specs
+fn validate_against_schema(
+    value: &serde_json::Value,
+    fields: &[FieldSpec],
+) -> Result<(), Vec<FieldValidationError>> {
+    let mut errors = Vec::new();
+
+    for spec in fields {
+        let field_val = resolve_path(value, &spec.path);
+
+        match &spec.constraints {
+            FieldConstraints::String { required, min_chars, max_chars, .. } => {
+                match field_val {
+                    None | Some(serde_json::Value::Null) => {
+                        if *required {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: "required field missing".into(),
+                            });
+                        }
+                    }
+                    Some(serde_json::Value::String(s)) => {
+                        let len = s.chars().count();
+                        if len < *min_chars {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!("min {} chars, got {}", min_chars, len),
+                            });
+                        }
+                        if len > *max_chars {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!("max {} chars, got {}", max_chars, len),
+                            });
+                        }
+                    }
+                    Some(other) => {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!("expected string, got {}", other),
+                        });
+                    }
+                }
             }
-            Self::LongTermGoalTooLong(len) => {
-                write!(f, "长远目标不能超过100字符（当前{}字符）", len)
+            FieldConstraints::Integer { required, min, max } => {
+                match field_val {
+                    None | Some(serde_json::Value::Null) => {
+                        if *required {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: "required field missing".into(),
+                            });
+                        }
+                    }
+                    Some(serde_json::Value::Number(n)) => {
+                        if let Some(n) = n.as_u64() {
+                            let n = n as u32;
+                            if n < *min || n > *max {
+                                errors.push(FieldValidationError {
+                                    path: spec.path.clone(),
+                                    message: format!("must be {}-{}, got {}", min, max, n),
+                                });
+                            }
+                        } else {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: "expected integer".into(),
+                            });
+                        }
+                    }
+                    Some(other) => {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!("expected integer, got {}", other),
+                        });
+                    }
+                }
+            }
+            FieldConstraints::Enum { required, options, .. } => {
+                match field_val {
+                    None | Some(serde_json::Value::Null) => {
+                        if *required {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: "required field missing".into(),
+                            });
+                        }
+                    }
+                    Some(serde_json::Value::String(s)) => {
+                        if !options.contains(s) {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!(
+                                    "invalid: \"{}\" (allowed: {})",
+                                    s,
+                                    options.join("\u{3001}")
+                                ),
+                            });
+                        }
+                    }
+                    Some(other) => {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!("expected string, got {}", other),
+                        });
+                    }
+                }
+            }
+            FieldConstraints::EnumArray { required, options, min_count, max_count, .. } => {
+                match field_val {
+                    None | Some(serde_json::Value::Null) => {
+                        if *required {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: "required field missing".into(),
+                            });
+                        }
+                    }
+                    Some(serde_json::Value::String(s)) => {
+                        if !options.contains(s) {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!(
+                                    "invalid: \"{}\" (allowed: {})",
+                                    s,
+                                    options.join("\u{3001}")
+                                ),
+                            });
+                        }
+                    }
+                    Some(serde_json::Value::Array(arr)) => {
+                        if arr.len() < *min_count || arr.len() > *max_count {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!(
+                                    "need {}-{} items, got {}",
+                                    min_count, max_count, arr.len()
+                                ),
+                            });
+                        }
+                        let invalid: Vec<String> = arr
+                            .iter()
+                            .filter_map(|v| v.as_str())
+                            .filter(|s| !options.iter().any(|o| o == *s))
+                            .map(|s| s.to_string())
+                            .collect();
+                        if !invalid.is_empty() {
+                            errors.push(FieldValidationError {
+                                path: spec.path.clone(),
+                                message: format!(
+                                    "invalid: {} (allowed: {})",
+                                    invalid.join("\u{3001}"),
+                                    options.join("\u{3001}")
+                                ),
+                            });
+                        }
+                    }
+                    Some(other) => {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!("expected array, got {}", other),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
+/// Resolve template variables in prompt_text from field constraints
+fn resolve_prompt_template(template: &str, spec: &FieldSpec, extra_vars: &std::collections::HashMap<String, String>) -> String {
+    let mut result = template.to_string();
+    match &spec.constraints {
+        FieldConstraints::String { min_chars, max_chars, .. } => {
+            result = result.replace("{min_chars}", &min_chars.to_string());
+            result = result.replace("{max_chars}", &max_chars.to_string());
+        }
+        FieldConstraints::Integer { min, max, .. } => {
+            result = result.replace("{min}", &min.to_string());
+            result = result.replace("{max}", &max.to_string());
+        }
+        FieldConstraints::Enum { options, .. } => {
+            result = result.replace("{options}", &options.join("\u{3001}"));
+        }
+        FieldConstraints::EnumArray { options, min_count, max_count, .. } => {
+            result = result.replace("{options}", &options.join("\u{3001}"));
+            result = result.replace("{min_count}", &min_count.to_string());
+            result = result.replace("{max_count}", &max_count.to_string());
+        }
+    }
+    for (k, v) in extra_vars {
+        result = result.replace(&format!("{{{}}}", k), v);
+    }
+    result
+}
+
+/// Generate prompt field line from a single field spec
+fn generate_field_line(spec: &FieldSpec, extra_vars: &std::collections::HashMap<String, String>) -> String {
+    let field_name = spec.path.split('.').next_back().unwrap_or(&spec.path);
+
+    // Check for prompt_text override
+    let prompt_text = match &spec.constraints {
+        FieldConstraints::String { prompt_text: Some(txt), .. }
+        | FieldConstraints::Enum { prompt_text: Some(txt), .. } => Some(txt.clone()),
+        _ => None,
+    };
+
+    if let Some(txt) = prompt_text {
+        let resolved = resolve_prompt_template(&txt, spec, extra_vars);
+        return format!("- {}: {}", field_name, resolved);
+    }
+
+    // Auto-generate from constraints
+    match &spec.constraints {
+        FieldConstraints::String { max_chars, min_chars, .. } => {
+            if *min_chars > 0 {
+                format!("- {}: {}-{} chars", field_name, min_chars, max_chars)
+            } else if *max_chars > 0 {
+                format!("- {}: max {} chars", field_name, max_chars)
+            } else {
+                format!("- {}: string", field_name)
+            }
+        }
+        FieldConstraints::Integer { min, max, .. } => {
+            format!("- {}: {}-{} (integer)", field_name, min, max)
+        }
+        FieldConstraints::Enum { options, .. } => {
+            format!("- {}: pick 1 from: {}", field_name, options.join("\u{3001}"))
+        }
+        FieldConstraints::EnumArray { options, min_count, max_count, extra_prompt, .. } => {
+            let base = format!(
+                "- {}: pick {}-{} from: {}",
+                field_name, min_count, max_count,
+                options.join("\u{3001}")
+            );
+            if let Some(extra) = extra_prompt {
+                format!("{}, {}", base, extra)
+            } else {
+                base
             }
         }
     }
 }
 
-impl CharacterRegisterRequest {
-    /// 验证请求参数是否符合前端输入框约束
-    fn validate(&self) -> Result<(), CharacterRegisterValidationError> {
-        // 姓名：必填，最大20字符
-        if self.name.trim().is_empty() {
-            return Err(CharacterRegisterValidationError::NameEmpty);
-        }
-        if self.name.chars().count() > 20 {
-            return Err(CharacterRegisterValidationError::NameTooLong(
-                self.name.chars().count(),
-            ));
-        }
+/// Build full character generation prompt from schema
+fn generate_character_prompt(
+    cg: &CharacterGenerationConfig,
+    extra_vars: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut top_level = Vec::new();
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
 
-        // 年龄：1-100
-        if self.age < 1 || self.age > 100 {
-            return Err(CharacterRegisterValidationError::AgeOutOfRange(self.age));
+    for spec in &cg.fields {
+        let line = generate_field_line(spec, extra_vars);
+        if let Some((parent, _)) = spec.path.split_once('.') {
+            groups.entry(parent.to_string()).or_default().push(line);
+        } else {
+            top_level.push(line);
         }
-
-        // 性别：仅允许"男"或"女"
-        if self.gender != "男" && self.gender != "女" {
-            return Err(CharacterRegisterValidationError::InvalidGender(
-                self.gender.clone(),
-            ));
-        }
-
-        // 身份背景：最大300字符
-        if let Some(ref identity) = self.identity
-            && identity.chars().count() > 300
-        {
-            return Err(CharacterRegisterValidationError::IdentityTooLong(
-                identity.chars().count(),
-            ));
-        }
-
-        // 短期目标：最大100字符
-        if let Some(ref short_term) = self.goals.short_term
-            && short_term.chars().count() > 100
-        {
-            return Err(CharacterRegisterValidationError::ShortTermGoalTooLong(
-                short_term.chars().count(),
-            ));
-        }
-
-        // 长远目标：最大100字符
-        if let Some(ref long_term) = self.goals.long_term
-            && long_term.chars().count() > 100
-        {
-            return Err(CharacterRegisterValidationError::LongTermGoalTooLong(
-                long_term.chars().count(),
-            ));
-        }
-
-        Ok(())
     }
+
+    let mut field_section = String::new();
+    for line in &top_level {
+        field_section.push_str(line);
+        field_section.push('\n');
+    }
+    for (parent, field_lines) in &groups {
+        field_section.push_str(&format!("- {}: object:\n", parent));
+        for line in field_lines {
+            field_section.push_str(&format!("  {}\n", line));
+        }
+    }
+
+    format!(
+r#"Generate a character fitting this world:
+
+## World
+{world_setting}
+
+## Core Requirements
+1. **Diversity**: distinct from typical characters in background, personality, values, speech
+2. **Authenticity**: complex motivations, unique speech patterns
+
+## Field Requirements
+{field_section}## Output Format
+Strict JSON output, no other text."#,
+        world_setting = cg.world_setting,
+        field_section = field_section,
+    )
 }
 
-/// 角色注册响应（返回给 CLI）
 #[derive(Debug, Serialize)]
 pub struct CharacterRegisterResponse {
     /// 角色 ID（服务器分配）
@@ -275,37 +501,12 @@ pub(crate) async fn generate_character_handler(
             format!("从百家姓中选第{}个姓氏作为角色姓氏", index)
         }
     };
-    let prompt = format!(r#"你是一个武侠角色生成器。请生成一个符合以下世界观的角色：
+    let mut extra_vars = std::collections::HashMap::new();
+    extra_vars.insert("surname_constraint".into(), surname_constraint);
+    let prompt = generate_character_prompt(&config.character_generation, &extra_vars);
 
-## 世界观
-时代：武侠架空世界，冷兵器时代。世界使用独立"天道历"纪年，与现实朝代无关。
-允许的概念：内力、轻功、武功、点穴，暗器、毒术、医术、易容、阵法。
-禁止的概念：魔法、仙术、法术、热武器、现代科技、超能力、穿越。
 
-## 核心要求
-1. **多样性**：生成的角色必须在姓名、身份背景、性格、价值观、语言风格、目标等方面与常见武侠角色有明显差异
-2. **真实性**：角色应该像一个真实的人，有复杂的动机和独特的说话方式
-
-## 字段要求
-- name: 姓名（2-4个汉字），{surname_constraint}
-- age: 年龄（16-60之间的整数）
-- gender: 性别（"男"或"女"）
-- appearance: 外貌描述（20-50字），要有特色
-- identity: 身份背景（如"江湖游侠"、"药铺掌柜"，不超过300字），要有独特的故事
-- personality: 性格特征数组（从以下选项中选2-4个：豪爽、沉稳、机智、冷漠、善良、阴险、正义、贪婪、忠诚、狡猾），避免只选正面或只选负面，性格特征需要与身份背景吻合。
-- values: 核心价值观数组（从以下选项中选1-3个：侠义、财富、权力、自由、荣誉、知识、爱情、友情、复仇、和平），核心价值观需要与身份背景吻合。
-- language_style: 对象，包含：
-  - tone: 语调（从以下选项中选1个：豪迈、温和、冷漠、狡黠、文雅）
-  - speech_patterns: 说话特点数组（从以下选项中选1-3个：喜欢引用古诗词、说话简洁、喜欢用成语、说话带方言、喜欢开玩笑、说话谨慎）
-- goals: 对象，包含：
-  - short_term: 短期目标（不超过100字），要具体且有个人特色
-  - long_term: 长远目标（不超过100字），要有野心或深度
-
-## 输出格式
-请严格输出 JSON，不要包含其他文字。"#);
-
-    // 5. 调用 LLM 生成角色
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     struct GeneratedCharacter {
         name: String,
         age: u8,
@@ -318,10 +519,33 @@ pub(crate) async fn generate_character_handler(
         goals: GoalsRequest,
     }
 
-    match llm_client.complete_json::<GeneratedCharacter>(&prompt).await {
-        Ok(character) => {
-            info!("[character] LLM 生成角色成功: {}", character.name);
-            (StatusCode::OK, Json(character)).into_response()
+    match llm_client.complete_json::<serde_json::Value>(&prompt).await {
+        Ok(json_value) => {
+            // Schema validation before deserialization
+            if let Err(errors) = validate_against_schema(&json_value, &config.character_generation.fields) {
+                let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+                warn!("[character] LLM output validation failed: {}", msgs.join("; "));
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ErrorResponse {
+                        error_code: "validation_failed".to_string(),
+                        message: format!("Role validation failed: {}", msgs.join("; ")),
+                    }),
+                ).into_response();
+            }
+            match serde_json::from_value::<GeneratedCharacter>(json_value) {
+                Ok(character) => {
+                    info!("[character] LLM generate success: {}", character.name);
+                    (StatusCode::OK, Json(character)).into_response()
+                }
+                Err(e) => {
+                    error!("[character] JSON deserialization failed: {}", e);
+                    (StatusCode::BAD_GATEWAY, Json(ErrorResponse {
+                        error_code: "parse_failed".to_string(),
+                        message: format!("Parse failed: {}", e),
+                    })).into_response()
+                }
+            }
         }
         Err(e) => {
             error!("[character] LLM 生成角色失败: {}", e);
@@ -344,7 +568,7 @@ pub(crate) async fn generate_character_handler(
 /// 接收 CLI 的角色创建请求，添加设备认证信息后转发到 Server
 pub(crate) async fn register_character_handler(
     State(state): State<HttpApiState>,
-    Json(payload): Json<CharacterRegisterRequest>,
+    Json(value): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     use reqwest::Client;
     use tracing::info;
@@ -366,23 +590,56 @@ pub(crate) async fn register_character_handler(
         }
     };
 
-    info!("角色注册请求: {}", payload.name);
+    let name = value.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    info!("角色注册请求: {}", name);
 
-    // 2. 验证前端输入约束
-    if let Err(e) = payload.validate() {
-        warn!("角色注册参数验证失败: {}", e);
+    // 2. Load config + schema validation
+    let config = match crate::config::Config::from_file(&state.config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("读取配置文件失败: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: format!("读取配置文件失败: {}", e),
+                    warning: None,
+                }),
+            ).into_response();
+        }
+    };
+
+    // 3. Schema validation
+    if let Err(errors) = validate_against_schema(&value, &config.character_generation.fields) {
+        let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+        warn!("角色注册参数验证失败: {}", msgs.join("; "));
         return (
             StatusCode::BAD_REQUEST,
             Json(CharacterRegisterResponse {
                 agent_id: String::new(),
-                message: e.to_string(),
+                message: msgs.join("; "),
                 warning: None,
             }),
-        )
-            .into_response();
+        ).into_response();
     }
 
-    // 3. 生成默认 system_prompt（如果未提供）
+    // 4. Deserialize into typed struct
+    let payload: CharacterRegisterRequest = match serde_json::from_value(value) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("JSON 反序列化失败: {}", e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(CharacterRegisterResponse {
+                    agent_id: String::new(),
+                    message: format!("请求格式错误: {}", e),
+                    warning: None,
+                }),
+            ).into_response();
+        }
+    };
+
+    // 5. Generate default system_prompt
     let system_prompt = payload.system_prompt.clone().unwrap_or_else(|| {
         format!(
             "你是{}，{}岁，{}。{}{}你的目标是探索这个江湖世界，与各路侠客交流，并在武林中闯出自己的一片天地。",
@@ -398,7 +655,7 @@ pub(crate) async fn register_character_handler(
         )
     });
 
-    // 4. 构建发送到 Server 的请求
+    // 6. 构建发送到 Server 的请求
     let server_request = serde_json::json!({
         "device_id": device_id,
         "auth_token": auth_token,
@@ -414,7 +671,7 @@ pub(crate) async fn register_character_handler(
         "system_prompt": system_prompt,
     });
 
-    // 5. 转发到 Server
+    // 7. 转发到 Server
     let client = Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
     let server_url = format!("{}/api/v1/agent/register", server_http_url);
@@ -435,7 +692,7 @@ pub(crate) async fn register_character_handler(
         }
     };
 
-    // 5. 处理 Server 响应
+    // 8. 处理 Server 响应
     if !response.status().is_success() {
         let status = response.status();
 
@@ -534,7 +791,7 @@ pub(crate) async fn register_character_handler(
         }
     }
 
-    // 6. 解析成功响应
+    // 9. 解析成功响应
     #[derive(Deserialize)]
     struct ServerRegisterResponse {
         agent_id: String,
@@ -550,7 +807,7 @@ pub(crate) async fn register_character_handler(
         Ok(result) => {
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
-            // 7. 保存 narrative_config 到本地配置目录
+            // 10. 保存 narrative_config 到本地配置目录
             if let Some(ref narrative_config) = result.narrative_config
                 && let Some(home) = dirs::home_dir()
             {
@@ -575,7 +832,7 @@ pub(crate) async fn register_character_handler(
                 }
             }
 
-            // 8. 创建并保存角色配置到文件系统
+            // 11. 创建并保存角色配置到文件系统
             let mut config_warning = None;
             let agent_uuid = match uuid::Uuid::parse_str(&result.agent_id) {
                 Ok(id) => id,
@@ -629,7 +886,7 @@ pub(crate) async fn register_character_handler(
                 config_warning = Some(format!("角色配置保存失败: {}", e));
             }
 
-            // 9. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
+            // 12. 更新运行时 agent_id（使后续 Intent 提交使用新角色）
             {
                 let mut id = state.agent_id.write().await;
                 *id = agent_uuid;
@@ -639,12 +896,12 @@ pub(crate) async fn register_character_handler(
                 );
             }
 
-            // 10. 重置死亡状态（新角色 = 新生命）
+            // 13. 重置死亡状态（新角色 = 新生命）
             state
                 .is_dead
                 .store(false, std::sync::atomic::Ordering::Relaxed);
 
-            // 11. 触发 WebSocket 重连以注册新角色
+            // 14. 触发 WebSocket 重连以注册新角色
             if let Some(ref tx) = state.reconnect_tx {
                 let server_ws_url = state.server_ws_url.read().await.clone();
                 let reconnect_req = crate::infra::api::ReconnectRequest {
