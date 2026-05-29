@@ -414,9 +414,7 @@ pub(crate) async fn generate_character_handler(
     body: Option<Json<GenerateCharacterRequest>>,
 ) -> impl IntoResponse {
     let body = body.map(|b| b.0).unwrap_or_default();
-    use crate::component::llm::{
-        DirectLlmClient, DirectLlmClientConfig, LlmClientExt, LlmProvider,
-    };
+    use crate::component::llm::LlmClientExt;
 
     // 1. 读取配置文件
     let config = match crate::config::Config::from_file(&state.config_path) {
@@ -433,56 +431,21 @@ pub(crate) async fn generate_character_handler(
         }
     };
 
-    // 2. 检查 LLM 是否已配置
-    if config.llm.model.is_none() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error_code: "llm_not_configured".to_string(),
-                message: "请先配置 LLM".to_string(),
-            }),
-        )
-            .into_response();
-    }
-
-    // 3. 创建 LLM 客户端
-    let provider = match LlmProvider::parse(&config.llm.provider) {
-        Some(p) => p,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error_code: "invalid_provider".to_string(),
-                    message: format!("不支持的 LLM Provider: {}", config.llm.provider),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    let mut client_config = DirectLlmClientConfig::new(provider, config.llm.api_key.as_deref());
-
-    if let Some(ref model) = config.llm.model {
-        client_config = client_config.with_model(model);
-    }
-    if let Some(ref base_url) = config.llm.base_url {
-        client_config = client_config.with_base_url(base_url);
-    }
-    client_config = client_config
-        .with_temperature(0.9)
-        .with_context_window_tokens(config.llm.context_window_tokens);
-
-    let llm_client = match DirectLlmClient::new(client_config) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error_code: "llm_client_error".to_string(),
-                    message: format!("创建 LLM 客户端失败: {}", e),
-                }),
-            )
-                .into_response();
+    // 2. 获取共享 LLM 客户端（模式无关：Cognitive 用 FallbackLlmClient，Claw 用 OpenClawBridge）
+    let llm_client: std::sync::Arc<dyn crate::component::llm::LlmClient> = {
+        let guard = state.llm_container.read().await;
+        match guard.as_ref() {
+            Some(container) => container.read().await.clone(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(ErrorResponse {
+                        error_code: "llm_not_initialized".to_string(),
+                        message: "LLM 未初始化，请先配置 LLM".to_string(),
+                    }),
+                )
+                    .into_response();
+            }
         }
     };
 
