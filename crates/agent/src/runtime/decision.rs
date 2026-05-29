@@ -65,7 +65,7 @@ pub fn cognitive_decision_with_chain(
         let engine = engine.clone();
         let world_state = world_state.clone();
         let memory_context = memory_context.to_string();
-        let feedback = feedback.map(|s| s.to_string());
+        let mut feedback = feedback.map(|s| s.to_string());
 
         Box::pin(async move {
             let mut last_error = String::new();
@@ -143,6 +143,12 @@ pub fn cognitive_decision_with_chain(
                         failed_attempts += 1;
                         last_error = e.to_string();
                         error!("[cognitive] Attempt {} failed: {}", attempt + 1, e);
+
+                        // 将解析错误注入重试 feedback，让 LLM 知道上次哪里错了
+                        feedback = Some(format!(
+                            "系统提示：你上一次输出格式有误（{}），请确保严格输出合法的JSON对象，不要在JSON外添加任何文本。",
+                            last_error
+                        ));
 
                         // 确定性失败，重试无意义
                         let err_msg = &last_error;
