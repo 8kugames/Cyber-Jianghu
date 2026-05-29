@@ -28,29 +28,34 @@ pub struct ConversationTurn {
 /// 对话输入参数（用于减少函数参数数量）
 #[derive(Debug, Clone)]
 pub struct ConversationInput<'a> {
-    /// 对话历史摘要
-    pub summary: Option<&'a str>,
+    /// 半静态内容（actions + skills），变更频率低
+    pub semi_static: &'a str,
     /// 保留的近期完整轮次
     pub turns: &'a [ConversationTurn],
     /// 当前请求的 prompt
     pub current_prompt: &'a str,
 }
 
-/// 构建对话消息列表（system + summary + history + current prompt）
+/// 构建对话消息列表（system + semi-static + summary + history + current tick）
+///
+/// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）
+/// 每个区域为独立 system message，确保 Immutable Prefix 在 compaction 后稳定。
 pub fn build_conversation_messages(
     system: &str,
+    semi_static: &str,
     summary: Option<&str>,
     turns: &[ConversationTurn],
-    current_prompt: &str,
+    current_tick_message: &str,
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
-    let mut system_content = system.to_string();
-    if let Some(s) = summary {
-        system_content.push_str(&format!("\n\n## 对话历史摘要\n{}", s));
+    let mut messages = vec![ChatMessage::system(system)];
+    if !semi_static.is_empty() {
+        messages.push(ChatMessage::system(semi_static));
     }
-
-    let mut messages = vec![ChatMessage::system(&system_content)];
+    if let Some(s) = summary {
+        messages.push(ChatMessage::system(&format!("## 对话历史摘要\n{}", s)));
+    }
     for turn in turns {
         messages.push(ChatMessage::user(&turn.user));
         messages.push(ChatMessage::assistant_with_reasoning(
@@ -58,7 +63,7 @@ pub fn build_conversation_messages(
             turn.reasoning_content.clone(),
         ));
     }
-    messages.push(ChatMessage::user(current_prompt));
+    messages.push(ChatMessage::user(current_tick_message));
     messages
 }
 
@@ -185,14 +190,15 @@ pub trait LlmClient: Send + Sync {
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
-        let _ = (&input.summary, input.turns);
+        let _ = (&input.semi_static, input.turns);
         self.complete_with_tools(system, input.current_prompt, tools, executor, max_rounds)
             .await
     }
 
     /// 使用对话历史完成调用（长窗口）
     ///
-    /// `summary` 为旧轮次的压缩摘要（注入 system message）。
+    /// `semi_static` 为半静态内容（actions + skills，变更频率低）。
+    /// `summary` 为旧轮次的压缩摘要。
     /// `turns` 为保留的近期完整轮次。
     /// `current_prompt` 为当前 tick 的用户输入。
     ///
@@ -200,11 +206,12 @@ pub trait LlmClient: Send + Sync {
     async fn complete_with_conversation(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<String> {
-        let _ = (summary, turns);
+        let _ = (semi_static, summary, turns);
         self.complete_with_system(system, current_prompt).await
     }
 
@@ -234,6 +241,7 @@ pub trait LlmClient: Send + Sync {
     fn complete_conversation_streaming<'a>(
         &'a self,
         system: &'a str,
+        semi_static: &'a str,
         summary: Option<&'a str>,
         turns: &'a [ConversationTurn],
         current_prompt: &'a str,
@@ -242,7 +250,7 @@ pub trait LlmClient: Send + Sync {
     > {
         Box::pin(async move {
             let result = self
-                .complete_with_conversation(system, summary, turns, current_prompt)
+                .complete_with_conversation(system, semi_static, summary, turns, current_prompt)
                 .await?;
             let stream = futures_util::stream::once(async move {
                 Ok(super::streaming::StreamChunk::Delta(result))
@@ -289,6 +297,7 @@ pub trait LlmClientExt {
     async fn complete_json_with_conversation<T: DeserializeOwned + Send>(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
@@ -309,6 +318,7 @@ pub trait LlmClientExt {
     async fn complete_json_streaming_with_conversation<T: DeserializeOwned + Send>(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
@@ -763,12 +773,13 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     async fn complete_json_with_conversation<D: DeserializeOwned + Send>(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<D> {
         let response = self
-            .complete_with_conversation(system, summary, turns, current_prompt)
+            .complete_with_conversation(system, semi_static, summary, turns, current_prompt)
             .await?;
         parse_json_response::<D>(&response)
     }
@@ -822,6 +833,7 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
     async fn complete_json_streaming_with_conversation<D: DeserializeOwned + Send>(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
@@ -829,7 +841,7 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         use futures_util::StreamExt;
 
         let stream = self
-            .complete_conversation_streaming(system, summary, turns, current_prompt)
+            .complete_conversation_streaming(system, semi_static, summary, turns, current_prompt)
             .await?;
         let mut acc = super::streaming::StreamAccumulator::new();
         let mut stream = std::pin::pin!(stream);
@@ -1322,22 +1334,22 @@ impl LlmClient for FallbackLlmClient {
         max_rounds: usize,
     ) -> Result<String> {
         let system = system.to_string();
+        let semi_static = input.semi_static.to_string();
         let turns = input.turns.to_vec();
         let current_prompt = input.current_prompt.to_string();
         let tools = tools.to_vec();
-        let summary = input.summary.map(|s| s.to_string());
         self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
             let system = system.clone();
+            let semi_static = semi_static.clone();
             let turns = turns.clone();
             let current_prompt = current_prompt.clone();
             let tools = tools.clone();
-            let summary = summary.clone();
             async move {
                 client
                     .complete_with_conversation_and_tools(
                         &system,
                         ConversationInput {
-                            summary: summary.as_deref(),
+                            semi_static: &semi_static,
                             turns: &turns,
                             current_prompt: &current_prompt,
                         },
@@ -1354,16 +1366,19 @@ impl LlmClient for FallbackLlmClient {
     async fn complete_with_conversation(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<String> {
         let system = system.to_string();
+        let semi_static = semi_static.to_string();
         let summary_owned = summary.map(|s| s.to_string());
         let turns = turns.to_vec();
         let current_prompt = current_prompt.to_string();
         self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
             let system = system.clone();
+            let semi_static = semi_static.clone();
             let summary = summary_owned.clone();
             let turns = turns.clone();
             let current_prompt = current_prompt.clone();
@@ -1371,6 +1386,7 @@ impl LlmClient for FallbackLlmClient {
                 client
                     .complete_with_conversation(
                         &system,
+                        &semi_static,
                         summary.as_deref(),
                         &turns,
                         &current_prompt,
@@ -1412,6 +1428,7 @@ impl LlmClient for FallbackLlmClient {
     fn complete_conversation_streaming<'a>(
         &'a self,
         system: &'a str,
+        semi_static: &'a str,
         summary: Option<&'a str>,
         turns: &'a [ConversationTurn],
         current_prompt: &'a str,
@@ -1422,11 +1439,13 @@ impl LlmClient for FallbackLlmClient {
             use super::direct_client::LlmProvider;
 
             let system = system.to_string();
+            let semi_static = semi_static.to_string();
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
             let prompt_chars = {
                 let mut total = system.len();
+                total += semi_static.len();
                 if let Some(ref s) = summary_owned {
                     total += s.len();
                 }
@@ -1440,6 +1459,7 @@ impl LlmClient for FallbackLlmClient {
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
+                    let semi_static = semi_static.clone();
                     let summary = summary_owned.clone();
                     let turns = turns.clone();
                     let current_prompt = current_prompt.clone();
@@ -1447,6 +1467,7 @@ impl LlmClient for FallbackLlmClient {
                         client
                             .complete_conversation_streaming(
                                 &system,
+                                &semi_static,
                                 summary.as_deref(),
                                 &turns,
                                 &current_prompt,

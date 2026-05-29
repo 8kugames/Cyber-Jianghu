@@ -917,12 +917,13 @@ impl DirectLlmClient {
     pub async fn complete_conversation_streaming(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[super::client::ConversationTurn],
         current_prompt: &str,
     ) -> Result<super::streaming::LlmStream> {
         let messages =
-            super::client::build_conversation_messages(system, summary, turns, current_prompt);
+            super::client::build_conversation_messages(system, semi_static, summary, turns, current_prompt);
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
             model,
@@ -1025,16 +1026,17 @@ impl DirectLlmClient {
 
     /// 使用对话历史完成调用（长窗口）
     ///
-    /// 构建 system (含摘要) + 历史轮次 + 当前 prompt 的完整消息列表。
+    /// 构建 system + semi-static + summary + 历史轮次 + 当前 prompt 的完整消息列表。
     async fn call_with_conversation(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
     ) -> Result<String> {
         let messages =
-            super::client::build_conversation_messages(system, summary, turns, current_prompt);
+            super::client::build_conversation_messages(system, semi_static, summary, turns, current_prompt);
 
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
@@ -1098,6 +1100,7 @@ impl LlmClient for DirectLlmClient {
     async fn complete_with_conversation(
         &self,
         system: &str,
+        semi_static: &str,
         summary: Option<&str>,
         turns: &[ConversationTurn],
         current_prompt: &str,
@@ -1105,7 +1108,7 @@ impl LlmClient for DirectLlmClient {
         if is_llm_disabled() {
             anyhow::bail!("LLM 调用已被停止");
         }
-        self.call_with_conversation(system, summary, turns, current_prompt)
+        self.call_with_conversation(system, semi_static, summary, turns, current_prompt)
             .await
     }
 
@@ -1205,12 +1208,20 @@ impl LlmClient for DirectLlmClient {
         if is_llm_disabled() {
             anyhow::bail!("LLM 调用已被停止");
         }
-        let messages = super::client::build_conversation_messages(
-            system,
-            input.summary,
-            input.turns,
-            input.current_prompt,
-        );
+        // 不使用 build_conversation_messages：tool loop 需要纯 history+current，
+        // system 和 semi-static 由 tool_loop 自己管理
+        let mut messages = vec![ChatMessage::system(system)];
+        if !input.semi_static.is_empty() {
+            messages.push(ChatMessage::system(input.semi_static));
+        }
+        for turn in input.turns {
+            messages.push(ChatMessage::user(&turn.user));
+            messages.push(ChatMessage::assistant_with_reasoning(
+                &turn.assistant,
+                turn.reasoning_content.clone(),
+            ));
+        }
+        messages.push(ChatMessage::user(input.current_prompt));
         let config = super::openai_types::ChatExchangeConfig {
             model: self.config.get_model_with_default(),
             temperature: self.config.temperature,
@@ -1257,6 +1268,7 @@ impl LlmClient for DirectLlmClient {
     fn complete_conversation_streaming<'a>(
         &'a self,
         system: &'a str,
+        semi_static: &'a str,
         summary: Option<&'a str>,
         turns: &'a [ConversationTurn],
         current_prompt: &'a str,
@@ -1269,6 +1281,7 @@ impl LlmClient for DirectLlmClient {
             }
             let prompt_chars = {
                 let mut total = system.len();
+                total += semi_static.len();
                 if let Some(s) = summary {
                     total += s.len();
                 }
@@ -1280,7 +1293,7 @@ impl LlmClient for DirectLlmClient {
                 total as u64
             };
             let stream = self
-                .complete_conversation_streaming(system, summary, turns, current_prompt)
+                .complete_conversation_streaming(system, semi_static, summary, turns, current_prompt)
                 .await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
