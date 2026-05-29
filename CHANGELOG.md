@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### Fixed — 联调测试问题修复
+
+- **Agent**: 429 限流 early-exit — `decision.rs` retry loop 检测 429/rate_limit 立即中断重试，防止 OOM (exit 137)
+- **Agent**: 自引用 target_agent_id 校验 — `rule_engine/engine.rs` 拒绝 target_agent_id == agent_id 的定向动作
+- **Agent**: 经历日志补全 — `soul_cycle.rs` 遍历 subsequent_intents 逐条记录 (pipe_seq 递增)，修复前端无法看到多 intent pipeline 的问题
+- **Agent**: 多 intent pipeline 展示 — `soul_cycle.rs` 将完整 pipeline actions 序列化到 `final_action_data`，`final_action_type` 显示为 "动作1 → 动作2 → 动作3" 格式，SoulCycleRecorder/IntentHistory/Server 上报三链路同步
+
+### Added — 角色生成姓氏多样性
+
+- **Agent**: `character_register.rs` 随机百家姓 index 注入 prompt，打破 LLM 对高频姓氏的趋同
+
+### Changed — 多 Intent 输出引导强化
+
+- **Agent**: `prompt_templates.yaml` 移除"大多数情况只需要 1 个动作"，改为鼓励 LLM 一次性规划 2-5 步连续动作
+- **Agent**: 示例从 3 单 + 1 多改为 1 单 + 4 多，覆盖生存/探索/社交场景组合
+- **Server**: `initial_inventory.yaml` 初始食物/水 3→8、银子 5→10
+
 ### Added — LLM 配置 Web UI 完善
 
 - **Agent**: `FallbackModelConfig` 新增 `context_window_tokens` 字段，支持 per-model 上下文窗口配置（默认使用全局 32K）
