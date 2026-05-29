@@ -274,5 +274,4 @@ mod tests {
         assert_eq!(window.len(), 1);
         assert_eq!(window.latest().unwrap().tick_id, 3);
     }
-
 }

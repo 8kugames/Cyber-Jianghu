@@ -190,7 +190,10 @@ impl super::CognitiveEngine {
     /// [Volatile] tick 级动态内容: feedback + world state + memory + summary + outcome + dialogue
     ///
     /// 每 tick 调用一次。内容随 tick 变化。
-    pub(super) fn build_tick_message(&self, params: TickMessageParams<'_>) -> anyhow::Result<String> {
+    pub(super) fn build_tick_message(
+        &self,
+        params: TickMessageParams<'_>,
+    ) -> anyhow::Result<String> {
         let TickMessageParams {
             world_state,
             memory_context,
@@ -253,7 +256,10 @@ impl super::CognitiveEngine {
 
         // world_state section
         let mut ws_vars = std::collections::HashMap::new();
-        ws_vars.insert("world_state_section".to_string(), world_state_section.clone());
+        ws_vars.insert(
+            "world_state_section".to_string(),
+            world_state_section.clone(),
+        );
         ws_vars.insert("memory_section".to_string(), memory_section.clone());
         ws_vars.insert("summary_context".to_string(), summary_context.clone());
         ws_vars.insert("outcome_section".to_string(), outcome_section.clone());

@@ -165,7 +165,9 @@ pub fn cognitive_decision_with_chain(
                             || err_msg.contains("rate_limit")
                             || err_msg.contains("Too Many Requests")
                         {
-                            warn!("[cognitive] Rate limited (429), aborting retries to prevent OOM");
+                            warn!(
+                                "[cognitive] Rate limited (429), aborting retries to prevent OOM"
+                            );
                             break;
                         }
                     }

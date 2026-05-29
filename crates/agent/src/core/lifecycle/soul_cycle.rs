@@ -399,21 +399,18 @@ impl super::super::Agent {
                         .await;
                     let pipeline = Self::assemble_pipeline(approved_intents.clone());
                     // 构建 pipeline 完整视图：primary + subsequent intents
-                    let pipeline_actions: Vec<serde_json::Value> = std::iter::once(
-                        serde_json::json!({
+                    let pipeline_actions: Vec<serde_json::Value> =
+                        std::iter::once(serde_json::json!({
                             "action_type": pipeline.action_type,
                             "action_data": pipeline.action_data,
-                        }),
-                    )
-                    .chain(
-                        pipeline.subsequent_intents.iter().map(|si| {
+                        }))
+                        .chain(pipeline.subsequent_intents.iter().map(|si| {
                             serde_json::json!({
                                 "action_type": si.action_type,
                                 "action_data": si.action_data,
                             })
-                        }),
-                    )
-                    .collect();
+                        }))
+                        .collect();
                     let action_type_display = pipeline_actions
                         .iter()
                         .filter_map(|a| a.get("action_type").and_then(|v| v.as_str()))

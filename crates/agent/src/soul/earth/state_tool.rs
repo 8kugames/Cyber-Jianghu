@@ -110,7 +110,8 @@ fn build_action_example(action_type: &str, required_fields: &[String]) -> String
 
     let mut fields = Vec::new();
     if has_target_agent_id {
-        fields.push("\"target_agent_id\": \"(从附近的人列表复制UUID，不要填角色名字)\"".to_string());
+        fields
+            .push("\"target_agent_id\": \"(从附近的人列表复制UUID，不要填角色名字)\"".to_string());
     }
     if has_target_location {
         fields.push("\"target_location\": \"(从可前往的地点列表复制)\"".to_string());

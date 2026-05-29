@@ -40,7 +40,9 @@ pub fn build_fallback_client(
         for (i, mc) in llm_config.models.iter().enumerate() {
             let max_tokens = mc.max_tokens.unwrap_or(llm_config.max_tokens);
             let enable_thinking = mc.enable_thinking.or(llm_config.enable_thinking);
-            let context_window_tokens = mc.context_window_tokens.unwrap_or(llm_config.context_window_tokens);
+            let context_window_tokens = mc
+                .context_window_tokens
+                .unwrap_or(llm_config.context_window_tokens);
             match build_direct_client_with_max_tokens(
                 llm_config,
                 Some(mc.model.as_str()),

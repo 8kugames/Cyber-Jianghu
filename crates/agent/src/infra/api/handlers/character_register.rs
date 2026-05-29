@@ -9,7 +9,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::config::{CharacterConfig, CharacterGenerationConfig, CharacterStatus, FieldConstraints, FieldSpec};
+use crate::config::{
+    CharacterConfig, CharacterGenerationConfig, CharacterStatus, FieldConstraints, FieldSpec,
+};
 
 use super::HttpApiState;
 use super::basic::ErrorResponse;
@@ -71,9 +73,6 @@ pub(crate) struct GoalsRequest {
     long_term: Option<String>,
 }
 
-
-
-
 // ============================================================================
 // Schema-driven prompt generation + validation
 // ============================================================================
@@ -111,171 +110,190 @@ fn validate_against_schema(
         let field_val = resolve_path(value, &spec.path);
 
         match &spec.constraints {
-            FieldConstraints::String { required, min_chars, max_chars, .. } => {
-                match field_val {
-                    None | Some(serde_json::Value::Null) => {
-                        if *required {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: "required field missing".into(),
-                            });
-                        }
-                    }
-                    Some(serde_json::Value::String(s)) => {
-                        let len = s.chars().count();
-                        if len < *min_chars {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!("min {} chars, got {}", min_chars, len),
-                            });
-                        }
-                        if len > *max_chars {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!("max {} chars, got {}", max_chars, len),
-                            });
-                        }
-                    }
-                    Some(other) => {
+            FieldConstraints::String {
+                required,
+                min_chars,
+                max_chars,
+                ..
+            } => match field_val {
+                None | Some(serde_json::Value::Null) => {
+                    if *required {
                         errors.push(FieldValidationError {
                             path: spec.path.clone(),
-                            message: format!("expected string, got {}", other),
+                            message: "required field missing".into(),
                         });
                     }
                 }
-            }
-            FieldConstraints::Integer { required, min, max } => {
-                match field_val {
-                    None | Some(serde_json::Value::Null) => {
-                        if *required {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: "required field missing".into(),
-                            });
-                        }
-                    }
-                    Some(serde_json::Value::Number(n)) => {
-                        if let Some(n) = n.as_u64() {
-                            let n = n as u32;
-                            if n < *min || n > *max {
-                                errors.push(FieldValidationError {
-                                    path: spec.path.clone(),
-                                    message: format!("must be {}-{}, got {}", min, max, n),
-                                });
-                            }
-                        } else {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: "expected integer".into(),
-                            });
-                        }
-                    }
-                    Some(other) => {
+                Some(serde_json::Value::String(s)) => {
+                    let len = s.chars().count();
+                    if len < *min_chars {
                         errors.push(FieldValidationError {
                             path: spec.path.clone(),
-                            message: format!("expected integer, got {}", other),
+                            message: format!("min {} chars, got {}", min_chars, len),
+                        });
+                    }
+                    if len > *max_chars {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!("max {} chars, got {}", max_chars, len),
                         });
                     }
                 }
-            }
-            FieldConstraints::Enum { required, options, .. } => {
-                match field_val {
-                    None | Some(serde_json::Value::Null) => {
-                        if *required {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: "required field missing".into(),
-                            });
-                        }
-                    }
-                    Some(serde_json::Value::String(s)) => {
-                        if !options.contains(s) {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!(
-                                    "invalid: \"{}\" (allowed: {})",
-                                    s,
-                                    options.join("\u{3001}")
-                                ),
-                            });
-                        }
-                    }
-                    Some(other) => {
+                Some(other) => {
+                    errors.push(FieldValidationError {
+                        path: spec.path.clone(),
+                        message: format!("expected string, got {}", other),
+                    });
+                }
+            },
+            FieldConstraints::Integer { required, min, max } => match field_val {
+                None | Some(serde_json::Value::Null) => {
+                    if *required {
                         errors.push(FieldValidationError {
                             path: spec.path.clone(),
-                            message: format!("expected string, got {}", other),
+                            message: "required field missing".into(),
                         });
                     }
                 }
-            }
-            FieldConstraints::EnumArray { required, options, min_count, max_count, .. } => {
-                match field_val {
-                    None | Some(serde_json::Value::Null) => {
-                        if *required {
+                Some(serde_json::Value::Number(n)) => {
+                    if let Some(n) = n.as_u64() {
+                        let n = n as u32;
+                        if n < *min || n > *max {
                             errors.push(FieldValidationError {
                                 path: spec.path.clone(),
-                                message: "required field missing".into(),
+                                message: format!("must be {}-{}, got {}", min, max, n),
                             });
                         }
-                    }
-                    Some(serde_json::Value::String(s)) => {
-                        if !options.contains(s) {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!(
-                                    "invalid: \"{}\" (allowed: {})",
-                                    s,
-                                    options.join("\u{3001}")
-                                ),
-                            });
-                        }
-                    }
-                    Some(serde_json::Value::Array(arr)) => {
-                        if arr.len() < *min_count || arr.len() > *max_count {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!(
-                                    "need {}-{} items, got {}",
-                                    min_count, max_count, arr.len()
-                                ),
-                            });
-                        }
-                        let invalid: Vec<String> = arr
-                            .iter()
-                            .filter_map(|v| v.as_str())
-                            .filter(|s| !options.iter().any(|o| o == *s))
-                            .map(|s| s.to_string())
-                            .collect();
-                        if !invalid.is_empty() {
-                            errors.push(FieldValidationError {
-                                path: spec.path.clone(),
-                                message: format!(
-                                    "invalid: {} (allowed: {})",
-                                    invalid.join("\u{3001}"),
-                                    options.join("\u{3001}")
-                                ),
-                            });
-                        }
-                    }
-                    Some(other) => {
+                    } else {
                         errors.push(FieldValidationError {
                             path: spec.path.clone(),
-                            message: format!("expected array, got {}", other),
+                            message: "expected integer".into(),
                         });
                     }
                 }
-            }
+                Some(other) => {
+                    errors.push(FieldValidationError {
+                        path: spec.path.clone(),
+                        message: format!("expected integer, got {}", other),
+                    });
+                }
+            },
+            FieldConstraints::Enum {
+                required, options, ..
+            } => match field_val {
+                None | Some(serde_json::Value::Null) => {
+                    if *required {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: "required field missing".into(),
+                        });
+                    }
+                }
+                Some(serde_json::Value::String(s)) => {
+                    if !options.contains(s) {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!(
+                                "invalid: \"{}\" (allowed: {})",
+                                s,
+                                options.join("\u{3001}")
+                            ),
+                        });
+                    }
+                }
+                Some(other) => {
+                    errors.push(FieldValidationError {
+                        path: spec.path.clone(),
+                        message: format!("expected string, got {}", other),
+                    });
+                }
+            },
+            FieldConstraints::EnumArray {
+                required,
+                options,
+                min_count,
+                max_count,
+                ..
+            } => match field_val {
+                None | Some(serde_json::Value::Null) => {
+                    if *required {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: "required field missing".into(),
+                        });
+                    }
+                }
+                Some(serde_json::Value::String(s)) => {
+                    if !options.contains(s) {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!(
+                                "invalid: \"{}\" (allowed: {})",
+                                s,
+                                options.join("\u{3001}")
+                            ),
+                        });
+                    }
+                }
+                Some(serde_json::Value::Array(arr)) => {
+                    if arr.len() < *min_count || arr.len() > *max_count {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!(
+                                "need {}-{} items, got {}",
+                                min_count,
+                                max_count,
+                                arr.len()
+                            ),
+                        });
+                    }
+                    let invalid: Vec<String> = arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|s| !options.iter().any(|o| o == *s))
+                        .map(|s| s.to_string())
+                        .collect();
+                    if !invalid.is_empty() {
+                        errors.push(FieldValidationError {
+                            path: spec.path.clone(),
+                            message: format!(
+                                "invalid: {} (allowed: {})",
+                                invalid.join("\u{3001}"),
+                                options.join("\u{3001}")
+                            ),
+                        });
+                    }
+                }
+                Some(other) => {
+                    errors.push(FieldValidationError {
+                        path: spec.path.clone(),
+                        message: format!("expected array, got {}", other),
+                    });
+                }
+            },
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Resolve template variables in prompt_text from field constraints
-fn resolve_prompt_template(template: &str, spec: &FieldSpec, extra_vars: &std::collections::HashMap<String, String>) -> String {
+fn resolve_prompt_template(
+    template: &str,
+    spec: &FieldSpec,
+    extra_vars: &std::collections::HashMap<String, String>,
+) -> String {
     let mut result = template.to_string();
     match &spec.constraints {
-        FieldConstraints::String { min_chars, max_chars, .. } => {
+        FieldConstraints::String {
+            min_chars,
+            max_chars,
+            ..
+        } => {
             result = result.replace("{min_chars}", &min_chars.to_string());
             result = result.replace("{max_chars}", &max_chars.to_string());
         }
@@ -286,7 +304,12 @@ fn resolve_prompt_template(template: &str, spec: &FieldSpec, extra_vars: &std::c
         FieldConstraints::Enum { options, .. } => {
             result = result.replace("{options}", &options.join("\u{3001}"));
         }
-        FieldConstraints::EnumArray { options, min_count, max_count, .. } => {
+        FieldConstraints::EnumArray {
+            options,
+            min_count,
+            max_count,
+            ..
+        } => {
             result = result.replace("{options}", &options.join("\u{3001}"));
             result = result.replace("{min_count}", &min_count.to_string());
             result = result.replace("{max_count}", &max_count.to_string());
@@ -299,13 +322,22 @@ fn resolve_prompt_template(template: &str, spec: &FieldSpec, extra_vars: &std::c
 }
 
 /// Generate prompt field line from a single field spec
-fn generate_field_line(spec: &FieldSpec, extra_vars: &std::collections::HashMap<String, String>) -> String {
+fn generate_field_line(
+    spec: &FieldSpec,
+    extra_vars: &std::collections::HashMap<String, String>,
+) -> String {
     let field_name = spec.path.split('.').next_back().unwrap_or(&spec.path);
 
     // Check for prompt_text override
     let prompt_text = match &spec.constraints {
-        FieldConstraints::String { prompt_text: Some(txt), .. }
-        | FieldConstraints::Enum { prompt_text: Some(txt), .. } => Some(txt.clone()),
+        FieldConstraints::String {
+            prompt_text: Some(txt),
+            ..
+        }
+        | FieldConstraints::Enum {
+            prompt_text: Some(txt),
+            ..
+        } => Some(txt.clone()),
         _ => None,
     };
 
@@ -316,7 +348,11 @@ fn generate_field_line(spec: &FieldSpec, extra_vars: &std::collections::HashMap<
 
     // Auto-generate from constraints
     match &spec.constraints {
-        FieldConstraints::String { max_chars, min_chars, .. } => {
+        FieldConstraints::String {
+            max_chars,
+            min_chars,
+            ..
+        } => {
             if *min_chars > 0 {
                 format!("- {}: {}-{} chars", field_name, min_chars, max_chars)
             } else if *max_chars > 0 {
@@ -329,12 +365,24 @@ fn generate_field_line(spec: &FieldSpec, extra_vars: &std::collections::HashMap<
             format!("- {}: {}-{} (integer)", field_name, min, max)
         }
         FieldConstraints::Enum { options, .. } => {
-            format!("- {}: pick 1 from: {}", field_name, options.join("\u{3001}"))
+            format!(
+                "- {}: pick 1 from: {}",
+                field_name,
+                options.join("\u{3001}")
+            )
         }
-        FieldConstraints::EnumArray { options, min_count, max_count, extra_prompt, .. } => {
+        FieldConstraints::EnumArray {
+            options,
+            min_count,
+            max_count,
+            extra_prompt,
+            ..
+        } => {
             let base = format!(
                 "- {}: pick {}-{} from: {}",
-                field_name, min_count, max_count,
+                field_name,
+                min_count,
+                max_count,
                 options.join("\u{3001}")
             );
             if let Some(extra) = extra_prompt {
@@ -352,7 +400,8 @@ fn generate_character_prompt(
     extra_vars: &std::collections::HashMap<String, String>,
 ) -> String {
     let mut top_level = Vec::new();
-    let mut groups: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
 
     for spec in &cg.fields {
         let line = generate_field_line(spec, extra_vars);
@@ -376,7 +425,7 @@ fn generate_character_prompt(
     }
 
     format!(
-r#"Generate a character fitting this world:
+        r#"Generate a character fitting this world:
 
 ## World
 {world_setting}
@@ -460,7 +509,6 @@ pub(crate) async fn generate_character_handler(
     extra_vars.insert("surname_constraint".into(), surname_constraint);
     let prompt = generate_character_prompt(&config.character_generation, &extra_vars);
 
-
     #[derive(Debug, serde::Deserialize, serde::Serialize)]
     struct GeneratedCharacter {
         name: String,
@@ -482,19 +530,28 @@ pub(crate) async fn generate_character_handler(
         max_tokens: 2048,
         enable_thinking: None,
     };
-    match llm_client.complete_json_with_config::<serde_json::Value>(&prompt, chat_config).await {
+    match llm_client
+        .complete_json_with_config::<serde_json::Value>(&prompt, chat_config)
+        .await
+    {
         Ok(json_value) => {
             // Schema validation before deserialization
-            if let Err(errors) = validate_against_schema(&json_value, &config.character_generation.fields) {
+            if let Err(errors) =
+                validate_against_schema(&json_value, &config.character_generation.fields)
+            {
                 let msgs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
-                warn!("[character] LLM output validation failed: {}", msgs.join("; "));
+                warn!(
+                    "[character] LLM output validation failed: {}",
+                    msgs.join("; ")
+                );
                 return (
                     StatusCode::BAD_GATEWAY,
                     Json(ErrorResponse {
                         error_code: "validation_failed".to_string(),
                         message: format!("Role validation failed: {}", msgs.join("; ")),
                     }),
-                ).into_response();
+                )
+                    .into_response();
             }
             match serde_json::from_value::<GeneratedCharacter>(json_value) {
                 Ok(character) => {
@@ -503,10 +560,14 @@ pub(crate) async fn generate_character_handler(
                 }
                 Err(e) => {
                     error!("[character] JSON deserialization failed: {}", e);
-                    (StatusCode::BAD_GATEWAY, Json(ErrorResponse {
-                        error_code: "parse_failed".to_string(),
-                        message: format!("Parse failed: {}", e),
-                    })).into_response()
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        Json(ErrorResponse {
+                            error_code: "parse_failed".to_string(),
+                            message: format!("Parse failed: {}", e),
+                        }),
+                    )
+                        .into_response()
                 }
             }
         }
@@ -553,7 +614,11 @@ pub(crate) async fn register_character_handler(
         }
     };
 
-    let name = value.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let name = value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     info!("角色注册请求: {}", name);
 
     // 2. Load config + schema validation
@@ -568,7 +633,8 @@ pub(crate) async fn register_character_handler(
                     message: format!("读取配置文件失败: {}", e),
                     warning: None,
                 }),
-            ).into_response();
+            )
+                .into_response();
         }
     };
 
@@ -583,7 +649,8 @@ pub(crate) async fn register_character_handler(
                 message: msgs.join("; "),
                 warning: None,
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     // 4. Deserialize into typed struct
@@ -598,7 +665,8 @@ pub(crate) async fn register_character_handler(
                     message: format!("请求格式错误: {}", e),
                     warning: None,
                 }),
-            ).into_response();
+            )
+                .into_response();
         }
     };
 

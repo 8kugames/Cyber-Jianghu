@@ -49,10 +49,7 @@ impl LoopGuard {
             if !self.warned_tools.contains(tool_name) {
                 // 第 1 次重复：警告
                 self.warned_tools.insert(tool_name.to_string());
-                let msg = format!(
-                    "你对'{}'已经了解得够多了，该看看其他方面了",
-                    tool_name
-                );
+                let msg = format!("你对'{}'已经了解得够多了，该看看其他方面了", tool_name);
                 self.pending_warning = Some(msg.clone());
                 return LoopGuardAction::Warn(msg);
             }

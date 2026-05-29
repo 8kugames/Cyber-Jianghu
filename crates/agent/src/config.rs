@@ -1129,16 +1129,14 @@ mod tests {
     fn test_cg() -> CharacterGenerationConfig {
         CharacterGenerationConfig {
             world_setting: "武侠架空世界".into(),
-            fields: vec![
-                FieldSpec {
-                    path: "age".into(),
-                    constraints: FieldConstraints::Integer {
-                        required: true,
-                        min: 16,
-                        max: 60,
-                    },
+            fields: vec![FieldSpec {
+                path: "age".into(),
+                constraints: FieldConstraints::Integer {
+                    required: true,
+                    min: 16,
+                    max: 60,
                 },
-            ],
+            }],
         }
     }
 
