@@ -75,7 +75,7 @@ impl super::super::Agent {
         // tick 级 LLM 失败计数器（优化模式下使用）
         let mut tick_llm_fail_count: u32 = 0;
 
-        // 注入对话上下文到 CognitiveEngine（供 build_prompt 的 {dialogue_section} 使用）
+        // 注入对话上下文到 CognitiveEngine（供 build_tick_message 的 {dialogue_section} 使用）
         if let Some(ref engine) = self.cognitive_engine {
             let dialogue_ctx = if let Some(ref dm) = self.dialogue_manager {
                 let guard = dm.read().await;
