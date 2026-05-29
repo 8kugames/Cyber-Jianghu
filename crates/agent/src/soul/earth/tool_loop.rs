@@ -104,10 +104,30 @@ pub(crate) async fn run_tool_loop(
                 content.len(),
                 content.chars().take(2000).collect::<String>()
             );
-            return Ok(ToolLoopResult {
-                content,
+
+            // 内容校验：必须是 JSON 格式（以 { 开头）
+            // 非 JSON 内容（纯动作名、XML tool_call、推理文本等）走强制 JSON 退出
+            if content.trim().starts_with('{') {
+                return Ok(ToolLoopResult {
+                    content,
+                    reasoning_content: response.reasoning_content,
+                });
+            }
+
+            warn!(
+                "[地魂] LLM 返回非JSON内容 ({} chars), 转为强制JSON退出, preview: {}",
+                content.len(),
+                content.chars().take(200).collect::<String>()
+            );
+            messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: Some(content),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
                 reasoning_content: response.reasoning_content,
             });
+            return forced_text_exit(llm, messages, llm_config).await;
         }
 
         let tool_calls = response
@@ -230,15 +250,15 @@ async fn forced_text_exit(
 ) -> Result<ToolLoopResult> {
     warn!("[地魂] 执行强制文本退出");
 
-    // 追加引导消息，防止模型在 tools 被移除后返回空响应
+    // 追加引导消息：显式要求 JSON 格式输出
     messages.push(ChatMessage::user(
-        "你已充分了解周围情况。现在请做出你的决定。",
+        "你已充分了解周围情况。现在请严格按照系统提示中的JSON格式输出你的决策。只输出JSON对象，不要输出任何其他文本。",
     ));
 
     let response = llm.send_chat_exchange(messages, None, llm_config).await?;
 
     let content = response.content.unwrap_or_default();
-    if content.is_empty() {
+    if content.trim().is_empty() {
         warn!("[地魂] 强制文本退出返回空内容，agent 本轮可能无决策");
     }
 
