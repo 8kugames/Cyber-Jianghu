@@ -795,13 +795,15 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             acc.push(chunk);
         }
 
-        let (pt, ct, has_real) = acc.token_stats();
+        let stats = acc.token_stats();
+        let pt = stats.prompt_tokens;
+        let ct = stats.completion_tokens;
         if pt > 0 || ct > 0 {
             tracing::debug!(
                 "Streaming JSON token usage: prompt={}, completion={}, real={}",
                 pt,
                 ct,
-                has_real
+                stats.has_real_usage
             );
         }
 
@@ -843,13 +845,15 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             acc.push(chunk);
         }
 
-        let (pt, ct, has_real) = acc.token_stats();
+        let stats = acc.token_stats();
+        let pt = stats.prompt_tokens;
+        let ct = stats.completion_tokens;
         if pt > 0 || ct > 0 {
             tracing::debug!(
                 "Streaming JSON conv token usage: prompt={}, completion={}, real={}",
                 pt,
                 ct,
-                has_real
+                stats.has_real_usage
             );
         }
 
