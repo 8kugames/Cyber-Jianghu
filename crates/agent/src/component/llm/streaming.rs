@@ -95,6 +95,7 @@ impl Stream for UsageTrackingStream {
                             &self.model,
                             *prompt_tokens,
                             *completion_tokens,
+                            0,
                         );
                         tracing::debug!(
                             "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
@@ -112,6 +113,7 @@ impl Stream for UsageTrackingStream {
                             &self.model,
                             est_pt,
                             est_ct,
+                            0,
                         );
                         tracing::debug!(
                             "UsageTrackingStream recorded (est): provider={}, model={}, prompt_est={}, completion_est={}",

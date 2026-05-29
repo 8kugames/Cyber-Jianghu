@@ -595,6 +595,7 @@ impl DirectLlmClient {
                 &model,
                 usage.prompt_tokens,
                 usage.completion_tokens,
+                0,
             );
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}",
@@ -617,7 +618,7 @@ impl DirectLlmClient {
                 .and_then(|c| c.message.content.as_ref())
                 .map(|s| (s.len() as u64 / 3).max(1))
                 .unwrap_or(0);
-            record_token_usage(&self.config.provider, &model, est_pt, est_ct);
+            record_token_usage(&self.config.provider, &model, est_pt, est_ct, 0);
             debug!(
                 "Token usage (estimated): provider={}, model={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
@@ -697,6 +698,7 @@ impl DirectLlmClient {
                     &self.config.get_model_with_default(),
                     pt,
                     0,
+                    0,
                 );
             }
             anyhow::bail!(
@@ -739,6 +741,7 @@ impl DirectLlmClient {
                 &self.config.get_model_with_default(),
                 final_pt,
                 ct,
+                0,
             );
             debug!(
                 "Stream token usage: provider={}, model={}, prompt={}, completion={}, real_usage={}",
@@ -762,6 +765,7 @@ impl DirectLlmClient {
                 &self.config.get_model_with_default(),
                 est_pt,
                 est_ct,
+                0,
             );
             debug!(
                 "Stream token usage (estimated fallback): provider={}, model={}, prompt~{}, completion~{}",
