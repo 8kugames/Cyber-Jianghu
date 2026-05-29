@@ -885,7 +885,7 @@ impl CognitiveEngine {
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
 
                 match conv_data {
-                    Some((turns, system, summary)) => {
+                    Some((turns, system, _summary)) => {
                         // tool-calling 模式下限制历史轮次（配置驱动，避免模式惯性）
                         let max_tool_turns = self.truncation("tool_calling_history_turns", 8);
                         let turns: Vec<_> = if turns.len() > max_tool_turns {
@@ -899,7 +899,7 @@ impl CognitiveEngine {
                             .complete_json_with_conversation_and_tools::<DirectCognitiveResponse>(
                                 &system,
                                 ConversationInput {
-                                    summary: summary.as_deref(),
+                                    semi_static: "",  // Task 8: wire up actual semi-static content
                                     turns: &turns,
                                     current_prompt: &prompt,
                                 },
@@ -932,6 +932,7 @@ impl CognitiveEngine {
                                 .llm_client
                                 .complete_json_streaming_with_conversation(
                                     &system,
+                                    "",  // Task 8: wire up actual semi-static content
                                     summary.as_deref(),
                                     &turns,
                                     &prompt,
@@ -944,6 +945,7 @@ impl CognitiveEngine {
                                     self.llm_client
                                         .complete_json_with_conversation(
                                             &system,
+                                            "",  // Task 8: wire up actual semi-static content
                                             summary.as_deref(),
                                             &turns,
                                             &prompt,
@@ -955,6 +957,7 @@ impl CognitiveEngine {
                             self.llm_client
                                 .complete_json_with_conversation(
                                     &system,
+                                    "",  // Task 8: wire up actual semi-static content
                                     summary.as_deref(),
                                     &turns,
                                     &prompt,
