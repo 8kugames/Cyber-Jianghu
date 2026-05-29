@@ -653,7 +653,11 @@ impl DirectLlmClient {
             }
         }
 
-        let (pt, ct, has_real) = acc.token_stats();
+        let stats = acc.token_stats();
+        let pt = stats.prompt_tokens;
+        let ct = stats.completion_tokens;
+        let has_real = stats.has_real_usage;
+        let cache_hit = stats.cache_hit_tokens.unwrap_or(0);
         let (content, tool_calls, reasoning_content) = acc.into_parts();
 
         // 诊断：检测 content 中的 UTF-8 mojibake（Latin-1 双重编码）

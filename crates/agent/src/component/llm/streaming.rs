@@ -32,6 +32,7 @@ pub enum StreamChunk {
     Done {
         prompt_tokens: u64,
         completion_tokens: u64,
+        cache_hit_tokens: u64,
     },
     /// 流结束，但服务端未返回 usage（需要估算）
     DoneEstimation { completion_chars: u64 },
@@ -87,6 +88,7 @@ impl Stream for UsageTrackingStream {
                     if let Ok(StreamChunk::Done {
                         prompt_tokens,
                         completion_tokens,
+                        cache_hit_tokens,
                     }) = &result
                     {
                         self.recorded = true;
@@ -95,7 +97,7 @@ impl Stream for UsageTrackingStream {
                             &self.model,
                             *prompt_tokens,
                             *completion_tokens,
-                            0,
+                            *cache_hit_tokens,
                         );
                         tracing::debug!(
                             "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
@@ -136,6 +138,14 @@ impl Stream for UsageTrackingStream {
 // 流累积器
 // ============================================================================
 
+/// Token 用量统计（流式路径）
+pub struct TokenStats {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub has_real_usage: bool,
+    pub cache_hit_tokens: Option<u64>,
+}
+
 /// 将 StreamChunk 累积为完整响应文本
 pub struct StreamAccumulator {
     content: String,
@@ -143,6 +153,7 @@ pub struct StreamAccumulator {
     prompt_tokens: u64,
     completion_tokens: u64,
     has_real_usage: bool,
+    cache_hit_tokens: Option<u64>,
     tool_call_acc: super::tool_types::StreamToolCallAccumulator,
     has_tool_calls: bool,
 }
@@ -161,6 +172,7 @@ impl StreamAccumulator {
             prompt_tokens: 0,
             completion_tokens: 0,
             has_real_usage: false,
+            cache_hit_tokens: None,
             tool_call_acc: super::tool_types::StreamToolCallAccumulator::new(),
             has_tool_calls: false,
         }
@@ -178,9 +190,11 @@ impl StreamAccumulator {
             StreamChunk::Done {
                 prompt_tokens,
                 completion_tokens,
+                cache_hit_tokens,
             } => {
                 self.prompt_tokens = prompt_tokens;
                 self.completion_tokens = completion_tokens;
+                self.cache_hit_tokens = Some(cache_hit_tokens);
                 self.has_real_usage = true;
             }
             StreamChunk::DoneEstimation { completion_chars } => {
@@ -210,13 +224,14 @@ impl StreamAccumulator {
         self.content
     }
 
-    /// 获取 token 用量 (prompt_tokens, completion_tokens, has_real_usage)
-    pub fn token_stats(&self) -> (u64, u64, bool) {
-        (
-            self.prompt_tokens,
-            self.completion_tokens,
-            self.has_real_usage,
-        )
+    /// 获取 token 用量
+    pub fn token_stats(&self) -> TokenStats {
+        TokenStats {
+            prompt_tokens: self.prompt_tokens,
+            completion_tokens: self.completion_tokens,
+            has_real_usage: self.has_real_usage,
+            cache_hit_tokens: self.cache_hit_tokens,
+        }
     }
 
     /// 追加一个流式 tool_call delta
@@ -257,7 +272,7 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
     let stream = async_stream::stream! {
         let mut raw_buffer: Vec<u8> = Vec::with_capacity(4096);
         let mut stream = response.bytes_stream();
-        let mut last_usage: Option<(u64, u64)> = None;
+        let mut last_usage: Option<(u64, u64, u64)> = None; // (prompt, completion, cache_hit)
         let mut completion_content = String::new();
         let mut chunk_count: u64 = 0;
 
@@ -289,10 +304,11 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
 
                     if data == "[DONE]" {
                         // [DONE] 不携带 usage，使用最后记录的 usage
-                        if let Some((pt, ct)) = last_usage {
+                        if let Some((pt, ct, ch)) = last_usage {
                             yield Ok(StreamChunk::Done {
                                 prompt_tokens: pt,
                                 completion_tokens: ct,
+                                cache_hit_tokens: ch,
                             });
                         } else {
                             // 服务端从未返回 usage，基于已累积的内容估算
@@ -339,7 +355,11 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                             }
                             // 记录 usage（即使不是最后一个 chunk）
                             if let Some(ref usage) = resp.usage {
-                                last_usage = Some((usage.prompt_tokens, usage.completion_tokens));
+                                last_usage = Some((
+                                    usage.prompt_tokens,
+                                    usage.completion_tokens,
+                                    usage.cache_hit_tokens().unwrap_or(0),
+                                ));
                             }
                         }
                         Err(e) => {
@@ -414,12 +434,14 @@ mod tests {
         acc.push(StreamChunk::Done {
             prompt_tokens: 10,
             completion_tokens: 5,
+            cache_hit_tokens: 3,
         });
         assert_eq!(acc.content(), "hello world");
-        let (pt, ct, has_real) = acc.token_stats();
-        assert_eq!(pt, 10);
-        assert_eq!(ct, 5);
-        assert!(has_real);
+        let stats = acc.token_stats();
+        assert_eq!(stats.prompt_tokens, 10);
+        assert_eq!(stats.completion_tokens, 5);
+        assert!(stats.has_real_usage);
+        assert_eq!(stats.cache_hit_tokens, Some(3));
     }
 
     #[test]
@@ -430,10 +452,10 @@ mod tests {
             completion_chars: 11,
         });
         assert_eq!(acc.content(), "hello world");
-        let (pt, ct, has_real) = acc.token_stats();
-        assert_eq!(pt, 0); // prompt_tokens 未记录
-        assert_eq!(ct, 11 / 3); // ~3 chars/token
-        assert!(!has_real);
+        let stats = acc.token_stats();
+        assert_eq!(stats.prompt_tokens, 0); // prompt_tokens 未记录
+        assert_eq!(stats.completion_tokens, 11 / 3); // ~3 chars/token
+        assert!(!stats.has_real_usage);
     }
 
     #[test]
