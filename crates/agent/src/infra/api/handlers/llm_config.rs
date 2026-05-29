@@ -593,6 +593,9 @@ pub async fn get_metrics_handler() -> Json<serde_json::Value> {
     use crate::component::llm::snapshot_all_stats;
 
     let stats = snapshot_all_stats();
+    let mut total_prompt: u64 = 0;
+    let mut total_cache_hit: u64 = 0;
+
     let models: Vec<serde_json::Value> = stats
         .iter()
         .map(|s| {
@@ -601,6 +604,13 @@ pub async fn get_metrics_handler() -> Json<serde_json::Value> {
             } else {
                 1.0
             };
+            let cache_hit_rate = if s.prompt_tokens > 0 {
+                s.cache_hit_tokens as f64 / s.prompt_tokens as f64
+            } else {
+                0.0
+            };
+            total_prompt += s.prompt_tokens;
+            total_cache_hit += s.cache_hit_tokens;
             serde_json::json!({
                 "provider": s.provider,
                 "model": s.model,
@@ -610,12 +620,23 @@ pub async fn get_metrics_handler() -> Json<serde_json::Value> {
                 "prompt_tokens": s.prompt_tokens,
                 "completion_tokens": s.completion_tokens,
                 "total_tokens": s.prompt_tokens + s.completion_tokens,
+                "cache_hit_tokens": s.cache_hit_tokens,
+                "cache_hit_rate": format!("{:.1}%", cache_hit_rate * 100.0),
             })
         })
         .collect();
 
+    let overall_cache_hit_rate = if total_prompt > 0 {
+        total_cache_hit as f64 / total_prompt as f64
+    } else {
+        0.0
+    };
+
     Json(serde_json::json!({
         "llm": models,
+        "total_cache_hit_tokens": total_cache_hit,
+        "total_prompt_tokens": total_prompt,
+        "cache_hit_rate": format!("{:.1}%", overall_cache_hit_rate * 100.0),
     }))
 }
 
