@@ -71,7 +71,7 @@ COPY crates/agent/src ./crates/agent/src
 # 使用 id=agent-src-N 强制独立的 target cache，避免旧编译结果被复用
 RUN --mount=type=cache,id=agent-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=agent-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=agent-target-v2,target=/app/target,sharing=locked \
+    --mount=type=cache,id=agent-target-v3,target=/app/target,sharing=locked \
     cargo clean -p cyber-jianghu-agent --release 2>/dev/null; \
     touch crates/protocol/src/lib.rs && \
     cargo build --release -p cyber-jianghu-agent && \
