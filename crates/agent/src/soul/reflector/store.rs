@@ -292,9 +292,7 @@ pub async fn submit_review(
         .submit_review(intent_id, submission.clone())
         .await
     {
-        Ok(result) => {
-            Ok(Json(result))
-        }
+        Ok(result) => Ok(Json(result)),
         Err(e) => {
             let status = match &e {
                 ReviewError::IntentNotFound { .. } => StatusCode::NOT_FOUND,

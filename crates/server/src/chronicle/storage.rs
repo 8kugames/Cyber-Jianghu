@@ -337,8 +337,12 @@ pub async fn get_chronicle(
                 births: r.get("births"),
                 status: r.get("status"),
                 created_at: r.get("created_at"),
-                formatted_start_date: crate::time_utils::game_day_to_chinese(r.get::<i32, _>("game_day_start") as i64),
-                formatted_end_date: crate::time_utils::game_day_to_chinese(r.get::<i32, _>("game_day_end") as i64),
+                formatted_start_date: crate::time_utils::game_day_to_chinese(
+                    r.get::<i32, _>("game_day_start") as i64,
+                ),
+                formatted_end_date: crate::time_utils::game_day_to_chinese(
+                    r.get::<i32, _>("game_day_end") as i64,
+                ),
             }))
         }
         None => Ok(None),

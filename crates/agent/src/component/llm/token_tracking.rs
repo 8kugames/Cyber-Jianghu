@@ -87,10 +87,11 @@ pub fn record_token_usage(
 ) {
     let key = model_key(provider, model);
     if let Ok(mut stats) = token_stats().lock() {
-        stats
-            .entry(key)
-            .or_insert_with(PerModelStats::new)
-            .record(prompt_tokens, completion_tokens, cache_hit);
+        stats.entry(key).or_insert_with(PerModelStats::new).record(
+            prompt_tokens,
+            completion_tokens,
+            cache_hit,
+        );
     }
 }
 

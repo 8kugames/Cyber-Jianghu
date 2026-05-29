@@ -120,7 +120,9 @@ struct ConnectionState {
     /// ExecutionResult 通道（后台任务 → 主循环，mpsc 保留全部结果）
     execution_result_tx: Option<tokio::sync::mpsc::Sender<ExecutionResultData>>,
     /// ExecutionResult 接收端（Arc<Mutex> 允许 &self 下异步访问）
-    execution_result_rx: Option<std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ExecutionResultData>>>>,
+    execution_result_rx: Option<
+        std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<ExecutionResultData>>>,
+    >,
 }
 
 impl WebSocketClient {
@@ -211,7 +213,9 @@ impl WebSocketClient {
                 state.worldstate_tx = Some(worldstate_tx);
                 state.registered_tx = Some(registered_tx);
                 state.execution_result_tx = Some(execution_result_tx);
-                state.execution_result_rx = Some(std::sync::Arc::new(tokio::sync::Mutex::new(execution_result_rx)));
+                state.execution_result_rx = Some(std::sync::Arc::new(tokio::sync::Mutex::new(
+                    execution_result_rx,
+                )));
 
                 info!("Connected to server (background task started)");
                 Ok(())
