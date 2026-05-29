@@ -1575,7 +1575,7 @@ button[type="button"]:disabled {
 
 .soul-pipeline {
     margin: 2px 0;
-    border-left: 2px solid var(--border-color);
+    border-left: 2px solid var(--border);
     padding-left: 8px;
 }
 .soul-pipeline-step {
@@ -1585,7 +1585,7 @@ button[type="button"]:disabled {
     padding: 2px 0;
 }
 .soul-pipeline-step + .soul-pipeline-step {
-    border-top: 1px dashed var(--border-color);
+    border-top: 1px dashed var(--border);
 }
 .soul-pipeline-num {
     font-size: 10px;
