@@ -33,6 +33,8 @@ pub struct ConversationHistory {
     conn: Connection,
     /// System message (persona + static rules)
     system_message: String,
+    /// 半静态内容（actions + skills），变更频率远低于 system，远高于 summary
+    semi_static_message: String,
     /// 旧轮次压缩摘要
     summary: Option<String>,
     /// 完整对话轮次（内存）
@@ -88,6 +90,7 @@ impl ConversationHistory {
         let mut history = Self {
             conn,
             system_message: system_message.to_string(),
+            semi_static_message: String::new(),
             summary: None,
             turns: Vec::new(),
             token_count: 0,
@@ -320,6 +323,22 @@ impl ConversationHistory {
         self.token_count = self.estimate_tokens();
     }
 
+    /// 设置半静态内容（actions + skills，配置更新时调用）
+    pub fn set_semi_static_message(&mut self, msg: String) {
+        self.semi_static_message = msg;
+        self.token_count = self.estimate_tokens();
+    }
+
+    /// 获取半静态内容
+    pub fn semi_static_message(&self) -> &str {
+        &self.semi_static_message
+    }
+
+    /// 获取 summary 摘要（alias for get_summary）
+    pub fn summary_message(&self) -> Option<&str> {
+        self.summary.as_deref()
+    }
+
     /// 清空对话历史 (rebirth 时调用)
     pub fn clear(&mut self) -> Result<()> {
         self.conn.execute("DELETE FROM conv_turns", [])?;
@@ -361,6 +380,9 @@ impl ConversationHistory {
 
     fn estimate_tokens(&self) -> usize {
         let mut count = estimate_tokens(&self.system_message);
+        if !self.semi_static_message.is_empty() {
+            count += estimate_tokens(&self.semi_static_message);
+        }
         if let Some(ref s) = self.summary {
             count += estimate_tokens(s);
         }
