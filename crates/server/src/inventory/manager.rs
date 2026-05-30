@@ -146,25 +146,6 @@ impl InventoryManager {
         Ok(())
     }
 
-    /// 获取物品数量（预留：物品数量查询）
-    #[allow(dead_code)]
-    pub async fn get_item_count(
-        pool: &PgPool,
-        agent_id: Uuid,
-        item_id: &str,
-    ) -> Result<i32, InventoryError> {
-        let count: Option<i32> = sqlx::query_scalar(
-            "SELECT quantity FROM agent_inventory WHERE agent_id = $1 AND item_id = $2",
-        )
-        .bind(agent_id)
-        .bind(item_id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| InventoryError::DatabaseError(e.to_string()))?;
-
-        Ok(count.unwrap_or(0))
-    }
-
     /// 获取Agent背包占用的格子数
     pub async fn get_slot_count(pool: &PgPool, agent_id: Uuid) -> Result<i32, InventoryError> {
         let count = sqlx::query_scalar::<_, i64>(

@@ -77,18 +77,6 @@ impl ChatMessage {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn assistant(content: &str) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content: Some(content.to_string()),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-            reasoning_content: None,
-        }
-    }
-
     pub(crate) fn assistant_with_reasoning(content: &str, reasoning: Option<String>) -> Self {
         Self {
             role: "assistant".to_string(),

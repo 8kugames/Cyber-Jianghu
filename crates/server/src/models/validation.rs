@@ -16,9 +16,3 @@ pub fn get_max_agent_name_length() -> usize {
 pub fn get_max_system_prompt_length() -> usize {
     StateRegistry::validation().max_system_prompt_length
 }
-
-/// 获取对话内容最大长度（预留：对话系统）
-#[allow(dead_code)]
-pub fn get_max_speak_content_length() -> usize {
-    StateRegistry::validation().max_speak_content_length
-}

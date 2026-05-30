@@ -222,8 +222,8 @@ pub fn load_world_building_rules() -> Option<WorldBuildingRules> {
     let data = unified_config.data;
 
     // 从 GameData 注入 rules_json（规则引擎验证规则）
-    let rules_json = crate::game_data::registry::registry()
-        .map(|cache| cache.get().rules_json.clone());
+    let rules_json =
+        crate::game_data::registry::registry().map(|cache| cache.get().rules_json.clone());
 
     let rules = WorldBuildingRules {
         version: unified_config.version,

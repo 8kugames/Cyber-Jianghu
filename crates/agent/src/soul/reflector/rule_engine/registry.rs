@@ -142,7 +142,6 @@ impl RuleRegistry {
         let set = self.inner.read().await;
         set.all_enabled().into_iter().cloned().collect()
     }
-
 }
 
 impl Default for RuleRegistry {

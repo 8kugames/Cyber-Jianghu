@@ -33,7 +33,6 @@ pub fn get_max_slots() -> i32 {
 }
 
 /// 获取每格最大堆叠数量
-#[allow(dead_code)]
 pub fn get_max_stack_size() -> i32 {
     InventoryRegistry::limits().max_stack_size
 }
