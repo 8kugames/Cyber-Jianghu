@@ -113,8 +113,8 @@ impl Validator for RuleEngine {
     }
 
     async fn update_rules(&self, _rules: WorldBuildingRules) {
-        // 规则引擎暂时不响应世界观规则更新
-        // 未来可以根据世界观规则动态调整验证规则
+        // ReflectorSoul::update_rules() 直接调用 self.rule_engine.reload_rules_from_json()
+        // 此 trait 方法无需额外操作
     }
 }
 
@@ -128,74 +128,38 @@ impl RuleEngine {
         }
     }
 
-    /// 创建带有默认配置的规则引擎
+    /// 创建带有默认配置的规则引擎（空规则集，等待 Server 下发）
     ///
-    /// 预加载默认的验证规则（硬编码，未来从 YAML 配置加载）：
-    /// - valid_item_id_eat: eat 的 item_id 必须在背包中
-    /// - valid_item_id_drink: drink 的 item_id 必须在背包中
-    /// - valid_target_node_move: move 的 target_location 必须可达
+    /// 规则从 Server 通过 WorldBuildingRules.rules_json 下发，
+    /// ReflectorSoul::update_rules() 调用 reload_rules_from_json() 加载。
     pub fn with_default_config() -> Self {
+        Self {
+            registry: Arc::new(RuleRegistry::new()),
+            evaluator: Box::new(DefaultEvaluator),
+            prompt_config: Arc::new(std::sync::RwLock::new(Self::load_prompt_config())),
+        }
+    }
+
+    /// 从 JSON 配置创建规则引擎
+    pub fn from_config(rules_json: &serde_json::Value) -> Self {
+        let rules: Vec<Rule> = serde_json::from_value(rules_json.clone()).unwrap_or_default();
         let mut rule_set = RuleSet::new();
-
-        // eat 的 item_id 必须在背包中（蕴含式：非 eat 放行，是 eat 则校验 item_id）
-        rule_set.add_rule(Rule::new(
-            "valid_item_id_eat".to_string(),
-            "eat 的 item_id 必须在背包中".to_string(),
-            super::types::RuleType::ResourceConstraint,
-            super::types::RuleCondition::Or(vec![
-                super::types::RuleCondition::NotEquals(
-                    "intent.action_type".to_string(),
-                    serde_json::json!("进食"),
-                ),
-                super::types::RuleCondition::In(
-                    "intent.action_data.item_id".to_string(),
-                    "available_item_ids".to_string(),
-                ),
-            ]),
-            format!("{}，请使用背包中物品的精确ID", ERR_EAT_INVALID_ITEM),
-        ));
-
-        // drink 的 item_id 必须在背包中（蕴含式）
-        rule_set.add_rule(Rule::new(
-            "valid_item_id_drink".to_string(),
-            "drink 的 item_id 必须在背包中".to_string(),
-            super::types::RuleType::ResourceConstraint,
-            super::types::RuleCondition::Or(vec![
-                super::types::RuleCondition::NotEquals(
-                    "intent.action_type".to_string(),
-                    serde_json::json!("饮水"),
-                ),
-                super::types::RuleCondition::In(
-                    "intent.action_data.item_id".to_string(),
-                    "available_item_ids".to_string(),
-                ),
-            ]),
-            format!("{}，请使用背包中物品的精确ID", ERR_DRINK_INVALID_ITEM),
-        ));
-
-        // move 的 target_location 必须可达（蕴含式）
-        rule_set.add_rule(Rule::new(
-            "valid_target_node_move".to_string(),
-            "move 的 target_location 必须可达".to_string(),
-            super::types::RuleType::StateRestriction,
-            super::types::RuleCondition::Or(vec![
-                super::types::RuleCondition::NotEquals(
-                    "intent.action_type".to_string(),
-                    serde_json::json!("移动"),
-                ),
-                super::types::RuleCondition::In(
-                    "intent.action_data.target_location".to_string(),
-                    "reachable_node_ids".to_string(),
-                ),
-            ]),
-            format!("{}，请使用可达地点的精确ID", ERR_MOVE_INVALID_TARGET),
-        ));
-
+        for rule in rules {
+            rule_set.add_rule(rule);
+        }
         Self {
             registry: Arc::new(RuleRegistry::from_rule_set(rule_set)),
             evaluator: Box::new(DefaultEvaluator),
             prompt_config: Arc::new(std::sync::RwLock::new(Self::load_prompt_config())),
         }
+    }
+
+    /// 运行时从 JSON 重载规则（通过 RuleRegistry 内部 RwLock 原子替换）
+    pub async fn reload_rules_from_json(&self, rules_json: serde_json::Value) {
+        let rules: Vec<Rule> = serde_json::from_value(rules_json).unwrap_or_default();
+        let count = rules.len();
+        self.registry.replace_all(rules).await;
+        tracing::info!("RuleEngine 已从配置重载 {} 条规则", count);
     }
 
     /// 使用自定义评估器创建规则引擎
@@ -543,5 +507,120 @@ mod tests {
                 panic!("应该通过验证，但被拒绝了: {}", reason);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_from_config_semantic_equivalence() {
+        // 模拟 rules.json 内容
+        let rules_json: serde_json::Value = serde_json::json!([
+            {
+                "id": "valid_item_id_eat",
+                "name": "eat 的 item_id 必须在背包中",
+                "rule_type": "ResourceConstraint",
+                "condition": {
+                    "Or": [
+                        {"NotEquals": ["intent.action_type", "进食"]},
+                        {"In": ["intent.action_data.item_id", "available_item_ids"]}
+                    ]
+                },
+                "error_message": "吃东西失败：物品ID无效，请使用背包中物品的精确ID",
+                "enabled": true
+            },
+            {
+                "id": "valid_item_id_drink",
+                "name": "drink 的 item_id 必须在背包中",
+                "rule_type": "ResourceConstraint",
+                "condition": {
+                    "Or": [
+                        {"NotEquals": ["intent.action_type", "饮水"]},
+                        {"In": ["intent.action_data.item_id", "available_item_ids"]}
+                    ]
+                },
+                "error_message": "喝水失败：物品ID无效，请使用背包中物品的精确ID",
+                "enabled": true
+            },
+            {
+                "id": "valid_target_node_move",
+                "name": "move 的 target_location 必须可达",
+                "rule_type": "StateRestriction",
+                "condition": {
+                    "Or": [
+                        {"NotEquals": ["intent.action_type", "移动"]},
+                        {"In": ["intent.action_data.target_location", "reachable_node_ids"]}
+                    ]
+                },
+                "error_message": "移动失败：目标地点ID无效，请使用可达地点的精确ID",
+                "enabled": true
+            }
+        ]);
+
+        let engine = RuleEngine::from_config(&rules_json);
+
+        // eat + 有效 item_id → 通过
+        let mut ctx = create_test_context();
+        ctx.intent = Intent::new(Uuid::new_v4(), 1, "进食", Some(serde_json::json!({"item_id": "馒头"})));
+        ctx.available_item_ids = vec!["馒头".to_string()];
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Approved { .. }), "eat 有效 item_id 应通过");
+
+        // eat + 无效 item_id → 拒绝
+        ctx.available_item_ids = vec!["水".to_string()];
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Rejected { .. }), "eat 无效 item_id 应拒绝");
+
+        // 非进食动作 → 通过（蕴含式放行）
+        ctx.intent = Intent::new(Uuid::new_v4(), 1, "说话", None);
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Approved { .. }), "非进食动作应通过");
+
+        // move + 有效 target → 通过
+        ctx.intent = Intent::new(Uuid::new_v4(), 1, "移动", Some(serde_json::json!({"target_location": "龙门厨房"})));
+        ctx.reachable_node_ids = vec!["龙门厨房".to_string()];
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Approved { .. }), "move 有效 target 应通过");
+
+        // move + 无效 target → 拒绝
+        ctx.reachable_node_ids = vec!["龙门后院".to_string()];
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Rejected { .. }), "move 无效 target 应拒绝");
+    }
+
+    #[tokio::test]
+    async fn test_reload_rules_from_json() {
+        let engine = RuleEngine::new();
+
+        // 初始空规则 → 通过
+        let ctx = create_test_context();
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Approved { .. }));
+
+        // 加载规则：禁止进食（NotEquals 蕴含式）
+        let rules_json = serde_json::json!([
+            {
+                "id": "block_eat",
+                "name": "禁止进食",
+                "rule_type": "ActionCooldown",
+                "condition": {"NotEquals": ["intent.action_type", "进食"]},
+                "error_message": "禁止进食",
+                "enabled": true
+            }
+        ]);
+        let parsed: Vec<Rule> = serde_json::from_value(rules_json.clone()).unwrap();
+        assert_eq!(parsed.len(), 1, "应解析出 1 条规则");
+
+        engine.reload_rules_from_json(rules_json).await;
+
+        let loaded = engine.registry().all_enabled().await;
+        assert_eq!(loaded.len(), 1, "应加载 1 条规则");
+
+        // 说话（非进食）→ NotEquals 满足 → 通过
+        let result = engine.validate_context(&ctx).await.unwrap();
+        assert!(matches!(result, ValidationResult::Approved { .. }), "说话应通过（非进食）");
+
+        // 进食 → NotEquals 不满足 → 拒绝
+        let mut ctx_eat = create_test_context();
+        ctx_eat.intent = Intent::new(Uuid::new_v4(), 1, "进食", None);
+        let result = engine.validate_context(&ctx_eat).await.unwrap();
+        assert!(matches!(result, ValidationResult::Rejected { .. }), "进食应被拒绝");
     }
 }

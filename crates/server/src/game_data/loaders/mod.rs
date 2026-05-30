@@ -18,6 +18,7 @@ mod locations_loader;
 mod narrative_loader;
 mod network_loader;
 mod recipes_loader;
+pub mod rules_loader;
 mod skills_loader;
 mod time_loader;
 
@@ -40,5 +41,6 @@ pub use locations_loader::load_locations;
 pub use narrative_loader::load_narrative;
 pub use network_loader::load_network;
 pub use recipes_loader::load_recipes;
+pub use rules_loader::load_rules_json;
 pub use skills_loader::load_skills;
 pub use time_loader::load_time;

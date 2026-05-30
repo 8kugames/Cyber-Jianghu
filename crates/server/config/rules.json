@@ -1,0 +1,41 @@
+[
+  {
+    "id": "valid_item_id_eat",
+    "name": "eat 的 item_id 必须在背包中",
+    "rule_type": "ResourceConstraint",
+    "condition": {
+      "Or": [
+        {"NotEquals": ["intent.action_type", "进食"]},
+        {"In": ["intent.action_data.item_id", "available_item_ids"]}
+      ]
+    },
+    "error_message": "吃东西失败：物品ID无效，请使用背包中物品的精确ID",
+    "enabled": true
+  },
+  {
+    "id": "valid_item_id_drink",
+    "name": "drink 的 item_id 必须在背包中",
+    "rule_type": "ResourceConstraint",
+    "condition": {
+      "Or": [
+        {"NotEquals": ["intent.action_type", "饮水"]},
+        {"In": ["intent.action_data.item_id", "available_item_ids"]}
+      ]
+    },
+    "error_message": "喝水失败：物品ID无效，请使用背包中物品的精确ID",
+    "enabled": true
+  },
+  {
+    "id": "valid_target_node_move",
+    "name": "move 的 target_location 必须可达",
+    "rule_type": "StateRestriction",
+    "condition": {
+      "Or": [
+        {"NotEquals": ["intent.action_type", "移动"]},
+        {"In": ["intent.action_data.target_location", "reachable_node_ids"]}
+      ]
+    },
+    "error_message": "移动失败：目标地点ID无效，请使用可达地点的精确ID",
+    "enabled": true
+  }
+]

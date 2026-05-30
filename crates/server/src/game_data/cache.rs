@@ -479,6 +479,7 @@ mod tests {
                     roles: vec![],
                 },
             },
+            rules_json: serde_json::Value::Array(vec![]),
         }
     }
 
