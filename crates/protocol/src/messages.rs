@@ -697,6 +697,7 @@ mod tests {
             forbidden_concepts: vec!["魔法".to_string()],
             narrative_rules: "测试叙事规则".to_string(),
             last_updated: "2026-01-01T00:00:00Z".to_string(),
+            rules_json: None,
         };
         let msg = ServerMessage::ConfigUpdate {
             config_type: "world_building_rules".to_string(),
@@ -748,6 +749,7 @@ mod tests {
             forbidden_concepts: vec!["魔法".to_string()],
             narrative_rules: "测试叙事规则".to_string(),
             last_updated: "2026-01-01T00:00:00Z".to_string(),
+            rules_json: None,
         };
 
         let msg = ServerMessage::Registered {

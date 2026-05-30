@@ -339,4 +339,107 @@ mod tests {
         assert!(context.history_intents.is_empty());
         assert!(context.attributes.is_empty());
     }
+
+    #[test]
+    fn test_rule_json_roundtrip() {
+        let rules = vec![
+            Rule::new(
+                "valid_item_id_eat".to_string(),
+                "eat 的 item_id 必须在背包中".to_string(),
+                RuleType::ResourceConstraint,
+                RuleCondition::Or(vec![
+                    RuleCondition::NotEquals(
+                        "intent.action_type".to_string(),
+                        serde_json::json!("进食"),
+                    ),
+                    RuleCondition::In(
+                        "intent.action_data.item_id".to_string(),
+                        "available_item_ids".to_string(),
+                    ),
+                ]),
+                "吃东西失败：物品ID无效".to_string(),
+            ),
+            Rule::new(
+                "valid_item_id_drink".to_string(),
+                "drink 的 item_id 必须在背包中".to_string(),
+                RuleType::ResourceConstraint,
+                RuleCondition::Or(vec![
+                    RuleCondition::NotEquals(
+                        "intent.action_type".to_string(),
+                        serde_json::json!("饮水"),
+                    ),
+                    RuleCondition::In(
+                        "intent.action_data.item_id".to_string(),
+                        "available_item_ids".to_string(),
+                    ),
+                ]),
+                "喝水失败：物品ID无效".to_string(),
+            ),
+            Rule::new(
+                "valid_target_node_move".to_string(),
+                "move 的 target_location 必须可达".to_string(),
+                RuleType::StateRestriction,
+                RuleCondition::Or(vec![
+                    RuleCondition::NotEquals(
+                        "intent.action_type".to_string(),
+                        serde_json::json!("移动"),
+                    ),
+                    RuleCondition::In(
+                        "intent.action_data.target_location".to_string(),
+                        "reachable_node_ids".to_string(),
+                    ),
+                ]),
+                "移动失败：目标地点ID无效".to_string(),
+            ),
+        ];
+
+        let json = serde_json::to_string_pretty(&rules).unwrap();
+        let parsed: Vec<Rule> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].id, "valid_item_id_eat");
+        assert_eq!(parsed[0].rule_type, RuleType::ResourceConstraint);
+        assert!(parsed[0].enabled);
+        match &parsed[0].condition {
+            RuleCondition::Or(conds) => {
+                assert_eq!(conds.len(), 2);
+                assert!(matches!(&conds[0], RuleCondition::NotEquals(f, _) if f == "intent.action_type"));
+                assert!(matches!(&conds[1], RuleCondition::In(f, c) if f == "intent.action_data.item_id" && c == "available_item_ids"));
+            }
+            _ => panic!("Expected Or condition for eat rule"),
+        }
+
+        assert_eq!(parsed[1].id, "valid_item_id_drink");
+        assert_eq!(parsed[2].id, "valid_target_node_move");
+        assert_eq!(parsed[2].rule_type, RuleType::StateRestriction);
+
+        // 二次 round-trip 确保稳定
+        let json2 = serde_json::to_string_pretty(&parsed).unwrap();
+        let parsed2: Vec<Rule> = serde_json::from_str(&json2).unwrap();
+        assert_eq!(parsed2.len(), parsed.len());
+    }
+
+    #[test]
+    fn test_rule_json_array_roundtrip() {
+        let rules_json: serde_json::Value = serde_json::json!([
+            {
+                "id": "test_rule",
+                "name": "测试规则",
+                "rule_type": "ResourceConstraint",
+                "condition": {
+                    "Or": [
+                        {"NotEquals": ["intent.action_type", "进食"]},
+                        {"In": ["intent.action_data.item_id", "available_item_ids"]}
+                    ]
+                },
+                "error_message": "测试错误",
+                "enabled": true
+            }
+        ]);
+
+        let rules: Vec<Rule> = serde_json::from_value(rules_json).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].id, "test_rule");
+        assert!(matches!(rules[0].condition, RuleCondition::Or(_)));
+    }
 }

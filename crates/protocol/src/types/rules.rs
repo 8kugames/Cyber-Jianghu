@@ -365,6 +365,10 @@ pub struct WorldBuildingRules {
 
     /// 最后更新时间
     pub last_updated: String,
+
+    /// 规则引擎验证规则（JSON，Agent 反序列化为 Vec<Rule>）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rules_json: Option<serde_json::Value>,
 }
 
 impl WorldBuildingRules {
