@@ -1047,7 +1047,6 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     if token_opt_enabled {
         let delta_config = cyber_jianghu_agent::component::delta_engine::DeltaConfig {
-            survival_thresholds: config.token_optimization.delta.survival_thresholds.clone(),
             change_percentage_threshold: config
                 .token_optimization
                 .delta

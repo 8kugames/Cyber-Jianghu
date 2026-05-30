@@ -16,6 +16,20 @@ pub struct NarrativeThreshold {
     pub max: i32,
     /// 叙事描述
     pub description: String,
+    /// 紧迫程度（0=不触发驱动，>0=紧迫程度，由 narratives.yaml 定义）
+    #[serde(default)]
+    pub urgency: u8,
+}
+
+/// 属性驱动配置（由 narratives.yaml 定义，server 预计算后下发）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttributeDriveConfig {
+    /// 驱动名称（如"寻找食物"）
+    pub name: String,
+    /// 驱动原因（如"肚子饿了，需要进食"）
+    pub reason: String,
+    /// 对应目标（如"寻找食物充饥"）
+    pub goal: String,
 }
 
 /// 单个属性的叙事配置
@@ -30,6 +44,9 @@ pub struct NarrativeAttributeConfig {
     /// 备注（可选）
     #[serde(default)]
     pub note: Option<String>,
+    /// 驱动配置（可选，省略则该属性不触发驱动）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive: Option<AttributeDriveConfig>,
 }
 
 /// 状态效果配置
@@ -76,6 +93,36 @@ impl NarrativeConfig {
         self.attributes
             .get(attr_name)
             .map(|c| c.display_name.as_str())
+    }
+
+    /// 从当前属性值计算生存驱动列表
+    ///
+    /// 遍历所有属性，匹配阈值段，提取 urgency>0 的驱动。
+    /// 数据驱动：驱动定义和紧迫程度全部来自 narratives.yaml。
+    pub fn compute_survival_drives(
+        &self,
+        attributes: &HashMap<String, i32>,
+    ) -> Vec<super::entities::SurvivalDrive> {
+        let mut drives = Vec::new();
+        for (name, &value) in attributes {
+            if let Some(attr_config) = self.attributes.get(name)
+                && let Some(drive_config) = &attr_config.drive
+            {
+                for threshold in &attr_config.thresholds {
+                    if value >= threshold.min && value <= threshold.max && threshold.urgency > 0 {
+                        drives.push(super::entities::SurvivalDrive {
+                            attribute: name.clone(),
+                            drive: drive_config.name.clone(),
+                            reason: drive_config.reason.clone(),
+                            urgency: threshold.urgency,
+                            goal: drive_config.goal.clone(),
+                        });
+                        break; // 一个属性最多一个驱动
+                    }
+                }
+            }
+        }
+        drives
     }
 }
 
@@ -232,14 +279,17 @@ mod tests {
                         min: 90,
                         max: 100,
                         description: "身体状况极佳".to_string(),
+                        urgency: 0,
                     },
                     NarrativeThreshold {
                         min: 50,
                         max: 89,
                         description: "身体状况一般".to_string(),
+                        urgency: 0,
                     },
                 ],
                 note: None,
+                drive: None,
             },
         );
         attributes.insert(
@@ -252,14 +302,21 @@ mod tests {
                         min: 80,
                         max: 100,
                         description: "肚子很饱".to_string(),
+                        urgency: 0,
                     },
                     NarrativeThreshold {
                         min: 0,
                         max: 79,
                         description: "有些饿".to_string(),
+                        urgency: 3,
                     },
                 ],
                 note: None,
+                drive: Some(AttributeDriveConfig {
+                    name: "寻找食物".to_string(),
+                    reason: "肚子饿了".to_string(),
+                    goal: "找东西吃".to_string(),
+                }),
             },
         );
         NarrativeConfig {

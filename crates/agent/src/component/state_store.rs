@@ -103,6 +103,7 @@ mod tests {
                 attributes: HashMap::new(),
                 derived_attributes: HashMap::new(),
                 attribute_descriptions: HashMap::new(),
+                survival_drives: vec![],
                 status_effects: vec![],
                 inventory: vec![],
                 skills: vec![],

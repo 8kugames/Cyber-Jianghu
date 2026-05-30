@@ -19,6 +19,24 @@ pub const ITEM_TYPE_MATERIAL: &str = "material";
 /// 货币
 pub const ITEM_TYPE_CURRENCY: &str = "currency";
 
+/// 生存驱动（server 从 narratives.yaml 预计算后下发）
+///
+/// 当属性值落入 urgency>0 的阈值段时，server 生成对应的驱动信息。
+/// agent 端直接使用，无需本地推导或硬编码。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SurvivalDrive {
+    /// 触发驱动的属性名（如"hunger"）
+    pub attribute: String,
+    /// 驱动名称（如"寻找食物"）
+    pub drive: String,
+    /// 驱动原因（如"肚子饿了，需要进食"）
+    pub reason: String,
+    /// 紧迫程度（1-10，由 narratives.yaml 定义）
+    pub urgency: u8,
+    /// 目标（如"寻找食物充饥"）
+    pub goal: String,
+}
+
 /// Agent 自身状态（完全动态架构）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSelfState {
@@ -37,6 +55,11 @@ pub struct AgentSelfState {
     /// 将数值转换为自然语言描述，便于 LLM 理解
     #[serde(default)]
     pub attribute_descriptions: HashMap<String, String>,
+
+    /// 生存驱动列表（server 从 narratives.yaml 预计算）
+    /// 包含紧迫属性对应的驱动名称、原因和紧迫程度
+    #[serde(default)]
+    pub survival_drives: Vec<SurvivalDrive>,
 
     /// 状态效果（如中毒、受伤等）
     #[serde(default)]
