@@ -52,12 +52,9 @@ pub trait SearchableBackend: MemoryBackend {
 
 /// 语义检索后端
 #[async_trait]
-pub trait SemanticSearchable: SearchableBackend {
+pub trait SemanticSearchable: MemoryBackend {
     /// 语义相似度检索
     async fn search_similar(&mut self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>>;
-
-    /// 为记忆生成嵌入向量（按需）
-    async fn ensure_embedding(&mut self, memory_id: i64) -> Result<()>;
 }
 
 /// 可遗忘的记忆后端

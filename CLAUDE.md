@@ -458,9 +458,6 @@ use super::builder::AgentBuilder;
 
 **Validation & Review**:
 - `POST /api/v1/validate` - Validate intent
-- `GET /api/v1/review/pending` - Get pending reviews
-- `POST /api/v1/review/{intent_id}` - Submit review
-- `GET /api/v1/review/{intent_id}/status` - Get review status
 
 **Events & Config**:
 - `GET /api/v1/events` - Death events SSE stream
