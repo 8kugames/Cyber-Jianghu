@@ -36,7 +36,6 @@ pub struct SoulCycleRecord {
     pub final_action_data: Option<String>,
     pub route_type: String,
     pub world_time: Option<String>,
-    pub cache_hit_rate: Option<f64>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -157,8 +156,8 @@ impl SoulCycleRecorder {
 
         let result = conn.execute(
             "INSERT INTO soul_cycle_record
-             (tick_id, attempt, renhun_narrative, renhun_thought_log, created_at, cache_hit_rate)
-             VALUES (?1, ?2, ?3, ?4, ?5, NULL)
+             (tick_id, attempt, renhun_narrative, renhun_thought_log, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(tick_id, attempt) DO UPDATE SET
                 renhun_narrative = excluded.renhun_narrative,
                 renhun_thought_log = excluded.renhun_thought_log,
@@ -435,7 +434,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
-                    world_time, cache_hit_rate, created_at
+                    world_time, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
         ) {
             Ok(s) => s,
@@ -494,7 +493,7 @@ impl SoulCycleRecorder {
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason, previous_round_narrative,
                     final_intent_id, final_action_type, final_action_data, route_type,
-                    world_time, cache_hit_rate, created_at
+                    world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
             build_in_placeholders(tick_ids.len())
         );
@@ -593,7 +592,6 @@ impl SoulCycleRecorder {
             final_action_data: row.get(13).ok(),
             route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
             world_time: row.get(15).ok(),
-            cache_hit_rate: row.get(16).ok(),
             created_at,
         }
     }
