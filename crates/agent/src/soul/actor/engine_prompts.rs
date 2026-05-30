@@ -115,12 +115,16 @@ impl super::CognitiveEngine {
         };
 
         let tool_calling_guidance = if use_tool_calling {
-            "## 输出格式\n\
-            直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
-            工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
-            你最多可以调用 2 次工具，调用后必须立即输出 JSON。\n\n\
-            重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
-            action_type 只能填\"可用动作\"列表中的名称，绝对不能填工具名称。\n".to_string()
+            let max_rounds = self.llm_param("max_tool_rounds", 2);
+            format!(
+                "## 输出格式\n\
+                直接输出以下 JSON，不要在 JSON 前输出任何推理或思考文本。你的整个输出必须是且仅是一个 JSON 对象。\n\
+                工具调用是可选的——根据焦点状态中的提示，在需要查询详细信息时调用对应工具。\n\
+                你最多可以调用 {} 次工具，调用后必须立即输出 JSON。\n\n\
+                重要：工具（query_world/get_action_detail/list_skills/skill_view）是查询信息的手段，不是动作。\
+                action_type 只能填\"可用动作\"列表中的名称，绝对不能填工具名称。\n",
+                max_rounds
+            )
         } else {
             "## 输出格式\n严格输出以下 JSON（不要添加任何额外文本）：\n".to_string()
         };
@@ -213,7 +217,6 @@ impl super::CognitiveEngine {
             format!("\n### 记忆上下文\n{memory_context}\n")
         };
 
-        let summary_context = self.get_summary_context();
         let outcome_section = self.get_outcome_context();
 
         // FocusSummary 替代完整 WorldState
@@ -261,7 +264,6 @@ impl super::CognitiveEngine {
             world_state_section.clone(),
         );
         ws_vars.insert("memory_section".to_string(), memory_section.clone());
-        ws_vars.insert("summary_context".to_string(), summary_context.clone());
         ws_vars.insert("outcome_section".to_string(), outcome_section.clone());
         if let Some(rendered) = tmpl.render_section("world_state", &ws_vars) {
             result.push_str(&rendered);
@@ -283,7 +285,7 @@ impl super::CognitiveEngine {
             memory: PromptSectionEstimate::estimate_tokens(memory_section.len()),
             skill_instructions: 0,
             other: PromptSectionEstimate::estimate_tokens(
-                feedback_section.len() + summary_context.len() + outcome_section.len(),
+                feedback_section.len() + outcome_section.len(),
             ),
         };
         tracing::info!(
