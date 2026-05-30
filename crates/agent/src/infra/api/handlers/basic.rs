@@ -7,16 +7,13 @@ use axum::{
     response::{IntoResponse, Json},
 };
 use serde::Serialize;
-use uuid::Uuid;
 
-use cyber_jianghu_protocol::{ActionType, Intent};
-
+use super::HttpApiState;
 use super::context::{
     ContextResponse, create_attributes_glimpse, generate_context_markdown,
     generate_context_markdown_no_relationship,
 };
 use super::dto::HealthResponse;
-use super::{HttpApiState, IntentRequest};
 
 #[derive(Serialize)]
 pub(crate) struct ErrorResponse {
@@ -150,101 +147,6 @@ pub(crate) async fn get_attributes_handler(State(state): State<HttpApiState>) ->
             Json(glimpse).into_response()
         }
         None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-    }
-}
-
-/// Submit intent handler (完全数据驱动)
-#[allow(dead_code)]
-pub(crate) async fn submit_intent_handler(
-    State(state): State<HttpApiState>,
-    Json(req): Json<IntentRequest>,
-) -> impl IntoResponse {
-    let tick_id = match resolve_tick_id_or_reject(req.tick_id, &state).await {
-        Ok(id) => id,
-        Err(resp) => return resp,
-    };
-
-    let current_tick = state
-        .current_state
-        .read()
-        .await
-        .as_ref()
-        .map(|s| s.tick_id)
-        .unwrap_or(0);
-    if tick_id < current_tick {
-        return (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({
-                "error": "intent_expired",
-                "message": format!("Intent tick {} is older than current tick {}", tick_id, current_tick),
-                "current_tick": current_tick,
-                "retry_suggestion": "Please fetch the latest state and submit intent for the new tick."
-            })),
-        )
-            .into_response();
-    }
-
-    // 从共享状态读取最新的 agent_id（注册后会被更新）
-    let state_agent_id = *state.agent_id.read().await;
-    let agent_id = req
-        .agent_id
-        .as_ref()
-        .and_then(|s| Uuid::parse_str(s).ok())
-        .unwrap_or(state_agent_id);
-
-    let action_type: ActionType = req.action_type.into();
-    let action_type_str = action_type.to_string();
-
-    // "narrative" 是三魂架构的内部 sentinel，不应通过 HTTP API 提交
-    if action_type_str == "narrative" {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "action_type 'narrative' is an internal sentinel, use a valid action type"
-            })),
-        )
-            .into_response();
-    }
-    let intent = if let Some(id_str) = &req.intent_id {
-        if let Ok(id) = Uuid::parse_str(id_str) {
-            Intent::new_with_id(id, agent_id, tick_id, action_type, req.action_data)
-        } else {
-            Intent::new(agent_id, tick_id, action_type, req.action_data)
-        }
-    } else {
-        Intent::new(agent_id, tick_id, action_type, req.action_data)
-    };
-
-    // 添加 thought_log（如果有）
-    let intent = if let Some(ref thought) = req.thought_log {
-        intent.with_thought(thought.clone())
-    } else {
-        intent
-    };
-
-    let intent_id = intent.intent_id;
-    let submitted_tick = tick_id;
-    let submitted_action = intent.action_type.to_string();
-
-    match state.intent_tx.send(intent).await {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "submitted",
-                "intent_id": intent_id,
-                "tick_id": submitted_tick,
-                "action_type": submitted_action
-            })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "error": "channel_closed",
-                "message": format!("Failed to submit intent: {}", e)
-            })),
-        )
-            .into_response(),
     }
 }
 

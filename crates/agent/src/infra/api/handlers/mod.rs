@@ -23,7 +23,6 @@ mod validate;
 
 // Re-export parent module items for sub-module access via `super::xxx`
 pub(super) use super::HttpApiState;
-pub(super) use super::IntentRequest;
 pub(super) use super::cognitive_context;
 pub(super) use super::context;
 pub(super) use super::dto;

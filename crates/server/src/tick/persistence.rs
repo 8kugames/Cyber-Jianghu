@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use tracing::debug;
 
 use crate::db::DbPool;
-use crate::models::{AgentState, TickLog};
+use crate::models::AgentState;
 
 /// 持久化状态到数据库
 ///
@@ -51,23 +51,5 @@ pub async fn persist_states(
         .context("批量插入Agent状态失败")?;
 
     debug!("Tick {}: 状态持久化完成", tick_id);
-    Ok(())
-}
-
-/// 保存Tick日志到文件
-///
-/// 注意：Tick日志详情已通过 `create_tick_log` / `update_tick_log` 写入数据库。
-/// 此函数仅将日志信息打印到标准日志（用于日志文件收集和监控）。
-#[allow(dead_code)]
-pub async fn save_tick_log(tick_log: &TickLog) -> Result<()> {
-    tracing::info!(
-        "Tick日志: id={}, status={:?}, agents={}, actions={}, duration={}ms",
-        tick_log.tick_id,
-        tick_log.status,
-        tick_log.agents_processed,
-        tick_log.actions_executed,
-        tick_log.duration_ms.unwrap_or(0)
-    );
-
     Ok(())
 }

@@ -10,7 +10,6 @@
 // ============================================================================
 
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -95,16 +94,6 @@ impl DialogueManager {
             session_id: session.session_id,
             target_agent_id: to_agent_id,
         })
-    }
-
-    /// 清理超时的对话会话
-    ///
-    /// timeout: 会话超时时间（从最后活动开始计算）
-    /// 返回被清理的会话数量
-    #[allow(dead_code)]
-    pub async fn cleanup_timeout_sessions(&self, timeout: Duration) -> usize {
-        let mut registry = self.sessions.write().await;
-        registry.cleanup_timeout_sessions(timeout)
     }
 
     /// 关闭指定会话（whisper 执行后立即释放）

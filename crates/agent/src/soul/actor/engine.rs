@@ -1494,16 +1494,6 @@ impl CognitiveEngine {
         (cache.get_action_descriptions().to_string(), String::new())
     }
 
-    /// 获取详细滑动窗口上下文（用于调试）
-    #[allow(dead_code)]
-    pub fn get_detailed_summary_context(&self) -> String {
-        if let Ok(window) = self.summary_window.read() {
-            window.to_detailed_context()
-        } else {
-            String::new()
-        }
-    }
-
     /// 清空滑动窗口
     pub fn clear_summary_window(&self) {
         if let Ok(mut window) = self.summary_window.write() {
@@ -1519,16 +1509,6 @@ impl CognitiveEngine {
             .read()
             .map(|sw| sw.get_recent_same_type_decisions(action_type, limit))
             .unwrap_or_default()
-    }
-
-    /// 获取窗口大小
-    #[allow(dead_code)]
-    pub fn summary_window_size(&self) -> usize {
-        if let Ok(window) = self.summary_window.read() {
-            window.len()
-        } else {
-            0
-        }
     }
 }
 

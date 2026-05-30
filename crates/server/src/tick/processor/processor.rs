@@ -51,13 +51,6 @@ impl StateProcessor {
         }
     }
 
-    /// 添加状态变更器
-    #[allow(dead_code)]
-    pub fn with_mutator<M: StateMutator + 'static>(mut self, mutator: M) -> Self {
-        self.mutators.push(Box::new(mutator));
-        self
-    }
-
     /// 处理单条 Intent（实时模式）
     ///
     /// 单个 Agent + 单条 Intent，保留 Sagas 快照/回滚机制。

@@ -472,38 +472,6 @@ fn validate_target_alive(intent: &Intent, all_states: &[AgentState]) -> Result<(
 }
 
 // ============================================================================
-// 辅助函数（预留：动作数据解析工具）
-// ============================================================================
-
-/// 解析动作数据
-///
-/// 从 JSON 值解析为指定类型
-#[allow(dead_code)]
-pub fn parse_action_data<T: serde::de::DeserializeOwned>(
-    action_data: &Option<serde_json::Value>,
-) -> Result<T, GameError> {
-    let data = action_data
-        .as_ref()
-        .ok_or_else(|| GameError::InvalidActionData {
-            reason: "缺少动作数据".to_string(),
-        })?;
-
-    serde_json::from_value(data.clone()).map_err(|e| GameError::InvalidActionData {
-        reason: format!("动作数据格式错误: {}", e),
-    })
-}
-
-/// 解析 UUID
-///
-/// 从字符串解析 UUID
-#[allow(dead_code)]
-pub fn parse_uuid(s: &str) -> Result<Uuid, GameError> {
-    Uuid::parse_str(s).map_err(|e| GameError::InvalidActionData {
-        reason: format!("无效的 UUID: {}", e),
-    })
-}
-
-// ============================================================================
 // 测试
 // ============================================================================
 

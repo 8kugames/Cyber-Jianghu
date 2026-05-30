@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 /// 系统级 Agent ID（用于标识系统操作的结束方）
@@ -160,14 +160,6 @@ impl SessionRegistry {
         self.sessions.get(session_id)
     }
 
-    /// 获取指定 Agent 当前所在的会话
-    #[allow(dead_code)]
-    pub fn get_agent_session(&self, agent_id: Uuid) -> Option<&DialogueSession> {
-        self.agent_index
-            .get(&agent_id)
-            .and_then(|session_id| self.sessions.get(session_id))
-    }
-
     /// 更新会话状态
     ///
     /// 返回更新前的会话状态，如果会话不存在则返回 None
@@ -202,42 +194,6 @@ impl SessionRegistry {
     /// 检查 Agent 是否正在对话中
     pub fn is_agent_in_dialogue(&self, agent_id: Uuid) -> bool {
         self.agent_index.contains_key(&agent_id)
-    }
-
-    /// 清理超时会话
-    ///
-    /// timeout: 会话超时时间（从最后活动开始计算）
-    /// 返回被清理的会话数量
-    #[allow(dead_code)]
-    pub fn cleanup_timeout_sessions(&mut self, timeout: Duration) -> usize {
-        // 收集需要清理的会话 ID
-        let sessions_to_remove: Vec<String> = self
-            .sessions
-            .iter()
-            .filter(|(_, session)| session.is_timeout(timeout))
-            .map(|(id, _)| id.clone())
-            .collect();
-
-        let removed_count = sessions_to_remove.len();
-
-        // 移除超时会话
-        for session_id in &sessions_to_remove {
-            if let Some(session) = self.remove_session(session_id) {
-                warn!(
-                    "会话超时已清理: {} (agents: {} <-> {}, 持续: {:?})",
-                    session_id,
-                    session.agent_a,
-                    session.agent_b,
-                    session.created_at.elapsed()
-                );
-            }
-        }
-
-        if removed_count > 0 {
-            info!("清理了 {} 个超时对话会话", removed_count);
-        }
-
-        removed_count
     }
 
     /// 关闭所有活动会话（Tick 结束时调用）
@@ -403,11 +359,6 @@ mod tests {
         let retrieved = registry.get_session(&session.session_id);
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().session_id, session.session_id);
-
-        // 获取 Agent 会话
-        let agent_session = registry.get_agent_session(agent_a);
-        assert!(agent_session.is_some());
-        assert_eq!(agent_session.unwrap().session_id, session.session_id);
     }
 
     #[test]

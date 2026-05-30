@@ -8,9 +8,7 @@
 // - 更新Agent状态（在线时间、位置）
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool, Postgres, Row};
+use sqlx::{PgPool, Postgres, Row};
 use std::collections::HashMap;
 use tracing::{debug, error, info};
 use uuid::Uuid;
@@ -638,46 +636,6 @@ pub async fn retire_agent(
         retired_name: Some(name),
         action_taken: true,
     })
-}
-
-/// 历史角色信息（用于归隐角色列表）
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-#[allow(dead_code)]
-pub struct RetiredAgentInfo {
-    /// Agent ID
-    pub agent_id: Uuid,
-    /// 角色名称
-    pub name: String,
-    /// 创建时间
-    pub created_at: DateTime<Utc>,
-    /// 归隐时间
-    pub retired_at: Option<DateTime<Utc>>,
-    /// 最后在线时间
-    pub last_tick_online: Option<DateTime<Utc>>,
-}
-
-/// 查询设备的归隐角色列表
-///
-/// 用于 Web 面板查看历史角色
-#[allow(dead_code)]
-pub async fn list_retired_agents(pool: &PgPool, device_id: Uuid) -> Result<Vec<RetiredAgentInfo>> {
-    debug!("查询归隐角色列表: device_id={}", device_id);
-
-    let agents = sqlx::query_as::<Postgres, RetiredAgentInfo>(
-        r#"
-        SELECT agent_id, name, created_at, retired_at, last_tick_online
-        FROM agents
-        WHERE device_id = $1 AND status = 'retired'
-        ORDER BY retired_at DESC NULLS LAST
-        "#,
-    )
-    .bind(device_id)
-    .fetch_all(pool)
-    .await
-    .context("查询归隐角色列表失败")?;
-
-    debug!("查询到 {} 个归隐角色", agents.len());
-    Ok(agents)
 }
 
 // ============================================================================

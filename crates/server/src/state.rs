@@ -5,7 +5,6 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tracing::info;
 
-use crate::config::Config;
 use crate::db::DbPool;
 use crate::dialogue;
 use crate::game_data;
@@ -145,10 +144,6 @@ pub async fn populate_agent_state_cache(
 /// 在整个应用中共享的状态，包括配置、数据库连接池等
 #[derive(Debug)]
 pub struct AppState {
-    /// 配置（预留：运行时配置热更新）
-    #[allow(dead_code)]
-    pub config: Config,
-
     /// 数据库连接池
     pub db_pool: DbPool,
 
@@ -199,7 +194,6 @@ pub struct AppState {
 impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        config: Config,
         db_pool: DbPool,
         connection_manager: websocket::ConnectionManager,
         agent_to_device_map: websocket::AgentToDeviceMap,
@@ -214,7 +208,6 @@ impl AppState {
         current_accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
         Self {
-            config,
             db_pool,
             connection_manager,
             agent_to_device_map,

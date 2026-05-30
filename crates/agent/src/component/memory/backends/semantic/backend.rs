@@ -19,10 +19,6 @@ pub struct SemanticMemoryConfig {
 }
 
 pub struct SemanticMemoryBackend {
-    #[allow(dead_code)]
-    agent_id: Uuid,
-    #[allow(dead_code)]
-    config: SemanticMemoryConfig,
     vector_store: Mutex<HnswVectorStore>,
     fts_fallback: Mutex<FtsFallback>,
     /// 可写的 episodic 数据库连接（用于更新 embedding blob）
@@ -62,8 +58,6 @@ impl SemanticMemoryBackend {
         let use_vector = embedder.is_available() && !vector_store.is_empty();
 
         Ok(Self {
-            agent_id,
-            config,
             vector_store: Mutex::new(vector_store),
             fts_fallback: Mutex::new(fts_fallback),
             episodic_conn: Mutex::new(episodic_conn),
@@ -95,11 +89,6 @@ impl SemanticMemoryBackend {
             .into_iter()
             .map(|m| (m.id.unwrap_or(0), 0.0))
             .collect())
-    }
-
-    #[allow(dead_code)]
-    async fn generate_embedding(&self, memory: &MemoryEntry) -> Result<Vec<f32>> {
-        self.embedder.embed(&memory.content).await
     }
 
     pub async fn search(&self, params: &SearchMemoryParams) -> Result<Vec<(i64, f32)>> {

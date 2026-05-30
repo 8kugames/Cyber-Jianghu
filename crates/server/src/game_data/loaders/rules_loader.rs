@@ -8,5 +8,6 @@ pub fn load_rules_json(config_dir: &Path) -> Result<serde_json::Value> {
     }
     let content = std::fs::read_to_string(&json_path)
         .with_context(|| format!("读取 rules.json 失败: {}", json_path.display()))?;
-    serde_json::from_str(&content).with_context(|| format!("解析 rules.json 失败: {}", json_path.display()))
+    serde_json::from_str(&content)
+        .with_context(|| format!("解析 rules.json 失败: {}", json_path.display()))
 }

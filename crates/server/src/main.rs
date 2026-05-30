@@ -281,7 +281,6 @@ async fn main() -> Result<()> {
 
     // 9.1 创建应用状态
     let state = Arc::new(AppState::new(
-        config.clone(),
         db_pool.clone(),
         connection_manager.clone(),
         agent_to_device_map.clone(),
