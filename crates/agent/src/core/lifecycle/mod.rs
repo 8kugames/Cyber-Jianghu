@@ -286,6 +286,13 @@ impl super::Agent {
 
         self.build_and_set_server_message_callback().await;
 
+        // 订阅死亡事件广播通道
+        // 当 ServerMessage::AgentDied 到达时，callback 会写入 death_event_tx
+        let mut death_rx = self
+            .http_api_state
+            .as_ref()
+            .map(|s| s.death_event_tx.subscribe());
+
         // 暂存上轮提交的 intents，供天魂生成上一轮执行叙事用
         let last_intents_for_narrative =
             Arc::new(std::sync::Mutex::new(Vec::<crate::models::Intent>::new()));
@@ -392,6 +399,28 @@ impl super::Agent {
                     continue;
                 }
 
+                // 1.4 死亡事件（AgentDied 消息通过 broadcast channel 到达）
+                // 独立于 WorldState 路径，解决死 agent 收不到 WorldState 的竞态问题
+                death_msg = async {
+                    if let Some(ref mut rx) = death_rx {
+                        rx.recv().await.ok()
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    if let Some(cyber_jianghu_protocol::ServerMessage::AgentDied {
+                        agent_id,
+                        tick_id,
+                        description,
+                        ..
+                    }) = death_msg
+                        && !self.death_reported
+                    {
+                        self.handle_death(tick_id, agent_id, &description).await;
+                    }
+                    continue;
+                }
+
                 // 接收世界状态
                 result = self.client.receive_world_state() => {
                     let world_state = match result {
@@ -420,73 +449,17 @@ impl super::Agent {
                             .unwrap_or(false);
 
                     if death_via_events || death_via_callback {
-                            let death_desc = world_state.events_log.iter()
-                                .find(|e| e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification)
-                                .map(|e| e.description.as_str())
-                                .unwrap_or("AgentDied 回调通知（events_log 未包含 DeathNotification）");
-                            warn!(
-                                "Agent '{}' has died: {}",
-                                self.character_name(), death_desc
-                            );
-                            self.death_reported = true;
-                            self.death_tick_id = Some(world_state.tick_id);
-
-                            // 从 HttpApiState 读取 rebirth_delay_ticks（由 AgentDied 回调写入）
-                            if let Some(ref api_state) = self.http_api_state {
-                                api_state.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
-                                self.rebirth_delay_ticks = api_state.rebirth_delay_ticks.load(std::sync::atomic::Ordering::Relaxed);
-                            }
-
-                            // 持久化死亡状态到 character.yaml（确保世界树显示正确）
-                            if let Some(ref mut char_cfg) = self.character_config {
-                                char_cfg.status = crate::config::CharacterStatus::Dead;
-                                if let Some(ref api_state) = self.http_api_state {
-                                    let characters_dir = api_state.character_dir.read().await.clone();
-                                    if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
-                                        warn!("Failed to persist death status: {}", e);
-                                    }
-                                }
-                            }
-
-                            // 死亡时触发传记生成（fire-and-forget，不阻塞 rebirth 调度）
-                            if let Some(ref api_state) = self.http_api_state {
-                                let state = api_state.clone();
-                                let dead_agent_id = world_state.agent_id.unwrap_or_default();
-                                tokio::spawn(async move {
-                                    info!("[biography] 死亡触发传记生成: agent={}", dead_agent_id);
-                                    // 最多重试 3 次，间隔 30s（LLM 瞬断/rate limit 等临时错误可恢复）
-                                    const MAX_RETRIES: u32 = 3;
-                                    const RETRY_DELAY_SECS: u64 = 30;
-                                    for attempt in 0..MAX_RETRIES {
-                                        match crate::infra::api::handlers::generate_biography_for_agent(&state, dead_agent_id).await {
-                                            Ok(bio) => {
-                                                info!("[biography] 死亡传记生成成功: {}字", bio.chars().count());
-                                                return;
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    "[biography] 死亡传记生成失败 (attempt {}/{}): {}",
-                                                    attempt + 1, MAX_RETRIES, e
-                                                );
-                                                if attempt + 1 < MAX_RETRIES {
-                                                    tokio::time::sleep(std::time::Duration::from_secs(RETRY_DELAY_SECS)).await;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    warn!("[biography] 死亡传记生成最终失败: agent={}", dead_agent_id);
-                                });
-                            }
-
-                            death::maybe_schedule_auto_rebirth(
-                                self,
-                                world_state.agent_id.unwrap_or_default(),
-                                &world_state,
-                                "",
-                            ).await;
-
-                            continue;
-                        }
+                        let death_desc = world_state.events_log.iter()
+                            .find(|e| e.event_type == cyber_jianghu_protocol::WorldEventType::DeathNotification)
+                            .map(|e| e.description.as_str())
+                            .unwrap_or("AgentDied 回调通知（events_log 未包含 DeathNotification）");
+                        self.handle_death(
+                            world_state.tick_id,
+                            world_state.agent_id.unwrap_or_default(),
+                            death_desc,
+                        ).await;
+                        continue;
+                    }
 
                     // 1.5b 已死亡 → 跳过决策循环（等待重生恢复）
                     if self.death_reported {
@@ -775,7 +748,7 @@ impl super::Agent {
                                             death::maybe_schedule_auto_rebirth(
                                                 self,
                                                 world_state.agent_id.unwrap_or_default(),
-                                                &world_state,
+                                                world_state.tick_id,
                                                 "（intent失败路径）",
                                             ).await;
                                         }
@@ -894,5 +867,89 @@ impl super::Agent {
             // 每个 tick 结束时持久化 token 统计
             crate::component::llm::token_tracking::persist_and_reset();
         }
+    }
+
+    /// 统一死亡处理：持久化状态 → 生成传记 → 调度重生
+    ///
+    /// 可从两条路径调用：
+    /// 1. WorldState.events_log 中包含 DeathNotification（死亡后最后一条 WorldState 恰好到达）
+    /// 2. AgentDied 消息通过 death_event_tx 广播到达
+    async fn handle_death(
+        &mut self,
+        death_tick_id: i64,
+        dead_agent_id: Uuid,
+        death_description: &str,
+    ) {
+        warn!(
+            "Agent '{}' has died (tick={}): {}",
+            self.character_name(),
+            death_tick_id,
+            death_description
+        );
+        self.death_reported = true;
+        self.death_tick_id = Some(death_tick_id);
+
+        // 从 HttpApiState 同步死亡标记（AgentDied 回调可能已经设置，确保一致性）
+        if let Some(ref api_state) = self.http_api_state {
+            api_state
+                .is_dead
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.rebirth_delay_ticks = api_state
+                .rebirth_delay_ticks
+                .load(std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // 持久化死亡状态到 character.yaml
+        if let Some(ref mut char_cfg) = self.character_config {
+            char_cfg.status = CharacterStatus::Dead;
+            if let Some(ref api_state) = self.http_api_state {
+                let characters_dir = api_state.character_dir.read().await.clone();
+                if let Err(e) = save_character_config_to_fs(char_cfg, &characters_dir) {
+                    warn!("Failed to persist death status: {}", e);
+                }
+            }
+        }
+
+        // 死亡时触发传记生成（fire-and-forget，不阻塞重生调度）
+        if let Some(ref api_state) = self.http_api_state {
+            let state = api_state.clone();
+            let bio_agent_id = dead_agent_id;
+            tokio::spawn(async move {
+                info!("[biography] 死亡触发传记生成: agent={}", bio_agent_id);
+                const MAX_RETRIES: u32 = 3;
+                const RETRY_DELAY_SECS: u64 = 30;
+                for attempt in 0..MAX_RETRIES {
+                    match crate::infra::api::handlers::generate_biography_for_agent(
+                        &state,
+                        bio_agent_id,
+                    )
+                    .await
+                    {
+                        Ok(bio) => {
+                            info!("[biography] 死亡传记生成成功: {}字", bio.chars().count());
+                            return;
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[biography] 死亡传记生成失败 (attempt {}/{}): {}",
+                                attempt + 1,
+                                MAX_RETRIES,
+                                e
+                            );
+                            if attempt + 1 < MAX_RETRIES {
+                                tokio::time::sleep(std::time::Duration::from_secs(
+                                    RETRY_DELAY_SECS,
+                                ))
+                                .await;
+                            }
+                        }
+                    }
+                }
+                warn!("[biography] 死亡传记生成最终失败: agent={}", bio_agent_id);
+            });
+        }
+
+        // 调度自动重生
+        death::maybe_schedule_auto_rebirth(self, dead_agent_id, death_tick_id, "").await;
     }
 }

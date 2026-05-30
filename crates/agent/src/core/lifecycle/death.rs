@@ -106,8 +106,8 @@ fn schedule_auto_rebirth(params: RebirthParams) {
 
 pub(super) async fn maybe_schedule_auto_rebirth(
     agent: &Agent,
-    _old_agent_id: Uuid,
-    world_state: &cyber_jianghu_protocol::WorldState,
+    dead_agent_id: Uuid,
+    _dead_tick_id: i64,
     context: &str,
 ) {
     let auto_rebirth_enabled = agent
@@ -133,10 +133,7 @@ pub(super) async fn maybe_schedule_auto_rebirth(
     let tick_secs = agent.get_tick_duration().await.as_secs();
     let delay_ms = delay_ticks as u64 * tick_secs * 1000;
 
-    let old_agent_id = world_state
-        .agent_id
-        .or_else(|| agent.character_config.as_ref().and_then(|c| c.agent_id))
-        .unwrap_or_default();
+    let old_agent_id = dead_agent_id;
 
     let http_url = agent.config.server.http_url.clone();
     let Some(api_state) = agent.http_api_state.clone() else {
@@ -179,7 +176,7 @@ pub(super) async fn maybe_schedule_auto_rebirth(
     if old_agent_id == Uuid::nil() {
         warn!(
             "自动转世重生跳过: 无法获取有效的 old_agent_id \
-             (world_state.agent_id=None, api_state.agent_id=None)"
+             (agent_id=None, api_state.agent_id=None)"
         );
         return;
     }
