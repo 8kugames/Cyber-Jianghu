@@ -558,31 +558,56 @@ mod tests {
 
         // eat + 有效 item_id → 通过
         let mut ctx = create_test_context();
-        ctx.intent = Intent::new(Uuid::new_v4(), 1, "进食", Some(serde_json::json!({"item_id": "馒头"})));
+        ctx.intent = Intent::new(
+            Uuid::new_v4(),
+            1,
+            "进食",
+            Some(serde_json::json!({"item_id": "馒头"})),
+        );
         ctx.available_item_ids = vec!["馒头".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Approved { .. }), "eat 有效 item_id 应通过");
+        assert!(
+            matches!(result, ValidationResult::Approved { .. }),
+            "eat 有效 item_id 应通过"
+        );
 
         // eat + 无效 item_id → 拒绝
         ctx.available_item_ids = vec!["水".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Rejected { .. }), "eat 无效 item_id 应拒绝");
+        assert!(
+            matches!(result, ValidationResult::Rejected { .. }),
+            "eat 无效 item_id 应拒绝"
+        );
 
         // 非进食动作 → 通过（蕴含式放行）
         ctx.intent = Intent::new(Uuid::new_v4(), 1, "说话", None);
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Approved { .. }), "非进食动作应通过");
+        assert!(
+            matches!(result, ValidationResult::Approved { .. }),
+            "非进食动作应通过"
+        );
 
         // move + 有效 target → 通过
-        ctx.intent = Intent::new(Uuid::new_v4(), 1, "移动", Some(serde_json::json!({"target_location": "龙门厨房"})));
+        ctx.intent = Intent::new(
+            Uuid::new_v4(),
+            1,
+            "移动",
+            Some(serde_json::json!({"target_location": "龙门厨房"})),
+        );
         ctx.reachable_node_ids = vec!["龙门厨房".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Approved { .. }), "move 有效 target 应通过");
+        assert!(
+            matches!(result, ValidationResult::Approved { .. }),
+            "move 有效 target 应通过"
+        );
 
         // move + 无效 target → 拒绝
         ctx.reachable_node_ids = vec!["龙门后院".to_string()];
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Rejected { .. }), "move 无效 target 应拒绝");
+        assert!(
+            matches!(result, ValidationResult::Rejected { .. }),
+            "move 无效 target 应拒绝"
+        );
     }
 
     #[tokio::test]
@@ -615,12 +640,18 @@ mod tests {
 
         // 说话（非进食）→ NotEquals 满足 → 通过
         let result = engine.validate_context(&ctx).await.unwrap();
-        assert!(matches!(result, ValidationResult::Approved { .. }), "说话应通过（非进食）");
+        assert!(
+            matches!(result, ValidationResult::Approved { .. }),
+            "说话应通过（非进食）"
+        );
 
         // 进食 → NotEquals 不满足 → 拒绝
         let mut ctx_eat = create_test_context();
         ctx_eat.intent = Intent::new(Uuid::new_v4(), 1, "进食", None);
         let result = engine.validate_context(&ctx_eat).await.unwrap();
-        assert!(matches!(result, ValidationResult::Rejected { .. }), "进食应被拒绝");
+        assert!(
+            matches!(result, ValidationResult::Rejected { .. }),
+            "进食应被拒绝"
+        );
     }
 }

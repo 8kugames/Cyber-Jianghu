@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use tracing::warn;
 use uuid::Uuid;
@@ -13,12 +12,8 @@ pub enum DialogueRole {
 
 #[derive(Debug, Clone)]
 struct DialogueMessageEntry {
-    #[allow(dead_code)]
-    tick_id: i64,
     role: DialogueRole,
     content: String,
-    #[allow(dead_code)]
-    timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,8 +22,6 @@ pub struct DialogueSession {
     partner_id: Uuid,
     partner_name: String,
     messages: Vec<DialogueMessageEntry>,
-    #[allow(dead_code)]
-    created_at: i64,
     last_active_tick: i64,
     is_active: bool,
 }
@@ -78,7 +71,6 @@ impl DialogueContextManager {
                 partner_id,
                 partner_name: String::new(),
                 messages: Vec::new(),
-                created_at: tick_id,
                 last_active_tick: tick_id,
                 is_active: true,
             });
@@ -136,7 +128,6 @@ impl DialogueContextManager {
                 partner_id,
                 partner_name: String::new(),
                 messages: Vec::new(),
-                created_at: tick_id,
                 last_active_tick: tick_id,
                 is_active: true,
             });
@@ -149,10 +140,8 @@ impl DialogueContextManager {
             session.messages.remove(0);
         }
         session.messages.push(DialogueMessageEntry {
-            tick_id,
             role,
             content: content.to_string(),
-            timestamp: Utc::now(),
         });
 
         if self.sessions.len() > self.max_sessions {

@@ -13,7 +13,6 @@ use std::collections::HashMap;
 ///
 /// 预留：主属性配置系统待集成
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[allow(dead_code)]
 pub struct PrimaryAttributesConfig {
     /// 配置版本号
     pub version: String,
@@ -94,21 +93,3 @@ pub type PrimaryAttributeType = String;
 pub const PRIMARY_ATTR_GROWABLE: &str = "growable";
 pub const PRIMARY_ATTR_STATIC: &str = "static";
 pub const PRIMARY_ATTR_DAILY_RANDOM: &str = "daily_random";
-
-/// 检查主属性类型是否为可成长属性
-#[allow(dead_code)]
-pub fn is_growable_attr(attr_type: &PrimaryAttributeType) -> bool {
-    attr_type == PRIMARY_ATTR_GROWABLE
-}
-
-/// 检查主属性类型是否为静态属性
-#[allow(dead_code)]
-pub fn is_static_attr(attr_type: &PrimaryAttributeType) -> bool {
-    attr_type == PRIMARY_ATTR_STATIC
-}
-
-/// 检查主属性类型是否为每日随机属性
-#[allow(dead_code)]
-pub fn is_daily_random_attr(attr_type: &PrimaryAttributeType) -> bool {
-    attr_type == PRIMARY_ATTR_DAILY_RANDOM
-}

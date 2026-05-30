@@ -38,12 +38,6 @@ impl<'a> MutationContext<'a> {
             events,
         }
     }
-
-    /// 添加事件
-    #[allow(dead_code)]
-    pub fn add_event(&mut self, agent_id: Uuid, event: WorldEvent) {
-        self.events.push((agent_id, event));
-    }
 }
 
 /// 状态变更器

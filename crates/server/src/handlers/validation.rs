@@ -124,27 +124,3 @@ pub async fn validate_action(
         suggestion: None,
     }))
 }
-
-/// Generate suggestion based on error（预留：智能动作建议）
-#[allow(dead_code)]
-fn generate_suggestion(action_type: &ActionType, error: &str) -> Option<String> {
-    if error.contains("AgentDead") {
-        Some("Agent 已死亡，无法执行任何动作".to_string())
-    } else if error.contains("TargetNotFound") {
-        Some("目标 Agent 不在当前位置".to_string())
-    } else if error.contains("TargetDead") {
-        Some("目标 Agent 已死亡".to_string())
-    } else if error.contains("属性") || error.contains("不足") {
-        match action_type.as_str() {
-            "攻击" => Some("HP 太低，无法攻击，建议先休息".to_string()),
-            "移动" => Some("体力不足，无法移动，建议先休息".to_string()),
-            _ => Some("属性不足，无法执行此动作".to_string()),
-        }
-    } else if error.contains("对话内容") {
-        Some("请提供非空的对话内容".to_string())
-    } else if error.contains("物品") {
-        Some("请检查物品 ID 是否正确".to_string())
-    } else {
-        Some("请检查动作参数是否正确".to_string())
-    }
-}

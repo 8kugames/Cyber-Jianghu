@@ -331,12 +331,6 @@ impl Agent {
         self.client.agent_id().await
     }
 
-    /// 等待 Agent ID 可用（注册后)
-    #[allow(dead_code)]
-    pub(crate) async fn wait_for_agent_id(&self) -> Result<Uuid> {
-        self.client.wait_for_agent_id().await
-    }
-
     /// 获取对话客户端的引用
     pub fn dialogue_client(&self) -> Option<&DialogueClient> {
         self.dialogue_client.as_ref()

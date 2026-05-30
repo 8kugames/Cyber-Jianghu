@@ -12,27 +12,6 @@ use uuid::Uuid;
 use crate::models::Intent;
 
 impl super::super::Agent {
-    /// 发送即时 Intent（统一走主 intent 通道）
-    #[allow(dead_code)]
-    pub(super) async fn send_immediate_intent(
-        &self,
-        intent: &Intent,
-    ) -> std::result::Result<(), String> {
-        if let Err(e) = self.client.send_intent(intent).await {
-            warn!(
-                "[天魂/即时] intent 发送失败 ({}): {}",
-                intent.action_type, e
-            );
-            Err(e.to_string())
-        } else {
-            info!(
-                "[天魂/即时] intent 已发送: {} {:?}",
-                intent.action_type, intent.action_data
-            );
-            Ok(())
-        }
-    }
-
     /// 从 WorldTime 计算游戏日（用于 EventStore game_day 字段）
     ///
     /// 数据驱动：从 CalendarConfig (time.yaml) 读取 days_per_season / seasons_per_year。

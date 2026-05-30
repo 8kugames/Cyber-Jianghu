@@ -403,8 +403,12 @@ mod tests {
         match &parsed[0].condition {
             RuleCondition::Or(conds) => {
                 assert_eq!(conds.len(), 2);
-                assert!(matches!(&conds[0], RuleCondition::NotEquals(f, _) if f == "intent.action_type"));
-                assert!(matches!(&conds[1], RuleCondition::In(f, c) if f == "intent.action_data.item_id" && c == "available_item_ids"));
+                assert!(
+                    matches!(&conds[0], RuleCondition::NotEquals(f, _) if f == "intent.action_type")
+                );
+                assert!(
+                    matches!(&conds[1], RuleCondition::In(f, c) if f == "intent.action_data.item_id" && c == "available_item_ids")
+                );
             }
             _ => panic!("Expected Or condition for eat rule"),
         }
