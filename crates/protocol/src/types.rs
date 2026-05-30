@@ -28,7 +28,6 @@ pub mod entities;
 pub mod locations;
 pub mod narrative;
 pub mod prompt_template;
-pub mod review;
 pub mod rules;
 pub mod world;
 
@@ -39,7 +38,6 @@ pub use entities::*;
 pub use locations::*;
 pub use narrative::*;
 pub use prompt_template::*;
-pub use review::*;
 pub use rules::*;
 pub use world::*;
 

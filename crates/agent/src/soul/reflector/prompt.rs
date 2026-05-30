@@ -1,11 +1,11 @@
 // ============================================================================
-// 观察者提示词模板
+// ReflectorSoul 提示词模板
 // ============================================================================
 
 use crate::models::Intent;
 
-/// 观察者 System Prompt
-const OBSERVER_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察者）。
+/// ReflectorSoul System Prompt
+const REFLECTOR_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察者）。
 
 ## 你的职责
 1. 审核玩家的意图是否符合武侠世界观
@@ -37,18 +37,18 @@ const OBSERVER_SYSTEM_PROMPT: &str = r#"你是武侠世界的守护者（观察�
   "rejection_type": "era_violation" | "power_system_violation" | "out_of_character" | "meta_gaming" | "semantic_repeat" | "other"
 }"#;
 
-/// 观察者 Prompt 模板
+/// ReflectorSoul Prompt 模板
 #[derive(Debug, Clone)]
-pub struct ObserverPrompt {
+pub struct ReflectorPrompt {
     /// System prompt
     system_prompt: String,
 }
 
-impl ObserverPrompt {
-    /// 创建新的观察者 Prompt
+impl ReflectorPrompt {
+    /// 创建新的 ReflectorSoul Prompt
     pub fn new() -> Self {
         Self {
-            system_prompt: OBSERVER_SYSTEM_PROMPT.to_string(),
+            system_prompt: REFLECTOR_SYSTEM_PROMPT.to_string(),
         }
     }
 
@@ -140,7 +140,7 @@ impl ObserverPrompt {
     }
 }
 
-impl Default for ObserverPrompt {
+impl Default for ReflectorPrompt {
     fn default() -> Self {
         Self::new()
     }
@@ -159,8 +159,8 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn test_observer_prompt_default() {
-        let prompt = ObserverPrompt::new();
+    fn test_reflector_prompt_default() {
+        let prompt = ReflectorPrompt::new();
         assert!(prompt.system_prompt().contains("武侠世界"));
     }
 
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_build_validation_prompt() {
-        let prompt = ObserverPrompt::new();
+        let prompt = ReflectorPrompt::new();
         let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "休息", None);
         let persona = crate::soul::reflector::PersonaInfo::default();
         let world_rules = test_world_building_rules();
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_build_validation_prompt_with_dedup() {
-        let prompt = ObserverPrompt::new();
+        let prompt = ReflectorPrompt::new();
         let intent = crate::models::Intent::new(Uuid::new_v4(), 1, "说话", None);
         let persona = crate::soul::reflector::PersonaInfo::default();
         let world_rules = test_world_building_rules();

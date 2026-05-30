@@ -373,7 +373,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     debug!("批量插入 {} 个动作日志", actions.len());
 
     let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, chaos_marker, dream_marker, pipe_seq) ",
+        "INSERT INTO agent_action_logs (tick_id, agent_id, action_type, action_type_display, action_data, result, result_message, thought_log, reflector_thought, narrative, soul_cycle_metadata, chaos_marker, dream_marker, pipe_seq) ",
     );
 
     query_builder.push_values(actions, |mut b, action| {
@@ -385,7 +385,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
             .push_bind(action.result.to_string())
             .push_bind(&action.result_message)
             .push_bind(&action.thought_log)
-            .push_bind(&action.observer_thought)
+            .push_bind(&action.reflector_thought)
             .push_bind(&action.narrative)
             .push_bind(&action.soul_cycle_metadata)
             .push_bind(&action.chaos_marker)
@@ -402,7 +402,7 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
          result = EXCLUDED.result, \
          result_message = EXCLUDED.result_message, \
          thought_log = EXCLUDED.thought_log, \
-         observer_thought = EXCLUDED.observer_thought, \
+         reflector_thought = EXCLUDED.reflector_thought, \
          narrative = EXCLUDED.narrative, \
          chaos_marker = EXCLUDED.chaos_marker, \
          dream_marker = EXCLUDED.dream_marker",

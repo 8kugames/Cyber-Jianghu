@@ -241,60 +241,6 @@ pub(crate) async fn api_list_handler(State(state): State<HttpApiState>) -> impl 
                 }
             })),
         },
-        // === 审查端点（Player Agent 提供，Observer Agent 调用）===
-        ApiEndpoint {
-            path: "/api/v1/review/pending".to_string(),
-            method: "GET".to_string(),
-            description: "获取待审查意图列表（Observer Agent 轮询用）".to_string(),
-            request_example: None,
-            response_example: Some(serde_json::json!({
-                "intent_id": "uuid-...",
-                "agent_id": "uuid-...",
-                "intent": {"action_type": "攻击", "action_data": null},
-                "persona_summary": {
-                    "name": "张三",
-                    "gender": "男",
-                    "age": 28,
-                    "personality": ["沉稳", "重情义"],
-                    "values": ["江湖道义为先"]
-                },
-                "world_context": "当前位置：龙门客栈大堂\n附近实体：李四...",
-                "created_at": "2024-03-19T10:00:00Z",
-                "deadline": "2024-03-19T10:00:30Z"
-            })),
-        },
-        ApiEndpoint {
-            path: "/api/v1/review/{intent_id}".to_string(),
-            method: "POST".to_string(),
-            description: "提交审查结果（批准/拒绝）".to_string(),
-            request_example: Some(serde_json::json!({
-                "result": "approved",
-                "reason": "行为符合武侠世界观",
-                "narrative": "张三决定出手相助"
-            })),
-            response_example: Some(serde_json::json!({
-                "intent_id": "uuid-...",
-                "status": "approved",
-                "decision": "approved",
-                "reason": "行为符合武侠世界观",
-                "narrative": "张三决定出手相助",
-                "reviewed_at": "2024-03-19T10:00:15Z"
-            })),
-        },
-        ApiEndpoint {
-            path: "/api/v1/review/{intent_id}/status".to_string(),
-            method: "GET".to_string(),
-            description: "获取特定意图的审查状态".to_string(),
-            request_example: None,
-            response_example: Some(serde_json::json!({
-                "intent_id": "uuid-...",
-                "status": "approved",
-                "decision": "approved",
-                "reason": "行为符合武侠世界观",
-                "narrative": "张三决定出手相助",
-                "reviewed_at": "2024-03-19T10:00:15Z"
-            })),
-        },
         // === 性能指标 ===
         ApiEndpoint {
             path: "/api/v1/metrics".to_string(),

@@ -1,4 +1,4 @@
-use crate::component::memory::backend::{MemoryBackend, SearchableBackend, SemanticSearchable};
+use crate::component::memory::backend::{MemoryBackend, SemanticSearchable};
 use crate::component::memory::backends::semantic::fts_fallback::FtsFallback;
 use crate::component::memory::backends::semantic::vector_store::HnswVectorStore;
 use crate::component::memory::embedder::EmbedderService;
@@ -100,10 +100,6 @@ impl SemanticMemoryBackend {
     #[allow(dead_code)]
     async fn generate_embedding(&self, memory: &MemoryEntry) -> Result<Vec<f32>> {
         self.embedder.embed(&memory.content).await
-    }
-
-    pub async fn ensure_embeddings_for_priority(&self) -> Result<usize> {
-        Ok(0)
     }
 
     pub async fn search(&self, params: &SearchMemoryParams) -> Result<Vec<(i64, f32)>> {
@@ -221,21 +217,6 @@ impl MemoryBackend for SemanticMemoryBackend {
 }
 
 #[async_trait]
-impl SearchableBackend for SemanticMemoryBackend {
-    async fn get_top_by_importance(&self, _limit: usize) -> Result<Vec<MemoryEntry>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_recent(&self, _limit: usize) -> Result<Vec<MemoryEntry>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_by_tick_range(&self, _start: i64, _end: i64) -> Result<Vec<MemoryEntry>> {
-        Ok(Vec::new())
-    }
-}
-
-#[async_trait]
 impl SemanticSearchable for SemanticMemoryBackend {
     async fn search_similar(&mut self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>> {
         // 尝试 embed：懒加载 embedder，成功则自动升级到 vector 模式
@@ -280,9 +261,5 @@ impl SemanticSearchable for SemanticMemoryBackend {
             .into_iter()
             .map(Self::client_memory_to_entry)
             .collect())
-    }
-
-    async fn ensure_embedding(&mut self, _memory_id: i64) -> Result<()> {
-        Ok(())
     }
 }

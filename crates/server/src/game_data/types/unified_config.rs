@@ -69,11 +69,6 @@ pub struct ConfigMeta {
     /// 标签
     #[serde(default)]
     pub tags: Vec<String>,
-
-    /// 额外扩展字段
-    #[serde(default)]
-    #[serde(flatten)]
-    pub extra: HashMap<String, serde_json::Value>,
 }
 
 // ============================================================================
@@ -146,12 +141,6 @@ impl ConfigMeta {
     /// 添加标签
     pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
-        self
-    }
-
-    /// 添加额外字段
-    pub fn with_extra(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.extra.insert(key.into(), value);
         self
     }
 }
