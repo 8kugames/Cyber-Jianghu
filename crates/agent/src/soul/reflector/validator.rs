@@ -495,11 +495,19 @@ impl ReflectorSoul {
             return;
         }
 
+        // 提取 rules_json 后存入
+        let rules_json = rules.rules_json.clone();
         *current_rules = rules;
         info!(
             "WorldBuildingRules updated to version {}",
             current_rules.version
         );
+
+        // 释放写锁后更新 RuleEngine
+        drop(current_rules);
+        if let Some(json) = rules_json {
+            self.rule_engine.reload_rules_from_json(json).await;
+        }
     }
 
     /// 验证人设（注册阶段，客户端本地验证）
@@ -622,6 +630,7 @@ mod tests {
             forbidden_concepts: vec!["魔法".to_string()],
             narrative_rules: "测试叙事规则".to_string(),
             last_updated: "2026-01-01T00:00:00Z".to_string(),
+            rules_json: None,
         }
     }
 

@@ -122,6 +122,15 @@ impl RuleRegistry {
         }
     }
 
+    /// 原子替换所有规则
+    pub async fn replace_all(&self, rules: Vec<Rule>) {
+        let mut set = self.inner.write().await;
+        *set = RuleSet::new();
+        for rule in rules {
+            set.add_rule(rule);
+        }
+    }
+
     /// 获取指定类型的规则
     pub async fn get_by_type(&self, rule_type: RuleType) -> Vec<Rule> {
         let set = self.inner.read().await;
@@ -134,13 +143,6 @@ impl RuleRegistry {
         set.all_enabled().into_iter().cloned().collect()
     }
 
-    /// 从配置加载规则（未来扩展）
-    pub async fn load_from_config(&self, _path: &std::path::Path) -> anyhow::Result<()> {
-        // Phase 2: 实现 YAML 配置加载
-        // 当前使用硬编码规则
-        tracing::warn!("load_from_config 尚未实现，使用硬编码规则");
-        Ok(())
-    }
 }
 
 impl Default for RuleRegistry {

@@ -59,4 +59,8 @@ pub struct GameData {
 
     /// 初始配方配置 (initial_recipes.yaml)
     pub initial_recipes: UnifiedInitialRecipesConfig,
+
+    /// 规则引擎验证规则 (rules.json)
+    /// Server 透传 JSON，Agent 反序列化为 Vec<Rule>
+    pub rules_json: serde_json::Value,
 }
