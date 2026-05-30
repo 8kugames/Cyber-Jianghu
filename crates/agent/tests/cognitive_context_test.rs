@@ -59,6 +59,7 @@ fn create_test_world_state() -> WorldState {
                 ("hunger".to_string(), "饥饿感明显".to_string()),
                 ("thirst".to_string(), "有些口渴".to_string()),
             ]),
+            survival_drives: vec![],
             status_effects: vec![],
             inventory: vec![],
             skills: vec![],

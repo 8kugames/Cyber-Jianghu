@@ -387,17 +387,23 @@ impl ReflectorSoul {
                 if matches!(rejection_type, RejectionType::OutOfCharacter)
                     && let Some(world_state) = request.world_state.as_ref()
                 {
-                    const SURVIVAL_OVERRIDE_THRESHOLD: i32 = 40;
-                    let hunger = world_state.self_state.hunger();
-                    let thirst = world_state.self_state.thirst();
-                    if hunger < SURVIVAL_OVERRIDE_THRESHOLD || thirst < SURVIVAL_OVERRIDE_THRESHOLD
-                    {
+                    let has_survival_drive = world_state
+                        .self_state
+                        .survival_drives
+                        .iter()
+                        .any(|sd| sd.attribute == "hunger" || sd.attribute == "thirst");
+                    if has_survival_drive {
                         layers.push(LayerResult {
                             layer: "layer3",
                             passed: true,
                             detail: Some(format!(
-                                "survival_override: hunger={}, thirst={} < {}",
-                                hunger, thirst, SURVIVAL_OVERRIDE_THRESHOLD
+                                "survival_override: drives={:?}",
+                                world_state
+                                    .self_state
+                                    .survival_drives
+                                    .iter()
+                                    .map(|sd| format!("{}({})", sd.attribute, sd.urgency))
+                                    .collect::<Vec<_>>()
                             )),
                         });
                         return Ok(PipelineValidationResult::Approved {
@@ -653,6 +659,7 @@ mod tests {
                 attributes,
                 derived_attributes: HashMap::new(),
                 attribute_descriptions: HashMap::new(),
+                survival_drives: vec![],
                 status_effects: vec![],
                 inventory: vec![InventoryItem {
                     item_id: "馒头".to_string(),

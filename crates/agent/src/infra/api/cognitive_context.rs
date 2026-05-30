@@ -379,49 +379,24 @@ impl CognitiveContextBuilder {
     }
 
     /// 构建动机上下文
+    ///
+    /// 直接使用 server 预计算的 survival_drives（数据驱动），
+    /// 无需本地推导或关键词匹配。
     fn build_motivation(
         &self,
         world_state: &WorldState,
         persona: Option<&DynamicPersona>,
     ) -> MotivationContext {
-        let mut drives = Vec::new();
-        let attrs = &world_state.self_state.attributes;
-
-        let hunger = attrs.get("hunger").copied().unwrap_or(50);
-        if hunger < 40 {
-            drives.push(Drive {
-                drive: "寻找食物".to_string(),
-                intensity: ((50 - hunger) / 5).min(10) as u8,
-                reason: "肚子饿了，需要进食".to_string(),
-            });
-        }
-
-        let thirst = attrs.get("thirst").copied().unwrap_or(50);
-        if thirst < 40 {
-            drives.push(Drive {
-                drive: "寻找水源".to_string(),
-                intensity: ((50 - thirst) / 5).min(10) as u8,
-                reason: "口渴了，需要喝水".to_string(),
-            });
-        }
-
-        let stamina = attrs.get("stamina").copied().unwrap_or(100);
-        if stamina < 30 {
-            drives.push(Drive {
-                drive: "休息恢复".to_string(),
-                intensity: ((100 - stamina) / 10).min(10) as u8,
-                reason: "体力不足，需要休息".to_string(),
-            });
-        }
-
-        let hp = attrs.get("hp").copied().unwrap_or(100);
-        if hp < 50 {
-            drives.push(Drive {
-                drive: "治疗伤势".to_string(),
-                intensity: ((100 - hp) / 5).min(10) as u8,
-                reason: "身体受伤，需要治疗".to_string(),
-            });
-        }
+        let mut drives: Vec<Drive> = world_state
+            .self_state
+            .survival_drives
+            .iter()
+            .map(|sd| Drive {
+                drive: sd.drive.clone(),
+                intensity: sd.urgency,
+                reason: sd.reason.clone(),
+            })
+            .collect();
 
         if let Some(p) = persona {
             for (trait_name, trait_obj) in p.traits.iter().take(2) {
@@ -465,22 +440,18 @@ impl CognitiveContextBuilder {
         world_state: &WorldState,
         available_actions_override: Option<Vec<AvailableAction>>,
     ) -> PlanningContext {
-        let mut goals = Vec::new();
-        let attrs = &world_state.self_state.attributes;
+        let goals: Vec<String> = world_state
+            .self_state
+            .survival_drives
+            .iter()
+            .map(|sd| sd.goal.clone())
+            .collect();
 
-        if attrs.get("hunger").copied().unwrap_or(50) < 40 {
-            goals.push("寻找食物充饥".to_string());
-        }
-        if attrs.get("thirst").copied().unwrap_or(50) < 40 {
-            goals.push("寻找水源解渴".to_string());
-        }
-        if attrs.get("hp").copied().unwrap_or(100) < 50 {
-            goals.push("寻找方法治疗伤势".to_string());
-        }
-
-        if goals.is_empty() {
-            goals.push("继续当前活动".to_string());
-        }
+        let goals = if goals.is_empty() {
+            vec!["继续当前活动".to_string()]
+        } else {
+            goals
+        };
 
         // 优先使用传入的 available_actions_override，若为空则从本地文件加载
         let source_actions = match available_actions_override {

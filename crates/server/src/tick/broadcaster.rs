@@ -476,10 +476,12 @@ impl Broadcaster {
                     })
                     .collect();
 
+                let survival_drives = game_data.narrative.compute_survival_drives(&attributes);
                 crate::models::AgentSelfState {
                     attributes,
                     derived_attributes,
                     attribute_descriptions,
+                    survival_drives,
                     // 注意：status_effects 字段暂未实现，始终为空数组
                     // Agent 的实际状态效果通过 attribute_descriptions 描述
                     status_effects: vec![],
@@ -785,34 +787,38 @@ pub fn build_reactive_world_state(
             adjacent_nodes,
             gatherable_items,
         },
-        self_state: crate::models::AgentSelfState {
-            attributes,
-            derived_attributes,
-            attribute_descriptions,
-            status_effects: vec![],
-            inventory: inventory.to_vec(),
-            skills: agent_state
-                .skills
-                .iter()
-                .filter_map(|skill_id| {
-                    crate::game_data::registry::SkillRegistry::get(skill_id).map(|def| {
-                        cyber_jianghu_protocol::types::entities::SkillInfo {
-                            skill_id: skill_id.clone(),
-                            name: def.name,
-                        }
+        self_state: {
+            let survival_drives = game_data.narrative.compute_survival_drives(&attributes);
+            crate::models::AgentSelfState {
+                attributes,
+                derived_attributes,
+                attribute_descriptions,
+                survival_drives,
+                status_effects: vec![],
+                inventory: inventory.to_vec(),
+                skills: agent_state
+                    .skills
+                    .iter()
+                    .filter_map(|skill_id| {
+                        crate::game_data::registry::SkillRegistry::get(skill_id).map(|def| {
+                            cyber_jianghu_protocol::types::entities::SkillInfo {
+                                skill_id: skill_id.clone(),
+                                name: def.name,
+                            }
+                        })
                     })
-                })
-                .collect(),
-            age_years: agent_state
-                .birth_tick
-                .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
-            max_age: game_data
-                .game_rules
-                .data
-                .lifespan
-                .as_ref()
-                .map(|l| l.max_age as u32),
-            recipe_details,
+                    .collect(),
+                age_years: agent_state
+                    .birth_tick
+                    .map(|bt| super::decay::compute_age_years(bt, agent_state.tick_id) as u32),
+                max_age: game_data
+                    .game_rules
+                    .data
+                    .lifespan
+                    .as_ref()
+                    .map(|l| l.max_age as u32),
+                recipe_details,
+            }
         },
         entities,
         nearby_items: nearby_items.to_vec(),
@@ -907,6 +913,7 @@ pub fn build_initial_world_state(
                 .map(|desc| (name.clone(), desc.to_string()))
         })
         .collect();
+    let survival_drives = game_data.narrative.compute_survival_drives(&attributes);
 
     crate::models::WorldState {
         event_type: EVENT_TYPE_WORLD_STATE.to_string(),
@@ -932,6 +939,7 @@ pub fn build_initial_world_state(
             attributes,
             derived_attributes,
             attribute_descriptions,
+            survival_drives,
             status_effects: vec![],
             inventory: initial_inventory,
             skills: agent_state

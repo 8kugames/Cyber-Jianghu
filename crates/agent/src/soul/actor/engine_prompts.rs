@@ -42,6 +42,7 @@ pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
             attributes: Default::default(),
             derived_attributes: Default::default(),
             attribute_descriptions: Default::default(),
+            survival_drives: vec![],
             status_effects: vec![],
             inventory: vec![],
             skills: vec![],

@@ -745,11 +745,10 @@ pub struct AttentionConfig {
     pub critical_auto_include: bool,
 }
 
-/// Delta Engine 配置（后续任务填充）
+/// Delta Engine 配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeltaConfig {
-    pub survival_thresholds: std::collections::HashMap<String, f32>,
     pub change_percentage_threshold: f32,
 }
 
@@ -775,13 +774,7 @@ impl Default for AttentionConfig {
 
 impl Default for DeltaConfig {
     fn default() -> Self {
-        let mut survival_thresholds = std::collections::HashMap::new();
-        survival_thresholds.insert("hunger".to_string(), 0.7);
-        survival_thresholds.insert("thirst".to_string(), 0.7);
-        survival_thresholds.insert("hp".to_string(), 0.3);
-        survival_thresholds.insert("stamina".to_string(), 0.2);
         Self {
-            survival_thresholds,
             change_percentage_threshold: 0.1,
         }
     }
