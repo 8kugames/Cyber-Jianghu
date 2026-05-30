@@ -17,7 +17,7 @@ use crate::runtime::claw::LlmClientContainer;
 use crate::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_protocol::{GradedValidationConfig, WorldBuildingRules};
 
-use super::prompt::ObserverPrompt;
+use super::prompt::ReflectorPrompt;
 use super::rule_engine::{RuleEngine, RuleValidationContext, types::extract_ids_from_world_state};
 use super::types::{
     LayerResult, LlmValidationResponse, PersonaInfo, PipelineValidationResult, RejectionType,
@@ -75,8 +75,8 @@ pub struct ReflectorSoul {
     rules: Arc<RwLock<WorldBuildingRules>>,
     /// LLM 客户端容器（支持热重载）
     llm_container: LlmClientContainer,
-    /// 观察者 prompt 模板
-    observer_prompt: ObserverPrompt,
+    /// ReflectorSoul prompt 模板
+    reflector_prompt: ReflectorPrompt,
     /// Layer 2 规则引擎
     rule_engine: RuleEngine,
 }
@@ -87,7 +87,7 @@ impl ReflectorSoul {
         Self {
             rules: Arc::new(RwLock::new(rules)),
             llm_container,
-            observer_prompt: ObserverPrompt::new(),
+            reflector_prompt: ReflectorPrompt::new(),
             rule_engine: RuleEngine::with_default_config(),
         }
     }
@@ -430,7 +430,7 @@ impl ReflectorSoul {
         };
 
         // 构建验证 prompt（条件注入语义去重指令）
-        let prompt = self.observer_prompt.build_validation_prompt(
+        let prompt = self.reflector_prompt.build_validation_prompt(
             &request.intent,
             &request.persona,
             &rules,
@@ -443,7 +443,7 @@ impl ReflectorSoul {
         // 调用 LLM（从 container 读取当前客户端，支持热重载）
         let llm_client = self.llm_container.read().await.clone();
         let response: LlmValidationResponse = llm_client
-            .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
+            .complete_json_with_system(self.reflector_prompt.system_prompt(), &prompt)
             .await?;
 
         thinking_log::log_llm(
@@ -540,7 +540,7 @@ impl ReflectorSoul {
 
         let llm_client = self.llm_container.read().await.clone();
         let response: LlmValidationResponse = llm_client
-            .complete_json_with_system(self.observer_prompt.system_prompt(), &prompt)
+            .complete_json_with_system(self.reflector_prompt.system_prompt(), &prompt)
             .await?;
 
         Ok(response.into_validation_result())

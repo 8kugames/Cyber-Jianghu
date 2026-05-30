@@ -27,7 +27,7 @@ pub struct ExperienceEntry {
     /// ActorSoul 思考日志
     pub thought_log: Option<String>,
     /// ReflectorSoul 审查理由
-    pub observer_thought: Option<String>,
+    pub reflector_thought: Option<String>,
     /// 叙事化经历描述
     pub narrative: Option<String>,
     /// 三魂循环元数据
@@ -106,7 +106,7 @@ pub async fn get_agent_experiences(
 
     // 获取经历日志
     let rows = sqlx::query(
-        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, observer_thought, narrative, soul_cycle_metadata, created_at
+        "SELECT tick_id, action_type, action_type_display, action_data, result, result_message, thought_log, reflector_thought, narrative, soul_cycle_metadata, created_at
          FROM agent_action_logs
          WHERE agent_id = $1
          ORDER BY tick_id DESC
@@ -134,7 +134,7 @@ pub async fn get_agent_experiences(
             result: row.get("result"),
             result_message: row.get("result_message"),
             thought_log: row.get("thought_log"),
-            observer_thought: row.get("observer_thought"),
+            reflector_thought: row.get("reflector_thought"),
             narrative: row.get("narrative"),
             soul_cycle_metadata: row.get("soul_cycle_metadata"),
             created_at: row.get("created_at"),
@@ -193,7 +193,7 @@ pub struct StreamEntry {
     pub result: Option<String>,
     pub result_message: Option<String>,
     pub thought_log: Option<String>,
-    pub observer_thought: Option<String>,
+    pub reflector_thought: Option<String>,
     pub narrative: Option<String>,
     pub soul_cycle_metadata: Option<serde_json::Value>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -269,7 +269,7 @@ pub async fn get_experiences(
         r#"
         SELECT a.tick_id, a.agent_id, ag.device_id, ag.name as agent_name, loc.node_id as location,
                a.action_type, a.action_type_display, a.action_data,
-               a.result, a.result_message, a.thought_log, a.observer_thought,
+               a.result, a.result_message, a.thought_log, a.reflector_thought,
                a.narrative, a.soul_cycle_metadata, a.created_at
         FROM agent_action_logs a
         JOIN agents ag ON a.agent_id = ag.agent_id
@@ -321,7 +321,7 @@ pub async fn get_experiences(
             result: row.get("result"),
             result_message: row.get("result_message"),
             thought_log: row.get("thought_log"),
-            observer_thought: row.get("observer_thought"),
+            reflector_thought: row.get("reflector_thought"),
             narrative: row.get("narrative"),
             soul_cycle_metadata: row.get("soul_cycle_metadata"),
             created_at: row.get("created_at"),

@@ -73,10 +73,6 @@ use crate::component::social::{DialogueClient, DialogueEventHandler};
 use crate::component::social::{NarrativeGenerator, RelationshipStore};
 use crate::soul::reflector::Validator;
 
-// 重导出 review 模块的公共 API（已迁移至 soul::reflector::store）
-pub use crate::soul::reflector::store::ReviewStore;
-pub type ReviewState = std::sync::Arc<ReviewStore>;
-
 // 重导出 context 模块的公共 API
 pub use context::{
     AttributesGlimpse, ContextResponse, create_attributes_glimpse,
@@ -165,8 +161,6 @@ pub struct HttpApiState {
     pub narrative_generator: Option<Arc<NarrativeGenerator>>,
     /// 动态人设（可选）
     pub dynamic_persona: Option<Arc<ThreadSafePersona>>,
-    /// 审查存储，管理待审查意图和审查结果（仅 Player Agent 使用）
-    pub review_store: Option<Arc<ReviewStore>>,
     /// 三魂循环记录器注册表，按 agent_id 隔离
     /// 支持多角色：当前角色写入 + 所有角色读取
     pub soul_cycle_registrar:
@@ -482,19 +476,6 @@ pub fn create_api_router() -> Router<HttpApiState> {
             "/api/v1/characters/{agent_id}",
             get(handlers::get_character_by_id_handler),
         ) // 获取指定角色详情
-        // === 审查系统端点（Player Agent 提供，Observer Agent 调用）===
-        .route(
-            "/api/v1/review/pending",
-            get(crate::soul::reflector::store::get_pending_reviews),
-        ) // 获取待审查意图
-        .route(
-            "/api/v1/review/{intent_id}",
-            post(crate::soul::reflector::store::submit_review),
-        ) // 提交审查结果
-        .route(
-            "/api/v1/review/{intent_id}/status",
-            get(crate::soul::reflector::store::get_review_status),
-        ) // 获取审查状态
         // === 实时事件端点（SSE）===
         .route("/api/v1/events", get(handlers::death_events_handler)) // 死亡事件 SSE 流
         // === 配置管理端点 ===
@@ -799,7 +780,6 @@ pub fn create_http_state(
         game_rules: Arc::new(RwLock::new(None)),
         narrative_generator: None,
         dynamic_persona: None,
-        review_store: None, // 由 Player Agent 通过 builder 设置
         soul_cycle_registrar: soul_cycle_registrar.clone(),
         data_dir: data_dir_clone.clone(),
         dream_store: Some(Arc::new(RwLock::new(DreamState::default()))),
@@ -865,12 +845,6 @@ impl HttpApiState {
     /// 设置动态人设
     pub fn with_dynamic_persona(mut self, persona: Arc<ThreadSafePersona>) -> Self {
         self.dynamic_persona = Some(persona);
-        self
-    }
-
-    /// 设置审查存储（仅 Player Agent 使用）
-    pub fn with_review_store(mut self, store: Arc<ReviewStore>) -> Self {
-        self.review_store = Some(store);
         self
     }
 

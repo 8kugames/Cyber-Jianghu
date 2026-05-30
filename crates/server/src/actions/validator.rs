@@ -525,7 +525,7 @@ mod tests {
             action_type,
             action_data,
             priority: 5,
-            observer_thought: None,
+            reflector_thought: None,
             narrative: None,
             already_broadcast: false,
             session_id: None,

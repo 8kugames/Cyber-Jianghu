@@ -76,7 +76,7 @@ pub enum DownstreamMessage {
         next_tick_in_ms: u64,
     },
 
-    /// 审核请求（发送给 Observer Agent）
+    /// 审核请求（ReflectorSoul 外部审查）
     ReviewRequest {
         /// 目标 Tick ID
         tick_id: i64,
@@ -243,7 +243,7 @@ pub enum UpstreamMessage {
         thought_log: Option<String>,
     },
 
-    /// 审核结果（由 Observer Agent 发送）
+    /// 审核结果（ReflectorSoul 审查返回）
     ReviewResult {
         /// 目标 Tick ID
         tick_id: i64,

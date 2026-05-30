@@ -48,7 +48,7 @@ pub struct AgentAction {
     pub thought_log: Option<String>,
 
     /// ReflectorSoul 审查理由
-    pub observer_thought: Option<String>,
+    pub reflector_thought: Option<String>,
 
     /// 叙事化经历描述
     pub narrative: Option<String>,

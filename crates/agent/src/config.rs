@@ -415,13 +415,6 @@ impl Default for RuntimeConfig {
 }
 
 // ============================================================================
-// Claw 模式配置
-// ============================================================================
-
-/// Claw 模式配置（当前为空壳，仅保留结构以便未来扩展）
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ClawConfig {}
-
 // ============================================================================
 // LLM 配置（仅 Cognitive 模式使用）
 // ============================================================================
@@ -702,84 +695,6 @@ impl Default for MemoryConfig {
 }
 
 // ============================================================================
-// 角色和审查配置（用于 Observer 模式）
-// ============================================================================
-
-/// Agent 角色
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentRole {
-    /// 玩家 Agent - 主动决策执行动作
-    #[default]
-    Player,
-    /// 观察者 Agent - 审查玩家意图
-    Observer,
-}
-
-/// 审查配置（仅 player 角色使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReviewConfig {
-    /// 审查超时（秒）
-    #[serde(default = "default_review_timeout")]
-    pub timeout_seconds: u64,
-
-    /// 是否启用审查
-    #[serde(default = "default_review_enabled")]
-    pub enabled: bool,
-
-    /// 审查认证 Token（用于 Observer 鉴权）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_token: Option<String>,
-}
-
-fn default_review_timeout() -> u64 {
-    30
-}
-
-fn default_review_enabled() -> bool {
-    true
-}
-
-impl Default for ReviewConfig {
-    fn default() -> Self {
-        Self {
-            timeout_seconds: 30,
-            enabled: true,
-            auth_token: None,
-        }
-    }
-}
-
-/// 观察者配置（仅 observer 角色使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObserverConfig {
-    /// 目标 Player Agent HTTP 端点
-    pub target_endpoint: String,
-
-    /// 审查认证 Token
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_token: Option<String>,
-
-    /// 轮询间隔（秒）
-    #[serde(default = "default_poll_interval")]
-    pub poll_interval_seconds: u64,
-}
-
-fn default_poll_interval() -> u64 {
-    5
-}
-
-impl Default for ObserverConfig {
-    fn default() -> Self {
-        Self {
-            target_endpoint: "http://localhost:23340".to_string(),
-            auth_token: None,
-            poll_interval_seconds: 5,
-        }
-    }
-}
-
-// ============================================================================
 // Token 优化配置
 // ============================================================================
 
@@ -792,12 +707,10 @@ pub struct TokenOptimizationConfig {
     pub enabled: bool,
     /// ReflectorSoul 优化：消灭重试循环
     pub reflector: ReflectorOptConfig,
-    /// Attention Controller（后续任务）
+    /// Attention Controller
     pub attention: AttentionConfig,
-    /// Delta Engine（后续任务）
+    /// Delta Engine
     pub delta: DeltaConfig,
-    /// Tool 预加载（后续任务）
-    pub tool_preload: ToolPreloadConfig,
 }
 
 impl Default for TokenOptimizationConfig {
@@ -807,7 +720,6 @@ impl Default for TokenOptimizationConfig {
             reflector: ReflectorOptConfig::default(),
             attention: AttentionConfig::default(),
             delta: DeltaConfig::default(),
-            tool_preload: ToolPreloadConfig::default(),
         }
     }
 }
@@ -841,14 +753,6 @@ pub struct DeltaConfig {
     pub change_percentage_threshold: f32,
 }
 
-/// Tool 预加载配置（后续任务填充）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ToolPreloadConfig {
-    pub enabled: bool,
-    pub critical_preload: bool,
-}
-
 impl Default for ReflectorOptConfig {
     fn default() -> Self {
         Self {
@@ -879,15 +783,6 @@ impl Default for DeltaConfig {
         Self {
             survival_thresholds,
             change_percentage_threshold: 0.1,
-        }
-    }
-}
-
-impl Default for ToolPreloadConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            critical_preload: true,
         }
     }
 }
@@ -958,10 +853,6 @@ pub struct Config {
     #[serde(default)]
     pub runtime: RuntimeConfig,
 
-    /// Claw 模式专用配置
-    #[serde(default)]
-    pub claw: ClawConfig,
-
     /// LLM 配置（Cognitive 模式直连 LLM，Claw 模式通过 OpenClawBridge）
     #[serde(default)]
     pub llm: LlmConfig,
@@ -973,18 +864,6 @@ pub struct Config {
     /// 记忆系统配置
     #[serde(default)]
     pub memory: MemoryConfig,
-
-    /// Agent 角色（Player/Observer）
-    #[serde(default)]
-    pub role: AgentRole,
-
-    /// 审查配置（仅 player 角色使用）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review: Option<ReviewConfig>,
-
-    /// 观察者配置（仅 observer 角色使用）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub observer: Option<ObserverConfig>,
 
     /// 游戏规则（从服务器获取）
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1177,13 +1056,9 @@ mod tests {
         let config = Config {
             server: ServerConfig::default(),
             runtime: RuntimeConfig::default(),
-            claw: ClawConfig::default(),
             llm,
             llm_reflector: None,
             memory: MemoryConfig::default(),
-            role: AgentRole::default(),
-            review: None,
-            observer: None,
             game_rules: None,
             config_path: PathBuf::from("/test/config.yaml"),
             servers_dir: PathBuf::new(),
@@ -1210,13 +1085,9 @@ mod tests {
         let config = Config {
             server: ServerConfig::default(),
             runtime: RuntimeConfig::default(),
-            claw: ClawConfig::default(),
             llm,
             llm_reflector: Some(llm_reflector),
             memory: MemoryConfig::default(),
-            role: AgentRole::default(),
-            review: None,
-            observer: None,
             game_rules: None,
             config_path: PathBuf::from("/test/config.yaml"),
             servers_dir: PathBuf::new(),

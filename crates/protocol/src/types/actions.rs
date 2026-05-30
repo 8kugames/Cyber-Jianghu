@@ -166,7 +166,7 @@ pub struct Intent {
     ///
     /// 审查通过时包含 reason，审查拒绝时也包含 reason
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observer_thought: Option<String>,
+    pub reflector_thought: Option<String>,
 
     /// 叙事化描述（ReflectorSoul 生成的经历描述）
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,7 +226,7 @@ impl Intent {
             action_type: action_type.into(),
             action_data,
             priority: 5,
-            observer_thought: None,
+            reflector_thought: None,
             narrative: None,
             chaos_marker: None,
             dream_marker: None,
@@ -252,7 +252,7 @@ impl Intent {
             action_type: action_type.into(),
             action_data,
             priority: 5,
-            observer_thought: None,
+            reflector_thought: None,
             narrative: None,
             chaos_marker: None,
             dream_marker: None,
@@ -269,8 +269,8 @@ impl Intent {
     }
 
     /// 设置反思之魂审查意见
-    pub fn with_observer_thought(mut self, thought: String) -> Self {
-        self.observer_thought = Some(thought);
+    pub fn with_reflector_thought(mut self, thought: String) -> Self {
+        self.reflector_thought = Some(thought);
         self
     }
 

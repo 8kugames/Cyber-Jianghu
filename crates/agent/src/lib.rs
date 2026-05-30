@@ -88,9 +88,8 @@ pub use soul::reflector::rule_engine::{
     RuleValidationResult,
 };
 pub use soul::reflector::{
-    ObserverPrompt, PendingReview, PendingReviewEntry, PersonaInfo, ReflectorSoul, RejectionType,
-    ReviewDecision, ReviewStatus, ReviewStore, ValidationRequest, ValidationResult, Validator,
-    sanitize_for_prompt,
+    PersonaInfo, ReflectorPrompt, ReflectorSoul, RejectionType, ValidationRequest,
+    ValidationResult, Validator, sanitize_for_prompt,
 };
 // 运行模式
 pub use runtime::{
@@ -116,8 +115,8 @@ pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
 
 // 配置
 pub use config::{
-    AgentRole, CharacterConfig, Config, DeviceConfig, GoalsConfig, LanguageStyleConfig,
-    MemoryConfig, ReviewConfig, RuntimeConfig, RuntimeMode, ServerConfig, TokenOptimizationConfig,
+    CharacterConfig, Config, DeviceConfig, GoalsConfig, LanguageStyleConfig, MemoryConfig,
+    RuntimeConfig, RuntimeMode, ServerConfig, TokenOptimizationConfig,
 };
 pub use models::{ActionType, Intent, WorldEvent, WorldState};
 
