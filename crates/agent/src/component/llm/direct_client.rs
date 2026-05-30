@@ -1230,6 +1230,9 @@ impl LlmClient for DirectLlmClient {
         if !input.semi_static.is_empty() {
             messages.push(ChatMessage::system(input.semi_static));
         }
+        if let Some(s) = input.summary {
+            messages.push(ChatMessage::system(&format!("## 对话历史摘要\n{}", s)));
+        }
         for turn in input.turns {
             messages.push(ChatMessage::user(&turn.user));
             messages.push(ChatMessage::assistant_with_reasoning(

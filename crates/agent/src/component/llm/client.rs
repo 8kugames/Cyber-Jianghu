@@ -30,6 +30,8 @@ pub struct ConversationTurn {
 pub struct ConversationInput<'a> {
     /// 半静态内容（actions + skills），变更频率低
     pub semi_static: &'a str,
+    /// 旧轮次压缩摘要（独立 system message，仅 compaction 时变化）
+    pub summary: Option<&'a str>,
     /// 保留的近期完整轮次
     pub turns: &'a [ConversationTurn],
     /// 当前请求的 prompt
@@ -190,7 +192,7 @@ pub trait LlmClient: Send + Sync {
         executor: &dyn super::tool_types::ToolExecutor,
         max_rounds: usize,
     ) -> Result<String> {
-        let _ = (&input.semi_static, input.turns);
+        let _ = (&input.semi_static, &input.summary, input.turns);
         self.complete_with_tools(system, input.current_prompt, tools, executor, max_rounds)
             .await
     }
@@ -1335,12 +1337,14 @@ impl LlmClient for FallbackLlmClient {
     ) -> Result<String> {
         let system = system.to_string();
         let semi_static = input.semi_static.to_string();
+        let summary_owned = input.summary.map(|s| s.to_string());
         let turns = input.turns.to_vec();
         let current_prompt = input.current_prompt.to_string();
         let tools = tools.to_vec();
         self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
             let system = system.clone();
             let semi_static = semi_static.clone();
+            let summary = summary_owned.clone();
             let turns = turns.clone();
             let current_prompt = current_prompt.clone();
             let tools = tools.clone();
@@ -1350,6 +1354,7 @@ impl LlmClient for FallbackLlmClient {
                         &system,
                         ConversationInput {
                             semi_static: &semi_static,
+                            summary: summary.as_deref(),
                             turns: &turns,
                             current_prompt: &current_prompt,
                         },
