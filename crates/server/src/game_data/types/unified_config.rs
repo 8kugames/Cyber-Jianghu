@@ -785,6 +785,16 @@ pub struct AttributeNarrativeData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub thresholds: Vec<ThresholdData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drive: Option<AttributeDriveData>,
+}
+
+/// 属性驱动配置（配置编辑器用）
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AttributeDriveData {
+    pub name: String,
+    pub reason: String,
+    pub goal: String,
 }
 
 /// 阈值数据
@@ -793,6 +803,8 @@ pub struct ThresholdData {
     pub min: i32,
     pub max: i32,
     pub description: String,
+    #[serde(default)]
+    pub urgency: u8,
 }
 
 /// 状态效果叙事数据

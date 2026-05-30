@@ -53,6 +53,10 @@ attributes:
     hp:
       name: hp
       display_name: 生命值
+      drive:
+        name: "疗伤求生"
+        reason: "身体受伤，需要治疗"
+        goal: "寻找药物或休息疗伤"
       thresholds:
         - min: 90
           max: 100
@@ -66,17 +70,24 @@ attributes:
         - min: 30
           max: 49
           description: "身体虚弱，伤痛明显，行动困难"
+          urgency: 5
         - min: 10
           max: 29
           description: "身受重伤，剧痛袭来，意识模糊，随时可能倒下"
+          urgency: 8
         - min: 0
           max: 9
           description: "生命垂危，意识在消散，死亡的阴影笼罩着你"
+          urgency: 10
 
     hunger:
       name: hunger
       display_name: 饥饿值
       note: "值越高表示越饱，越低表示越饿"
+      drive:
+        name: "寻找食物"
+        reason: "肚子饿了，需要进食"
+        goal: "寻找食物充饥"
       thresholds:
         - min: 80
           max: 100
@@ -87,17 +98,24 @@ attributes:
         - min: 40
           max: 59
           description: "肚子有些饿了，该找点东西吃"
+          urgency: 3
         - min: 25
           max: 39
           description: "饥肠辘辘，四肢乏力，必须立即进食"
+          urgency: 7
         - min: 0
           max: 24
           description: "极度饥饿，生命正在消逝，不择手段也要找到食物"
+          urgency: 10
 
     thirst:
       name: thirst
       display_name: 口渴值
       note: "值越高表示越不渴，越低表示越渴"
+      drive:
+        name: "寻找水源"
+        reason: "口渴了，需要饮水"
+        goal: "寻找水源解渴"
       thresholds:
         - min: 80
           max: 100
@@ -108,16 +126,23 @@ attributes:
         - min: 40
           max: 59
           description: "口渴明显，嗓子发干，该找水喝了"
+          urgency: 3
         - min: 20
           max: 39
           description: "口渴难耐，急需饮水，喉咙如火烧"
+          urgency: 7
         - min: 0
           max: 19
           description: "脱水严重，急需饮水，视线模糊，生命垂危"
+          urgency: 10
 
     stamina:
       name: stamina
       display_name: 体力
+      drive:
+        name: "休息恢复"
+        reason: "体力不支，需要休息"
+        goal: "找地方休息恢复体力"
       thresholds:
         - min: 80
           max: 100
@@ -128,12 +153,15 @@ attributes:
         - min: 40
           max: 59
           description: "体力有些不支，感到疲劳，不宜进行剧烈活动"
+          urgency: 2
         - min: 20
           max: 39
           description: "精疲力竭，浑身乏力，需要休息恢复体力"
+          urgency: 6
         - min: 0
           max: 19
           description: "体力耗尽，已经没有力气行动，必须立即休息"
+          urgency: 9
 
     qi:
       name: qi

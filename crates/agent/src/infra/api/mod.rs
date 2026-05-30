@@ -96,14 +96,15 @@ pub struct HttpDecisionConfig {
     /// 监听端口
     pub port: u16,
     /// 决策超时（秒），超过此时间返回 idle 意图
+    /// tick_duration=60s，留 5s 余量用于 intent 提交和网络往返
     pub timeout_secs: u64,
 }
 
 impl Default for HttpDecisionConfig {
     fn default() -> Self {
         Self {
-            port: 0, // 0 = 随机端口
-            timeout_secs: 55,
+            port: 0,          // 0 = 随机端口
+            timeout_secs: 55, // tick=60s − 5s 余量
         }
     }
 }
@@ -647,6 +648,7 @@ pub fn create_http_state(
     runtime_mode: crate::config::RuntimeMode,
     actual_port: u16,
 ) -> (Arc<HttpDecisionState>, HttpApiState) {
+    // intent 通道：单 consumer (IntentWorker)，100 = 单 tick 内最大积压量
     let (intent_tx, intent_rx) = mpsc::channel(100);
 
     // 读取 agent_id（使用 block_in_place 在同步上下文中读取异步锁）
@@ -724,6 +726,7 @@ pub fn create_http_state(
         }
     };
 
+    // death_event: 100 = 并发在线 agent 数量上限; tick_update: 64 = 每个 tick 周期的订阅者上限
     let (death_event_tx, _) = broadcast::channel(100);
     let (tick_update_tx, _) = broadcast::channel(64);
 

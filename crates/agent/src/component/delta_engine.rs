@@ -46,21 +46,13 @@ pub struct StateDelta {
 /// Delta 检测配置
 #[derive(Debug, Clone)]
 pub struct DeltaConfig {
-    /// 监控的生存属性及临界阈值（属性值 / 100 >= threshold => Critical）
-    pub survival_thresholds: HashMap<String, f32>,
     /// 变化百分比阈值（|diff| / 100 >= threshold => Important）
     pub change_percentage_threshold: f32,
 }
 
 impl Default for DeltaConfig {
     fn default() -> Self {
-        let mut survival_thresholds = HashMap::new();
-        survival_thresholds.insert("hp".to_string(), 0.3);
-        survival_thresholds.insert("hunger".to_string(), 0.7);
-        survival_thresholds.insert("thirst".to_string(), 0.7);
-        survival_thresholds.insert("stamina".to_string(), 0.2);
         Self {
-            survival_thresholds,
             change_percentage_threshold: 0.1,
         }
     }
@@ -89,6 +81,7 @@ impl DeltaEngine {
                 self.detect_survival_changes(
                     &curr.self_state.attributes,
                     &prev.self_state.attributes,
+                    &curr.self_state.survival_drives,
                     &mut changes,
                 );
                 self.detect_social_changes(&curr.entities, &prev.entities, &mut changes);
@@ -110,14 +103,17 @@ impl DeltaEngine {
 
     /// 首次 tick：生成全量状态快照
     fn detect_full_state(&self, curr: &WorldState, changes: &mut Vec<StateChange>) {
+        let critical_attrs: HashSet<&str> = curr
+            .self_state
+            .survival_drives
+            .iter()
+            .map(|sd| sd.attribute.as_str())
+            .collect();
+
         // 属性
         for (key, &val) in &curr.self_state.attributes {
-            let urgency = if let Some(&threshold) = self.config.survival_thresholds.get(key) {
-                if val as f32 / 100.0 < threshold {
-                    Urgency::Critical
-                } else {
-                    Urgency::Important
-                }
+            let urgency = if critical_attrs.contains(key.as_str()) {
+                Urgency::Critical
             } else {
                 Urgency::Important
             };
@@ -187,22 +183,26 @@ impl DeltaEngine {
         }
     }
 
-    /// 检测生存属性变化（数据驱动：遍历 config 中的 keys）
+    /// 检测属性变化（数据驱动：从 server 下发的 survival_drives 判定 Critical）
     fn detect_survival_changes(
         &self,
         curr_attrs: &HashMap<String, i32>,
         prev_attrs: &HashMap<String, i32>,
+        survival_drives: &[cyber_jianghu_protocol::SurvivalDrive],
         changes: &mut Vec<StateChange>,
     ) {
-        // 检查配置的生存阈值属性
-        for (key, &threshold) in &self.config.survival_thresholds {
-            let curr_val = curr_attrs.get(key).copied().unwrap_or(0);
+        let critical_attrs: HashSet<&str> = survival_drives
+            .iter()
+            .map(|sd| sd.attribute.as_str())
+            .collect();
+
+        for (key, &curr_val) in curr_attrs {
             let prev_val = prev_attrs.get(key).copied().unwrap_or(0);
             if curr_val == prev_val {
                 continue;
             }
             let diff = (curr_val - prev_val).unsigned_abs();
-            let urgency = if curr_val as f32 / 100.0 < threshold {
+            let urgency = if critical_attrs.contains(key.as_str()) {
                 Urgency::Critical
             } else if diff as f32 / 100.0 >= self.config.change_percentage_threshold {
                 Urgency::Important
@@ -210,38 +210,9 @@ impl DeltaEngine {
                 Urgency::Info
             };
 
-            let tool_hint = match key.as_str() {
-                k if k.contains("hunger") => {
-                    Some("query_world(section=inventory, filter=food)".to_string())
-                }
-                k if k.contains("thirst") => {
-                    Some("query_world(section=inventory, filter=water)".to_string())
-                }
-                _ => Some("query_world(section=state)".to_string()),
-            };
-
             changes.push(StateChange {
                 category: ChangeCategory::Survival,
                 urgency,
-                field: format!("attributes.{}", key),
-                description: format!("{}: {} -> {}", key, prev_val, curr_val),
-                data: serde_json::json!({ "key": key, "prev": prev_val, "curr": curr_val }),
-                tool_hint,
-            });
-        }
-
-        // 检测不在生存阈值配置中的其他属性变化
-        for (key, &curr_val) in curr_attrs {
-            if self.config.survival_thresholds.contains_key(key) {
-                continue;
-            }
-            let prev_val = prev_attrs.get(key).copied().unwrap_or(0);
-            if curr_val == prev_val {
-                continue;
-            }
-            changes.push(StateChange {
-                category: ChangeCategory::Survival,
-                urgency: Urgency::Info,
                 field: format!("attributes.{}", key),
                 description: format!("{}: {} -> {}", key, prev_val, curr_val),
                 data: serde_json::json!({ "key": key, "prev": prev_val, "curr": curr_val }),
@@ -412,14 +383,6 @@ mod tests {
 
     fn test_config() -> DeltaConfig {
         DeltaConfig {
-            survival_thresholds: {
-                let mut m = HashMap::new();
-                m.insert("hp".to_string(), 0.3);
-                m.insert("hunger".to_string(), 0.7);
-                m.insert("thirst".to_string(), 0.7);
-                m.insert("stamina".to_string(), 0.2);
-                m
-            },
             change_percentage_threshold: 0.1,
         }
     }
@@ -448,6 +411,17 @@ mod tests {
         inventory: Vec<InventoryItem>,
         location: Location,
     ) -> WorldState {
+        build_world_state_with_drives(attrs, vec![], entities, events, inventory, location)
+    }
+
+    fn build_world_state_with_drives(
+        attrs: HashMap<String, i32>,
+        survival_drives: Vec<cyber_jianghu_protocol::SurvivalDrive>,
+        entities: Vec<Entity>,
+        events: Vec<WorldEvent>,
+        inventory: Vec<InventoryItem>,
+        location: Location,
+    ) -> WorldState {
         WorldState {
             event_type: "world_state".to_string(),
             tick_id: 1,
@@ -458,6 +432,7 @@ mod tests {
                 attributes: attrs,
                 derived_attributes: HashMap::new(),
                 attribute_descriptions: HashMap::new(),
+                survival_drives,
                 status_effects: vec![],
                 inventory,
                 skills: vec![],
@@ -558,13 +533,26 @@ mod tests {
     #[test]
     fn test_survival_critical_threshold() {
         let engine = test_engine();
-        // hp threshold = 0.3 → hp <= 30 时 Critical
         let prev_attrs = HashMap::from([("hp".to_string(), 50), ("hunger".to_string(), 50)]);
         let curr_attrs = HashMap::from([("hp".to_string(), 20), ("hunger".to_string(), 50)]);
 
         let prev = build_world_state(prev_attrs, vec![], vec![], vec![], default_location());
-        let mut curr = prev.clone();
-        curr.self_state.attributes = curr_attrs;
+        // server 预计算：hp=20 触发生存驱动 → Critical
+        let drives = vec![cyber_jianghu_protocol::SurvivalDrive {
+            attribute: "hp".to_string(),
+            drive: "疗伤".to_string(),
+            reason: "受伤".to_string(),
+            urgency: 8,
+            goal: "治疗".to_string(),
+        }];
+        let curr = build_world_state_with_drives(
+            curr_attrs,
+            drives,
+            vec![],
+            vec![],
+            vec![],
+            default_location(),
+        );
 
         let delta = engine.compute(Some(&prev), &curr);
         let hp_change = delta

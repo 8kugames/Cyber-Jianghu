@@ -140,6 +140,7 @@ mod tests {
                 },
                 derived_attributes: std::collections::HashMap::new(),
                 attribute_descriptions: std::collections::HashMap::new(),
+                survival_drives: vec![],
                 status_effects: vec![],
                 inventory: vec![],
                 skills: vec![],
