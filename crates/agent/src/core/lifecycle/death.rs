@@ -116,11 +116,20 @@ pub(super) async fn maybe_schedule_auto_rebirth(
         .map(|s| s.auto_rebirth.load(std::sync::atomic::Ordering::Relaxed))
         .unwrap_or(true);
 
-    if agent.rebirth_delay_ticks <= 0 || !auto_rebirth_enabled {
+    // 重生延迟来源链: (1) WS AgentDied 动态覆写 > (2) 注册时 game_rules 默认值
+    // 两条死亡检测路径（events_log vs WS 回调）解耦: 不依赖 WS 回调写入时序。
+    let effective_delay = if agent.rebirth_delay_ticks > 0 {
+        agent.rebirth_delay_ticks
+    } else {
+        let cfg_delay = agent.config.rebirth_delay_ticks();
+        if cfg_delay > 0 { cfg_delay } else { 0 }
+    };
+
+    if effective_delay <= 0 || !auto_rebirth_enabled {
         return;
     }
 
-    let delay_ticks = agent.rebirth_delay_ticks;
+    let delay_ticks = effective_delay;
     let tick_secs = agent.get_tick_duration().await.as_secs();
     let delay_ms = delay_ticks as u64 * tick_secs * 1000;
 

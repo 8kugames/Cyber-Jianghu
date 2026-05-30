@@ -490,7 +490,13 @@ impl super::Agent {
 
                     // 1.5b 已死亡 → 跳过决策循环（等待重生恢复）
                     if self.death_reported {
-                        if self.rebirth_delay_ticks > 0 {
+                        // 双源检查：优先 WS 回调值（动态），fallback 到 config 值（注册时下发的 game_rules）
+                        let effective_delay_ticks = if self.rebirth_delay_ticks > 0 {
+                            self.rebirth_delay_ticks
+                        } else {
+                            self.config.rebirth_delay_ticks()
+                        };
+                        if effective_delay_ticks > 0 {
                             let rebirth_done = self.http_api_state.as_ref()
                                 .map(|s| !s.is_dead.load(std::sync::atomic::Ordering::Relaxed))
                                 .unwrap_or(false);
@@ -515,7 +521,7 @@ impl super::Agent {
                                 continue;
                             }
                         } else {
-                            // 无自动重生：持续等待直到外部重生触发（通过 API 或重启）
+                            // 无自动重生（WS 回调 + config 均为 0）：持续等待直到外部触发（通过 API 或重启）
                             continue;
                         }
                     }
