@@ -529,7 +529,7 @@ impl CognitiveEngine {
     }
 
     /// 获取 LLM 调用参数配置（数据驱动替代硬编码参数）
-    fn llm_param(&self, key: &str, default: usize) -> usize {
+    pub(super) fn llm_param(&self, key: &str, default: usize) -> usize {
         self.prompt_template()
             .llm_param("actor_direct", key, default)
     }
@@ -941,7 +941,7 @@ impl CognitiveEngine {
                 let tools = super::super::earth::EarthToolExecutor::tool_definitions();
 
                 match conv_data {
-                    Some((turns, system, _summary)) => {
+                    Some((turns, system, summary)) => {
                         // tool-calling 模式下限制历史轮次（配置驱动，避免模式惯性）
                         let max_tool_turns = self.truncation("tool_calling_history_turns", 8);
                         let turns: Vec<_> = if turns.len() > max_tool_turns {
@@ -956,6 +956,7 @@ impl CognitiveEngine {
                                 &system,
                                 ConversationInput {
                                     semi_static: &semi_static,
+                                    summary: summary.as_deref(),
                                     turns: &turns,
                                     current_prompt: &tick_msg,
                                 },
