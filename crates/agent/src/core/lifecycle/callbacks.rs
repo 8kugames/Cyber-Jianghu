@@ -107,6 +107,7 @@ impl super::super::Agent {
     /// 构建并设置 Server 消息回调（链式：lifecycle 处理 + binary 回调透传）
     pub(super) async fn build_and_set_server_message_callback(&mut self) {
         let prev_callback = self.client.get_server_msg_callback().await;
+        let api_state = self.http_api_state.clone();
         let immediate_handler = self.immediate_handler.clone();
         let error_feedback = self.server_error_feedback.clone();
         let memory_manager = self.memory_manager.clone();
@@ -283,6 +284,22 @@ impl super::super::Agent {
                             }
                         }
                     });
+                }
+                // 死亡事件：设置死亡标记并广播到 death_event_tx
+                // Cognitive 模式下 AgentDied 回调已做此操作，此路径确保 Claw 模式也能正确检测死亡
+                if let cyber_jianghu_protocol::ServerMessage::AgentDied {
+                    agent_id: _,
+                    rebirth_delay_ticks,
+                    tick_id: _,
+                    description: _,
+                    ..
+                } = &msg
+                    && let Some(ref s) = api_state
+                {
+                    s.is_dead.store(true, std::sync::atomic::Ordering::Relaxed);
+                    s.rebirth_delay_ticks
+                        .store(*rebirth_delay_ticks, std::sync::atomic::Ordering::Relaxed);
+                    let _ = s.death_event_tx.send(msg.clone());
                 }
                 if let Some(ref prev) = prev_callback {
                     prev(msg);
