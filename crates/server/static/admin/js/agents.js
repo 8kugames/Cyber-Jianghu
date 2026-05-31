@@ -641,10 +641,7 @@ function renderTickCard(exp, metadata, time) {
 // LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
-// 地魂 action_type 分类常量（与 history.js DIHUN_*_TYPES 保持一致）
-var SPEAK_TYPES = { "说话": true, speak: true };
-var WHISPER_TYPES = { "私语": true, whisper: true };
-var SHOUT_TYPES = { "大喊": true, shout: true };
+// SPEAK_TYPES/WHISPER_TYPES/SHOUT_TYPES 已提取到 utils.js（全局共享）
 
 function renderServerActionHtml(actionType, actionData) {
   var at = actionType || "";

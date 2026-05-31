@@ -130,11 +130,6 @@ impl super::super::Agent {
                 decision_future.await
             };
 
-            // 如果 final_intent 已被设置（如 speak 即时通道），退出
-            if final_intent.is_some() {
-                break;
-            }
-
             // 5c. 天魂 (ReflectorSoul) 审核 — 分级审核策略
             let graded_config = self
                 .config

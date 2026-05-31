@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### Fixed — 三魂数据模型根治 [BREAKING]
+
+- **[BREAKING] Protocol**: `FinalIntentReport` 新增 `pipeline_actions: Option<Vec<PipelineAction>>` 字段。`action_data` 回归单 intent 语义（单对象），pipeline 完整视图由 `pipeline_actions` 独立承载。`PipelineAction` 新增 struct
+- **[BREAKING] Agent**: `SoulCycleRecord` 新增 `final_pipeline_json TEXT` 列。`record_final_intent` 签名变更 5→6 参数（新增 `pipeline_json`）。`final_action_type` 从拼接 "移动 → 给予" 恢复为单个 primary action_type
+- **Agent**: `biography.rs` 行动摘要遍历 `final_pipeline_json` 展示完整 pipeline（非仅 primary）
+- **Agent**: `reporting.rs` pipe_seq=0 从 `final_pipeline_json` 反序列化 `pipeline_actions`，pipe_seq>0 为 None
+- **Server**: 透传 `pipeline_actions` 到 `soul_cycle_metadata` JSON blob，无需修改
+- **Frontend**: `history.js` / `agents.js` 优先使用 `pipeline_actions` 渲染 pipeline 多意图，旧数据 `Array.isArray` 兜底兼容
+- **Frontend**: `agents.js` 提取 `renderServerActionHtml` 复用 `SPEAK_TYPES`/`WHISPER_TYPES`/`SHOUT_TYPES` 常量，伪装地魂复用同一函数，消除第三处独立硬编码
+
 ### Changed — Schema-Driven 角色生成约束 [BREAKING]
 
 - **Agent**: `CharacterGenerationConfig` 从 18 个独立字段改为 schema-driven 设计：`FieldSpec` enum (string/integer/enum/enum_array) + `fields` 列表。Prompt 和 validate 共享同一 YAML schema，结构上消除 prompt/validate mismatch
