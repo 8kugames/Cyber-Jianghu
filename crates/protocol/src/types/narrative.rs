@@ -95,6 +95,38 @@ impl NarrativeConfig {
             .map(|c| c.display_name.as_str())
     }
 
+    /// 为所有属性（基础+派生）构建叙事描述映射
+    ///
+    /// 数据驱动策略：
+    /// - 基础属性：优先使用阈值段描述（narrative_config.yaml 定义），无匹配则回退到显示名
+    /// - 派生属性：直接使用显示名（派生属性无阈值段）
+    ///
+    /// 调用方不需要感知基础/派生的差异——此方法封装了全部回退逻辑。
+    pub fn build_attribute_descriptions(
+        &self,
+        base: &HashMap<String, i32>,
+        derived: &HashMap<String, f32>,
+    ) -> HashMap<String, String> {
+        let mut result: HashMap<String, String> = HashMap::new();
+
+        for (name, &value) in base {
+            let desc = self
+                .get_description(name, value)
+                .or_else(|| self.get_display_name(name));
+            if let Some(d) = desc {
+                result.insert(name.clone(), d.to_string());
+            }
+        }
+
+        for (name, _) in derived {
+            if let Some(display) = self.get_display_name(name) {
+                result.insert(name.clone(), display.to_string());
+            }
+        }
+
+        result
+    }
+
     /// 从当前属性值计算生存驱动列表
     ///
     /// 遍历所有属性，匹配阈值段，提取 urgency>0 的驱动。
