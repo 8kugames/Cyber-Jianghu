@@ -1,2 +1,2 @@
--- 托梦影响标记：记录哪些 action 受托梦驱动
-ALTER TABLE agent_action_logs ADD COLUMN IF NOT EXISTS dream_marker JSONB;
+-- 已合并到 005_tick_system.sql (agent_action_logs 全量表)
+SELECT 1;
