@@ -170,22 +170,21 @@
                 <input
                     type="text"
                     class="search-input"
-                    placeholder="搜索摘要内容（当前页内筛选）..."
+                    placeholder="搜索摘要内容..."
                     id="sum-search-input"
+                    oninput="debouncedSumTextFilter()"
                 />
-                <select id="sum-agent-filter" class="filter-select">
-                    <option value="">所有角色</option>
-                </select>
-                <input
-                    type="number"
-                    id="sum-game-day-filter"
-                    class="filter-input"
-                    placeholder="游戏日"
-                    style="width: 100px"
-                />
-                <button class="btn btn-primary" onclick="searchSummaries()">
-                    搜索
-                </button>
+                <div class="combobox" id="sum-agent-combobox">
+                    <input
+                        type="text"
+                        class="combobox-input"
+                        placeholder="搜索角色（名字/ID）..."
+                        id="sum-agent-input"
+                        autocomplete="off"
+                    />
+                    <input type="hidden" id="sum-agent-id" value="" />
+                    <div class="combobox-dropdown" id="sum-agent-dropdown"></div>
+                </div>
                 <button class="btn btn-secondary" onclick="resetSumFilters()">
                     重置
                 </button>

@@ -51,7 +51,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use anyhow::Context;
@@ -1002,9 +1002,44 @@ impl HttpApiState {
         #[derive(Deserialize)]
         struct ConnectResponse {
             auth_token: String,
+            narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
+            narrative_config_hash: Option<String>,
         }
 
         let result: ConnectResponse = response.json().await.context("解析刷新令牌响应失败")?;
+
+        // 刷新令牌时同步 narrative_config 到磁盘和内存（hash skip-optimization）
+        if let Some(ref nc) = result.narrative_config {
+            // 内存始终更新（保证 API 返回最新数据）
+            *self.narrative_config.write().await = Some(nc.clone());
+
+            if let Some(home) = dirs::home_dir() {
+                let config_dir = home.join(".cyber-jianghu").join("config");
+                let hash_path = config_dir.join("narrative_config.hash");
+
+                let should_save = match result.narrative_config_hash.as_ref() {
+                    Some(new_hash) => match std::fs::read_to_string(&hash_path) {
+                        Ok(old_hash) => old_hash.trim() != new_hash,
+                        Err(_) => true,
+                    },
+                    None => true,
+                };
+
+                if should_save {
+                    if let Ok(json) = serde_json::to_string_pretty(nc) {
+                        let _ = std::fs::create_dir_all(&config_dir);
+                        let nc_path = config_dir.join("narrative_config.json");
+                        if let Err(e) = std::fs::write(&nc_path, json) {
+                            error!("刷新令牌保存 narrative_config 失败: {}", e);
+                        } else if let Some(ref hash) = result.narrative_config_hash {
+                            let _ = std::fs::write(&hash_path, hash);
+                        }
+                    }
+                } else {
+                    debug!("token refresh narrative_config skip: hash unchanged");
+                }
+            }
+        }
 
         info!("设备 {} 的令牌刷新成功", device_id);
 

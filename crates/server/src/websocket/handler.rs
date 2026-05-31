@@ -1451,7 +1451,7 @@ async fn handle_soul_cycle_report(
     .await
     {
         warn!(
-            "写入三魂循环元数据失败: agent={}, tick={}, err={}",
+            "写入三魂循环元数据失败: agent={}, tick={}, err={:#}",
             agent_id, tick_id, e
         );
     }

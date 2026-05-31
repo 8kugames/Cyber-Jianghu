@@ -205,8 +205,10 @@ const filterChronicles = debounce(function () {
         chronicles.filter(
             (c) =>
                 (c.summary_preview || "").toLowerCase().includes(q) ||
+                (c.summary || "").toLowerCase().includes(q) ||
                 (c.chronicle_id || "").toLowerCase().includes(q) ||
-                (c.season || "").toLowerCase().includes(q),
+                (c.season || "").toLowerCase().includes(q) ||
+                (c.agent_summaries || []).some((a) => (a.name || "").toLowerCase().includes(q)),
         ),
     );
 }, 300);
@@ -572,20 +574,92 @@ function resetExpFilters() {
 let summariesData = [];
 let sumTotal = 0, sumPage = 1, sumPageSize = 20;
 let summariesLoaded = false;
+let _selectedSumAgentId = "";
+
+// Combobox: 即时过滤角色列表
+function filterAgentDropdown() {
+    const input = document.getElementById("sum-agent-input");
+    const dropdown = document.getElementById("sum-agent-dropdown");
+    const q = input.value.toLowerCase().trim();
+
+    const seen = new Set();
+    const agents = Object.values(allAgentsMap).filter((a) => {
+        if (seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+    });
+    const matched = q
+        ? agents.filter(
+              (a) =>
+                  (a.name || "").toLowerCase().includes(q) ||
+                  (a.id || "").toLowerCase().includes(q),
+          )
+        : agents;
+
+    if (!matched.length) {
+        dropdown.innerHTML = '<div class="combobox-empty">无匹配角色</div>';
+        dropdown.classList.add("open");
+        return;
+    }
+
+    dropdown.innerHTML = matched
+        .slice(0, 50)
+        .map((a) => {
+            const short = a.id ? a.id.substring(0, 8) : "";
+            return `<div class="combobox-option" data-agent-id="${escapeHtml(a.id)}">${escapeHtml(a.name)} <span class="timeline-agent-id">(${short}...)</span></div>`;
+        })
+        .join("");
+    dropdown.classList.add("open");
+}
+
+function selectAgentOption(el) {
+    const id = el.dataset.agentId;
+    const agent = allAgentsMap[id];
+    const name = agent ? agent.name : el.textContent.trim().split(" (")[0];
+    document.getElementById("sum-agent-input").value = name;
+    document.getElementById("sum-agent-id").value = id;
+    _selectedSumAgentId = id;
+    document.getElementById("sum-agent-dropdown").classList.remove("open");
+    sumPage = 1;
+    loadSummaries();
+}
+
+function onComboboxBlur() {
+    setTimeout(() => {
+        const dropdown = document.getElementById("sum-agent-dropdown");
+        if (!dropdown.matches(":hover")) {
+            dropdown.classList.remove("open");
+            const input = document.getElementById("sum-agent-input");
+            if (!input.value.trim()) {
+                // 输入框清空 → 清除筛选
+                document.getElementById("sum-agent-id").value = "";
+                _selectedSumAgentId = "";
+            } else if (_selectedSumAgentId) {
+                // 有选中值但输入框被手动修改 → 恢复为已选 agent 的名字
+                const agent = allAgentsMap[_selectedSumAgentId];
+                if (agent && input.value !== agent.name) {
+                    input.value = agent.name;
+                }
+            }
+        }
+    }, 150);
+}
+
+const debouncedSumTextFilter = debounce(function () {
+    if (!summariesLoaded) return;
+    applySumTextFilter();
+}, 300);
 
 async function loadSummaries() {
     const container = document.getElementById("summaries-container");
     container.innerHTML = '<div class="loading">加载中...</div>';
 
-    await fetchAndPopulateAgents(["sum-agent-filter"]);
+    await fetchAndPopulateAgents([]);
 
     const params = new URLSearchParams();
     params.set("page", sumPage);
     params.set("limit", sumPageSize);
-    const agentFilterVal = document.getElementById("sum-agent-filter").value;
-    const gameDayVal = document.getElementById("sum-game-day-filter").value;
-    if (agentFilterVal) params.set("agent_id", agentFilterVal);
-    if (gameDayVal) params.set("game_day", gameDayVal);
+    if (_selectedSumAgentId) params.set("agent_id", _selectedSumAgentId);
 
     try {
         const res = await apiFetch(API.BASE + "/agent-daily-summaries?" + params);
@@ -620,19 +694,11 @@ function applySumTextFilter() {
     }
 }
 
-function searchSummaries() {
-    if (summariesLoaded) {
-        applySumTextFilter();
-    } else {
-        sumPage = 1;
-        loadSummaries();
-    }
-}
-
 function resetSumFilters() {
     document.getElementById("sum-search-input").value = "";
-    document.getElementById("sum-agent-filter").value = "";
-    document.getElementById("sum-game-day-filter").value = "";
+    document.getElementById("sum-agent-input").value = "";
+    document.getElementById("sum-agent-id").value = "";
+    _selectedSumAgentId = "";
     sumPage = 1;
     loadSummaries();
 }
@@ -671,11 +737,11 @@ function renderSummaries(list) {
             <div class="timeline-dot"></div>
             <div class="timeline-content">
                 <div class="timeline-header">
+                    <span class="timeline-calendar">${escapeHtml(calTime)}</span>
                     <span class="timeline-agent">
                         ${escapeHtml(agentName)}
                         <span class="timeline-agent-id">(${escapeHtml(agentShortId)}...)</span>
                     </span>
-                    <span class="timeline-calendar">${escapeHtml(calTime)}</span>
                 </div>
                 <div class="timeline-meta">存档时间: ${escapeHtml(dateStr)}</div>
                 <div class="timeline-body" data-sum-expanded="false">${escapeHtml(s.summary || "")}</div>
@@ -757,6 +823,18 @@ document.addEventListener("click", (e) => {
     // Modal overlay click-to-close (only if clicking the overlay itself, not content)
     const modal = document.getElementById("detail-modal");
     if (e.target === modal) closeModal();
+
+    // Combobox option click (event delegation)
+    const option = e.target.closest(".combobox-option");
+    if (option) {
+        selectAgentOption(option);
+        return;
+    }
+    // Click outside combobox → close dropdown
+    const combobox = e.target.closest(".combobox");
+    if (!combobox) {
+        document.querySelectorAll(".combobox-dropdown.open").forEach((d) => d.classList.remove("open"));
+    }
 });
 
 // Chronicle card keyboard activation
@@ -772,3 +850,11 @@ document.addEventListener("keydown", (e) => {
 
 // Load experiences on init (default tab)
 ensureExperiencesLoaded();
+
+// Combobox event binding
+const _sumAgentInput = document.getElementById("sum-agent-input");
+if (_sumAgentInput) {
+    _sumAgentInput.addEventListener("focus", filterAgentDropdown);
+    _sumAgentInput.addEventListener("input", filterAgentDropdown);
+    _sumAgentInput.addEventListener("blur", onComboboxBlur);
+}

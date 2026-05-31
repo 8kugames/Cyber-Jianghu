@@ -10,6 +10,7 @@
 // - Agent动作日志操作
 
 use anyhow::{Context, Result};
+use std::error::Error;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
@@ -408,11 +409,15 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
          dream_marker = EXCLUDED.dream_marker",
     );
 
-    query_builder
-        .build()
-        .execute(pool)
-        .await
-        .context("批量插入动作日志失败")?;
+    let sql_result = query_builder.build().execute(pool).await;
+    if let Err(ref e) = sql_result {
+        // RAW DEBUG: log full error chain before context
+        eprintln!("[RAW-DEBUG-batch] sqlx error type: {}", std::any::type_name::<sqlx::Error>());
+        eprintln!("[RAW-DEBUG-batch] display: {}", e);
+        eprintln!("[RAW-DEBUG-batch] debug: {:?}", e);
+        eprintln!("[RAW-DEBUG-batch] source: {:?}", e.source());
+    }
+    sql_result.context("批量插入动作日志失败")?;
 
     debug!("批量插入动作日志完成");
     Ok(())
@@ -448,7 +453,7 @@ pub async fn update_soul_cycle_metadata(
         );
         // Upsert：SoulCycleReport 可能先于 tick processor 到达
         // 提供默认值以满足 NOT NULL 约束（action_type, tick_id FK 已移除）
-        sqlx::query(
+        let upsert_result = sqlx::query(
             "INSERT INTO agent_action_logs (agent_id, tick_id, pipe_seq, action_type, result, soul_cycle_metadata)
              VALUES ($1, $2, $3, 'idle', 'success', $4)
              ON CONFLICT (agent_id, tick_id, pipe_seq) DO UPDATE SET soul_cycle_metadata = EXCLUDED.soul_cycle_metadata",
@@ -458,8 +463,13 @@ pub async fn update_soul_cycle_metadata(
         .bind(pipe_seq)
         .bind(metadata)
         .execute(pool)
-        .await
-        .context("插入三魂循环元数据失败")?;
+        .await;
+        if let Err(ref e) = upsert_result {
+            eprintln!("[RAW-DEBUG-soulcycle] display: {}", e);
+            eprintln!("[RAW-DEBUG-soulcycle] debug: {:?}", e);
+            eprintln!("[RAW-DEBUG-soulcycle] source: {:?}", e.source());
+        }
+        upsert_result.context("插入三魂循环元数据失败")?;
     } else {
         debug!(
             "已更新 agent_id={}, tick_id={}, pipe_seq={} 的三魂循环元数据",

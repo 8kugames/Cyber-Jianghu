@@ -49,6 +49,14 @@ pub struct AgentConnectResponse {
 
     /// 结果消息
     pub message: String,
+
+    /// 叙事化配置（设备连接时立即下发，供前端属性分类和显示名使用）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
+
+    /// 叙事化配置 SHA256 hash（用于 agent 端 skip-optimization，避免未变更时重复写磁盘）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narrative_config_hash: Option<String>,
 }
 
 // ============================================================================
@@ -151,6 +159,10 @@ pub struct AgentRegisterResponse {
 
     /// 叙事化配置（用于属性描述转换）
     pub narrative_config: protocol::NarrativeConfig,
+
+    /// 叙事化配置 SHA256 hash（用于 agent 端 skip-optimization）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narrative_config_hash: Option<String>,
 
     /// 初始属性（先天属性，用于 Agent 端存储 birth_attributes）
     #[serde(default)]

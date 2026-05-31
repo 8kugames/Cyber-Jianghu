@@ -8,7 +8,7 @@ let hasMore = false;
 let hasMoreMemories = false;
 let hasMoreDreamRecords = false;
 let allCharacters = [];
-let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的属性分类
+let attributeMeta = null; // 从 /api/v1/attribute-meta 加载的显示名称映射（分类由数据结构决定）
 let _expLoadSeq = 0; // 经历日志请求序号，防竞态
 
 // 每日摘要
@@ -102,14 +102,13 @@ function formatRealTime(ts) {
   return d.toLocaleString("zh-CN");
 }
 
-// 加载属性元数据（分类信息，从 narrative_config 解析）
+// 加载属性元数据（显示名称映射，从 narrative_config 解析）
 async function loadAttributeMeta() {
+  if (attributeMeta) return;
   try {
     const res = await fetch("/api/v1/attribute-meta");
-    // 503 = config 未就绪，保持 null 以便重试机制工作
     if (res.status === 503) return;
     const data = await res.json();
-    // 仅缓存非空结果，避免 {} 绕过 !attributeMeta 守卫
     if (data && data.display_names && Object.keys(data.display_names).length > 0) {
       attributeMeta = data;
     }
@@ -828,15 +827,13 @@ function generateAttributesHtml(attributes, derivedAttributes) {
 
   let html = "";
 
-  // Helper to get category
   const getCategory = (key) => {
     if (attributeMeta && attributeMeta.categories) {
       for (const [cat, keys] of Object.entries(attributeMeta.categories)) {
         if (keys.includes(key)) return cat;
       }
     }
-    // attributeMeta 未加载时默认归入 primary，避免 warn 且保持功能正常
-    return "primary";
+    return null;
   };
 
   const primary = [];
@@ -844,7 +841,6 @@ function generateAttributesHtml(attributes, derivedAttributes) {
   const derived = [];
   const other = [];
 
-  // Process attributes
   Object.entries(attributes).forEach(([key, val]) => {
     if (key.endsWith("_max")) return;
     const cat = getCategory(key);
@@ -854,7 +850,6 @@ function generateAttributesHtml(attributes, derivedAttributes) {
     else other.push([key, val]);
   });
 
-  // Process derivedAttributes
   if (derivedAttributes) {
     Object.entries(derivedAttributes).forEach(([key, val]) => {
       const cat = getCategory(key);
@@ -1530,7 +1525,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // 仅对存活角色建立 SSE 连接
     connectDeathEvents();
 
-    // 角色数据通过 HTTP API 获取，需等待 attributeMeta 就绪后再渲染属性
+    // 分类由数据结构决定，不依赖 attributeMeta；meta 仅用于显示名称
     await loadCharacter();
     await loadRelationships();
     await loadMemories();
@@ -1825,10 +1820,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // 增量刷新：只更新变化的字段
   async function incrementalRefresh() {
     try {
-      // 确保 attributeMeta 有效后再渲染属性
+      // 尝试加载显示名称映射（分类不依赖此数据）
       if (!attributeMeta || !Object.keys(attributeMeta.display_names || {}).length) {
         await loadAttributeMeta();
-        if (!attributeMeta) return; // 仍未就绪，跳过本轮
       }
 
       const data = await apiGet("/api/v1/character");
