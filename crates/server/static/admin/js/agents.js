@@ -552,29 +552,10 @@ function renderExperiences(data) {
           tianhunHtml +
           "</div></div>";
 
-      // 伪装地魂：动作（解析 action_data 显示说话/私语内容）
+      // 伪装地魂：复用 renderServerActionHtml 统一渲染
       html +=
         '<div class="exp-action"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">';
-      var expAd = exp.action_data;
-      if (typeof expAd === "string") {
-        try { expAd = JSON.parse(expAd); } catch(e) { expAd = {}; }
-      }
-      if (!expAd || typeof expAd !== "object") expAd = {};
-      var expContent = expAd.content || "";
-      var expAt = exp.action_type || "";
-      if ((expAt === "说话" || expAt === "speak") && expContent) {
-        html += '<div class="soul-text">向众人说话："' + escapeHtml(expContent) + '"</div>';
-      } else if ((expAt === "私语" || expAt === "whisper") && expContent) {
-        var expTarget = resolveTargetName(expAd.target_agent_id);
-        html += '<div class="soul-text">向 ' + escapeHtml(expTarget) + ' 密语："' + escapeHtml(expContent) + '"</div>';
-      } else if ((expAt === "大喊" || expAt === "shout") && expContent) {
-        html += '<div class="soul-text">大声喊道："' + escapeHtml(expContent) + '"</div>';
-      } else {
-        html += '<div class="soul-text">' + escapeHtml(actionType) + "</div>";
-        if (Object.keys(expAd).length > 0) {
-          html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(expAd)) + "</span>";
-        }
-      }
+      html += renderServerActionHtml(exp.action_type, exp.action_data);
       html += "</div></div>";
 
       html += "</div></div>";
@@ -660,23 +641,28 @@ function renderTickCard(exp, metadata, time) {
 // LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
+// 地魂 action_type 分类常量（与 history.js DIHUN_*_TYPES 保持一致）
+var SPEAK_TYPES = { "说话": true, speak: true };
+var WHISPER_TYPES = { "私语": true, whisper: true };
+var SHOUT_TYPES = { "大喊": true, shout: true };
+
 function renderServerActionHtml(actionType, actionData) {
   var at = actionType || "";
   var ad = actionData;
   if (typeof ad === "string") {
     try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
   }
-  if (!ad || typeof ad !== "object") ad = {};
+  if (!ad || typeof ad !== "object" || Array.isArray(ad)) ad = {};
   var content = ad.content || "";
   var targetId = ad.target_agent_id;
   var html = "";
-  if (at === "说话" || at === "speak") {
-    var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向众人说话";
+  if (SPEAK_TYPES[at] && content) {
+    var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向在场众人说话";
     html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
-  } else if (at === "私语" || at === "whisper") {
-    html += '<div class="soul-text">向 ' + escapeHtml(resolveTargetName(targetId)) + ' 密语："' + escapeHtml(content) + '"</div>';
-  } else if (at === "大喊" || at === "shout") {
-    html += '<div class="soul-text">大声喊道："' + escapeHtml(content) + '"</div>';
+  } else if (WHISPER_TYPES[at] && content) {
+    html += '<div class="soul-text">向' + escapeHtml(resolveTargetName(targetId)) + '密语："' + escapeHtml(content) + '"</div>';
+  } else if (SHOUT_TYPES[at] && content) {
+    html += '<div class="soul-text">大喊："' + escapeHtml(content) + '"</div>';
   } else {
     html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
     if (Object.keys(ad).length > 0) {
