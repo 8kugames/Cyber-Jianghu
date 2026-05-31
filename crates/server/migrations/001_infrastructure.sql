@@ -1,13 +1,11 @@
 -- ============================================================================
 -- 001_infrastructure.sql
 -- ============================================================================
--- PostgreSQL extensions and utility functions. Must execute first.
+-- PostgreSQL extensions and utility functions.
 -- ============================================================================
 
--- Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Generic updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
