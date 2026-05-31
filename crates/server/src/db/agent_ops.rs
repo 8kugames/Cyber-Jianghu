@@ -656,7 +656,7 @@ pub struct AutoRebirthResult {
 ///
 /// 事务内完成：
 /// 1. 查询旧 agent（确认 dead 状态）
-/// 2. 旧 agent dead → retired
+/// 2. 旧 agent dead → retired（status='retired'，防重复转世）
 /// 3. INSERT 新 agent（新 UUID，同 device_id/name/system_prompt）
 /// 4. INSERT agent_states（初始属性）
 /// 5. INSERT agent_inventory（初始物品）
@@ -694,8 +694,8 @@ pub async fn auto_rebirth_agent(
         None => anyhow::bail!("Agent {} 不存在或非 dead 状态，无法转世", old_agent_id),
     };
 
-    // 2. 旧 agent 标记 retired_at（保持 dead 状态，dashboard 可区分死亡 vs 归隐）
-    sqlx::query("UPDATE agents SET retired_at = NOW() WHERE agent_id = $1")
+    // 2. 旧 agent 归隐（dead → retired）：转世完成 = 旧角色正式退出世界
+    sqlx::query("UPDATE agents SET status = 'retired', retired_at = NOW() WHERE agent_id = $1")
         .bind(old_agent_id)
         .execute(&mut *tx)
         .await
