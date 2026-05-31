@@ -47,6 +47,12 @@ impl super::super::Agent {
                             narrative: r.previous_round_narrative,
                         },
                         final_intent: r.final_intent_id.map(|id| {
+                            let pipeline_actions: Option<
+                                Vec<cyber_jianghu_protocol::PipelineAction>,
+                            > = r
+                                .final_pipeline_json
+                                .as_ref()
+                                .and_then(|s| serde_json::from_str(s).ok());
                             cyber_jianghu_protocol::FinalIntentReport {
                                 intent_id: Some(id),
                                 action_type: r.final_action_type.clone(),
@@ -54,6 +60,7 @@ impl super::super::Agent {
                                     .final_action_data
                                     .as_ref()
                                     .and_then(|s| serde_json::from_str(s).ok()),
+                                pipeline_actions,
                                 chaos_marker: None,
                                 dream_marker: None,
                             }
@@ -161,6 +168,7 @@ impl super::super::Agent {
                                 intent_id: Some(subsequent.intent_id.to_string()),
                                 action_type: Some(subsequent.action_type.to_string()),
                                 action_data: subsequent.action_data.clone(),
+                                pipeline_actions: None,
                                 chaos_marker: subsequent.chaos_marker.clone(),
                                 dream_marker: subsequent.dream_marker.clone(),
                             }),

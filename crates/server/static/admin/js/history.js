@@ -488,6 +488,38 @@ function parseActionData(raw) {
     return {};
 }
 
+// 渲染单个 action 的地魂描述文本
+function renderSingleAction(aType, aData) {
+    const content = aData.content || "";
+    if (DIHUN_SPEAK_TYPES[aType] && content)
+        return `向在场众人说话："${escapeHtml(content)}"`;
+    if (DIHUN_WHISPER_TYPES[aType] && content) {
+        const name = resolveTargetName(aData.target_agent_id);
+        return `向${escapeHtml(name)}密语："${escapeHtml(content)}"`;
+    }
+    if (DIHUN_SHOUT_TYPES[aType] && content)
+        return `大喊："${escapeHtml(content)}"`;
+    let text = escapeHtml(getActionTypeDisplay(aType));
+    // 选取关键字段展示（非全量 JSON dump）
+    const keys = Object.keys(aData).filter(k => k !== "content" && k !== "target_agent_id");
+    if (content) text += ` "${escapeHtml(content)}"`;
+    if (aData.target_agent_id) {
+        const name = resolveTargetName(aData.target_agent_id);
+        text += ` → ${escapeHtml(name)}`;
+    }
+    if (aData.item_id) text += ` ${escapeHtml(aData.item_id)}`;
+    if (aData.quantity) text += ` x${aData.quantity}`;
+    if (aData.target_location) text += ` → ${escapeHtml(aData.target_location)}`;
+    // 其他未知字段兜底
+    const remaining = keys.filter(k => !["item_id","quantity","target_location"].includes(k));
+    if (remaining.length > 0) {
+        const picked = {};
+        remaining.forEach(k => picked[k] = aData[k]);
+        text += ` ${escapeHtml(JSON.stringify(picked))}`;
+    }
+    return text;
+}
+
 // 渲染地魂单元格
 function renderDihunCell(cycles, entry) {
     if (!cycles || cycles.length === 0) {
@@ -509,27 +541,28 @@ function renderDihunCell(cycles, entry) {
         if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
         const fi = cycle.final_intent;
         if (!fi) return;
-        const fiActionType = fi.action_type || "";
-        let fiData = parseActionData(fi.action_data);
-        if (!fiData.content && entry.action_data) {
-            const fallback = parseActionData(entry.action_data);
-            if (fallback.content) fiData = { ...fiData, ...fallback };
+        // 优先使用 pipeline_actions（新数据格式）
+        if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
+            fi.pipeline_actions.forEach((item) => {
+                const aType = item.action_type || "";
+                const aData = parseActionData(item.action_data);
+                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+            });
+        } else {
+            // 旧数据兜底：action_data 可能是数组或单对象
+            const fiData = fi.action_data;
+            if (Array.isArray(fiData)) {
+                fiData.forEach((item) => {
+                    const aType = item.action_type || "";
+                    const aData = parseActionData(item.action_data);
+                    html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+                });
+            } else {
+                const aType = fi.action_type || "";
+                const aData = parseActionData(fiData);
+                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+            }
         }
-        const fiContent = fiData.content || "";
-        let fiText = "";
-        if (DIHUN_SPEAK_TYPES[fiActionType] && fiContent)
-            fiText = `"${escapeHtml(fiContent)}"`;
-        else if (DIHUN_WHISPER_TYPES[fiActionType] && fiContent) {
-            const name = resolveTargetName(fiData.target_agent_id);
-            fiText = `向${escapeHtml(name)}密语: "${escapeHtml(fiContent)}"`;
-        } else if (DIHUN_SHOUT_TYPES[fiActionType] && fiContent)
-            fiText = `大喊: "${escapeHtml(fiContent)}"`;
-        else {
-            fiText = escapeHtml(getActionTypeDisplay(fiActionType));
-            if (Object.keys(fiData).length > 0)
-                fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
-        }
-        html += `<div class="exp-meta-text">${fiText}</div>`;
     });
     return html || "-";
 }
