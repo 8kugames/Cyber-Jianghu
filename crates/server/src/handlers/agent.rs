@@ -1,5 +1,6 @@
 use anyhow::Result;
 use axum::{Json, extract::State, http::StatusCode};
+use sha2::Digest;
 use std::sync::Arc;
 use tracing::{error, info};
 
@@ -54,9 +55,16 @@ pub async fn agent_connect(
 
     info!("{}", message);
 
+    let narrative = state.game_data.get().narrative.clone();
+    let nc_hash = serde_json::to_vec(&narrative)
+        .ok()
+        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
+
     Ok(Json(AgentConnectResponse {
         auth_token,
         message,
+        narrative_config: Some(narrative),
+        narrative_config_hash: nc_hash,
     }))
 }
 
@@ -282,6 +290,9 @@ pub async fn agent_register(
 
     // 8. 获取叙事化配置（用于属性描述转换）
     let narrative_config = state.game_data.get().narrative.clone();
+    let nc_hash = serde_json::to_vec(&narrative_config)
+        .ok()
+        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
 
     // 9. 获取初始属性（先天属性，用于 Agent 端存储 birth_attributes）
     let initial_attributes = registration.initial_state.get_attributes_for_protocol();
@@ -291,6 +302,7 @@ pub async fn agent_register(
         message: format!("Agent '{}' registered successfully", agent.name),
         game_rules,
         narrative_config,
+        narrative_config_hash: nc_hash,
         initial_attributes,
     }))
 }

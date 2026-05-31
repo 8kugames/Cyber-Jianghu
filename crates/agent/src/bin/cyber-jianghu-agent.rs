@@ -251,6 +251,47 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
         .context("No auth_token in response")?
         .to_string();
 
+    // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
+    // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
+    if let Some(home) = dirs::home_dir() {
+        let nc = &body["narrative_config"];
+        let nc_hash = body["narrative_config_hash"].as_str();
+        if !nc.is_null() {
+            let config_dir = home.join(".cyber-jianghu").join("config");
+            let _ = std::fs::create_dir_all(&config_dir);
+            let hash_path = config_dir.join("narrative_config.hash");
+
+            let should_save = match nc_hash {
+                Some(new_hash) => {
+                    match std::fs::read_to_string(&hash_path) {
+                        Ok(old_hash) => old_hash.trim() != new_hash,
+                        Err(_) => true,
+                    }
+                }
+                None => true,
+            };
+
+            if should_save {
+                match serde_json::to_string_pretty(nc) {
+                    Ok(json) => {
+                        let nc_path = config_dir.join("narrative_config.json");
+                        if let Err(e) = std::fs::write(&nc_path, &json) {
+                            warn!("保存 narrative_config 失败: {}", e);
+                        } else {
+                            if let Some(hash) = nc_hash {
+                                let _ = std::fs::write(&hash_path, hash);
+                            }
+                            info!("设备连接时已保存 narrative_config");
+                        }
+                    }
+                    Err(e) => warn!("序列化 narrative_config 失败: {}", e),
+                }
+            } else {
+                debug!("narrative_config skip: hash unchanged");
+            }
+        }
+    }
+
     // 4. 创建 DeviceConfig
     let device = DeviceConfig {
         device_id,
