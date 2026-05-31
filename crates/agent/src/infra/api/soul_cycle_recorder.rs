@@ -34,6 +34,7 @@ pub struct SoulCycleRecord {
     pub final_intent_id: Option<String>,
     pub final_action_type: Option<String>,
     pub final_action_data: Option<String>,
+    pub final_pipeline_json: Option<String>,
     pub route_type: String,
     pub world_time: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -103,6 +104,7 @@ impl SoulCycleRecorder {
                 final_intent_id TEXT,
                 final_action_type TEXT,
                 final_action_data TEXT,
+                final_pipeline_json TEXT,
                 route_type TEXT NOT NULL DEFAULT 'main',
                 world_time TEXT,
                 created_at TEXT NOT NULL,
@@ -135,6 +137,9 @@ impl SoulCycleRecorder {
 
         // idempotent migration: add cache_hit_rate column (ignore if already exists)
         conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN cache_hit_rate REAL")
+            .ok();
+        // idempotent migration: add final_pipeline_json column
+        conn.execute_batch("ALTER TABLE soul_cycle_record ADD COLUMN final_pipeline_json TEXT")
             .ok();
 
         Ok(())
@@ -272,6 +277,7 @@ impl SoulCycleRecorder {
         intent_id: Option<&str>,
         action_type: Option<&str>,
         action_data: Option<&str>,
+        pipeline_json: Option<&str>,
     ) {
         let conn = self
             .conn
@@ -284,12 +290,14 @@ impl SoulCycleRecorder {
                 final_intent_id = ?1,
                 final_action_type = ?2,
                 final_action_data = ?3,
-                created_at = ?4
-             WHERE tick_id = ?5 AND attempt = ?6",
+                final_pipeline_json = ?4,
+                created_at = ?5
+             WHERE tick_id = ?6 AND attempt = ?7",
             params![
                 intent_id,
                 action_type,
                 action_data,
+                pipeline_json,
                 created_at,
                 tick_id,
                 attempt
@@ -433,8 +441,8 @@ impl SoulCycleRecorder {
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason, previous_round_narrative,
-                    final_intent_id, final_action_type, final_action_data, route_type,
-                    world_time, created_at
+                    final_intent_id, final_action_type, final_action_data, final_pipeline_json,
+                    route_type, world_time, created_at
              FROM soul_cycle_record WHERE tick_id = ?1 ORDER BY attempt ASC",
         ) {
             Ok(s) => s,
@@ -492,8 +500,8 @@ impl SoulCycleRecorder {
             "SELECT id, tick_id, attempt, renhun_narrative, renhun_thought_log,
                     tianhun_result, tianhun_layer1_result, tianhun_layer2_result,
                     tianhun_layer3_result, tianhun_reason, previous_round_narrative,
-                    final_intent_id, final_action_type, final_action_data, route_type,
-                    world_time, created_at
+                    final_intent_id, final_action_type, final_action_data, final_pipeline_json,
+                    route_type, world_time, created_at
              FROM soul_cycle_record WHERE tick_id IN ({}) ORDER BY tick_id DESC, attempt ASC",
             build_in_placeholders(tick_ids.len())
         );
@@ -590,8 +598,9 @@ impl SoulCycleRecorder {
             final_intent_id: row.get(11).ok(),
             final_action_type: row.get(12).ok(),
             final_action_data: row.get(13).ok(),
-            route_type: row.get(14).unwrap_or_else(|_| "main".to_string()),
-            world_time: row.get(15).ok(),
+            final_pipeline_json: row.get(14).ok(),
+            route_type: row.get(15).unwrap_or_else(|_| "main".to_string()),
+            world_time: row.get(16).ok(),
             created_at,
         }
     }

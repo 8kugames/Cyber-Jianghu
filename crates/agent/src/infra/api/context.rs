@@ -223,7 +223,7 @@ fn generate_impl(
     // 核心状态属性优先展示（选择哪些属性优先是展示层决策，不做数据驱动）
     for attr in &vital_attrs {
         if let Some(desc) = descriptions.get(*attr) {
-            let raw = lookup_attr_value(*attr, &state.self_state);
+            let raw = lookup_attr_value(attr, &state.self_state);
             sections.push(format!("- {}: {}{}", attr, desc, raw));
         }
     }

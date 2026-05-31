@@ -660,6 +660,33 @@ function renderTickCard(exp, metadata, time) {
 // LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
+function renderServerActionHtml(actionType, actionData) {
+  var at = actionType || "";
+  var ad = actionData;
+  if (typeof ad === "string") {
+    try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
+  }
+  if (!ad || typeof ad !== "object") ad = {};
+  var content = ad.content || "";
+  var targetId = ad.target_agent_id;
+  var html = "";
+  if (at === "说话" || at === "speak") {
+    var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向众人说话";
+    html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
+  } else if (at === "私语" || at === "whisper") {
+    html += '<div class="soul-text">向 ' + escapeHtml(resolveTargetName(targetId)) + ' 密语："' + escapeHtml(content) + '"</div>';
+  } else if (at === "大喊" || at === "shout") {
+    html += '<div class="soul-text">大声喊道："' + escapeHtml(content) + '"</div>';
+  } else {
+    html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
+    if (Object.keys(ad).length > 0) {
+      html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(ad)) + '</span>';
+    }
+    html += "</div>";
+  }
+  return html;
+}
+
 function renderServerSoulInline(label, data, type) {
   if (!data) return "";
   var html =
@@ -708,68 +735,34 @@ function renderServerSoulInline(label, data, type) {
       html +=
         '<div class="soul-narrative">' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
-    // 地魂：最终行动，说话/私语/大喊特殊展示
-    // 注意：action_type 存储为中文（说话/私语/shout），需同时兼容英文
-    if (data.action_type) {
-      var at = data.action_type;
-      var ad = data.action_data;
-      if (typeof ad === "string") {
-        try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
-      }
-      if (!ad || typeof ad !== "object") ad = {};
-      var content = ad.content || "";
-      var targetId = ad.target_agent_id;
-
-      if (at === "说话" || at === "speak") {
-        var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向众人说话";
-        html +=
-          '<div class="soul-text">' +
-          escapeHtml(speakLabel) +
-          '："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else if (at === "私语" || at === "whisper") {
-        var targetName = resolveTargetName(targetId);
-        html +=
-          '<div class="soul-text">向 ' +
-          escapeHtml(targetName) +
-          ' 密语："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else if (at === "大喊" || at === "shout") {
-        html +=
-          '<div class="soul-text">大声喊道："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else {
-        html +=
-          '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
-        if (Object.keys(ad).length > 0) {
-          html +=
-            ' <span class="soul-params">' +
-            escapeHtml(JSON.stringify(ad)) +
-            "</span>";
-        }
-        html += "</div>";
-      }
-      // 混沌标记徽章
-      if (data.chaos_marker) {
-        var cm = data.chaos_marker;
-        var chaosLabel =
-          cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
-        html +=
-          '<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">' +
-          escapeHtml(chaosLabel) +
-          "</span></div>";
-      }
-      // 托梦影响徽章
-      if (data.dream_marker) {
-        var dreamThought = data.dream_marker.thought || '';
-        html +=
-          '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
-          (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
-          '</div>';
-      }
+    // 地魂：最终行动，支持 pipeline 多意图
+    var pipelineActions = data.pipeline_actions;
+    if (pipelineActions && pipelineActions.length > 1) {
+      // pipeline 多意图：逐个渲染 action 文本
+      pipelineActions.forEach(function(pa) {
+        html += renderServerActionHtml(pa.action_type, pa.action_data);
+      });
+    } else if (data.action_type) {
+      // 单意图（或旧数据无 pipeline_actions）
+      html += renderServerActionHtml(data.action_type, data.action_data);
+    }
+    // 混沌标记徽章（仅 primary intent 级别）
+    if (data.chaos_marker) {
+      var cm = data.chaos_marker;
+      var chaosLabel =
+        cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
+      html +=
+        '<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">' +
+        escapeHtml(chaosLabel) +
+        "</span></div>";
+    }
+    // 托梦影响徽章（仅 primary intent 级别）
+    if (data.dream_marker) {
+      var dreamThought = data.dream_marker.thought || '';
+      html +=
+        '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
+        (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
+        '</div>';
     }
   }
   html += "</div></div>";
