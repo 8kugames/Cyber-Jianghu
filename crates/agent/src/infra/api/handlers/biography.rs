@@ -121,27 +121,43 @@ async fn collect_soul_cycle_timeline(
         lines.push(format!("\n--- Tick {} ({}) ---", tick_id, wt));
 
         for rec in &records {
-            // 行动摘要
+            // 行动摘要：优先使用 pipeline 完整视图，覆盖所有 intent
             if let Some(ref action_type) = rec.final_action_type {
-                let action_desc = if let Some(ref data_str) = rec.final_action_data {
-                    // 尝试解析 action_data 提取 content
-                    if let Ok(data) = serde_json::from_str::<serde_json::Value>(data_str) {
-                        let content = data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        if action_type == "speak"
-                            || action_type == "whisper"
-                            || action_type == "shout"
+                let pipeline_items: Vec<serde_json::Value> = rec
+                    .final_pipeline_json
+                    .as_ref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_else(|| {
+                        // 旧数据无 final_pipeline_json，退化为单 intent
+                        let mut item = serde_json::json!({
+                            "action_type": action_type,
+                        });
+                        if let Some(ref d) = rec.final_action_data
+                            && let Ok(v) = serde_json::from_str::<serde_json::Value>(d)
                         {
-                            format!("{}：{}", action_type, content)
-                        } else {
-                            action_type.to_string()
+                            item["action_data"] = v;
                         }
-                    } else {
-                        action_type.to_string()
-                    }
-                } else {
-                    action_type.to_string()
-                };
-                lines.push(format!("  行动：{}", action_desc));
+                        vec![item]
+                    });
+
+                let descs: Vec<String> = pipeline_items
+                    .iter()
+                    .map(|item| {
+                        let at = item.get("action_type").and_then(|v| v.as_str()).unwrap_or("");
+                        let content = item
+                            .get("action_data")
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        if (at == "speak" || at == "whisper" || at == "shout") && !content.is_empty()
+                        {
+                            format!("{}：{}", at, content)
+                        } else {
+                            at.to_string()
+                        }
+                    })
+                    .collect();
+                lines.push(format!("  行动：{}", descs.join(" → ")));
             }
 
             // 人魂叙事（简短摘要）
