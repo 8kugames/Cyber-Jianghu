@@ -205,7 +205,7 @@ impl NarrativeConfig {
             }
         }
 
-        for (name, _) in derived {
+        for name in derived.keys() {
             if let Some(display) = self.get_display_name(name) {
                 result.insert(name.clone(), display.to_string());
             }

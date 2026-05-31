@@ -349,32 +349,32 @@ impl super::Agent {
             .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?;
 
         // 重连时同步 narrative_config 到磁盘（hash skip-optimization）
-        if let Some(ref nc) = result.narrative_config {
-            if let Some(home) = dirs::home_dir() {
-                let config_dir = home.join(".cyber-jianghu").join("config");
-                let hash_path = config_dir.join("narrative_config.hash");
+        if let Some(ref nc) = result.narrative_config
+            && let Some(home) = dirs::home_dir()
+        {
+            let config_dir = home.join(".cyber-jianghu").join("config");
+            let hash_path = config_dir.join("narrative_config.hash");
 
-                let should_save = match result.narrative_config_hash.as_ref() {
-                    Some(new_hash) => match std::fs::read_to_string(&hash_path) {
-                        Ok(old_hash) => old_hash.trim() != new_hash,
-                        Err(_) => true,
-                    },
-                    None => true,
-                };
+            let should_save = match result.narrative_config_hash.as_ref() {
+                Some(new_hash) => match std::fs::read_to_string(&hash_path) {
+                    Ok(old_hash) => old_hash.trim() != new_hash,
+                    Err(_) => true,
+                },
+                None => true,
+            };
 
-                if should_save {
-                    if let Ok(json) = serde_json::to_string_pretty(nc) {
-                        let _ = std::fs::create_dir_all(&config_dir);
-                        let nc_path = config_dir.join("narrative_config.json");
-                        if let Err(e) = std::fs::write(&nc_path, json) {
-                            warn!("重连保存 narrative_config 失败: {}", e);
-                        } else if let Some(ref hash) = result.narrative_config_hash {
-                            let _ = std::fs::write(&hash_path, hash);
-                        }
+            if should_save {
+                if let Ok(json) = serde_json::to_string_pretty(nc) {
+                    let _ = std::fs::create_dir_all(&config_dir);
+                    let nc_path = config_dir.join("narrative_config.json");
+                    if let Err(e) = std::fs::write(&nc_path, json) {
+                        warn!("重连保存 narrative_config 失败: {}", e);
+                    } else if let Some(ref hash) = result.narrative_config_hash {
+                        let _ = std::fs::write(&hash_path, hash);
                     }
-                } else {
-                    debug!("reconnect narrative_config skip: hash unchanged");
                 }
+            } else {
+                debug!("reconnect narrative_config skip: hash unchanged");
             }
         }
 
