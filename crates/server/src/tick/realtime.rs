@@ -937,9 +937,9 @@ impl IntentWorker {
                 Err(e) => warn!("清空死亡Agent {} 背包失败: {}", agent_id, e),
             }
 
-            // 2. DB: 标记 Agent 为 dead
+            // 2. DB: 标记 Agent 为 dead（不设 retired_at，死亡 ≠ 归隐）
             if let Err(e) = sqlx::query(
-                "UPDATE agents SET status = 'dead', retired_at = CURRENT_TIMESTAMP WHERE agent_id = $1 AND status = 'active'",
+                "UPDATE agents SET status = 'dead' WHERE agent_id = $1 AND status = 'active'",
             )
             .bind(agent_id)
             .execute(&self.db_pool)
