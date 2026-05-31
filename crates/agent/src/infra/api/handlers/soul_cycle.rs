@@ -39,13 +39,6 @@ struct TianhunEntry {
     narrative: Option<String>,
 }
 
-/// Pipeline 单个 action
-#[derive(Debug, Serialize)]
-struct PipelineActionEntry {
-    action_type: String,
-    action_data: Option<serde_json::Value>,
-}
-
 /// 最终 Intent 记录
 #[derive(Debug, Serialize)]
 struct FinalIntentEntry {
@@ -53,7 +46,7 @@ struct FinalIntentEntry {
     action_type: Option<String>,
     action_data: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pipeline_actions: Option<Vec<PipelineActionEntry>>,
+    pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dream_marker: Option<serde_json::Value>,
 }
@@ -150,25 +143,10 @@ fn record_to_attempt_entry(
             narrative: r.previous_round_narrative,
         },
         final_intent: r.final_intent_id.map(|id| {
-            let pipeline_actions: Option<Vec<PipelineActionEntry>> =
+            let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> =
                 r.final_pipeline_json
                     .as_ref()
-                    .and_then(|s| {
-                        serde_json::from_str::<Vec<serde_json::Value>>(s).ok()
-                    })
-                    .map(|items| {
-                        items
-                            .into_iter()
-                            .map(|v| PipelineActionEntry {
-                                action_type: v
-                                    .get("action_type")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                                action_data: v.get("action_data").cloned(),
-                            })
-                            .collect()
-                    });
+                    .and_then(|s| serde_json::from_str(s).ok());
             FinalIntentEntry {
                 intent_id: Some(id),
                 action_type: r.final_action_type,
