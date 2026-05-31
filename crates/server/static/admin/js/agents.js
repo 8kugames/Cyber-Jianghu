@@ -493,7 +493,6 @@ function renderExperiences(data) {
       }
 
       // Fallback: 显示基本信息（当 soul_cycle_metadata 为空时）
-      var actionType = getActionTypeDisplay(exp.action_type || "");
       var resultText =
         exp.result === "success"
           ? "成功"
@@ -649,7 +648,10 @@ function renderServerActionHtml(actionType, actionData) {
   if (typeof ad === "string") {
     try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
   }
-  if (!ad || typeof ad !== "object" || Array.isArray(ad)) ad = {};
+  if (!ad || typeof ad !== "object" || Array.isArray(ad)) {
+    if (Array.isArray(ad)) console.warn("[renderServerActionHtml] 旧格式 action_data(数组)，内容丢失:", ad);
+    ad = {};
+  }
   var content = ad.content || "";
   var targetId = ad.target_agent_id;
   var html = "";
