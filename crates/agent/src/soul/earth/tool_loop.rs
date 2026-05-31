@@ -105,17 +105,28 @@ pub(crate) async fn run_tool_loop(
                 content.chars().take(2000).collect::<String>()
             );
 
-            // 内容校验：必须是 JSON 格式（以 { 开头）
-            // 非 JSON 内容（纯动作名、XML tool_call、推理文本等）走强制 JSON 退出
-            if content.trim().starts_with('{') {
+            // 提取 JSON：纯 JSON 直接通过，否则从内容中提取含 actions 标记的决策 JSON
+            let trimmed = content.trim();
+            if trimmed.starts_with('{') {
                 return Ok(ToolLoopResult {
                     content,
                     reasoning_content: response.reasoning_content,
                 });
             }
 
+            if let Some(json) = extract_json_object(&content) {
+                info!(
+                    "[地魂] 从 LLM 输出中提取到 JSON ({} chars), 跳过 forced_text_exit",
+                    json.len()
+                );
+                return Ok(ToolLoopResult {
+                    content: json,
+                    reasoning_content: response.reasoning_content,
+                });
+            }
+
             warn!(
-                "[地魂] LLM 返回非JSON内容 ({} chars), 转为强制JSON退出, preview: {}",
+                "[地魂] LLM 返回无 JSON 内容 ({} chars), 转为强制JSON退出, preview: {}",
                 content.len(),
                 content.chars().take(200).collect::<String>()
             );
@@ -266,4 +277,127 @@ async fn forced_text_exit(
         content,
         reasoning_content: response.reasoning_content,
     })
+}
+
+/// 决策 JSON 的确定性标识字段
+const DECISION_MARKER: &str = "actions";
+
+/// 从 LLM 输出中提取决策 JSON 对象。
+///
+/// 策略：遍历所有 JSON object，优先找含 `DECISION_MARKER` 的（确定性决策），
+/// 找不到则 fallback 最后一个 object（兼容旧格式）。
+/// 用 `StreamDeserializer` 容忍前后文本。
+fn extract_json_object(content: &str) -> Option<String> {
+    let start = content.find('{')?;
+    let json_candidate = &content[start..];
+    let stream = serde_json::Deserializer::from_str(json_candidate)
+        .into_iter::<serde_json::Value>();
+
+    let mut last_object: Option<serde_json::Value> = None;
+    let mut marked_object: Option<serde_json::Value> = None;
+
+    for value in stream.flatten() {
+        if value.is_object() {
+            if value.get(DECISION_MARKER).is_some() {
+                marked_object = Some(value);
+            } else {
+                last_object = Some(value);
+            }
+        }
+    }
+
+    marked_object
+        .or(last_object)
+        .map(|v| v.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_object_pure_json() {
+        let json = r#"{"action_type":"喝水","action_data":{"item_id":"水"}}"#;
+        let extracted = extract_json_object(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+        assert_eq!(parsed["action_data"]["item_id"], "水");
+    }
+
+    #[test]
+    fn test_extract_json_object_reasoning_then_json() {
+        let content = "Good, I have:\n- 水: 7\n\n{\"action_type\":\"喝水\",\"item\":\"水\"}";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+    }
+
+    #[test]
+    fn test_extract_json_object_no_json() {
+        assert_eq!(extract_json_object("just plain text, no json here"), None);
+    }
+
+    #[test]
+    fn test_extract_json_object_json_array_returns_none() {
+        // JSON array 不是 object，不应提取
+        assert_eq!(extract_json_object("[1,2,3]"), None);
+    }
+
+    #[test]
+    fn test_extract_json_object_nested_braces() {
+        let content = "thinking...\n{\"a\":{\"b\":1},\"c\":2}";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["a"]["b"], 1);
+        assert_eq!(parsed["c"], 2);
+    }
+
+    #[test]
+    fn test_extract_json_object_trailing_text() {
+        let content = "reasoning...\n{\"action_type\":\"喝水\"}\n\ndone.";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+    }
+
+    #[test]
+    fn test_extract_json_object_surrounded_text() {
+        let content = "Before.\n{\"x\":1}\nAfter.";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["x"], 1);
+    }
+
+    #[test]
+    fn test_extract_json_object_multiple_prefers_marked() {
+        // 第一个无 actions，第二个有 actions → 优先取有 actions 的
+        let content = r#"analysis...
+{"step":"reasoning","thirst":99}
+{"actions":[{"action_type":"喝水","action_data":{"item_id":"水"}}]}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert!(parsed.get("actions").is_some(), "should pick JSON with actions");
+        assert!(parsed.get("step").is_none(), "should not be the unmarked JSON");
+    }
+
+    #[test]
+    fn test_extract_json_object_marked_before_unmarked() {
+        // 有 actions 的在前面，无 actions 的在后面 → 仍取有 actions 的
+        let content = r#"thinking...
+{"actions":[{"action_type":"喝水"}]}
+{"note":"some afterthought"}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert!(parsed.get("actions").is_some());
+    }
+
+    #[test]
+    fn test_extract_json_object_no_marker_fallback_last() {
+        // 都没有 actions → fallback 最后一个
+        let content = r#"{"a":1}
+{"b":2}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["b"], 2);
+    }
 }
