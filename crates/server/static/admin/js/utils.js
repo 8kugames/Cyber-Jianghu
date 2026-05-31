@@ -20,6 +20,11 @@ var refreshInterval = null;
 var smoothTimeConfig = null;
 var smoothTimeAnimationId = null;
 
+// 地魂 action_type 分类常量（数据驱动：说话/私语/大喊类有 content 字段）
+var SPEAK_TYPES = { "说话": true, speak: true };
+var WHISPER_TYPES = { "私语": true, whisper: true };
+var SHOUT_TYPES = { "大喊": true, shout: true };
+
 // authVerified may be declared in auth.js (loaded after utils.js), so window guard needed
 var authVerified = typeof window.authVerified !== "undefined" ? window.authVerified : false;
 
