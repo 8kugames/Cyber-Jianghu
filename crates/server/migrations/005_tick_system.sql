@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS agent_action_logs (
     action_data      JSONB,
     result           VARCHAR(50),
     thought_log      TEXT,
-    observer_thought TEXT,
+    reflector_thought TEXT,
     narrative        TEXT,
     created_at       TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,5 +56,6 @@ COMMENT ON COLUMN agent_action_logs.action_type IS '动作类型：idle/speak/gi
 COMMENT ON COLUMN agent_action_logs.action_data IS '动作详细数据（JSON格式）';
 COMMENT ON COLUMN agent_action_logs.result IS '动作执行结果：success/failed';
 COMMENT ON COLUMN agent_action_logs.thought_log IS 'ActorSoul 思考日志';
-COMMENT ON COLUMN agent_action_logs.observer_thought IS 'ReflectorSoul 审查理由';
+-- COMMENT ON COLUMN agent_action_logs.reflector_thought IS 'ReflectorSoul 审查理由';
 COMMENT ON COLUMN agent_action_logs.narrative IS '叙事化经历描述';
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'agent_action_logs' AND column_name = 'reflector_thought') THEN COMMENT ON COLUMN agent_action_logs.reflector_thought IS 'ReflectorSoul 审查理由'; END IF; END $$;

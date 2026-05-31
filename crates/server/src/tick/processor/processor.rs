@@ -218,7 +218,7 @@ impl StateProcessor {
         let pool = self.db_pool.clone();
         tokio::spawn(async move {
             if let Err(e) = crate::db::batch_insert_action_logs(&pool, &[action_log]).await {
-                warn!("Action log 异步写入失败: {}", e);
+                warn!("Action log 异步写入失败: {:#}", e);
             }
         });
 

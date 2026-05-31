@@ -262,7 +262,6 @@ impl Agent {
                     Ok(char_config) => {
                         let prompt = char_config.generate_system_prompt();
                         engine.update_persona(name, &prompt);
-                        engine.update_conversation_system_message(&prompt);
                         self.character_config = Some(char_config);
                         info!("已从 character.yaml 重新加载人设并更新认知引擎");
                     }
