@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 use crate::component::memory::backend::MemoryBackend;
 
@@ -276,8 +275,12 @@ impl super::super::Agent {
                                     format!("；足迹：{}", lh.join("→"))
                                 }
                             );
+                            let entry_agent_id = {
+                                let r = mgr.read().await;
+                                r.agent_id()
+                            };
                             let mut entry = crate::component::memory::MemoryEntry::new(
-                                Uuid::nil(),
+                                entry_agent_id,
                                 gd,
                                 content,
                             )
