@@ -1,5 +1,9 @@
 use anyhow::Result;
-use axum::{Json, extract::{Path, State}, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use sha2::Digest;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -434,7 +438,10 @@ pub struct AutoRebirthResponse {
 /// POST /api/v1/agent/auto-rebirth
 ///
 /// Agent 端在等待 rebirth_delay_ticks 后调用此接口完成转世重生。
-/// 服务端在单一事务中：创建全新 agent_id + 初始状态 + 初始物品。旧 agent 保持 dead 状态。
+/// 服务端在单一事务中：创建全新 agent_id + 初始状态 + 初始物品。
+///
+/// 旧 agent 终态：保持 `status='dead'` 死亡标记，`retired_at` 字段作为时间戳记录转世完成事件。
+/// `retired` 状态不被 auto-rebirth 触及（仅 `/api/v1/agent/retire` 端点可设置，专属"玩家主动归隐"语义）。
 pub async fn agent_auto_rebirth(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AutoRebirthRequest>,
@@ -804,24 +811,21 @@ pub async fn get_agent_biography(
     State(state): State<Arc<AppState>>,
     Path(agent_id): Path<uuid::Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let biography: Option<String> = sqlx::query_scalar(
-        "SELECT biography FROM agents WHERE agent_id = $1",
-    )
-    .bind(agent_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|e| {
-        error!("[biography] 查询失败: agent={}, err={}", agent_id, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": "数据库查询失败"})),
-        )
-    })?;
+    let biography: Option<String> =
+        sqlx::query_scalar("SELECT biography FROM agents WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .map_err(|e| {
+                error!("[biography] 查询失败: agent={}, err={}", agent_id, e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "数据库查询失败"})),
+                )
+            })?;
 
     match biography {
-        Some(bio) if !bio.is_empty() => {
-            Ok(Json(serde_json::json!({"biography": bio})))
-        }
+        Some(bio) if !bio.is_empty() => Ok(Json(serde_json::json!({"biography": bio}))),
         _ => Ok(Json(serde_json::json!({"biography": null}))),
     }
 }

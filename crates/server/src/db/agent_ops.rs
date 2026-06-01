@@ -652,11 +652,19 @@ pub struct AutoRebirthResult {
     pub spawn_location: String,
 }
 
-/// 自动转世重生：旧 agent dead → retired，INSERT 全新 agent
+/// 自动转世重生：旧 agent 保持 status='dead' 死亡标记，INSERT 全新 agent
+///
+/// 用户硬性约束：不允许将已死亡角色设置为归隐（status='retired'）。
+/// `retired` 状态语义专属"玩家主动归隐"（通过 /api/v1/agent/retire 触发）。
+///
+/// 转世完成后：
+/// - 旧 agent 保持 `status='dead'` 死亡标记
+/// - `retired_at` 字段作为时间戳记录"转世完成"事件（用于区分"未转世的死角色"和"已转世的死角色"）
+/// - retired 状态完全不被 auto-rebirth 触及
 ///
 /// 事务内完成：
-/// 1. 查询旧 agent（确认 dead 状态）
-/// 2. 旧 agent dead → retired（status='retired'，防重复转世）
+/// 1. 查询旧 agent（确认 dead 状态 + 获取基础信息）
+/// 2. 旧 agent 仅写 `retired_at` 时间戳，status 保持 'dead'
 /// 3. INSERT 新 agent（新 UUID，同 device_id/name/system_prompt）
 /// 4. INSERT agent_states（初始属性）
 /// 5. INSERT agent_inventory（初始物品）
@@ -694,12 +702,28 @@ pub async fn auto_rebirth_agent(
         None => anyhow::bail!("Agent {} 不存在或非 dead 状态，无法转世", old_agent_id),
     };
 
-    // 2. 旧 agent 归隐（dead → retired）：转世完成 = 旧角色正式退出世界
-    sqlx::query("UPDATE agents SET status = 'retired', retired_at = NOW() WHERE agent_id = $1")
-        .bind(old_agent_id)
-        .execute(&mut *tx)
-        .await
-        .context("标记旧 Agent 转世时间失败")?;
+    // 2. 旧 agent 保持 status='dead' 死亡标记
+    //    retired_at 作为时间戳记录"转世完成"事件
+    //    严禁写 status='retired'（用户硬性约束：不允许将已死亡角色设置为归隐）
+    let update_result = sqlx::query(
+        "UPDATE agents SET retired_at = NOW() \
+         WHERE agent_id = $1 AND status = 'dead'",
+    )
+    .bind(old_agent_id)
+    .execute(&mut *tx)
+    .await
+    .context("记录旧 Agent 转世时间戳失败")?;
+
+    if update_result.rows_affected() == 0 {
+        anyhow::bail!(
+            "Agent {} 转世中止：UPDATE 未影响任何行（可能并发状态变更）",
+            old_agent_id
+        );
+    }
+    debug!(
+        "旧 Agent {} 保持 status='dead' 死亡标记，retired_at 已记录转世时刻",
+        old_agent_id
+    );
 
     // 3. 获取当前 tick_id（用于 birth_tick 计算）
     let current_tick: i64 = sqlx::query_scalar(

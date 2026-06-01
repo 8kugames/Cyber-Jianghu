@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### Fixed — Auto-Rebirth 将已死亡角色错误归隐
+
+- **[BREAKING] Server**: `auto_rebirth_agent()` 不再将旧 agent `status` 改为 `'retired'`。转世完成后旧 agent 保持 `status='dead'` 死亡标记，`retired_at` 字段仅作为时间戳记录"转世完成"事件。`retired` 状态语义专属"玩家主动归隐"（通过 `/api/v1/agent/retire` 端点触发）。**已死亡角色永远不会被 auto-rebirth 错误归隐**。
+- **Server**: `auto_rebirth_agent` SQL 加 `rows_affected()` 检查，并发状态变更时显式 bail（fail-fast）
+- **Server**: `unified_config.rs` 删除 `RebirthTerminalStatus` 枚举（单一变体违反 YAGNI，终态由硬编码 SQL 决定）
+- **Agent**: `rebirth_character_handler`（web 面板"重生"按钮）按 `CharacterStatus` dispatch——`dead` 调 `/api/v1/agent/auto-rebirth`，`alive` 调 `/api/v1/agent/retire`，`retired` 幂等 no-op，character.yaml 缺失/损坏时保守 no-op 防止误归隐
+
+### Changed — Agent Web Panel SPA 重构
+
+- **Frontend**: 6 页碎片化 HTML (welcome/setup/create/character/settings + shared.js) 重构为 3 页 SPA，hash router 导航 (#/dashboard, #/characters, #/settings)
+- **Frontend**: 8 个 ES module (app/router/api/ui/dashboard/character/panels/settings)，最大模块 ~430 行 (panels.js)，替代旧 2056 行 character.js monolith
+- **Frontend**: 数据驱动 UI — 属性面板从 API categories 动态渲染，事件数量由 DASHBOARD_EVENT_LIMIT 常量控制，statusMap 集中定义
+- **Frontend**: 共享 helper 函数 (extractActionSummary/getActionColor/getAttrColor/fmtNum/STATUS_MAP) 集中到 ui.js，消除跨模块重复
+- **Frontend**: CSS 从 3369 行压缩至 ~445 行，CSS custom properties 主题化 (--bg-primary/--accent/--shadow-sm|md|lg|xl 等)
+- **Agent**: cyber-jianghu-agent.rs 路由变更 — 所有 /welcome.html 引用改为 / (SPA 入口)
+- **Agent**: api/mod.rs 重定向变更 — /create.html → /#/characters，/character.html → /#/characters，/settings.html → /#/settings
+- **Deleted**: welcome.html, setup.html, create.html, character.html, settings.html, js/shared.js, js/create.js, character.js.old
+
 ### Fixed — 三魂数据模型根治 [BREAKING]
 
 - **[BREAKING] Protocol**: `FinalIntentReport` 新增 `pipeline_actions: Option<Vec<PipelineAction>>` 字段。`action_data` 回归单 intent 语义（单对象），pipeline 完整视图由 `pipeline_actions` 独立承载。`PipelineAction` 新增 struct
