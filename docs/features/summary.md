@@ -50,7 +50,8 @@
   - [x] 处理 HP、体力、饥饿、口渴等生理状态随时间的自然衰减。
   - [x] 寿终正寝检查：超龄自动清零 HP。
   - [x] 触发 TickBoundary 事件，如每 7 个游戏日触发传记生成。
-  - [x] `[BREAKING]` auto-rebirth 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 旧 agent dead→retired，新 agent 全新 UUID + 初始状态 + 初始物品，事务包裹保证原子性。
+  - [x] `[BREAKING]` auto-rebirth 从 UPDATE-in-place（回魂）改为 INSERT 新 agent（转世）— 新 agent 全新 UUID + 初始状态 + 初始物品，事务包裹保证原子性。
+  - [x] `[BREAKING]` auto-rebirth 完成后旧 agent 保持 `status='dead'` 死亡标记，`retired_at` 字段仅作为时间戳记录"转世完成"事件。**已死亡角色永远不会被 auto-rebirth 错误归隐**。`retired` 状态语义专属"玩家主动归隐"。
 - [x] **[实时 Intent 处理管道 (Real-time Pipeline)](../../crates/server/docs/architecture/p0_core/realtime_pipeline.md)**: 零并发冲突的单线程意图调度器。
   - [x] **单消费者 MPSC 队列**：彻底消除写锁竞争和数据资源冲突。
   - [x] **同地广播 (Co-located Broadcast)**：发生动作后仅向处于同一 `node_id` 的周围 Agent 广播事件（如说话、攻击），避免全局风暴。
