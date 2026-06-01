@@ -46,21 +46,33 @@ export function showModal(html, options = {}) {
     overlay.classList.remove('hidden');
     if (options.className) body.classList.add(options.className);
 
-    // 点击 overlay 背景关闭（不冒泡到 body）
+    // 先清理上一次残留的 handler
+    if (overlay._escHandler) {
+        document.removeEventListener('keydown', overlay._escHandler);
+        overlay._escHandler = null;
+    }
+
+    // 点击 overlay 背景关闭
     overlay.onclick = (e) => { if (e.target === overlay) hideModal(); };
     // ESC 关闭
-    const escHandler = (e) => {
-        if (e.key === 'Escape') { hideModal(); document.removeEventListener('keydown', escHandler); }
-    };
+    const escHandler = (e) => { if (e.key === 'Escape') hideModal(); };
+    overlay._escHandler = escHandler;
     document.addEventListener('keydown', escHandler);
 
-    return { close: () => { hideModal(); document.removeEventListener('keydown', escHandler); } };
+    return { close: () => hideModal() };
 }
 
 export function hideModal() {
     const overlay = document.getElementById('modal-overlay');
     const body = document.getElementById('modal-body');
-    if (overlay) { overlay.classList.add('hidden'); overlay.onclick = null; }
+    if (overlay) {
+        overlay.classList.add('hidden');
+        overlay.onclick = null;
+        if (overlay._escHandler) {
+            document.removeEventListener('keydown', overlay._escHandler);
+            overlay._escHandler = null;
+        }
+    }
     if (body) body.innerHTML = '';
 }
 
