@@ -128,17 +128,19 @@ enum Commands {
 // 配置路径
 // ============================================================================
 
-fn config_path() -> PathBuf {
-    // 支持通过环境变量指定配置目录
-    if let Ok(config_dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
-        return PathBuf::from(config_dir).join("agent.yaml");
+/// 返回配置目录（优先 CYBER_JIANGHU_CONFIG_DIR 环境变量，回退 $HOME/.cyber-jianghu/config）
+fn config_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
+        return PathBuf::from(dir);
     }
-
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".cyber-jianghu")
         .join("config")
-        .join("agent.yaml")
+}
+
+fn config_path() -> PathBuf {
+    config_dir().join("agent.yaml")
 }
 
 // ============================================================================
@@ -253,13 +255,15 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
 
     // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
     // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
-    if let Some(home) = dirs::home_dir() {
+    // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
+    // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
+    {
         let nc = &body["narrative_config"];
         let nc_hash = body["narrative_config_hash"].as_str();
         if !nc.is_null() {
-            let config_dir = home.join(".cyber-jianghu").join("config");
-            let _ = std::fs::create_dir_all(&config_dir);
-            let hash_path = config_dir.join("narrative_config.hash");
+            let cdir = config_dir();
+            let _ = std::fs::create_dir_all(&cdir);
+            let hash_path = cdir.join("narrative_config.hash");
 
             let should_save = match nc_hash {
                 Some(new_hash) => match std::fs::read_to_string(&hash_path) {
@@ -272,7 +276,7 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
             if should_save {
                 match serde_json::to_string_pretty(nc) {
                     Ok(json) => {
-                        let nc_path = config_dir.join("narrative_config.json");
+                        let nc_path = cdir.join("narrative_config.json");
                         if let Err(e) = std::fs::write(&nc_path, &json) {
                             warn!("保存 narrative_config 失败: {}", e);
                         } else {
@@ -359,11 +363,15 @@ fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str, m
 // ============================================================================
 
 fn init_tracing() -> Result<()> {
-    let config_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".cyber-jianghu");
+    let data_dir = std::env::var("CYBER_JIANGHU_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".cyber-jianghu")
+        });
 
-    let thinking_log_path = thinking_log::init_thinking_log(&config_dir)?;
+    let thinking_log_path = thinking_log::init_thinking_log(&data_dir)?;
 
     tracing_subscriber::fmt()
         .with_env_filter(
