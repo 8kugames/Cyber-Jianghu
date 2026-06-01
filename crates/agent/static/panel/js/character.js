@@ -34,7 +34,7 @@ function render(container) {
             </div>
             <div style="display:flex;align-items:center;gap:8px">
                 <select class="form-select" id="char-select" style="flex:1;min-width:200px"></select>
-                <button id="char-create-btn" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">+</button>
+                <button id="char-create-btn" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">新</button>
             </div>
         </div>
         <div class="character-body">
