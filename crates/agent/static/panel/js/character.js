@@ -146,7 +146,7 @@ function renderCharHeader(data) {
                 <span title="Agent ID">${escapeHtml(agentId)}</span>
             </div>
             <div style="font-size:11px;color:var(--text-muted)">
-                注册: ${escapeHtml(registeredAt)} · Server: ${escapeHtml(serverUrl)}
+                注册时间: ${escapeHtml(registeredAt)} · Server: ${escapeHtml(serverUrl)}
             </div>
         </div>
     `;
