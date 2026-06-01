@@ -428,7 +428,9 @@ async function mountMemories(container, ctx) {
         if (!list) return;
         showLoading(list);
         try {
-            const results = await post(API.MEMORY_SEARCH, { query });
+            const searchBody = { query };
+            if (ctx.agentId) searchBody.agent_id = ctx.agentId;
+            const results = await post(API.MEMORY_SEARCH, searchBody);
             const memories = results.memories || results || [];
             if (memories.length === 0) {
                 list.innerHTML = '<p class="text-muted">无匹配结果</p>';
@@ -450,7 +452,8 @@ async function loadMemPage(container, ctx) {
     if (!list) return;
 
     try {
-        const data = await get(`${API.MEMORY_RECENT}?page=${memPage}&limit=20`);
+        const agentIdParam = ctx.agentId ? `&agent_id=${ctx.agentId}` : '';
+        const data = await get(`${API.MEMORY_RECENT}?page=${memPage}&limit=20${agentIdParam}`);
         const memories = data.memories || data || [];
 
         if (memories.length === 0 && memPage === 1) {
