@@ -9,6 +9,7 @@
 // ============================================================================
 
 use crate::game_data::registry::TimeRegistry;
+use cyber_jianghu_protocol::WorldTime;
 
 /// 将游戏日（从1开始）转换为中文日期字符串
 ///
@@ -89,6 +90,28 @@ fn day_to_chinese(day: i32) -> String {
         10 => "十".to_string(),
         _ => cyber_jianghu_protocol::digit_to_chinese(day),
     }
+}
+
+pub fn parse_world_time_json(json_str: Option<&str>) -> Option<WorldTime> {
+    let s = json_str?;
+    serde_json::from_str::<WorldTime>(s).ok()
+}
+
+pub fn world_time_json_to_game_day(json_str: Option<&str>) -> i64 {
+    let Some(wt) = parse_world_time_json(json_str) else {
+        return 0;
+    };
+    let config = TimeRegistry::get_config();
+    let (days_per_season, seasons_per_year) = match config {
+        Some(cfg) => (cfg.days_per_season as i64, cfg.seasons_per_year as i64),
+        None => (10, 4),
+    };
+    let days_per_year = days_per_season * seasons_per_year;
+    (wt.year as i64 - 1) * days_per_year + (wt.month as i64 - 1) * days_per_season + wt.day as i64
+}
+
+pub fn world_time_json_to_chinese(json_str: Option<&str>) -> Option<String> {
+    parse_world_time_json(json_str).map(|wt| wt.to_chinese())
 }
 
 #[cfg(test)]
