@@ -142,7 +142,10 @@ pub fn create_attributes_glimpse(
 /// 同时检查 attributes（i32 基础属性）和 derived_attributes（f32 派生属性）。
 /// 因为 attribute_descriptions 由 build_attribute_descriptions 注入，
 /// 其中包含派生属性条目，迭代 descriptions 时 raw value 可能来自任一张 map。
-fn lookup_attr_value(attr: &str, state: &cyber_jianghu_protocol::types::entities::AgentSelfState) -> String {
+fn lookup_attr_value(
+    attr: &str,
+    state: &cyber_jianghu_protocol::types::entities::AgentSelfState,
+) -> String {
     state
         .attributes
         .get(attr)

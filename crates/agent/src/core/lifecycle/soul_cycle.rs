@@ -223,10 +223,7 @@ impl super::super::Agent {
                 })
                 .collect::<Vec<_>>()
                 .join("；");
-            let renhun_thought_log = raw_intent
-                .thought_log
-                .as_deref()
-                .unwrap_or("");
+            let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
 
             // 重要记忆固化
             #[allow(clippy::collapsible_if)]
@@ -415,7 +412,9 @@ impl super::super::Agent {
                             })
                         }))
                         .collect();
-                    let primary_action_data = pipeline.action_data.as_ref()
+                    let primary_action_data = pipeline
+                        .action_data
+                        .as_ref()
                         .and_then(|d| serde_json::to_string(d).ok());
                     let pipeline_json = serde_json::to_string(&pipeline_actions).ok();
                     recorder

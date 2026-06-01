@@ -262,12 +262,10 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
             let hash_path = config_dir.join("narrative_config.hash");
 
             let should_save = match nc_hash {
-                Some(new_hash) => {
-                    match std::fs::read_to_string(&hash_path) {
-                        Ok(old_hash) => old_hash.trim() != new_hash,
-                        Err(_) => true,
-                    }
-                }
+                Some(new_hash) => match std::fs::read_to_string(&hash_path) {
+                    Ok(old_hash) => old_hash.trim() != new_hash,
+                    Err(_) => true,
+                },
                 None => true,
             };
 
@@ -478,10 +476,7 @@ fn show_config() -> Result<()> {
         } else {
             config.runtime.port.to_string()
         };
-        println!(
-            "  通过 Web 面板创建: http://localhost:{}/",
-            display_port
-        );
+        println!("  通过 Web 面板创建: http://localhost:{}/", display_port);
         println!("  或通过 CLI: cyber-jianghu-agent create-character --name 名字");
     }
 
@@ -536,10 +531,7 @@ async fn create_character_cli(
         Err(e) => {
             warn!("无法连接到 Agent API: {}", e);
             warn!("请确保 Agent 已启动并监听端口 {}", port);
-            warn!(
-                "或通过 Web 面板创建角色: http://localhost:{}/",
-                port
-            );
+            warn!("或通过 Web 面板创建角色: http://localhost:{}/", port);
             return Err(e);
         }
     }
