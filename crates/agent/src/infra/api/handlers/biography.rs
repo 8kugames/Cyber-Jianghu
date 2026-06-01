@@ -52,7 +52,10 @@ pub(crate) async fn get_biography_handler(
 }
 
 /// 从 server DB 查询传记（回退机制：agent 本地 character.yaml 无传记时使用）
-async fn fetch_biography_from_server(state: &HttpApiState, agent_id: Uuid) -> axum::response::Response {
+async fn fetch_biography_from_server(
+    state: &HttpApiState,
+    agent_id: Uuid,
+) -> axum::response::Response {
     let server_http_url = state.server_http_url.read().await.clone();
     let url = format!("{}/api/v1/agent/{}/biography", server_http_url, agent_id);
 
@@ -62,21 +65,19 @@ async fn fetch_biography_from_server(state: &HttpApiState, agent_id: Uuid) -> ax
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<serde_json::Value>().await {
-                Ok(data) => {
-                    let bio = data.get("biography").and_then(|v| v.as_str());
-                    match bio {
-                        Some(b) if !b.is_empty() => {
-                            info!("[biography] server 回退命中: agent={}", agent_id);
-                            Json(serde_json::json!({"biography": b})).into_response()
-                        }
-                        _ => Json(serde_json::json!({"biography": null})).into_response(),
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(data) => {
+                let bio = data.get("biography").and_then(|v| v.as_str());
+                match bio {
+                    Some(b) if !b.is_empty() => {
+                        info!("[biography] server 回退命中: agent={}", agent_id);
+                        Json(serde_json::json!({"biography": b})).into_response()
                     }
+                    _ => Json(serde_json::json!({"biography": null})).into_response(),
                 }
-                Err(_) => Json(serde_json::json!({"biography": null})).into_response(),
             }
-        }
+            Err(_) => Json(serde_json::json!({"biography": null})).into_response(),
+        },
         _ => {
             warn!("[biography] server 回退失败: agent={}", agent_id);
             Json(serde_json::json!({"biography": null})).into_response()
@@ -186,13 +187,17 @@ async fn collect_soul_cycle_timeline(
                 let descs: Vec<String> = pipeline_items
                     .iter()
                     .map(|item| {
-                        let at = item.get("action_type").and_then(|v| v.as_str()).unwrap_or("");
+                        let at = item
+                            .get("action_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         let content = item
                             .get("action_data")
                             .and_then(|d| d.get("content"))
                             .and_then(|c| c.as_str())
                             .unwrap_or("");
-                        if (at == "speak" || at == "whisper" || at == "shout") && !content.is_empty()
+                        if (at == "speak" || at == "whisper" || at == "shout")
+                            && !content.is_empty()
                         {
                             format!("{}：{}", at, content)
                         } else {
@@ -300,9 +305,7 @@ pub(crate) async fn generate_biography_for_agent(
     // 3. 构建 prompt
     let char_info = format!(
         "姓名：{}\n年龄：{}\n性别：{}",
-        character.name,
-        character.age,
-        character.gender,
+        character.name, character.age, character.gender,
     );
 
     // 构建经历日志段落
