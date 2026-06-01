@@ -1,7 +1,7 @@
 // Character page: sidebar tabs, panel switching, character dropdown, creation, death/rebirth
 
 import { API, get, post } from './api.js';
-import { escapeHtml, showLoading, showSuccess, showError, showModal, hideModal } from './ui.js';
+import { escapeHtml, showLoading, showSuccess, showError, showModal, hideModal, STATUS_MAP } from './ui.js';
 import { onEvent } from './app.js';
 import { getPanelDefinitions, mountPanel } from './panels.js';
 
@@ -107,7 +107,9 @@ async function loadCharacterList() {
         if (characterData?.agent_id) {
             select.value = characterData.agent_id;
         }
-    } catch (_) {}
+    } catch (e) {
+        showError('角色列表加载失败: ' + e.message);
+    }
 }
 
 async function loadCharacterData() {
@@ -121,14 +123,13 @@ async function loadCharacterData() {
         const gender = data.gender || '-';
         const location = data.location_name || data.location_id || '-';
         const status = data.status || 'unknown';
-        const statusMap = { alive: '活跃', dead: '死亡', retired: '退休' };
 
         if (infoEl) {
             infoEl.innerHTML = `
                 <div style="width:36px;height:36px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">${escapeHtml(name.charAt(0))}</div>
                 <div>
                     <div style="font-size:16px;font-weight:600">${escapeHtml(name)}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)} · <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'}">${statusMap[status] || status}</span></div>
+                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)} · <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'}">${STATUS_MAP[status] || status}</span></div>
                 </div>
             `;
         }

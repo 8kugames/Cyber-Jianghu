@@ -1,7 +1,7 @@
 // Settings page: server + LLM config, setup wizard mode
 
 import { API, get, post } from './api.js';
-import { showSuccess, showError } from './ui.js';
+import { showSuccess, showError, fmtNum } from './ui.js';
 import { appState } from './app.js';
 
 export const settingsPage = {
@@ -335,10 +335,4 @@ function bindEvents() {
 function setText(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
-}
-
-function fmtNum(n) {
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-    return String(n);
 }

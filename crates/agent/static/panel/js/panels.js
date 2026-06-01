@@ -1,7 +1,7 @@
 // Panel renderers: attribute/relationship/biography/experience/memory/dream/skill
 
 import { API, get, post } from './api.js';
-import { escapeHtml, showSuccess, showError, showLoading, formatWorldTime, showModal } from './ui.js';
+import { escapeHtml, showSuccess, showError, showLoading, formatWorldTime, showModal, extractActionSummary, getActionColor } from './ui.js';
 
 // Panel registry: each panel exports { label, mount(container, data) }
 const panels = {
@@ -434,41 +434,3 @@ async function mountSkills(container, ctx) {
     }
 }
 
-// ============================================================================
-// Shared helpers
-// ============================================================================
-
-function extractActionSummary(rec) {
-    if (!rec.final_action_type) return '-';
-    const pipeline = rec.final_pipeline_json;
-    if (pipeline) {
-        try {
-            const items = JSON.parse(pipeline);
-            if (Array.isArray(items) && items.length > 0) {
-                return items.map(i => {
-                    const content = i.action_data?.content;
-                    if (content && (i.action_type === 'speak' || i.action_type === 'whisper')) return `${i.action_type}: ${content}`;
-                    return i.action_type || '-';
-                }).join(' → ');
-            }
-        } catch (_) {}
-    }
-    const data = rec.final_action_data;
-    if (data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) return `${rec.final_action_type}: ${parsed.content}`;
-        } catch (_) {}
-    }
-    return rec.final_action_type;
-}
-
-function getActionColor(type) {
-    if (!type) return '#e2e4e8';
-    const t = type.toLowerCase();
-    if (t === 'speak' || t === 'whisper' || t === 'shout') return '#4fc08d';
-    if (t === 'move' || t === 'travel') return '#7b68ee';
-    if (t.includes('fight') || t.includes('attack') || t === 'combat') return '#e06c75';
-    if (t.includes('gather') || t.includes('craft') || t.includes('cook')) return '#e5c07b';
-    return '#61afef';
-}

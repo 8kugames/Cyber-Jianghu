@@ -203,10 +203,12 @@
   - [x] 名字解析链路 `name_map → store → "陌生人"`，防止已有真名被覆写。
   - [x] 控制台关系卡片化 + Modal 详情（Agent ID、密语沟通记录、关键事件）。
 - [x] **[玩家控制台 (Agent Control Panel)](../../crates/agent/docs/architecture/p2_enhancement/agent_control_panel.md)**: 允许人类玩家观察并干预 AI 角色的前端面板。
+  - [x] SPA 架构：3 页 hash router (#/dashboard, #/characters, #/settings)，8 个 ES module 替代旧 6 页碎片化 HTML。
+  - [x] 数据驱动 UI：属性面板从 API categories 动态渲染，共享 helper 集中到 ui.js。
   - [x] 实时 SSE 数据流展示心跳、推演记录与周围状态。
   - [x] 辅助创建角色，一键生成世界树与属性雷达图。
   - [x] 托梦接口：上帝视角向指定 Agent 注入强制文本思想。
-  - [x] 自动重生开关：`RuntimeConfig.auto_rebirth`（默认 true），角色死亡后自动转世重生，复用角色信息仅替换 agent_id；Web 面板 create.html / character.html 提供 toggle UI，运行时 `GET/POST /api/v1/config/auto-rebirth` 热切换。
+  - [x] 自动重生开关：`RuntimeConfig.auto_rebirth`（默认 true），角色死亡后自动转世重生，复用角色信息仅替换 agent_id；Web 面板提供 toggle UI，运行时 `GET/POST /api/v1/config/auto-rebirth` 热切换。
 - [x] **[命令行工具 (CLI)](../../crates/agent/docs/architecture/p2_enhancement/cli.md)**:
   - [x] 提供 `run` / `config` / `create-character` / `show` / `reset` 等快速运维指令。
   - [x] 支持通过 `--port 0` 自动探测并分配可用通信端口。
