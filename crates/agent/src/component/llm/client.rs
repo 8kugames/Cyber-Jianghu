@@ -41,7 +41,10 @@ pub struct ConversationInput<'a> {
 /// 构建对话消息列表（system + semi-static + summary + history + current tick）
 ///
 /// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）
-/// 每个区域为独立 system message，确保 Immutable Prefix 在 compaction 后稳定。
+///
+/// 关键约束：sensenova 等严格 OpenAI 兼容实现拒绝 2+ 个连续 `role: "system"` 消息
+/// （返回 400 `code: 9 engine is not available`）。所有 system 段必须在请求前
+/// 合并为单个 system message，按 persona → semi_static → summary 顺序拼接。
 pub fn build_conversation_messages(
     system: &str,
     semi_static: &str,
@@ -51,13 +54,19 @@ pub fn build_conversation_messages(
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
-    let mut messages = vec![ChatMessage::system(system)];
+    // 合并所有 system 段为单个 system message（避免 sensenova 400）
+    let mut combined_system = String::with_capacity(system.len() + semi_static.len() + 64);
+    combined_system.push_str(system);
     if !semi_static.is_empty() {
-        messages.push(ChatMessage::system(semi_static));
+        combined_system.push_str("\n\n");
+        combined_system.push_str(semi_static);
     }
     if let Some(s) = summary {
-        messages.push(ChatMessage::system(&format!("## 对话历史摘要\n{}", s)));
+        combined_system.push_str("\n\n## 对话历史摘要\n");
+        combined_system.push_str(s);
     }
+
+    let mut messages = vec![ChatMessage::system(&combined_system)];
     for turn in turns {
         messages.push(ChatMessage::user(&turn.user));
         messages.push(ChatMessage::assistant_with_reasoning(

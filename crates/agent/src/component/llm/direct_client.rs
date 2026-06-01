@@ -1270,13 +1270,21 @@ impl LlmClient for DirectLlmClient {
         }
         // 不使用 build_conversation_messages：tool loop 需要纯 history+current，
         // system 和 semi-static 由 tool_loop 自己管理
-        let mut messages = vec![ChatMessage::system(system)];
+        //
+        // 关键约束：sensenova 拒绝 2+ 连续 system message（返回 400 code 9）。
+        // 必须合并 persona + semi_static + summary 为单个 system message。
+        let mut combined_system = String::with_capacity(system.len() + input.semi_static.len() + 64);
+        combined_system.push_str(system);
         if !input.semi_static.is_empty() {
-            messages.push(ChatMessage::system(input.semi_static));
+            combined_system.push_str("\n\n");
+            combined_system.push_str(input.semi_static);
         }
         if let Some(s) = input.summary {
-            messages.push(ChatMessage::system(&format!("## 对话历史摘要\n{}", s)));
+            combined_system.push_str("\n\n## 对话历史摘要\n");
+            combined_system.push_str(s);
         }
+
+        let mut messages = vec![ChatMessage::system(&combined_system)];
         for turn in input.turns {
             messages.push(ChatMessage::user(&turn.user));
             messages.push(ChatMessage::assistant_with_reasoning(
