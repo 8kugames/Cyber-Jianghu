@@ -52,6 +52,22 @@ pub fn digit_to_chinese(n: i32) -> String {
         .collect()
 }
 
+/// 天数（1-30）转中文，10/20/30 用"十/二十/三十"而非 digit_to_chinese 逐位
+pub fn day_to_chinese(day: i32) -> String {
+    if day <= 0 {
+        return "零".to_string();
+    }
+    match day {
+        1..=9 => digit_to_chinese(day),
+        10 => "十".to_string(),
+        11..=19 => format!("十{}", digit_to_chinese(day - 10)),
+        20 => "二十".to_string(),
+        21..=29 => format!("二十{}", digit_to_chinese(day - 20)),
+        30 => "三十".to_string(),
+        _ => digit_to_chinese(day),
+    }
+}
+
 /// 数字转中文大写
 pub fn number_to_chinese(n: i32) -> String {
     if n == 0 {
@@ -100,7 +116,7 @@ impl WorldTime {
             12 => "腊月",
             _ => return format!("第{}天{:02}:{:02}", self.day, self.hour, self.minute),
         };
-        let day = number_to_chinese(self.day);
+        let day = day_to_chinese(self.day);
         let shichen = shichen_name(self.hour);
         format!("{}年{}{}日{}", year, month, day, shichen)
     }
@@ -288,4 +304,72 @@ pub struct PublicLesson {
     pub death_count: i32,
     /// 该死因的平均存活 tick 数
     pub avg_survival_ticks: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn day_to_chinese_basic() {
+        assert_eq!(day_to_chinese(1), "一");
+        assert_eq!(day_to_chinese(4), "四");
+        assert_eq!(day_to_chinese(9), "九");
+    }
+
+    #[test]
+    fn day_to_chinese_ten_boundary() {
+        assert_eq!(day_to_chinese(10), "十");
+        assert_eq!(day_to_chinese(15), "十五");
+        assert_eq!(day_to_chinese(19), "十九");
+    }
+
+    #[test]
+    fn day_to_chinese_twenty_thirty() {
+        assert_eq!(day_to_chinese(20), "二十");
+        assert_eq!(day_to_chinese(25), "二十五");
+        assert_eq!(day_to_chinese(30), "三十");
+    }
+
+    #[test]
+    fn world_time_to_chinese_day_10() {
+        let wt = WorldTime {
+            year: 1,
+            month: 1,
+            day: 10,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            weather: "晴".to_string(),
+        };
+        assert_eq!(wt.to_chinese(), "一年元月十日子时");
+    }
+
+    #[test]
+    fn world_time_to_chinese_day_4() {
+        let wt = WorldTime {
+            year: 274,
+            month: 1,
+            day: 4,
+            hour: 1,
+            minute: 0,
+            second: 0,
+            weather: "晴".to_string(),
+        };
+        assert_eq!(wt.to_chinese(), "二七四年元月四日子时");
+    }
+
+    #[test]
+    fn world_time_to_chinese_day_30() {
+        let wt = WorldTime {
+            year: 1,
+            month: 1,
+            day: 30,
+            hour: 16,
+            minute: 0,
+            second: 0,
+            weather: "晴".to_string(),
+        };
+        assert_eq!(wt.to_chinese(), "一年元月三十日申时");
+    }
 }

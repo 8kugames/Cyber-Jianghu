@@ -834,7 +834,16 @@ function formatChronicleRange(startDate, endDate, startGameDay, endGameDay) {
 }
 
 function formatCalendarDate(gameDay) {
-    return '[第' + gameDay + '日]';
+    if (!gameDay || gameDay <= 0) return null;
+    var gd0 = gameDay - 1;
+    var year = 1 + Math.floor(gd0 / TIME_CONFIG.DAYS_PER_YEAR);
+    var month = 1 + Math.floor((gd0 % TIME_CONFIG.DAYS_PER_YEAR) / TIME_CONFIG.DAYS_PER_SEASON);
+    var day = 1 + (gd0 % TIME_CONFIG.DAYS_PER_SEASON);
+    return (typeof digitToChinese === "function" ? digitToChinese(year) : String(year))
+        + "年"
+        + (MONTH_NAMES && MONTH_NAMES[month - 1] || ("第" + month + "月"))
+        + (typeof dayToChinese === "function" ? dayToChinese(day) : String(day))
+        + "日";
 }
 
 // ============================================================
