@@ -6,6 +6,7 @@
 // CognitiveValidator 在内部重试循环中执行质量审查。
 // 天魂翻译步骤已消除。
 
+use crate::component::llm::{classify_llm_error, ErrorAction};
 use crate::soul::actor::{CognitiveChain, CognitiveEngine};
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;
 use cyber_jianghu_protocol::{Intent, WorldState};
@@ -150,25 +151,20 @@ pub fn cognitive_decision_with_chain(
                             last_error
                         ));
 
-                        // 确定性失败，重试无意义
-                        let err_msg = &last_error;
-                        if err_msg.contains("exceeds max context window")
-                            || err_msg.contains("Prompt too long")
-                            || err_msg.contains("context_length_exceeded")
-                            || err_msg.contains("maximum context length")
-                        {
-                            warn!("[cognitive] Prompt exceeds context window, aborting retries");
-                            break;
-                        }
-                        // 429 限流是配额级问题，持续重试只会加剧内存压力
-                        if err_msg.contains("429")
-                            || err_msg.contains("rate_limit")
-                            || err_msg.contains("Too Many Requests")
-                        {
-                            warn!(
-                                "[cognitive] Rate limited (429), aborting retries to prevent OOM"
-                            );
-                            break;
+                        // 按统一分类决定是否中止重试
+                        // call_with_fallback 已尝试所有可用客户端，继续重试无意义
+                        let (action, _reason) = classify_llm_error(&e);
+                        match action {
+                            ErrorAction::Retry => {
+                                // 网络瞬时故障，可能恢复，继续重试
+                            }
+                            other => {
+                                warn!(
+                                    "[cognitive] Aborting retries (action={:?}): {}",
+                                    other, last_error
+                                );
+                                break;
+                            }
                         }
                     }
                 }
