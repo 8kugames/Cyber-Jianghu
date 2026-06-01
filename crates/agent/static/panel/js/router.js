@@ -1,5 +1,7 @@
 // Hash router: manages #/dashboard, #/characters, #/settings
 
+import { escapeHtml } from './ui.js';
+
 const routes = {};
 let currentRoute = null;
 let currentModule = null;
@@ -44,12 +46,6 @@ function onHashChange() {
     } else {
         container.innerHTML = `<div class="empty-state"><p>页面 "${escapeHtml(name)}" 不存在</p></div>`;
     }
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 export function getCurrentRoute() {
