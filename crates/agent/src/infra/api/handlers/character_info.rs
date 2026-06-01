@@ -438,9 +438,12 @@ pub(crate) async fn get_attribute_meta_handler(
                 *state.narrative_config.write().await = Some(cfg.clone());
                 // 回填磁盘
                 let cdir = super::super::config_dir();
-                let _ = std::fs::create_dir_all(&cdir);
-                if let Ok(json) = serde_json::to_string_pretty(&cfg) {
-                    let _ = std::fs::write(cdir.join("narrative_config.json"), json);
+                if let Err(e) = std::fs::create_dir_all(&cdir) {
+                    warn!("server-fetch 回填磁盘: 创建目录失败: {}", e);
+                } else if let Ok(json) = serde_json::to_string_pretty(&cfg)
+                    && let Err(e) = std::fs::write(cdir.join("narrative_config.json"), json)
+                {
+                    warn!("server-fetch 回填磁盘: 写入失败: {}", e);
                 }
                 Some(cfg)
             }
