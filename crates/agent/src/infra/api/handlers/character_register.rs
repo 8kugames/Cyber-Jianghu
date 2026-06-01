@@ -845,9 +845,8 @@ pub(crate) async fn register_character_handler(
                 *state.narrative_config.write().await = result.narrative_config.clone();
 
                 let hash = result.narrative_config_hash.as_deref();
-                if let Err(e) = crate::config::save_narrative_config_to_disk(
-                    narrative_config, hash,
-                ) {
+                if let Err(e) = crate::config::save_narrative_config_to_disk(narrative_config, hash)
+                {
                     error!("保存 narrative_config 失败: {}", e);
                 }
             }
