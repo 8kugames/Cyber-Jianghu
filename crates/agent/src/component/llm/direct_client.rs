@@ -356,6 +356,9 @@ pub struct DirectLlmClient {
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等模型需要回传）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// 共享 circuit-breaker：由 FallbackLlmClient 注入，保证
+    /// `run_tool_loop` 内部 send_chat_exchange 也走同一份禁用表
+    breaker: Option<std::sync::Arc<super::client::SharedBreaker>>,
 }
 
 impl Clone for DirectLlmClient {
@@ -364,6 +367,7 @@ impl Clone for DirectLlmClient {
             config: self.config.clone(),
             earth_soul_config: self.earth_soul_config.clone(),
             last_reasoning_content: std::sync::Mutex::new(None),
+            breaker: self.breaker.clone(),
         }
     }
 }
@@ -381,6 +385,7 @@ impl DirectLlmClient {
             config,
             earth_soul_config: None,
             last_reasoning_content: std::sync::Mutex::new(None),
+            breaker: None,
         })
     }
 
@@ -391,6 +396,36 @@ impl DirectLlmClient {
     ) -> Self {
         self.earth_soul_config = Some(config);
         self
+    }
+
+    /// 注入共享 circuit-breaker（由 FallbackLlmClient 调用）
+    pub fn with_breaker(mut self, breaker: std::sync::Arc<super::client::SharedBreaker>) -> Self {
+        self.breaker = Some(breaker);
+        self
+    }
+
+    /// 检查共享 breaker：命中则直接返回 Err，不发起 HTTP 请求
+    fn check_breaker(&self) -> Result<()> {
+        if let Some(breaker) = &self.breaker
+            && let Some(remaining) = breaker.is_disabled(&self.breaker_key())
+        {
+            anyhow::bail!(
+                "LLM model {}/{} is in cooldown ({}s remaining)",
+                self.config.provider.as_str(),
+                self.config.get_model_with_default(),
+                remaining
+            );
+        }
+        Ok(())
+    }
+
+    /// 生成 breaker key：provider + model 联合标识
+    fn breaker_key(&self) -> String {
+        format!(
+            "{}/{}",
+            self.config.provider.as_str(),
+            self.config.get_model_with_default()
+        )
     }
 
     /// 获取当前使用的模型名称
@@ -467,6 +502,9 @@ impl DirectLlmClient {
 
     /// 发送 OpenAI 兼容 API 请求（公共 HTTP 逻辑）
     async fn send_request(&self, request: &OpenAIRequest) -> Result<OpenAIResponse> {
+        // 共享 breaker 守门：模型在冷却期直接拒绝
+        self.check_breaker()?;
+
         // prefer_stream: 直接走流式，避免对只支持 streaming 的模型浪费 400 降级
         if self.config.prefer_stream {
             return self.send_request_via_stream(request).await;
@@ -829,6 +867,9 @@ impl DirectLlmClient {
         &self,
         request: &OpenAIRequest,
     ) -> Result<super::streaming::LlmStream> {
+        // 共享 breaker 守门：模型在冷却期直接拒绝
+        self.check_breaker()?;
+
         let client = self.build_http_client()?;
         let base_url = self.config.get_base_url()?;
         let url = format!("{}/chat/completions", base_url);
@@ -1139,6 +1180,9 @@ impl LlmClient for DirectLlmClient {
         tools: Option<&[ToolDefinition]>,
         config: super::openai_types::ChatExchangeConfig,
     ) -> Result<super::openai_types::ChatExchangeResponse> {
+        // 共享 breaker 守门：模型在冷却期直接拒绝
+        self.check_breaker()?;
+
         let request = OpenAIRequest {
             model: config.model,
             messages,
@@ -1499,5 +1543,97 @@ mod tests {
         let config = DirectLlmClientConfig::new(LlmProvider::OpenClaw, Some("test-key"))
             .with_temperature(1.5);
         assert_eq!(config.temperature, 1.0);
+    }
+
+    // ========================================================================
+    // SharedBreaker 集成测试 — 验证 check_breaker / breaker_key / 注入流程
+    // ========================================================================
+
+    use super::super::client::SharedBreaker;
+    use std::sync::Arc;
+
+    fn make_test_client_with_breaker() -> (DirectLlmClient, Arc<SharedBreaker>) {
+        let breaker = Arc::new(SharedBreaker::new());
+        let config = DirectLlmClientConfig::new(LlmProvider::OpenAICompatible, Some("test-key"))
+            .with_base_url("https://example.com/v1")
+            .with_model("test-model");
+        let client = DirectLlmClient::new(config)
+            .unwrap()
+            .with_breaker(breaker.clone());
+        (client, breaker)
+    }
+
+    #[test]
+    fn test_breaker_key_format() {
+        let (client, _) = make_test_client_with_breaker();
+        assert_eq!(client.breaker_key(), "openai_compatible/test-model");
+    }
+
+    #[test]
+    fn test_check_breaker_allows_when_not_disabled() {
+        let (client, _) = make_test_client_with_breaker();
+        // 初始状态：breaker 表为空 → check_breaker 通过
+        assert!(client.check_breaker().is_ok());
+    }
+
+    #[test]
+    fn test_check_breaker_rejects_when_disabled() {
+        let (client, breaker) = make_test_client_with_breaker();
+        // 禁用该 client 对应的 key
+        let key = client.breaker_key();
+        breaker.disable(key.clone());
+
+        // check_breaker 必须返回 Err，且错误信息包含 "cooldown"
+        let result = client.check_breaker();
+        assert!(result.is_err(), "禁用后 check_breaker 应返回 Err");
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("cooldown"),
+            "错误信息应提示冷却，实际: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains(&key),
+            "错误信息应包含 key，实际: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_check_breaker_independent_keys() {
+        // 验证：breaker key 隔离 — 禁用 model A 不影响 model B
+        let breaker = Arc::new(SharedBreaker::new());
+        let config_a = DirectLlmClientConfig::new(LlmProvider::OpenAICompatible, Some("k"))
+            .with_base_url("https://example.com/v1")
+            .with_model("model-a");
+        let client_a = DirectLlmClient::new(config_a)
+            .unwrap()
+            .with_breaker(breaker.clone());
+        let config_b = DirectLlmClientConfig::new(LlmProvider::OpenAICompatible, Some("k"))
+            .with_base_url("https://example.com/v1")
+            .with_model("model-b");
+        let client_b = DirectLlmClient::new(config_b)
+            .unwrap()
+            .with_breaker(breaker.clone());
+
+        // 禁用 model-a
+        breaker.disable(client_a.breaker_key());
+
+        // model-a 被拒，model-b 仍可用
+        assert!(client_a.check_breaker().is_err());
+        assert!(client_b.check_breaker().is_ok());
+    }
+
+    #[test]
+    fn test_breaker_clone_shares_state() {
+        // 验证：Clone 后的 DirectLlmClient 与原 client 共享同一份 breaker
+        let (client, breaker) = make_test_client_with_breaker();
+        let cloned = client.clone();
+
+        // 在原 breaker 上禁用
+        breaker.disable(client.breaker_key());
+
+        // 克隆体也应命中
+        assert!(cloned.check_breaker().is_err());
     }
 }

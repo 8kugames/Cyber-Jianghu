@@ -892,6 +892,60 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
 
 // ============================================================================
+// 共享 Circuit-Breaker
+// ============================================================================
+//
+// 修复 FINDING-002: 此前 `disabled_models` 仅存在于 `FallbackLlmClient`，
+// 但 `run_tool_loop` 内部 `send_chat_exchange` 直接打到 `DirectLlmClient`，
+// 完全绕过该表，导致 sensenova 抖动一次就被放大成 566 次 400。
+//
+// 抽 `SharedBreaker` 后，FallbackLlmClient 和 DirectLlmClient 共享同一份
+// "已禁用 provider/model" 表，任意入口（fallback / tool_loop）都能命中。
+// key = `"{provider}/{model}"`，多个 agent 共享同一 provider/model 时
+// 也会一起退避（避免雪崩式打 sensenova）。
+
+/// 共享 circuit-breaker 状态。
+#[derive(Default)]
+pub struct SharedBreaker {
+    /// key: `"{provider}/{model}"`; value: 禁用开始时间
+    disabled: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+}
+
+impl std::fmt::Debug for SharedBreaker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let disabled = self.disabled.lock().expect("lock poisoned");
+        f.debug_struct("SharedBreaker")
+            .field("disabled_keys", &disabled.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl SharedBreaker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 查询 key 是否被禁用。返回 `Some(remaining_secs)` 表示仍在冷却，
+    /// `None` 表示可用（不在表内或已过期）。
+    pub fn is_disabled(&self, key: &str) -> Option<u64> {
+        let mut disabled = self.disabled.lock().expect("lock poisoned");
+        // 清理过期项
+        let now = std::time::Instant::now();
+        disabled.retain(|_, ts| now.duration_since(*ts).as_secs() < RATE_LIMIT_BACKOFF_SECS);
+        disabled.get(key).map(|ts| {
+            let elapsed = now.duration_since(*ts).as_secs();
+            RATE_LIMIT_BACKOFF_SECS.saturating_sub(elapsed)
+        })
+    }
+
+    /// 标记 key 禁用
+    pub fn disable(&self, key: String) {
+        let mut disabled = self.disabled.lock().expect("lock poisoned");
+        disabled.insert(key, std::time::Instant::now());
+    }
+}
+
+// ============================================================================
 // 统一错误分类 — 三处消费者共享同一份分类逻辑
 // ============================================================================
 
@@ -998,6 +1052,9 @@ pub struct FallbackLlmClient {
     idle_threshold: usize,
     /// 标记为不可用的模型索引 + disable 时间戳
     disabled_models: Arc<std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>>,
+    /// 共享 circuit-breaker：写入时同步到下层 DirectLlmClient，
+    /// 使 `run_tool_loop` 内部 `send_chat_exchange` 也能命中。
+    shared_breaker: Arc<SharedBreaker>,
 }
 
 impl FallbackLlmClient {
@@ -1016,12 +1073,20 @@ impl FallbackLlmClient {
             idle_counts: Arc::new(std::sync::Mutex::new(vec![0; count])),
             idle_threshold: 5, // 默认阈值
             disabled_models: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            shared_breaker: Arc::new(SharedBreaker::new()),
         }
     }
 
     /// 设置 idle 旋转阈值
     pub fn with_idle_threshold(mut self, threshold: usize) -> Self {
         self.idle_threshold = threshold;
+        self
+    }
+
+    /// 注入共享 circuit-breaker（由 build_fallback_client 调用，
+    /// 必须与下层 DirectLlmClient 持有的 Arc 指向同一实例）
+    pub fn with_shared_breaker(mut self, breaker: Arc<SharedBreaker>) -> Self {
+        self.shared_breaker = breaker;
         self
     }
 
@@ -1096,6 +1161,15 @@ impl FallbackLlmClient {
     fn disable_model(&self, idx: usize, reason: &str) {
         let mut disabled = self.disabled_models.lock().expect("lock poisoned");
         if disabled.insert(idx, std::time::Instant::now()).is_none() {
+            // 同步写入共享 breaker：key = "{provider}/{model}"，
+            // 使下层 DirectLlmClient 在 tool_loop 内部 send_chat_exchange 时也能命中。
+            let key = format!(
+                "{}/{}",
+                self.clients[idx].provider_name(),
+                self.clients[idx].model_name()
+            );
+            self.shared_breaker.disable(key);
+
             tracing::warn!(
                 "LLM 模型 #{} 标记为不可用 (原因: {})，已禁用模型: {:?}",
                 idx,
@@ -1147,14 +1221,14 @@ impl FallbackLlmClient {
         self.clients[idx.min(self.clients.len() - 1)].clone()
     }
 
-    /// 执行带 fallback 的调用
+    /// 执行带 fallback 的调用（返回类型由闭包决定）
     ///
     /// 策略：从 active index 开始，失败时尝试后续所有客户端。
-    /// 一旦成功，sticky 到该客户端。
-    async fn call_with_fallback<F, Fut>(&self, f: F) -> Result<String>
+    /// 一旦成功，sticky 到该客户端。`FallbackAndDisable` 会同步写 shared_breaker。
+    async fn call_with_fallback<F, Fut, T>(&self, f: F) -> Result<T>
     where
         F: Fn(Arc<dyn LlmClient>) -> Fut,
-        Fut: std::future::Future<Output = Result<String>>,
+        Fut: std::future::Future<Output = Result<T>>,
     {
         self.reenable_expired();
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
@@ -1329,12 +1403,21 @@ impl LlmClient for FallbackLlmClient {
         tools: Option<&[super::tool_types::ToolDefinition]>,
         config: super::openai_types::ChatExchangeConfig,
     ) -> Result<super::openai_types::ChatExchangeResponse> {
-        // NOTE: 当前 tool loop 路径不经过此处 — run_tool_loop 拿到的是底层
-        // DirectLlmClient 的 &dyn LlmClient，fallback 在外层 complete_with_tools
-        // 的 call_with_fallback 中以整体重试实现。
-        self.active_client()
-            .send_chat_exchange(messages, tools, config)
-            .await
+        // 走 call_with_fallback：跳过已 disabled 的客户端，
+        // FallbackAndDisable 时同步写 shared_breaker。
+        // 此前直调 active_client 会在 tool_loop 内部绕过 circuit breaker。
+        let tools_opt = tools.map(|t| t.to_vec());
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let messages = messages.clone();
+            let tools_inner = tools_opt.clone();
+            let config = config.clone();
+            async move {
+                client
+                    .send_chat_exchange(messages, tools_inner.as_deref(), config)
+                    .await
+            }
+        })
+        .await
     }
 
     fn provider_name(&self) -> String {
@@ -1854,5 +1937,49 @@ mod tests {
         let result = repair_llm_json(input);
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["desc"], "a:b");
+    }
+
+    // ========================================================================
+    // SharedBreaker tests — 验证 disable / is_disabled / 自动清理过期项
+    // ========================================================================
+
+    #[test]
+    fn test_shared_breaker_disable_and_query() {
+        let breaker = SharedBreaker::new();
+        // 初始：所有 key 都可用
+        assert!(breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite").is_none());
+
+        // 禁用后：返回剩余秒数
+        breaker.disable("openai_compatible/sensenova-6.7-flash-lite".to_string());
+        let remaining = breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite");
+        assert!(remaining.is_some(), "禁用后应返回 Some(remaining)");
+        let secs = remaining.unwrap();
+        assert!(secs > 0 && secs <= RATE_LIMIT_BACKOFF_SECS, "剩余秒数应在 (0, {}] 区间", RATE_LIMIT_BACKOFF_SECS);
+
+        // 其他 key 不受影响
+        assert!(breaker.is_disabled("openai_compatible/other-model").is_none());
+    }
+
+    #[test]
+    fn test_shared_breaker_overwrite_disable() {
+        let breaker = SharedBreaker::new();
+        let key = "openai_compatible/x".to_string();
+        breaker.disable(key.clone());
+        // 二次 disable 不应 panic
+        breaker.disable(key);
+        assert!(breaker.is_disabled("openai_compatible/x").is_some());
+    }
+
+    #[test]
+    fn test_shared_breaker_default() {
+        let breaker = SharedBreaker::default();
+        assert!(breaker.is_disabled("any/key").is_none());
+    }
+
+    #[test]
+    fn test_shared_breaker_is_send_sync() {
+        // 编译期断言：SharedBreaker 必须能跨线程共享
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SharedBreaker>();
     }
 }

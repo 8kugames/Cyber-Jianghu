@@ -14,7 +14,7 @@ pub use client::mock;
 pub use client::mock::MockLlmClient;
 pub use client::{
     ConversationInput, ConversationTurn, ErrorAction, FallbackLlmClient, LlmClient, LlmClientExt,
-    classify_llm_error,
+    SharedBreaker, classify_llm_error,
 };
 pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider, OpenClawConfig};
 pub(crate) use openai_types::{ChatExchangeConfig, ChatMessage};
@@ -36,6 +36,11 @@ pub fn build_fallback_client(
     prefer_stream: bool,
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
 ) -> Result<Arc<dyn LlmClient>> {
+    // 共享 circuit-breaker：每个 FallbackLlmClient 一份，
+    // 注入到所有下层 DirectLlmClient，保证 tool_loop 内部 send_chat_exchange
+    // 也能命中禁用标记。
+    let shared_breaker = Arc::new(client::SharedBreaker::new());
+
     let mut llm_clients: Vec<Arc<dyn LlmClient>> = Vec::new();
 
     // 优先使用 models（per-model 配置），否则回退到 fallback_models
@@ -54,6 +59,7 @@ pub fn build_fallback_client(
                 enable_thinking,
                 context_window_tokens,
                 earth_soul_config.clone(),
+                shared_breaker.clone(),
             ) {
                 Ok(client) => {
                     info!("模型 #{}: {} (max_tokens={})", i + 1, mc.model, max_tokens);
@@ -71,6 +77,7 @@ pub fn build_fallback_client(
             llm_config.model.as_deref(),
             prefer_stream,
             earth_soul_config.clone(),
+            shared_breaker.clone(),
         ) {
             Ok(client) => {
                 info!(
@@ -95,6 +102,7 @@ pub fn build_fallback_client(
                 Some(fallback_model.as_str()),
                 prefer_stream,
                 earth_soul_config.clone(),
+                shared_breaker.clone(),
             ) {
                 Ok(client) => {
                     info!("Fallback 模型 #{}: {}", i + 1, fallback_model);
@@ -119,12 +127,14 @@ pub fn build_fallback_client(
     let llm_arc: Arc<dyn LlmClient> = if llm_clients.len() > 1 {
         let mut fb = FallbackLlmClient::new(llm_clients);
         fb = fb.with_idle_threshold(llm_config.idle_rotate_threshold as usize);
+        fb = fb.with_shared_breaker(shared_breaker);
         Arc::new(fb)
     } else {
-        llm_clients
-            .into_iter()
-            .next()
-            .expect("at least one LLM client must be configured")
+        // 单客户端场景：仍用 FallbackLlmClient 包装以保持一致的 circuit-breaker 行为
+        let mut fb = FallbackLlmClient::new(llm_clients);
+        fb = fb.with_idle_threshold(llm_config.idle_rotate_threshold as usize);
+        fb = fb.with_shared_breaker(shared_breaker);
+        Arc::new(fb)
     };
 
     Ok(llm_arc)
@@ -136,6 +146,7 @@ fn build_direct_client(
     model: Option<&str>,
     prefer_stream: bool,
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
+    shared_breaker: Arc<client::SharedBreaker>,
 ) -> Result<DirectLlmClient> {
     build_direct_client_with_max_tokens(
         llm_config,
@@ -145,6 +156,7 @@ fn build_direct_client(
         llm_config.enable_thinking,
         llm_config.context_window_tokens,
         earth_soul_config,
+        shared_breaker,
     )
 }
 
@@ -157,6 +169,7 @@ fn build_direct_client_with_max_tokens(
     enable_thinking: Option<bool>,
     context_window_tokens: u32,
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
+    shared_breaker: Arc<client::SharedBreaker>,
 ) -> Result<DirectLlmClient> {
     let provider = LlmProvider::parse(&llm_config.provider)
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
@@ -180,5 +193,6 @@ fn build_direct_client_with_max_tokens(
     if let Some(esc) = earth_soul_config {
         client = client.with_earth_soul_config(esc);
     }
+    client = client.with_breaker(shared_breaker);
     Ok(client)
 }
