@@ -48,6 +48,7 @@ fn memory_to_json(m: &crate::component::memory::store::ClientMemory) -> serde_js
     serde_json::json!({
         "id": m.id,
         "tick_id": m.tick_id,
+        "event_type": m.event_type,
         "content": m.content,
         "importance": m.importance_score,
         "created_at": m.created_at.clone(),
@@ -71,20 +72,21 @@ pub(crate) async fn get_recent_memory_handler(
 
     let current_agent_id = *state.agent_id.read().await;
 
+    let page: usize = params
+        .get("page")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .min(MAX_PAGE_SIZE);
+
     // 非当前角色 → 临时打开 DB 读取
     if let Some(target) = target_agent_id
         && target != current_agent_id
     {
-        let page: usize = params
-            .get("page")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1)
-            .max(1);
-        let limit: usize = params
-            .get("limit")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(DEFAULT_PAGE_SIZE)
-            .min(MAX_PAGE_SIZE);
         return read_memories_for_agent(&state, target, page, limit).await;
     }
 
@@ -103,8 +105,30 @@ pub(crate) async fn get_recent_memory_handler(
 
     let mut mgr = mm.write().await;
     let service = MemoryService::new(&mut mgr);
-    let memories = service.get_recent().await;
-    Json(memories_to_json_response(&memories)).into_response()
+    let fetch = (page * limit).min(MAX_PAGE_SIZE);
+    match service.get_recent(fetch).await {
+        Ok(all) => {
+            let offset = (page - 1) * limit;
+            let page_slice: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
+            let has_more = page_slice.len() == limit;
+            let results: Vec<serde_json::Value> =
+                page_slice.iter().map(super::service::memory_to_json).collect();
+            Json(serde_json::json!({
+                "memories": results,
+                "count": results.len(),
+                "has_more": has_more,
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            error!("[http] Failed to get recent memories: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read memories",
+            )
+                .into_response()
+        }
+    }
 }
 
 /// 临时打开指定角色的记忆 DB 并返回近期记忆（支持分页）
@@ -207,6 +231,7 @@ pub(crate) async fn get_daily_summaries_handler(
                     serde_json::json!({
                         "id": m.id,
                         "tick_id": m.tick_id,
+                        "event_type": m.event_type,
                         "content": m.content,
                         "importance": m.importance_score,
                         "created_at": m.created_at.to_rfc3339(),

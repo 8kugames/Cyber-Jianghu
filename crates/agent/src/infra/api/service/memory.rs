@@ -22,13 +22,12 @@ impl<'a> MemoryService<'a> {
         Self { manager }
     }
 
-    /// 获取近期记忆（情景记忆叙事摘要）
-    pub async fn get_recent(&self) -> Vec<MemoryEntry> {
+    /// 获取近期记忆（按时间倒序，支持分页）
+    pub async fn get_recent(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
         self.manager
             .episodic()
-            .get_top_by_importance(20)
+            .get_top_by_importance(limit)
             .await
-            .unwrap_or_default()
     }
 
     /// 搜索归档记忆
@@ -83,6 +82,7 @@ impl<'a> MemoryService<'a> {
 pub fn memory_to_json(memory: &MemoryEntry) -> serde_json::Value {
     serde_json::json!({
         "tick_id": memory.tick_id,
+        "event_type": memory.event_type,
         "content": memory.content,
         "importance": memory.importance_score,
         "created_at": memory.created_at,
