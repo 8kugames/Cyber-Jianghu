@@ -210,6 +210,28 @@ impl ReflectorSoul {
                     return Err(format!("动作 '{}' 缺少必需字段: {}", action.name, field));
                 }
             }
+            // 对话类动作 content 字段占位符检测
+            if matches!(
+                intent.action_type.as_str(),
+                "说话" | "私语" | "大喊"
+            ) {
+                if let Some(content) = intent
+                    .action_data
+                    .as_ref()
+                    .and_then(|d| d.get("content"))
+                    .and_then(|v| v.as_str())
+                {
+                    let trimmed = content.trim();
+                    if trimmed.is_empty()
+                        || matches!(trimmed, "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---")
+                    {
+                        return Err(format!(
+                            "动作 '{}' 的 content 不能为空或占位符，请写出实际的对话内容",
+                            action.name
+                        ));
+                    }
+                }
+            }
             return Ok(());
         }
 

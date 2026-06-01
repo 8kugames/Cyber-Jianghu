@@ -219,6 +219,11 @@ pub async fn get_inventory_item_quantity(
     .unwrap_or(0)
 }
 
+/// 检测 LLM 输出的占位符内容（如 "..." "…" "。。。"）
+fn is_placeholder_content(s: &str) -> bool {
+    matches!(s, "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---")
+}
+
 /// 验证单个字段
 fn validate_field(intent: &Intent, field_validation: &FieldValidation) -> Result<(), GameError> {
     let field = &field_validation.field;
@@ -232,9 +237,10 @@ fn validate_field(intent: &Intent, field_validation: &FieldValidation) -> Result
                 }
             })?;
 
-            if value.trim().is_empty() {
+            let trimmed = value.trim();
+            if trimmed.is_empty() || is_placeholder_content(trimmed) {
                 return Err(GameError::InvalidActionData {
-                    reason: format!("字段 {} 不能为空", field),
+                    reason: format!("字段 {} 不能为空或占位符", field),
                 });
             }
         }
