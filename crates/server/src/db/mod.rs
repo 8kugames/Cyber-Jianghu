@@ -42,8 +42,9 @@ pub use agent_ops::{
     AutoRebirthResult, DeviceConnectResult, RetireResult, assign_initial_recipes,
     auto_rebirth_agent, batch_get_known_recipe_ids, connect_device, get_agent_by_device_id,
     get_agent_by_id, get_all_agents, get_intent_timeout_stats, get_known_recipe_ids,
-    record_recipe_observation, register_agent_transactional, retire_agent, update_agent_biography,
-    update_agent_location, update_agent_online, update_device_last_seen, verify_device_token,
+    record_recipe_observation, register_agent_transactional, register_device, retire_agent,
+    update_agent_biography, update_agent_location, update_agent_online, update_device_last_seen,
+    verify_device_strict, verify_device_token,
 };
 
 // 导出公共API - AgentState操作

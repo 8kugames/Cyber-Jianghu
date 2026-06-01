@@ -60,6 +60,48 @@ pub struct AgentConnectResponse {
 }
 
 // ============================================================================
+// 设备严格校验/显式注册 API（设备身份生命周期 v2）
+// ============================================================================
+
+/// 设备校验请求
+///
+/// POST /api/v1/device/verify 接口的请求数据
+/// Agent 启动时携带本地 device.yaml 中的 device_id 向 server 验证仍被认可
+#[derive(Debug, Deserialize)]
+pub struct DeviceVerifyRequest {
+    pub device_id: Uuid,
+}
+
+/// 设备校验响应
+///
+/// POST /api/v1/device/verify 接口成功响应（200）
+#[derive(Debug, Serialize)]
+pub struct DeviceVerifyResponse {
+    pub device_id: Uuid,
+    pub auth_token: String,
+    pub message: String,
+}
+
+/// 设备校验错误响应（404）
+#[derive(Debug, Serialize)]
+pub struct DeviceVerifyErrorResponse {
+    pub error: &'static str,
+    pub message: String,
+    pub device_id: Uuid,
+}
+
+/// 设备显式注册响应
+///
+/// POST /api/v1/device/register 接口响应
+/// server 生成 device_id + auth_token，agent 必须保存到本地 device.yaml
+#[derive(Debug, Serialize)]
+pub struct DeviceRegisterResponse {
+    pub device_id: Uuid,
+    pub auth_token: String,
+    pub message: String,
+}
+
+// ============================================================================
 // 角色注册 API（Phase 4）
 // ============================================================================
 
