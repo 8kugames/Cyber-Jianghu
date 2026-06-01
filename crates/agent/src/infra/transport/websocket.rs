@@ -221,9 +221,9 @@ impl WebSocketClient {
                 Ok(())
             }
             Err(tokio_tungstenite::tungstenite::Error::Http(resp))
-                if resp.status().as_u16() == 400 =>
+                if matches!(resp.status().as_u16(), 400 | 401) =>
             {
-                warn!("WebSocket auth failed (HTTP 400)");
+                warn!("WebSocket auth failed (HTTP {})", resp.status().as_u16());
                 Err(ConnectError::AuthFailed)
             }
             Err(e) => Err(ConnectError::ConnectionFailed(anyhow::anyhow!(

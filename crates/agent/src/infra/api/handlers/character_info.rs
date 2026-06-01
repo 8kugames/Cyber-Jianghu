@@ -1,7 +1,6 @@
 // 角色信息 API Handlers
 // ============================================================================
 
-use anyhow::Context as _;
 use axum::{
     extract::{Path as AxumPath, State},
     http::StatusCode,
@@ -428,39 +427,16 @@ pub(crate) async fn get_attribute_meta_handler(
         narrative
     };
 
-    // 3. 内存和磁盘都没有时，主动从 server 拉取
-    let narrative = if narrative.is_none() {
-        match fetch_narrative_config_from_server(&state).await {
-            Ok(cfg) => {
-                info!("从 server 拉取 narrative_config 成功，回填内存+磁盘");
-                // 回填内存
-                *state.narrative_config.write().await = Some(cfg.clone());
-                // 回填磁盘
-                let cdir = crate::config::config_dir();
-                if let Err(e) = std::fs::create_dir_all(&cdir) {
-                    warn!("server-fetch 回填磁盘: 创建目录失败: {}", e);
-                } else if let Ok(json) = serde_json::to_string_pretty(&cfg)
-                    && let Err(e) = std::fs::write(cdir.join("narrative_config.json"), json)
-                {
-                    warn!("server-fetch 回填磁盘: 写入失败: {}", e);
-                }
-                Some(cfg)
-            }
-            Err(e) => {
-                warn!("从 server 拉取 narrative_config 失败: {}", e);
-                None
-            }
-        }
-    } else {
-        narrative
-    };
+    // 3. 内存和磁盘都没有时，narrative_config 必须由 character_register 路径注入
+    //    这是 narrative_config 的唯一权威注入点（设备身份端点不负责游戏规则下发）
+    //    兜底"主动拉取"已删除：旧路径会调 /api/v1/agent/connect，已废弃
 
     // 仍然没有才返回 503（所有恢复路径都失败了）
     if narrative.is_none() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
-                "error": "narrative_config 尚未就绪",
+                "error": "narrative_config 尚未就绪，请先调用 POST /api/v1/character/register",
                 "retry": true
             })),
         )
@@ -484,45 +460,6 @@ pub(crate) async fn get_attribute_meta_handler(
         display_names,
     })
     .into_response()
-}
-
-/// 从 server 拉取 narrative_config（通过 /api/v1/agent/connect 端点）
-async fn fetch_narrative_config_from_server(
-    state: &HttpApiState,
-) -> anyhow::Result<cyber_jianghu_protocol::NarrativeConfig> {
-    let server_http_url = state.server_http_url.read().await.clone();
-    anyhow::ensure!(!server_http_url.is_empty(), "server_http_url 未配置");
-
-    // 读取 device 配置获取 device_id 和 auth_token
-    let device = state.device_config.read().await.clone();
-    anyhow::ensure!(device.is_some(), "device_config 未初始化");
-    let device = device.unwrap();
-
-    let client = reqwest::Client::new();
-    let url = format!("{}/api/v1/agent/connect", server_http_url);
-    let resp = client
-        .post(&url)
-        .json(&serde_json::json!({
-            "device_id": device.device_id.to_string(),
-        }))
-        .send()
-        .await
-        .context("连接 server 失败")?;
-
-    anyhow::ensure!(
-        resp.status().is_success(),
-        "server 返回错误: {}",
-        resp.status()
-    );
-
-    let body: serde_json::Value = resp.json().await.context("解析响应失败")?;
-    let nc = body
-        .get("narrative_config")
-        .context("响应中无 narrative_config")?;
-
-    let config: cyber_jianghu_protocol::NarrativeConfig =
-        serde_json::from_value(nc.clone()).context("反序列化 narrative_config 失败")?;
-    Ok(config)
 }
 
 /// 丰富属性数据，添加叙事描述

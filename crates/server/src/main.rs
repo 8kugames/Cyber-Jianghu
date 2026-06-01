@@ -315,10 +315,15 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(handlers::system::root))
         .route("/health", get(handlers::system::health_check))
-        // 设备连接（Phase 3）- 首次启动时注册设备身份
+        // 设备身份生命周期 v2 — 严格校验（DB 不存在时返回 404）
         .route(
-            "/api/v1/agent/connect",
-            post(handlers::agent::agent_connect),
+            "/api/v1/device/verify",
+            post(handlers::device::device_verify),
+        )
+        // 设备身份生命周期 v2 — 显式注册（server 生成 device_id，201 Created）
+        .route(
+            "/api/v1/device/register",
+            post(handlers::device::device_register),
         )
         // 角色注册（Phase 4）- 创建游戏角色
         .route(

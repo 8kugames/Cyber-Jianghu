@@ -67,9 +67,11 @@ async function mountAttributes(container, ctx) {
         const displayNames = meta.display_names || {};
         const allAttrs = attrs.attributes || [];
 
+        const CAT_NAMES = { primary: '基础属性', derived: '衍生属性', status: '状态' };
+
         let html = '';
         for (const [catName, attrNames] of Object.entries(categories)) {
-            const catLabel = displayNames[catName] || catName;
+            const catLabel = CAT_NAMES[catName] || displayNames[catName] || catName;
             html += `<h3 style="font-size:14px;font-weight:600;margin:${html ? '16px' : '0'} 0 8px;color:var(--text-secondary)">${escapeHtml(catLabel)}</h3>`;
             html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">';
             for (const attrName of attrNames) {
@@ -301,9 +303,9 @@ function renderTickCard(tickId, attempts, immediate) {
             const statusText = imm.send_status === 'sent' ? '已发送' : '失败';
             html += `<div class="imm-item">`;
             html += `<div class="exp-immediate"><span class="exp-soul-label">即时</span>`;
-            html += `<div class="exp-soul-content"><span class="soul-text">${escapeHtml(imm.action_type || '-')}`;
-            if (imm.speech_content) html += `: ${escapeHtml(imm.speech_content)}`;
-            html += `</span></div></div>`;
+            html += `<div class="exp-soul-content">`;
+            html += renderActionText(imm.action_type, { content: imm.speech_content, target_agent_id: imm.target_agent_id });
+            html += `</div></div>`;
             html += `<span class="imm-status ${statusCls}">${escapeHtml(statusText)}</span>`;
             if (imm.send_error) html += `<span class="imm-error">${escapeHtml(imm.send_error)}</span>`;
             html += `</div>`;
@@ -358,8 +360,12 @@ function renderDihun(data) {
     let html = `<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">`;
 
     const pipeline = data.pipeline_actions;
-    if (pipeline && pipeline.length > 1) {
-        for (const pa of pipeline) html += renderActionText(pa.action_type, pa.action_data);
+    if (pipeline && pipeline.length >= 1) {
+        const multi = pipeline.length > 1;
+        pipeline.forEach((pa, idx) => {
+            if (multi) html += `<div style="font-size:10px;color:var(--text-muted);margin-top:${idx > 0 ? '4px' : '0'}">意图 ${idx + 1}</div>`;
+            html += renderActionText(pa.action_type, pa.action_data);
+        });
     } else if (data.action_type) {
         html += renderActionText(data.action_type, data.action_data);
     }
