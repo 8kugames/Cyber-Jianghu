@@ -16,7 +16,7 @@
 // 2. 后续运行：自动使用已保存的身份连接服务器
 // 3. Cognitive 模式（默认）：cyber-jianghu-agent run --mode cognitive
 // 4. Claw 模式：cyber-jianghu-agent run --mode claw
-// 5. Web 面板：http://localhost:<端口>/welcome.html
+// 5. Web 面板：http://localhost:<端口>/
 // 6. HTTP API：http://localhost:<端口>/api/v1/*
 // ============================================================================
 
@@ -479,7 +479,7 @@ fn show_config() -> Result<()> {
             config.runtime.port.to_string()
         };
         println!(
-            "  通过 Web 面板创建: http://localhost:{}/welcome.html",
+            "  通过 Web 面板创建: http://localhost:{}/",
             display_port
         );
         println!("  或通过 CLI: cyber-jianghu-agent create-character --name 名字");
@@ -537,7 +537,7 @@ async fn create_character_cli(
             warn!("无法连接到 Agent API: {}", e);
             warn!("请确保 Agent 已启动并监听端口 {}", port);
             warn!(
-                "或通过 Web 面板创建角色: http://localhost:{}/welcome.html",
+                "或通过 Web 面板创建角色: http://localhost:{}/",
                 port
             );
             return Err(e);
@@ -833,7 +833,7 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
             let state = early.clone();
 
             // 浏览器打开 Web 面板
-            let browser_url = format!("http://localhost:{}/welcome.html", early_actual_port);
+            let browser_url = format!("http://localhost:{}/", early_actual_port);
             let is_container = std::path::Path::new("/app/.dockerenv").exists();
             tokio::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -1093,6 +1093,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 .token_optimization
                 .delta
                 .change_percentage_threshold,
+            survival_critical_urgency_threshold: config
+                .token_optimization
+                .delta
+                .survival_critical_urgency_threshold,
         };
         let attention_config = config.token_optimization.attention.clone();
         builder = builder
