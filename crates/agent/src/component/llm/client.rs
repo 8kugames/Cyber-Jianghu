@@ -40,11 +40,12 @@ pub struct ConversationInput<'a> {
 
 /// 构建对话消息列表（system + semi-static + summary + history + current tick）
 ///
-/// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）
+/// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）。
 ///
-/// 关键约束：sensenova 等严格 OpenAI 兼容实现拒绝 2+ 个连续 `role: "system"` 消息
-/// （返回 400 `code: 9 engine is not available`）。所有 system 段必须在请求前
-/// 合并为单个 system message，按 persona → semi_static → summary 顺序拼接。
+/// **通用逻辑 — 不针对任何 provider 特化。** OpenAI Chat Completions 规范对连续
+/// 多个 `role: "system"` 消息的语义未定义，部分严格实现（如 sensenova）会直接
+/// 拒绝返回 400。模型视角下 `[sys:A][sys:B][user:Q]` 与 `[sys:A\n\nB][user:Q]`
+/// 信息量等价，合并是更安全且无损的默认。
 pub fn build_conversation_messages(
     system: &str,
     semi_static: &str,
@@ -54,7 +55,7 @@ pub fn build_conversation_messages(
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
-    // 合并所有 system 段为单个 system message（避免 sensenova 400）
+    // 合并所有 system 段为单个 system message（通用兼容处理，无 provider 特化）
     let mut combined_system = String::with_capacity(system.len() + semi_static.len() + 64);
     combined_system.push_str(system);
     if !semi_static.is_empty() {
