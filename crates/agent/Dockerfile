@@ -42,38 +42,23 @@ replace-with = "aliyun"\n\
 [source.aliyun]\n\
 registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
-# 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
-# Cargo.lock 可选（如果存在则使用 --locked，否则正常构建）
+# 复制 Cargo 元数据和协议/Agent 源码（消除 placeholder 引起的 build cache 污染）
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
-COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
+COPY crates/server/Cargo.toml ./crates/server/
 
-# 创建空的 src 目录，用于下载依赖
-RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
-    echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
-    echo "pub fn placeholder() {}" > crates/server/src/lib.rs && \
-    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
-    echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
+# workspace 需要各成员至少存在有效 targets
+RUN mkdir -p crates/server/src && echo "fn main() {}" > crates/server/src/main.rs
 
-# 构建依赖（使用 BuildKit 缓存挂载，依赖会被持久化）
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/app/target,sharing=locked \
-    cargo build --release -p cyber-jianghu-agent
-
-# 复制实际源代码
-ARG SRC_REV=2
+# 复制真实源码
 COPY crates/protocol/src ./crates/protocol/src
 COPY crates/agent/src ./crates/agent/src
 
-# 重新构建（只编译源代码，依赖已缓存）
-# 使用 id=agent-src-N 强制独立的 target cache，避免旧编译结果被复用
-RUN --mount=type=cache,id=agent-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=agent-git,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,id=agent-target-v3,target=/app/target,sharing=locked \
-    cargo clean -p cyber-jianghu-agent --release 2>/dev/null; \
-    touch crates/protocol/src/lib.rs && \
+# 构建（使用 BuildKit 缓存挂载加速依赖）
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
     cargo build --release -p cyber-jianghu-agent && \
     cp /app/target/release/cyber-jianghu-agent /app/agent-bin
 
