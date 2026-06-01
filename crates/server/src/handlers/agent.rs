@@ -1,5 +1,5 @@
 use anyhow::Result;
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{Json, extract::{Path, State}, http::StatusCode};
 use sha2::Digest;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -794,6 +794,35 @@ pub async fn update_biography(
                 Json(serde_json::json!({"error": format!("保存失败: {}", e)})),
             ))
         }
+    }
+}
+
+/// GET /api/v1/agent/{id}/biography
+///
+/// 从数据库查询角色传记，供 agent 端回退读取（agent 本地 character.yaml 无传记时使用）
+pub async fn get_agent_biography(
+    State(state): State<Arc<AppState>>,
+    Path(agent_id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let biography: Option<String> = sqlx::query_scalar(
+        "SELECT biography FROM agents WHERE agent_id = $1",
+    )
+    .bind(agent_id)
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| {
+        error!("[biography] 查询失败: agent={}, err={}", agent_id, e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "数据库查询失败"})),
+        )
+    })?;
+
+    match biography {
+        Some(bio) if !bio.is_empty() => {
+            Ok(Json(serde_json::json!({"biography": bio})))
+        }
+        _ => Ok(Json(serde_json::json!({"biography": null}))),
     }
 }
 

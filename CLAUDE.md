@@ -377,6 +377,7 @@ use super::builder::AgentBuilder;
 - `POST /api/v1/agent/auto-rebirth` - Auto rebirth (INSERT new agent, old agent dead→retired)
 - `GET /api/v1/agent/{id}/context` - Get agent context
 - `POST /api/v1/agent/biography` - Receive biography from agent (body: `{agent_id, biography}`)
+- `GET /api/v1/agent/{id}/biography` - Get agent biography from server DB (fallback read for agent)
 - `POST /api/v1/agent/grant-items` - Admin inventory injection (requires write_token)
 - `POST /api/v1/validate-action` - Validate action parameters
 
