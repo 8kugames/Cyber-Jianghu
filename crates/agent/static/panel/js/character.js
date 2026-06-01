@@ -170,9 +170,12 @@ function showCreationModal() {
         <div style="display:flex;gap:8px;margin-bottom:16px">
             <button class="btn btn-primary" id="create-generate-btn">一键生成 (LLM)</button>
             <button class="btn" id="create-manual-btn">手动创建</button>
+            <button class="btn" id="create-close-btn" style="margin-left:auto">关闭</button>
         </div>
         <div id="create-content"></div>
     `);
+
+    document.getElementById('create-close-btn')?.addEventListener('click', hideModal);
 
     document.getElementById('create-generate-btn')?.addEventListener('click', startGeneration);
     document.getElementById('create-manual-btn')?.addEventListener('click', showManualForm);

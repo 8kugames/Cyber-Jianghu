@@ -1196,12 +1196,7 @@ impl FallbackLlmClient {
                             | ErrorAction::FallbackAndDisable
                             | ErrorAction::Retry
                     );
-                    tracing::warn!(
-                        "LLM 客户端 #{} 调用失败 (action={:?}): {}",
-                        idx,
-                        action,
-                        e
-                    );
+                    tracing::warn!("LLM 客户端 #{} 调用失败 (action={:?}): {}", idx, action, e);
                     if action == ErrorAction::FallbackAndDisable {
                         self.disable_model(idx, reason);
                     }

@@ -248,8 +248,9 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
         let nc_value = &body["narrative_config"];
         if !nc_value.is_null() {
             let nc_hash = body["narrative_config_hash"].as_str();
-            match serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(nc_value.clone())
-            {
+            match serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(
+                nc_value.clone(),
+            ) {
                 Ok(nc) => {
                     if let Err(e) =
                         cyber_jianghu_agent::config::save_narrative_config_to_disk(&nc, nc_hash)
@@ -735,6 +736,16 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     let character = match initial_character {
         Some(c) if c.agent_id.is_some() && c.status == CharacterStatus::Alive => c,
         _ => {
+            // 角色未就绪 — 先注入 LLM container 以支持角色创建时的 LLM 调用
+            if runtime_mode == RuntimeMode::Cognitive
+                && let Some(ref early_state) = _early_api_state
+            {
+                let llm = create_llm_client(runtime_mode, &config, None)?;
+                let container: std::sync::Arc<tokio::sync::RwLock<std::sync::Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>>> =
+                    std::sync::Arc::new(tokio::sync::RwLock::new(llm.clone()));
+                *early_state.llm_container.write().await = Some(container);
+                info!("LLM container 已预注入 HttpApiState（角色创建前）");
+            }
             info!("尚未创建角色，等待角色创建...");
             info!(
                 "请通过 Web 面板创建角色: http://localhost:{}/index.html",
