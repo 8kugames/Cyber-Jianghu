@@ -220,6 +220,8 @@ pub async fn get_inventory_item_quantity(
 }
 
 /// 检测 LLM 输出的占位符内容（如 "..." "…" "。。。"）
+///
+/// LLM 偶尔用省略号替代实际对话内容，导致前端经历日志显示 "..." 而非实际文字
 fn is_placeholder_content(s: &str) -> bool {
     matches!(s, "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---")
 }
