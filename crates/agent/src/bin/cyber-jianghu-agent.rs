@@ -128,19 +128,8 @@ enum Commands {
 // 配置路径
 // ============================================================================
 
-/// 返回配置目录（优先 CYBER_JIANGHU_CONFIG_DIR 环境变量，回退 $HOME/.cyber-jianghu/config）
-fn config_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
-        return PathBuf::from(dir);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".cyber-jianghu")
-        .join("config")
-}
-
 fn config_path() -> PathBuf {
-    config_dir().join("agent.yaml")
+    cyber_jianghu_agent::config::config_dir().join("agent.yaml")
 }
 
 // ============================================================================
@@ -256,38 +245,21 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
     // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
     // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
     {
-        let nc = &body["narrative_config"];
-        let nc_hash = body["narrative_config_hash"].as_str();
-        if !nc.is_null() {
-            let cdir = config_dir();
-            let _ = std::fs::create_dir_all(&cdir);
-            let hash_path = cdir.join("narrative_config.hash");
-
-            let should_save = match nc_hash {
-                Some(new_hash) => match std::fs::read_to_string(&hash_path) {
-                    Ok(old_hash) => old_hash.trim() != new_hash,
-                    Err(_) => true,
-                },
-                None => true,
-            };
-
-            if should_save {
-                match serde_json::to_string_pretty(nc) {
-                    Ok(json) => {
-                        let nc_path = cdir.join("narrative_config.json");
-                        if let Err(e) = std::fs::write(&nc_path, &json) {
-                            warn!("保存 narrative_config 失败: {}", e);
-                        } else {
-                            if let Some(hash) = nc_hash {
-                                let _ = std::fs::write(&hash_path, hash);
-                            }
-                            info!("设备连接时已保存 narrative_config");
-                        }
+        let nc_value = &body["narrative_config"];
+        if !nc_value.is_null() {
+            let nc_hash = body["narrative_config_hash"].as_str();
+            match serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(nc_value.clone())
+            {
+                Ok(nc) => {
+                    if let Err(e) =
+                        cyber_jianghu_agent::config::save_narrative_config_to_disk(&nc, nc_hash)
+                    {
+                        warn!("保存 narrative_config 失败: {}", e);
+                    } else {
+                        info!("设备连接时已保存 narrative_config");
                     }
-                    Err(e) => warn!("序列化 narrative_config 失败: {}", e),
                 }
-            } else {
-                debug!("narrative_config skip: hash unchanged");
+                Err(e) => warn!("解析 narrative_config 失败: {}", e),
             }
         }
     }
@@ -361,13 +333,7 @@ fn print_startup_banner(port: u16, server_ws_url: &str, config_path_str: &str, m
 // ============================================================================
 
 fn init_tracing() -> Result<()> {
-    let data_dir = std::env::var("CYBER_JIANGHU_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".cyber-jianghu")
-        });
+    let data_dir = cyber_jianghu_agent::config::data_base_dir();
 
     let thinking_log_path = thinking_log::init_thinking_log(&data_dir)?;
 
@@ -662,17 +628,8 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         .context("earth_soul 配置校验失败")?;
 
     // Ensure servers_dir is set (#[serde(default)] means it's empty after from_file)
-    // 优先级：CYBER_JIANGHU_DATA_DIR 环境变量 > ~/.cyber-jianghu/servers
     if config.servers_dir.as_os_str().is_empty() {
-        config.servers_dir = if let Ok(data_dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
-            info!("使用 CYBER_JIANGHU_DATA_DIR: {}", data_dir);
-            PathBuf::from(data_dir).join("servers")
-        } else {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".cyber-jianghu")
-                .join("servers")
-        };
+        config.servers_dir = cyber_jianghu_agent::config::data_base_dir().join("servers");
     }
 
     let runtime_mode = match mode.to_lowercase().as_str() {

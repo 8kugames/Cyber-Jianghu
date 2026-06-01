@@ -350,29 +350,9 @@ impl super::Agent {
 
         // 重连时同步 narrative_config 到磁盘（hash skip-optimization）
         if let Some(ref nc) = result.narrative_config {
-            let cdir = crate::infra::api::config_dir();
-            let hash_path = cdir.join("narrative_config.hash");
-
-            let should_save = match result.narrative_config_hash.as_ref() {
-                Some(new_hash) => match std::fs::read_to_string(&hash_path) {
-                    Ok(old_hash) => old_hash.trim() != new_hash,
-                    Err(_) => true,
-                },
-                None => true,
-            };
-
-            if should_save {
-                if let Ok(json) = serde_json::to_string_pretty(nc) {
-                    let _ = std::fs::create_dir_all(&cdir);
-                    let nc_path = cdir.join("narrative_config.json");
-                    if let Err(e) = std::fs::write(&nc_path, json) {
-                        warn!("重连保存 narrative_config 失败: {}", e);
-                    } else if let Some(ref hash) = result.narrative_config_hash {
-                        let _ = std::fs::write(&hash_path, hash);
-                    }
-                }
-            } else {
-                debug!("reconnect narrative_config skip: hash unchanged");
+            let hash = result.narrative_config_hash.as_deref();
+            if let Err(e) = crate::config::save_narrative_config_to_disk(nc, hash) {
+                warn!("重连保存 narrative_config 失败: {}", e);
             }
         }
 

@@ -844,38 +844,11 @@ pub(crate) async fn register_character_handler(
                 // 内存始终更新
                 *state.narrative_config.write().await = result.narrative_config.clone();
 
-                let cdir = crate::infra::api::config_dir();
-                if let Err(e) = std::fs::create_dir_all(&cdir) {
-                    error!("创建配置目录失败: {}", e);
-                } else {
-                    let hash_path = cdir.join("narrative_config.hash");
-
-                    let should_save = match result.narrative_config_hash.as_ref() {
-                        Some(new_hash) => match std::fs::read_to_string(&hash_path) {
-                            Ok(old_hash) => old_hash.trim() != new_hash,
-                            Err(_) => true,
-                        },
-                        None => true,
-                    };
-
-                    if should_save {
-                        let config_path = cdir.join("narrative_config.json");
-                        match serde_json::to_string_pretty(narrative_config) {
-                            Ok(json) => {
-                                if let Err(e) = std::fs::write(&config_path, json) {
-                                    error!("保存 narrative_config 失败: {}", e);
-                                } else {
-                                    if let Some(ref hash) = result.narrative_config_hash {
-                                        let _ = std::fs::write(&hash_path, hash);
-                                    }
-                                    info!("已保存 narrative_config 到 {:?}", config_path);
-                                }
-                            }
-                            Err(e) => error!("序列化 narrative_config 失败: {}", e),
-                        }
-                    } else {
-                        tracing::debug!("register narrative_config skip: hash unchanged");
-                    }
+                let hash = result.narrative_config_hash.as_deref();
+                if let Err(e) = crate::config::save_narrative_config_to_disk(
+                    narrative_config, hash,
+                ) {
+                    error!("保存 narrative_config 失败: {}", e);
                 }
             }
 

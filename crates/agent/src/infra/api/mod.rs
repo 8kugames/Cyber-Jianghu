@@ -51,7 +51,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use anyhow::Context;
@@ -526,27 +526,6 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 获取 LLM Token 累计使用统计
 }
 
-/// 返回配置目录路径（优先 CYBER_JIANGHU_CONFIG_DIR 环境变量，回退 $HOME/.cyber-jianghu/config）
-pub fn config_dir() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".cyber-jianghu")
-        .join("config")
-}
-
-/// 返回数据目录路径（优先 CYBER_JIANGHU_DATA_DIR 环境变量，回退 $HOME/.cyber-jianghu）
-pub fn data_base_dir() -> std::path::PathBuf {
-    if let Ok(dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".cyber-jianghu")
-}
-
 /// 获取静态文件服务目录
 pub fn get_static_serve_dir() -> PathBuf {
     let panel_path = PathBuf::from("crates/agent/static/panel");
@@ -730,7 +709,7 @@ pub fn create_http_state(
     let intent_validator = None;
 
     let narrative_config = {
-        let narrative_path = config_dir().join("narrative_config.json");
+        let narrative_path = crate::config::config_dir().join("narrative_config.json");
         if narrative_path.exists() {
             std::fs::read_to_string(&narrative_path)
                 .ok()
@@ -1027,31 +1006,9 @@ impl HttpApiState {
             // 内存始终更新（保证 API 返回最新数据）
             *self.narrative_config.write().await = Some(nc.clone());
 
-            {
-                let cdir = config_dir();
-                let hash_path = cdir.join("narrative_config.hash");
-
-                let should_save = match result.narrative_config_hash.as_ref() {
-                    Some(new_hash) => match std::fs::read_to_string(&hash_path) {
-                        Ok(old_hash) => old_hash.trim() != new_hash,
-                        Err(_) => true,
-                    },
-                    None => true,
-                };
-
-                if should_save {
-                    if let Ok(json) = serde_json::to_string_pretty(nc) {
-                        let _ = std::fs::create_dir_all(&cdir);
-                        let nc_path = cdir.join("narrative_config.json");
-                        if let Err(e) = std::fs::write(&nc_path, json) {
-                            error!("刷新令牌保存 narrative_config 失败: {}", e);
-                        } else if let Some(ref hash) = result.narrative_config_hash {
-                            let _ = std::fs::write(&hash_path, hash);
-                        }
-                    }
-                } else {
-                    debug!("token refresh narrative_config skip: hash unchanged");
-                }
+            let hash = result.narrative_config_hash.as_deref();
+            if let Err(e) = crate::config::save_narrative_config_to_disk(nc, hash) {
+                error!("刷新令牌保存 narrative_config 失败: {}", e);
             }
         }
 

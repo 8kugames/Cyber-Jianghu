@@ -398,7 +398,7 @@ pub(crate) async fn get_attribute_meta_handler(
 
     // 2. 内存为空时，尝试从磁盘加载
     let narrative = if narrative.is_none() {
-        let path = super::super::config_dir().join("narrative_config.json");
+        let path = crate::config::config_dir().join("narrative_config.json");
         if path.exists() {
             match tokio::fs::read_to_string(&path).await {
                 Ok(content) => {
@@ -437,7 +437,7 @@ pub(crate) async fn get_attribute_meta_handler(
                 // 回填内存
                 *state.narrative_config.write().await = Some(cfg.clone());
                 // 回填磁盘
-                let cdir = super::super::config_dir();
+                let cdir = crate::config::config_dir();
                 if let Err(e) = std::fs::create_dir_all(&cdir) {
                     warn!("server-fetch 回填磁盘: 创建目录失败: {}", e);
                 } else if let Ok(json) = serde_json::to_string_pretty(&cfg)
