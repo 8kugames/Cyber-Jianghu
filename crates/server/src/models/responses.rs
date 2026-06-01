@@ -26,40 +26,6 @@ pub struct HealthResponse {
 }
 
 // ============================================================================
-// 设备连接 API（Phase 3）
-// ============================================================================
-
-/// 设备连接请求
-///
-/// POST /api/v1/agent/connect 接口的请求数据
-/// 客户端首次启动时调用，注册设备身份
-#[derive(Debug, Deserialize)]
-pub struct AgentConnectRequest {
-    /// 设备唯一标识（客户端生成的 UUID v4）
-    pub device_id: Uuid,
-}
-
-/// 设备连接响应
-///
-/// POST /api/v1/agent/connect 接口的响应数据
-#[derive(Debug, Serialize)]
-pub struct AgentConnectResponse {
-    /// 认证令牌（用于后续 WebSocket 连接和 API 调用）
-    pub auth_token: String,
-
-    /// 结果消息
-    pub message: String,
-
-    /// 叙事化配置（设备连接时立即下发，供前端属性分类和显示名使用）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
-
-    /// 叙事化配置 SHA256 hash（用于 agent 端 skip-optimization，避免未变更时重复写磁盘）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub narrative_config_hash: Option<String>,
-}
-
-// ============================================================================
 // 设备严格校验/显式注册 API（设备身份生命周期 v2）
 // ============================================================================
 
@@ -98,6 +64,15 @@ pub struct DeviceVerifyErrorResponse {
 pub struct DeviceRegisterResponse {
     pub device_id: Uuid,
     pub auth_token: String,
+    pub message: String,
+}
+
+/// 设备显式注册错误响应
+///
+/// 与 `DeviceVerifyErrorResponse` 对称：所有 4xx/5xx 响应都应带结构化 body
+#[derive(Debug, Serialize)]
+pub struct DeviceRegisterErrorResponse {
+    pub error: &'static str,
     pub message: String,
 }
 

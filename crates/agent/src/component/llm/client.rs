@@ -342,18 +342,20 @@ pub trait LlmClientExt {
 /// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
 /// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
 fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
-    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>, <reasoning>...</reasoning>, <thought>...</thought>
-    // 闭合标签也允许属性（如 MiniMax 的 </think HTaming>）
+    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>,
+    // <reasoning>...</reasoning>, <thought>...</thought>,
+    // <minimax:tool_call>...</minimax:tool_call>（MiniMax 专有 XML tool_call 格式）
     let paired_re = regex::Regex::new(
-        r"(?is)<(?:think_tag|think|reasoning|thought)[^>]*>.*?</(?:think_tag|think|reasoning|thought)[^>]*>"
+        r"(?is)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>.*?</(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>"
     ).expect("static regex is valid");
 
     let cleaned = paired_re.replace_all(response, "").to_string();
 
     // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
-    let self_closing_re =
-        regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*")
-            .expect("static regex is valid");
+    let self_closing_re = regex::Regex::new(
+        r"(?i)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*/>\s*",
+    )
+    .expect("static regex is valid");
     let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
 
     if cleaned == response {
@@ -1947,17 +1949,29 @@ mod tests {
     fn test_shared_breaker_disable_and_query() {
         let breaker = SharedBreaker::new();
         // 初始：所有 key 都可用
-        assert!(breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite").is_none());
+        assert!(
+            breaker
+                .is_disabled("openai_compatible/sensenova-6.7-flash-lite")
+                .is_none()
+        );
 
         // 禁用后：返回剩余秒数
         breaker.disable("openai_compatible/sensenova-6.7-flash-lite".to_string());
         let remaining = breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite");
         assert!(remaining.is_some(), "禁用后应返回 Some(remaining)");
         let secs = remaining.unwrap();
-        assert!(secs > 0 && secs <= RATE_LIMIT_BACKOFF_SECS, "剩余秒数应在 (0, {}] 区间", RATE_LIMIT_BACKOFF_SECS);
+        assert!(
+            secs > 0 && secs <= RATE_LIMIT_BACKOFF_SECS,
+            "剩余秒数应在 (0, {}] 区间",
+            RATE_LIMIT_BACKOFF_SECS
+        );
 
         // 其他 key 不受影响
-        assert!(breaker.is_disabled("openai_compatible/other-model").is_none());
+        assert!(
+            breaker
+                .is_disabled("openai_compatible/other-model")
+                .is_none()
+        );
     }
 
     #[test]

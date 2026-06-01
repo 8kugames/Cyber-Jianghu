@@ -146,7 +146,7 @@ export function fmtNum(n) {
     return String(n);
 }
 
-export const STATUS_MAP = { alive: '活跃', dead: '死亡', retired: '退休' };
+export const STATUS_MAP = { alive: '活跃', dead: '死亡', retired: '归隐' };
 
 export function formatWorldTime(worldTime) {
     if (!worldTime) return '-';
@@ -158,8 +158,18 @@ export function formatWorldTime(worldTime) {
         const day = worldTime.day ?? worldTime.d;
         const hour = worldTime.hour ?? worldTime.h;
         if (year !== undefined) {
-            return `${year}年${month ?? '?'}月${day ?? '?'}日 ${getShichen(hour ?? 0)}`;
+            const monthNames = ['元月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','腊月'];
+            const mLabel = monthNames[(month ?? 1) - 1] || `${month}月`;
+            return `${numberToChinese(year)}年${mLabel}${numberToChinese(day)}日${getShichen(hour ?? 0)}`;
         }
     }
     return '-';
+}
+
+function numberToChinese(n) {
+    if (n < 0) return String(n);
+    const digits = ['零','一','二','三','四','五','六','七','八','九'];
+    if (n < 10) return digits[n];
+    if (n < 100) return (n >= 20 ? digits[Math.floor(n / 10)] : '') + '十' + (n % 10 ? digits[n % 10] : '');
+    return String(n).split('').map(d => digits[parseInt(d)]).join('');
 }

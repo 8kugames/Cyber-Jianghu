@@ -371,7 +371,8 @@ use super::builder::AgentBuilder;
 ### Server (port 23333)
 
 **Agent Lifecycle**:
-- `POST /api/v1/agent/connect` - Connect device
+- `POST /api/v1/device/verify` - Strict device verification (returns 404 if unknown; agent must re-register)
+- `POST /api/v1/device/register` - Explicit device registration (server generates device_id, returns 201 Created)
 - `POST /api/v1/agent/register` - Register new agent (returns `narrative_config`)
 - `POST /api/v1/agent/retire` - Retire active character (mark as retired)
 - `POST /api/v1/agent/auto-rebirth` - Auto rebirth (INSERT new agent, old agent dead→retired)
