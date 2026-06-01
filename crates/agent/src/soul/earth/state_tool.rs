@@ -54,6 +54,24 @@ pub fn query_world_definition() -> ToolDefinition {
     )
 }
 
+/// lookup_character tool 定义
+pub fn lookup_character_definition() -> ToolDefinition {
+    ToolDefinition::new(
+        "lookup_character",
+        "当你只知道角色名字、但动作需要填写 target_agent_id（UUID）时，调用此工具将名字转为 UUID。ReflectorSoul 拒绝非 UUID 格式的 target_agent_id，因此必须在提交动作前先用此工具获取精确 UUID。支持名字部分匹配。只能查到同地点的角色。",
+        Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "你已知的角色名字。支持部分匹配，传入你知道的名字片段即可（如传'沈'可查到'沈吟'）。"
+                }
+            },
+            "required": ["name"]
+        })),
+    )
+}
+
 /// list_skills tool 定义
 pub fn list_skills_definition() -> ToolDefinition {
     ToolDefinition::simple(
@@ -111,7 +129,7 @@ fn build_action_example(action_type: &str, required_fields: &[String]) -> String
     let mut fields = Vec::new();
     if has_target_agent_id {
         fields
-            .push("\"target_agent_id\": \"(从附近的人列表复制UUID，不要填角色名字)\"".to_string());
+            .push("\"target_agent_id\": \"(先用 lookup_character 查角色的 UUID 再填入，不要直接填角色名字)\"".to_string());
     }
     if has_target_location {
         fields.push("\"target_location\": \"(从可前往的地点列表复制)\"".to_string());
@@ -247,6 +265,57 @@ pub async fn execute_query_world(
             )
         }),
     }
+}
+
+/// 执行 lookup_character
+///
+/// 根据角色名称在附近实体中查找匹配项，返回 UUID 字符串。
+pub async fn execute_lookup_character(
+    name: &str,
+    store: &WorldStateStore,
+) -> serde_json::Value {
+    let ws = match store.current().await {
+        Some(ws) => ws,
+        None => {
+            return serde_json::json!({
+                "success": false,
+                "message": "WorldState 尚未初始化"
+            })
+        }
+    };
+
+    let matches: Vec<_> = ws
+        .entities
+        .iter()
+        .filter(|e| e.name.contains(name))
+        .map(|e| {
+            serde_json::json!({
+                "name": e.name,
+                "id": e.id.to_string(),
+                "state": e.state,
+                "distance": e.distance,
+                "hostile": e.hostile,
+            })
+        })
+        .collect();
+
+    let hint = if matches.is_empty() {
+        "未找到匹配角色，请检查名字是否正确，或使用 query_world(section: 'entities') 查看附近所有角色".to_string()
+    } else if matches.len() == 1 {
+        format!(
+            "找到角色 '{}'，UUID: {}",
+            matches[0]["name"], matches[0]["id"]
+        )
+    } else {
+        "找到多个匹配角色，请使用更完整的名称重新查询".to_string()
+    };
+
+    serde_json::json!({
+        "success": true,
+        "matches": matches,
+        "total": matches.len(),
+        "hint": hint,
+    })
 }
 
 /// 执行 list_skills
@@ -482,6 +551,49 @@ mod tests {
         let result = execute_query_world("nonexistent", None, &store).await;
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["message"].as_str().unwrap().contains("nonexistent"));
+    }
+
+    // ---- lookup_character ----
+
+    #[tokio::test]
+    async fn test_lookup_character_exact_match() {
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
+        let result = execute_lookup_character("路人甲", &store).await;
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["total"], 1);
+        assert_eq!(result["matches"][0]["name"], "路人甲");
+        assert!(!result["matches"][0]["id"].as_str().unwrap().is_empty());
+        assert!(
+            uuid::Uuid::parse_str(result["matches"][0]["id"].as_str().unwrap()).is_ok(),
+            "返回的 id 应为合法 UUID"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_lookup_character_partial_match() {
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
+        let result = execute_lookup_character("路人", &store).await;
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["total"], 1);
+    }
+
+    #[tokio::test]
+    async fn test_lookup_character_no_match() {
+        let store = WorldStateStore::new();
+        store.update(make_test_world_state()).await;
+        let result = execute_lookup_character("不存在", &store).await;
+        assert!(result["success"].as_bool().unwrap());
+        assert_eq!(result["total"], 0);
+        assert!(result["hint"].as_str().unwrap().contains("未找到"));
+    }
+
+    #[tokio::test]
+    async fn test_lookup_character_no_world_state() {
+        let store = WorldStateStore::new();
+        let result = execute_lookup_character("路人甲", &store).await;
+        assert!(!result["success"].as_bool().unwrap());
     }
 
     // ---- tool definitions ----
