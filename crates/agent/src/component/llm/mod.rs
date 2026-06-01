@@ -161,6 +161,7 @@ fn build_direct_client(
 }
 
 /// 构建 DirectLlmClient（指定 max_tokens + enable_thinking + context_window_tokens）
+#[allow(clippy::too_many_arguments)]
 fn build_direct_client_with_max_tokens(
     llm_config: &crate::config::LlmConfig,
     model: Option<&str>,
