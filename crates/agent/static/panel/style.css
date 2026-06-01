@@ -160,6 +160,7 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     min-height: 500px;
+    padding: 16px;
 }
 
 .sidebar-tab {
@@ -354,6 +355,73 @@ body {
     transition: width 0.3s ease;
 }
 
+/* Panel enter animation */
+@keyframes panel-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.panel-enter { animation: panel-enter 0.2s ease-out; }
+
+/* Relationship avatar */
+.rel-card { transition: box-shadow 0.15s; }
+.rel-card:hover { box-shadow: var(--shadow-sm); }
+.rel-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--accent-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+/* Experience timeline */
+.exp-list {
+    padding: 4px 0;
+    position: relative;
+    margin-left: 10px;
+}
+.exp-list::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--border);
+    border-radius: 1px;
+}
+.tl-item {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 10px;
+}
+.tl-dot {
+    position: absolute;
+    left: -5px;
+    top: 14px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 2px solid var(--accent);
+    z-index: 1;
+}
+.tl-item:last-child .tl-dot {
+    border-color: var(--success);
+}
+.tl-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+}
+.tl-content:hover { box-shadow: var(--shadow-sm); }
+
 /* Event items */
 .event-item {
     padding: 10px 12px;
@@ -364,6 +432,131 @@ body {
 }
 .event-item .event-time { font-size: 11px; color: var(--text-muted); }
 .event-item .event-text { font-size: 13px; margin-top: 2px; }
+
+/* ============================================================================
+   Three-Soul Experience Cards (三魂经历日志)
+   ============================================================================ */
+
+:root {
+    --soul-renhun: #0d9488;
+    --soul-renhun-border: #14b8a6;
+    --soul-renhun-muted: rgba(20, 184, 166, 0.12);
+    --soul-tianhun: #0891b2;
+    --soul-tianhun-border: #22d3ee;
+    --soul-tianhun-muted: rgba(34, 211, 238, 0.12);
+    --soul-dihun: #059669;
+    --soul-dihun-border: #34d399;
+    --soul-dihun-muted: rgba(52, 211, 153, 0.12);
+    --soul-immediate: #ea580c;
+    --soul-immediate-border: #fb923c;
+    --soul-immediate-muted: rgba(251, 146, 60, 0.12);
+}
+
+.tick-card-header {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 12px;
+}
+.tick-badge {
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--accent-light);
+    color: var(--accent);
+}
+.tick-world-time { color: var(--text-secondary); }
+.tick-real-time { color: var(--text-muted); margin-left: auto; font-size: 11px; }
+
+.tick-section { margin-bottom: 8px; }
+.tick-section:last-child { margin-bottom: 0; }
+.tick-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.tick-attempts-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+}
+.tick-attempt-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+}
+.tick-attempt-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+/* 三魂 inline blocks */
+.exp-renhun, .exp-tianhun, .exp-dihun, .exp-immediate {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    border-left: 3px solid transparent;
+}
+.exp-renhun:hover, .exp-tianhun:hover, .exp-dihun:hover { background: var(--bg-hover); }
+
+.exp-soul-label {
+    font-weight: 700;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    min-width: 32px;
+    text-align: center;
+}
+.exp-soul-content { flex: 1; }
+
+.exp-renhun { border-left-color: var(--soul-renhun-border); }
+.exp-renhun .exp-soul-label { background: var(--soul-renhun-muted); color: var(--soul-renhun); }
+
+.exp-tianhun { border-left-color: var(--soul-tianhun-border); }
+.exp-tianhun .exp-soul-label { background: var(--soul-tianhun-muted); color: var(--soul-tianhun); }
+
+.exp-dihun { border-left-color: var(--soul-dihun-border); flex-direction: column; gap: 4px; }
+.exp-dihun .exp-soul-label { background: var(--soul-dihun-muted); color: var(--soul-dihun); align-self: flex-start; }
+
+.exp-immediate { border-left-color: var(--soul-immediate-border); }
+.exp-immediate .exp-soul-label { background: var(--soul-immediate-muted); color: var(--soul-immediate); }
+
+.soul-text { font-size: 13px; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.soul-thought { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.soul-params { font-family: monospace; font-size: 10px; color: var(--text-muted); }
+.soul-result { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; display: inline-block; }
+.soul-result.approved { color: var(--success); background: var(--success-light); }
+.soul-result.rejected { color: var(--danger); background: var(--danger-light); }
+.soul-reason, .soul-narrative { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+.soul-layers { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+.soul-layer-tag { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+.soul-layer-tag.passed { background: var(--success-light); color: var(--success); }
+.soul-layer-tag.failed { background: var(--danger-light); color: var(--danger); }
+
+.tick-section-immediate { border-top: 1px dashed var(--border-light); padding-top: 8px; }
+.imm-item { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+.imm-status { font-size: 10px; padding: 1px 6px; border-radius: 4px; }
+.imm-status.sent { background: var(--success-light); color: var(--success); }
+.imm-status.failed { background: var(--danger-light); color: var(--danger); }
+.imm-error { font-size: 10px; color: var(--danger); }
 
 /* Metric grid */
 .metric-grid {

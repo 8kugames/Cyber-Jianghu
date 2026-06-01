@@ -1,7 +1,7 @@
 // Dashboard page: three-column overview
 
 import { API, get } from './api.js';
-import { escapeHtml, showLoading, formatWorldTime, extractActionSummary, getActionColor, getAttrColor, fmtNum, STATUS_MAP } from './ui.js';
+import { escapeHtml, showLoading, formatWorldTime, getAttrColor, fmtNum, STATUS_MAP } from './ui.js';
 import { onEvent } from './app.js';
 
 const DASHBOARD_EVENT_LIMIT = 5;
@@ -70,14 +70,15 @@ async function loadCharStatus() {
     if (!el) return;
 
     try {
-        const [state, attrs, meta] = await Promise.all([
+        const [state, attrs, meta, character] = await Promise.all([
             get(API.STATE),
             get(API.ATTRIBUTES),
             get(API.ATTRIBUTE_META),
+            get(API.CHARACTER).catch(() => null),
         ]);
 
-        const charName = state.self_state?.name || state.agent_name || '-';
-        const status = state.self_state?.status || 'unknown';
+        const charName = character?.name || character?.agent_name || state.agent_name || '-';
+        const status = character?.status || 'unknown';
         const statusLabel = STATUS_MAP[status] || status;
 
         // Group attributes by category
@@ -94,7 +95,7 @@ async function loadCharStatus() {
             const raw = attrs.raw?.[attrName];
             const pct = raw != null ? Math.min(100, Math.max(0, raw)) : 50;
             const color = getAttrColor(attrName, pct);
-            const label = attr.display_name || displayNames[attrName] || attrName;
+            const label = displayNames[attrName] || attrName;
             barsHtml += `
             <div class="attr-bar">
                 <div class="attr-bar-label">
@@ -108,7 +109,7 @@ async function loadCharStatus() {
         }
 
         // Location
-        const location = state.self_state?.location_name || state.self_state?.location_id || '-';
+        const location = character?.location_name || character?.location_id || state.location?.name || state.location?.node_id || '-';
 
         el.innerHTML = `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -133,28 +134,64 @@ async function loadEvents() {
     if (!el) return;
 
     try {
-        const data = await get(`${API.SOUL_CYCLES}?page=1&per_page=${DASHBOARD_EVENT_LIMIT}`);
-        const records = data.records || [];
+        const data = await get(`${API.SOUL_CYCLES}?page=1&limit=${DASHBOARD_EVENT_LIMIT}`);
+        let recordMap = data.records || {};
+        if (Array.isArray(recordMap)) {
+            const m = {};
+            for (const r of recordMap) { const k = String(r.tick_id || 0); (m[k] ||= []).push(r); }
+            recordMap = m;
+        }
 
-        if (records.length === 0) {
+        const tickIds = Object.keys(recordMap).sort((a, b) => Number(b) - Number(a));
+
+        if (tickIds.length === 0) {
             el.innerHTML = '<p class="text-muted">暂无事件记录</p>';
             return;
         }
 
         let html = '';
-        for (const rec of records.slice(0, DASHBOARD_EVENT_LIMIT)) {
-            const wt = rec.world_time ? formatWorldTime(rec.world_time) : '-';
-            const actionType = rec.final_action_type || '-';
-            const content = extractActionSummary(rec);
-            const narrative = rec.renhun_narrative ? rec.renhun_narrative.substring(0, 80) : '';
-            const color = getActionColor(actionType);
+        for (const tickId of tickIds.slice(0, DASHBOARD_EVENT_LIMIT)) {
+            const attempts = recordMap[tickId] || [];
+            const first = attempts[0];
+            if (!first) continue;
 
-            html += `
-            <div class="event-item" style="border-left-color:${color}">
-                <div class="event-time">${escapeHtml(wt)} · ${escapeHtml(actionType)}</div>
-                <div class="event-text">${escapeHtml(content)}</div>
-                ${narrative ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(narrative)}...</div>` : ''}
-            </div>`;
+            const wt = first.world_time ? formatWorldTime(first.world_time) : '-';
+            const intent = first.final_intent;
+            const actionType = intent?.action_type || '-';
+            const renhunNarrative = first.renhun?.narrative || '';
+            const tianhunResult = first.tianhun?.result || '';
+
+            // Compact dashboard: action summary + renhun narrative snippet
+            let actionSummary = actionType;
+            if (intent?.pipeline_actions && intent.pipeline_actions.length > 0) {
+                actionSummary = intent.pipeline_actions.map(pa => {
+                    const c = pa.action_data?.content;
+                    return c ? `${pa.action_type}: ${c}` : (pa.action_type || '-');
+                }).join(' → ');
+            } else if (intent?.action_data) {
+                const ad = typeof intent.action_data === 'string' ? (() => { try { return JSON.parse(intent.action_data); } catch { return {}; } })() : intent.action_data;
+                if (ad.content) actionSummary = `${actionType}: ${ad.content}`;
+            }
+
+            html += `<div class="card" style="margin-bottom:6px;padding:10px">`;
+            html += `<div class="tick-card-header" style="margin-bottom:4px">`;
+            html += `<span class="tick-badge">T${escapeHtml(tickId)}</span>`;
+            html += `<span class="tick-world-time">${escapeHtml(wt)}</span>`;
+            if (tianhunResult) {
+                const isApproved = tianhunResult === 'approved';
+                html += `<span class="soul-result ${isApproved ? 'approved' : 'rejected'}" style="margin-left:auto">${isApproved ? '通过' : '驳回'}</span>`;
+            }
+            html += `</div>`;
+
+            // Dihun (action)
+            html += `<div class="exp-dihun" style="margin-top:2px;padding:4px 8px"><span class="exp-soul-label">地魂</span><div class="exp-soul-content"><div class="soul-text" style="font-size:12px">${escapeHtml(actionSummary.substring(0, 100))}${actionSummary.length > 100 ? '...' : ''}</div></div></div>`;
+
+            // Renhun (narrative) — collapsed snippet
+            if (renhunNarrative) {
+                const snippet = renhunNarrative.substring(0, 80);
+                html += `<div class="exp-renhun" style="margin-top:2px;padding:4px 8px"><span class="exp-soul-label">人魂</span><div class="exp-soul-content"><div class="soul-text" style="font-size:11px">${escapeHtml(snippet)}${renhunNarrative.length > 80 ? '...' : ''}</div></div></div>`;
+            }
+            html += `</div>`;
         }
 
         html += `<div style="text-align:center;margin-top:8px"><a href="#/characters" class="text-link">查看完整经历 →</a></div>`;
@@ -185,9 +222,15 @@ async function loadMonitor() {
             });
         }
 
-        const connected = status.status === 'fulfilled' && status.value?.server_connected;
+        const connected = status.status === 'fulfilled' && status.value?.has_server;
         const tickId = tick.status === 'fulfilled' ? tick.value?.tick_id ?? '-' : '-';
-        const sanity = cognitive.status === 'fulfilled' ? cognitive.value?.sanity ?? '-' : '-';
+        // sanity: 从 cognitive context 中提取
+        let sanity = '-';
+        if (cognitive.status === 'fulfilled' && cognitive.value) {
+            const cog = cognitive.value;
+            const attrs = cog.world_state?.attributes || {};
+            sanity = attrs.sanity ?? attrs.理智 ?? cog.sanity ?? '-';
+        }
 
         el.innerHTML = `
         <div class="metric-grid">
@@ -261,10 +304,12 @@ function drawRadar(attributes, categories, displayNames) {
         ctx.stroke();
     }
 
-    // Draw data polygon
+    // Draw data polygon — 动态归一化：取数据最大值作基准
+    const numericValues = radarAttrs.map(a => parseFloat(a.value)).filter(n => !isNaN(n));
+    const maxValue = numericValues.length > 0 ? Math.max(...numericValues, 1) : 100;
     const values = radarAttrs.map(a => {
         const num = parseFloat(a.value);
-        return isNaN(num) ? 0.5 : Math.min(1, Math.max(0, num / 100));
+        return isNaN(num) ? 0.5 : Math.min(1, Math.max(0, num / maxValue));
     });
 
     ctx.fillStyle = 'rgba(64, 120, 242, 0.15)';
@@ -289,6 +334,6 @@ function drawRadar(attributes, categories, displayNames) {
         const angle = -Math.PI / 2 + i * angleStep;
         const lx = cx + (r + 18) * Math.cos(angle);
         const ly = cy + (r + 18) * Math.sin(angle);
-        ctx.fillText(radarAttrs[i].display, lx, ly + 4);
+        ctx.fillText(`${radarAttrs[i].display} ${radarAttrs[i].value}`, lx, ly + 4);
     }
 }

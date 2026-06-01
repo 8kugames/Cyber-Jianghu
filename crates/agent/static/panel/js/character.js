@@ -7,6 +7,7 @@ import { getPanelDefinitions, mountPanel } from './panels.js';
 
 let activePanel = 'attributes';
 let characterData = null;
+let characterList = [];
 let unsubscribe = null;
 
 export const characterPage = {
@@ -73,11 +74,19 @@ function render(container) {
             return;
         }
         if (agentId) {
-            try {
-                await post(API.CHARACTERS_SWITCH, { agent_id: agentId });
-                loadCharacterData();
-            } catch (err) {
-                showError('切换失败: ' + err.message);
+            const ch = characterList.find(c => (c.agent_id || c.id) === agentId);
+            const isInactive = ch && (ch.status === 'dead' || ch.status === 'retired');
+
+            if (isInactive) {
+                // Dead/retired: load directly from local agent storage, no server switch
+                await loadCharacterDataById(agentId);
+            } else {
+                try {
+                    await post(API.CHARACTERS_SWITCH, { agent_id: agentId });
+                    loadCharacterData();
+                } catch (err) {
+                    showError('切换失败: ' + err.message);
+                }
             }
         }
     });
@@ -90,6 +99,8 @@ async function loadCharacterList() {
     try {
         const data = await get(API.CHARACTERS);
         const characters = data.characters || data || [];
+        characterList = characters;
+
         const select = document.getElementById('char-select');
         if (!select) return;
 
@@ -98,8 +109,7 @@ async function loadCharacterList() {
             const id = ch.agent_id || ch.id;
             const name = ch.name || id;
             const status = ch.status || 'unknown';
-            const disabled = status === 'dead' || status === 'retired';
-            html += `<option value="${escapeHtml(id)}" ${disabled ? 'disabled' : ''}>${escapeHtml(name)} (${status})</option>`;
+            html += `<option value="${escapeHtml(id)}">${escapeHtml(name)} (${STATUS_MAP[status] || status})</option>`;
         }
         html += '<option value="__create__">+ 新角色</option>';
         select.innerHTML = html;
@@ -144,6 +154,34 @@ async function loadCharacterData() {
         if (e.message.includes('412') || e.message.includes('没有')) {
             if (infoEl) infoEl.innerHTML = '<p class="text-muted">当前无活跃角色，请创建新角色</p>';
         }
+    }
+}
+
+async function loadCharacterDataById(agentId) {
+    const infoEl = document.getElementById('char-info');
+    try {
+        const data = await get(`/api/v1/characters/${encodeURIComponent(agentId)}`);
+        characterData = data;
+
+        const name = data.name || '-';
+        const age = data.age ?? '-';
+        const gender = data.gender || '-';
+        const location = data.location || '-';
+        const status = data.status || 'unknown';
+
+        if (infoEl) {
+            infoEl.innerHTML = `
+                <div style="width:36px;height:36px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">${escapeHtml(name.charAt(0))}</div>
+                <div>
+                    <div style="font-size:16px;font-weight:600">${escapeHtml(name)}</div>
+                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)} · <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'}">${STATUS_MAP[status] || status}</span></div>
+                </div>
+            `;
+        }
+
+        loadPanel();
+    } catch (e) {
+        if (infoEl) infoEl.innerHTML = '<p class="text-muted">角色数据加载失败</p>';
     }
 }
 

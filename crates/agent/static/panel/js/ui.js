@@ -94,28 +94,30 @@ function getShichen(hour) {
 }
 
 export function extractActionSummary(rec) {
-    if (!rec.final_action_type) return '-';
-    const pipeline = rec.final_pipeline_json;
+    // 兼容两种 API 结构：嵌套 final_intent 或扁平
+    const intent = rec.final_intent || {};
+    const actionType = rec.final_action_type || intent.action_type;
+    if (!actionType) return '-';
+
+    // pipeline actions（多意图）
+    const pipeline = rec.final_pipeline_json || intent.pipeline_actions;
     if (pipeline) {
-        try {
-            const items = JSON.parse(pipeline);
-            if (Array.isArray(items) && items.length > 0) {
-                return items.map(i => {
-                    const content = i.action_data?.content;
-                    if (content && (i.action_type === 'speak' || i.action_type === 'whisper')) return `${i.action_type}: ${content}`;
-                    return i.action_type || '-';
-                }).join(' → ');
-            }
-        } catch (_) {}
+        const items = typeof pipeline === 'string' ? JSON.parse(pipeline) : pipeline;
+        if (Array.isArray(items) && items.length > 0) {
+            return items.map(i => {
+                const content = i.action_data?.content;
+                if (content && (i.action_type === 'speak' || i.action_type === 'whisper')) return `${i.action_type}: ${content}`;
+                return i.action_type || '-';
+            }).join(' → ');
+        }
     }
-    const data = rec.final_action_data;
+
+    const data = rec.final_action_data || intent.action_data;
     if (data) {
-        try {
-            const parsed = JSON.parse(data);
-            if (parsed.content) return `${rec.final_action_type}: ${parsed.content}`;
-        } catch (_) {}
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        if (parsed.content) return `${actionType}: ${parsed.content}`;
     }
-    return rec.final_action_type;
+    return actionType;
 }
 
 export function getActionColor(type) {

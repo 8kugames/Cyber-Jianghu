@@ -545,17 +545,63 @@ pub fn get_static_serve_dir() -> PathBuf {
     }
 }
 
+/// 静态文件 handler：读取磁盘文件并添加 Cache-Control: no-cache 头
+async fn static_file_handler(req: axum::extract::Request, serve_dir: std::path::PathBuf) -> axum::response::Response {
+    let path = req.uri().path().trim_start_matches('/');
+    let file_path = if path.is_empty() || path == "index.html" {
+        serve_dir.join("index.html")
+    } else {
+        serve_dir.join(path)
+    };
+
+    // Security: prevent path traversal
+    if !file_path.starts_with(&serve_dir) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+
+    match tokio::fs::read(&file_path).await {
+        Ok(bytes) => {
+            let content_type = match file_path.extension().and_then(|e| e.to_str()) {
+                Some("html") => "text/html; charset=utf-8",
+                Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
+                Some("css") => "text/css; charset=utf-8",
+                Some("json") => "application/json",
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("svg") => "image/svg+xml",
+                Some("ico") => "image/x-icon",
+                _ => "application/octet-stream",
+            };
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert("cache-control", "no-cache, no-store, must-revalidate".parse().unwrap());
+            headers.insert("content-type", content_type.parse().unwrap());
+            (axum::http::StatusCode::OK, headers, bytes).into_response()
+        }
+        Err(_) => {
+            // SPA fallback: serve index.html for unknown routes
+            match tokio::fs::read(serve_dir.join("index.html")).await {
+                Ok(html) => {
+                    let mut headers = axum::http::HeaderMap::new();
+                    headers.insert("cache-control", "no-cache, no-store, must-revalidate".parse().unwrap());
+                    headers.insert("content-type", "text/html; charset=utf-8".parse().unwrap());
+                    (axum::http::StatusCode::OK, headers, html).into_response()
+                }
+                Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    }
+}
+
 /// 启动 HTTP API 服务器
 ///
 /// 启动后监听指定端口，提供 RESTful API 供外部系统调用
 /// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
 /// 则返回 503 SERVICE_UNAVAILABLE 错误
 pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
-    let app = create_api_router().with_state(api_state.clone());
-
-    // 添加静态文件服务（用于 Web 面板）
-    let serve_dir = get_static_serve_dir();
-    let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
+    let static_dir = get_static_serve_dir();
+    let app = create_api_router()
+        .with_state(api_state.clone())
+        .fallback(move |req: axum::extract::Request| static_file_handler(req, static_dir.clone()));
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
