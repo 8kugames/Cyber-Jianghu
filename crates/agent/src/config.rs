@@ -750,6 +750,8 @@ pub struct AttentionConfig {
 #[serde(default)]
 pub struct DeltaConfig {
     pub change_percentage_threshold: f32,
+    /// 生存驱动 Critical 阈值（>= 此值标 Critical，< 此值标 Important）
+    pub survival_critical_urgency_threshold: u8,
 }
 
 impl Default for ReflectorOptConfig {
@@ -776,6 +778,7 @@ impl Default for DeltaConfig {
     fn default() -> Self {
         Self {
             change_percentage_threshold: 0.1,
+            survival_critical_urgency_threshold: 5,
         }
     }
 }
