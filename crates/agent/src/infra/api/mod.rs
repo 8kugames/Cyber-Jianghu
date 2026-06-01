@@ -573,15 +573,15 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     info!("[http] HTTP_PORT={}", local_addr.port());
     info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
     info!(
-        "[http] - Create character: http://127.0.0.1:{}/create.html",
+        "[http] - Dashboard:       http://127.0.0.1:{}/#/dashboard",
         local_addr.port()
     );
     info!(
-        "[http] - Character info:  http://127.0.0.1:{}/character.html",
+        "[http] - Character info:  http://127.0.0.1:{}/#/characters",
         local_addr.port()
     );
     info!(
-        "[http] - Settings:        http://127.0.0.1:{}/settings.html",
+        "[http] - Settings:        http://127.0.0.1:{}/#/settings",
         local_addr.port()
     );
 
