@@ -90,7 +90,7 @@ pub struct AgentRegisterRequest {
     // === 设备认证 ===
     /// 设备唯一标识
     pub device_id: Uuid,
-    /// 设备认证令牌（从 /api/v1/agent/connect 获取）
+    /// 设备认证令牌（从 /api/v1/device/verify 或 /api/v1/device/register 获取）
     pub auth_token: String,
 
     // === 角色基本信息 ===

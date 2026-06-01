@@ -7,6 +7,26 @@
 
 ## [Unreleased]
 
+### Changed — 设备身份生命周期 v2 [BREAKING]
+
+- **[BREAKING] Server**: 废弃 `POST /api/v1/agent/connect`（upsert 撞库语义），拆分为两个严格语义端点：
+  - `POST /api/v1/device/verify` — 仅查询，设备不存在返回 `404 + {error: "device_not_found", ...}`。**严禁**任何 client 撞库新建设备。
+  - `POST /api/v1/device/register` — server 端生成 `device_id` (UUID v4)，`201 Created`。**不接受** client 入参 `device_id`，从协议层消除撞库。
+- **[BREAKING] Server**: 删除 `agent_connect` handler、`AgentConnectRequest`/`AgentConnectResponse` 结构（与 `/api/v1/agent/connect` 端点一同移除）。`narrative_config` 不再随设备身份下发，迁移至 `POST /api/v1/agent/register` (character register) 唯一注入点。
+- **Server TOCTOU 修复**: `device_verify` 200 路径调用新增的 `get_device_token` (SELECT only)，**不再**调用 `connect_device` (upsert 语义)。并发 DELETE 窗口（verify_strict 返回 true 后、get_device_token 之前）显式 fail-fast 返 500，杜绝"刚被 admin DELETE 的 device 被 agent verify 复活"。
+- **Server 新增 `DeviceRegisterErrorResponse`**: `device_register` 错误路径返回结构化 JSON body（与 `DeviceVerifyErrorResponse` 对称），含 `error: "internal_error"` 标识。
+- **Server 状态码**: `device_register` 资源创建返 `201 Created`（不再用 200）。
+- **Server `connect_device` DB 函数保留**（YAGNI 注：仍为内部低阶 helper，未来如需 upsert 语义可独立调用；端点层已彻底禁止使用）。
+- **Agent**: `ensure_device` 重写为 verify-first — 启动时先调 `/device/verify`，404 删除本地 yaml 后 fall through 到 `/device/register` 申报新设备。
+- **Agent**: `refresh_device_token` (HTTP path) 与 `refresh_device_token` (reconnect path) 统一改调 `/device/verify`，404 时 fail-fast 删本地 yaml + bail，触发上层重启走 `ensure_device` 重新注册路径。
+- **Agent**: WebSocket 401 归类为 `AuthFailed`（之前仅识别 400），触发 `refresh_device_token` 自动恢复。
+- **Agent**: `remove_file` 失败 fail-fast（`bail!`）— 之前仅 `warn!` 后继续，会形成"stale yaml 删不掉 → 下次启动再次 404 → 死循环"的可复现 bug。
+- **Agent**: 死代码 `if server_token != local.auth_token` 分支删除（server 端不轮换 token，命中"existing"分支原样返回，YAGNI）。
+- **Agent**: 删除 `fetch_narrative_config_from_server` 函数（依赖旧 `/api/v1/agent/connect` 拉 narrative_config）— narrative_config 唯一注入点为 character_register 路径。
+- **CLAUDE.md**: Server API 端点列表更新，删除 `/api/v1/agent/connect`，新增 `/api/v1/device/verify` + `/api/v1/device/register`。
+
+**升级影响**：依赖旧 `/api/v1/agent/connect` 端点的外部 client（OpenClaw 集成、第三方 agent）需迁移到新端点。Agent 端 SDK 已自动适配。
+
 ### Fixed — Auto-Rebirth 将已死亡角色错误归隐
 
 - **[BREAKING] Server**: `auto_rebirth_agent()` 不再将旧 agent `status` 改为 `'retired'`。转世完成后旧 agent 保持 `status='dead'` 死亡标记，`retired_at` 字段仅作为时间戳记录"转世完成"事件。`retired` 状态语义专属"玩家主动归隐"（通过 `/api/v1/agent/retire` 端点触发）。**已死亡角色永远不会被 auto-rebirth 错误归隐**。

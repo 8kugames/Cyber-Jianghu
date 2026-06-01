@@ -2,9 +2,8 @@
 // 设备身份生命周期 v2 — 严格校验 + 显式注册
 // ============================================================================
 //
-// 与 `agent.rs::agent_connect` 的根本区别：
-// - agent_connect 是 upsert 语义（撞库空就建）— **保留以兼容旧 agent**
-// - 本文件的两个端点是严格语义：
+// 本文件两个端点是设备身份 v2 的唯一入口（设备身份 v1 的 upsert 端点
+// `POST /api/v1/agent/connect` 已彻底删除，详见 CHANGELOG [Unreleased]）：
 //   * /device/verify   — 仅查询，设备不存在返回 404
 //   * /device/register — server 端生成 device_id，**不允许** client 传入
 //
