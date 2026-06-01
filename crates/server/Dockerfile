@@ -43,43 +43,26 @@ RUN mkdir -p ./.cargo \
     [source.aliyun]\n\
     registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"' > ./.cargo/config.toml
 
-# 优化构建缓存：先复制 Cargo 文件（包含所有 workspace 成员）
-# Cargo.lock 可选（如果存在则使用 --locked，否则正常构建）
+# 复制 Cargo 元数据以缓存依赖下载
 COPY Cargo.toml Cargo.lock* ./
 COPY crates/protocol/Cargo.toml ./crates/protocol/
 COPY crates/server/Cargo.toml ./crates/server/
 COPY crates/agent/Cargo.toml ./crates/agent/
 
-# 创建空的 src 目录，用于下载依赖（仅 server 需要的依赖）
+# 创建最小占位源文件，使 workspace 解析成功
 RUN mkdir -p crates/protocol/src crates/server/src crates/agent/src/bin && \
-    echo "pub fn placeholder() {}" > crates/protocol/src/lib.rs && \
     echo "fn main() {}" > crates/server/src/main.rs && \
-    echo "pub fn placeholder() {}" > crates/agent/src/lib.rs && \
     echo "fn main() {}" > crates/agent/src/bin/cyber-jianghu-agent.rs
 
-# 构建依赖（使用 BuildKit 缓存挂载，依赖会被持久化）
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/app/target,sharing=locked \
-    if [ -f Cargo.lock ]; then \
-        cargo build --release -p cyber-jianghu-server; \
-    else \
-        cargo build --release -p cyber-jianghu-server; \
-    fi
-
-# 复制实际源代码（server 仅依赖 protocol）
+# 复制真实 protocol 源码，之后构建将检测到变化并重新编译
 COPY crates/protocol/src ./crates/protocol/src
 COPY crates/server/src ./crates/server/src
 
-# 重新构建（只编译源代码，依赖已缓存）
+# 构建（使用 BuildKit 缓存挂载加速依赖）
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    if [ -f Cargo.lock ]; then \
-        cargo build --release -p cyber-jianghu-server; \
-    else \
-        cargo build --release -p cyber-jianghu-server; \
-    fi && \
+    cargo build --release -p cyber-jianghu-server && \
     cp /app/target/release/cyber-jianghu-server /app/server-bin
 
 # ============================================================================

@@ -129,3 +129,4 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
+.superpowers/
