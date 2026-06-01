@@ -404,10 +404,67 @@ function renderActionText(actionType, actionData) {
 // ============================================================================
 
 let memPage = 1;
+let allMemories = [];
+
+const EVENT_TYPE_MAP = {
+    daily_summary: { label: '摘要', color: '#4078f2' },
+    daily_action_stats: { label: '统计', color: '#8c8c8c' },
+    synthesized_memory: { label: '合成', color: '#9b59b6' },
+    public_message: { label: '社交', color: '#27ae60' },
+    private_dialogue: { label: '社交', color: '#27ae60' },
+    social_interaction: { label: '社交', color: '#27ae60' },
+    action_result: { label: '事件', color: '#e67e22' },
+    state_change: { label: '事件', color: '#e67e22' },
+    death_notification: { label: '事件', color: '#e67e22' },
+    environmental_change: { label: '事件', color: '#e67e22' },
+    time_update: { label: '时间', color: '#5dade2' },
+    system_notification: { label: '系统', color: '#95a5a6' },
+    unknown: { label: '记忆', color: '#666' },
+};
+
+const MEM_FILTERS = [
+    { key: 'all', label: '全部' },
+    { key: 'daily_summary', label: '摘要' },
+    { key: 'synthesized_memory', label: '合成' },
+    { key: 'social', label: '社交' },
+    { key: 'event', label: '事件' },
+    { key: 'system', label: '系统' },
+];
+
+const SOCIAL_TYPES = ['public_message', 'private_dialogue', 'social_interaction'];
+const EVENT_TYPES = ['action_result', 'state_change', 'death_notification', 'environmental_change'];
+const SYSTEM_TYPES = ['time_update', 'system_notification'];
+
+function memTypeBadge(eventType) {
+    const info = EVENT_TYPE_MAP[eventType] || { label: '记忆', color: '#666' };
+    return `<span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;background:${info.color};color:#fff;margin-right:4px">${info.label}</span>`;
+}
+
+function memFilterKey(eventType) {
+    if (SOCIAL_TYPES.includes(eventType)) return 'social';
+    if (EVENT_TYPES.includes(eventType)) return 'event';
+    if (SYSTEM_TYPES.includes(eventType)) return 'system';
+    if (eventType === 'daily_summary') return 'daily_summary';
+    if (eventType === 'synthesized_memory') return 'synthesized_memory';
+    return eventType || 'unknown';
+}
+
+function renderMemories(memories) {
+    return memories.map(m =>
+        `<div class="card mem-card" data-mem-type="${memFilterKey(m.event_type)}" style="padding:10px;margin-bottom:6px">` +
+        `<div style="font-size:12px;color:var(--text-muted)">${memTypeBadge(m.event_type)}Tick ${m.tick_id ?? '-'} · ${(m.importance ?? 0).toFixed(2)}</div>` +
+        `<div style="font-size:13px;margin-top:2px">${escapeHtml(m.content || '-')}</div></div>`
+    ).join('');
+}
 
 async function mountMemories(container, ctx) {
     memPage = 1;
+    allMemories = [];
     showLoading(container);
+
+    const filterBtns = MEM_FILTERS.map(f =>
+        `<button class="btn btn-sm mem-filter${f.key === 'all' ? ' btn-primary' : ''}" data-filter="${f.key}">${f.label}</button>`
+    ).join('');
 
     container.innerHTML = `
         <div style="margin-bottom:12px">
@@ -415,11 +472,27 @@ async function mountMemories(container, ctx) {
                 <input class="form-input" type="text" id="mem-search-input" placeholder="搜索记忆...">
                 <button class="btn" id="mem-search-btn">搜索</button>
             </div>
+            <div class="mem-filters" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+                ${filterBtns}
+            </div>
         </div>
         <div id="mem-list"></div>
     `;
 
     await loadMemPage(container, ctx);
+
+    container.querySelectorAll('.mem-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            container.querySelectorAll('.mem-filter').forEach(b => b.classList.remove('btn-primary'));
+            btn.classList.add('btn-primary');
+            const filter = btn.dataset.filter;
+            const list = document.getElementById('mem-list');
+            if (!list) return;
+            list.querySelectorAll('.mem-card').forEach(card => {
+                card.style.display = (filter === 'all' || card.dataset.memType === filter) ? '' : 'none';
+            });
+        });
+    });
 
     document.getElementById('mem-search-btn')?.addEventListener('click', async () => {
         const query = document.getElementById('mem-search-input')?.value?.trim();
@@ -436,11 +509,7 @@ async function mountMemories(container, ctx) {
                 list.innerHTML = '<p class="text-muted">无匹配结果</p>';
                 return;
             }
-            let html = '';
-            for (const m of memories) {
-                html += `<div class="card" style="padding:10px;margin-bottom:6px"><div style="font-size:12px;color:var(--text-muted)">Tick ${m.tick_id ?? '-'} · ${m.importance ?? ''}</div><div style="font-size:13px;margin-top:2px">${escapeHtml(m.content || '-')}</div></div>`;
-            }
-            list.innerHTML = html;
+            list.innerHTML = renderMemories(memories);
         } catch (e) {
             list.innerHTML = '<p class="text-muted">搜索失败</p>';
         }
@@ -455,16 +524,14 @@ async function loadMemPage(container, ctx) {
         const agentIdParam = ctx.agentId ? `&agent_id=${ctx.agentId}` : '';
         const data = await get(`${API.MEMORY_RECENT}?page=${memPage}&limit=20${agentIdParam}`);
         const memories = data.memories || data || [];
+        allMemories = allMemories.concat(memories);
 
         if (memories.length === 0 && memPage === 1) {
             list.innerHTML = '<p class="text-muted">暂无记忆</p>';
             return;
         }
 
-        let html = '';
-        for (const m of memories) {
-            html += `<div class="card" style="padding:10px;margin-bottom:6px"><div style="font-size:12px;color:var(--text-muted)">Tick ${m.tick_id ?? '-'}</div><div style="font-size:13px;margin-top:2px">${escapeHtml(m.content || '-')}</div></div>`;
-        }
+        let html = renderMemories(memories);
 
         if (memories.length >= 20) {
             html += `<div style="text-align:center;margin-top:8px"><button class="btn btn-sm" id="mem-load-more">加载更多</button></div>`;
@@ -473,7 +540,18 @@ async function loadMemPage(container, ctx) {
         if (memPage === 1) {
             list.innerHTML = html;
         } else {
-            list.insertAdjacentHTML('beforeend', html);
+            // Re-render full list to apply current filter
+            const activeFilter = container.querySelector('.mem-filter.btn-primary')?.dataset.filter || 'all';
+            list.innerHTML = renderMemories(allMemories);
+            if (memories.length >= 20) {
+                list.insertAdjacentHTML('beforeend', `<div style="text-align:center;margin-top:8px"><button class="btn btn-sm" id="mem-load-more">加载更多</button></div>`);
+            }
+            if (activeFilter !== 'all') {
+                list.querySelectorAll('.mem-card').forEach(card => {
+                    card.style.display = card.dataset.memType === activeFilter ? '' : 'none';
+                });
+            }
+            return;
         }
 
         document.getElementById('mem-load-more')?.addEventListener('click', () => {
