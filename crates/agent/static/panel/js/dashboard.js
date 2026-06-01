@@ -32,7 +32,7 @@ function render(container) {
             </div>
             <div class="card" style="margin-top:12px">
                 <div class="card-body" id="dash-radar" style="text-align:center;min-height:160px">
-                    <canvas id="radar-canvas" width="200" height="200"></canvas>
+                    <canvas id="radar-canvas" width="360" height="360"></canvas>
                 </div>
             </div>
             <div class="card" style="margin-top:12px">
@@ -125,7 +125,8 @@ async function loadCharStatus() {
                     </div>
                     <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)}</div>
                     <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escapeHtml(agentId)}</div>
-                    <div style="font-size:11px;color:var(--text-muted)">注册: ${escapeHtml(registeredAt)} · ${escapeHtml(serverUrl)}</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:1px">注册时间: ${escapeHtml(registeredAt)}</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:1px">Server: ${escapeHtml(serverUrl)}</div>
                 </div>
             </div>
             ${barsHtml}

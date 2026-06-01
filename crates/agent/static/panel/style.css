@@ -129,7 +129,7 @@ body {
     gap: 16px;
     align-items: flex-start;
 }
-.dashboard-left { width: 240px; flex-shrink: 0; }
+.dashboard-left { width: 400px; flex-shrink: 0; }
 .dashboard-center { flex: 1; min-width: 0; }
 .dashboard-right { width: 200px; flex-shrink: 0; }
 
