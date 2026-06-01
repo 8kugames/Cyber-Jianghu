@@ -345,6 +345,11 @@ async fn main() -> Result<()> {
             "/api/v1/agent/biography",
             post(handlers::agent::update_biography),
         )
+        // 传记查询 - Agent 端回退读取（本地无传记时从 server DB 获取）
+        .route(
+            "/api/v1/agent/{id}/biography",
+            get(handlers::agent::get_agent_biography),
+        )
         // Prompt Templates 拉取 — Agent 启动时主动获取
         .route(
             "/api/v1/agent/prompt-templates",

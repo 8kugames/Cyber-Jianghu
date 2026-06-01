@@ -11,9 +11,9 @@ use anyhow::Context;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 
-/// GET /api/v1/character/biography?agent_id=xxx
+/// GET /api/v1/character/biography?agent_id=xxx[&fallback=server]
 ///
-/// 返回已缓存的纪传体传记（不触发生成）
+/// 返回已缓存的纪传体传记。本地无传记时若指定 fallback=server，则回退到 server DB 查询。
 pub(crate) async fn get_biography_handler(
     State(state): State<HttpApiState>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
@@ -27,6 +27,10 @@ pub(crate) async fn get_biography_handler(
     let character = match get_character_by_id_sync(&character_dir, agent_id) {
         Ok(Some(c)) => c,
         _ => {
+            // 本地无角色文件，尝试 server 回退
+            if params.get("fallback").map(|s| s.as_str()) == Some("server") {
+                return fetch_biography_from_server(&state, agent_id).await;
+            }
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "character not found"})),
@@ -37,7 +41,46 @@ pub(crate) async fn get_biography_handler(
 
     match &character.biography {
         Some(bio) if !bio.is_empty() => Json(serde_json::json!({"biography": bio})).into_response(),
-        _ => Json(serde_json::json!({"biography": null})).into_response(),
+        _ => {
+            // 本地无传记，尝试 server 回退
+            if params.get("fallback").map(|s| s.as_str()) == Some("server") {
+                return fetch_biography_from_server(&state, agent_id).await;
+            }
+            Json(serde_json::json!({"biography": null})).into_response()
+        }
+    }
+}
+
+/// 从 server DB 查询传记（回退机制：agent 本地 character.yaml 无传记时使用）
+async fn fetch_biography_from_server(state: &HttpApiState, agent_id: Uuid) -> axum::response::Response {
+    let server_http_url = state.server_http_url.read().await.clone();
+    let url = format!("{}/api/v1/agent/{}/biography", server_http_url, agent_id);
+
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<serde_json::Value>().await {
+                Ok(data) => {
+                    let bio = data.get("biography").and_then(|v| v.as_str());
+                    match bio {
+                        Some(b) if !b.is_empty() => {
+                            info!("[biography] server 回退命中: agent={}", agent_id);
+                            Json(serde_json::json!({"biography": b})).into_response()
+                        }
+                        _ => Json(serde_json::json!({"biography": null})).into_response(),
+                    }
+                }
+                Err(_) => Json(serde_json::json!({"biography": null})).into_response(),
+            }
+        }
+        _ => {
+            warn!("[biography] server 回退失败: agent={}", agent_id);
+            Json(serde_json::json!({"biography": null})).into_response()
+        }
     }
 }
 
@@ -256,18 +299,15 @@ pub(crate) async fn generate_biography_for_agent(
 
     // 3. 构建 prompt
     let char_info = format!(
-        "姓名：{}\n年龄：{}\n性别：{}\n身份：{}\n性格：{}\n价值观：{}",
+        "姓名：{}\n年龄：{}\n性别：{}",
         character.name,
         character.age,
         character.gender,
-        character.identity.as_deref().unwrap_or("未知"),
-        character.personality.join("、"),
-        character.values.join("、"),
     );
 
-    // 构建经历日志段落（有数据则用，无数据则留空让 LLM 基于人物信息虚构）
+    // 构建经历日志段落
     let timeline_section = if timeline.is_empty() {
-        "（无经历日志）".to_string()
+        "（无经历日志 — 角色可能未在世上有过记录行为）".to_string()
     } else {
         timeline
     };
@@ -279,22 +319,23 @@ pub(crate) async fn generate_biography_for_agent(
     };
 
     let prompt = format!(
-        r#"你是一位精通中国古典文学的传记作家。请根据以下角色的经历日志和每日摘要，以「纪传体」风格撰写一篇角色传记。
+        r#"你是一位精通中国古典文学的传记作家。请根据以下角色的真实经历日志和每日摘要，以「纪传体」风格撰写一篇角色传记。
 
-## 角色信息
+## 角色基本信息
 {char_info}
 
-## 经历日志（按时间顺序）
+## 经历日志（按时间顺序，来自实际游戏行为）
 {timeline_section}
 {daily_section}
 
 ## 撰写要求
-1. 以第三人称叙述，开头简述角色籍贯出身（可合理虚构）
-2. 按时间顺序叙述角色的关键经历：重要行动、人际交往、生死抉择
-3. 语言风格：半文半白的武侠叙事，典雅凝练
-4. 结尾以"论曰"或"太史公曰"附一段简短评语
-5. 总字数：不少于100字，不超过2000字
-6. 只输出传记正文，不要标题、不要标注字数、不要其他格式
+1. 严格基于经历日志和每日摘要中的实际事件撰写，禁止虚构未发生的事
+2. 按时间顺序叙述角色的关键行为：做了什么、与谁互动、做出了什么选择、遭遇了什么
+3. 如日志中有对话内容，引用关键对话
+4. 语言风格：半文半白的武侠叙事，典雅凝练
+5. 结尾以"论曰"附一段简短评语，评价角色的一生
+6. 总字数：不少于100字，不超过2000字
+7. 只输出传记正文，不要标题、不要标注字数、不要其他格式
 
 请直接输出传记正文："#,
         char_info = char_info,

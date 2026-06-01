@@ -398,10 +398,10 @@ async function loadCharacterIntoDrawer(char) {
         </div>
     `;
 
-  // 传记：已死亡/归隐角色展示纪传体传记
+  // 传记：已死亡/归隐角色展示纪传体传记（占位，异步加载在 DOM 挂载后触发）
   const isDeadOrRetired = charData.status === "dead" || charData.status === "retired";
   if (isDeadOrRetired) {
-    html += await loadBiographySection(char.agent_id);
+    html += loadBiographySection(char.agent_id);
   }
 
   if (charData.appearance || charData.identity) {
@@ -495,12 +495,14 @@ async function loadCharacterIntoDrawer(char) {
     const total = expData.total || 0;
     let expHtml = renderDrawerSoulCycles(recordsMap, immMap);
     if (hasMore) {
-      expHtml += `<p class="no-data" style="margin-top:8px;">另有 ${total - 50} 条更早记录（完整记录在历史页）</p>`;
+      expHtml += `<div class="load-more" id="drawer-exp-load-more" style="display:block;">
+        <button class="btn-secondary" onclick="loadDrawerExpMore(this)" data-agent-id="${char.agent_id}" data-page="1" data-total="${total}">加载更多（共 ${total} 条）</button>
+      </div>`;
     }
     html += `
             <section class="drawer-section">
                 <div class="drawer-section-title">经历日志</div>
-                ${expHtml}
+                <div class="drawer-experiences">${expHtml}</div>
             </section>
         `;
   } catch (err) {
@@ -573,25 +575,28 @@ async function loadCharacterIntoDrawer(char) {
   }
 
   body.innerHTML = html;
+
+  // DOM 已挂载，触发传记异步加载（修复 rAF 竞态：之前 requestAnimationFrame 在 await yield 中触发时 DOM 尚未就绪）
+  const bioSection = document.getElementById("biography-section");
+  if (bioSection) {
+    loadBiographyAsync(bioSection.dataset.agentId);
+  }
 }
 
 // 加载传记区块 HTML（用于 drawer 中 dead/retired 角色）
-async function loadBiographySection(agentId) {
-  const placeholder = `
-    <section class="drawer-section biography-section" id="biography-section">
+// 注意：只返回占位 HTML，异步加载在 loadCharacterIntoDrawer 中 body.innerHTML 设置后触发
+function loadBiographySection(agentId) {
+  return `
+    <section class="drawer-section biography-section" id="biography-section" data-agent-id="${agentId}">
       <div class="drawer-section-title">传记</div>
       <div class="biography-loading">
         <span class="biography-loading-dot"></span>
         <span class="biography-loading-dot"></span>
         <span class="biography-loading-dot"></span>
-        <span style="margin-left:8px;color:var(--text-muted);font-size:12px;">正在撰写传记...</span>
+        <span style="margin-left:8px;color:var(--text-muted);font-size:12px;">正在加载传记...</span>
       </div>
     </section>
   `;
-
-  // 先返回占位，延迟异步填充（占位 HTML 尚未挂载 DOM，需等渲染后执行）
-  requestAnimationFrame(function () { loadBiographyAsync(agentId); });
-  return placeholder;
 }
 
 // 异步加载/生成传记并更新 DOM
@@ -600,28 +605,64 @@ async function loadBiographyAsync(agentId) {
   if (!section) return;
 
   try {
-    // 先尝试获取缓存
+    // 1. 尝试 agent 端缓存（本地 character.yaml）
     let data = await apiGet(`/api/v1/character/biography?agent_id=${agentId}`);
+
+    // 2. agent 端无缓存，尝试触发生成
     if (!data.biography) {
-      // 无缓存，触发生成
       try {
         data = await apiPost(`/api/v1/character/biography?agent_id=${agentId}`, {});
-      } catch (genErr) {
-        section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">传记生成失败：${escapeHtml(genErr.message)}</p>`;
-        return;
+      } catch (_) {
+        // 生成失败（可能 LLM 不可用），尝试 server 端回退
+        try {
+          data = await apiGet(`/api/v1/character/biography?agent_id=${agentId}&fallback=server`);
+        } catch (_) {
+          // server 回退也失败
+        }
       }
     }
 
-    if (data.biography) {
+    if (data && data.biography) {
       section.innerHTML = `
         <div class="drawer-section-title">传记</div>
         <div class="biography-content">${escapeHtml(data.biography)}</div>
       `;
     } else {
-      section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">暂无传记数据</p>`;
+      section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">暂无传记</p>`;
     }
   } catch (err) {
     section.innerHTML = `<div class="drawer-section-title">传记</div><p class="no-data">传记加载失败</p>`;
+  }
+}
+
+// Drawer 经历日志加载更多
+async function loadDrawerExpMore(btn) {
+  const agentId = btn.dataset.agentId;
+  const page = parseInt(btn.dataset.page) + 1;
+  btn.disabled = true;
+  btn.textContent = "加载中...";
+
+  try {
+    const data = await apiGet(
+      `/api/v1/character/soul-cycles?agent_id=${agentId}&page=${page}&limit=50`,
+    );
+    const recordsMap = data.records || {};
+    const immMap = data.immediate_intents || {};
+    const expHtml = renderDrawerSoulCycles(recordsMap, immMap);
+    btn.parentElement.insertAdjacentHTML("beforebegin", expHtml);
+
+    if (data.has_more) {
+      btn.dataset.page = page;
+      btn.disabled = false;
+      const total = btn.dataset.total || "?";
+      btn.textContent = `加载更多（共 ${total} 条）`;
+    } else {
+      btn.textContent = "已全部加载";
+      btn.disabled = true;
+    }
+  } catch (_) {
+    btn.disabled = false;
+    btn.textContent = "加载失败，点击重试";
   }
 }
 
