@@ -6,7 +6,7 @@
 // CognitiveValidator 在内部重试循环中执行质量审查。
 // 天魂翻译步骤已消除。
 
-use crate::component::llm::{classify_llm_error, ErrorAction};
+use crate::component::llm::{ErrorAction, classify_llm_error};
 use crate::soul::actor::{CognitiveChain, CognitiveEngine};
 use crate::soul::reflector::cognitive_validator::CognitiveValidator;
 use cyber_jianghu_protocol::{Intent, WorldState};

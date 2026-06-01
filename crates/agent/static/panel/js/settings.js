@@ -31,7 +31,8 @@ async function loadData() {
 
     // Populate LLM form
     if (llmConfig.status === 'fulfilled') {
-        const c = llmConfig.value;
+        const resp = llmConfig.value;
+        const c = resp.actor || resp; // API 返回 {actor: {...}, reflector, ...}，兼容旧格式
         const fields = { 's-provider': c.provider, 's-model': c.model, 's-base-url': c.base_url, 's-api-key': c.api_key, 's-temperature': c.temperature, 's-max-tokens': c.max_tokens, 's-context-window': c.context_window };
         for (const [id, val] of Object.entries(fields)) {
             const el = document.getElementById(id);
@@ -53,18 +54,19 @@ async function loadData() {
 
         // Mode badge
         const badge = document.getElementById('s-mode-badge');
-        if (badge && c.mode) {
-            badge.textContent = c.mode;
-            badge.className = `mode-badge ${c.mode.toLowerCase()}`;
+        const mode = resp.runtime_mode || resp.mode || '';
+        if (badge && mode) {
+            badge.textContent = mode;
+            badge.className = `mode-badge ${mode.toLowerCase()}`;
         }
 
         // Claw mode notice
         const clawNotice = document.getElementById('s-claw-notice');
-        if (clawNotice) clawNotice.classList.toggle('visible', c.mode === 'Claw');
+        if (clawNotice) clawNotice.classList.toggle('visible', mode === 'Claw');
 
         // LLM disabled toggle
         const toggle = document.getElementById('s-llm-disabled');
-        if (toggle && c.llm_disabled) toggle.checked = true;
+        if (toggle && resp.llm_disabled) toggle.checked = true;
     }
 
     // Providers dropdown
@@ -81,8 +83,9 @@ async function loadData() {
                 select.appendChild(opt);
             });
             // Restore selected value after populating
-            if (llmConfig.status === 'fulfilled' && llmConfig.value.provider) {
-                select.value = llmConfig.value.provider;
+            if (llmConfig.status === 'fulfilled') {
+                const actor = llmConfig.value.actor || llmConfig.value;
+                if (actor.provider) select.value = actor.provider;
             }
             select.dispatchEvent(new Event('change'));
         }

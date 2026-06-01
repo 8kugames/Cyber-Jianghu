@@ -1,12 +1,12 @@
 // 角色信息 API Handlers
 // ============================================================================
 
+use anyhow::Context as _;
 use axum::{
     extract::{Path as AxumPath, State},
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use anyhow::Context as _;
 use serde::Serialize;
 use std::collections::HashMap;
 use tracing::{error, info, warn};
@@ -402,9 +402,8 @@ pub(crate) async fn get_attribute_meta_handler(
         if path.exists() {
             match tokio::fs::read_to_string(&path).await {
                 Ok(content) => {
-                    match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(
-                        &content,
-                    ) {
+                    match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(&content)
+                    {
                         Ok(cfg) => {
                             info!("从磁盘加载 narrative_config: {:?}", path);
                             // 回填内存，供后续请求使用
@@ -510,7 +509,11 @@ async fn fetch_narrative_config_from_server(
         .await
         .context("连接 server 失败")?;
 
-    anyhow::ensure!(resp.status().is_success(), "server 返回错误: {}", resp.status());
+    anyhow::ensure!(
+        resp.status().is_success(),
+        "server 返回错误: {}",
+        resp.status()
+    );
 
     let body: serde_json::Value = resp.json().await.context("解析响应失败")?;
     let nc = body
