@@ -891,6 +891,94 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 /// 429 disable 的恢复间隔（1 小时）
 const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
 
+// ============================================================================
+// 统一错误分类 — 三处消费者共享同一份分类逻辑
+// ============================================================================
+
+/// LLM 调用错误的处理策略
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorAction {
+    /// 放弃 — 错误不可恢复，无需重试（auth、context 超长等）
+    GiveUp,
+    /// 切换到下一个 model/provider（403 额度不足、404 模型不存在等）
+    Fallback,
+    /// 禁用当前 model 后切换到下一个（429 限流、provider 炸了等）
+    FallbackAndDisable,
+    /// 重试（网络瞬时故障、连接超时等）
+    Retry,
+}
+
+/// 根据 error 内容分类 LLM 调用错误
+///
+/// 返回 `(ErrorAction, &'static str)`，第二元素为 disable_model 的简短原因。
+///
+/// 三处消费者：
+/// - `call_with_fallback + call_streaming_with_fallback`:
+///   `Fallback | FallbackAndDisable | Retry` → 继续轮询下一模型
+///   `FallbackAndDisable` → disable_model + rotate
+/// - `decision.rs` retry loop: `GiveUp | Fallback | FallbackAndDisable` → break
+pub fn classify_llm_error(error: &anyhow::Error) -> (ErrorAction, &'static str) {
+    let msg = format!("{:#}", error);
+
+    // ── Permanent: 确定性的，重试/fallback 无意义 ──────────────
+    if msg.contains("exceeds max context window")
+        || msg.contains("Prompt too long")
+        || msg.contains("context_length_exceeded")
+        || msg.contains("maximum context length")
+    {
+        return (ErrorAction::GiveUp, "context_too_long");
+    }
+
+    // ── Config/Model: 换模型可能解决 ────────────────────────────
+    if msg.contains("LLM API error 404")
+        || msg.contains("LLM streaming API error 404")
+        || msg.contains("AllocationQuota")
+    {
+        return (ErrorAction::Fallback, "model_not_found_or_quota");
+    }
+
+    // 403 也可能是配额问题
+    if msg.contains("LLM API error 403") || msg.contains("LLM streaming API error 403") {
+        return (ErrorAction::Fallback, "forbidden_or_quota");
+    }
+
+    // ── Rate limit: 禁用模型（1h 冷却），避免 OOM ──────────────
+    if msg.contains("429")
+        || msg.contains("rate_limit")
+        || msg.contains("Too Many Requests")
+        || msg.contains("LLM API error 429")
+        || msg.contains("LLM streaming API error 429")
+    {
+        return (ErrorAction::FallbackAndDisable, "rate_limit");
+    }
+
+    // ── Provider 内部错误: 如 sensenova 把 503 包装成 400 internal_server_error ──
+    if msg.contains("internal_server_error") {
+        return (ErrorAction::FallbackAndDisable, "internal_server_error");
+    }
+
+    // ── 空响应: 模型偶尔返回 null ────────────────────────────────
+    if msg.contains("response content is empty") {
+        return (ErrorAction::FallbackAndDisable, "empty_response");
+    }
+
+    // ── 400 Bad Request: 模型能力不匹配（如 "only support stream mode"）─
+    if msg.contains("LLM API error 400") || msg.contains("LLM streaming API error 400") {
+        return (ErrorAction::Fallback, "bad_request");
+    }
+
+    // ── 连接/请求失败: 网络瞬时故障 ─────────────────────────────
+    if msg.contains("Failed to send request to LLM API")
+        || msg.contains("error sending request for url")
+        || msg.contains("does not support http call")
+    {
+        return (ErrorAction::Retry, "connection_failed");
+    }
+
+    // 未知错误 — 保守起见，允许 fallback
+    (ErrorAction::Retry, "unknown_error")
+}
+
 /// Fallback LLM 客户端
 ///
 /// 主模型 403（额度耗尽）或超时时，自动切换到备用模型。
@@ -1059,47 +1147,6 @@ impl FallbackLlmClient {
         self.clients[idx.min(self.clients.len() - 1)].clone()
     }
 
-    /// 判断错误是否应触发 fallback
-    ///
-    /// 匹配条件：
-    /// - HTTP 404 (model_not_found / 模型不存在或无权限)
-    /// - HTTP 403 (AllocationQuota / 额度耗尽)
-    /// - HTTP 429 (Rate limit)
-    /// - HTTP 400 (does not support http call / 模型不支持HTTP调用)
-    /// - 空响应（模型返回 null/空内容）
-    fn should_fallback(error: &anyhow::Error) -> bool {
-        let msg = format!("{:#}", error);
-
-        // Prompt 超长是确定性的，重试/fallback 无意义（所有模型都可能超长）
-        if msg.contains("exceeds max context window")
-            || msg.contains("Prompt too long")
-            || msg.contains("context_length_exceeded")
-            || msg.contains("maximum context length")
-        {
-            return false;
-        }
-
-        // HTTP 状态码匹配（直接来自 API 响应）
-        msg.contains("LLM API error 404")
-            || msg.contains("LLM API error 403")
-            || msg.contains("LLM API error 429")
-            || msg.contains("LLM streaming API error 404")
-            || msg.contains("LLM streaming API error 403")
-            || msg.contains("LLM streaming API error 429")
-            // 400 Bad Request：模型能力不匹配（如 "only support stream mode"）
-            || (msg.contains("LLM API error 400") && !msg.contains("Prompt too long"))
-            || (msg.contains("LLM streaming API error 400") && !msg.contains("Prompt too long"))
-            // 额度耗尽关键词
-            || msg.contains("AllocationQuota")
-            // 连接/请求失败（.context() 包装后的前缀）
-            || msg.contains("Failed to send request to LLM API")
-            || msg.contains("error sending request for url")
-            // 空响应（MiniMax 等模型偶尔返回 content=null）
-            || msg.contains("response content is empty")
-            // DashScope "does not support http call"（开发测试用）
-            || msg.contains("does not support http call")
-    }
-
     /// 执行带 fallback 的调用
     ///
     /// 策略：从 active index 开始，失败时尝试后续所有客户端。
@@ -1142,8 +1189,22 @@ impl FallbackLlmClient {
                     return Ok(response);
                 }
                 Err(e) => {
-                    let should = Self::should_fallback(&e);
-                    tracing::warn!("LLM 客户端 #{} 调用失败 (fallback={}: {}", idx, should, e);
+                    let (action, reason) = classify_llm_error(&e);
+                    let is_fallback = matches!(
+                        action,
+                        ErrorAction::Fallback
+                            | ErrorAction::FallbackAndDisable
+                            | ErrorAction::Retry
+                    );
+                    tracing::warn!(
+                        "LLM 客户端 #{} 调用失败 (action={:?}): {}",
+                        idx,
+                        action,
+                        e
+                    );
+                    if action == ErrorAction::FallbackAndDisable {
+                        self.disable_model(idx, reason);
+                    }
                     let err_msg = format!("{:#}", &e);
                     if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long")
                     {
@@ -1151,12 +1212,7 @@ impl FallbackLlmClient {
                             "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
                         );
                     }
-                    if err_msg.contains("429") {
-                        self.disable_model(idx, "429 rate limit");
-                    } else if err_msg.contains("response content is empty") {
-                        self.disable_model(idx, "empty response");
-                    }
-                    if !should {
+                    if !is_fallback {
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -1213,20 +1269,23 @@ impl FallbackLlmClient {
                     return Ok((stream, client.provider_name(), client.model_name()));
                 }
                 Err(e) => {
-                    let should = Self::should_fallback(&e);
+                    let (action, reason) = classify_llm_error(&e);
+                    let is_fallback = matches!(
+                        action,
+                        ErrorAction::Fallback
+                            | ErrorAction::FallbackAndDisable
+                            | ErrorAction::Retry
+                    );
                     tracing::warn!(
-                        "LLM streaming 客户端 #{} 失败 (fallback={}: {}",
+                        "LLM streaming 客户端 #{} 失败 (action={:?}): {}",
                         idx,
-                        should,
+                        action,
                         e
                     );
-                    let err_msg = format!("{:#}", &e);
-                    if err_msg.contains("429") {
-                        self.disable_model(idx, "429 rate limit");
-                    } else if err_msg.contains("response content is empty") {
-                        self.disable_model(idx, "empty response");
+                    if action == ErrorAction::FallbackAndDisable {
+                        self.disable_model(idx, reason);
                     }
-                    if !should {
+                    if !is_fallback {
                         return Err(e);
                     }
                     last_err = Some(e);

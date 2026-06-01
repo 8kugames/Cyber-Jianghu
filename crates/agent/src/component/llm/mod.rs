@@ -12,7 +12,10 @@ pub mod tool_types;
 
 pub use client::mock;
 pub use client::mock::MockLlmClient;
-pub use client::{ConversationInput, ConversationTurn, FallbackLlmClient, LlmClient, LlmClientExt};
+pub use client::{
+    classify_llm_error, ConversationInput, ConversationTurn, ErrorAction, FallbackLlmClient,
+    LlmClient, LlmClientExt,
+};
 pub use direct_client::{DirectLlmClient, DirectLlmClientConfig, LlmProvider, OpenClawConfig};
 pub(crate) use openai_types::{ChatExchangeConfig, ChatMessage};
 pub use token_tracking::{
