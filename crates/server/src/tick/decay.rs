@@ -385,15 +385,22 @@ mod tests {
         // 测试 AgentState 的衰减逻辑
         // 根据 PRD，白板重生初始值：HP=100, 体力=100, 饥饿=50, 口渴=50
         let mut state = AgentState::new(uuid::Uuid::new_v4(), 1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 50); // 初始饥饿值
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 50); // 初始口渴值
-        assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 初始体力值
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
-        // 应用衰减（饥饿 -5, 口渴 -5, 体力 +5）
+        // 测试配置 decay_per_tick = 0.2（累计器）→ 单 tick 不扣减
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 45); // 50 - 5
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 45); // 50 - 5
-        assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，保持 100
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
+
+        // 跑满 5 tick 累计器到 -1.0，扣 1
+        for _ in 0..4 {
+            let _ = state.apply_decay(1);
+        }
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
     }
 
     // ============================================================================

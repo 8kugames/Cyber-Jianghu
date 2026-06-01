@@ -115,6 +115,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for AgentState {
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
             birth_tick: row.try_get("birth_tick").ok().flatten(),
+            decay_accumulator: std::collections::HashMap::new(),
             created_at: row.try_get("created_at")?,
         })
     }

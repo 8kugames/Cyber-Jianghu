@@ -92,6 +92,66 @@ pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConn
     })
 }
 
+/// 严格校验设备是否存在（仅查询，不创建）
+///
+/// 与 `connect_device` 的根本区别：本函数**不会**因为设备不存在而自动创建。
+/// 用于 agent 启动时验证 device.yaml 中的 device_id 仍被 server 认可。
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+///
+/// # 返回
+/// - Ok(true): 设备存在
+/// - Ok(false): 设备不存在
+/// - Err: 数据库错误
+pub async fn verify_device_strict(pool: &PgPool, device_id: Uuid) -> Result<bool> {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT device_id FROM devices WHERE device_id = $1",
+    )
+    .bind(device_id)
+    .fetch_optional(pool)
+    .await
+    .context("严格校验设备失败")?;
+    Ok(row.is_some())
+}
+
+/// 显式注册新设备（server 生成 device_id + auth_token）
+///
+/// 与 `connect_device` 的根本区别：调用者**不能**指定 device_id，必须由 server 生成。
+/// 这样从协议层面消除"client 携带任意 UUID 撞库"的可能。
+///
+/// # 参数
+/// - pool: 数据库连接池
+///
+/// # 返回
+/// - Ok(DeviceConnectResult): 包含新 device_id + auth_token，is_new 恒为 true
+/// - Err: 数据库错误
+pub async fn register_device(pool: &PgPool) -> Result<DeviceConnectResult> {
+    let device_id = Uuid::new_v4();
+    let auth_token = generate_secure_token();
+
+    sqlx::query(
+        r#"
+        INSERT INTO devices (device_id, auth_token)
+        VALUES ($1, $2)
+        "#,
+    )
+    .bind(device_id)
+    .bind(&auth_token)
+    .execute(pool)
+    .await
+    .context("显式注册新设备失败")?;
+
+    info!("新设备显式注册成功: {}", device_id);
+
+    Ok(DeviceConnectResult {
+        device_id,
+        auth_token,
+        is_new: true,
+    })
+}
+
 /// 验证设备认证令牌
 ///
 /// # 参数

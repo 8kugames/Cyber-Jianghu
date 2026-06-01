@@ -21,29 +21,66 @@ mod tests {
         assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
         assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
         assert_eq!(state.status.get("hp").unwrap_or(0), 100);
-        assert_eq!(state.is_alive);
+        assert!(state.is_alive);
 
-        // 应用衰减（饥饿 -5, 口渴 -5, 体力 +5）
+        // 测试配置：hunger/thirst decay_per_tick = 0.2
+        // 单 tick 累计器未到 1.0，hunger/thirst 保持原值
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 45);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 45);
-        assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，不再增加
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
-        // 测试多次衰减导致死亡
-        // 测试中的 mock 注册表没有季节系统，所以 modifier 为 1。
-        // 从 45 开始，每次 -5。
-        // 测试中其实 stamina 是 +5, hunger 是 -5, thirst 是 -5
-        // Wait, attributes.json says decay_per_tick = 5 for hunger and thirst.
-        // apply_decay code subtracts decay_amount, so delta is -5.
-        // Current value is 45. We need it to drop to 0. 45 / 5 = 9 times.
-        // Let's just use a while loop to be safe.
-        // wait, we only want to decay hunger/thirst.
-        let mut loop_count = 0;
-        for _ in 0..20 {
-            if state.is_alive {
-                let _ = state.apply_decay(1);
-                loop_count += 1;
+        // 跑满 5 tick，累计器到 -1.0，hunger 扣 1
+        for _ in 0..4 {
+            let _ = state.apply_decay(1);
+        }
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+
+        // 验证累计器不漂移：再跑 5 tick，应再扣 1
+        for _ in 0..5 {
+            let _ = state.apply_decay(1);
+        }
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 48);
+
+        // 持续衰减至死亡：0.2/tick → 5 tick 扣 1，48 → 0 需 ~240 tick
+        for _ in 0..300 {
+            if !state.is_alive {
+                break;
             }
+            let _ = state.apply_decay(1);
+        }
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 0);
+        assert!(state.status.get("thirst").unwrap_or(0) <= 1);
+        assert!(!state.is_alive);
+        assert_eq!(state.status.get("hp").unwrap_or(0), 0);
+    }
+
+    /// 验证小数 decay（如 0.2）跨 tick 累计，不被 f32→i32 截断为 0
+    #[test]
+    fn test_agent_state_decay_fractional_accumulator() {
+        crate::game_data::init_test_registry();
+
+        let mut state = AgentState::new(Uuid::new_v4(), 1);
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+
+        for tick in 1..=4 {
+            let _ = state.apply_decay(tick);
+            assert_eq!(
+                state.status.get("hunger").unwrap_or(-1),
+                50,
+                "tick {} 累计器未到 1.0，hunger 应保持 50",
+                tick
+            );
+            let acc = state.decay_accumulator.get("hunger").copied().unwrap_or(0.0);
+            assert!((acc - (-0.2 * tick as f32)).abs() < 1e-5);
+        }
+
+        let _ = state.apply_decay(5);
+        assert_eq!(state.status.get("hunger").unwrap_or(-1), 49);
+        let acc = state.decay_accumulator.get("hunger").copied().unwrap_or(0.0);
+        assert!(acc.abs() < 1e-5, "累计器应在扣减后归零，实际 {}", acc);
+    }
         }
         println!("Loop count to death: {}", loop_count);
         // Since attributes.json config has decay_per_tick = 5, and default is 50.

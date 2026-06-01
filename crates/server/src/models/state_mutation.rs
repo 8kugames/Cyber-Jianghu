@@ -63,34 +63,46 @@ impl AgentState {
 
             // 获取季节修饰系数（数据驱动）
             let season_modifier = self.get_season_modifier(&attr_name, tick_id);
-            let delta = (base_delta * season_modifier).floor() as i32;
+            let raw_delta = base_delta * season_modifier;
 
-            // 记录衰减前的值
-            let before_value = self.status.get(&attr_name).unwrap_or(-1);
+            // 用累计器把小数部分留到下一 tick
+            let acc = self
+                .decay_accumulator
+                .entry(attr_name.clone())
+                .or_insert(0.0);
+            *acc += raw_delta;
+            let delta = *acc as i32; // 朝零截断（f32→i32 cast 而非 floor）
+            *acc -= delta as f32;
 
-            debug!(
-                "Applying decay to {}: decay_amount={}, season_modifier={}, delta={}, before_value={}",
-                attr_name, decay_amount, season_modifier, delta, before_value
-            );
+            if delta != 0 {
+                // 记录衰减前的值
+                let before_value = self.status.get(&attr_name).unwrap_or(-1);
 
-            if let Ok(new_val) = self.status.apply_change(&attr_name, delta, &context) {
                 debug!(
-                    "Applied decay to {}: before={}, delta={}, after={}",
-                    attr_name, before_value, delta, new_val
+                    "Applying decay to {}: decay_amount={}, season_modifier={}, raw_delta={}, delta={}, before_value={}",
+                    attr_name, decay_amount, season_modifier, raw_delta, delta, before_value
                 );
-                // 检查是否触发死亡条件
-                if self.status.check_death_condition(&attr_name) {
-                    self.is_alive = false;
-                    let _ = self.status.set("hp", 0);
-                    tracing::warn!(
-                        "Agent {} 因 {} 归零而死亡 (Tick: {})",
-                        self.agent_id,
-                        attr_name,
-                        tick_id
+
+                if let Ok(new_val) = self.status.apply_change(&attr_name, delta, &context) {
+                    debug!(
+                        "Applied decay to {}: before={}, delta={}, after={}",
+                        attr_name, before_value, delta, new_val
                     );
-                    // 返回触发死亡的属性名
-                    return Some(attr_name);
                 }
+            }
+
+            // 死亡检查：累计器未到 1.0（delta=0）时也要检查，
+            // 因为属性可能已通过其他途径（如吃/喝耗尽）触发了死亡条件
+            if self.status.check_death_condition(&attr_name) {
+                self.is_alive = false;
+                let _ = self.status.set("hp", 0);
+                tracing::warn!(
+                    "Agent {} 因 {} 归零而死亡 (Tick: {})",
+                    self.agent_id,
+                    attr_name,
+                    tick_id
+                );
+                return Some(attr_name);
             }
         }
 
@@ -118,7 +130,7 @@ impl AgentState {
             if base_recovery > 0 {
                 // 获取季节修饰系数（数据驱动）
                 let season_modifier = self.get_season_modifier(&attr_name, tick_id);
-                let delta = (base_recovery as f32 * season_modifier).floor() as i32;
+                let delta = (base_recovery as f32 * season_modifier).round() as i32;
 
                 if delta > 0 {
                     let before_value = self.status.get(&attr_name).unwrap_or(-1);

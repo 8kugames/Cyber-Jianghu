@@ -775,6 +775,7 @@ mod tests {
             skills: vec![],
             action_counts: std::collections::HashMap::new(),
             birth_tick: None,
+            decay_accumulator: std::collections::HashMap::new(),
             created_at: chrono::Utc::now(),
         }
     }
