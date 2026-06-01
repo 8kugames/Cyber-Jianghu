@@ -11,13 +11,14 @@
 // 配合 agent 端 `ensure_device` 的 fail-fast 验证，形成完整生命周期。
 // ============================================================================
 
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::db;
 use crate::models::{
-    DeviceRegisterResponse, DeviceVerifyErrorResponse, DeviceVerifyRequest, DeviceVerifyResponse,
+    DeviceRegisterErrorResponse, DeviceRegisterResponse, DeviceVerifyErrorResponse,
+    DeviceVerifyRequest, DeviceVerifyResponse,
 };
 use crate::state::AppState;
 
@@ -54,14 +55,16 @@ pub async fn device_verify(
             StatusCode::NOT_FOUND,
             Json(DeviceVerifyErrorResponse {
                 error: "device_not_found",
-                message: "设备不存在，请调用 /api/v1/device/register 重新注册".to_string(),
+                message: "设备不存在".to_string(),
                 device_id: payload.device_id,
             }),
         ));
     }
 
-    // 设备存在 → 取出当前 token（用 connect_device 的只读路径）
-    let result = db::connect_device(&state.db_pool, payload.device_id)
+    // 设备存在 → 仅取 token（SELECT only，根除 TOCTOU 竞态）
+    // 关键：绝不可调 connect_device（upsert 语义），否则 admin DELETE 后
+    // verify 会"复活"刚被删的 device，破坏 server 权威性。
+    let auth_token = db::get_device_token(&state.db_pool, payload.device_id)
         .await
         .map_err(|e| {
             warn!("设备 {} 取 token 失败: {}", payload.device_id, e);
@@ -73,12 +76,29 @@ pub async fn device_verify(
                     device_id: payload.device_id,
                 }),
             )
+        })?
+        .ok_or_else(|| {
+            // verify_device_strict 已确认存在，get_device_token 却又找不到 —
+            // 说明 verify 与 get_device_token 之间发生了 DELETE（并发窗口）。
+            // 此时必须 fail-fast 报错，**不可**回落 upsert 创建。
+            warn!(
+                "设备 {} 在 verify 与取 token 之间消失（并发 DELETE），fail-fast",
+                payload.device_id
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(DeviceVerifyErrorResponse {
+                    error: "internal_error",
+                    message: "设备状态在请求中途发生变化".to_string(),
+                    device_id: payload.device_id,
+                }),
+            )
         })?;
 
     Ok(Json(DeviceVerifyResponse {
-        device_id: result.device_id,
-        auth_token: result.auth_token,
-        message: format!("设备 {} 校验通过", result.device_id),
+        device_id: payload.device_id,
+        auth_token,
+        message: format!("设备 {} 校验通过", payload.device_id),
     }))
 }
 
@@ -88,24 +108,31 @@ pub async fn device_verify(
 ///
 /// Agent 申报注册新设备。**不接受** device_id 入参，server 端生成 UUID v4。
 /// 这是消除"client 携带任意 UUID 撞库"的协议层保证。
+///
+/// 成功 → 201 Created（资源创建）
+/// 失败 → 5xx + 结构化 JSON body（与 verify 错误响应对称）
 pub async fn device_register(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<DeviceRegisterResponse>, StatusCode> {
-    let result = db::register_device(&state.db_pool)
-        .await
-        .map_err(|e| {
-            warn!("设备显式注册失败: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+) -> Result<impl IntoResponse, (StatusCode, Json<DeviceRegisterErrorResponse>)> {
+    let result = db::register_device(&state.db_pool).await.map_err(|e| {
+        warn!("设备显式注册失败: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(DeviceRegisterErrorResponse {
+                error: "internal_error",
+                message: "服务器内部错误".to_string(),
+            }),
+        )
+    })?;
 
     info!("设备显式注册成功: {}", result.device_id);
 
-    // 设备注册响应不下发 narrative_config — 那是 /connect 端点的责任
-    // 这样保持 /device/register 是纯粹的"设备身份发放"
-
-    Ok(Json(DeviceRegisterResponse {
-        device_id: result.device_id,
-        auth_token: result.auth_token,
-        message: format!("设备 {} 注册成功", result.device_id),
-    }))
+    Ok((
+        StatusCode::CREATED,
+        Json(DeviceRegisterResponse {
+            device_id: result.device_id,
+            auth_token: result.auth_token,
+            message: format!("设备 {} 注册成功", result.device_id),
+        }),
+    ))
 }

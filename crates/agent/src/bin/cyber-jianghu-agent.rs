@@ -203,82 +203,126 @@ async fn create_character_via_api(agent_port: u16, character: CharacterConfig) -
 }
 
 // ============================================================================
-// 确保设备身份存在（server-scoped）
+// 确保设备身份存在（server-scoped）— 设备身份生命周期 v2
+// ============================================================================
+//
+// 关键不变量：本地 device.yaml 中持有的 device_id 必须与 server 端认可的一致。
+// 流程：
+// 1. device.yaml 不存在 → 直接调 /device/register 申报
+// 2. device.yaml 存在 → 调 /device/verify 严格校验
+//    - 200 → 用 server 返回的 token 刷新本地（以 server 为准）
+//    - 404 → 本地 yaml 是 stale（DB 被清空等），删除并 fall through 到分支 1
 // ============================================================================
 
 async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
     let device_path = config.device_yaml_path(ws_url);
+    let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
+    let client = reqwest::Client::new();
 
     if device_path.exists() {
-        let device = DeviceConfig::from_file(&device_path)?;
-        info!("使用已有设备身份: {}", device.device_id);
-        return Ok(device);
+        let local = DeviceConfig::from_file(&device_path)?;
+        info!(
+            "本地有 device.yaml，调用 /device/verify 校验 server 是否仍认可 {}",
+            local.device_id
+        );
+
+        let resp = client
+            .post(format!("{}/api/v1/device/verify", http_url))
+            .json(&serde_json::json!({"device_id": local.device_id.to_string()}))
+            .send()
+            .await
+            .context("调用 /device/verify 失败")?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            // server 不认这个 device → 本地 yaml 已 stale
+            // 关键：必须先成功删除本地 yaml，再 fall through 到 register 分支
+            // 否则 register 会用 server 新生成的 device_id 创建新 yaml，而旧的
+            // 还在磁盘上 — 下次启动会再次触发 404，形成可复现死循环
+            warn!(
+                "server 不认可 device {}（404），删除本地 yaml 并重新申报",
+                local.device_id
+            );
+            std::fs::remove_file(&device_path)
+                .with_context(|| format!("删除 stale device.yaml 失败: {:?}", device_path))?;
+            // fall through 到"无本地记录"分支
+        } else if !resp.status().is_success() {
+            // 网络错误 / 5xx 等：直接抛错，不假装通过也不删除
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("/device/verify 失败: HTTP {} - {}", status, body);
+        } else {
+            // 200：server 认可 → 用 server 返回的 token 替换本地（server 权威）
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .context("Failed to parse /device/verify response")?;
+            let server_token = body["auth_token"]
+                .as_str()
+                .context("/device/verify 响应缺少 auth_token")?
+                .to_string();
+
+            let refreshed = DeviceConfig {
+                device_id: local.device_id,
+                auth_token: server_token.clone(),
+                server_url: local.server_url.clone(),
+            };
+            if let Err(e) = refreshed.save_to_file(&device_path) {
+                warn!("保存刷新后的 device.yaml 失败: {}", e);
+            }
+            info!(
+                "device {} token 已用 server 权威值刷新",
+                refreshed.device_id
+            );
+            return Ok(refreshed);
+        }
     }
 
-    info!("首次启动，生成设备身份...");
+    // 本地无记录 / 刚被删除 → 向 server 申报注册新 device
+    info!("向 server 申报注册新 device");
 
-    // 1. 生成 device_id
-    let device_id = Uuid::new_v4();
-    info!("生成设备 ID: {}", device_id);
-
-    // 2. Derive HTTP URL from WS URL
-    let http_url = cyber_jianghu_agent::config::ws_to_http_url(ws_url);
-
-    // 3. 向服务器注册
-    let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{}/api/v1/agent/connect", http_url))
-        .json(&serde_json::json!({"device_id": device_id.to_string()}))
+        .post(format!("{}/api/v1/device/register", http_url))
+        .json(&serde_json::json!({}))
         .send()
         .await
-        .context("Failed to register device with server")?;
+        .context("调用 /device/register 失败")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("/device/register 失败: HTTP {} - {}", status, body);
+    }
 
     let body: serde_json::Value = resp
         .json()
         .await
-        .context("Failed to parse device registration response")?;
+        .context("Failed to parse /device/register response")?;
+    let device_id = Uuid::parse_str(
+        body["device_id"]
+            .as_str()
+            .context("/device/register 响应缺少 device_id")?,
+    )
+    .context("/device/register 返回的 device_id 不是合法 UUID")?;
     let auth_token = body["auth_token"]
         .as_str()
-        .context("No auth_token in response")?
+        .context("/device/register 响应缺少 auth_token")?
         .to_string();
 
-    // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
-    // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
-    {
-        let nc_value = &body["narrative_config"];
-        if !nc_value.is_null() {
-            let nc_hash = body["narrative_config_hash"].as_str();
-            match serde_json::from_value::<cyber_jianghu_protocol::NarrativeConfig>(
-                nc_value.clone(),
-            ) {
-                Ok(nc) => {
-                    if let Err(e) =
-                        cyber_jianghu_agent::config::save_narrative_config_to_disk(&nc, nc_hash)
-                    {
-                        warn!("保存 narrative_config 失败: {}", e);
-                    } else {
-                        info!("设备连接时已保存 narrative_config");
-                    }
-                }
-                Err(e) => warn!("解析 narrative_config 失败: {}", e),
-            }
-        }
-    }
-
-    // 4. 创建 DeviceConfig
     let device = DeviceConfig {
         device_id,
         auth_token,
         server_url: ws_url.to_string(),
     };
 
-    // 5. 持久化
     if let Some(parent) = device_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     device.save_to_file(&device_path)?;
 
-    info!("设备身份已创建并保存: {} (server: {})", device_id, ws_url);
+    info!(
+        "新设备已向 server 申报注册: {} (server: {})",
+        device_id, ws_url
+    );
     Ok(device)
 }
 
@@ -741,8 +785,11 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
                 && let Some(ref early_state) = _early_api_state
             {
                 let llm = create_llm_client(runtime_mode, &config, None)?;
-                let container: std::sync::Arc<tokio::sync::RwLock<std::sync::Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>>> =
-                    std::sync::Arc::new(tokio::sync::RwLock::new(llm.clone()));
+                let container: std::sync::Arc<
+                    tokio::sync::RwLock<
+                        std::sync::Arc<dyn cyber_jianghu_agent::component::llm::LlmClient>,
+                    >,
+                > = std::sync::Arc::new(tokio::sync::RwLock::new(llm.clone()));
                 *early_state.llm_container.write().await = Some(container);
                 info!("LLM container 已预注入 HttpApiState（角色创建前）");
             }

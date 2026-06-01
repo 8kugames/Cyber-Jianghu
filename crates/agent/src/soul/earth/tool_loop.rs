@@ -12,7 +12,7 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
+use crate::component::llm::tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 use crate::component::llm::{ChatExchangeConfig, ChatMessage, LlmClient};
 
 use super::budget::ToolResultBudget;
@@ -23,6 +23,7 @@ pub(crate) struct ToolLoopResult {
 }
 
 use super::config::EarthSoulConfig;
+use super::content_fallback;
 use super::loop_guard::{LoopGuard, LoopGuardAction};
 
 /// 共享 tool calling 循环
@@ -91,13 +92,122 @@ pub(crate) async fn run_tool_loop(
                 .unwrap_or_default(),
         );
 
-        let has_tool_calls = response
+        let provider_name = llm.provider_name();
+        let tool_calls: Option<Vec<ToolCall>> = response
             .tool_calls
-            .as_ref()
-            .map(|tc| !tc.is_empty())
-            .unwrap_or(false);
+            .clone()
+            .filter(|tc| !tc.is_empty())
+            .or_else(|| {
+                response.content.as_ref().and_then(|c| {
+                    let parsed = content_fallback::try_parse_content_tool_calls(c, &provider_name);
+                    if parsed.is_some() {
+                        info!(
+                            "[地魂] content fallback 解析成功: provider={}, tools={}",
+                            provider_name,
+                            parsed.as_ref().map_or(0, |v| v.len())
+                        );
+                    }
+                    parsed
+                })
+            });
 
-        if !has_tool_calls {
+        if let Some(ref calls) = tool_calls {
+            let call_names: Vec<&str> = calls.iter().map(|tc| tc.function.name.as_str()).collect();
+            info!(
+                "[地魂] LLM 请求调用 {} 个 tool: {:?}",
+                calls.len(),
+                call_names
+            );
+
+            // Push assistant message with tool_calls
+            messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: response.content,
+                tool_calls: Some(calls.clone()),
+                tool_call_id: None,
+                name: None,
+                reasoning_content: response.reasoning_content.clone(),
+            });
+
+            for (i, tc) in calls.iter().enumerate() {
+                // Loop guard check (F2) — 渐进策略：Warn → Terminate
+                if let Some(ref mut g) = guard {
+                    match g.check(&tc.function.name) {
+                        LoopGuardAction::Terminate => {
+                            warn!(
+                                "[地魂] Loop guard 截断: 连续调用 '{}' 超限",
+                                tc.function.name
+                            );
+                            // 为当前及所有剩余 tool_calls 推送占位 result
+                            for remaining in &calls[i..] {
+                                messages.push(ChatMessage::tool_result(
+                                    &remaining.id,
+                                    &remaining.function.name,
+                                    "[已获知足够信息，直接回答]",
+                                ));
+                            }
+                            return forced_text_exit(llm, messages, llm_config.clone()).await;
+                        }
+                        LoopGuardAction::Warn(_) => {
+                            warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
+                        }
+                        LoopGuardAction::Proceed => {}
+                    }
+                }
+
+                // Execute + error signaling (F3)
+                let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
+                info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
+
+                let raw_result = match executor.execute(&tc.function.name, &args).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
+                        let error_str =
+                            format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
+                        messages.push(ChatMessage::tool_result(
+                            &tc.id,
+                            &tc.function.name,
+                            &error_str,
+                        ));
+                        continue;
+                    }
+                };
+
+                // Budget 处理 (F1) — JSON 感知：紧凑化 → 字符截断兜底
+                let processed = match &mut budget {
+                    Some(b) => {
+                        if b.is_exhausted() {
+                            ToolResultBudget::exhausted_message().to_string()
+                        } else {
+                            b.process(&tc.function.name, &raw_result)
+                        }
+                    }
+                    None => raw_result.to_string(),
+                };
+
+                // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
+                let final_result = if let Some(ref mut g) = guard
+                    && let Some(warning) = g.take_pending_warning()
+                {
+                    format!("[系统提示] {}\n{}", warning, processed)
+                } else {
+                    processed
+                };
+
+                info!(
+                    "[地魂] Tool {} 结果: {}",
+                    tc.function.name,
+                    final_result.chars().take(2000).collect::<String>()
+                );
+
+                messages.push(ChatMessage::tool_result(
+                    &tc.id,
+                    &tc.function.name,
+                    &final_result,
+                ));
+            }
+        } else {
             let content = response.content.unwrap_or_default();
             info!(
                 "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars), preview: {}",
@@ -139,109 +249,6 @@ pub(crate) async fn run_tool_loop(
                 reasoning_content: response.reasoning_content,
             });
             return forced_text_exit(llm, messages, llm_config).await;
-        }
-
-        let tool_calls = response
-            .tool_calls
-            .as_ref()
-            .expect("tool_calls must exist when finish_reason is tool_calls");
-        let call_names: Vec<&str> = tool_calls
-            .iter()
-            .map(|tc| tc.function.name.as_str())
-            .collect();
-        info!(
-            "[地魂] LLM 请求调用 {} 个 tool: {:?}",
-            tool_calls.len(),
-            call_names
-        );
-
-        // Push assistant message with tool_calls
-        messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: response.content,
-            tool_calls: Some(tool_calls.clone()),
-            tool_call_id: None,
-            name: None,
-            reasoning_content: response.reasoning_content.clone(),
-        });
-
-        for (i, tc) in tool_calls.iter().enumerate() {
-            // Loop guard check (F2) — 渐进策略：Warn → Terminate
-            if let Some(ref mut g) = guard {
-                match g.check(&tc.function.name) {
-                    LoopGuardAction::Terminate => {
-                        warn!(
-                            "[地魂] Loop guard 截断: 连续调用 '{}' 超限",
-                            tc.function.name
-                        );
-                        // 为当前及所有剩余 tool_calls 推送占位 result
-                        for remaining in &tool_calls[i..] {
-                            messages.push(ChatMessage::tool_result(
-                                &remaining.id,
-                                &remaining.function.name,
-                                "[已获知足够信息，直接回答]",
-                            ));
-                        }
-                        return forced_text_exit(llm, messages, llm_config.clone()).await;
-                    }
-                    LoopGuardAction::Warn(_) => {
-                        warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
-                    }
-                    LoopGuardAction::Proceed => {}
-                }
-            }
-
-            // Execute + error signaling (F3)
-            let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
-            info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
-
-            let raw_result = match executor.execute(&tc.function.name, &args).await {
-                Ok(val) => val,
-                Err(e) => {
-                    warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
-                    let error_str =
-                        format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
-                    messages.push(ChatMessage::tool_result(
-                        &tc.id,
-                        &tc.function.name,
-                        &error_str,
-                    ));
-                    continue;
-                }
-            };
-
-            // Budget 处理 (F1) — JSON 感知：紧凑化 → 字符截断兜底
-            let processed = match &mut budget {
-                Some(b) => {
-                    if b.is_exhausted() {
-                        ToolResultBudget::exhausted_message().to_string()
-                    } else {
-                        b.process(&tc.function.name, &raw_result)
-                    }
-                }
-                None => raw_result.to_string(),
-            };
-
-            // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
-            let final_result = if let Some(ref mut g) = guard
-                && let Some(warning) = g.take_pending_warning()
-            {
-                format!("[系统提示] {}\n{}", warning, processed)
-            } else {
-                processed
-            };
-
-            info!(
-                "[地魂] Tool {} 结果: {}",
-                tc.function.name,
-                final_result.chars().take(2000).collect::<String>()
-            );
-
-            messages.push(ChatMessage::tool_result(
-                &tc.id,
-                &tc.function.name,
-                &final_result,
-            ));
         }
     }
 

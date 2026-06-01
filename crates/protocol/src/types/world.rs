@@ -102,7 +102,7 @@ impl WorldTime {
         };
         let day = number_to_chinese(self.day);
         let shichen = shichen_name(self.hour);
-        format!("天道历{}年{}{}日{}", year, month, day, shichen)
+        format!("{}年{}{}日{}", year, month, day, shichen)
     }
 }
 

@@ -39,9 +39,9 @@ impl super::super::Agent {
         Ok(())
     }
 
-    /// 格式化游戏内时间（WorldTime → 中文武侠风格字符串）
+    /// 序列化 WorldTime 为 JSON 存储（展示由前端 formatWorldTime 负责）
     pub(super) fn format_world_time(wt: &WorldTime) -> String {
-        wt.to_chinese()
+        serde_json::to_string(wt).unwrap_or_else(|_| wt.to_chinese())
     }
 
     /// LLM 失败时的 chaos fallback：尝试生成生存导向 intent，失败则退回休息

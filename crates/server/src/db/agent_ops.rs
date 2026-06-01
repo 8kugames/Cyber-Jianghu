@@ -92,6 +92,34 @@ pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConn
     })
 }
 
+/// 仅查询设备当前 auth_token（SELECT only，无副作用）
+///
+/// 与 `connect_device` 的根本区别：
+/// - 本函数**永远不修改数据库**，调用方必须先通过 `verify_device_strict`
+///   确认设备存在后才能调用，否则会得到 `Ok(None)`
+/// - `connect_device` 在设备不存在时会自动 INSERT，是 upsert 语义
+///
+/// 用于 `device_verify` 端点的 200 路径。**绝不**用于任何需要"创建/复活"
+/// 设备的场景——那是 `register_device` 的责任。
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+///
+/// # 返回
+/// - Ok(Some(token)): 设备存在，返回当前 auth_token
+/// - Ok(None): 设备不存在
+/// - Err: 数据库查询失败
+pub async fn get_device_token(pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT auth_token FROM devices WHERE device_id = $1")
+            .bind(device_id)
+            .fetch_optional(pool)
+            .await
+            .context("查询设备 token 失败")?;
+    Ok(row.map(|(t,)| t))
+}
+
 /// 严格校验设备是否存在（仅查询，不创建）
 ///
 /// 与 `connect_device` 的根本区别：本函数**不会**因为设备不存在而自动创建。
@@ -106,13 +134,11 @@ pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConn
 /// - Ok(false): 设备不存在
 /// - Err: 数据库错误
 pub async fn verify_device_strict(pool: &PgPool, device_id: Uuid) -> Result<bool> {
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT device_id FROM devices WHERE device_id = $1",
-    )
-    .bind(device_id)
-    .fetch_optional(pool)
-    .await
-    .context("严格校验设备失败")?;
+    let row: Option<(Uuid,)> = sqlx::query_as("SELECT device_id FROM devices WHERE device_id = $1")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+        .context("严格校验设备失败")?;
     Ok(row.is_some())
 }
 
@@ -224,7 +250,7 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
 
 /// 根据设备ID获取Agent（优先返回活跃，其次返回已死亡）
 ///
-/// 返回该设备最新的、非退休状态的 Agent：
+/// 返回该设备最新的、非归隐状态的 Agent：
 /// - `active`：正常返回
 /// - `dead`：返回（让 agent 知道自己已死亡，而非"未注册"）
 /// - `retired`：不返回（用户主动注销，等同未注册）
@@ -235,7 +261,7 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
 ///
 /// # 返回
 /// - Ok(Some(Agent)): 找到活跃或已死亡的 Agent
-/// - Ok(None): 无 Agent 或已退休
+/// - Ok(None): 无 Agent 或已归隐
 /// - Err: 查询失败
 pub async fn get_agent_by_device_id(pool: &PgPool, device_id: Uuid) -> Result<Option<Agent>> {
     debug!("查询Agent by device_id: {}", device_id);

@@ -225,7 +225,7 @@ async function startGeneration() {
     content.innerHTML = '<div class="loading"><div class="spinner"></div><p>正在生成角色...</p></div>';
 
     try {
-        const data = await post(API.CHARACTER_GENERATE, {});
+        const data = await post(API.CHARACTER_GENERATE, {}, { timeout: 1800000 });
         content.innerHTML = `
             <div class="card" style="padding:16px">
                 <div style="font-size:16px;font-weight:600;margin-bottom:8px">${escapeHtml(data.name || '-')}</div>

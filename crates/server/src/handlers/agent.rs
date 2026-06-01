@@ -8,69 +8,13 @@ use sha2::Digest;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::db::{self, DeviceConnectResult, verify_device_token};
+use crate::db::{self, verify_device_token};
 use crate::game_data;
 use crate::models::{
-    AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,
-    GameRules, InitialItem, get_max_agent_name_length, get_max_system_prompt_length,
+    AgentRegisterRequest, AgentRegisterResponse, GameRules, InitialItem, get_max_agent_name_length,
+    get_max_system_prompt_length,
 };
 use crate::state::AppState;
-
-// ============================================================================
-// 设备连接 API（Phase 3）
-// ============================================================================
-
-/// 设备连接接口
-///
-/// POST /api/v1/agent/connect
-///
-/// 客户端首次启动时调用，用于注册设备身份或获取现有认证令牌。
-///
-/// 流程：
-/// 1. 客户端生成 device_id (UUID v4)
-/// 2. 调用此接口注册设备
-/// 3. 服务器返回 auth_token
-/// 4. 客户端保存 device_id + auth_token 到 agent.yaml
-///
-/// 后续 WebSocket 连接使用: ws://server/ws?device_id={}&token={}
-pub async fn agent_connect(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<AgentConnectRequest>,
-) -> Result<Json<AgentConnectResponse>, StatusCode> {
-    info!("设备连接请求: {}", payload.device_id);
-
-    // 注册或获取设备
-    let DeviceConnectResult {
-        device_id,
-        auth_token,
-        is_new,
-    } = db::connect_device(&state.db_pool, payload.device_id)
-        .await
-        .map_err(|e| {
-            error!("设备连接失败: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let message = if is_new {
-        format!("设备 {} 注册成功", device_id)
-    } else {
-        format!("设备 {} 已连接", device_id)
-    };
-
-    info!("{}", message);
-
-    let narrative = state.game_data.get().narrative.clone();
-    let nc_hash = serde_json::to_vec(&narrative)
-        .ok()
-        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
-
-    Ok(Json(AgentConnectResponse {
-        auth_token,
-        message,
-        narrative_config: Some(narrative),
-        narrative_config_hash: nc_hash,
-    }))
-}
 
 // ============================================================================
 // Agent 注册 API（Phase 4 - 角色创建）
