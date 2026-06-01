@@ -239,6 +239,11 @@
 - **Agent**: Token 统计全零修复 — 单模型场景 `DirectLlmClient` 流式路径缺少 `UsageTrackingStream` 包装，导致 `token_cost_count.tmp` 始终全零
   - `DirectLlmClient` trait impl 的 `complete_streaming` / `complete_conversation_streaming` 加入 `UsageTrackingStream` 包装
   - 非流式 `send_request_once` 当 API 不返回 usage 时用字符长度估算 token
+- **Agent**: Token 统计改为按小时聚合（`yyyy-mm-dd-hh`）
+  - `token_cost_count.tmp` 新结构：`{ summary: { by_provider_model: {...} }, detail: { "<hour>": { "<model_key>": {...} } } }`
+  - `summary.by_provider_model.<model_key>` 含聚合字段（`total_*` / `active_hours` / `first_record_at` / `last_record_at`）与四个 `avg_*`（`avg_prompt_tokens_per_hour` / `avg_completion_tokens_per_hour` / `avg_calls_per_hour` / `avg_cache_hit_ratio`）
+  - 时区固定 UTC；旧 flat HashMap 格式不兼容（首次运行丢弃旧数据，文件无外部 reader 无影响）
+  - 公共 API（`snapshot_all_stats` / `record_token_usage` / `record_failure`）签名与 `ModelTokenStats` 返回结构不变，`/api/v1/metrics` 与 `/api/v1/config/llm/usage` 无感
 - **Agent+Protocol**: Session triage LLM 兜底分流修复 — 由硬编码二段式改为配置阈值驱动的三段式（urgent/batch/ignored），并区分“超时/调用失败”的兜底 reason；未配置 event_triage 或阈值无效时禁用即时事件处理
 - **Agent**: max_tokens 自适应 — API 返回 400 且错误体包含 max_tokens 限制时自动学习并重试
   - `LEARNED_MODEL_LIMITS` 全局状态持久化到 `~/.cyber-jianghu/model_limits.json`
