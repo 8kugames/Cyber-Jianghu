@@ -48,12 +48,17 @@ pub struct StateDelta {
 pub struct DeltaConfig {
     /// 变化百分比阈值（|diff| / 100 >= threshold => Important）
     pub change_percentage_threshold: f32,
+    /// 生存驱动 Critical 阈值：只有 survival_drive.urgency >= 此值时才标 Critical
+    /// 默认值 5 对应 narratives.yaml 中 hunger/thirst urgency=3(轻微), 7(重度), 10(致命)
+    /// 低于此值的生存属性变化标 Important 而非 Critical，减少信号噪声
+    pub survival_critical_urgency_threshold: u8,
 }
 
 impl Default for DeltaConfig {
     fn default() -> Self {
         Self {
             change_percentage_threshold: 0.1,
+            survival_critical_urgency_threshold: 5,
         }
     }
 }
@@ -103,19 +108,23 @@ impl DeltaEngine {
 
     /// 首次 tick：生成全量状态快照
     fn detect_full_state(&self, curr: &WorldState, changes: &mut Vec<StateChange>) {
-        let critical_attrs: HashSet<&str> = curr
+        let survival_urgencies: HashMap<&str, u8> = curr
             .self_state
             .survival_drives
             .iter()
-            .map(|sd| sd.attribute.as_str())
+            .map(|sd| (sd.attribute.as_str(), sd.urgency))
             .collect();
 
         // 属性
         for (key, &val) in &curr.self_state.attributes {
-            let urgency = if critical_attrs.contains(key.as_str()) {
-                Urgency::Critical
-            } else {
-                Urgency::Important
+            let urgency = match survival_urgencies.get(key.as_str()) {
+                Some(&drive_urgency)
+                    if drive_urgency >= self.config.survival_critical_urgency_threshold =>
+                {
+                    Urgency::Critical
+                }
+                Some(_) => Urgency::Important,
+                None => Urgency::Important,
             };
             changes.push(StateChange {
                 category: ChangeCategory::Survival,
@@ -184,6 +193,10 @@ impl DeltaEngine {
     }
 
     /// 检测属性变化（数据驱动：从 server 下发的 survival_drives 判定 Critical）
+    ///
+    /// Critical 判定规则：survival_drive.urgency >= config.survival_critical_urgency_threshold
+    /// 而不是简单地检查属性是否在 survival_drives 中，以避免低紧迫度的生存属性变化
+    /// （如 hunger=59→58, urgency=3）产生 Critical 信号噪声。
     fn detect_survival_changes(
         &self,
         curr_attrs: &HashMap<String, i32>,
@@ -191,9 +204,10 @@ impl DeltaEngine {
         survival_drives: &[cyber_jianghu_protocol::SurvivalDrive],
         changes: &mut Vec<StateChange>,
     ) {
-        let critical_attrs: HashSet<&str> = survival_drives
+        // 构建 attribute -> urgency 映射（仅 urgency > 0 的驱动）
+        let survival_urgencies: HashMap<&str, u8> = survival_drives
             .iter()
-            .map(|sd| sd.attribute.as_str())
+            .map(|sd| (sd.attribute.as_str(), sd.urgency))
             .collect();
 
         for (key, &curr_val) in curr_attrs {
@@ -202,12 +216,17 @@ impl DeltaEngine {
                 continue;
             }
             let diff = (curr_val - prev_val).unsigned_abs();
-            let urgency = if critical_attrs.contains(key.as_str()) {
-                Urgency::Critical
-            } else if diff as f32 / 100.0 >= self.config.change_percentage_threshold {
-                Urgency::Important
-            } else {
-                Urgency::Info
+            let urgency = match survival_urgencies.get(key.as_str()) {
+                Some(&drive_urgency)
+                    if drive_urgency >= self.config.survival_critical_urgency_threshold =>
+                {
+                    Urgency::Critical
+                }
+                Some(_) => Urgency::Important, // 生存属性但紧迫不足 → Important
+                None if diff as f32 / 100.0 >= self.config.change_percentage_threshold => {
+                    Urgency::Important
+                }
+                _ => Urgency::Info,
             };
 
             changes.push(StateChange {
@@ -384,6 +403,7 @@ mod tests {
     fn test_config() -> DeltaConfig {
         DeltaConfig {
             change_percentage_threshold: 0.1,
+            survival_critical_urgency_threshold: 5,
         }
     }
 
@@ -561,6 +581,43 @@ mod tests {
             .find(|c| c.field == "attributes.hp")
             .expect("应有 hp 变化");
         assert_eq!(hp_change.urgency, Urgency::Critical);
+    }
+
+    #[test]
+    fn test_survival_low_urgency_not_critical() {
+        let engine = test_engine();
+        let prev_attrs = HashMap::from([("hunger".to_string(), 42)]);
+        let curr_attrs = HashMap::from([("hunger".to_string(), 30)]);
+
+        let drives = vec![cyber_jianghu_protocol::SurvivalDrive {
+            attribute: "hunger".to_string(),
+            drive: "寻找食物".to_string(),
+            reason: "肚子饿了".to_string(),
+            urgency: 3,
+            goal: "找东西吃".to_string(),
+        }];
+
+        let prev = build_world_state(prev_attrs, vec![], vec![], vec![], default_location());
+        let curr = build_world_state_with_drives(
+            curr_attrs,
+            drives,
+            vec![],
+            vec![],
+            vec![],
+            default_location(),
+        );
+
+        let delta = engine.compute(Some(&prev), &curr);
+        let hunger_change = delta
+            .changes
+            .iter()
+            .find(|c| c.field == "attributes.hunger")
+            .expect("应有 hunger 变化");
+        assert_eq!(
+            hunger_change.urgency,
+            Urgency::Important,
+            "urgency=3 应标 Important 而非 Critical"
+        );
     }
 
     #[test]
