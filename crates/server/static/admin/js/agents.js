@@ -569,7 +569,10 @@ function renderExperiences(data) {
 function renderTickCard(exp, metadata, time) {
   var attempts = metadata.cycles || [];
   var immediate = metadata.immediate_intents || [];
-  var worldTimeDisplay = metadata.world_time || "-";
+  var worldTimeDisplay =
+    exp.formatted_time ||
+    formatWorldTime(metadata.world_time) ||
+    "-";
 
   var html =
     '<div class="tick-card">' +
@@ -720,15 +723,12 @@ function renderServerSoulInline(label, data, type) {
       html +=
         '<div class="soul-narrative">' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
-    // 地魂：最终行动，支持 pipeline 多意图
     var pipelineActions = data.pipeline_actions;
-    if (pipelineActions && pipelineActions.length > 1) {
-      // pipeline 多意图：逐个渲染 action 文本
+    if (pipelineActions && pipelineActions.length > 0) {
       pipelineActions.forEach(function(pa) {
         html += renderServerActionHtml(pa.action_type, pa.action_data);
       });
     } else if (data.action_type) {
-      // 单意图（或旧数据无 pipeline_actions）
       html += renderServerActionHtml(data.action_type, data.action_data);
     }
     // 混沌标记徽章（仅 primary intent 级别）

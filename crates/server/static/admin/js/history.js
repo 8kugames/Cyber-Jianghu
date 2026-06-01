@@ -400,11 +400,13 @@ function renderExpTable() {
             const isSuccess = e.result === "success";
             const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
-            const timeStr = e.created_at
-                ? new Date(e.created_at).toLocaleString("zh-CN", {
-                      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-                  })
-                : "-";
+            const timeStr = e.formatted_time
+                || (e.game_day > 0 ? formatCalendarDate(e.game_day) : null)
+                || (e.created_at
+                    ? new Date(e.created_at).toLocaleString("zh-CN", {
+                          month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                      })
+                    : "-");
 
             const renhunHtml = renderRenhunCell(cycles, e);
             const tianhunHtml = renderTianhunCell(cycles, e);
