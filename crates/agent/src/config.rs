@@ -23,6 +23,62 @@ use zeroize::Zeroize;
 pub use cyber_jianghu_protocol::{AvailableAction, GameRules, InitialItem, WorldTime};
 
 // ============================================================================
+// 路径解析函数
+// ============================================================================
+
+/// 返回配置目录路径（优先 CYBER_JIANGHU_CONFIG_DIR 环境变量，回退 $HOME/.cyber-jianghu/config）
+pub fn config_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cyber-jianghu")
+        .join("config")
+}
+
+/// 返回数据目录路径（优先 CYBER_JIANGHU_DATA_DIR 环境变量，回退 $HOME/.cyber-jianghu）
+pub fn data_base_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".cyber-jianghu")
+}
+
+/// 保存 narrative_config 到磁盘（hash skip-optimization）
+///
+/// 比较新旧 hash，相同则跳过写入。写入成功后同步保存 .hash 文件。
+pub fn save_narrative_config_to_disk(
+    config: &cyber_jianghu_protocol::NarrativeConfig,
+    hash: Option<&str>,
+) -> std::io::Result<()> {
+    let cdir = config_dir();
+    let hash_path = cdir.join("narrative_config.hash");
+
+    let should_save = match hash {
+        Some(new_hash) => match std::fs::read_to_string(&hash_path) {
+            Ok(old_hash) => old_hash.trim() != new_hash,
+            Err(_) => true,
+        },
+        None => true,
+    };
+
+    if !should_save {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&cdir)?;
+    let json = serde_json::to_string_pretty(config)?;
+    std::fs::write(cdir.join("narrative_config.json"), json)?;
+    if let Some(h) = hash {
+        std::fs::write(&hash_path, h)?;
+    }
+    Ok(())
+}
+
+// ============================================================================
 // 每服务器设备身份配置（device.yaml）
 // ============================================================================
 
@@ -939,23 +995,11 @@ impl Config {
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件
-        // 优先 CYBER_JIANGHU_CONFIG_DIR，回退 CYBER_JIANGHU_DATA_DIR/config，再回退默认路径
-        let config_dir = std::env::var("CYBER_JIANGHU_CONFIG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                std::env::var("CYBER_JIANGHU_DATA_DIR")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| {
-                        dirs::home_dir()
-                            .unwrap_or_else(|| PathBuf::from("."))
-                            .join(".cyber-jianghu")
-                    })
-                    .join("config")
-            });
-        let actions_path = config_dir.join("actions.json");
+        let cdir = config_dir();
+        let actions_path = cdir.join("actions.json");
 
         // 确保目录存在
-        if let Err(e) = fs::create_dir_all(&config_dir) {
+        if let Err(e) = fs::create_dir_all(&cdir) {
             tracing::warn!("创建配置目录失败: {}", e);
         } else {
             // 序列化并保存

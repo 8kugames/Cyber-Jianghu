@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 /// 从本地文件加载可用动作列表
 pub fn load_available_actions_from_file() -> Vec<AvailableAction> {
-    let actions_path = super::config_dir().join("actions.json");
+    let actions_path = crate::config::config_dir().join("actions.json");
 
     if !actions_path.exists() {
         tracing::debug!("本地 actions.json 不存在，跳过加载");
