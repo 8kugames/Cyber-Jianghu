@@ -103,6 +103,14 @@ pub struct AgentState {
     #[serde(default)]
     pub birth_tick: Option<i64>,
 
+    /// 衰减小数累计器（运行时状态，不持久化）
+    ///
+    /// 解决 `decay_per_tick < 1.0` 时 f32→i32 截断为 0 的问题。
+    /// 每 tick 把 `-decay_amount * season_modifier` 累加到对应属性上，
+    /// 当 |accumulator| ≥ 1.0 时扣减整数，余数保留。
+    #[serde(skip, default)]
+    pub decay_accumulator: std::collections::HashMap<String, f32>,
+
     /// 状态记录时间
     pub created_at: DateTime<Utc>,
 }

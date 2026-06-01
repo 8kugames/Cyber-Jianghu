@@ -121,29 +121,29 @@ mod tests {
         assert_eq!(state.status.get("hp").unwrap_or(0), 100);
         assert!(state.is_alive);
 
-        // 应用衰减（hunger/thirst 每tick衰减5，stamina 使用 recovery_formula 恢复）
+        // 测试配置 hunger/thirst decay_per_tick = 0.2
+        // 单 tick 累计器未到 1.0，hunger/thirst 保持原值
         let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 45); // 50 - 5 = 45
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 45); // 50 - 5 = 45
-        assert_eq!(state.status.get("stamina").unwrap_or(0), 100); // 已经是最大值，不再增加
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 50);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 50);
+        assert_eq!(state.status.get("stamina").unwrap_or(0), 100);
 
-        // 测试多次衰减导致死亡
-        // 测试中的 mock 注册表没有季节系统，所以 modifier 为 1。
-        // hunger/thirst 每tick衰减5（decay_per_tick: 5 表示扣减5）
-        // 从 45 开始，每次 -5，9次后归零死亡
-        let mut loop_count = 0;
-        for _ in 0..20 {
-            if state.is_alive {
-                let _ = state.apply_decay(1);
-                loop_count += 1;
-            }
+        // 跑满 5 tick，累计器到 -1.0，hunger 扣 1
+        for _ in 0..4 {
+            let _ = state.apply_decay(1);
         }
-        println!("Loop count to death: {}", loop_count);
-        // We know it starts at 50, and 10 decays of 5 makes it 0.
-        // And we trigger death at 0, so is_alive = false.
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
+
+        // 持续衰减至死亡：0.2/tick → 5 tick 扣 1，49 → 0 需 ~245 tick
+        for _ in 0..300 {
+            if !state.is_alive {
+                break;
+            }
+            let _ = state.apply_decay(1);
+        }
         assert_eq!(state.status.get("hunger").unwrap_or(0), 0);
-        // Note: Because it breaks when hunger reaches 0, thirst might not have been decremented the 10th time!
-        assert!(state.status.get("thirst").unwrap_or(0) <= 5);
+        assert!(state.status.get("thirst").unwrap_or(0) <= 1);
         assert!(!state.is_alive);
         assert_eq!(state.status.get("hp").unwrap_or(0), 0);
     }
@@ -154,22 +154,24 @@ mod tests {
 
         let mut state = AgentState::new(Uuid::new_v4(), 1);
 
-        // 应用衰减
-        let _ = state.apply_decay(1);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 45);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 45);
+        // 跑满 5 tick 让 hunger/thirst 扣 1
+        for _ in 0..5 {
+            let _ = state.apply_decay(1);
+        }
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 49);
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 49);
 
         // 恢复饥饿值
         state.restore_attribute("hunger", 30);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 75); // 45 + 30 = 75
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 79);
 
         // 恢复口渴值
         state.restore_attribute("thirst", 20);
-        assert_eq!(state.status.get("thirst").unwrap_or(0), 65); // 45 + 20 = 65
+        assert_eq!(state.status.get("thirst").unwrap_or(0), 69);
 
         // 恢复到最大值
         state.restore_attribute("hunger", 50);
-        assert_eq!(state.status.get("hunger").unwrap_or(0), 100); // 最大100
+        assert_eq!(state.status.get("hunger").unwrap_or(0), 100);
     }
 
     #[test]
