@@ -526,6 +526,27 @@ pub fn create_api_router() -> Router<HttpApiState> {
         ) // 获取 LLM Token 累计使用统计
 }
 
+/// 返回配置目录路径（优先 CYBER_JIANGHU_CONFIG_DIR 环境变量，回退 $HOME/.cyber-jianghu/config）
+pub fn config_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("CYBER_JIANGHU_CONFIG_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".cyber-jianghu")
+        .join("config")
+}
+
+/// 返回数据目录路径（优先 CYBER_JIANGHU_DATA_DIR 环境变量，回退 $HOME/.cyber-jianghu）
+pub fn data_base_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("CYBER_JIANGHU_DATA_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".cyber-jianghu")
+}
+
 /// 获取静态文件服务目录
 pub fn get_static_serve_dir() -> PathBuf {
     let panel_path = PathBuf::from("crates/agent/static/panel");
@@ -709,18 +730,11 @@ pub fn create_http_state(
     let intent_validator = None;
 
     let narrative_config = {
-        if let Some(home) = dirs::home_dir() {
-            let narrative_path = home
-                .join(".cyber-jianghu")
-                .join("config")
-                .join("narrative_config.json");
-            if narrative_path.exists() {
-                std::fs::read_to_string(&narrative_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-            } else {
-                None
-            }
+        let narrative_path = config_dir().join("narrative_config.json");
+        if narrative_path.exists() {
+            std::fs::read_to_string(&narrative_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
         } else {
             None
         }
@@ -1013,9 +1027,9 @@ impl HttpApiState {
             // 内存始终更新（保证 API 返回最新数据）
             *self.narrative_config.write().await = Some(nc.clone());
 
-            if let Some(home) = dirs::home_dir() {
-                let config_dir = home.join(".cyber-jianghu").join("config");
-                let hash_path = config_dir.join("narrative_config.hash");
+            {
+                let cdir = config_dir();
+                let hash_path = cdir.join("narrative_config.hash");
 
                 let should_save = match result.narrative_config_hash.as_ref() {
                     Some(new_hash) => match std::fs::read_to_string(&hash_path) {
@@ -1027,8 +1041,8 @@ impl HttpApiState {
 
                 if should_save {
                     if let Ok(json) = serde_json::to_string_pretty(nc) {
-                        let _ = std::fs::create_dir_all(&config_dir);
-                        let nc_path = config_dir.join("narrative_config.json");
+                        let _ = std::fs::create_dir_all(&cdir);
+                        let nc_path = cdir.join("narrative_config.json");
                         if let Err(e) = std::fs::write(&nc_path, json) {
                             error!("刷新令牌保存 narrative_config 失败: {}", e);
                         } else if let Some(ref hash) = result.narrative_config_hash {
