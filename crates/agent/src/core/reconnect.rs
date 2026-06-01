@@ -66,7 +66,7 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok(Some((agent_id, game_rules, registered_name, is_alive))) => {
+                        Ok(Some((agent_id, game_rules, world_building_rules, registered_name, is_alive))) => {
                             info!("重连后注册确认: agent_id={}, alive={}", agent_id, is_alive);
 
                             // 更新 agent 名称和人设（与 lifecycle 注册确认逻辑对齐）
@@ -243,6 +243,18 @@ impl super::Agent {
                             // 热更新认知引擎的动作列表缓存
                             if let Some(ref engine) = self.cognitive_engine {
                                 engine.update_action_aliases(&game_rules.available_actions);
+                                engine.set_available_actions(game_rules.available_actions.clone());
+                            }
+
+                            // 立即应用 world_building_rules 到 Validator（与 lifecycle 路径对齐）
+                            if let (Some(validator), Some(wb_rules)) = (&self.validator, &world_building_rules) {
+                                let v = validator.clone();
+                                let rules = wb_rules.clone();
+                                v.update_rules(rules).await;
+                                info!(
+                                    "reconnect: 已从 Registered 消息应用 world_building_rules v={} 到 Validator",
+                                    wb_rules.version
+                                );
                             }
 
                             // 新架构：即时事件处理器无需重新绑定（EventStore 是持久化的）

@@ -15,12 +15,17 @@ impl super::super::Agent {
         let agent_name_for_skills = agent_name_for_callback.clone();
         let agent_name_for_prompt = agent_name_for_callback.clone();
 
+        let cognitive_engine_for_rules = self.cognitive_engine.clone();
         self.client
             .set_game_rules_callback(Arc::new(move |game_rules| {
                 info!(
                     "Agent '{}' received game rules update: version {}",
                     agent_name_for_callback, game_rules.version
                 );
+                if let Some(ref engine) = cognitive_engine_for_rules {
+                    engine.update_action_aliases(&game_rules.available_actions);
+                    engine.set_available_actions(game_rules.available_actions.clone());
+                }
             }))
             .await;
 

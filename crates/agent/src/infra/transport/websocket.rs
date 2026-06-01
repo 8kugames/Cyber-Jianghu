@@ -365,12 +365,12 @@ impl WebSocketClient {
     /// 等待注册响应
     ///
     /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
+    /// - `Ok(Some((agent_id, game_rules, world_building_rules, agent_name, is_alive)))` - 有角色（活或死）
     /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
     pub async fn wait_for_registration(
         &self,
-    ) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
+    ) -> Result<Option<(Uuid, GameRules, Option<WorldBuildingRules>, Option<String>, bool)>> {
         let mut rx = {
             let state = self.state.read().await;
             state
@@ -403,6 +403,7 @@ impl WebSocketClient {
                     return Ok(Some((
                         data.agent_id,
                         data.game_rules.clone(),
+                        data.world_building_rules.clone(),
                         data.agent_name.clone(),
                         data.is_alive,
                     )));
@@ -1161,12 +1162,12 @@ impl AgentClient {
     /// 等待注册响应
     ///
     /// 返回值：
-    /// - `Ok(Some((agent_id, game_rules, agent_name, is_alive)))` - 有角色（活或死）
+    /// - `Ok(Some((agent_id, game_rules, world_building_rules, agent_name, is_alive)))` - 有角色（活或死）
     /// - `Ok(None)` - 无角色，等待注册（agent_id 为 nil）
     /// - `Err(e)` - 连接错误
     pub async fn wait_for_registration(
         &self,
-    ) -> Result<Option<(Uuid, GameRules, Option<String>, bool)>> {
+    ) -> Result<Option<(Uuid, GameRules, Option<WorldBuildingRules>, Option<String>, bool)>> {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }
