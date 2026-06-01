@@ -940,14 +940,18 @@ impl Config {
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件
         // 使用 CYBER_JIANGHU_DATA_DIR 或默认路径
-        let data_dir = std::env::var("CYBER_JIANGHU_DATA_DIR")
+        let config_dir = std::env::var("CYBER_JIANGHU_CONFIG_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
-                dirs::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join(".cyber-jianghu")
+                std::env::var("CYBER_JIANGHU_DATA_DIR")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| {
+                        dirs::home_dir()
+                            .unwrap_or_else(|| PathBuf::from("."))
+                            .join(".cyber-jianghu")
+                    })
+                    .join("config")
             });
-        let config_dir = data_dir.join("config");
         let actions_path = config_dir.join("actions.json");
 
         // 确保目录存在

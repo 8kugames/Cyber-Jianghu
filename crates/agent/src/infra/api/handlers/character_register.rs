@@ -840,17 +840,15 @@ pub(crate) async fn register_character_handler(
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
             // 10. 保存 narrative_config 到本地配置目录（hash skip-optimization）
-            if let Some(ref narrative_config) = result.narrative_config
-                && let Some(home) = dirs::home_dir()
-            {
+            if let Some(ref narrative_config) = result.narrative_config {
                 // 内存始终更新
                 *state.narrative_config.write().await = result.narrative_config.clone();
 
-                let config_dir = home.join(".cyber-jianghu").join("config");
-                if let Err(e) = std::fs::create_dir_all(&config_dir) {
+                let cdir = crate::infra::api::config_dir();
+                if let Err(e) = std::fs::create_dir_all(&cdir) {
                     error!("创建配置目录失败: {}", e);
                 } else {
-                    let hash_path = config_dir.join("narrative_config.hash");
+                    let hash_path = cdir.join("narrative_config.hash");
 
                     let should_save = match result.narrative_config_hash.as_ref() {
                         Some(new_hash) => match std::fs::read_to_string(&hash_path) {
@@ -861,7 +859,7 @@ pub(crate) async fn register_character_handler(
                     };
 
                     if should_save {
-                        let config_path = config_dir.join("narrative_config.json");
+                        let config_path = cdir.join("narrative_config.json");
                         match serde_json::to_string_pretty(narrative_config) {
                             Ok(json) => {
                                 if let Err(e) = std::fs::write(&config_path, json) {
