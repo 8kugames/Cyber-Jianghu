@@ -113,8 +113,9 @@ async function loadData() {
     if (appState.setupStatus) {
         const dot = document.getElementById('s-conn-dot');
         const text = document.getElementById('s-conn-text');
-        if (dot) dot.className = `connection-dot ${appState.setupStatus.server_connected ? 'connected' : 'disconnected'}`;
-        if (text) text.textContent = appState.setupStatus.server_connected ? '已连接' : '未连接';
+        const connected = appState.setupStatus.has_server;
+        if (dot) dot.className = `connection-dot ${connected ? 'connected' : 'disconnected'}`;
+        if (text) text.textContent = connected ? '已连接' : '未连接';
     }
 }
 
