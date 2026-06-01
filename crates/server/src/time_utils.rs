@@ -92,7 +92,7 @@ fn day_to_chinese(day: i32) -> String {
     }
 }
 
-pub fn parse_world_time_json(json_str: Option<&str>) -> Option<WorldTime> {
+fn parse_world_time_json(json_str: Option<&str>) -> Option<WorldTime> {
     let s = json_str?;
     serde_json::from_str::<WorldTime>(s).ok()
 }

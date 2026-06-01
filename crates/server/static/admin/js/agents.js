@@ -506,11 +506,24 @@ function renderExperiences(data) {
             ? "rejected"
             : "";
 
+      var fallbackWorldTime =
+        exp.formatted_time ||
+        (metadata && typeof formatWorldTime === "function"
+          ? formatWorldTime(metadata.world_time)
+          : null) ||
+        (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
+          ? formatCalendarDate(exp.game_day)
+          : null) ||
+        "[时间格式异常]";
+
       var html =
         '<div class="tick-card">' +
         '<div class="tick-card-header">' +
         '<span class="tick-badge">T' +
         escapeHtml(exp.tick_id || "-") +
+        "</span>" +
+        '<span class="tick-world-time">' +
+        escapeHtml(fallbackWorldTime) +
         "</span>" +
         '<span class="tick-real-time">' +
         escapeHtml(time) +
@@ -571,8 +584,13 @@ function renderTickCard(exp, metadata, time) {
   var immediate = metadata.immediate_intents || [];
   var worldTimeDisplay =
     exp.formatted_time ||
-    formatWorldTime(metadata.world_time) ||
-    "-";
+    (typeof formatWorldTime === "function"
+      ? formatWorldTime(metadata.world_time)
+      : null) ||
+    (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
+      ? formatCalendarDate(exp.game_day)
+      : null) ||
+    "[时间格式异常]";
 
   var html =
     '<div class="tick-card">' +
