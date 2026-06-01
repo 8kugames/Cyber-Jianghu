@@ -270,17 +270,14 @@ pub async fn execute_query_world(
 /// 执行 lookup_character
 ///
 /// 根据角色名称在附近实体中查找匹配项，返回 UUID 字符串。
-pub async fn execute_lookup_character(
-    name: &str,
-    store: &WorldStateStore,
-) -> serde_json::Value {
+pub async fn execute_lookup_character(name: &str, store: &WorldStateStore) -> serde_json::Value {
     let ws = match store.current().await {
         Some(ws) => ws,
         None => {
             return serde_json::json!({
                 "success": false,
                 "message": "WorldState 尚未初始化"
-            })
+            });
         }
     };
 

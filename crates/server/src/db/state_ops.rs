@@ -10,10 +10,10 @@
 // - Agent动作日志操作
 
 use anyhow::{Context, Result};
-use std::error::Error;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
+use std::error::Error;
 use tracing::{debug, error, info, warn};
 
 use crate::models::{AgentAction, AgentState, TickLog};
@@ -412,7 +412,10 @@ pub async fn batch_insert_action_logs(pool: &PgPool, actions: &[AgentAction]) ->
     let sql_result = query_builder.build().execute(pool).await;
     if let Err(ref e) = sql_result {
         // RAW DEBUG: log full error chain before context
-        eprintln!("[RAW-DEBUG-batch] sqlx error type: {}", std::any::type_name::<sqlx::Error>());
+        eprintln!(
+            "[RAW-DEBUG-batch] sqlx error type: {}",
+            std::any::type_name::<sqlx::Error>()
+        );
         eprintln!("[RAW-DEBUG-batch] display: {}", e);
         eprintln!("[RAW-DEBUG-batch] debug: {:?}", e);
         eprintln!("[RAW-DEBUG-batch] source: {:?}", e.source());

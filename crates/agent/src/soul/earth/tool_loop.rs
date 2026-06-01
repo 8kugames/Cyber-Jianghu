@@ -290,8 +290,8 @@ const DECISION_MARKER: &str = "actions";
 fn extract_json_object(content: &str) -> Option<String> {
     let start = content.find('{')?;
     let json_candidate = &content[start..];
-    let stream = serde_json::Deserializer::from_str(json_candidate)
-        .into_iter::<serde_json::Value>();
+    let stream =
+        serde_json::Deserializer::from_str(json_candidate).into_iter::<serde_json::Value>();
 
     let mut last_object: Option<serde_json::Value> = None;
     let mut marked_object: Option<serde_json::Value> = None;
@@ -306,9 +306,7 @@ fn extract_json_object(content: &str) -> Option<String> {
         }
     }
 
-    marked_object
-        .or(last_object)
-        .map(|v| v.to_string())
+    marked_object.or(last_object).map(|v| v.to_string())
 }
 
 #[cfg(test)]
@@ -376,8 +374,14 @@ mod tests {
 {"actions":[{"action_type":"喝水","action_data":{"item_id":"水"}}]}"#;
         let extracted = extract_json_object(content).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
-        assert!(parsed.get("actions").is_some(), "should pick JSON with actions");
-        assert!(parsed.get("step").is_none(), "should not be the unmarked JSON");
+        assert!(
+            parsed.get("actions").is_some(),
+            "should pick JSON with actions"
+        );
+        assert!(
+            parsed.get("step").is_none(),
+            "should not be the unmarked JSON"
+        );
     }
 
     #[test]

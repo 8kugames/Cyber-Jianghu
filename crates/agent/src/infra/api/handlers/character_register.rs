@@ -844,8 +844,7 @@ pub(crate) async fn register_character_handler(
                 && let Some(home) = dirs::home_dir()
             {
                 // 内存始终更新
-                *state.narrative_config.write().await =
-                    result.narrative_config.clone();
+                *state.narrative_config.write().await = result.narrative_config.clone();
 
                 let config_dir = home.join(".cyber-jianghu").join("config");
                 if let Err(e) = std::fs::create_dir_all(&config_dir) {

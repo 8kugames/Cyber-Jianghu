@@ -171,8 +171,9 @@ impl NarrativeConfig {
             });
         }
 
-        let cat_order: HashMap<&str, usize> =
-            [("primary", 0), ("status", 1), ("derived", 2)].into_iter().collect();
+        let cat_order: HashMap<&str, usize> = [("primary", 0), ("status", 1), ("derived", 2)]
+            .into_iter()
+            .collect();
         views.sort_by(|a, b| {
             let ao = cat_order.get(a.category.as_str()).unwrap_or(&3);
             let bo = cat_order.get(b.category.as_str()).unwrap_or(&3);
