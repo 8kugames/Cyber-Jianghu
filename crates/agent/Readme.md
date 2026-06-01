@@ -117,7 +117,7 @@ cyber-jianghu-agent run --mode claw
 - `GET /api/v1/character/soul-cycles` - 灵魂循环记录
 - `GET /api/v1/character/biography` - 获取纪传体传记
 - `POST /api/v1/character/biography` - LLM 生成传记
-- `GET/POST /api/v1/character/dream` - 梦境注入（持续 N 轮思想注入）
+- `GET/POST /api/v1/character/dream` - 托梦注入（持续 N 轮思想注入）
 
 **多角色**:
 - `GET /api/v1/characters` - 列出所有角色

@@ -1,8 +1,9 @@
 // Dashboard page: three-column overview
 
 import { API, get } from './api.js';
-import { escapeHtml, showLoading, formatWorldTime, getAttrColor, fmtNum, STATUS_MAP } from './ui.js';
+import { escapeHtml, showLoading, getAttrColor, fmtNum, STATUS_MAP, formatDateTime } from './ui.js';
 import { onEvent } from './app.js';
+import { renderTickCard, groupByTick } from './panels.js';
 
 const DASHBOARD_EVENT_LIMIT = 5;
 
@@ -21,7 +22,7 @@ let unsubscribe = null;
 
 function render(container) {
     container.innerHTML = `
-    <div class="dashboard">
+    <div class="dashboard" style="grid-template-columns:minmax(320px,1fr) 1fr">
         <div class="dashboard-left" id="dash-left">
             <div class="card">
                 <div class="card-header">角色状态</div>
@@ -34,19 +35,17 @@ function render(container) {
                     <canvas id="radar-canvas" width="200" height="200"></canvas>
                 </div>
             </div>
+            <div class="card" style="margin-top:12px">
+                <div class="card-header">系统监控</div>
+                <div class="card-body" id="dash-monitor">
+                    <p class="text-muted">加载中...</p>
+                </div>
+            </div>
         </div>
         <div class="dashboard-center" id="dash-center">
             <div class="card">
                 <div class="card-header">最近事件</div>
                 <div class="card-body" id="dash-events">
-                    <p class="text-muted">加载中...</p>
-                </div>
-            </div>
-        </div>
-        <div class="dashboard-right" id="dash-right">
-            <div class="card">
-                <div class="card-header">系统监控</div>
-                <div class="card-body" id="dash-monitor">
                     <p class="text-muted">加载中...</p>
                 </div>
             </div>
@@ -78,8 +77,13 @@ async function loadCharStatus() {
         ]);
 
         const charName = character?.name || character?.agent_name || state.agent_name || '-';
+        const agentId = character?.agent_id || '-';
         const status = character?.status || 'unknown';
         const statusLabel = STATUS_MAP[status] || status;
+        const age = character?.age ?? '-';
+        const gender = character?.gender || '-';
+        const registeredAt = formatDateTime(character?.registered_at);
+        const serverUrl = character?.server_url || '-';
 
         // Group attributes by category
         const categories = meta.categories || {};
@@ -114,9 +118,14 @@ async function loadCharStatus() {
         el.innerHTML = `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
                 <div style="width:42px;height:42px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px">${escapeHtml(charName.charAt(0))}</div>
-                <div>
-                    <div style="font-size:16px;font-weight:600">${escapeHtml(charName)}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${statusLabel} · ${escapeHtml(location)}</div>
+                <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span style="font-size:16px;font-weight:600">${escapeHtml(charName)}</span>
+                        <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'};font-size:12px">${statusLabel}</span>
+                    </div>
+                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)}</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${escapeHtml(agentId)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">注册: ${escapeHtml(registeredAt)} · ${escapeHtml(serverUrl)}</div>
                 </div>
             </div>
             ${barsHtml}
@@ -137,11 +146,10 @@ async function loadEvents() {
         const data = await get(`${API.SOUL_CYCLES}?page=1&limit=${DASHBOARD_EVENT_LIMIT}`);
         let recordMap = data.records || {};
         if (Array.isArray(recordMap)) {
-            const m = {};
-            for (const r of recordMap) { const k = String(r.tick_id || 0); (m[k] ||= []).push(r); }
-            recordMap = m;
+            recordMap = groupByTick(recordMap);
         }
 
+        const immediateMap = data.immediate_intents || {};
         const tickIds = Object.keys(recordMap).sort((a, b) => Number(b) - Number(a));
 
         if (tickIds.length === 0) {
@@ -149,51 +157,14 @@ async function loadEvents() {
             return;
         }
 
-        let html = '';
+        let html = '<div class="exp-list">';
         for (const tickId of tickIds.slice(0, DASHBOARD_EVENT_LIMIT)) {
             const attempts = recordMap[tickId] || [];
-            const first = attempts[0];
-            if (!first) continue;
-
-            const wt = first.world_time ? formatWorldTime(first.world_time) : '-';
-            const intent = first.final_intent;
-            const actionType = intent?.action_type || '-';
-            const renhunNarrative = first.renhun?.narrative || '';
-            const tianhunResult = first.tianhun?.result || '';
-
-            // Compact dashboard: action summary + renhun narrative snippet
-            let actionSummary = actionType;
-            if (intent?.pipeline_actions && intent.pipeline_actions.length > 0) {
-                actionSummary = intent.pipeline_actions.map(pa => {
-                    const c = pa.action_data?.content;
-                    return c ? `${pa.action_type}: ${c}` : (pa.action_type || '-');
-                }).join(' → ');
-            } else if (intent?.action_data) {
-                const ad = typeof intent.action_data === 'string' ? (() => { try { return JSON.parse(intent.action_data); } catch { return {}; } })() : intent.action_data;
-                if (ad.content) actionSummary = `${actionType}: ${ad.content}`;
-            }
-
-            html += `<div class="card" style="margin-bottom:6px;padding:10px">`;
-            html += `<div class="tick-card-header" style="margin-bottom:4px">`;
-            html += `<span class="tick-badge">T${escapeHtml(tickId)}</span>`;
-            html += `<span class="tick-world-time">${escapeHtml(wt)}</span>`;
-            if (tianhunResult) {
-                const isApproved = tianhunResult === 'approved';
-                html += `<span class="soul-result ${isApproved ? 'approved' : 'rejected'}" style="margin-left:auto">${isApproved ? '通过' : '驳回'}</span>`;
-            }
-            html += `</div>`;
-
-            // Dihun (action)
-            html += `<div class="exp-dihun" style="margin-top:2px;padding:4px 8px"><span class="exp-soul-label">地魂</span><div class="exp-soul-content"><div class="soul-text" style="font-size:12px">${escapeHtml(actionSummary.substring(0, 100))}${actionSummary.length > 100 ? '...' : ''}</div></div></div>`;
-
-            // Renhun (narrative) — collapsed snippet
-            if (renhunNarrative) {
-                const snippet = renhunNarrative.substring(0, 80);
-                html += `<div class="exp-renhun" style="margin-top:2px;padding:4px 8px"><span class="exp-soul-label">人魂</span><div class="exp-soul-content"><div class="soul-text" style="font-size:11px">${escapeHtml(snippet)}${renhunNarrative.length > 80 ? '...' : ''}</div></div></div>`;
-            }
-            html += `</div>`;
+            const immediate = immediateMap[tickId] || [];
+            if (!attempts[0] && immediate.length === 0) continue;
+            html += renderTickCard(tickId, attempts, immediate);
         }
-
+        html += '</div>';
         html += `<div style="text-align:center;margin-top:8px"><a href="#/characters" class="text-link">查看完整经历 →</a></div>`;
         el.innerHTML = html;
     } catch (e) {

@@ -1,7 +1,7 @@
 // Character page: sidebar tabs, panel switching, character dropdown, creation, death/rebirth
 
 import { API, get, post } from './api.js';
-import { escapeHtml, showLoading, showSuccess, showError, showModal, hideModal, STATUS_MAP } from './ui.js';
+import { escapeHtml, showLoading, showSuccess, showError, showModal, hideModal, STATUS_MAP, formatDateTime } from './ui.js';
 import { onEvent } from './app.js';
 import { getPanelDefinitions, mountPanel } from './panels.js';
 
@@ -33,8 +33,8 @@ function render(container) {
                 <p class="text-muted">加载中...</p>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-                <select class="form-select" id="char-select" style="width:180px"></select>
-                <button class="btn btn-sm" id="char-create-btn">+ 新角色</button>
+                <select class="form-select" id="char-select" style="flex:1;min-width:200px"></select>
+                <button id="char-create-btn" style="width:32px;height:32px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">+</button>
             </div>
         </div>
         <div class="character-body">
@@ -109,7 +109,8 @@ async function loadCharacterList() {
             const id = ch.agent_id || ch.id;
             const name = ch.name || id;
             const status = ch.status || 'unknown';
-            html += `<option value="${escapeHtml(id)}">${escapeHtml(name)} (${STATUS_MAP[status] || status})</option>`;
+            const shortId = id ? id.substring(0, 8) : '?';
+            html += `<option value="${escapeHtml(id)}">${escapeHtml(name)}(${shortId})(${STATUS_MAP[status] || status})</option>`;
         }
         html += '<option value="__create__">+ 新角色</option>';
         select.innerHTML = html;
@@ -122,26 +123,43 @@ async function loadCharacterList() {
     }
 }
 
+function renderCharHeader(data) {
+    const name = data.name || data.agent_name || '-';
+    const age = data.age ?? '-';
+    const gender = data.gender || '-';
+    const location = data.location_name || data.location_id || data.location || '-';
+    const status = data.status || 'unknown';
+    const agentId = data.agent_id || '-';
+    const registeredAt = formatDateTime(data.registered_at);
+    const serverUrl = data.server_url || '-';
+    const statusColor = status === 'alive' ? 'var(--success)' : 'var(--danger)';
+
+    return `
+        <div style="width:36px;height:36px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">${escapeHtml(name.charAt(0))}</div>
+        <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:16px;font-weight:600">${escapeHtml(name)}</span>
+                <span style="color:${statusColor};font-size:12px">${STATUS_MAP[status] || status}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+                <span title="Agent ID">${escapeHtml(agentId)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted)">
+                注册: ${escapeHtml(registeredAt)} · Server: ${escapeHtml(serverUrl)}
+            </div>
+        </div>
+    `;
+}
+
 async function loadCharacterData() {
     const infoEl = document.getElementById('char-info');
     try {
         const data = await get(API.CHARACTER);
         characterData = data;
 
-        const name = data.name || data.agent_name || '-';
-        const age = data.age ?? '-';
-        const gender = data.gender || '-';
-        const location = data.location_name || data.location_id || '-';
-        const status = data.status || 'unknown';
-
         if (infoEl) {
-            infoEl.innerHTML = `
-                <div style="width:36px;height:36px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">${escapeHtml(name.charAt(0))}</div>
-                <div>
-                    <div style="font-size:16px;font-weight:600">${escapeHtml(name)}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)} · <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'}">${STATUS_MAP[status] || status}</span></div>
-                </div>
-            `;
+            infoEl.innerHTML = renderCharHeader(data);
         }
 
         // Update select
@@ -163,20 +181,8 @@ async function loadCharacterDataById(agentId) {
         const data = await get(`/api/v1/characters/${encodeURIComponent(agentId)}`);
         characterData = data;
 
-        const name = data.name || '-';
-        const age = data.age ?? '-';
-        const gender = data.gender || '-';
-        const location = data.location || '-';
-        const status = data.status || 'unknown';
-
         if (infoEl) {
-            infoEl.innerHTML = `
-                <div style="width:36px;height:36px;background:var(--accent-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600">${escapeHtml(name.charAt(0))}</div>
-                <div>
-                    <div style="font-size:16px;font-weight:600">${escapeHtml(name)}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(gender)} · ${age}岁 · ${escapeHtml(location)} · <span style="color:${status === 'alive' ? 'var(--success)' : 'var(--danger)'}">${STATUS_MAP[status] || status}</span></div>
-                </div>
-            `;
+            infoEl.innerHTML = renderCharHeader(data);
         }
 
         loadPanel();

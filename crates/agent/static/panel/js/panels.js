@@ -13,10 +13,6 @@ const panels = {
         label: '关系',
         mount: mountRelationships,
     },
-    biography: {
-        label: '传记',
-        mount: mountBiography,
-    },
     experiences: {
         label: '经历',
         mount: mountExperiences,
@@ -25,13 +21,17 @@ const panels = {
         label: '记忆',
         mount: mountMemories,
     },
-    dream: {
-        label: '梦境',
-        mount: mountDream,
-    },
     skills: {
         label: '技能',
         mount: mountSkills,
+    },
+    dream: {
+        label: '托梦',
+        mount: mountDream,
+    },
+    biography: {
+        label: '传记',
+        mount: mountBiography,
     },
 };
 
@@ -205,9 +205,9 @@ async function mountBiography(container, ctx) {
 let expPage = 1;
 
 const LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
-const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true };
-const WHISPER_TYPES = { whisper: true, murmur: true };
-const SHOUT_TYPES = { shout: true, yell: true };
+const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true, 说话: true };
+const WHISPER_TYPES = { whisper: true, murmur: true, 私语: true };
+const SHOUT_TYPES = { shout: true, yell: true, 大喊: true };
 
 async function mountExperiences(container, ctx) {
     expPage = 1;
@@ -261,7 +261,7 @@ async function loadExpPage(container, ctx) {
     }
 }
 
-function groupByTick(arr) {
+export function groupByTick(arr) {
     const m = {};
     for (const r of arr) {
         const k = String(r.tick_id || 0);
@@ -270,7 +270,7 @@ function groupByTick(arr) {
     return m;
 }
 
-function renderTickCard(tickId, attempts, immediate) {
+export function renderTickCard(tickId, attempts, immediate) {
     const first = attempts[0];
     const wt = first?.world_time ? formatWorldTime(first.world_time) : '-';
     const ts = first?.created_at ? new Date(first.created_at).toLocaleString('zh-CN') : '';
@@ -495,11 +495,11 @@ async function mountDream(container, ctx) {
             get(`${API.DREAM_RECORDS}?page=1&limit=20`),
         ]);
 
-        let html = '<h3 style="font-size:14px;font-weight:600;margin-bottom:8px">注入梦境</h3>';
+        let html = '<h3 style="font-size:14px;font-weight:600;margin-bottom:8px">托梦</h3>';
         html += `
         <form id="dream-form" style="margin-bottom:16px">
             <div class="form-group">
-                <label class="form-label">梦境内容</label>
+                <label class="form-label">托梦内容</label>
                 <textarea class="form-input" id="dream-thought" rows="3" placeholder="输入要注入的思考内容" required></textarea>
             </div>
             <div style="display:flex;gap:8px;align-items:end">
@@ -513,14 +513,14 @@ async function mountDream(container, ctx) {
 
         // Current dream status
         if (status.status === 'fulfilled' && status.value?.active) {
-            html += `<div class="card" style="padding:10px;margin-bottom:12px;border-left:3px solid var(--accent)"><div style="font-size:12px;color:var(--text-muted)">当前梦境 (剩余 ${status.value.remaining ?? '?'} 轮)</div><div style="font-size:13px;margin-top:2px">${escapeHtml(status.value.thought || '')}</div></div>`;
+            html += `<div class="card" style="padding:10px;margin-bottom:12px;border-left:3px solid var(--accent)"><div style="font-size:12px;color:var(--text-muted)">托梦生效 (剩余 ${status.value.remaining ?? '?'} 轮)</div><div style="font-size:13px;margin-top:2px">${escapeHtml(status.value.thought || '')}</div></div>`;
         }
 
         // Records
-        html += '<h3 style="font-size:14px;font-weight:600;margin:12px 0 8px">梦境记录</h3>';
+        html += '<h3 style="font-size:14px;font-weight:600;margin:12px 0 8px">托梦记录</h3>';
         const recs = records.status === 'fulfilled' ? (records.value.records || records.value || []) : [];
         if (recs.length === 0) {
-            html += '<p class="text-muted">暂无梦境记录</p>';
+            html += '<p class="text-muted">暂无托梦记录</p>';
         } else {
             for (const r of recs) {
                 html += `<div class="card" style="padding:10px;margin-bottom:6px"><div style="font-size:12px;color:var(--text-muted)">${escapeHtml(r.injected_at || '-')} · ${r.duration ?? '?'}轮</div><div style="font-size:13px;margin-top:2px">${escapeHtml(r.thought || '-')}</div></div>`;
@@ -536,14 +536,14 @@ async function mountDream(container, ctx) {
             if (!thought) return;
             try {
                 await post(API.DREAM, { thought, duration });
-                showSuccess('梦境已注入');
+                showSuccess('托梦已注入');
                 mountDream(container, ctx);
             } catch (e) {
                 showError('注入失败: ' + e.message);
             }
         });
     } catch (e) {
-        container.innerHTML = '<p class="text-muted">梦境数据加载失败</p>';
+        container.innerHTML = '<p class="text-muted">托梦数据加载失败</p>';
     }
 }
 
@@ -578,4 +578,3 @@ async function mountSkills(container, ctx) {
         container.innerHTML = '<p class="text-muted">技能数据加载失败</p>';
     }
 }
-
