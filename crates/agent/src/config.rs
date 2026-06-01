@@ -939,7 +939,7 @@ impl Config {
     /// 更新游戏规则
     pub fn update_game_rules(&mut self, game_rules: GameRules) {
         // 保存 available_actions 到本地文件
-        // 使用 CYBER_JIANGHU_DATA_DIR 或默认路径
+        // 优先 CYBER_JIANGHU_CONFIG_DIR，回退 CYBER_JIANGHU_DATA_DIR/config，再回退默认路径
         let config_dir = std::env::var("CYBER_JIANGHU_CONFIG_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {

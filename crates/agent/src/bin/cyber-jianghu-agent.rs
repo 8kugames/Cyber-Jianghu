@@ -255,8 +255,6 @@ async fn ensure_device(config: &Config, ws_url: &str) -> Result<DeviceConfig> {
 
     // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
     // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
-    // 保存 narrative_config（设备连接时下发，供前端属性分类使用）
-    // hash skip-optimization：与 prompt_templates 相同逻辑，hash 未变则跳过磁盘写入
     {
         let nc = &body["narrative_config"];
         let nc_hash = body["narrative_config_hash"].as_str();
