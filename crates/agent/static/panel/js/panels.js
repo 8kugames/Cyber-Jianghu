@@ -1,7 +1,7 @@
 // Panel renderers: attribute/relationship/biography/experience/memory/dream/skill
 
 import { API, get, post } from './api.js';
-import { escapeHtml, showSuccess, showError, showLoading, formatWorldTime, showModal, extractActionSummary, getActionColor } from './ui.js';
+import { escapeHtml, showSuccess, showError, showLoading, formatWorldTime, showModal } from './ui.js';
 
 // Panel registry: each panel exports { label, mount(container, data) }
 const panels = {
@@ -42,6 +42,9 @@ export function getPanelDefinitions() {
 export async function mountPanel(panelId, container, context) {
     const panel = panels[panelId];
     if (panel) {
+        container.classList.remove('panel-enter');
+        void container.offsetWidth; // force reflow
+        container.classList.add('panel-enter');
         await panel.mount(container, context);
     } else {
         container.innerHTML = '<p class="text-muted">未知面板</p>';
@@ -67,12 +70,12 @@ async function mountAttributes(container, ctx) {
         let html = '';
         for (const [catName, attrNames] of Object.entries(categories)) {
             const catLabel = displayNames[catName] || catName;
-            html += `<h3 style="font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--text-secondary)">${escapeHtml(catLabel)}</h3>`;
+            html += `<h3 style="font-size:14px;font-weight:600;margin:${html ? '16px' : '0'} 0 8px;color:var(--text-secondary)">${escapeHtml(catLabel)}</h3>`;
             html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">';
             for (const attrName of attrNames) {
                 const attr = allAttrs.find(a => a.name === attrName);
                 if (!attr) continue;
-                const label = attr.display_name || displayNames[attrName] || attrName;
+                const label = displayNames[attrName] || attrName;
                 html += `<div class="card" style="padding:10px"><div style="font-size:11px;color:var(--text-muted)">${escapeHtml(label)}</div><div style="font-size:16px;font-weight:600">${escapeHtml(attr.value_str)}</div></div>`;
             }
             html += '</div>';
@@ -105,10 +108,12 @@ async function mountRelationships(container, ctx) {
             const label = rel.relationship_label || '-';
             const favor = rel.favorability ?? rel.level ?? '-';
             const color = typeof favor === 'number' ? (favor >= 70 ? 'var(--success)' : favor >= 30 ? 'var(--warning)' : 'var(--danger)') : 'var(--text-muted)';
+            const initial = name.charAt(0);
             html += `
-            <div class="card" style="padding:12px;margin-bottom:8px;cursor:pointer" data-rel-id="${escapeHtml(rel.target_id || '')}">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                    <div>
+            <div class="card rel-card" style="padding:12px;margin-bottom:8px;cursor:pointer" data-rel-id="${escapeHtml(rel.target_id || '')}">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div class="rel-avatar">${escapeHtml(initial)}</div>
+                    <div style="flex:1;min-width:0">
                         <div style="font-weight:600">${escapeHtml(name)}</div>
                         <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(label)}</div>
                     </div>
@@ -197,6 +202,11 @@ async function mountBiography(container, ctx) {
 
 let expPage = 1;
 
+const LAYER_NAMES = { layer1: '动作审查', layer2: '规则校验', layer3: '意图审查' };
+const SPEAK_TYPES = { speak: true, talk: true, say: true, chat: true };
+const WHISPER_TYPES = { whisper: true, murmur: true };
+const SHOUT_TYPES = { shout: true, yell: true };
+
 async function mountExperiences(container, ctx) {
     expPage = 1;
     showLoading(container);
@@ -207,41 +217,36 @@ async function loadExpPage(container, ctx) {
     try {
         const agentId = ctx.agentId || '';
         const param = agentId ? `&agent_id=${agentId}` : '';
-        const data = await get(`${API.SOUL_CYCLES}?page=${expPage}&limit=20${param}`);
-        const records = data.records || [];
+        const data = await get(`${API.SOUL_CYCLES}?page=${expPage}&limit=10${param}`);
 
-        if (records.length === 0 && expPage === 1) {
+        // records: { tick_id: [SoulCycleAttemptEntry] }, immediate_intents: { tick_id: [...] }
+        let recordMap = data.records || {};
+        let immMap = data.immediate_intents || {};
+        if (Array.isArray(recordMap)) { recordMap = groupByTick(recordMap); }
+
+        const tickIds = Object.keys(recordMap).sort((a, b) => Number(b) - Number(a));
+
+        if (tickIds.length === 0 && expPage === 1) {
             container.innerHTML = '<p class="text-muted">暂无经历记录</p>';
             return;
         }
 
         let html = '';
-        for (const rec of records) {
-            const wt = rec.world_time ? formatWorldTime(rec.world_time) : '-';
-            const actionType = rec.final_action_type || '-';
-            const content = extractActionSummary(rec);
-            const narrative = rec.renhun_narrative || '';
-            const color = getActionColor(actionType);
-
-            html += `
-            <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${color}">
-                <div style="display:flex;justify-content:space-between">
-                    <span style="font-size:12px;color:var(--text-muted)">Tick ${rec.tick_id ?? '-'} · ${escapeHtml(wt)}</span>
-                    <span style="font-size:12px;color:${color}">${escapeHtml(actionType)}</span>
-                </div>
-                <div style="font-size:13px;margin-top:4px">${escapeHtml(content)}</div>
-                ${narrative ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;border-top:1px solid var(--border-light);padding-top:4px">${escapeHtml(narrative.substring(0, 200))}${narrative.length > 200 ? '...' : ''}</div>` : ''}
-            </div>`;
+        for (const tickId of tickIds) {
+            const attempts = recordMap[tickId] || [];
+            const immediate = immMap[tickId] || [];
+            html += renderTickCard(tickId, attempts, immediate);
         }
 
-        if (data.has_more || records.length >= 20) {
+        if (data.has_more || tickIds.length >= 10) {
             html += `<div style="text-align:center;margin-top:12px"><button class="btn btn-sm" id="exp-load-more">加载更多</button></div>`;
         }
 
         if (expPage === 1) {
-            container.innerHTML = html;
+            container.innerHTML = `<div class="exp-list">${html}</div>`;
         } else {
-            container.insertAdjacentHTML('beforeend', html);
+            const list = container.querySelector('.exp-list');
+            if (list) list.insertAdjacentHTML('beforeend', html);
         }
 
         document.getElementById('exp-load-more')?.addEventListener('click', () => {
@@ -252,6 +257,140 @@ async function loadExpPage(container, ctx) {
     } catch (e) {
         if (expPage === 1) container.innerHTML = '<p class="text-muted">经历加载失败</p>';
     }
+}
+
+function groupByTick(arr) {
+    const m = {};
+    for (const r of arr) {
+        const k = String(r.tick_id || 0);
+        (m[k] ||= []).push(r);
+    }
+    return m;
+}
+
+function renderTickCard(tickId, attempts, immediate) {
+    const first = attempts[0];
+    const wt = first?.world_time ? formatWorldTime(first.world_time) : '-';
+    const ts = first?.created_at ? new Date(first.created_at).toLocaleString('zh-CN') : '';
+
+    let html = `<div class="tl-item"><div class="tl-dot"></div><div class="tl-content">`;
+    html += `<div class="tick-card-header">`;
+    html += `<span class="tick-badge">T${escapeHtml(tickId)}</span>`;
+    html += `<span class="tick-world-time">${escapeHtml(wt)}</span>`;
+    html += `<span class="tick-real-time">${escapeHtml(ts)}</span>`;
+    html += `</div>`;
+
+    // 行动区
+    html += `<div class="tick-section"><div class="tick-section-title">行动</div>`;
+    html += `<div class="tick-attempts-container">`;
+    attempts.forEach((att, idx) => {
+        html += `<div class="tick-attempt-box">`;
+        if (attempts.length > 1) html += `<div class="tick-attempt-label">行动 ${idx + 1}</div>`;
+        html += renderRenhun(att.renhun);
+        html += renderTianhun(att.tianhun);
+        if (att.final_intent) html += renderDihun(att.final_intent);
+        html += `</div>`;
+    });
+    html += `</div></div>`;
+
+    // 即时区
+    if (immediate.length > 0) {
+        html += `<div class="tick-section tick-section-immediate"><div class="tick-section-title">即时</div>`;
+        for (const imm of immediate) {
+            const statusCls = imm.send_status === 'sent' ? 'sent' : 'failed';
+            const statusText = imm.send_status === 'sent' ? '已发送' : '失败';
+            html += `<div class="imm-item">`;
+            html += `<div class="exp-immediate"><span class="exp-soul-label">即时</span>`;
+            html += `<div class="exp-soul-content"><span class="soul-text">${escapeHtml(imm.action_type || '-')}`;
+            if (imm.speech_content) html += `: ${escapeHtml(imm.speech_content)}`;
+            html += `</span></div></div>`;
+            html += `<span class="imm-status ${statusCls}">${escapeHtml(statusText)}</span>`;
+            if (imm.send_error) html += `<span class="imm-error">${escapeHtml(imm.send_error)}</span>`;
+            html += `</div>`;
+        }
+        html += `</div>`;
+    }
+
+    html += `</div></div></div>`;
+    return html;
+}
+
+function renderRenhun(data) {
+    if (!data) return '';
+    const hasNarrative = data.narrative;
+    const hasThought = data.thought_log;
+    if (!hasNarrative && !hasThought) return '';
+
+    let html = `<div class="exp-renhun"><span class="exp-soul-label">人魂</span><div class="exp-soul-content">`;
+    if (hasNarrative) html += `<div class="soul-text">${escapeHtml(data.narrative)}</div>`;
+    if (hasThought) html += `<div class="soul-thought">${escapeHtml(data.thought_log)}</div>`;
+    html += `</div></div>`;
+    return html;
+}
+
+function renderTianhun(data) {
+    if (!data) return '';
+    let html = `<div class="exp-tianhun"><span class="exp-soul-label">天魂</span><div class="exp-soul-content">`;
+
+    if (data.result) {
+        const isApproved = data.result === 'approved';
+        html += `<div class="soul-result ${isApproved ? 'approved' : 'rejected'}">${isApproved ? '通过' : '驳回'}</div>`;
+    }
+    if (data.layers && data.layers.length > 0) {
+        html += `<div class="soul-layers">`;
+        for (const l of data.layers) {
+            const name = LAYER_NAMES[l.layer] || l.layer;
+            html += `<span class="soul-layer-tag ${l.passed ? 'passed' : 'failed'}">${escapeHtml(name)}`;
+            if (!l.passed && l.detail) html += `: ${escapeHtml(l.detail)}`;
+            html += `</span>`;
+        }
+        html += `</div>`;
+    }
+    if (data.reason) html += `<div class="soul-reason">${escapeHtml(data.reason)}</div>`;
+    if (data.narrative) html += `<div class="soul-narrative">${escapeHtml(data.narrative)}</div>`;
+
+    html += `</div></div>`;
+    return html;
+}
+
+function renderDihun(data) {
+    if (!data) return '';
+    let html = `<div class="exp-dihun"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">`;
+
+    const pipeline = data.pipeline_actions;
+    if (pipeline && pipeline.length > 1) {
+        for (const pa of pipeline) html += renderActionText(pa.action_type, pa.action_data);
+    } else if (data.action_type) {
+        html += renderActionText(data.action_type, data.action_data);
+    }
+
+    html += `</div></div>`;
+    return html;
+}
+
+function renderActionText(actionType, actionData) {
+    const at = actionType || '';
+    let ad = actionData;
+    if (typeof ad === 'string') { try { ad = JSON.parse(ad); } catch { ad = {}; } }
+    if (!ad || typeof ad !== 'object') ad = {};
+    const content = ad.content || '';
+    const targetId = ad.target_agent_id;
+
+    let html = '<div class="soul-text">';
+    if (SPEAK_TYPES[at] && content) {
+        const label = targetId ? `对${targetId.substring(0, 8)}...说话` : '向在场众人说话';
+        html += `${escapeHtml(label)}："${escapeHtml(content)}"`;
+    } else if (WHISPER_TYPES[at] && content) {
+        html += `密语："${escapeHtml(content)}"`;
+    } else if (SHOUT_TYPES[at] && content) {
+        html += `大喊："${escapeHtml(content)}"`;
+    } else {
+        html += escapeHtml(at);
+        const keys = Object.keys(ad).filter(k => ad[k] != null && ad[k] !== '');
+        if (keys.length > 0) html += ` <span class="soul-params">${escapeHtml(JSON.stringify(ad, null, 0))}</span>`;
+    }
+    html += '</div>';
+    return html;
 }
 
 // ============================================================================
