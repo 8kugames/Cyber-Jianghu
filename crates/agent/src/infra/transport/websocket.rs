@@ -370,7 +370,15 @@ impl WebSocketClient {
     /// - `Err(e)` - 连接错误
     pub async fn wait_for_registration(
         &self,
-    ) -> Result<Option<(Uuid, GameRules, Option<WorldBuildingRules>, Option<String>, bool)>> {
+    ) -> Result<
+        Option<(
+            Uuid,
+            GameRules,
+            Option<WorldBuildingRules>,
+            Option<String>,
+            bool,
+        )>,
+    > {
         let mut rx = {
             let state = self.state.read().await;
             state
@@ -1167,7 +1175,15 @@ impl AgentClient {
     /// - `Err(e)` - 连接错误
     pub async fn wait_for_registration(
         &self,
-    ) -> Result<Option<(Uuid, GameRules, Option<WorldBuildingRules>, Option<String>, bool)>> {
+    ) -> Result<
+        Option<(
+            Uuid,
+            GameRules,
+            Option<WorldBuildingRules>,
+            Option<String>,
+            bool,
+        )>,
+    > {
         let client = self.client.read().await;
         client.wait_for_registration().await
     }

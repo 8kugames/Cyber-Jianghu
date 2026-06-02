@@ -111,8 +111,10 @@ pub(crate) async fn get_recent_memory_handler(
             let offset = (page - 1) * limit;
             let page_slice: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
             let has_more = page_slice.len() == limit;
-            let results: Vec<serde_json::Value> =
-                page_slice.iter().map(super::service::memory_to_json).collect();
+            let results: Vec<serde_json::Value> = page_slice
+                .iter()
+                .map(super::service::memory_to_json)
+                .collect();
             Json(serde_json::json!({
                 "memories": results,
                 "count": results.len(),
@@ -122,11 +124,7 @@ pub(crate) async fn get_recent_memory_handler(
         }
         Err(e) => {
             error!("[http] Failed to get recent memories: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to read memories",
-            )
-                .into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read memories").into_response()
         }
     }
 }
@@ -148,11 +146,7 @@ async fn read_memories_for_agent(
     match store.get_recent_memories(fetch) {
         Ok(all) => {
             let offset = (page - 1) * limit;
-            let page_slice: Vec<_> = all
-                .into_iter()
-                .skip(offset)
-                .take(limit)
-                .collect();
+            let page_slice: Vec<_> = all.into_iter().skip(offset).take(limit).collect();
             let has_more = page_slice.len() == limit;
             let results: Vec<serde_json::Value> = page_slice.iter().map(memory_to_json).collect();
             Json(serde_json::json!({
@@ -167,11 +161,7 @@ async fn read_memories_for_agent(
                 "[http] Failed to read memories for agent {}: {}",
                 agent_id, e
             );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to read memories",
-            )
-                .into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read memories").into_response()
         }
     }
 }
