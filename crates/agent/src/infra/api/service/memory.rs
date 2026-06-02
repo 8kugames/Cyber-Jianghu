@@ -24,10 +24,7 @@ impl<'a> MemoryService<'a> {
 
     /// 获取近期记忆（按时间倒序，支持分页）
     pub async fn get_recent(&self, limit: usize) -> Result<Vec<MemoryEntry>> {
-        self.manager
-            .episodic()
-            .get_top_by_importance(limit)
-            .await
+        self.manager.episodic().get_top_by_importance(limit).await
     }
 
     /// 搜索归档记忆
