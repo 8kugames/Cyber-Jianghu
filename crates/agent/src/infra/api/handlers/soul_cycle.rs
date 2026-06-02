@@ -14,6 +14,7 @@ use crate::config::{CharacterConfig, CharacterStatus};
 
 use super::HttpApiState;
 use super::character_helpers::get_device_id;
+use super::character_info::enrich_world_time_json;
 
 /// Layer 结果条目
 #[derive(Debug, Serialize)]
@@ -122,9 +123,11 @@ fn record_to_attempt_entry(
     })
     .collect();
     let world_time: Option<serde_json::Value> = r.world_time.as_ref().and_then(|s| {
-        serde_json::from_str(s)
-            .ok()
-            .or_else(|| Some(serde_json::Value::String(s.clone())))
+        let parsed: Option<cyber_jianghu_protocol::WorldTime> = serde_json::from_str(s).ok();
+        match parsed {
+            Some(wt) => enrich_world_time_json(&wt),
+            None => Some(serde_json::Value::String(s.clone())),
+        }
     });
 
     SoulCycleAttemptEntry {
