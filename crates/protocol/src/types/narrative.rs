@@ -7,6 +7,24 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+/// 格式化属性视图，供展示层使用
+///
+/// 由 NarrativeConfig::build_attribute_views() 生成，
+/// 包含展示所需全部信息：显示名、格式化值、类别。
+/// 类别（primary/status/derived）来自 attribute_categories 配置，
+/// 显示名来自 attribute_descriptions（服务端数据驱动）。
+#[derive(Debug, Clone, Serialize)]
+pub struct AttributeView {
+    /// 属性原始键
+    pub name: String,
+    /// 显示名称（由 server 端 attribute_descriptions 提供）
+    pub display_name: String,
+    /// 格式化属性值（基础属性为原始值，派生属性保留三位小数）
+    pub value_str: String,
+    /// 属性类别，由 attribute_categories 配置定义（primary/status/derived/unknown 等）
+    pub category: String,
+}
+
 /// 单个阈值配置
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NarrativeThreshold {
@@ -93,6 +111,108 @@ impl NarrativeConfig {
         self.attributes
             .get(attr_name)
             .map(|c| c.display_name.as_str())
+    }
+
+    /// 构建格式化属性视图列表
+    ///
+    /// 数据驱动策略：
+    /// - 显示名来自 attribute_descriptions（服务端已封装回退：阈值描述→显示名）
+    /// - 类别来自 self.attribute_categories 配置
+    /// - 值从 base/derived 对应 map 获取，派生属性保留三位小数
+    ///
+    /// 输出按类别优先级排序：primary → status → derived → 未分类。
+    /// 这是所有展示层的唯一入口，禁止调用方自行拼接 attributes/derived/descriptions 三张表。
+    pub fn build_attribute_views(
+        &self,
+        base_values: &HashMap<String, i32>,
+        derived_values: &HashMap<String, f32>,
+        descriptions: &HashMap<String, String>,
+    ) -> Vec<AttributeView> {
+        let mut attr_category: HashMap<&str, &str> = HashMap::new();
+        for (cat, attrs) in &self.attribute_categories {
+            for attr_name in attrs {
+                attr_category.insert(attr_name.as_str(), cat.as_str());
+            }
+        }
+
+        let mut views = Vec::new();
+
+        for (name, &value) in base_values {
+            let display_name = descriptions
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone());
+            let category = attr_category
+                .get(name.as_str())
+                .unwrap_or(&"unknown")
+                .to_string();
+            views.push(AttributeView {
+                name: name.clone(),
+                display_name,
+                value_str: format!("{}", value),
+                category,
+            });
+        }
+
+        for (name, &value) in derived_values {
+            let display_name = descriptions
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone());
+            let category = attr_category
+                .get(name.as_str())
+                .unwrap_or(&"derived")
+                .to_string();
+            views.push(AttributeView {
+                name: name.clone(),
+                display_name,
+                value_str: format!("{:.3}", value),
+                category,
+            });
+        }
+
+        let cat_order: HashMap<&str, usize> = [("primary", 0), ("status", 1), ("derived", 2)]
+            .into_iter()
+            .collect();
+        views.sort_by(|a, b| {
+            let ao = cat_order.get(a.category.as_str()).unwrap_or(&3);
+            let bo = cat_order.get(b.category.as_str()).unwrap_or(&3);
+            ao.cmp(bo)
+        });
+
+        views
+    }
+
+    /// 为所有属性（基础+派生）构建叙事描述映射
+    ///
+    /// 数据驱动策略：
+    /// - 基础属性：优先使用阈值段描述（narrative_config.yaml 定义），无匹配则回退到显示名
+    /// - 派生属性：直接使用显示名（派生属性无阈值段）
+    ///
+    /// 调用方不需要感知基础/派生的差异——此方法封装了全部回退逻辑。
+    pub fn build_attribute_descriptions(
+        &self,
+        base: &HashMap<String, i32>,
+        derived: &HashMap<String, f32>,
+    ) -> HashMap<String, String> {
+        let mut result: HashMap<String, String> = HashMap::new();
+
+        for (name, &value) in base {
+            let desc = self
+                .get_description(name, value)
+                .or_else(|| self.get_display_name(name));
+            if let Some(d) = desc {
+                result.insert(name.clone(), d.to_string());
+            }
+        }
+
+        for name in derived.keys() {
+            if let Some(display) = self.get_display_name(name) {
+                result.insert(name.clone(), display.to_string());
+            }
+        }
+
+        result
     }
 
     /// 从当前属性值计算生存驱动列表

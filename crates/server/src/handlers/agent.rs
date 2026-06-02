@@ -1,64 +1,20 @@
 use anyhow::Result;
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
+use sha2::Digest;
 use std::sync::Arc;
 use tracing::{error, info};
 
-use crate::db::{self, DeviceConnectResult, verify_device_token};
+use crate::db::{self, verify_device_token};
 use crate::game_data;
 use crate::models::{
-    AgentConnectRequest, AgentConnectResponse, AgentRegisterRequest, AgentRegisterResponse,
-    GameRules, InitialItem, get_max_agent_name_length, get_max_system_prompt_length,
+    AgentRegisterRequest, AgentRegisterResponse, GameRules, InitialItem, get_max_agent_name_length,
+    get_max_system_prompt_length,
 };
 use crate::state::AppState;
-
-// ============================================================================
-// 设备连接 API（Phase 3）
-// ============================================================================
-
-/// 设备连接接口
-///
-/// POST /api/v1/agent/connect
-///
-/// 客户端首次启动时调用，用于注册设备身份或获取现有认证令牌。
-///
-/// 流程：
-/// 1. 客户端生成 device_id (UUID v4)
-/// 2. 调用此接口注册设备
-/// 3. 服务器返回 auth_token
-/// 4. 客户端保存 device_id + auth_token 到 agent.yaml
-///
-/// 后续 WebSocket 连接使用: ws://server/ws?device_id={}&token={}
-pub async fn agent_connect(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<AgentConnectRequest>,
-) -> Result<Json<AgentConnectResponse>, StatusCode> {
-    info!("设备连接请求: {}", payload.device_id);
-
-    // 注册或获取设备
-    let DeviceConnectResult {
-        device_id,
-        auth_token,
-        is_new,
-    } = db::connect_device(&state.db_pool, payload.device_id)
-        .await
-        .map_err(|e| {
-            error!("设备连接失败: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let message = if is_new {
-        format!("设备 {} 注册成功", device_id)
-    } else {
-        format!("设备 {} 已连接", device_id)
-    };
-
-    info!("{}", message);
-
-    Ok(Json(AgentConnectResponse {
-        auth_token,
-        message,
-    }))
-}
 
 // ============================================================================
 // Agent 注册 API（Phase 4 - 角色创建）
@@ -282,6 +238,9 @@ pub async fn agent_register(
 
     // 8. 获取叙事化配置（用于属性描述转换）
     let narrative_config = state.game_data.get().narrative.clone();
+    let nc_hash = serde_json::to_vec(&narrative_config)
+        .ok()
+        .map(|bytes| format!("{:x}", sha2::Sha256::digest(&bytes)));
 
     // 9. 获取初始属性（先天属性，用于 Agent 端存储 birth_attributes）
     let initial_attributes = registration.initial_state.get_attributes_for_protocol();
@@ -291,6 +250,7 @@ pub async fn agent_register(
         message: format!("Agent '{}' registered successfully", agent.name),
         game_rules,
         narrative_config,
+        narrative_config_hash: nc_hash,
         initial_attributes,
     }))
 }
@@ -422,7 +382,10 @@ pub struct AutoRebirthResponse {
 /// POST /api/v1/agent/auto-rebirth
 ///
 /// Agent 端在等待 rebirth_delay_ticks 后调用此接口完成转世重生。
-/// 服务端在单一事务中：创建全新 agent_id + 初始状态 + 初始物品。旧 agent 保持 dead 状态。
+/// 服务端在单一事务中：创建全新 agent_id + 初始状态 + 初始物品。
+///
+/// 旧 agent 终态：保持 `status='dead'` 死亡标记，`retired_at` 字段作为时间戳记录转世完成事件。
+/// `retired` 状态不被 auto-rebirth 触及（仅 `/api/v1/agent/retire` 端点可设置，专属"玩家主动归隐"语义）。
 pub async fn agent_auto_rebirth(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AutoRebirthRequest>,
@@ -782,6 +745,32 @@ pub async fn update_biography(
                 Json(serde_json::json!({"error": format!("保存失败: {}", e)})),
             ))
         }
+    }
+}
+
+/// GET /api/v1/agent/{id}/biography
+///
+/// 从数据库查询角色传记，供 agent 端回退读取（agent 本地 character.yaml 无传记时使用）
+pub async fn get_agent_biography(
+    State(state): State<Arc<AppState>>,
+    Path(agent_id): Path<uuid::Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let biography: Option<String> =
+        sqlx::query_scalar("SELECT biography FROM agents WHERE agent_id = $1")
+            .bind(agent_id)
+            .fetch_optional(&state.db_pool)
+            .await
+            .map_err(|e| {
+                error!("[biography] 查询失败: agent={}, err={}", agent_id, e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "数据库查询失败"})),
+                )
+            })?;
+
+    match biography {
+        Some(bio) if !bio.is_empty() => Ok(Json(serde_json::json!({"biography": bio}))),
+        _ => Ok(Json(serde_json::json!({"biography": null}))),
     }
 }
 

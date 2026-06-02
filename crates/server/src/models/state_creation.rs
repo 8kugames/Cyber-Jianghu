@@ -48,6 +48,7 @@ impl AgentState {
             skills: vec![],
             action_counts: std::collections::HashMap::new(),
             birth_tick: None, // 由 register/rebirth 时显式设置
+            decay_accumulator: std::collections::HashMap::new(),
             created_at: Utc::now(),
         }
     }

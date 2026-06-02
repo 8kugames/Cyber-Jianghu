@@ -830,6 +830,7 @@ pub(crate) async fn register_character_handler(
         #[allow(dead_code)]
         game_rules: Option<cyber_jianghu_protocol::GameRules>,
         narrative_config: Option<cyber_jianghu_protocol::NarrativeConfig>,
+        narrative_config_hash: Option<String>,
         #[serde(default)]
         initial_attributes: std::collections::HashMap<String, i32>,
     }
@@ -838,28 +839,15 @@ pub(crate) async fn register_character_handler(
         Ok(result) => {
             info!("角色注册成功: {} -> {}", payload.name, result.agent_id);
 
-            // 10. 保存 narrative_config 到本地配置目录
-            if let Some(ref narrative_config) = result.narrative_config
-                && let Some(home) = dirs::home_dir()
-            {
-                let config_dir = home.join(".cyber-jianghu").join("config");
-                if let Err(e) = std::fs::create_dir_all(&config_dir) {
-                    error!("创建配置目录失败: {}", e);
-                } else {
-                    let config_path = config_dir.join("narrative_config.json");
-                    match serde_json::to_string_pretty(narrative_config) {
-                        Ok(json) => {
-                            if let Err(e) = std::fs::write(&config_path, json) {
-                                error!("保存 narrative_config 失败: {}", e);
-                            } else {
-                                info!("已保存 narrative_config 到 {:?}", config_path);
-                                // 同步更新内存中的 narrative_config，避免重启后数据不一致
-                                *state.narrative_config.write().await =
-                                    result.narrative_config.clone();
-                            }
-                        }
-                        Err(e) => error!("序列化 narrative_config 失败: {}", e),
-                    }
+            // 10. 保存 narrative_config 到本地配置目录（hash skip-optimization）
+            if let Some(ref narrative_config) = result.narrative_config {
+                // 内存始终更新
+                *state.narrative_config.write().await = result.narrative_config.clone();
+
+                let hash = result.narrative_config_hash.as_deref();
+                if let Err(e) = crate::config::save_narrative_config_to_disk(narrative_config, hash)
+                {
+                    error!("保存 narrative_config 失败: {}", e);
                 }
             }
 

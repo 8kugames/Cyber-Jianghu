@@ -136,14 +136,14 @@ pub(crate) async fn get_context_handler(State(state): State<HttpApiState>) -> im
 ///
 /// 格式说明：
 /// - 显示格式：{display_name}: {value_str}
-/// - 先天属性（growable）：{当前} ({上限})
-/// - 状态值：{当前}/{最大}
-/// - 派生属性：{计算值}
+/// - 基础属性值直接以整数展示，派生属性保留三位小数
+/// - 类别由 attribute_categories 配置定义，不硬编码属性名/类
 pub(crate) async fn get_attributes_handler(State(state): State<HttpApiState>) -> impl IntoResponse {
     let current = state.current_state.read().await;
+    let narrative = state.narrative_config.read().await.clone();
     match current.as_ref() {
         Some(world_state) => {
-            let glimpse = create_attributes_glimpse(world_state);
+            let glimpse = create_attributes_glimpse(world_state, narrative.as_ref());
             Json(glimpse).into_response()
         }
         None => StatusCode::SERVICE_UNAVAILABLE.into_response(),

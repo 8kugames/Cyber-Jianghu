@@ -23,7 +23,7 @@ use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state
 use cyber_jianghu_server::tick::{IntentWorker, StateProcessor, create_worker_channel};
 use cyber_jianghu_server::*;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Router,
     body::Body,
@@ -279,7 +279,17 @@ async fn main() -> Result<()> {
     // 9. 创建共享 tick_id（scheduler 和 AppState 共用）
     let accepting_tick_id = Arc::new(AtomicI64::new(0));
 
-    // 9.1 创建应用状态
+    // 9.1 加载/初始化服务器部署时间（持久化，重启不变）
+    let deployment_time = crate::db::get_or_init_deployment_time(&db_pool)
+        .await
+        .context("加载服务器部署时间失败")?;
+    info!(
+        "服务器部署时间: {} (已运行 {})",
+        deployment_time,
+        chrono::Utc::now().signed_duration_since(deployment_time)
+    );
+
+    // 9.2 创建应用状态
     let state = Arc::new(AppState::new(
         db_pool.clone(),
         connection_manager.clone(),
@@ -291,6 +301,7 @@ async fn main() -> Result<()> {
         dialogue_manager.clone(),
         admin_read_token,
         admin_write_token,
+        deployment_time,
         crate::paths::get_config_dir(),
         accepting_tick_id.clone(),
     ));
@@ -315,10 +326,15 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(handlers::system::root))
         .route("/health", get(handlers::system::health_check))
-        // 设备连接（Phase 3）- 首次启动时注册设备身份
+        // 设备身份生命周期 v2 — 严格校验（DB 不存在时返回 404）
         .route(
-            "/api/v1/agent/connect",
-            post(handlers::agent::agent_connect),
+            "/api/v1/device/verify",
+            post(handlers::device::device_verify),
+        )
+        // 设备身份生命周期 v2 — 显式注册（server 生成 device_id，201 Created）
+        .route(
+            "/api/v1/device/register",
+            post(handlers::device::device_register),
         )
         // 角色注册（Phase 4）- 创建游戏角色
         .route(
@@ -344,6 +360,11 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/agent/biography",
             post(handlers::agent::update_biography),
+        )
+        // 传记查询 - Agent 端回退读取（本地无传记时从 server DB 获取）
+        .route(
+            "/api/v1/agent/{id}/biography",
+            get(handlers::agent::get_agent_biography),
         )
         // Prompt Templates 拉取 — Agent 启动时主动获取
         .route(

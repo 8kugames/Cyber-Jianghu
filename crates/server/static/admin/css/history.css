@@ -488,10 +488,99 @@ body {
     align-items: center;
 }
 
+/* Combobox */
+.combobox {
+    position: relative;
+}
+
+.combobox-input {
+    padding: 8px 14px;
+    background: var(--bg-level-1);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    min-width: 200px;
+    outline: none;
+    transition: all 0.15s;
+    font-family: var(--font-family);
+    box-sizing: border-box;
+}
+
+.combobox-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.combobox-input::placeholder {
+    color: var(--text-subtle);
+}
+
+.combobox-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-level-1);
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.combobox-dropdown.open {
+    display: block;
+}
+
+.combobox-option {
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: background 0.1s;
+}
+
+.combobox-option:hover {
+    background: var(--bg-level-2);
+}
+
+.combobox-empty {
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text-subtle);
+    text-align: center;
+}
+
 /* Timeline */
 .timeline-container {
     position: relative;
     padding-left: 40px;
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #4a5568) transparent;
+}
+
+.timeline-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.timeline-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.timeline-container::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4a5568);
+    border-radius: 4px;
+}
+
+.timeline-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary, #a0aec0);
 }
 
 .timeline-container::before {

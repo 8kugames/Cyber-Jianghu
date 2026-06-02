@@ -130,20 +130,6 @@ impl super::super::Agent {
                 decision_future.await
             };
 
-            // 如果 final_intent 已被设置（如 speak 即时通道），退出
-            if final_intent.is_some() {
-                break;
-            }
-
-            // 预计算人魂叙述（审查通过后才记录）
-            let renhun_narrative = Self::summarize_intent(
-                raw_intent.action_type.as_str(),
-                raw_intent.action_data.as_ref(),
-                &world_state.location.name,
-                &world_state.entities,
-            );
-            let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
-
             // 5c. 天魂 (ReflectorSoul) 审核 — 分级审核策略
             let graded_config = self
                 .config
@@ -223,6 +209,21 @@ impl super::super::Agent {
                     });
                 }
             }
+
+            // 人魂叙述：基于全部原始意图（审查前），体现角色主观意图
+            let renhun_narrative = all_raw_intents
+                .iter()
+                .map(|intent| {
+                    Self::summarize_intent(
+                        intent.action_type.as_str(),
+                        intent.action_data.as_ref(),
+                        &world_state.location.name,
+                        &world_state.entities,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("；");
+            let renhun_thought_log = raw_intent.thought_log.as_deref().unwrap_or("");
 
             // 重要记忆固化
             #[allow(clippy::collapsible_if)]
@@ -411,18 +412,19 @@ impl super::super::Agent {
                             })
                         }))
                         .collect();
-                    let action_type_display = pipeline_actions
-                        .iter()
-                        .filter_map(|a| a.get("action_type").and_then(|v| v.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(" → ");
+                    let primary_action_data = pipeline
+                        .action_data
+                        .as_ref()
+                        .and_then(|d| serde_json::to_string(d).ok());
+                    let pipeline_json = serde_json::to_string(&pipeline_actions).ok();
                     recorder
                         .record_final_intent(
                             world_state.tick_id,
                             attempt,
                             Some(&pipeline.intent_id.to_string()),
-                            Some(&action_type_display),
-                            Some(&serde_json::to_string(&pipeline_actions).unwrap_or_default()),
+                            Some(pipeline.action_type.as_str()),
+                            primary_action_data.as_deref(),
+                            pipeline_json.as_deref(),
                         )
                         .await;
                     final_intent = Some(pipeline);

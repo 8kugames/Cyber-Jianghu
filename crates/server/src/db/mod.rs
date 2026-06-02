@@ -41,15 +41,17 @@ pub use common::init_db_pool;
 pub use agent_ops::{
     AutoRebirthResult, DeviceConnectResult, RetireResult, assign_initial_recipes,
     auto_rebirth_agent, batch_get_known_recipe_ids, connect_device, get_agent_by_device_id,
-    get_agent_by_id, get_all_agents, get_intent_timeout_stats, get_known_recipe_ids,
-    record_recipe_observation, register_agent_transactional, retire_agent, update_agent_biography,
-    update_agent_location, update_agent_online, update_device_last_seen, verify_device_token,
+    get_agent_by_id, get_all_agents, get_device_token, get_intent_timeout_stats,
+    get_known_recipe_ids, record_recipe_observation, register_agent_transactional, register_device,
+    retire_agent, update_agent_biography, update_agent_location, update_agent_online,
+    update_device_last_seen, verify_device_strict, verify_device_token,
 };
 
 // 导出公共API - AgentState操作
 pub use state_ops::{
     batch_insert_agent_states, get_all_alive_agents_latest_states, get_current_world_tick_id,
-    get_last_tick_time, get_latest_agent_state, get_latest_state_tick_id, upsert_agent_state,
+    get_last_tick_time, get_latest_agent_state, get_latest_state_tick_id,
+    get_or_init_deployment_time, upsert_agent_state,
 };
 
 // 导出公共API - Tick日志操作

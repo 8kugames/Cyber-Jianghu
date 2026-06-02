@@ -403,10 +403,18 @@ pub struct LayerReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineAction {
+    pub action_type: String,
+    pub action_data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalIntentReport {
     pub intent_id: Option<String>,
     pub action_type: Option<String>,
     pub action_data: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_actions: Option<Vec<PipelineAction>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chaos_marker: Option<crate::types::ChaosMarker>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

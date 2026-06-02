@@ -23,10 +23,8 @@ pub struct LocalEmbedderConfig {
 
 impl Default for LocalEmbedderConfig {
     fn default() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         Self {
-            model_dir: home
-                .join(".cyber-jianghu")
+            model_dir: crate::config::data_base_dir()
                 .join("models")
                 .join("bge-small-zh-v1.5"),
             expected_dim: 512,

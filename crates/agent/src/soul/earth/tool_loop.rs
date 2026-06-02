@@ -12,7 +12,7 @@
 use anyhow::Result;
 use tracing::{debug, info, warn};
 
-use crate::component::llm::tool_types::{ToolDefinition, ToolExecutor};
+use crate::component::llm::tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 use crate::component::llm::{ChatExchangeConfig, ChatMessage, LlmClient};
 
 use super::budget::ToolResultBudget;
@@ -23,6 +23,7 @@ pub(crate) struct ToolLoopResult {
 }
 
 use super::config::EarthSoulConfig;
+use super::content_fallback;
 use super::loop_guard::{LoopGuard, LoopGuardAction};
 
 /// 共享 tool calling 循环
@@ -91,13 +92,122 @@ pub(crate) async fn run_tool_loop(
                 .unwrap_or_default(),
         );
 
-        let has_tool_calls = response
+        let provider_name = llm.provider_name();
+        let tool_calls: Option<Vec<ToolCall>> = response
             .tool_calls
-            .as_ref()
-            .map(|tc| !tc.is_empty())
-            .unwrap_or(false);
+            .clone()
+            .filter(|tc| !tc.is_empty())
+            .or_else(|| {
+                response.content.as_ref().and_then(|c| {
+                    let parsed = content_fallback::try_parse_content_tool_calls(c, &provider_name);
+                    if parsed.is_some() {
+                        info!(
+                            "[地魂] content fallback 解析成功: provider={}, tools={}",
+                            provider_name,
+                            parsed.as_ref().map_or(0, |v| v.len())
+                        );
+                    }
+                    parsed
+                })
+            });
 
-        if !has_tool_calls {
+        if let Some(ref calls) = tool_calls {
+            let call_names: Vec<&str> = calls.iter().map(|tc| tc.function.name.as_str()).collect();
+            info!(
+                "[地魂] LLM 请求调用 {} 个 tool: {:?}",
+                calls.len(),
+                call_names
+            );
+
+            // Push assistant message with tool_calls
+            messages.push(ChatMessage {
+                role: "assistant".to_string(),
+                content: response.content,
+                tool_calls: Some(calls.clone()),
+                tool_call_id: None,
+                name: None,
+                reasoning_content: response.reasoning_content.clone(),
+            });
+
+            for (i, tc) in calls.iter().enumerate() {
+                // Loop guard check (F2) — 渐进策略：Warn → Terminate
+                if let Some(ref mut g) = guard {
+                    match g.check(&tc.function.name) {
+                        LoopGuardAction::Terminate => {
+                            warn!(
+                                "[地魂] Loop guard 截断: 连续调用 '{}' 超限",
+                                tc.function.name
+                            );
+                            // 为当前及所有剩余 tool_calls 推送占位 result
+                            for remaining in &calls[i..] {
+                                messages.push(ChatMessage::tool_result(
+                                    &remaining.id,
+                                    &remaining.function.name,
+                                    "[已获知足够信息，直接回答]",
+                                ));
+                            }
+                            return forced_text_exit(llm, messages, llm_config.clone()).await;
+                        }
+                        LoopGuardAction::Warn(_) => {
+                            warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
+                        }
+                        LoopGuardAction::Proceed => {}
+                    }
+                }
+
+                // Execute + error signaling (F3)
+                let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
+                info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
+
+                let raw_result = match executor.execute(&tc.function.name, &args).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
+                        let error_str =
+                            format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
+                        messages.push(ChatMessage::tool_result(
+                            &tc.id,
+                            &tc.function.name,
+                            &error_str,
+                        ));
+                        continue;
+                    }
+                };
+
+                // Budget 处理 (F1) — JSON 感知：紧凑化 → 字符截断兜底
+                let processed = match &mut budget {
+                    Some(b) => {
+                        if b.is_exhausted() {
+                            ToolResultBudget::exhausted_message().to_string()
+                        } else {
+                            b.process(&tc.function.name, &raw_result)
+                        }
+                    }
+                    None => raw_result.to_string(),
+                };
+
+                // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
+                let final_result = if let Some(ref mut g) = guard
+                    && let Some(warning) = g.take_pending_warning()
+                {
+                    format!("[系统提示] {}\n{}", warning, processed)
+                } else {
+                    processed
+                };
+
+                info!(
+                    "[地魂] Tool {} 结果: {}",
+                    tc.function.name,
+                    final_result.chars().take(2000).collect::<String>()
+                );
+
+                messages.push(ChatMessage::tool_result(
+                    &tc.id,
+                    &tc.function.name,
+                    &final_result,
+                ));
+            }
+        } else {
             let content = response.content.unwrap_or_default();
             info!(
                 "[地魂] LLM 未调用任何 tool，直接返回文本 ({} chars), preview: {}",
@@ -105,17 +215,28 @@ pub(crate) async fn run_tool_loop(
                 content.chars().take(2000).collect::<String>()
             );
 
-            // 内容校验：必须是 JSON 格式（以 { 开头）
-            // 非 JSON 内容（纯动作名、XML tool_call、推理文本等）走强制 JSON 退出
-            if content.trim().starts_with('{') {
+            // 提取 JSON：纯 JSON 直接通过，否则从内容中提取含 actions 标记的决策 JSON
+            let trimmed = content.trim();
+            if trimmed.starts_with('{') {
                 return Ok(ToolLoopResult {
                     content,
                     reasoning_content: response.reasoning_content,
                 });
             }
 
+            if let Some(json) = extract_json_object(&content) {
+                info!(
+                    "[地魂] 从 LLM 输出中提取到 JSON ({} chars), 跳过 forced_text_exit",
+                    json.len()
+                );
+                return Ok(ToolLoopResult {
+                    content: json,
+                    reasoning_content: response.reasoning_content,
+                });
+            }
+
             warn!(
-                "[地魂] LLM 返回非JSON内容 ({} chars), 转为强制JSON退出, preview: {}",
+                "[地魂] LLM 返回无 JSON 内容 ({} chars), 转为强制JSON退出, preview: {}",
                 content.len(),
                 content.chars().take(200).collect::<String>()
             );
@@ -128,109 +249,6 @@ pub(crate) async fn run_tool_loop(
                 reasoning_content: response.reasoning_content,
             });
             return forced_text_exit(llm, messages, llm_config).await;
-        }
-
-        let tool_calls = response
-            .tool_calls
-            .as_ref()
-            .expect("tool_calls must exist when finish_reason is tool_calls");
-        let call_names: Vec<&str> = tool_calls
-            .iter()
-            .map(|tc| tc.function.name.as_str())
-            .collect();
-        info!(
-            "[地魂] LLM 请求调用 {} 个 tool: {:?}",
-            tool_calls.len(),
-            call_names
-        );
-
-        // Push assistant message with tool_calls
-        messages.push(ChatMessage {
-            role: "assistant".to_string(),
-            content: response.content,
-            tool_calls: Some(tool_calls.clone()),
-            tool_call_id: None,
-            name: None,
-            reasoning_content: response.reasoning_content.clone(),
-        });
-
-        for (i, tc) in tool_calls.iter().enumerate() {
-            // Loop guard check (F2) — 渐进策略：Warn → Terminate
-            if let Some(ref mut g) = guard {
-                match g.check(&tc.function.name) {
-                    LoopGuardAction::Terminate => {
-                        warn!(
-                            "[地魂] Loop guard 截断: 连续调用 '{}' 超限",
-                            tc.function.name
-                        );
-                        // 为当前及所有剩余 tool_calls 推送占位 result
-                        for remaining in &tool_calls[i..] {
-                            messages.push(ChatMessage::tool_result(
-                                &remaining.id,
-                                &remaining.function.name,
-                                "[已获知足够信息，直接回答]",
-                            ));
-                        }
-                        return forced_text_exit(llm, messages, llm_config.clone()).await;
-                    }
-                    LoopGuardAction::Warn(_) => {
-                        warn!("[地魂] Loop guard 警告: 连续调用 '{}'", tc.function.name);
-                    }
-                    LoopGuardAction::Proceed => {}
-                }
-            }
-
-            // Execute + error signaling (F3)
-            let args = tc.parse_arguments().unwrap_or(serde_json::json!({}));
-            info!("[地魂] 执行 tool: {}({})", tc.function.name, args);
-
-            let raw_result = match executor.execute(&tc.function.name, &args).await {
-                Ok(val) => val,
-                Err(e) => {
-                    warn!("[地魂] Tool '{}' 执行失败: {}", tc.function.name, e);
-                    let error_str =
-                        format!("[工具调用失败] 工具: {} | 原因: {}", tc.function.name, e);
-                    messages.push(ChatMessage::tool_result(
-                        &tc.id,
-                        &tc.function.name,
-                        &error_str,
-                    ));
-                    continue;
-                }
-            };
-
-            // Budget 处理 (F1) — JSON 感知：紧凑化 → 字符截断兜底
-            let processed = match &mut budget {
-                Some(b) => {
-                    if b.is_exhausted() {
-                        ToolResultBudget::exhausted_message().to_string()
-                    } else {
-                        b.process(&tc.function.name, &raw_result)
-                    }
-                }
-                None => raw_result.to_string(),
-            };
-
-            // LoopGuard Warn 后置拼接（budget 处理后再 prepend，不破坏 JSON）
-            let final_result = if let Some(ref mut g) = guard
-                && let Some(warning) = g.take_pending_warning()
-            {
-                format!("[系统提示] {}\n{}", warning, processed)
-            } else {
-                processed
-            };
-
-            info!(
-                "[地魂] Tool {} 结果: {}",
-                tc.function.name,
-                final_result.chars().take(2000).collect::<String>()
-            );
-
-            messages.push(ChatMessage::tool_result(
-                &tc.id,
-                &tc.function.name,
-                &final_result,
-            ));
         }
     }
 
@@ -266,4 +284,131 @@ async fn forced_text_exit(
         content,
         reasoning_content: response.reasoning_content,
     })
+}
+
+/// 决策 JSON 的确定性标识字段
+const DECISION_MARKER: &str = "actions";
+
+/// 从 LLM 输出中提取决策 JSON 对象。
+///
+/// 策略：遍历所有 JSON object，优先找含 `DECISION_MARKER` 的（确定性决策），
+/// 找不到则 fallback 最后一个 object（兼容旧格式）。
+/// 用 `StreamDeserializer` 容忍前后文本。
+fn extract_json_object(content: &str) -> Option<String> {
+    let start = content.find('{')?;
+    let json_candidate = &content[start..];
+    let stream =
+        serde_json::Deserializer::from_str(json_candidate).into_iter::<serde_json::Value>();
+
+    let mut last_object: Option<serde_json::Value> = None;
+    let mut marked_object: Option<serde_json::Value> = None;
+
+    for value in stream.flatten() {
+        if value.is_object() {
+            if value.get(DECISION_MARKER).is_some() {
+                marked_object = Some(value);
+            } else {
+                last_object = Some(value);
+            }
+        }
+    }
+
+    marked_object.or(last_object).map(|v| v.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_object_pure_json() {
+        let json = r#"{"action_type":"喝水","action_data":{"item_id":"水"}}"#;
+        let extracted = extract_json_object(json).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+        assert_eq!(parsed["action_data"]["item_id"], "水");
+    }
+
+    #[test]
+    fn test_extract_json_object_reasoning_then_json() {
+        let content = "Good, I have:\n- 水: 7\n\n{\"action_type\":\"喝水\",\"item\":\"水\"}";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+    }
+
+    #[test]
+    fn test_extract_json_object_no_json() {
+        assert_eq!(extract_json_object("just plain text, no json here"), None);
+    }
+
+    #[test]
+    fn test_extract_json_object_json_array_returns_none() {
+        // JSON array 不是 object，不应提取
+        assert_eq!(extract_json_object("[1,2,3]"), None);
+    }
+
+    #[test]
+    fn test_extract_json_object_nested_braces() {
+        let content = "thinking...\n{\"a\":{\"b\":1},\"c\":2}";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["a"]["b"], 1);
+        assert_eq!(parsed["c"], 2);
+    }
+
+    #[test]
+    fn test_extract_json_object_trailing_text() {
+        let content = "reasoning...\n{\"action_type\":\"喝水\"}\n\ndone.";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["action_type"], "喝水");
+    }
+
+    #[test]
+    fn test_extract_json_object_surrounded_text() {
+        let content = "Before.\n{\"x\":1}\nAfter.";
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["x"], 1);
+    }
+
+    #[test]
+    fn test_extract_json_object_multiple_prefers_marked() {
+        // 第一个无 actions，第二个有 actions → 优先取有 actions 的
+        let content = r#"analysis...
+{"step":"reasoning","thirst":99}
+{"actions":[{"action_type":"喝水","action_data":{"item_id":"水"}}]}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert!(
+            parsed.get("actions").is_some(),
+            "should pick JSON with actions"
+        );
+        assert!(
+            parsed.get("step").is_none(),
+            "should not be the unmarked JSON"
+        );
+    }
+
+    #[test]
+    fn test_extract_json_object_marked_before_unmarked() {
+        // 有 actions 的在前面，无 actions 的在后面 → 仍取有 actions 的
+        let content = r#"thinking...
+{"actions":[{"action_type":"喝水"}]}
+{"note":"some afterthought"}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert!(parsed.get("actions").is_some());
+    }
+
+    #[test]
+    fn test_extract_json_object_no_marker_fallback_last() {
+        // 都没有 actions → fallback 最后一个
+        let content = r#"{"a":1}
+{"b":2}"#;
+        let extracted = extract_json_object(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&extracted).unwrap();
+        assert_eq!(parsed["b"], 2);
+    }
 }

@@ -26,28 +26,53 @@ pub struct HealthResponse {
 }
 
 // ============================================================================
-// 设备连接 API（Phase 3）
+// 设备严格校验/显式注册 API（设备身份生命周期 v2）
 // ============================================================================
 
-/// 设备连接请求
+/// 设备校验请求
 ///
-/// POST /api/v1/agent/connect 接口的请求数据
-/// 客户端首次启动时调用，注册设备身份
+/// POST /api/v1/device/verify 接口的请求数据
+/// Agent 启动时携带本地 device.yaml 中的 device_id 向 server 验证仍被认可
 #[derive(Debug, Deserialize)]
-pub struct AgentConnectRequest {
-    /// 设备唯一标识（客户端生成的 UUID v4）
+pub struct DeviceVerifyRequest {
     pub device_id: Uuid,
 }
 
-/// 设备连接响应
+/// 设备校验响应
 ///
-/// POST /api/v1/agent/connect 接口的响应数据
+/// POST /api/v1/device/verify 接口成功响应（200）
 #[derive(Debug, Serialize)]
-pub struct AgentConnectResponse {
-    /// 认证令牌（用于后续 WebSocket 连接和 API 调用）
+pub struct DeviceVerifyResponse {
+    pub device_id: Uuid,
     pub auth_token: String,
+    pub message: String,
+}
 
-    /// 结果消息
+/// 设备校验错误响应（404）
+#[derive(Debug, Serialize)]
+pub struct DeviceVerifyErrorResponse {
+    pub error: &'static str,
+    pub message: String,
+    pub device_id: Uuid,
+}
+
+/// 设备显式注册响应
+///
+/// POST /api/v1/device/register 接口响应
+/// server 生成 device_id + auth_token，agent 必须保存到本地 device.yaml
+#[derive(Debug, Serialize)]
+pub struct DeviceRegisterResponse {
+    pub device_id: Uuid,
+    pub auth_token: String,
+    pub message: String,
+}
+
+/// 设备显式注册错误响应
+///
+/// 与 `DeviceVerifyErrorResponse` 对称：所有 4xx/5xx 响应都应带结构化 body
+#[derive(Debug, Serialize)]
+pub struct DeviceRegisterErrorResponse {
+    pub error: &'static str,
     pub message: String,
 }
 
@@ -65,7 +90,7 @@ pub struct AgentRegisterRequest {
     // === 设备认证 ===
     /// 设备唯一标识
     pub device_id: Uuid,
-    /// 设备认证令牌（从 /api/v1/agent/connect 获取）
+    /// 设备认证令牌（从 /api/v1/device/verify 或 /api/v1/device/register 获取）
     pub auth_token: String,
 
     // === 角色基本信息 ===
@@ -151,6 +176,10 @@ pub struct AgentRegisterResponse {
 
     /// 叙事化配置（用于属性描述转换）
     pub narrative_config: protocol::NarrativeConfig,
+
+    /// 叙事化配置 SHA256 hash（用于 agent 端 skip-optimization）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narrative_config_hash: Option<String>,
 
     /// 初始属性（先天属性，用于 Agent 端存储 birth_attributes）
     #[serde(default)]
