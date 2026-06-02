@@ -212,25 +212,24 @@ impl ReflectorSoul {
             }
             // 对话类动作 content 占位符检测：LLM 偶尔输出 "..." 替代实际对话内容，
             // 导致前端经历日志显示省略号而非文字，此处拦截并要求重新生成
-            if matches!(
-                intent.action_type.as_str(),
-                "说话" | "私语" | "大喊"
-            ) {
-                if let Some(content) = intent
+            if matches!(intent.action_type.as_str(), "说话" | "私语" | "大喊")
+                && let Some(content) = intent
                     .action_data
                     .as_ref()
                     .and_then(|d| d.get("content"))
                     .and_then(|v| v.as_str())
+            {
+                let trimmed = content.trim();
+                if trimmed.is_empty()
+                    || matches!(
+                        trimmed,
+                        "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---"
+                    )
                 {
-                    let trimmed = content.trim();
-                    if trimmed.is_empty()
-                        || matches!(trimmed, "..." | "…" | "。。。" | ".." | "。" | "-" | "--" | "---")
-                    {
-                        return Err(format!(
-                            "动作 '{}' 的 content 不能为空或占位符，请写出实际的对话内容",
-                            action.name
-                        ));
-                    }
+                    return Err(format!(
+                        "动作 '{}' 的 content 不能为空或占位符，请写出实际的对话内容",
+                        action.name
+                    ));
                 }
             }
             return Ok(());
