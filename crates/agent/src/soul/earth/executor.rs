@@ -66,6 +66,7 @@ impl EarthToolExecutor {
             super::recipe_tool::view_recipe_detail_definition(),
             super::state_tool::get_action_detail_definition(),
             super::state_tool::query_world_definition(),
+            super::state_tool::lookup_character_definition(),
             super::state_tool::list_skills_definition(),
         ]
     }
@@ -223,6 +224,19 @@ impl ToolExecutor for EarthToolExecutor {
                     }))
                 }
             }
+            "lookup_character" => {
+                let name = arguments["name"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
+                if let Some(ref store) = self.world_state_store {
+                    Ok(super::state_tool::execute_lookup_character(name, store).await)
+                } else {
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "message": "WorldStateStore 未初始化"
+                    }))
+                }
+            }
             "list_skills" => Ok(super::state_tool::execute_list_skills(&self.skill_cache)),
             _ => Err(anyhow::anyhow!("地魂未知工具: {}", name)),
         }
@@ -236,7 +250,7 @@ mod tests {
     #[test]
     fn test_tool_definitions_count() {
         let defs = EarthToolExecutor::tool_definitions();
-        assert_eq!(defs.len(), 11);
+        assert_eq!(defs.len(), 12);
     }
 
     #[test]

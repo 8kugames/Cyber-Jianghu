@@ -158,7 +158,7 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
         _ => unreachable!(),
     };
     let text = format!(
-        "天道历{}年{}{}日{}",
+        "{}年{}{}日{}",
         number_to_chinese(year),
         month_text,
         number_to_chinese(day),

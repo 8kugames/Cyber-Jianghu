@@ -40,8 +40,12 @@ pub struct ConversationInput<'a> {
 
 /// 构建对话消息列表（system + semi-static + summary + history + current tick）
 ///
-/// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）
-/// 每个区域为独立 system message，确保 Immutable Prefix 在 compaction 后稳定。
+/// 三区域分区：system（persona）→ semi-static（actions/skills）→ summary（压缩摘要）。
+///
+/// **通用逻辑 — 不针对任何 provider 特化。** OpenAI Chat Completions 规范对连续
+/// 多个 `role: "system"` 消息的语义未定义，部分严格实现（如 sensenova）会直接
+/// 拒绝返回 400。模型视角下 `[sys:A][sys:B][user:Q]` 与 `[sys:A\n\nB][user:Q]`
+/// 信息量等价，合并是更安全且无损的默认。
 pub fn build_conversation_messages(
     system: &str,
     semi_static: &str,
@@ -51,13 +55,19 @@ pub fn build_conversation_messages(
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
-    let mut messages = vec![ChatMessage::system(system)];
+    // 合并所有 system 段为单个 system message（通用兼容处理，无 provider 特化）
+    let mut combined_system = String::with_capacity(system.len() + semi_static.len() + 64);
+    combined_system.push_str(system);
     if !semi_static.is_empty() {
-        messages.push(ChatMessage::system(semi_static));
+        combined_system.push_str("\n\n");
+        combined_system.push_str(semi_static);
     }
     if let Some(s) = summary {
-        messages.push(ChatMessage::system(&format!("## 对话历史摘要\n{}", s)));
+        combined_system.push_str("\n\n## 对话历史摘要\n");
+        combined_system.push_str(s);
     }
+
+    let mut messages = vec![ChatMessage::system(&combined_system)];
     for turn in turns {
         messages.push(ChatMessage::user(&turn.user));
         messages.push(ChatMessage::assistant_with_reasoning(
@@ -342,18 +352,20 @@ pub trait LlmClientExt {
 /// 部分 LLM（如 MiniMax）在非流式调用时会在 JSON 前输出思考过程，
 /// 导致 `find('{')` 匹配到 thinking 内容中的 `{` 而非 JSON 的 `{`。
 fn strip_thinking_tags(response: &str) -> std::borrow::Cow<'_, str> {
-    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>, <reasoning>...</reasoning>, <thought>...</thought>
-    // 闭合标签也允许属性（如 MiniMax 的 </think HTaming>）
+    // 匹配配对标签: <think_tag>...</think_tag>, <think attrs>...</think attrs>,
+    // <reasoning>...</reasoning>, <thought>...</thought>,
+    // <minimax:tool_call>...</minimax:tool_call>（MiniMax 专有 XML tool_call 格式）
     let paired_re = regex::Regex::new(
-        r"(?is)<(?:think_tag|think|reasoning|thought)[^>]*>.*?</(?:think_tag|think|reasoning|thought)[^>]*>"
+        r"(?is)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>.*?</(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*>"
     ).expect("static regex is valid");
 
     let cleaned = paired_re.replace_all(response, "").to_string();
 
     // 处理自闭合标签: <think/>, <think />, <think.../>, <think length="123"/>
-    let self_closing_re =
-        regex::Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought)[^>]*/>\s*")
-            .expect("static regex is valid");
+    let self_closing_re = regex::Regex::new(
+        r"(?i)<(?:think_tag|think|reasoning|thought|minimax:tool_call)[^>]*/>\s*",
+    )
+    .expect("static regex is valid");
     let cleaned = self_closing_re.replace_all(&cleaned, "").to_string();
 
     if cleaned == response {
@@ -891,6 +903,148 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
 /// 429 disable 的恢复间隔（1 小时）
 const RATE_LIMIT_BACKOFF_SECS: u64 = 3600;
 
+// ============================================================================
+// 共享 Circuit-Breaker
+// ============================================================================
+//
+// 修复 FINDING-002: 此前 `disabled_models` 仅存在于 `FallbackLlmClient`，
+// 但 `run_tool_loop` 内部 `send_chat_exchange` 直接打到 `DirectLlmClient`，
+// 完全绕过该表，导致 sensenova 抖动一次就被放大成 566 次 400。
+//
+// 抽 `SharedBreaker` 后，FallbackLlmClient 和 DirectLlmClient 共享同一份
+// "已禁用 provider/model" 表，任意入口（fallback / tool_loop）都能命中。
+// key = `"{provider}/{model}"`，多个 agent 共享同一 provider/model 时
+// 也会一起退避（避免雪崩式打 sensenova）。
+
+/// 共享 circuit-breaker 状态。
+#[derive(Default)]
+pub struct SharedBreaker {
+    /// key: `"{provider}/{model}"`; value: 禁用开始时间
+    disabled: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+}
+
+impl std::fmt::Debug for SharedBreaker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let disabled = self.disabled.lock().expect("lock poisoned");
+        f.debug_struct("SharedBreaker")
+            .field("disabled_keys", &disabled.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl SharedBreaker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 查询 key 是否被禁用。返回 `Some(remaining_secs)` 表示仍在冷却，
+    /// `None` 表示可用（不在表内或已过期）。
+    pub fn is_disabled(&self, key: &str) -> Option<u64> {
+        let mut disabled = self.disabled.lock().expect("lock poisoned");
+        // 清理过期项
+        let now = std::time::Instant::now();
+        disabled.retain(|_, ts| now.duration_since(*ts).as_secs() < RATE_LIMIT_BACKOFF_SECS);
+        disabled.get(key).map(|ts| {
+            let elapsed = now.duration_since(*ts).as_secs();
+            RATE_LIMIT_BACKOFF_SECS.saturating_sub(elapsed)
+        })
+    }
+
+    /// 标记 key 禁用
+    pub fn disable(&self, key: String) {
+        let mut disabled = self.disabled.lock().expect("lock poisoned");
+        disabled.insert(key, std::time::Instant::now());
+    }
+}
+
+// ============================================================================
+// 统一错误分类 — 三处消费者共享同一份分类逻辑
+// ============================================================================
+
+/// LLM 调用错误的处理策略
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorAction {
+    /// 放弃 — 错误不可恢复，无需重试（auth、context 超长等）
+    GiveUp,
+    /// 切换到下一个 model/provider（403 额度不足、404 模型不存在等）
+    Fallback,
+    /// 禁用当前 model 后切换到下一个（429 限流、provider 炸了等）
+    FallbackAndDisable,
+    /// 重试（网络瞬时故障、连接超时等）
+    Retry,
+}
+
+/// 根据 error 内容分类 LLM 调用错误
+///
+/// 返回 `(ErrorAction, &'static str)`，第二元素为 disable_model 的简短原因。
+///
+/// 三处消费者：
+/// - `call_with_fallback + call_streaming_with_fallback`:
+///   `Fallback | FallbackAndDisable | Retry` → 继续轮询下一模型
+///   `FallbackAndDisable` → disable_model + rotate
+/// - `decision.rs` retry loop: `GiveUp | Fallback | FallbackAndDisable` → break
+pub fn classify_llm_error(error: &anyhow::Error) -> (ErrorAction, &'static str) {
+    let msg = format!("{:#}", error);
+
+    // ── Permanent: 确定性的，重试/fallback 无意义 ──────────────
+    if msg.contains("exceeds max context window")
+        || msg.contains("Prompt too long")
+        || msg.contains("context_length_exceeded")
+        || msg.contains("maximum context length")
+    {
+        return (ErrorAction::GiveUp, "context_too_long");
+    }
+
+    // ── Config/Model: 换模型可能解决 ────────────────────────────
+    if msg.contains("LLM API error 404")
+        || msg.contains("LLM streaming API error 404")
+        || msg.contains("AllocationQuota")
+    {
+        return (ErrorAction::Fallback, "model_not_found_or_quota");
+    }
+
+    // 403 也可能是配额问题
+    if msg.contains("LLM API error 403") || msg.contains("LLM streaming API error 403") {
+        return (ErrorAction::Fallback, "forbidden_or_quota");
+    }
+
+    // ── Rate limit: 禁用模型（1h 冷却），避免 OOM ──────────────
+    if msg.contains("429")
+        || msg.contains("rate_limit")
+        || msg.contains("Too Many Requests")
+        || msg.contains("LLM API error 429")
+        || msg.contains("LLM streaming API error 429")
+    {
+        return (ErrorAction::FallbackAndDisable, "rate_limit");
+    }
+
+    // ── Provider 内部错误: 如 sensenova 把 503 包装成 400 internal_server_error ──
+    if msg.contains("internal_server_error") {
+        return (ErrorAction::FallbackAndDisable, "internal_server_error");
+    }
+
+    // ── 空响应: 模型偶尔返回 null ────────────────────────────────
+    if msg.contains("response content is empty") {
+        return (ErrorAction::FallbackAndDisable, "empty_response");
+    }
+
+    // ── 400 Bad Request: 模型能力不匹配（如 "only support stream mode"）─
+    if msg.contains("LLM API error 400") || msg.contains("LLM streaming API error 400") {
+        return (ErrorAction::Fallback, "bad_request");
+    }
+
+    // ── 连接/请求失败: 网络瞬时故障 ─────────────────────────────
+    if msg.contains("Failed to send request to LLM API")
+        || msg.contains("error sending request for url")
+        || msg.contains("does not support http call")
+    {
+        return (ErrorAction::Retry, "connection_failed");
+    }
+
+    // 未知错误 — 保守起见，允许 fallback
+    (ErrorAction::Retry, "unknown_error")
+}
+
 /// Fallback LLM 客户端
 ///
 /// 主模型 403（额度耗尽）或超时时，自动切换到备用模型。
@@ -910,6 +1064,9 @@ pub struct FallbackLlmClient {
     idle_threshold: usize,
     /// 标记为不可用的模型索引 + disable 时间戳
     disabled_models: Arc<std::sync::Mutex<std::collections::HashMap<usize, std::time::Instant>>>,
+    /// 共享 circuit-breaker：写入时同步到下层 DirectLlmClient，
+    /// 使 `run_tool_loop` 内部 `send_chat_exchange` 也能命中。
+    shared_breaker: Arc<SharedBreaker>,
 }
 
 impl FallbackLlmClient {
@@ -928,12 +1085,20 @@ impl FallbackLlmClient {
             idle_counts: Arc::new(std::sync::Mutex::new(vec![0; count])),
             idle_threshold: 5, // 默认阈值
             disabled_models: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            shared_breaker: Arc::new(SharedBreaker::new()),
         }
     }
 
     /// 设置 idle 旋转阈值
     pub fn with_idle_threshold(mut self, threshold: usize) -> Self {
         self.idle_threshold = threshold;
+        self
+    }
+
+    /// 注入共享 circuit-breaker（由 build_fallback_client 调用，
+    /// 必须与下层 DirectLlmClient 持有的 Arc 指向同一实例）
+    pub fn with_shared_breaker(mut self, breaker: Arc<SharedBreaker>) -> Self {
+        self.shared_breaker = breaker;
         self
     }
 
@@ -1008,6 +1173,15 @@ impl FallbackLlmClient {
     fn disable_model(&self, idx: usize, reason: &str) {
         let mut disabled = self.disabled_models.lock().expect("lock poisoned");
         if disabled.insert(idx, std::time::Instant::now()).is_none() {
+            // 同步写入共享 breaker：key = "{provider}/{model}"，
+            // 使下层 DirectLlmClient 在 tool_loop 内部 send_chat_exchange 时也能命中。
+            let key = format!(
+                "{}/{}",
+                self.clients[idx].provider_name(),
+                self.clients[idx].model_name()
+            );
+            self.shared_breaker.disable(key);
+
             tracing::warn!(
                 "LLM 模型 #{} 标记为不可用 (原因: {})，已禁用模型: {:?}",
                 idx,
@@ -1059,55 +1233,14 @@ impl FallbackLlmClient {
         self.clients[idx.min(self.clients.len() - 1)].clone()
     }
 
-    /// 判断错误是否应触发 fallback
-    ///
-    /// 匹配条件：
-    /// - HTTP 404 (model_not_found / 模型不存在或无权限)
-    /// - HTTP 403 (AllocationQuota / 额度耗尽)
-    /// - HTTP 429 (Rate limit)
-    /// - HTTP 400 (does not support http call / 模型不支持HTTP调用)
-    /// - 空响应（模型返回 null/空内容）
-    fn should_fallback(error: &anyhow::Error) -> bool {
-        let msg = format!("{:#}", error);
-
-        // Prompt 超长是确定性的，重试/fallback 无意义（所有模型都可能超长）
-        if msg.contains("exceeds max context window")
-            || msg.contains("Prompt too long")
-            || msg.contains("context_length_exceeded")
-            || msg.contains("maximum context length")
-        {
-            return false;
-        }
-
-        // HTTP 状态码匹配（直接来自 API 响应）
-        msg.contains("LLM API error 404")
-            || msg.contains("LLM API error 403")
-            || msg.contains("LLM API error 429")
-            || msg.contains("LLM streaming API error 404")
-            || msg.contains("LLM streaming API error 403")
-            || msg.contains("LLM streaming API error 429")
-            // 400 Bad Request：模型能力不匹配（如 "only support stream mode"）
-            || (msg.contains("LLM API error 400") && !msg.contains("Prompt too long"))
-            || (msg.contains("LLM streaming API error 400") && !msg.contains("Prompt too long"))
-            // 额度耗尽关键词
-            || msg.contains("AllocationQuota")
-            // 连接/请求失败（.context() 包装后的前缀）
-            || msg.contains("Failed to send request to LLM API")
-            || msg.contains("error sending request for url")
-            // 空响应（MiniMax 等模型偶尔返回 content=null）
-            || msg.contains("response content is empty")
-            // DashScope "does not support http call"（开发测试用）
-            || msg.contains("does not support http call")
-    }
-
-    /// 执行带 fallback 的调用
+    /// 执行带 fallback 的调用（返回类型由闭包决定）
     ///
     /// 策略：从 active index 开始，失败时尝试后续所有客户端。
-    /// 一旦成功，sticky 到该客户端。
-    async fn call_with_fallback<F, Fut>(&self, f: F) -> Result<String>
+    /// 一旦成功，sticky 到该客户端。`FallbackAndDisable` 会同步写 shared_breaker。
+    async fn call_with_fallback<F, Fut, T>(&self, f: F) -> Result<T>
     where
         F: Fn(Arc<dyn LlmClient>) -> Fut,
-        Fut: std::future::Future<Output = Result<String>>,
+        Fut: std::future::Future<Output = Result<T>>,
     {
         self.reenable_expired();
         let start = self.active.load(std::sync::atomic::Ordering::Relaxed);
@@ -1142,8 +1275,17 @@ impl FallbackLlmClient {
                     return Ok(response);
                 }
                 Err(e) => {
-                    let should = Self::should_fallback(&e);
-                    tracing::warn!("LLM 客户端 #{} 调用失败 (fallback={}: {}", idx, should, e);
+                    let (action, reason) = classify_llm_error(&e);
+                    let is_fallback = matches!(
+                        action,
+                        ErrorAction::Fallback
+                            | ErrorAction::FallbackAndDisable
+                            | ErrorAction::Retry
+                    );
+                    tracing::warn!("LLM 客户端 #{} 调用失败 (action={:?}): {}", idx, action, e);
+                    if action == ErrorAction::FallbackAndDisable {
+                        self.disable_model(idx, reason);
+                    }
                     let err_msg = format!("{:#}", &e);
                     if err_msg.contains("LLM API error 400") && !err_msg.contains("Prompt too long")
                     {
@@ -1151,12 +1293,7 @@ impl FallbackLlmClient {
                             "提示: 模型可能不支持 non-streaming，建议在 agent.yaml 中设置 prefer_stream: true"
                         );
                     }
-                    if err_msg.contains("429") {
-                        self.disable_model(idx, "429 rate limit");
-                    } else if err_msg.contains("response content is empty") {
-                        self.disable_model(idx, "empty response");
-                    }
-                    if !should {
+                    if !is_fallback {
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -1213,20 +1350,23 @@ impl FallbackLlmClient {
                     return Ok((stream, client.provider_name(), client.model_name()));
                 }
                 Err(e) => {
-                    let should = Self::should_fallback(&e);
+                    let (action, reason) = classify_llm_error(&e);
+                    let is_fallback = matches!(
+                        action,
+                        ErrorAction::Fallback
+                            | ErrorAction::FallbackAndDisable
+                            | ErrorAction::Retry
+                    );
                     tracing::warn!(
-                        "LLM streaming 客户端 #{} 失败 (fallback={}: {}",
+                        "LLM streaming 客户端 #{} 失败 (action={:?}): {}",
                         idx,
-                        should,
+                        action,
                         e
                     );
-                    let err_msg = format!("{:#}", &e);
-                    if err_msg.contains("429") {
-                        self.disable_model(idx, "429 rate limit");
-                    } else if err_msg.contains("response content is empty") {
-                        self.disable_model(idx, "empty response");
+                    if action == ErrorAction::FallbackAndDisable {
+                        self.disable_model(idx, reason);
                     }
-                    if !should {
+                    if !is_fallback {
                         return Err(e);
                     }
                     last_err = Some(e);
@@ -1275,12 +1415,21 @@ impl LlmClient for FallbackLlmClient {
         tools: Option<&[super::tool_types::ToolDefinition]>,
         config: super::openai_types::ChatExchangeConfig,
     ) -> Result<super::openai_types::ChatExchangeResponse> {
-        // NOTE: 当前 tool loop 路径不经过此处 — run_tool_loop 拿到的是底层
-        // DirectLlmClient 的 &dyn LlmClient，fallback 在外层 complete_with_tools
-        // 的 call_with_fallback 中以整体重试实现。
-        self.active_client()
-            .send_chat_exchange(messages, tools, config)
-            .await
+        // 走 call_with_fallback：跳过已 disabled 的客户端，
+        // FallbackAndDisable 时同步写 shared_breaker。
+        // 此前直调 active_client 会在 tool_loop 内部绕过 circuit breaker。
+        let tools_opt = tools.map(|t| t.to_vec());
+        self.call_with_fallback(move |client: Arc<dyn LlmClient>| {
+            let messages = messages.clone();
+            let tools_inner = tools_opt.clone();
+            let config = config.clone();
+            async move {
+                client
+                    .send_chat_exchange(messages, tools_inner.as_deref(), config)
+                    .await
+            }
+        })
+        .await
     }
 
     fn provider_name(&self) -> String {
@@ -1800,5 +1949,61 @@ mod tests {
         let result = repair_llm_json(input);
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["desc"], "a:b");
+    }
+
+    // ========================================================================
+    // SharedBreaker tests — 验证 disable / is_disabled / 自动清理过期项
+    // ========================================================================
+
+    #[test]
+    fn test_shared_breaker_disable_and_query() {
+        let breaker = SharedBreaker::new();
+        // 初始：所有 key 都可用
+        assert!(
+            breaker
+                .is_disabled("openai_compatible/sensenova-6.7-flash-lite")
+                .is_none()
+        );
+
+        // 禁用后：返回剩余秒数
+        breaker.disable("openai_compatible/sensenova-6.7-flash-lite".to_string());
+        let remaining = breaker.is_disabled("openai_compatible/sensenova-6.7-flash-lite");
+        assert!(remaining.is_some(), "禁用后应返回 Some(remaining)");
+        let secs = remaining.unwrap();
+        assert!(
+            secs > 0 && secs <= RATE_LIMIT_BACKOFF_SECS,
+            "剩余秒数应在 (0, {}] 区间",
+            RATE_LIMIT_BACKOFF_SECS
+        );
+
+        // 其他 key 不受影响
+        assert!(
+            breaker
+                .is_disabled("openai_compatible/other-model")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_shared_breaker_overwrite_disable() {
+        let breaker = SharedBreaker::new();
+        let key = "openai_compatible/x".to_string();
+        breaker.disable(key.clone());
+        // 二次 disable 不应 panic
+        breaker.disable(key);
+        assert!(breaker.is_disabled("openai_compatible/x").is_some());
+    }
+
+    #[test]
+    fn test_shared_breaker_default() {
+        let breaker = SharedBreaker::default();
+        assert!(breaker.is_disabled("any/key").is_none());
+    }
+
+    #[test]
+    fn test_shared_breaker_is_send_sync() {
+        // 编译期断言：SharedBreaker 必须能跨线程共享
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SharedBreaker>();
     }
 }

@@ -92,6 +92,92 @@ pub async fn connect_device(pool: &PgPool, device_id: Uuid) -> Result<DeviceConn
     })
 }
 
+/// 仅查询设备当前 auth_token（SELECT only，无副作用）
+///
+/// 与 `connect_device` 的根本区别：
+/// - 本函数**永远不修改数据库**，调用方必须先通过 `verify_device_strict`
+///   确认设备存在后才能调用，否则会得到 `Ok(None)`
+/// - `connect_device` 在设备不存在时会自动 INSERT，是 upsert 语义
+///
+/// 用于 `device_verify` 端点的 200 路径。**绝不**用于任何需要"创建/复活"
+/// 设备的场景——那是 `register_device` 的责任。
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+///
+/// # 返回
+/// - Ok(Some(token)): 设备存在，返回当前 auth_token
+/// - Ok(None): 设备不存在
+/// - Err: 数据库查询失败
+pub async fn get_device_token(pool: &PgPool, device_id: Uuid) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT auth_token FROM devices WHERE device_id = $1")
+            .bind(device_id)
+            .fetch_optional(pool)
+            .await
+            .context("查询设备 token 失败")?;
+    Ok(row.map(|(t,)| t))
+}
+
+/// 严格校验设备是否存在（仅查询，不创建）
+///
+/// 与 `connect_device` 的根本区别：本函数**不会**因为设备不存在而自动创建。
+/// 用于 agent 启动时验证 device.yaml 中的 device_id 仍被 server 认可。
+///
+/// # 参数
+/// - pool: 数据库连接池
+/// - device_id: 设备 UUID
+///
+/// # 返回
+/// - Ok(true): 设备存在
+/// - Ok(false): 设备不存在
+/// - Err: 数据库错误
+pub async fn verify_device_strict(pool: &PgPool, device_id: Uuid) -> Result<bool> {
+    let row: Option<(Uuid,)> = sqlx::query_as("SELECT device_id FROM devices WHERE device_id = $1")
+        .bind(device_id)
+        .fetch_optional(pool)
+        .await
+        .context("严格校验设备失败")?;
+    Ok(row.is_some())
+}
+
+/// 显式注册新设备（server 生成 device_id + auth_token）
+///
+/// 与 `connect_device` 的根本区别：调用者**不能**指定 device_id，必须由 server 生成。
+/// 这样从协议层面消除"client 携带任意 UUID 撞库"的可能。
+///
+/// # 参数
+/// - pool: 数据库连接池
+///
+/// # 返回
+/// - Ok(DeviceConnectResult): 包含新 device_id + auth_token，is_new 恒为 true
+/// - Err: 数据库错误
+pub async fn register_device(pool: &PgPool) -> Result<DeviceConnectResult> {
+    let device_id = Uuid::new_v4();
+    let auth_token = generate_secure_token();
+
+    sqlx::query(
+        r#"
+        INSERT INTO devices (device_id, auth_token)
+        VALUES ($1, $2)
+        "#,
+    )
+    .bind(device_id)
+    .bind(&auth_token)
+    .execute(pool)
+    .await
+    .context("显式注册新设备失败")?;
+
+    info!("新设备显式注册成功: {}", device_id);
+
+    Ok(DeviceConnectResult {
+        device_id,
+        auth_token,
+        is_new: true,
+    })
+}
+
 /// 验证设备认证令牌
 ///
 /// # 参数
@@ -164,7 +250,7 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
 
 /// 根据设备ID获取Agent（优先返回活跃，其次返回已死亡）
 ///
-/// 返回该设备最新的、非退休状态的 Agent：
+/// 返回该设备最新的、非归隐状态的 Agent：
 /// - `active`：正常返回
 /// - `dead`：返回（让 agent 知道自己已死亡，而非"未注册"）
 /// - `retired`：不返回（用户主动注销，等同未注册）
@@ -175,7 +261,7 @@ pub async fn get_agent_by_id(pool: &PgPool, agent_id: Uuid) -> Result<Agent> {
 ///
 /// # 返回
 /// - Ok(Some(Agent)): 找到活跃或已死亡的 Agent
-/// - Ok(None): 无 Agent 或已退休
+/// - Ok(None): 无 Agent 或已归隐
 /// - Err: 查询失败
 pub async fn get_agent_by_device_id(pool: &PgPool, device_id: Uuid) -> Result<Option<Agent>> {
     debug!("查询Agent by device_id: {}", device_id);
@@ -652,11 +738,19 @@ pub struct AutoRebirthResult {
     pub spawn_location: String,
 }
 
-/// 自动转世重生：旧 agent dead → retired，INSERT 全新 agent
+/// 自动转世重生：旧 agent 保持 status='dead' 死亡标记，INSERT 全新 agent
+///
+/// 用户硬性约束：不允许将已死亡角色设置为归隐（status='retired'）。
+/// `retired` 状态语义专属"玩家主动归隐"（通过 /api/v1/agent/retire 触发）。
+///
+/// 转世完成后：
+/// - 旧 agent 保持 `status='dead'` 死亡标记
+/// - `retired_at` 字段作为时间戳记录"转世完成"事件（用于区分"未转世的死角色"和"已转世的死角色"）
+/// - retired 状态完全不被 auto-rebirth 触及
 ///
 /// 事务内完成：
-/// 1. 查询旧 agent（确认 dead 状态）
-/// 2. 旧 agent dead → retired
+/// 1. 查询旧 agent（确认 dead 状态 + 获取基础信息）
+/// 2. 旧 agent 仅写 `retired_at` 时间戳，status 保持 'dead'
 /// 3. INSERT 新 agent（新 UUID，同 device_id/name/system_prompt）
 /// 4. INSERT agent_states（初始属性）
 /// 5. INSERT agent_inventory（初始物品）
@@ -694,12 +788,28 @@ pub async fn auto_rebirth_agent(
         None => anyhow::bail!("Agent {} 不存在或非 dead 状态，无法转世", old_agent_id),
     };
 
-    // 2. 旧 agent 标记 retired_at（保持 dead 状态，dashboard 可区分死亡 vs 归隐）
-    sqlx::query("UPDATE agents SET retired_at = NOW() WHERE agent_id = $1")
-        .bind(old_agent_id)
-        .execute(&mut *tx)
-        .await
-        .context("标记旧 Agent 转世时间失败")?;
+    // 2. 旧 agent 保持 status='dead' 死亡标记
+    //    retired_at 作为时间戳记录"转世完成"事件
+    //    严禁写 status='retired'（用户硬性约束：不允许将已死亡角色设置为归隐）
+    let update_result = sqlx::query(
+        "UPDATE agents SET retired_at = NOW() \
+         WHERE agent_id = $1 AND status = 'dead'",
+    )
+    .bind(old_agent_id)
+    .execute(&mut *tx)
+    .await
+    .context("记录旧 Agent 转世时间戳失败")?;
+
+    if update_result.rows_affected() == 0 {
+        anyhow::bail!(
+            "Agent {} 转世中止：UPDATE 未影响任何行（可能并发状态变更）",
+            old_agent_id
+        );
+    }
+    debug!(
+        "旧 Agent {} 保持 status='dead' 死亡标记，retired_at 已记录转世时刻",
+        old_agent_id
+    );
 
     // 3. 获取当前 tick_id（用于 birth_tick 计算）
     let current_tick: i64 = sqlx::query_scalar(

@@ -69,7 +69,7 @@ pub struct FormattedAttribute {
     pub display_name: String,
     /// 格式化的值字符串
     pub value_str: String,
-    /// 属性类别：primary（先天）, status（状态）, derived（派生）
+    /// 属性类别，由 attribute_categories 配置定义
     pub category: String,
 }
 
@@ -77,91 +77,86 @@ pub struct FormattedAttribute {
 ///
 /// 格式说明：
 /// - 显示格式：{display_name}: {value_str}
-/// - 先天属性（growable）：{当前} ({上限})
-/// - 状态值：{当前}/{最大}
-/// - 派生属性：{计算值}
 ///
-/// display_name 优先从 WorldState.attribute_descriptions 获取（server 数据驱动），
-/// 回退到原始属性名。
-pub fn create_attributes_glimpse(state: &WorldState) -> AttributesGlimpse {
-    let mut formatted = Vec::new();
+/// 数据驱动：属性分类来自 NarrativeConfig.attribute_categories（YAML 配置），
+/// 显示名来自 attribute_descriptions（server 端 build_attribute_descriptions）。
+/// 禁止在此方法内硬编码任何属性名或类别。
+pub fn create_attributes_glimpse(
+    state: &WorldState,
+    narrative_config: Option<&cyber_jianghu_protocol::NarrativeConfig>,
+) -> AttributesGlimpse {
     let raw: HashMap<String, i32> = state.self_state.attributes.clone();
     let derived_raw: HashMap<String, f32> = state.self_state.derived_attributes.clone();
     let descriptions = &state.self_state.attribute_descriptions;
 
-    let status_attrs = [
-        "hp",
-        "stamina",
-        "hunger",
-        "thirst",
-        "qi",
-        "sanity",
-        "reputation",
-    ];
-    let primary_attrs = [
-        "strength",
-        "agility",
-        "constitution",
-        "intelligence",
-        "charisma",
-        "luck",
-    ];
-
-    for (name, &value) in &raw {
-        let display_name = descriptions
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.clone());
-        let category = if status_attrs.contains(&name.as_str()) {
-            "status"
-        } else if primary_attrs.contains(&name.as_str()) {
-            "primary"
-        } else {
-            "unknown"
-        };
-
-        let value_str = format!("{}", value);
-
-        formatted.push(FormattedAttribute {
-            name: name.clone(),
-            display_name,
-            value_str,
-            category: category.to_string(),
-        });
-    }
-
-    for (name, &value) in &derived_raw {
-        let display_name = descriptions
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| name.clone());
-        let value_str = format!("{:.3}", value);
-
-        formatted.push(FormattedAttribute {
-            name: name.clone(),
-            display_name,
-            value_str,
-            category: "derived".to_string(),
-        });
-    }
-
-    formatted.sort_by(|a, b| {
-        let order = |c: &str| match c {
-            "primary" => 0,
-            "status" => 1,
-            "derived" => 2,
-            _ => 3,
-        };
-        order(&a.category).cmp(&order(&b.category))
-    });
+    let attributes = if let Some(config) = narrative_config {
+        config
+            .build_attribute_views(&raw, &derived_raw, descriptions)
+            .into_iter()
+            .map(|v| FormattedAttribute {
+                name: v.name,
+                display_name: v.display_name,
+                value_str: v.value_str,
+                category: v.category,
+            })
+            .collect()
+    } else {
+        // 无 NarrativeConfig 时降级：全部标记为 unknown
+        let mut formatted: Vec<FormattedAttribute> = raw
+            .iter()
+            .map(|(name, &value)| FormattedAttribute {
+                name: name.clone(),
+                display_name: descriptions
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
+                value_str: format!("{}", value),
+                category: "unknown".to_string(),
+            })
+            .collect();
+        for (name, &value) in &derived_raw {
+            formatted.push(FormattedAttribute {
+                name: name.clone(),
+                display_name: descriptions
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| name.clone()),
+                value_str: format!("{:.3}", value),
+                category: "unknown".to_string(),
+            });
+        }
+        formatted
+    };
 
     AttributesGlimpse {
         tick_id: state.tick_id,
-        attributes: formatted,
+        attributes,
         raw,
         derived_raw,
         warning: "此数据为梦中一瞥，仅限当前决策周期使用。禁止存储到记忆系统。".to_string(),
     }
+}
+
+/// 从 AgentSelfState 中查找属性值
+///
+/// 同时检查 attributes（i32 基础属性）和 derived_attributes（f32 派生属性）。
+/// 因为 attribute_descriptions 由 build_attribute_descriptions 注入，
+/// 其中包含派生属性条目，迭代 descriptions 时 raw value 可能来自任一张 map。
+fn lookup_attr_value(
+    attr: &str,
+    state: &cyber_jianghu_protocol::types::entities::AgentSelfState,
+) -> String {
+    state
+        .attributes
+        .get(attr)
+        .map(|v| format!(" [当前值: {}]", v))
+        .or_else(|| {
+            state
+                .derived_attributes
+                .get(attr)
+                .map(|v| format!(" [当前值: {:.3}]", v))
+        })
+        .unwrap_or_default()
 }
 
 /// 生成叙事化上下文
@@ -221,44 +216,28 @@ fn generate_impl(
         state.location.name, state.location.node_type
     ));
 
-    // 自身状态 - 使用 server 提供的 attribute_descriptions
+    // 自身状态 - 使用 server 提供的 attribute_descriptions（数据驱动）
     sections.push("".to_string());
     sections.push("## 自身状态".to_string());
 
     let descriptions = &state.self_state.attribute_descriptions;
-    let standard = ["hp", "hunger", "thirst", "stamina"];
+    let vital_attrs = ["hp", "hunger", "thirst", "stamina"];
 
-    // 标准属性用叙事描述 + 数值注入
-    for attr in &standard {
+    // 核心状态属性优先展示（选择哪些属性优先是展示层决策，不做数据驱动）
+    for attr in &vital_attrs {
         if let Some(desc) = descriptions.get(*attr) {
-            let label = match *attr {
-                "hp" => "身体",
-                "hunger" => "饥饿",
-                "thirst" => "口渴",
-                "stamina" => "体力",
-                _ => *attr,
-            };
-            let raw = state
-                .self_state
-                .attributes
-                .get(*attr)
-                .map(|v| format!(" [当前值: {}]", v))
-                .unwrap_or_default();
-            sections.push(format!("- {}: {}{}", label, desc, raw));
+            let raw = lookup_attr_value(attr, &state.self_state);
+            sections.push(format!("- {}: {}{}", attr, desc, raw));
         }
     }
 
-    // 非标准属性
+    // 其他属性（包括派生属性）—— 统一使用 attribute_descriptions + 双 map 查值
     for (name, desc) in descriptions {
-        if !standard.contains(&name.as_str()) {
-            let raw = state
-                .self_state
-                .attributes
-                .get(name)
-                .map(|v| format!(" [当前值: {}]", v))
-                .unwrap_or_default();
-            sections.push(format!("- {}: {}{}", name, desc, raw));
+        if vital_attrs.contains(&name.as_str()) {
+            continue;
         }
+        let raw = lookup_attr_value(name, &state.self_state);
+        sections.push(format!("- {}: {}{}", name, desc, raw));
     }
 
     // 状态效果

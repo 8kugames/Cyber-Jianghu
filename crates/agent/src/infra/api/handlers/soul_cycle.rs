@@ -46,6 +46,8 @@ struct FinalIntentEntry {
     action_type: Option<String>,
     action_data: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     dream_marker: Option<serde_json::Value>,
 }
 
@@ -140,11 +142,18 @@ fn record_to_attempt_entry(
             reason: r.tianhun_reason,
             narrative: r.previous_round_narrative,
         },
-        final_intent: r.final_intent_id.map(|id| FinalIntentEntry {
-            intent_id: Some(id),
-            action_type: r.final_action_type,
-            action_data,
-            dream_marker: None,
+        final_intent: r.final_intent_id.map(|id| {
+            let pipeline_actions: Option<Vec<cyber_jianghu_protocol::PipelineAction>> = r
+                .final_pipeline_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok());
+            FinalIntentEntry {
+                intent_id: Some(id),
+                action_type: r.final_action_type,
+                action_data,
+                pipeline_actions,
+                dream_marker: None,
+            }
         }),
     }
 }
@@ -329,20 +338,78 @@ pub(crate) async fn rebirth_character_handler(
         agent_id, device_id
     );
 
-    // 2. 调用 server 归隐（幂等：active→retired，dead/retired→success with action_taken=false）
+    // 数据驱动 dispatch：按当前 agent 状态选 server 端点
+    // 读取 character.yaml 中的 CharacterStatus（数据驱动）：
+    // - Dead: 调 /api/v1/agent/auto-rebirth（创建新 agent，旧 agent 保持 status='dead'，用户裁决默认行为）
+    // - Alive: 调 /api/v1/agent/retire（玩家主动归隐）
+    // - Retired: 幂等 no-op（已是归隐状态）
+    // - 未找到 character.yaml 或 agent_id 为 nil：默认 no-op（避免对未知角色误调 retire 导致错误归隐）
+    let character_status = if agent_id != Uuid::nil() {
+        let characters_dir = state.character_dir.read().await.clone();
+        let char_yaml = characters_dir
+            .join(agent_id.to_string())
+            .join("character.yaml");
+        match crate::config::CharacterConfig::from_file(&char_yaml) {
+            Ok(c) => c.status,
+            Err(_) => {
+                // character.yaml 不存在或损坏：保守 no-op
+                warn!(
+                    "[rebirth] character.yaml 不存在或损坏: agent={}, 跳过 server 调用",
+                    agent_id
+                );
+                return Json(RebirthResponse {
+                    success: true,
+                    message: "无法读取角色状态，请重试或手动操作".to_string(),
+                })
+                .into_response();
+            }
+        }
+    } else {
+        crate::config::CharacterStatus::Retired
+    };
+
     let client = reqwest::Client::new();
     let server_http_url = state.server_http_url.read().await.clone();
-    let server_url = format!("{}/api/v1/agent/retire", server_http_url);
 
-    #[derive(Serialize)]
-    struct ServerRetireRequest {
-        device_id: Uuid,
-        auth_token: String,
-    }
-
-    let request_body = ServerRetireRequest {
-        device_id,
-        auth_token,
+    let (server_url, request_body, log_tag) = match character_status {
+        crate::config::CharacterStatus::Dead => {
+            // dead → auto-rebirth（创建全新 agent，old agent 保持 status='dead'）
+            // 需要 name/system_prompt，从 character.yaml 读
+            let characters_dir = state.character_dir.read().await.clone();
+            let char_yaml = characters_dir
+                .join(agent_id.to_string())
+                .join("character.yaml");
+            let (name, system_prompt) = crate::config::CharacterConfig::from_file(&char_yaml)
+                .map(|c| (c.name, c.system_prompt.unwrap_or_default()))
+                .unwrap_or_default();
+            let url = format!("{}/api/v1/agent/auto-rebirth", server_http_url);
+            let body = serde_json::json!({
+                "device_id": device_id,
+                "auth_token": auth_token,
+                "old_agent_id": agent_id,
+                "name": name,
+                "system_prompt": system_prompt,
+            });
+            (url, body, "auto-rebirth (dead→保持dead, 创建新agent)")
+        }
+        crate::config::CharacterStatus::Alive => {
+            // alive → retire（玩家主动归隐）
+            let url = format!("{}/api/v1/agent/retire", server_http_url);
+            let body = serde_json::json!({
+                "device_id": device_id,
+                "auth_token": auth_token,
+            });
+            (url, body, "retire (alive→retired 主动归隐)")
+        }
+        crate::config::CharacterStatus::Retired => {
+            // 已是 retired：本地清理 + 触发重连，跳过 server 调用
+            info!("[rebirth] 角色已是归隐状态，跳过 server 调用");
+            return Json(RebirthResponse {
+                success: true,
+                message: "角色已是归隐状态，请创建新角色".to_string(),
+            })
+            .into_response();
+        }
     };
 
     let response = match client.post(&server_url).json(&request_body).send().await {
@@ -377,7 +444,8 @@ pub(crate) async fn rebirth_character_handler(
 
     if status.is_success() {
         info!(
-            "[rebirth] Server 归隐响应: status={}, body={}",
+            "[rebirth] Server 响应: 路径={}, status={}, body={}",
+            log_tag,
             status,
             &body[..body.len().min(2000)]
         );

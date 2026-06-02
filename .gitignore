@@ -101,6 +101,8 @@ $RECYCLE.BIN/
 *.lnk
 
 # 临时文件
+tmp/
+temp/
 *.tmp
 *.temp
 *.bak
@@ -129,3 +131,4 @@ flamegraph.svg
 *.dll
 *.so
 *.dylib
+.superpowers/
