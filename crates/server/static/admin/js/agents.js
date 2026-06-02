@@ -506,15 +506,7 @@ function renderExperiences(data) {
             ? "rejected"
             : "";
 
-      var fallbackWorldTime =
-        exp.formatted_time ||
-        (metadata && typeof formatWorldTime === "function"
-          ? formatWorldTime(metadata.world_time)
-          : null) ||
-        (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
-          ? formatCalendarDate(exp.game_day)
-          : null) ||
-        "-";
+      var fallbackWorldTime = exp.formatted_time || "-";
 
       var html =
         '<div class="tick-card">' +
@@ -582,15 +574,7 @@ function renderExperiences(data) {
 function renderTickCard(exp, metadata, time) {
   var attempts = metadata.cycles || [];
   var immediate = metadata.immediate_intents || [];
-  var worldTimeDisplay =
-    exp.formatted_time ||
-    (typeof formatWorldTime === "function"
-      ? formatWorldTime(metadata.world_time)
-      : null) ||
-    (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
-      ? formatCalendarDate(exp.game_day)
-      : null) ||
-    "-";
+  var worldTimeDisplay = exp.formatted_time || "-";
 
   var html =
     '<div class="tick-card">' +
