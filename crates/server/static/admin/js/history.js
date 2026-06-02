@@ -205,8 +205,10 @@ const filterChronicles = debounce(function () {
         chronicles.filter(
             (c) =>
                 (c.summary_preview || "").toLowerCase().includes(q) ||
+                (c.summary || "").toLowerCase().includes(q) ||
                 (c.chronicle_id || "").toLowerCase().includes(q) ||
-                (c.season || "").toLowerCase().includes(q),
+                (c.season || "").toLowerCase().includes(q) ||
+                (c.agent_summaries || []).some((a) => (a.name || "").toLowerCase().includes(q)),
         ),
     );
 }, 300);
@@ -398,11 +400,13 @@ function renderExpTable() {
             const isSuccess = e.result === "success";
             const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
-            const timeStr = e.created_at
-                ? new Date(e.created_at).toLocaleString("zh-CN", {
-                      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-                  })
-                : "-";
+            const timeStr = e.formatted_time
+                || (e.game_day > 0 ? formatCalendarDate(e.game_day) : null)
+                || (e.created_at
+                    ? new Date(e.created_at).toLocaleString("zh-CN", {
+                          month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+                      })
+                    : "-");
 
             const renhunHtml = renderRenhunCell(cycles, e);
             const tianhunHtml = renderTianhunCell(cycles, e);
@@ -472,10 +476,7 @@ function renderTianhunCell(cycles, entry) {
     return html || "-";
 }
 
-// 地魂 action_type 中文映射
-const DIHUN_SPEAK_TYPES = { 说话: true, speak: true };
-const DIHUN_WHISPER_TYPES = { 私语: true, whisper: true };
-const DIHUN_SHOUT_TYPES = { 大喊: true, shout: true };
+// 地魂 action_type 中文映射（常量定义在 utils.js: SPEAK_TYPES / WHISPER_TYPES / SHOUT_TYPES）
 
 function parseActionData(raw) {
     if (!raw) return {};
@@ -486,19 +487,51 @@ function parseActionData(raw) {
     return {};
 }
 
+// 渲染单个 action 的地魂描述文本
+function renderSingleAction(aType, aData) {
+    const content = aData.content || "";
+    if (SPEAK_TYPES[aType] && content)
+        return `向在场众人说话："${escapeHtml(content)}"`;
+    if (WHISPER_TYPES[aType] && content) {
+        const name = resolveTargetName(aData.target_agent_id);
+        return `向${escapeHtml(name)}密语："${escapeHtml(content)}"`;
+    }
+    if (SHOUT_TYPES[aType] && content)
+        return `大喊："${escapeHtml(content)}"`;
+    let text = escapeHtml(getActionTypeDisplay(aType));
+    // 选取关键字段展示（非全量 JSON dump）
+    const keys = Object.keys(aData).filter(k => k !== "content" && k !== "target_agent_id");
+    if (content) text += ` "${escapeHtml(content)}"`;
+    if (aData.target_agent_id) {
+        const name = resolveTargetName(aData.target_agent_id);
+        text += ` → ${escapeHtml(name)}`;
+    }
+    if (aData.item_id) text += ` ${escapeHtml(aData.item_id)}`;
+    if (aData.quantity) text += ` x${aData.quantity}`;
+    if (aData.target_location) text += ` → ${escapeHtml(aData.target_location)}`;
+    // 其他未知字段兜底
+    const remaining = keys.filter(k => !["item_id","quantity","target_location"].includes(k));
+    if (remaining.length > 0) {
+        const picked = {};
+        remaining.forEach(k => picked[k] = aData[k]);
+        text += ` ${escapeHtml(JSON.stringify(picked))}`;
+    }
+    return text;
+}
+
 // 渲染地魂单元格
 function renderDihunCell(cycles, entry) {
     if (!cycles || cycles.length === 0) {
         const topData = parseActionData(entry.action_data);
         const topType = entry.action_type || "";
         const topContent = topData.content || "";
-        if (DIHUN_SPEAK_TYPES[topType] && topContent)
+        if (SPEAK_TYPES[topType] && topContent)
             return `<div class="exp-meta-text">"${escapeHtml(topContent)}"</div>`;
-        if (DIHUN_WHISPER_TYPES[topType] && topContent) {
+        if (WHISPER_TYPES[topType] && topContent) {
             const name = resolveTargetName(topData.target_agent_id);
             return `<div class="exp-meta-text">向${escapeHtml(name)}密语: "${escapeHtml(topContent)}"</div>`;
         }
-        if (DIHUN_SHOUT_TYPES[topType] && topContent)
+        if (SHOUT_TYPES[topType] && topContent)
             return `<div class="exp-meta-text">大喊: "${escapeHtml(topContent)}"</div>`;
         return "-";
     }
@@ -507,27 +540,28 @@ function renderDihunCell(cycles, entry) {
         if (cycles.length > 1) html += `<div class="tick-attempt-label">第${idx + 1}次</div>`;
         const fi = cycle.final_intent;
         if (!fi) return;
-        const fiActionType = fi.action_type || "";
-        let fiData = parseActionData(fi.action_data);
-        if (!fiData.content && entry.action_data) {
-            const fallback = parseActionData(entry.action_data);
-            if (fallback.content) fiData = { ...fiData, ...fallback };
+        // 优先使用 pipeline_actions（新数据格式）
+        if (fi.pipeline_actions && fi.pipeline_actions.length > 0) {
+            fi.pipeline_actions.forEach((item) => {
+                const aType = item.action_type || "";
+                const aData = parseActionData(item.action_data);
+                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+            });
+        } else {
+            // 旧数据兜底：action_data 可能是数组或单对象
+            const fiData = fi.action_data;
+            if (Array.isArray(fiData)) {
+                fiData.forEach((item) => {
+                    const aType = item.action_type || "";
+                    const aData = parseActionData(item.action_data);
+                    html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+                });
+            } else {
+                const aType = fi.action_type || "";
+                const aData = parseActionData(fiData);
+                html += `<div class="exp-meta-text">${renderSingleAction(aType, aData)}</div>`;
+            }
         }
-        const fiContent = fiData.content || "";
-        let fiText = "";
-        if (DIHUN_SPEAK_TYPES[fiActionType] && fiContent)
-            fiText = `"${escapeHtml(fiContent)}"`;
-        else if (DIHUN_WHISPER_TYPES[fiActionType] && fiContent) {
-            const name = resolveTargetName(fiData.target_agent_id);
-            fiText = `向${escapeHtml(name)}密语: "${escapeHtml(fiContent)}"`;
-        } else if (DIHUN_SHOUT_TYPES[fiActionType] && fiContent)
-            fiText = `大喊: "${escapeHtml(fiContent)}"`;
-        else {
-            fiText = escapeHtml(getActionTypeDisplay(fiActionType));
-            if (Object.keys(fiData).length > 0)
-                fiText += ` ${escapeHtml(JSON.stringify(fiData))}`;
-        }
-        html += `<div class="exp-meta-text">${fiText}</div>`;
     });
     return html || "-";
 }
@@ -572,20 +606,92 @@ function resetExpFilters() {
 let summariesData = [];
 let sumTotal = 0, sumPage = 1, sumPageSize = 20;
 let summariesLoaded = false;
+let _selectedSumAgentId = "";
+
+// Combobox: 即时过滤角色列表
+function filterAgentDropdown() {
+    const input = document.getElementById("sum-agent-input");
+    const dropdown = document.getElementById("sum-agent-dropdown");
+    const q = input.value.toLowerCase().trim();
+
+    const seen = new Set();
+    const agents = Object.values(allAgentsMap).filter((a) => {
+        if (seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+    });
+    const matched = q
+        ? agents.filter(
+              (a) =>
+                  (a.name || "").toLowerCase().includes(q) ||
+                  (a.id || "").toLowerCase().includes(q),
+          )
+        : agents;
+
+    if (!matched.length) {
+        dropdown.innerHTML = '<div class="combobox-empty">无匹配角色</div>';
+        dropdown.classList.add("open");
+        return;
+    }
+
+    dropdown.innerHTML = matched
+        .slice(0, 50)
+        .map((a) => {
+            const short = a.id ? a.id.substring(0, 8) : "";
+            return `<div class="combobox-option" data-agent-id="${escapeHtml(a.id)}">${escapeHtml(a.name)} <span class="timeline-agent-id">(${short}...)</span></div>`;
+        })
+        .join("");
+    dropdown.classList.add("open");
+}
+
+function selectAgentOption(el) {
+    const id = el.dataset.agentId;
+    const agent = allAgentsMap[id];
+    const name = agent ? agent.name : el.textContent.trim().split(" (")[0];
+    document.getElementById("sum-agent-input").value = name;
+    document.getElementById("sum-agent-id").value = id;
+    _selectedSumAgentId = id;
+    document.getElementById("sum-agent-dropdown").classList.remove("open");
+    sumPage = 1;
+    loadSummaries();
+}
+
+function onComboboxBlur() {
+    setTimeout(() => {
+        const dropdown = document.getElementById("sum-agent-dropdown");
+        if (!dropdown.matches(":hover")) {
+            dropdown.classList.remove("open");
+            const input = document.getElementById("sum-agent-input");
+            if (!input.value.trim()) {
+                // 输入框清空 → 清除筛选
+                document.getElementById("sum-agent-id").value = "";
+                _selectedSumAgentId = "";
+            } else if (_selectedSumAgentId) {
+                // 有选中值但输入框被手动修改 → 恢复为已选 agent 的名字
+                const agent = allAgentsMap[_selectedSumAgentId];
+                if (agent && input.value !== agent.name) {
+                    input.value = agent.name;
+                }
+            }
+        }
+    }, 150);
+}
+
+const debouncedSumTextFilter = debounce(function () {
+    if (!summariesLoaded) return;
+    applySumTextFilter();
+}, 300);
 
 async function loadSummaries() {
     const container = document.getElementById("summaries-container");
     container.innerHTML = '<div class="loading">加载中...</div>';
 
-    await fetchAndPopulateAgents(["sum-agent-filter"]);
+    await fetchAndPopulateAgents([]);
 
     const params = new URLSearchParams();
     params.set("page", sumPage);
     params.set("limit", sumPageSize);
-    const agentFilterVal = document.getElementById("sum-agent-filter").value;
-    const gameDayVal = document.getElementById("sum-game-day-filter").value;
-    if (agentFilterVal) params.set("agent_id", agentFilterVal);
-    if (gameDayVal) params.set("game_day", gameDayVal);
+    if (_selectedSumAgentId) params.set("agent_id", _selectedSumAgentId);
 
     try {
         const res = await apiFetch(API.BASE + "/agent-daily-summaries?" + params);
@@ -620,19 +726,11 @@ function applySumTextFilter() {
     }
 }
 
-function searchSummaries() {
-    if (summariesLoaded) {
-        applySumTextFilter();
-    } else {
-        sumPage = 1;
-        loadSummaries();
-    }
-}
-
 function resetSumFilters() {
     document.getElementById("sum-search-input").value = "";
-    document.getElementById("sum-agent-filter").value = "";
-    document.getElementById("sum-game-day-filter").value = "";
+    document.getElementById("sum-agent-input").value = "";
+    document.getElementById("sum-agent-id").value = "";
+    _selectedSumAgentId = "";
     sumPage = 1;
     loadSummaries();
 }
@@ -671,11 +769,11 @@ function renderSummaries(list) {
             <div class="timeline-dot"></div>
             <div class="timeline-content">
                 <div class="timeline-header">
+                    <span class="timeline-calendar">${escapeHtml(calTime)}</span>
                     <span class="timeline-agent">
                         ${escapeHtml(agentName)}
                         <span class="timeline-agent-id">(${escapeHtml(agentShortId)}...)</span>
                     </span>
-                    <span class="timeline-calendar">${escapeHtml(calTime)}</span>
                 </div>
                 <div class="timeline-meta">存档时间: ${escapeHtml(dateStr)}</div>
                 <div class="timeline-body" data-sum-expanded="false">${escapeHtml(s.summary || "")}</div>
@@ -736,7 +834,16 @@ function formatChronicleRange(startDate, endDate, startGameDay, endGameDay) {
 }
 
 function formatCalendarDate(gameDay) {
-    return '[第' + gameDay + '日]';
+    if (!gameDay || gameDay <= 0) return null;
+    var gd0 = gameDay - 1;
+    var year = 1 + Math.floor(gd0 / TIME_CONFIG.DAYS_PER_YEAR);
+    var month = 1 + Math.floor((gd0 % TIME_CONFIG.DAYS_PER_YEAR) / TIME_CONFIG.DAYS_PER_SEASON);
+    var day = 1 + (gd0 % TIME_CONFIG.DAYS_PER_SEASON);
+    return (typeof digitToChinese === "function" ? digitToChinese(year) : String(year))
+        + "年"
+        + (MONTH_NAMES && MONTH_NAMES[month - 1] || ("第" + month + "月"))
+        + (typeof dayToChinese === "function" ? dayToChinese(day) : String(day))
+        + "日";
 }
 
 // ============================================================
@@ -757,6 +864,18 @@ document.addEventListener("click", (e) => {
     // Modal overlay click-to-close (only if clicking the overlay itself, not content)
     const modal = document.getElementById("detail-modal");
     if (e.target === modal) closeModal();
+
+    // Combobox option click (event delegation)
+    const option = e.target.closest(".combobox-option");
+    if (option) {
+        selectAgentOption(option);
+        return;
+    }
+    // Click outside combobox → close dropdown
+    const combobox = e.target.closest(".combobox");
+    if (!combobox) {
+        document.querySelectorAll(".combobox-dropdown.open").forEach((d) => d.classList.remove("open"));
+    }
 });
 
 // Chronicle card keyboard activation
@@ -772,3 +891,11 @@ document.addEventListener("keydown", (e) => {
 
 // Load experiences on init (default tab)
 ensureExperiencesLoaded();
+
+// Combobox event binding
+const _sumAgentInput = document.getElementById("sum-agent-input");
+if (_sumAgentInput) {
+    _sumAgentInput.addEventListener("focus", filterAgentDropdown);
+    _sumAgentInput.addEventListener("input", filterAgentDropdown);
+    _sumAgentInput.addEventListener("blur", onComboboxBlur);
+}

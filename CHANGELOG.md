@@ -7,6 +7,54 @@
 
 ## [Unreleased]
 
+### Changed — 设备身份生命周期 v2 [BREAKING]
+
+- **[BREAKING] Server**: 废弃 `POST /api/v1/agent/connect`（upsert 撞库语义），拆分为两个严格语义端点：
+  - `POST /api/v1/device/verify` — 仅查询，设备不存在返回 `404 + {error: "device_not_found", ...}`。**严禁**任何 client 撞库新建设备。
+  - `POST /api/v1/device/register` — server 端生成 `device_id` (UUID v4)，`201 Created`。**不接受** client 入参 `device_id`，从协议层消除撞库。
+- **[BREAKING] Server**: 删除 `agent_connect` handler、`AgentConnectRequest`/`AgentConnectResponse` 结构（与 `/api/v1/agent/connect` 端点一同移除）。`narrative_config` 不再随设备身份下发，迁移至 `POST /api/v1/agent/register` (character register) 唯一注入点。
+- **Server TOCTOU 修复**: `device_verify` 200 路径调用新增的 `get_device_token` (SELECT only)，**不再**调用 `connect_device` (upsert 语义)。并发 DELETE 窗口（verify_strict 返回 true 后、get_device_token 之前）显式 fail-fast 返 500，杜绝"刚被 admin DELETE 的 device 被 agent verify 复活"。
+- **Server 新增 `DeviceRegisterErrorResponse`**: `device_register` 错误路径返回结构化 JSON body（与 `DeviceVerifyErrorResponse` 对称），含 `error: "internal_error"` 标识。
+- **Server 状态码**: `device_register` 资源创建返 `201 Created`（不再用 200）。
+- **Server `connect_device` DB 函数保留**（YAGNI 注：仍为内部低阶 helper，未来如需 upsert 语义可独立调用；端点层已彻底禁止使用）。
+- **Agent**: `ensure_device` 重写为 verify-first — 启动时先调 `/device/verify`，404 删除本地 yaml 后 fall through 到 `/device/register` 申报新设备。
+- **Agent**: `refresh_device_token` (HTTP path) 与 `refresh_device_token` (reconnect path) 统一改调 `/device/verify`，404 时 fail-fast 删本地 yaml + bail，触发上层重启走 `ensure_device` 重新注册路径。
+- **Agent**: WebSocket 401 归类为 `AuthFailed`（之前仅识别 400），触发 `refresh_device_token` 自动恢复。
+- **Agent**: `remove_file` 失败 fail-fast（`bail!`）— 之前仅 `warn!` 后继续，会形成"stale yaml 删不掉 → 下次启动再次 404 → 死循环"的可复现 bug。
+- **Agent**: 死代码 `if server_token != local.auth_token` 分支删除（server 端不轮换 token，命中"existing"分支原样返回，YAGNI）。
+- **Agent**: 删除 `fetch_narrative_config_from_server` 函数（依赖旧 `/api/v1/agent/connect` 拉 narrative_config）— narrative_config 唯一注入点为 character_register 路径。
+- **CLAUDE.md**: Server API 端点列表更新，删除 `/api/v1/agent/connect`，新增 `/api/v1/device/verify` + `/api/v1/device/register`。
+
+**升级影响**：依赖旧 `/api/v1/agent/connect` 端点的外部 client（OpenClaw 集成、第三方 agent）需迁移到新端点。Agent 端 SDK 已自动适配。
+
+### Fixed — Auto-Rebirth 将已死亡角色错误归隐
+
+- **[BREAKING] Server**: `auto_rebirth_agent()` 不再将旧 agent `status` 改为 `'retired'`。转世完成后旧 agent 保持 `status='dead'` 死亡标记，`retired_at` 字段仅作为时间戳记录"转世完成"事件。`retired` 状态语义专属"玩家主动归隐"（通过 `/api/v1/agent/retire` 端点触发）。**已死亡角色永远不会被 auto-rebirth 错误归隐**。
+- **Server**: `auto_rebirth_agent` SQL 加 `rows_affected()` 检查，并发状态变更时显式 bail（fail-fast）
+- **Server**: `unified_config.rs` 删除 `RebirthTerminalStatus` 枚举（单一变体违反 YAGNI，终态由硬编码 SQL 决定）
+- **Agent**: `rebirth_character_handler`（web 面板"重生"按钮）按 `CharacterStatus` dispatch——`dead` 调 `/api/v1/agent/auto-rebirth`，`alive` 调 `/api/v1/agent/retire`，`retired` 幂等 no-op，character.yaml 缺失/损坏时保守 no-op 防止误归隐
+
+### Changed — Agent Web Panel SPA 重构
+
+- **Frontend**: 6 页碎片化 HTML (welcome/setup/create/character/settings + shared.js) 重构为 3 页 SPA，hash router 导航 (#/dashboard, #/characters, #/settings)
+- **Frontend**: 8 个 ES module (app/router/api/ui/dashboard/character/panels/settings)，最大模块 ~430 行 (panels.js)，替代旧 2056 行 character.js monolith
+- **Frontend**: 数据驱动 UI — 属性面板从 API categories 动态渲染，事件数量由 DASHBOARD_EVENT_LIMIT 常量控制，statusMap 集中定义
+- **Frontend**: 共享 helper 函数 (extractActionSummary/getActionColor/getAttrColor/fmtNum/STATUS_MAP) 集中到 ui.js，消除跨模块重复
+- **Frontend**: CSS 从 3369 行压缩至 ~445 行，CSS custom properties 主题化 (--bg-primary/--accent/--shadow-sm|md|lg|xl 等)
+- **Agent**: cyber-jianghu-agent.rs 路由变更 — 所有 /welcome.html 引用改为 / (SPA 入口)
+- **Agent**: api/mod.rs 重定向变更 — /create.html → /#/characters，/character.html → /#/characters，/settings.html → /#/settings
+- **Deleted**: welcome.html, setup.html, create.html, character.html, settings.html, js/shared.js, js/create.js, character.js.old
+
+### Fixed — 三魂数据模型根治 [BREAKING]
+
+- **[BREAKING] Protocol**: `FinalIntentReport` 新增 `pipeline_actions: Option<Vec<PipelineAction>>` 字段。`action_data` 回归单 intent 语义（单对象），pipeline 完整视图由 `pipeline_actions` 独立承载。`PipelineAction` 新增 struct
+- **[BREAKING] Agent**: `SoulCycleRecord` 新增 `final_pipeline_json TEXT` 列。`record_final_intent` 签名变更 5→6 参数（新增 `pipeline_json`）。`final_action_type` 从拼接 "移动 → 给予" 恢复为单个 primary action_type
+- **Agent**: `biography.rs` 行动摘要遍历 `final_pipeline_json` 展示完整 pipeline（非仅 primary）
+- **Agent**: `reporting.rs` pipe_seq=0 从 `final_pipeline_json` 反序列化 `pipeline_actions`，pipe_seq>0 为 None
+- **Server**: 透传 `pipeline_actions` 到 `soul_cycle_metadata` JSON blob，无需修改
+- **Frontend**: `history.js` / `agents.js` 优先使用 `pipeline_actions` 渲染 pipeline 多意图，旧数据 `Array.isArray` 兜底兼容
+- **Frontend**: `agents.js` 提取 `renderServerActionHtml` 复用 `SPEAK_TYPES`/`WHISPER_TYPES`/`SHOUT_TYPES` 常量，伪装地魂复用同一函数，消除第三处独立硬编码
+
 ### Changed — Schema-Driven 角色生成约束 [BREAKING]
 
 - **Agent**: `CharacterGenerationConfig` 从 18 个独立字段改为 schema-driven 设计：`FieldSpec` enum (string/integer/enum/enum_array) + `fields` 列表。Prompt 和 validate 共享同一 YAML schema，结构上消除 prompt/validate mismatch
@@ -211,6 +259,11 @@
 - **Agent**: Token 统计全零修复 — 单模型场景 `DirectLlmClient` 流式路径缺少 `UsageTrackingStream` 包装，导致 `token_cost_count.tmp` 始终全零
   - `DirectLlmClient` trait impl 的 `complete_streaming` / `complete_conversation_streaming` 加入 `UsageTrackingStream` 包装
   - 非流式 `send_request_once` 当 API 不返回 usage 时用字符长度估算 token
+- **Agent**: Token 统计改为按小时聚合（`yyyy-mm-dd-hh`）
+  - `token_cost_count.tmp` 新结构：`{ summary: { by_provider_model: {...} }, detail: { "<hour>": { "<model_key>": {...} } } }`
+  - `summary.by_provider_model.<model_key>` 含聚合字段（`total_*` / `active_hours` / `first_record_at` / `last_record_at`）与四个 `avg_*`（`avg_prompt_tokens_per_hour` / `avg_completion_tokens_per_hour` / `avg_calls_per_hour` / `avg_cache_hit_ratio`）
+  - 时区固定 UTC；旧 flat HashMap 格式不兼容（首次运行丢弃旧数据，文件无外部 reader 无影响）
+  - 公共 API（`snapshot_all_stats` / `record_token_usage` / `record_failure`）签名与 `ModelTokenStats` 返回结构不变，`/api/v1/metrics` 与 `/api/v1/config/llm/usage` 无感
 - **Agent+Protocol**: Session triage LLM 兜底分流修复 — 由硬编码二段式改为配置阈值驱动的三段式（urgent/batch/ignored），并区分“超时/调用失败”的兜底 reason；未配置 event_triage 或阈值无效时禁用即时事件处理
 - **Agent**: max_tokens 自适应 — API 返回 400 且错误体包含 max_tokens 限制时自动学习并重试
   - `LEARNED_MODEL_LIMITS` 全局状态持久化到 `~/.cyber-jianghu/model_limits.json`

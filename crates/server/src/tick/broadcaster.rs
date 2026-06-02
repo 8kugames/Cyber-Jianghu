@@ -465,16 +465,10 @@ impl Broadcaster {
                 // 获取派生属性（浮点数）
                 let derived_attributes = agent_state.get_derived_attributes_for_protocol();
 
-                // 从 NarrativeConfig 生成叙事描述
-                let attribute_descriptions: HashMap<String, String> = attributes
-                    .iter()
-                    .filter_map(|(name, &value)| {
-                        game_data
-                            .narrative
-                            .get_description(name, value)
-                            .map(|desc| (name.clone(), desc.to_string()))
-                    })
-                    .collect();
+                // 从 NarrativeConfig 生成叙事描述（数据驱动：阈值描述→显示名回退）
+                let attribute_descriptions = game_data
+                    .narrative
+                    .build_attribute_descriptions(&attributes, &derived_attributes);
 
                 let survival_drives = game_data.narrative.compute_survival_drives(&attributes);
                 crate::models::AgentSelfState {
@@ -757,15 +751,9 @@ pub fn build_reactive_world_state(
     // 属性
     let attributes = agent_state.get_attributes_for_protocol();
     let derived_attributes = agent_state.get_derived_attributes_for_protocol();
-    let attribute_descriptions: HashMap<String, String> = attributes
-        .iter()
-        .filter_map(|(name, &value)| {
-            game_data
-                .narrative
-                .get_description(name, value)
-                .map(|desc| (name.clone(), desc.to_string()))
-        })
-        .collect();
+    let attribute_descriptions = game_data
+        .narrative
+        .build_attribute_descriptions(&attributes, &derived_attributes);
 
     crate::models::WorldState {
         event_type: EVENT_TYPE_WORLD_STATE.to_string(),
@@ -904,15 +892,10 @@ pub fn build_initial_world_state(
     // 属性
     let attributes = agent_state.get_attributes_for_protocol();
     let derived_attributes = agent_state.get_derived_attributes_for_protocol();
-    let attribute_descriptions: HashMap<String, String> = attributes
-        .iter()
-        .filter_map(|(name, &value)| {
-            game_data
-                .narrative
-                .get_description(name, value)
-                .map(|desc| (name.clone(), desc.to_string()))
-        })
-        .collect();
+    let attribute_descriptions = game_data
+        .narrative
+        .build_attribute_descriptions(&attributes, &derived_attributes);
+
     let survival_drives = game_data.narrative.compute_survival_drives(&attributes);
 
     crate::models::WorldState {

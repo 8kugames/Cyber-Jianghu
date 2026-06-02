@@ -14,6 +14,7 @@
 pub mod budget;
 pub mod compactor;
 pub mod config;
+pub mod content_fallback;
 mod executor;
 pub mod loop_guard;
 mod memory_tool;

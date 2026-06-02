@@ -493,7 +493,6 @@ function renderExperiences(data) {
       }
 
       // Fallback: 显示基本信息（当 soul_cycle_metadata 为空时）
-      var actionType = getActionTypeDisplay(exp.action_type || "");
       var resultText =
         exp.result === "success"
           ? "成功"
@@ -507,11 +506,24 @@ function renderExperiences(data) {
             ? "rejected"
             : "";
 
+      var fallbackWorldTime =
+        exp.formatted_time ||
+        (metadata && typeof formatWorldTime === "function"
+          ? formatWorldTime(metadata.world_time)
+          : null) ||
+        (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
+          ? formatCalendarDate(exp.game_day)
+          : null) ||
+        "-";
+
       var html =
         '<div class="tick-card">' +
         '<div class="tick-card-header">' +
         '<span class="tick-badge">T' +
         escapeHtml(exp.tick_id || "-") +
+        "</span>" +
+        '<span class="tick-world-time">' +
+        escapeHtml(fallbackWorldTime) +
         "</span>" +
         '<span class="tick-real-time">' +
         escapeHtml(time) +
@@ -552,29 +564,10 @@ function renderExperiences(data) {
           tianhunHtml +
           "</div></div>";
 
-      // 伪装地魂：动作（解析 action_data 显示说话/私语内容）
+      // 伪装地魂：复用 renderServerActionHtml 统一渲染
       html +=
         '<div class="exp-action"><span class="exp-soul-label">地魂</span><div class="exp-soul-content">';
-      var expAd = exp.action_data;
-      if (typeof expAd === "string") {
-        try { expAd = JSON.parse(expAd); } catch(e) { expAd = {}; }
-      }
-      if (!expAd || typeof expAd !== "object") expAd = {};
-      var expContent = expAd.content || "";
-      var expAt = exp.action_type || "";
-      if ((expAt === "说话" || expAt === "speak") && expContent) {
-        html += '<div class="soul-text">向众人说话："' + escapeHtml(expContent) + '"</div>';
-      } else if ((expAt === "私语" || expAt === "whisper") && expContent) {
-        var expTarget = resolveTargetName(expAd.target_agent_id);
-        html += '<div class="soul-text">向 ' + escapeHtml(expTarget) + ' 密语："' + escapeHtml(expContent) + '"</div>';
-      } else if ((expAt === "大喊" || expAt === "shout") && expContent) {
-        html += '<div class="soul-text">大声喊道："' + escapeHtml(expContent) + '"</div>';
-      } else {
-        html += '<div class="soul-text">' + escapeHtml(actionType) + "</div>";
-        if (Object.keys(expAd).length > 0) {
-          html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(expAd)) + "</span>";
-        }
-      }
+      html += renderServerActionHtml(exp.action_type, exp.action_data);
       html += "</div></div>";
 
       html += "</div></div>";
@@ -589,7 +582,15 @@ function renderExperiences(data) {
 function renderTickCard(exp, metadata, time) {
   var attempts = metadata.cycles || [];
   var immediate = metadata.immediate_intents || [];
-  var worldTimeDisplay = metadata.world_time || "-";
+  var worldTimeDisplay =
+    exp.formatted_time ||
+    (typeof formatWorldTime === "function"
+      ? formatWorldTime(metadata.world_time)
+      : null) ||
+    (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
+      ? formatCalendarDate(exp.game_day)
+      : null) ||
+    "-";
 
   var html =
     '<div class="tick-card">' +
@@ -660,6 +661,38 @@ function renderTickCard(exp, metadata, time) {
 // LAYER_NAMES 已移至 utils.js（全局共享）
 
 // 渲染单魂/行动内联区块（server 版本，与 agent 端保持一致）
+// SPEAK_TYPES/WHISPER_TYPES/SHOUT_TYPES 已提取到 utils.js（全局共享）
+
+function renderServerActionHtml(actionType, actionData) {
+  var at = actionType || "";
+  var ad = actionData;
+  if (typeof ad === "string") {
+    try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
+  }
+  if (!ad || typeof ad !== "object" || Array.isArray(ad)) {
+    if (Array.isArray(ad)) console.warn("[renderServerActionHtml] 旧格式 action_data(数组)，内容丢失:", ad);
+    ad = {};
+  }
+  var content = ad.content || "";
+  var targetId = ad.target_agent_id;
+  var html = "";
+  if (SPEAK_TYPES[at] && content) {
+    var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向在场众人说话";
+    html += '<div class="soul-text">' + escapeHtml(speakLabel) + '："' + escapeHtml(content) + '"</div>';
+  } else if (WHISPER_TYPES[at] && content) {
+    html += '<div class="soul-text">向' + escapeHtml(resolveTargetName(targetId)) + '密语："' + escapeHtml(content) + '"</div>';
+  } else if (SHOUT_TYPES[at] && content) {
+    html += '<div class="soul-text">大喊："' + escapeHtml(content) + '"</div>';
+  } else {
+    html += '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
+    if (Object.keys(ad).length > 0) {
+      html += ' <span class="soul-params">' + escapeHtml(JSON.stringify(ad)) + '</span>';
+    }
+    html += "</div>";
+  }
+  return html;
+}
+
 function renderServerSoulInline(label, data, type) {
   if (!data) return "";
   var html =
@@ -708,68 +741,31 @@ function renderServerSoulInline(label, data, type) {
       html +=
         '<div class="soul-narrative">' + escapeHtml(data.narrative) + "</div>";
   } else if (type === "action") {
-    // 地魂：最终行动，说话/私语/大喊特殊展示
-    // 注意：action_type 存储为中文（说话/私语/shout），需同时兼容英文
-    if (data.action_type) {
-      var at = data.action_type;
-      var ad = data.action_data;
-      if (typeof ad === "string") {
-        try { ad = JSON.parse(ad); } catch(e) { ad = {}; }
-      }
-      if (!ad || typeof ad !== "object") ad = {};
-      var content = ad.content || "";
-      var targetId = ad.target_agent_id;
-
-      if (at === "说话" || at === "speak") {
-        var speakLabel = targetId ? ("对" + resolveTargetName(targetId) + "说话") : "向众人说话";
-        html +=
-          '<div class="soul-text">' +
-          escapeHtml(speakLabel) +
-          '："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else if (at === "私语" || at === "whisper") {
-        var targetName = resolveTargetName(targetId);
-        html +=
-          '<div class="soul-text">向 ' +
-          escapeHtml(targetName) +
-          ' 密语："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else if (at === "大喊" || at === "shout") {
-        html +=
-          '<div class="soul-text">大声喊道："' +
-          escapeHtml(content) +
-          '"</div>';
-      } else {
-        html +=
-          '<div class="soul-text">' + escapeHtml(getActionTypeDisplay(at));
-        if (Object.keys(ad).length > 0) {
-          html +=
-            ' <span class="soul-params">' +
-            escapeHtml(JSON.stringify(ad)) +
-            "</span>";
-        }
-        html += "</div>";
-      }
-      // 混沌标记徽章
-      if (data.chaos_marker) {
-        var cm = data.chaos_marker;
-        var chaosLabel =
-          cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
-        html +=
-          '<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">' +
-          escapeHtml(chaosLabel) +
-          "</span></div>";
-      }
-      // 托梦影响徽章
-      if (data.dream_marker) {
-        var dreamThought = data.dream_marker.thought || '';
-        html +=
-          '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
-          (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
-          '</div>';
-      }
+    var pipelineActions = data.pipeline_actions;
+    if (pipelineActions && pipelineActions.length > 0) {
+      pipelineActions.forEach(function(pa) {
+        html += renderServerActionHtml(pa.action_type, pa.action_data);
+      });
+    } else if (data.action_type) {
+      html += renderServerActionHtml(data.action_type, data.action_data);
+    }
+    // 混沌标记徽章（仅 primary intent 级别）
+    if (data.chaos_marker) {
+      var cm = data.chaos_marker;
+      var chaosLabel =
+        cm.type === "Sanity" ? "陷入混乱(低理智)" : "陷入混乱(LLM配额耗尽)";
+      html +=
+        '<div class="chaos-badge" style="margin-top:4px;"><span class="chaos-tag">' +
+        escapeHtml(chaosLabel) +
+        "</span></div>";
+    }
+    // 托梦影响徽章（仅 primary intent 级别）
+    if (data.dream_marker) {
+      var dreamThought = data.dream_marker.thought || '';
+      html +=
+        '<div class="dream-badge" style="margin-top:4px;"><span class="dream-tag">受托梦影响</span>' +
+        (dreamThought ? ' <span style="color:#8b949e;font-size:12px;">' + escapeHtml(dreamThought) + '</span>' : '') +
+        '</div>';
     }
   }
   html += "</div></div>";

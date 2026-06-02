@@ -33,6 +33,11 @@ pub struct ExperienceEntry {
     /// 三魂循环元数据
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soul_cycle_metadata: Option<serde_json::Value>,
+    /// 游戏日编号（从 soul_cycle_metadata.world_time 解析，无元数据时为 0）
+    pub game_day: i64,
+    /// 中文天道历时间（"天道历X年X月X日X时"），供前端直接渲染
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formatted_time: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -124,20 +129,34 @@ pub async fn get_agent_experiences(
 
     let experiences: Vec<ExperienceEntry> = rows
         .into_iter()
-        .map(|row| ExperienceEntry {
-            tick_id: row.get("tick_id"),
-            action_type: row.get("action_type"),
-            action_type_display: row.get("action_type_display"),
-            action_data: row
-                .get::<Option<serde_json::Value>, _>("action_data")
-                .unwrap_or(serde_json::Value::Null),
-            result: row.get("result"),
-            result_message: row.get("result_message"),
-            thought_log: row.get("thought_log"),
-            reflector_thought: row.get("reflector_thought"),
-            narrative: row.get("narrative"),
-            soul_cycle_metadata: row.get("soul_cycle_metadata"),
-            created_at: row.get("created_at"),
+        .map(|row| {
+            let metadata: Option<serde_json::Value> = row.get("soul_cycle_metadata");
+            let world_time_json: Option<String> = metadata
+                .as_ref()
+                .and_then(|m| m.get("world_time"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            ExperienceEntry {
+                tick_id: row.get("tick_id"),
+                action_type: row.get("action_type"),
+                action_type_display: row.get("action_type_display"),
+                action_data: row
+                    .get::<Option<serde_json::Value>, _>("action_data")
+                    .unwrap_or(serde_json::Value::Null),
+                result: row.get("result"),
+                result_message: row.get("result_message"),
+                thought_log: row.get("thought_log"),
+                reflector_thought: row.get("reflector_thought"),
+                narrative: row.get("narrative"),
+                soul_cycle_metadata: metadata,
+                game_day: crate::time_utils::world_time_json_to_game_day(
+                    world_time_json.as_deref(),
+                ),
+                formatted_time: crate::time_utils::world_time_json_to_chinese(
+                    world_time_json.as_deref(),
+                ),
+                created_at: row.get("created_at"),
+            }
         })
         .collect();
 
@@ -196,6 +215,11 @@ pub struct StreamEntry {
     pub reflector_thought: Option<String>,
     pub narrative: Option<String>,
     pub soul_cycle_metadata: Option<serde_json::Value>,
+    /// 游戏日编号（0 表示无元数据）
+    pub game_day: i64,
+    /// 中文天道历时间（"天道历X年X月X日X时"）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formatted_time: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -307,24 +331,38 @@ pub async fn get_experiences(
 
     let entries: Vec<StreamEntry> = rows
         .into_iter()
-        .map(|row| StreamEntry {
-            tick_id: row.get("tick_id"),
-            agent_id: row.get("agent_id"),
-            device_id: row.get("device_id"),
-            agent_name: row.get("agent_name"),
-            location: row.get("location"),
-            action_type: row.get("action_type"),
-            action_type_display: row.get("action_type_display"),
-            action_data: row
-                .get::<Option<serde_json::Value>, _>("action_data")
-                .unwrap_or(serde_json::Value::Null),
-            result: row.get("result"),
-            result_message: row.get("result_message"),
-            thought_log: row.get("thought_log"),
-            reflector_thought: row.get("reflector_thought"),
-            narrative: row.get("narrative"),
-            soul_cycle_metadata: row.get("soul_cycle_metadata"),
-            created_at: row.get("created_at"),
+        .map(|row| {
+            let metadata: Option<serde_json::Value> = row.get("soul_cycle_metadata");
+            let world_time_json: Option<String> = metadata
+                .as_ref()
+                .and_then(|m| m.get("world_time"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            StreamEntry {
+                tick_id: row.get("tick_id"),
+                agent_id: row.get("agent_id"),
+                device_id: row.get("device_id"),
+                agent_name: row.get("agent_name"),
+                location: row.get("location"),
+                action_type: row.get("action_type"),
+                action_type_display: row.get("action_type_display"),
+                action_data: row
+                    .get::<Option<serde_json::Value>, _>("action_data")
+                    .unwrap_or(serde_json::Value::Null),
+                result: row.get("result"),
+                result_message: row.get("result_message"),
+                thought_log: row.get("thought_log"),
+                reflector_thought: row.get("reflector_thought"),
+                narrative: row.get("narrative"),
+                soul_cycle_metadata: metadata,
+                game_day: crate::time_utils::world_time_json_to_game_day(
+                    world_time_json.as_deref(),
+                ),
+                formatted_time: crate::time_utils::world_time_json_to_chinese(
+                    world_time_json.as_deref(),
+                ),
+                created_at: row.get("created_at"),
+            }
         })
         .collect();
 

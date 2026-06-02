@@ -66,7 +66,7 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok(Some((agent_id, game_rules, registered_name, is_alive))) => {
+                        Ok(Some((agent_id, game_rules, world_building_rules, registered_name, is_alive))) => {
                             info!("重连后注册确认: agent_id={}, alive={}", agent_id, is_alive);
 
                             // 更新 agent 名称和人设（与 lifecycle 注册确认逻辑对齐）
@@ -243,6 +243,18 @@ impl super::Agent {
                             // 热更新认知引擎的动作列表缓存
                             if let Some(ref engine) = self.cognitive_engine {
                                 engine.update_action_aliases(&game_rules.available_actions);
+                                engine.set_available_actions(game_rules.available_actions.clone());
+                            }
+
+                            // 立即应用 world_building_rules 到 Validator（与 lifecycle 路径对齐）
+                            if let (Some(validator), Some(wb_rules)) = (&self.validator, &world_building_rules) {
+                                let v = validator.clone();
+                                let rules = wb_rules.clone();
+                                v.update_rules(rules).await;
+                                info!(
+                                    "reconnect: 已从 Registered 消息应用 world_building_rules v={} 到 Validator",
+                                    wb_rules.version
+                                );
                             }
 
                             // 新架构：即时事件处理器无需重新绑定（EventStore 是持久化的）
@@ -306,10 +318,12 @@ impl super::Agent {
         }
     }
 
-    /// 刷新设备 token（WebSocket 400 认证失败时自动调用）
+    /// 刷新设备 token（WebSocket 400/401 认证失败时自动调用）
     ///
-    /// 调用 `POST {server_http_url}/api/v1/agent/connect` 获取新的 auth_token，
-    /// 然后更新客户端身份和本地 device_config。
+    /// 调用 `POST {server_http_url}/api/v1/device/verify` 严格校验设备是否仍被持有。
+    /// - 200 → 设备存在，用 server 返回的 token 替换本地 token
+    /// - 404 → 设备不存在（DB 被清空等场景），删除本地 device.yaml 并抛错，
+    ///   上层应终止进程或重启以走 ensure_device 的"显式注册"路径
     pub(crate) async fn refresh_device_token(&mut self) -> Result<()> {
         let device_id = self
             .device_config
@@ -318,7 +332,7 @@ impl super::Agent {
             .ok_or_else(|| anyhow::anyhow!("No device_config, cannot refresh token"))?;
 
         let http_url = &self.config.server.http_url;
-        let url = format!("{}/api/v1/agent/connect", http_url);
+        let url = format!("{}/api/v1/device/verify", http_url);
 
         debug!("Refreshing device token for {} at {}", device_id, url);
 
@@ -330,6 +344,24 @@ impl super::Agent {
             .await
             .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
 
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            // 关键路径：server 不认这个 device → 删除本地 yaml 让 ensure_device 重新生成
+            // fail-fast：必须先成功删除，再 bail。否则重连循环会反复失败
+            warn!(
+                "server 报告 device {} 不存在（404），删除本地 yaml 要求重新注册",
+                device_id
+            );
+            if let Some(ref device) = self.device_config {
+                let path = self.config.device_yaml_path(&device.server_url);
+                std::fs::remove_file(&path)
+                    .map_err(|e| anyhow::anyhow!("删除 stale device.yaml 失败: {}", e))?;
+            }
+            anyhow::bail!(
+                "device {} no longer exists on server, local device.yaml removed, please restart",
+                device_id
+            );
+        }
+
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
@@ -337,14 +369,23 @@ impl super::Agent {
         }
 
         #[derive(serde::Deserialize)]
-        struct ConnectResponse {
+        struct VerifyResponse {
+            device_id: uuid::Uuid,
             auth_token: String,
         }
 
-        let result: ConnectResponse = response
+        let result: VerifyResponse = response
             .json()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?;
+
+        if result.device_id != device_id {
+            anyhow::bail!(
+                "Server returned device_id {} but we requested {}, refusing to update",
+                result.device_id,
+                device_id
+            );
+        }
 
         info!("Token refreshed successfully for device {}", device_id);
 

@@ -58,6 +58,7 @@ pub struct LifespanResponse {
 pub struct MemorySearchRequest {
     pub query: String,
     pub limit: Option<usize>,
+    pub agent_id: Option<String>,
 }
 
 /// 记忆存储请求

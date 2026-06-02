@@ -187,7 +187,7 @@ data:
         default_value: 100
         min_value: 0
         max_value_formula: "100 + constitution * 0.5"
-        decay_per_tick: 1
+        decay_per_tick: 0.2
         death_condition:
           operator: equals
           value: 0
@@ -204,7 +204,7 @@ data:
         default_value: 100
         min_value: 0
         max_value_formula: "100 + constitution * 0.5"
-        decay_per_tick: 1
+        decay_per_tick: 0.2
         death_condition:
           operator: equals
           value: 0

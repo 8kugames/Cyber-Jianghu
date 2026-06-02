@@ -70,7 +70,7 @@ character_generation:
       type: string
       required: false
       min_chars: 20
-      max_chars: 50
+      max_chars: 100
       prompt_text: "appearance ({min_chars}-{max_chars} chars), distinctive"
     - path: identity
       type: string

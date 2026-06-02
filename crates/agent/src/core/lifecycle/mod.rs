@@ -98,9 +98,9 @@ impl super::Agent {
 
         // 等待注册确认（包含游戏规则）
         // Ok(None) = agent_id 为 nil，等待角色注册（保持连接，不 close/reconnect）
-        let (agent_id, game_rules, registered_name, is_alive) =
+        let (agent_id, game_rules, world_building_rules, registered_name, is_alive) =
             match self.client.wait_for_registration().await {
-                Ok(Some((id, rules, name, alive))) => (id, rules, name, alive),
+                Ok(Some((id, rules, wb_rules, name, alive))) => (id, rules, wb_rules, name, alive),
                 Ok(None) => {
                     info!(
                         "Agent '{}' 等待角色注册（保持连接）...",
@@ -266,6 +266,17 @@ impl super::Agent {
         // 注入 WorldStateStore 到 CognitiveEngine（供地魂 query_world 工具使用）
         if let (Some(engine), Some(store)) = (&self.cognitive_engine, &self.world_state_store) {
             engine.set_world_state_store(store.clone());
+        }
+
+        // 立即应用 world_building_rules 到 Validator（不等待后续 ConfigUpdate）
+        if let (Some(validator), Some(wb_rules)) = (&self.validator, &world_building_rules) {
+            let v = validator.clone();
+            let rules = wb_rules.clone();
+            v.update_rules(rules).await;
+            info!(
+                "已从 Registered 消息应用 world_building_rules v={} 到 Validator",
+                wb_rules.version
+            );
         }
 
         // 初始化对话上下文管理器（Fail-Fast: dialogue_context 段存在时所有字段必填）

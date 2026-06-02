@@ -397,36 +397,28 @@ pub(crate) async fn get_attribute_meta_handler(
 
     // 2. 内存为空时，尝试从磁盘加载
     let narrative = if narrative.is_none() {
-        if let Some(home) = dirs::home_dir() {
-            let path = home
-                .join(".cyber-jianghu")
-                .join("config")
-                .join("narrative_config.json");
-            if path.exists() {
-                match tokio::fs::read_to_string(&path).await {
-                    Ok(content) => {
-                        match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(
-                            &content,
-                        ) {
-                            Ok(cfg) => {
-                                info!("从磁盘加载 narrative_config: {:?}", path);
-                                // 回填内存，供后续请求使用
-                                *state.narrative_config.write().await = Some(cfg.clone());
-                                Some(cfg)
-                            }
-                            Err(e) => {
-                                warn!("解析磁盘 narrative_config 失败: {}", e);
-                                None
-                            }
+        let path = crate::config::config_dir().join("narrative_config.json");
+        if path.exists() {
+            match tokio::fs::read_to_string(&path).await {
+                Ok(content) => {
+                    match serde_json::from_str::<cyber_jianghu_protocol::NarrativeConfig>(&content)
+                    {
+                        Ok(cfg) => {
+                            info!("从磁盘加载 narrative_config: {:?}", path);
+                            // 回填内存，供后续请求使用
+                            *state.narrative_config.write().await = Some(cfg.clone());
+                            Some(cfg)
+                        }
+                        Err(e) => {
+                            warn!("解析磁盘 narrative_config 失败: {}", e);
+                            None
                         }
                     }
-                    Err(e) => {
-                        warn!("读取磁盘 narrative_config 失败: {}", e);
-                        None
-                    }
                 }
-            } else {
-                None
+                Err(e) => {
+                    warn!("读取磁盘 narrative_config 失败: {}", e);
+                    None
+                }
             }
         } else {
             None
@@ -435,12 +427,16 @@ pub(crate) async fn get_attribute_meta_handler(
         narrative
     };
 
-    // 503 信号：让前端重试而非永久缓存空结果
+    // 3. 内存和磁盘都没有时，narrative_config 必须由 character_register 路径注入
+    //    这是 narrative_config 的唯一权威注入点（设备身份端点不负责游戏规则下发）
+    //    兜底"主动拉取"已删除：旧路径会调 /api/v1/agent/connect，已废弃
+
+    // 仍然没有才返回 503（所有恢复路径都失败了）
     if narrative.is_none() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
-                "error": "narrative_config 尚未就绪",
+                "error": "narrative_config 尚未就绪，请先调用 POST /api/v1/character/register",
                 "retry": true
             })),
         )

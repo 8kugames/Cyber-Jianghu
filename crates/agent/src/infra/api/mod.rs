@@ -41,6 +41,7 @@ pub mod thinking_log;
 
 use axum::{
     Router,
+    response::IntoResponse,
     routing::{get, post},
 };
 use cyber_jianghu_protocol::{Intent, ServerMessage, WorldState};
@@ -545,17 +546,72 @@ pub fn get_static_serve_dir() -> PathBuf {
     }
 }
 
+/// 静态文件 handler：读取磁盘文件并添加 Cache-Control: no-cache 头
+async fn static_file_handler(
+    req: axum::extract::Request,
+    serve_dir: std::path::PathBuf,
+) -> axum::response::Response {
+    let path = req.uri().path().trim_start_matches('/');
+    let file_path = if path.is_empty() || path == "index.html" {
+        serve_dir.join("index.html")
+    } else {
+        serve_dir.join(path)
+    };
+
+    // Security: prevent path traversal
+    if !file_path.starts_with(&serve_dir) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+
+    match tokio::fs::read(&file_path).await {
+        Ok(bytes) => {
+            let content_type = match file_path.extension().and_then(|e| e.to_str()) {
+                Some("html") => "text/html; charset=utf-8",
+                Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
+                Some("css") => "text/css; charset=utf-8",
+                Some("json") => "application/json",
+                Some("png") => "image/png",
+                Some("jpg") | Some("jpeg") => "image/jpeg",
+                Some("svg") => "image/svg+xml",
+                Some("ico") => "image/x-icon",
+                _ => "application/octet-stream",
+            };
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(
+                "cache-control",
+                "no-cache, no-store, must-revalidate".parse().unwrap(),
+            );
+            headers.insert("content-type", content_type.parse().unwrap());
+            (axum::http::StatusCode::OK, headers, bytes).into_response()
+        }
+        Err(_) => {
+            // SPA fallback: serve index.html for unknown routes
+            match tokio::fs::read(serve_dir.join("index.html")).await {
+                Ok(html) => {
+                    let mut headers = axum::http::HeaderMap::new();
+                    headers.insert(
+                        "cache-control",
+                        "no-cache, no-store, must-revalidate".parse().unwrap(),
+                    );
+                    headers.insert("content-type", "text/html; charset=utf-8".parse().unwrap());
+                    (axum::http::StatusCode::OK, headers, html).into_response()
+                }
+                Err(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    }
+}
+
 /// 启动 HTTP API 服务器
 ///
 /// 启动后监听指定端口，提供 RESTful API 供外部系统调用
 /// 所有端点都需要从共享状态中获取对应的 AI 组件，如果组件未初始化
 /// 则返回 503 SERVICE_UNAVAILABLE 错误
 pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Result<()> {
-    let app = create_api_router().with_state(api_state.clone());
-
-    // 添加静态文件服务（用于 Web 面板）
-    let serve_dir = get_static_serve_dir();
-    let app = app.fallback_service(tower_http::services::ServeDir::new(serve_dir));
+    let static_dir = get_static_serve_dir();
+    let app = create_api_router()
+        .with_state(api_state.clone())
+        .fallback(move |req: axum::extract::Request| static_file_handler(req, static_dir.clone()));
 
     let addr = format!("0.0.0.0:{}", port);
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -573,15 +629,15 @@ pub async fn run_http_server(port: u16, api_state: HttpApiState) -> anyhow::Resu
     info!("[http] HTTP_PORT={}", local_addr.port());
     info!("[http] Web Panel: http://127.0.0.1:{}/", local_addr.port());
     info!(
-        "[http] - Create character: http://127.0.0.1:{}/create.html",
+        "[http] - Dashboard:       http://127.0.0.1:{}/#/dashboard",
         local_addr.port()
     );
     info!(
-        "[http] - Character info:  http://127.0.0.1:{}/character.html",
+        "[http] - Character info:  http://127.0.0.1:{}/#/characters",
         local_addr.port()
     );
     info!(
-        "[http] - Settings:        http://127.0.0.1:{}/settings.html",
+        "[http] - Settings:        http://127.0.0.1:{}/#/settings",
         local_addr.port()
     );
 
@@ -709,18 +765,11 @@ pub fn create_http_state(
     let intent_validator = None;
 
     let narrative_config = {
-        if let Some(home) = dirs::home_dir() {
-            let narrative_path = home
-                .join(".cyber-jianghu")
-                .join("config")
-                .join("narrative_config.json");
-            if narrative_path.exists() {
-                std::fs::read_to_string(&narrative_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-            } else {
-                None
-            }
+        let narrative_path = crate::config::config_dir().join("narrative_config.json");
+        if narrative_path.exists() {
+            std::fs::read_to_string(&narrative_path)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
         } else {
             None
         }
@@ -971,8 +1020,13 @@ impl HttpApiState {
 
     /// 刷新设备认证令牌（HTTP 401 时调用）
     ///
-    /// 调用 `POST {server_http_url}/api/v1/agent/connect` 获取新的 auth_token，
-    /// 然后更新本地 device_config 并持久化到 device.yaml。
+    /// 调用 `POST {server_http_url}/api/v1/device/verify` 严格校验设备是否仍被持有。
+    /// - 200 → 用 server 返回的 token 替换本地 token
+    /// - 404 → 设备不存在（DB 被清空等场景），返回错误让上层走 ensure_device 重新注册
+    /// - 其他 → 错误传播
+    ///
+    /// **narrative_config 不在此处同步**：它是"游戏规则"数据，归属 character_register
+    /// 路径。设备身份端点不负责游戏规则下发。
     pub async fn refresh_auth_token(&self) -> anyhow::Result<()> {
         // 1. 获取当前设备配置
         let device = self.device_config.read().await;
@@ -982,9 +1036,9 @@ impl HttpApiState {
 
         // 2. 获取 HTTP URL
         let http_url = self.server_http_url.read().await.clone();
-        let url = format!("{}/api/v1/agent/connect", http_url);
+        let url = format!("{}/api/v1/device/verify", http_url);
 
-        // 3. 调用 connect API 获取新 token
+        // 3. 调 /device/verify 严格校验
         let client = reqwest::Client::new();
         let response = client
             .post(&url)
@@ -993,6 +1047,14 @@ impl HttpApiState {
             .await
             .context("刷新令牌请求失败")?;
 
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            // server 不认这个 device → 触发上层重启以走 ensure_device 重新注册
+            anyhow::bail!(
+                "device {} 已不被 server 认可，需重启走 ensure_device",
+                device_id
+            );
+        }
+
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
@@ -1000,11 +1062,21 @@ impl HttpApiState {
         }
 
         #[derive(Deserialize)]
-        struct ConnectResponse {
+        struct VerifyResponse {
+            device_id: Uuid,
             auth_token: String,
         }
 
-        let result: ConnectResponse = response.json().await.context("解析刷新令牌响应失败")?;
+        let result: VerifyResponse = response.json().await.context("解析刷新令牌响应失败")?;
+
+        // 防御：server 绝不应回不同 device_id，若发生则 fail-fast
+        if result.device_id != device_id {
+            anyhow::bail!(
+                "server 返回 device_id {} 与请求 {} 不一致",
+                result.device_id,
+                device_id
+            );
+        }
 
         info!("设备 {} 的令牌刷新成功", device_id);
 

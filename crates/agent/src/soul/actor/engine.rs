@@ -328,11 +328,7 @@ impl CognitiveEngine {
 
     /// 数据目录（用于本地持久化，如 skill_cache.json）
     fn resolve_data_dir() -> std::path::PathBuf {
-        std::env::var("CYBER_JIANGHU_DATA_DIR")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".cyber-jianghu").join("data")))
-            .unwrap_or_else(|| std::path::PathBuf::from("./data"))
+        crate::config::data_base_dir()
     }
 
     /// skill_cache.json 路径
@@ -813,17 +809,22 @@ impl CognitiveEngine {
 
     /// 更新 Agent 人设（rebirth 后调用）
     pub fn update_persona(&self, name: &str, system_prompt: &str) {
-        let mut config = self.config.write().expect("rwlock poisoned");
-        config.agent_name = name.to_string();
-        config.persona.name = name.to_string();
-        config.persona.base_description = system_prompt.to_string();
-
-        let new_desc = config.persona.generate_description();
-        let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
-        cache.invalidate_persona(new_desc, &config.persona);
-
-        // 重建 system message（persona 变更）
+        // BUG-FIX: 避免 self-deadlock — config.write() 和 build_system_message(config.read()) 冲突
+        // 必须释放 config + prompt_cache 锁之后再调用 build_system_message
         let use_tool_calling = self.llm_client.supports_tool_calling();
+        {
+            let mut config = self.config.write().expect("rwlock poisoned");
+            config.agent_name = name.to_string();
+            config.persona.name = name.to_string();
+            config.persona.base_description = system_prompt.to_string();
+
+            let new_desc = config.persona.generate_description();
+            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+            cache.invalidate_persona(new_desc, &config.persona);
+            // config + cache 在此作用域结束时释放
+        }
+
+        // 重建 system message（persona 变更）— 此时无锁，build_system_message 可安全获取 config.read()
         let system_msg = self.build_system_message(use_tool_calling);
         self.update_conversation_system_message(&system_msg);
 
