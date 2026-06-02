@@ -559,6 +559,28 @@ body {
 .timeline-container {
     position: relative;
     padding-left: 40px;
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color, #4a5568) transparent;
+}
+
+.timeline-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.timeline-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.timeline-container::-webkit-scrollbar-thumb {
+    background: var(--border-color, #4a5568);
+    border-radius: 4px;
+}
+
+.timeline-container::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary, #a0aec0);
 }
 
 .timeline-container::before {

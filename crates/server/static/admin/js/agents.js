@@ -514,7 +514,7 @@ function renderExperiences(data) {
         (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
           ? formatCalendarDate(exp.game_day)
           : null) ||
-        "[时间格式异常]";
+        "-";
 
       var html =
         '<div class="tick-card">' +
@@ -590,7 +590,7 @@ function renderTickCard(exp, metadata, time) {
     (exp.game_day && exp.game_day > 0 && typeof formatCalendarDate === "function"
       ? formatCalendarDate(exp.game_day)
       : null) ||
-    "[时间格式异常]";
+    "-";
 
   var html =
     '<div class="tick-card">' +
