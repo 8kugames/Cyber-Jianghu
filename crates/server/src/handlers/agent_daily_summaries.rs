@@ -14,7 +14,15 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::db;
+use crate::game_data::registry::TimeRegistry;
 use crate::state::AppState;
+use cyber_jianghu_protocol::game_day_to_chinese;
+
+fn format_game_day(game_day: i64) -> String {
+    TimeRegistry::get_calendar_config()
+        .map(|cal| game_day_to_chinese(game_day, &cal))
+        .unwrap_or_else(|| format!("第{}日", game_day))
+}
 
 /// 查询参数
 #[derive(Debug, Deserialize)]
@@ -63,9 +71,9 @@ pub async fn list_summaries(
         axum::http::StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // 填充格式化时间（服务端统一入口，避免前端重复实现）
+    // 填充格式化时间（服务端统一入口）
     for s in &mut summaries {
-        s.formatted_time = crate::time_utils::game_day_to_chinese(s.game_day);
+        s.formatted_time = format_game_day(s.game_day);
     }
 
     let total = db::count_agent_daily_summaries(&state.db_pool, agent_id, game_day)
@@ -113,7 +121,7 @@ pub async fn get_by_agent(
 
     // 填充格式化时间（服务端统一入口）
     for s in &mut summaries {
-        s.formatted_time = crate::time_utils::game_day_to_chinese(s.game_day);
+        s.formatted_time = format_game_day(s.game_day);
     }
 
     let total = db::count_agent_daily_summaries(&state.db_pool, Some(agent_id), None)
