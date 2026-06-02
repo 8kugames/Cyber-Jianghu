@@ -5,7 +5,7 @@
 // 独立的工具函数，不依赖 run() 的局部状态
 
 use anyhow::Result;
-use cyber_jianghu_protocol::{CalendarConfig, Entity, WorldTime};
+use cyber_jianghu_protocol::{CalendarConfig, Entity, WorldTime, game_day_from_world_time};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -15,17 +15,15 @@ impl super::super::Agent {
     /// 从 WorldTime 计算游戏日（用于 EventStore game_day 字段）
     ///
     /// 数据驱动：从 CalendarConfig (time.yaml) 读取 days_per_season / seasons_per_year。
-    /// game_day = (year-1) * days_per_year + (month-1) * days_per_season + day
-    /// 其中 days_per_year = seasons_per_year * days_per_season
+    /// 算法统一在协议层 `game_day_from_world_time`，
+    /// 此处仅在缺失 calendar 时使用排序键兜底。
     pub(super) fn compute_game_day(time: &WorldTime, calendar: Option<&CalendarConfig>) -> i64 {
-        if let Some(cal) = calendar {
-            let days_per_year = cal.seasons_per_year as i64 * cal.days_per_season as i64;
-            (time.year as i64 - 1) * days_per_year
-                + (time.month as i64 - 1) * cal.days_per_season as i64
-                + time.day as i64
-        } else {
-            // 降级：无 calendar 配置时（旧服务器），用单调排序键避免碰撞
-            (time.year as i64) * 10000 + (time.month as i64) * 100 + time.day as i64
+        match calendar {
+            Some(cal) => game_day_from_world_time(time, cal),
+            None => {
+                // 降级：无 calendar 配置时（旧服务器），用单调排序键避免碰撞
+                time.year as i64 * 10000 + time.month as i64 * 100 + time.day as i64
+            }
         }
     }
 
@@ -39,7 +37,7 @@ impl super::super::Agent {
         Ok(())
     }
 
-    /// 序列化 WorldTime 为 JSON 存储（展示由前端 formatWorldTime 负责）
+    /// 序列化 WorldTime 为 JSON 存储（展示由 server 预格式化的 `world_time_text` 字段负责）
     pub(super) fn format_world_time(wt: &WorldTime) -> String {
         serde_json::to_string(wt).unwrap_or_else(|_| wt.to_chinese())
     }
