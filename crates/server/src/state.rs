@@ -174,7 +174,7 @@ pub struct AppState {
     /// 管理员读写 Token (RW)
     pub admin_write_token: String,
 
-    /// 服务器启动时间
+    /// 服务器部署时间（首次启动时持久化，重启不变）
     pub start_time: chrono::DateTime<chrono::Utc>,
 
     /// 配置文件目录路径
@@ -204,6 +204,7 @@ impl AppState {
         dialogue_manager: Arc<dialogue::DialogueManager>,
         admin_read_token: String,
         admin_write_token: String,
+        start_time: chrono::DateTime<chrono::Utc>,
         config_dir: std::path::PathBuf,
         current_accepting_tick_id: Arc<AtomicI64>,
     ) -> Self {
@@ -218,7 +219,7 @@ impl AppState {
             dialogue_manager,
             admin_read_token,
             admin_write_token,
-            start_time: chrono::Utc::now(),
+            start_time,
             config_dir,
             current_accepting_tick_id,
             vendor_pending_events: crate::models::VendorPendingEvents::default(),

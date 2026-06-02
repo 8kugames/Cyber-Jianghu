@@ -23,7 +23,7 @@ use cyber_jianghu_server::state::{create_agent_state_cache, populate_agent_state
 use cyber_jianghu_server::tick::{IntentWorker, StateProcessor, create_worker_channel};
 use cyber_jianghu_server::*;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     Router,
     body::Body,
@@ -279,7 +279,17 @@ async fn main() -> Result<()> {
     // 9. 创建共享 tick_id（scheduler 和 AppState 共用）
     let accepting_tick_id = Arc::new(AtomicI64::new(0));
 
-    // 9.1 创建应用状态
+    // 9.1 加载/初始化服务器部署时间（持久化，重启不变）
+    let deployment_time = crate::db::get_or_init_deployment_time(&db_pool)
+        .await
+        .context("加载服务器部署时间失败")?;
+    info!(
+        "服务器部署时间: {} (已运行 {})",
+        deployment_time,
+        chrono::Utc::now().signed_duration_since(deployment_time)
+    );
+
+    // 9.2 创建应用状态
     let state = Arc::new(AppState::new(
         db_pool.clone(),
         connection_manager.clone(),
@@ -291,6 +301,7 @@ async fn main() -> Result<()> {
         dialogue_manager.clone(),
         admin_read_token,
         admin_write_token,
+        deployment_time,
         crate::paths::get_config_dir(),
         accepting_tick_id.clone(),
     ));

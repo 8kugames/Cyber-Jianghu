@@ -114,6 +114,31 @@ pub async fn get_current_world_tick_id(pool: &PgPool) -> Result<i64> {
     Ok(tick_id)
 }
 
+/// 获取服务器首次部署时间（持久化，重启不变）
+///
+/// 幂等：首次调用时插入一行（写入当前时间），后续调用复用已存时间。
+/// migration 008 会在启动时预插一行；此处冗余 INSERT 用于表缺失等异常场景。
+pub async fn get_or_init_deployment_time(pool: &PgPool) -> Result<DateTime<Utc>> {
+    sqlx::query(
+        r#"
+        INSERT INTO server_deployment (id, deployed_at)
+        VALUES (1, CURRENT_TIMESTAMP)
+        ON CONFLICT (id) DO NOTHING
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("初始化服务器部署时间失败")?;
+
+    let deployed_at: DateTime<Utc> =
+        sqlx::query_scalar(r#"SELECT deployed_at FROM server_deployment WHERE id = 1"#)
+            .fetch_one(pool)
+            .await
+            .context("读取服务器部署时间失败")?;
+
+    Ok(deployed_at)
+}
+
 /// 获取最新状态快照Tick ID
 ///
 /// 仅使用 agent_states 的最大值，适用于按状态快照查询。
