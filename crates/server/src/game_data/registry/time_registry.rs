@@ -1,5 +1,6 @@
 use crate::game_data::registry_or_error;
 use crate::game_data::types::unified_config::{SeasonData, TimeData};
+use cyber_jianghu_protocol::CalendarConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,18 @@ impl TimeRegistry {
     pub fn get_config() -> Option<TimeData> {
         let registry = registry_or_error().ok()?;
         Some(registry.get().time.data.clone())
+    }
+
+    /// 获取日历配置（game_day 格式化专用）
+    ///
+    /// 协议层的 `game_day_to_chinese(game_day, &CalendarConfig)` 接受 CalendarConfig，
+    /// 此处从 TimeData 投影出 CalendarConfig，避免协议层依赖服务端 TimeRegistry。
+    pub fn get_calendar_config() -> Option<CalendarConfig> {
+        let cfg = Self::get_config()?;
+        Some(CalendarConfig {
+            days_per_season: cfg.days_per_season.max(0) as u32,
+            seasons_per_year: cfg.seasons_per_year.max(0) as u32,
+        })
     }
 
     /// 根据 tick 获取当前季节
