@@ -5,7 +5,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::state::AppState;
-use cyber_jianghu_protocol::types::world::{number_to_chinese, shichen_name};
 
 use super::types::*;
 
@@ -142,28 +141,16 @@ pub async fn get_dashboard_stats(State(state): State<Arc<AppState>>) -> Json<Das
             .map(|s| s.name)
             .unwrap_or_else(|| "未知".to_string());
 
-    let month_text = match month {
-        1 => "元月",
-        2 => "二月",
-        3 => "三月",
-        4 => "四月",
-        5 => "五月",
-        6 => "六月",
-        7 => "七月",
-        8 => "八月",
-        9 => "九月",
-        10 => "十月",
-        11 => "十一月",
-        12 => "腊月",
-        _ => unreachable!(),
-    };
-    let text = format!(
-        "{}年{}{}日{}",
-        number_to_chinese(year),
-        month_text,
-        number_to_chinese(day),
-        shichen_name(hour)
-    );
+    let text = cyber_jianghu_protocol::WorldTime {
+        year,
+        month,
+        day,
+        hour,
+        minute: 0,
+        second: 0,
+        weather: String::new(),
+    }
+    .to_chinese();
 
     let game_time = WorldTime {
         year,

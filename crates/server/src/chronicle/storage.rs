@@ -10,6 +10,14 @@ use sqlx::Row;
 
 use super::collector::CollectedData;
 use super::{AgentSummary, Chronicle, Highlight, LocationStat};
+use crate::game_data::registry::TimeRegistry;
+use cyber_jianghu_protocol::game_day_to_chinese;
+
+fn format_game_day(game_day: i64) -> String {
+    TimeRegistry::get_calendar_config()
+        .map(|cal| game_day_to_chinese(game_day, &cal))
+        .unwrap_or_else(|| format!("第{}日", game_day))
+}
 
 /// 存储群像传记（兼容旧接口，summary_llm = None）
 pub async fn store(
@@ -138,8 +146,8 @@ pub async fn store_with_llm(
         births: data.births,
         status: status.to_string(),
         created_at: chrono::Utc::now(),
-        formatted_start_date: crate::time_utils::game_day_to_chinese(data.game_day_start as i64),
-        formatted_end_date: crate::time_utils::game_day_to_chinese(data.game_day_end as i64),
+        formatted_start_date: format_game_day(data.game_day_start as i64),
+        formatted_end_date: format_game_day(data.game_day_end as i64),
     })
 }
 
@@ -237,8 +245,8 @@ pub async fn list_chronicles(
                 births: r.get("births"),
                 status: r.get("status"),
                 created_at: r.get("created_at"),
-                formatted_start_date: crate::time_utils::game_day_to_chinese(game_day_start as i64),
-                formatted_end_date: crate::time_utils::game_day_to_chinese(game_day_end as i64),
+                formatted_start_date: format_game_day(game_day_start as i64),
+                formatted_end_date: format_game_day(game_day_end as i64),
             }
         })
         .collect();
@@ -337,12 +345,8 @@ pub async fn get_chronicle(
                 births: r.get("births"),
                 status: r.get("status"),
                 created_at: r.get("created_at"),
-                formatted_start_date: crate::time_utils::game_day_to_chinese(
-                    r.get::<i32, _>("game_day_start") as i64,
-                ),
-                formatted_end_date: crate::time_utils::game_day_to_chinese(
-                    r.get::<i32, _>("game_day_end") as i64,
-                ),
+                formatted_start_date: format_game_day(r.get::<i32, _>("game_day_start") as i64),
+                formatted_end_date: format_game_day(r.get::<i32, _>("game_day_end") as i64),
             }))
         }
         None => Ok(None),

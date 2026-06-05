@@ -464,7 +464,7 @@ pub(crate) async fn get_attribute_meta_handler(
 
 /// 丰富属性数据，添加叙事描述
 /// 为 WorldTime JSON 添加 `display` 字段（中文格式）
-fn enrich_world_time_json(
+pub(super) fn enrich_world_time_json(
     world_time: &cyber_jianghu_protocol::WorldTime,
 ) -> Option<serde_json::Value> {
     let mut val = serde_json::to_value(world_time).ok()?;

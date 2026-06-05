@@ -2,15 +2,6 @@
 // history.js — History page logic (experiences, summaries, chronicles)
 // ============================================================
 
-// ---------- Time config (frontend mirror of server time.yaml) ----------
-// 仅用于 formatChronicleRange 的同月判断逻辑。
-// 若 time.yaml 的 DAYS_PER_SEASON / SEASONS_PER_YEAR 变更，此处须同步。
-const TIME_CONFIG = {
-    DAYS_PER_SEASON: 10,
-    SEASONS_PER_YEAR: 4,
-};
-TIME_CONFIG.DAYS_PER_YEAR = TIME_CONFIG.DAYS_PER_SEASON * TIME_CONFIG.SEASONS_PER_YEAR;
-
 // ---------- Utility: debounce ----------
 function debounce(fn, ms) {
     let timer;
@@ -155,7 +146,7 @@ function renderChronicles(list) {
     }
     container.innerHTML = list
         .map((c) => {
-            const range = escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date, c.game_day_start, c.game_day_end));
+            const range = escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date));
             return `
             <div class="chronicle-card" tabindex="0" data-chronicle-id="${escapeHtml(c.chronicle_id)}" role="button" aria-label="查看传记 ${escapeHtml(c.chronicle_id)}">
                 <div class="chronicle-header">
@@ -230,7 +221,7 @@ function showChrModal(c) {
     <div class="detail-section">
         <h3>基本统计</h3>
         <div class="detail-grid">
-            <div class="detail-item"><div class="label">周期</div><div class="value">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date, c.game_day_start, c.game_day_end))}</div></div>
+            <div class="detail-item"><div class="label">周期</div><div class="value">${escapeHtml(formatChronicleRange(c.formatted_start_date, c.formatted_end_date))}</div></div>
             <div class="detail-item"><div class="label">江湖儿女</div><div class="value">${escapeHtml(c.agent_count)}</div></div>
             <div class="detail-item"><div class="label">行动次数</div><div class="value">${escapeHtml(c.actions_count)}</div></div>
             <div class="detail-item"><div class="label">陨落人数</div><div class="value">${escapeHtml(c.deaths)}</div></div>
@@ -401,7 +392,6 @@ function renderExpTable() {
             const resultBadge = `<span class="result-badge ${isSuccess ? "result-success" : "result-failed"}">${isSuccess ? "成功" : "失败"}</span>`;
 
             const timeStr = e.formatted_time
-                || (e.game_day > 0 ? formatCalendarDate(e.game_day) : null)
                 || (e.created_at
                     ? new Date(e.created_at).toLocaleString("zh-CN", {
                           month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
@@ -763,7 +753,7 @@ function renderSummaries(list) {
             });
             const agentName = getAgentName(s.agent_id);
             const agentShortId = s.agent_id ? s.agent_id.substring(0, 8) : "";
-            const calTime = s.formatted_time || formatCalendarDate(s.game_day);
+            const calTime = s.formatted_time || "-";
             return `
         <div class="timeline-item">
             <div class="timeline-dot"></div>
@@ -818,32 +808,10 @@ function toggleSummaryExpand(btn) {
 // Formatting helpers
 // ============================================================
 
-// 群像传记范围格式化（source config: time.yaml via TIME_CONFIG）
-function formatChronicleRange(startDate, endDate, startGameDay, endGameDay) {
-    function sameYearMonth(gd1, gd2) {
-        const gd0_1 = gd1 - 1, gd0_2 = gd2 - 1;
-        return Math.floor(gd0_1 / TIME_CONFIG.DAYS_PER_YEAR) === Math.floor(gd0_2 / TIME_CONFIG.DAYS_PER_YEAR) &&
-               Math.floor((gd0_1 % TIME_CONFIG.DAYS_PER_YEAR) / TIME_CONFIG.DAYS_PER_SEASON) === Math.floor((gd0_2 % TIME_CONFIG.DAYS_PER_YEAR) / TIME_CONFIG.DAYS_PER_SEASON);
-    }
-
-    if (sameYearMonth(startGameDay, endGameDay)) {
-        const prefix = startDate.match(/^.+?[元二三四五六七八九十]月/);
-        if (prefix) return startDate + '至' + endDate.slice(prefix[0].length);
-    }
+function formatChronicleRange(startDate, endDate) {
+    const prefix = startDate.match(/^.+?月/);
+    if (prefix) return startDate + '至' + endDate.slice(prefix[0].length);
     return startDate + '至' + endDate;
-}
-
-function formatCalendarDate(gameDay) {
-    if (!gameDay || gameDay <= 0) return null;
-    var gd0 = gameDay - 1;
-    var year = 1 + Math.floor(gd0 / TIME_CONFIG.DAYS_PER_YEAR);
-    var month = 1 + Math.floor((gd0 % TIME_CONFIG.DAYS_PER_YEAR) / TIME_CONFIG.DAYS_PER_SEASON);
-    var day = 1 + (gd0 % TIME_CONFIG.DAYS_PER_SEASON);
-    return (typeof digitToChinese === "function" ? digitToChinese(year) : String(year))
-        + "年"
-        + (MONTH_NAMES && MONTH_NAMES[month - 1] || ("第" + month + "月"))
-        + (typeof dayToChinese === "function" ? dayToChinese(day) : String(day))
-        + "日";
 }
 
 // ============================================================

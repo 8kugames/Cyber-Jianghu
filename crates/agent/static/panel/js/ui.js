@@ -87,12 +87,6 @@ export function formatDateTime(isoString) {
         date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
-function getShichen(hour) {
-    const table = [[0,1,'子时'],[2,3,'丑时'],[4,5,'寅时'],[6,7,'卯时'],[8,9,'辰时'],[10,11,'巳时'],[12,13,'午时'],[14,15,'未时'],[16,17,'申时'],[18,19,'酉时'],[20,21,'戌时'],[22,23,'亥时']];
-    for (const [lo, hi, name] of table) { if (hour >= lo && hour <= hi) return name; }
-    return '';
-}
-
 export function extractActionSummary(rec) {
     // 兼容两种 API 结构：嵌套 final_intent 或扁平
     const intent = rec.final_intent || {};
@@ -147,29 +141,3 @@ export function fmtNum(n) {
 }
 
 export const STATUS_MAP = { alive: '活跃', dead: '死亡', retired: '归隐' };
-
-export function formatWorldTime(worldTime) {
-    if (!worldTime) return '-';
-    if (typeof worldTime === 'string' || typeof worldTime === 'number') return String(worldTime);
-    if (typeof worldTime === 'object') {
-        if (worldTime.display != null) return String(worldTime.display);
-        const year = worldTime.year ?? worldTime.y;
-        const month = worldTime.month ?? worldTime.m;
-        const day = worldTime.day ?? worldTime.d;
-        const hour = worldTime.hour ?? worldTime.h;
-        if (year !== undefined) {
-            const monthNames = ['元月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','腊月'];
-            const mLabel = monthNames[(month ?? 1) - 1] || `${month}月`;
-            return `${numberToChinese(year)}年${mLabel}${numberToChinese(day)}日${getShichen(hour ?? 0)}`;
-        }
-    }
-    return '-';
-}
-
-function numberToChinese(n) {
-    if (n < 0) return String(n);
-    const digits = ['零','一','二','三','四','五','六','七','八','九'];
-    if (n < 10) return digits[n];
-    if (n < 100) return (n >= 20 ? digits[Math.floor(n / 10)] : '') + '十' + (n % 10 ? digits[n % 10] : '');
-    return String(n).split('').map(d => digits[parseInt(d)]).join('');
-}

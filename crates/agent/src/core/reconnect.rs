@@ -66,7 +66,13 @@ impl super::Agent {
 
                     // 等待 Server 发送 Registered 消息，获取最新的 agent_id 和 game_rules
                     match self.client.wait_for_registration().await {
-                        Ok(Some((agent_id, game_rules, world_building_rules, registered_name, is_alive))) => {
+                        Ok(Some((
+                            agent_id,
+                            game_rules,
+                            world_building_rules,
+                            registered_name,
+                            is_alive,
+                        ))) => {
                             info!("重连后注册确认: agent_id={}, alive={}", agent_id, is_alive);
 
                             // 更新 agent 名称和人设（与 lifecycle 注册确认逻辑对齐）
@@ -247,7 +253,9 @@ impl super::Agent {
                             }
 
                             // 立即应用 world_building_rules 到 Validator（与 lifecycle 路径对齐）
-                            if let (Some(validator), Some(wb_rules)) = (&self.validator, &world_building_rules) {
+                            if let (Some(validator), Some(wb_rules)) =
+                                (&self.validator, &world_building_rules)
+                            {
                                 let v = validator.clone();
                                 let rules = wb_rules.clone();
                                 v.update_rules(rules).await;
