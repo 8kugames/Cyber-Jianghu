@@ -68,7 +68,7 @@ pub async fn validate_action(
 
     // 数据驱动验证：根据配置中的 validation 规则进行验证
     if let Some(validation) = &config.validation {
-        validate_by_rules(intent, all_states, validation)?;
+        validate_by_rules(intent, agent_state, all_states, validation)?;
     }
 
     Ok(())
@@ -77,6 +77,7 @@ pub async fn validate_action(
 /// 根据配置中的验证规则进行验证（数据驱动）
 fn validate_by_rules(
     intent: &Intent,
+    agent_state: &AgentState,
     all_states: &[AgentState],
     validation: &ActionValidation,
 ) -> Result<(), GameError> {
@@ -119,6 +120,11 @@ fn validate_by_rules(
     // 验证目标存活
     if validation.requires_target_alive.unwrap_or(false) {
         validate_target_alive(&temp_intent, all_states)?;
+    }
+
+    // 验证目标同地点
+    if validation.requires_target_colocated.unwrap_or(false) {
+        validate_target_colocated(&temp_intent, agent_state, all_states)?;
     }
 
     Ok(())
@@ -375,11 +381,12 @@ async fn validate_recipe_knowledge(
     Ok(())
 }
 
-/// 校验传授动作：传授者配方知晓度 + 同地点 + 防自传授
+/// 校验传授动作：传授者配方知晓度 + 防自传授
+/// 同地点校验由数据驱动的 requires_target_colocated 处理（actions.yaml）
 async fn validate_teach_recipe(
     intent: &Intent,
     agent_state: &AgentState,
-    all_states: &[AgentState],
+    _all_states: &[AgentState],
     db_pool: &DbPool,
 ) -> Result<(), GameError> {
     let action_data = &intent.action_data;
@@ -405,16 +412,6 @@ async fn validate_teach_recipe(
         if target_uuid == agent_state.agent_id {
             return Err(GameError::InvalidActionData {
                 reason: "不能向自己传授配方".to_string(),
-            });
-        }
-
-        // 同地点校验
-        let same_location = all_states
-            .iter()
-            .any(|s| s.agent_id == target_uuid && s.node_id == agent_state.node_id);
-        if !same_location {
-            return Err(GameError::InvalidActionData {
-                reason: "目标人物不在同一地点，无法传授".to_string(),
             });
         }
     }
@@ -474,6 +471,37 @@ fn validate_target_alive(intent: &Intent, all_states: &[AgentState]) -> Result<(
 
     if !target_state.is_alive {
         return Err(GameError::TargetDead { target_id });
+    }
+
+    Ok(())
+}
+
+/// 验证目标 Agent 与发起者在同一地点
+fn validate_target_colocated(
+    intent: &Intent,
+    agent_state: &AgentState,
+    all_states: &[AgentState],
+) -> Result<(), GameError> {
+    let target_id_str =
+        get_field_string(&intent.action_data, "target_agent_id").ok_or_else(|| {
+            GameError::InvalidActionData {
+                reason: "缺少 target_agent_id 字段".to_string(),
+            }
+        })?;
+
+    let target_id = Uuid::parse_str(&target_id_str).map_err(|_| GameError::InvalidActionData {
+        reason: format!("无效的 target_agent_id: {}", target_id_str),
+    })?;
+
+    let target_state = all_states
+        .iter()
+        .find(|s| s.agent_id == target_id)
+        .ok_or(GameError::TargetNotFound { target_id })?;
+
+    if target_state.node_id != agent_state.node_id {
+        return Err(GameError::InvalidActionData {
+            reason: "目标不在同一地点".to_string(),
+        });
     }
 
     Ok(())

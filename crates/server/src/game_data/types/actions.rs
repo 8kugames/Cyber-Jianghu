@@ -106,6 +106,9 @@ pub struct ActionValidation {
     /// 是否需要目标存活
     pub requires_target_alive: Option<bool>,
 
+    /// 是否需要目标与发起者在同一地点
+    pub requires_target_colocated: Option<bool>,
+
     /// 必需的数据字段
     pub required_fields: Vec<String>,
 
