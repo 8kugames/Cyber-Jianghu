@@ -1,7 +1,7 @@
 // Panel renderers: attribute/relationship/biography/experience/memory/dream/skill
 
 import { API, get, post } from './api.js';
-import { escapeHtml, showSuccess, showError, showLoading, formatWorldTime, showModal } from './ui.js';
+import { escapeHtml, showSuccess, showError, showLoading, showModal } from './ui.js';
 
 // Panel registry: each panel exports { label, mount(container, data) }
 const panels = {
@@ -272,7 +272,7 @@ export function groupByTick(arr) {
 
 export function renderTickCard(tickId, attempts, immediate) {
     const first = attempts[0];
-    const wt = first?.world_time ? formatWorldTime(first.world_time) : '-';
+    const wt = first?.world_time?.display || '-';
     const ts = first?.created_at ? new Date(first.created_at).toLocaleString('zh-CN') : '';
 
     let html = `<div class="tl-item"><div class="tl-dot"></div><div class="tl-content">`;

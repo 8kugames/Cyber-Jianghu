@@ -1274,7 +1274,8 @@ impl LlmClient for DirectLlmClient {
         // 通用逻辑：合并 persona + semi_static + summary 为单个 system message。
         // OpenAI 规范对连续 system 消息无定义，部分 provider（如 sensenova）拒绝。
         // 对模型而言信息量等价 → 合并无损且更安全。
-        let mut combined_system = String::with_capacity(system.len() + input.semi_static.len() + 64);
+        let mut combined_system =
+            String::with_capacity(system.len() + input.semi_static.len() + 64);
         combined_system.push_str(system);
         if !input.semi_static.is_empty() {
             combined_system.push_str("\n\n");

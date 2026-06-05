@@ -229,6 +229,7 @@ data:
     validation:
       requires_target: true
       requires_target_alive: true
+      requires_target_colocated: true
       required_fields:
         - target_agent_id
       field_aliases:
@@ -342,6 +343,7 @@ data:
     validation:
       requires_target: true
       requires_target_alive: true
+      requires_target_colocated: true
       required_fields:
         - target_agent_id
         - item_id
@@ -475,6 +477,7 @@ data:
     max_content_length: 200
     validation:
       requires_target: true
+      requires_target_colocated: true
       required_fields:
         - target_agent_id
         - content
@@ -540,6 +543,7 @@ data:
     validation:
       requires_target: true
       requires_target_alive: true
+      requires_target_colocated: true
       required_fields:
         - target_agent_id
         - item_id
@@ -599,6 +603,7 @@ data:
     validation:
       requires_target: true
       requires_target_alive: true
+      requires_target_colocated: true
       required_fields:
         - target_agent_id
         - recipe_id

@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::{entities::*, locations::Location};
 
 use super::actions::ExecutionSummary;
+use super::rules::CalendarConfig;
 
 /// 世界时间
 ///
@@ -95,27 +96,79 @@ pub fn shichen_name(hour: i32) -> &'static str {
     }
 }
 
+/// 月份名称（1-12 对应元月...腊月）
+///
+/// WorldTime 和 game_day_to_chinese 共用同一份月份命名，
+/// 避免日期与时间格式化出现"不同规格的轮子"。
+pub fn month_name(month: i32) -> &'static str {
+    match month {
+        1 => "元月",
+        2 => "二月",
+        3 => "三月",
+        4 => "四月",
+        5 => "五月",
+        6 => "六月",
+        7 => "七月",
+        8 => "八月",
+        9 => "九月",
+        10 => "十月",
+        11 => "十一月",
+        12 => "腊月",
+        _ => "未知月",
+    }
+}
+
+/// 游戏日（1-based）转中文日期字符串
+///
+/// 格式："四四年二月四日"（无"天道历"前缀，无时辰）
+/// 算法：game_day 是单调递增的累计游戏日，按 calendar 配置换算为 year/month/day。
+/// 与 `WorldTime::to_chinese()` 形成"日期 vs 日期时间"语义区分。
+pub fn game_day_to_chinese(game_day: i64, calendar: &CalendarConfig) -> String {
+    let days_per_season = calendar.days_per_season as i64;
+    let seasons_per_year = calendar.seasons_per_year as i64;
+    let days_per_year = days_per_season * seasons_per_year;
+
+    if days_per_year <= 0 {
+        return format!("第{}日", game_day);
+    }
+
+    let gd0 = game_day - 1;
+    let year = 1 + (gd0 / days_per_year) as i32;
+    let month = 1 + ((gd0 % days_per_year) / days_per_season) as i32;
+    let day = 1 + (gd0 % days_per_season) as i32;
+
+    format!(
+        "{}年{}{}日",
+        number_to_chinese(year),
+        month_name(month),
+        day_to_chinese(day)
+    )
+}
+
+/// WorldTime → 游戏日（1-based）
+///
+/// `game_day_to_chinese` 的反向运算。服务端存储 WorldTime，agent 端查询
+/// daily_summary/soul_cycle 时需要将 WorldTime 还原为 game_day 以命中 DB 索引。
+/// 协议层提供统一实现，server 与 agent 共用。
+pub fn game_day_from_world_time(wt: &WorldTime, calendar: &CalendarConfig) -> i64 {
+    let days_per_season = calendar.days_per_season as i64;
+    let seasons_per_year = calendar.seasons_per_year as i64;
+    let days_per_year = days_per_season * seasons_per_year;
+
+    if days_per_year <= 0 {
+        return 0;
+    }
+
+    (wt.year as i64 - 1) * days_per_year + (wt.month as i64 - 1) * days_per_season + wt.day as i64
+}
+
 impl WorldTime {
     /// 格式化为中文风格时间表述
     ///
-    /// 格式："天道历三二五年元月四日申时"
+    /// 格式："三二五年元月四日申时"
     pub fn to_chinese(&self) -> String {
         let year = number_to_chinese(self.year);
-        let month = match self.month {
-            1 => "元月",
-            2 => "二月",
-            3 => "三月",
-            4 => "四月",
-            5 => "五月",
-            6 => "六月",
-            7 => "七月",
-            8 => "八月",
-            9 => "九月",
-            10 => "十月",
-            11 => "十一月",
-            12 => "腊月",
-            _ => return format!("第{}天{:02}:{:02}", self.day, self.hour, self.minute),
-        };
+        let month = month_name(self.month);
         let day = day_to_chinese(self.day);
         let shichen = shichen_name(self.hour);
         format!("{}年{}{}日{}", year, month, day, shichen)
@@ -371,5 +424,131 @@ mod tests {
             weather: "晴".to_string(),
         };
         assert_eq!(wt.to_chinese(), "一年元月三十日申时");
+    }
+
+    fn default_calendar() -> CalendarConfig {
+        CalendarConfig {
+            days_per_season: 10,
+            seasons_per_year: 4,
+        }
+    }
+
+    #[test]
+    fn game_day_to_chinese_day_1() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(1, &cal), "一年元月一日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_day_10() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(10, &cal), "一年元月十日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_day_11() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(11, &cal), "一年二月一日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_day_40() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(40, &cal), "一年四月十日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_day_41() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(41, &cal), "二年元月一日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_year_44() {
+        let cal = default_calendar();
+        assert_eq!(game_day_to_chinese(1734, &cal), "四四年二月四日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_custom_calendar() {
+        let cal = CalendarConfig {
+            days_per_season: 15,
+            seasons_per_year: 3,
+        };
+        assert_eq!(game_day_to_chinese(1, &cal), "一年元月一日");
+        assert_eq!(game_day_to_chinese(16, &cal), "一年二月一日");
+        assert_eq!(game_day_to_chinese(46, &cal), "二年元月一日");
+    }
+
+    #[test]
+    fn game_day_to_chinese_invalid_calendar() {
+        let cal = CalendarConfig {
+            days_per_season: 0,
+            seasons_per_year: 0,
+        };
+        assert_eq!(game_day_to_chinese(5, &cal), "第5日");
+    }
+
+    fn wt(year: i32, month: i32, day: i32) -> WorldTime {
+        WorldTime {
+            year,
+            month,
+            day,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            weather: String::new(),
+        }
+    }
+
+    #[test]
+    fn game_day_from_world_time_roundtrip_day_1() {
+        let cal = default_calendar();
+        assert_eq!(game_day_from_world_time(&wt(1, 1, 1), &cal), 1);
+    }
+
+    #[test]
+    fn game_day_from_world_time_roundtrip_year_boundary() {
+        let cal = default_calendar();
+        assert_eq!(game_day_from_world_time(&wt(1, 4, 10), &cal), 40);
+        assert_eq!(game_day_from_world_time(&wt(2, 1, 1), &cal), 41);
+    }
+
+    #[test]
+    fn game_day_from_world_time_custom_calendar() {
+        let cal = CalendarConfig {
+            days_per_season: 15,
+            seasons_per_year: 3,
+        };
+        assert_eq!(game_day_from_world_time(&wt(1, 1, 1), &cal), 1);
+        assert_eq!(game_day_from_world_time(&wt(1, 2, 1), &cal), 16);
+        assert_eq!(game_day_from_world_time(&wt(2, 1, 1), &cal), 46);
+    }
+
+    #[test]
+    fn game_day_from_world_time_invalid_calendar() {
+        let cal = CalendarConfig {
+            days_per_season: 0,
+            seasons_per_year: 0,
+        };
+        assert_eq!(game_day_from_world_time(&wt(1, 1, 1), &cal), 0);
+    }
+
+    /// 协议层不强制输入合法性——这些值在业务层由 WorldTime 上界守护。
+    /// 测试目的是记录当前数学行为，防止未来无意中变更。
+    #[test]
+    fn game_day_from_world_time_out_of_range_inputs() {
+        let cal = default_calendar();
+        assert_eq!(game_day_from_world_time(&wt(0, 0, 0), &cal), -50);
+        assert_eq!(game_day_from_world_time(&wt(1, 5, 11), &cal), 51);
+        assert_eq!(game_day_from_world_time(&wt(-1, 1, 1), &cal), -79);
+    }
+
+    #[test]
+    fn month_name_full_coverage() {
+        assert_eq!(month_name(1), "元月");
+        assert_eq!(month_name(12), "腊月");
+        assert_eq!(month_name(0), "未知月");
+        assert_eq!(month_name(13), "未知月");
     }
 }

@@ -44,6 +44,6 @@ pub struct WorldTime {
     pub second: i32,
     /// 当前季节名称
     pub season: String,
-    /// 天道历格式文本
+    /// 中文风格时间文本（由 `WorldTime::to_chinese()` 生成）
     pub text: String,
 }
