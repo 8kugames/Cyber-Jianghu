@@ -39,6 +39,8 @@ pub struct MemoryManagerConfig {
     pub episodic_threshold: f32,
     /// 艾宾浩斯配置
     pub ebbinghaus_config: EbbinghausConfig,
+    /// 遗忘扫描间隔（tick 数）
+    pub forgetting_interval_ticks: i64,
     /// 叙事合成最小事件数（触发 LLM 调用的最低事件数）
     pub narrative_min_events: usize,
 }
@@ -51,6 +53,7 @@ impl Default for MemoryManagerConfig {
             working_memory_size: 20,
             episodic_threshold: 0.3,
             ebbinghaus_config: EbbinghausConfig::default(),
+            forgetting_interval_ticks: 84,
             narrative_min_events: 1,
         }
     }
@@ -106,7 +109,7 @@ impl MemoryManager {
         };
 
         // 创建遗忘调度器
-        let forgetting_scheduler = ForgettingScheduler::new(config.ebbinghaus_config.clone(), 0);
+        let forgetting_scheduler = ForgettingScheduler::new(config.ebbinghaus_config.clone(), 0, config.forgetting_interval_ticks);
 
         Ok(Self {
             config,

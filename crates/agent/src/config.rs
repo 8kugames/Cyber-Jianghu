@@ -9,6 +9,7 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
+use crate::component::memory::types::EbbinghausConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -721,6 +722,19 @@ pub struct MemoryConfig {
     /// 基于 tick_duration=60s 时，84 ticks ≈ 84 分钟
     #[serde(default = "default_forgetting_interval_ticks")]
     pub forgetting_interval_ticks: i64,
+
+    /// 艾宾浩斯遗忘曲线参数（可选，不填则用默认值）
+    /// R = e^(-decay_rate * ticks / strength)
+    #[serde(default)]
+    pub ebbinghaus: Option<EbbinghausConfig>,
+
+    /// OutcomeMemory 每种 action 的 prompt 注入条数上限
+    #[serde(default = "default_outcome_prompt_limit")]
+    pub outcome_prompt_limit: usize,
+
+    /// OutcomeMemory 最大记录数（FIFO 清理）
+    #[serde(default = "default_outcome_max_records")]
+    pub outcome_max_records: usize,
 }
 
 fn default_memory_enabled() -> bool {
@@ -739,6 +753,14 @@ fn default_forgetting_interval_ticks() -> i64 {
     84
 }
 
+fn default_outcome_prompt_limit() -> usize {
+    10
+}
+
+fn default_outcome_max_records() -> usize {
+    1000
+}
+
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
@@ -746,6 +768,9 @@ impl Default for MemoryConfig {
             working_memory_size: 20,
             episodic_threshold: 0.3,
             forgetting_interval_ticks: 84,
+            ebbinghaus: None,
+            outcome_prompt_limit: 10,
+            outcome_max_records: 1000,
         }
     }
 }

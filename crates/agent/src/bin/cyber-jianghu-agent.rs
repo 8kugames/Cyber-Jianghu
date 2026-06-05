@@ -937,7 +937,9 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Outcome Memory（Hermes 模式）
     let outcome_db_path = data_dir.join("outcome_memory.db");
-    match cyber_jianghu_agent::component::memory::OutcomeMemory::new(&outcome_db_path, 10) {
+    let outcome_prompt_limit = config.memory.outcome_prompt_limit;
+    let outcome_max_records = config.memory.outcome_max_records;
+    match cyber_jianghu_agent::component::memory::OutcomeMemory::with_max_records(&outcome_db_path, outcome_prompt_limit, outcome_max_records) {
         Ok(mem) => {
             info!(
                 "Outcome memory initialized at {}",

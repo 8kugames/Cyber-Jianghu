@@ -8,7 +8,7 @@
 // ============================================================================
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -40,16 +40,57 @@ pub struct OutcomeRecord {
     pub action_data: Option<serde_json::Value>,
     /// 执行结果
     pub result: OutcomeResult,
+    /// 交互目标 Agent ID（社交类动作从 action_data 提取）
+    #[serde(default)]
+    pub target_agent_id: Option<String>,
     /// 场景指纹（位置 + 附近物品类型 + NPC 数量）
     pub context_hash: String,
     /// 时间戳（tick_id）
     pub tick_id: i64,
 }
 
+/// 从 action_data 中提取 target_agent_id
+///
+/// 提取优先级：target_agent_id > target_id > target_uuid
+pub fn extract_target_agent_id(action_data: &Option<serde_json::Value>) -> Option<String> {
+    let data = action_data.as_ref()?;
+    for key in ["target_agent_id", "target_id", "target_uuid"] {
+        if let Some(id) = data.get(key).and_then(|v| v.as_str()) {
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// SQLite row → OutcomeRecord 映射（query_recent / query_by_target 共用）
+fn row_to_outcome(row: &Row) -> rusqlite::Result<OutcomeRecord> {
+    let action_type: String = row.get(0)?;
+    let action_data_str: Option<String> = row.get(1)?;
+    let result_type: String = row.get(2)?;
+    let result_detail: Option<String> = row.get(3)?;
+    let target_agent_id: Option<String> = row.get(4)?;
+    let context_hash: String = row.get(5)?;
+    let tick_id: i64 = row.get(6)?;
+    let result = match result_type.as_str() {
+        "success" => OutcomeResult::Success,
+        _ => OutcomeResult::Failed(result_detail.unwrap_or_default()),
+    };
+    Ok(OutcomeRecord {
+        action_type,
+        action_data: action_data_str.and_then(|s| serde_json::from_str(&s).ok()),
+        result,
+        target_agent_id,
+        context_hash,
+        tick_id,
+    })
+}
+
 /// 行动结果记忆
 ///
 /// SQLite 持久化，记录每次行动的成功/失败。
-/// 提供按 action_type 和 context_hash 的查询。
+/// 提供按 action_type、context_hash 和 target_agent_id 的查询。
 pub struct OutcomeMemory {
     conn: Mutex<Connection>,
     /// prompt 注入时每种 action 最多显示多少条
@@ -76,19 +117,24 @@ impl OutcomeMemory {
         let conn = Connection::open(db_path).context("打开 outcome memory 数据库失败")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS outcome_records (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                action_type  TEXT NOT NULL,
-                action_data  TEXT,
-                result_type  TEXT NOT NULL,
-                result       TEXT,
-                context_hash TEXT NOT NULL,
-                tick_id      INTEGER NOT NULL,
-                created_at   INTEGER DEFAULT (strftime('%s', 'now'))
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_type      TEXT NOT NULL,
+                action_data      TEXT,
+                result_type      TEXT NOT NULL,
+                result           TEXT,
+                target_agent_id  TEXT,
+                context_hash     TEXT NOT NULL,
+                tick_id          INTEGER NOT NULL,
+                created_at       INTEGER DEFAULT (strftime('%s', 'now'))
             );
             CREATE INDEX IF NOT EXISTS idx_outcome_action ON outcome_records(action_type);
             CREATE INDEX IF NOT EXISTS idx_outcome_context ON outcome_records(context_hash);
+            CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id);
             ",
         )?;
+        // 老库迁移：加 target_agent_id 列（拆开执行，避免 ALTER 失败导致 INDEX 跳过）
+        let _ = conn.execute_batch("ALTER TABLE outcome_records ADD COLUMN target_agent_id TEXT");
+        let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id)");
         Ok(Self {
             conn: Mutex::new(conn),
             prompt_limit,
@@ -115,8 +161,8 @@ impl OutcomeMemory {
             }
         };
         if let Err(e) = conn.execute(
-            "INSERT INTO outcome_records (action_type, action_data, result_type, result, context_hash, tick_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![record.action_type, action_data_str, result_type, result_detail, record.context_hash, record.tick_id],
+            "INSERT INTO outcome_records (action_type, action_data, result_type, result, target_agent_id, context_hash, tick_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![record.action_type, action_data_str, result_type, result_detail, record.target_agent_id, record.context_hash, record.tick_id],
         ) {
             debug!("outcome memory record failed: {}", e);
         }
@@ -135,31 +181,33 @@ impl OutcomeMemory {
             Err(_) => return Vec::new(),
         };
         let mut stmt = match conn.prepare(
-            "SELECT action_type, action_data, result_type, result, context_hash, tick_id
+            "SELECT action_type, action_data, result_type, result, target_agent_id, context_hash, tick_id
              FROM outcome_records WHERE action_type = ?1 ORDER BY id DESC LIMIT ?2",
         ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        let rows = match stmt.query_map(params![action_type, limit], |row| {
-            let action_type: String = row.get(0)?;
-            let action_data_str: Option<String> = row.get(1)?;
-            let result_type: String = row.get(2)?;
-            let result_detail: Option<String> = row.get(3)?;
-            let context_hash: String = row.get(4)?;
-            let tick_id: i64 = row.get(5)?;
-            let result = match result_type.as_str() {
-                "success" => OutcomeResult::Success,
-                _ => OutcomeResult::Failed(result_detail.unwrap_or_default()),
-            };
-            Ok(OutcomeRecord {
-                action_type,
-                action_data: action_data_str.and_then(|s| serde_json::from_str(&s).ok()),
-                result,
-                context_hash,
-                tick_id,
-            })
-        }) {
+        let rows = match stmt.query_map(params![action_type, limit], row_to_outcome) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    /// 查询与特定 Agent 的交互历史
+    pub fn query_by_target(&self, target_agent_id: &str, limit: usize) -> Vec<OutcomeRecord> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT action_type, action_data, result_type, result, target_agent_id, context_hash, tick_id
+             FROM outcome_records WHERE target_agent_id = ?1 ORDER BY id DESC LIMIT ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(params![target_agent_id, limit], row_to_outcome) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
@@ -304,6 +352,7 @@ mod tests {
             action_type: "进食".into(),
             action_data: Some(serde_json::json!({"item_id": "馒头"})),
             result: OutcomeResult::Success,
+            target_agent_id: None,
             context_hash: "龙门大堂:food,drink:2".into(),
             tick_id: 100,
         });
@@ -312,6 +361,7 @@ mod tests {
             action_type: "进食".into(),
             action_data: Some(serde_json::json!({"item_id": "invalid"})),
             result: OutcomeResult::Failed("物品不存在".into()),
+            target_agent_id: None,
             context_hash: "龙门大堂:food,drink:2".into(),
             tick_id: 101,
         });
@@ -336,6 +386,7 @@ mod tests {
             action_type: "移动".into(),
             action_data: Some(serde_json::json!({"target_location": "龙门厨房"})),
             result: OutcomeResult::Success,
+            target_agent_id: None,
             context_hash: "龙门大堂::1".into(),
             tick_id: 100,
         });
@@ -356,6 +407,7 @@ mod tests {
             action_type: "攻击".into(),
             action_data: None,
             result: OutcomeResult::Success,
+            target_agent_id: None,
             context_hash: "loc::0".into(),
             tick_id: 100,
         });
@@ -367,5 +419,70 @@ mod tests {
         assert!(ctx.contains("攻击 → 成功"));
 
         let _ = std::fs::remove_file(&db);
+    }
+
+    #[test]
+    fn test_query_by_target() {
+        let db = temp_db();
+        let mem = OutcomeMemory::new(&db, 10).unwrap();
+
+        let target_id = "agent-b";
+        mem.record(OutcomeRecord {
+            action_type: "给予".into(),
+            action_data: Some(serde_json::json!({"item_id": "馒头", "quantity": 10, "target_agent_id": target_id})),
+            result: OutcomeResult::Success,
+            target_agent_id: Some(target_id.to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 100,
+        });
+        mem.record(OutcomeRecord {
+            action_type: "给予".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            target_agent_id: Some(target_id.to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 101,
+        });
+        mem.record(OutcomeRecord {
+            action_type: "攻击".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            target_agent_id: Some("agent-c".to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 102,
+        });
+
+        let records = mem.query_by_target(target_id, 10);
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|r| r.target_agent_id.as_deref() == Some(target_id)));
+
+        let records_c = mem.query_by_target("agent-c", 10);
+        assert_eq!(records_c.len(), 1);
+
+        let records_none = mem.query_by_target("nonexistent", 10);
+        assert!(records_none.is_empty());
+
+        let _ = std::fs::remove_file(&db);
+    }
+
+    #[test]
+    fn test_extract_target_agent_id() {
+        assert_eq!(
+            extract_target_agent_id(&Some(serde_json::json!({"target_agent_id": "abc"}))),
+            Some("abc".to_string())
+        );
+        assert_eq!(
+            extract_target_agent_id(&Some(serde_json::json!({"target_id": "def"}))),
+            Some("def".to_string())
+        );
+        assert_eq!(
+            extract_target_agent_id(&Some(serde_json::json!({"target_uuid": "ghi"}))),
+            Some("ghi".to_string())
+        );
+        assert_eq!(
+            extract_target_agent_id(&Some(serde_json::json!({"item_id": "馒头"}))),
+            None
+        );
+        assert_eq!(extract_target_agent_id(&None), None);
     }
 }

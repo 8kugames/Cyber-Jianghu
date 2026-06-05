@@ -332,8 +332,11 @@ impl AgentBuilder {
             let config = self.memory_config.unwrap_or_else(|| MemoryManagerConfig {
                 agent_id,
                 db_dir: self.data_dir.clone(),
+                working_memory_size: self.config.memory.working_memory_size,
                 episodic_threshold: self.config.memory.episodic_threshold,
-                ..Default::default()
+                ebbinghaus_config: self.config.memory.ebbinghaus.clone().unwrap_or_default(),
+                forgetting_interval_ticks: self.config.memory.forgetting_interval_ticks,
+                narrative_min_events: 1,
             });
 
             // 初始化记忆管理器（使用本地 embedder）
