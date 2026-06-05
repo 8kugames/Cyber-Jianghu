@@ -15,17 +15,17 @@ pub struct ForgettingScheduler {
 
 impl ForgettingScheduler {
     /// 创建新的遗忘调度器
-    pub fn new(config: EbbinghausConfig, start_tick: i64) -> Self {
+    pub fn new(config: EbbinghausConfig, start_tick: i64, forget_interval: i64) -> Self {
         Self {
             config,
             last_forget_tick: start_tick,
-            forget_interval: 84, // 每 84 tick (7 游戏日)
+            forget_interval,
         }
     }
 
     /// 使用默认配置创建
     pub fn with_default_config(start_tick: i64) -> Self {
-        Self::new(EbbinghausConfig::default(), start_tick)
+        Self::new(EbbinghausConfig::default(), start_tick, 84)
     }
 
     /// 计算记忆保留率 R = e^(-t/S)
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_calculate_retention() {
         let config = EbbinghausConfig::default();
-        let scheduler = ForgettingScheduler::new(config, 0);
+        let scheduler = ForgettingScheduler::new(config, 0, 84);
 
         let memory = MemoryEntry {
             tick_id: 0,
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn test_strengthen() {
         let config = EbbinghausConfig::default();
-        let scheduler = ForgettingScheduler::new(config, 0);
+        let scheduler = ForgettingScheduler::new(config, 0, 84);
 
         let mut memory = MemoryEntry {
             tick_id: 0,
