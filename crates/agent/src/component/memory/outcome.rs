@@ -262,8 +262,79 @@ impl OutcomeMemory {
         rows.filter_map(|r| r.ok()).collect()
     }
 
-    /// 生成 prompt 注入文本（经验教训段）
+    /// 查询所有有记录的 (action_type, target_agent_id) 组合
+    fn distinct_action_target_pairs(&self) -> Vec<(String, Option<String>)> {
+        let conn = match self.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+        let mut stmt = match conn.prepare(
+            "SELECT DISTINCT action_type, target_agent_id FROM outcome_records ORDER BY action_type",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map([], |row| {
+            let at: String = row.get(0)?;
+            let target: Option<String> = row.get(1)?;
+            Ok((at, target))
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    /// 生成 prompt 注入文本（按动作类型 + 交互对象聚合）
     pub fn to_prompt_context(&self) -> String {
+        let pairs = self.distinct_action_target_pairs();
+        let mut lines: Vec<String> = Vec::new();
+
+        for (at, target) in &pairs {
+            let records: Vec<OutcomeRecord> = if let Some(tid) = target {
+                self.query_by_target(tid, self.prompt_limit)
+                    .into_iter()
+                    .filter(|r| r.action_type == *at)
+                    .collect()
+            } else {
+                self.query_recent(at, self.prompt_limit)
+                    .into_iter()
+                    .filter(|r| r.target_agent_id.is_none())
+                    .collect()
+            };
+            if records.is_empty() {
+                continue;
+            }
+            let label = match target {
+                Some(tid) => format!("{} {}", at, tid),
+                None => at.clone(),
+            };
+            let success_count = records.iter().filter(|r| matches!(r.result, OutcomeResult::Success)).count();
+            let fail_count = records.len() - success_count;
+
+            if success_count > 0 && fail_count > 0 {
+                lines.push(format!("- {} → 成功{}次/失败{}次", label, success_count, fail_count));
+            } else if success_count > 0 {
+                lines.push(format!("- {} → 成功 [{}次]", label, success_count));
+            } else if fail_count > 0 {
+                if let Some(reason) = records.iter().find_map(|r| match &r.result {
+                    OutcomeResult::Failed(r) => Some(r.clone()),
+                    _ => None,
+                }) {
+                    lines.push(format!("- {} → 失败（{}）[{}次]", label, reason, fail_count));
+                }
+            }
+        }
+
+        if lines.is_empty() {
+            return String::new();
+        }
+        format!("\n### 经验教训\n{}\n", lines.join("\n"))
+    }
+
+    /// 生成 prompt 注入文本（旧版，仅按动作类型聚合）
+    #[allow(dead_code)]
+    fn to_prompt_context_by_action(&self) -> String {
         let action_types = self.distinct_action_types();
         let mut lines: Vec<String> = Vec::new();
 
@@ -484,5 +555,54 @@ mod tests {
             None
         );
         assert_eq!(extract_target_agent_id(&None), None);
+    }
+
+    #[test]
+    fn test_prompt_context_per_target() {
+        let db = temp_db();
+        let mem = OutcomeMemory::new(&db, 10).unwrap();
+
+        // 有 target 的动作
+        mem.record(OutcomeRecord {
+            action_type: "给予".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            target_agent_id: Some("npc-a".to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 100,
+        });
+        mem.record(OutcomeRecord {
+            action_type: "给予".into(),
+            action_data: None,
+            result: OutcomeResult::Failed("物品不足".into()),
+            target_agent_id: Some("npc-a".to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 101,
+        });
+        mem.record(OutcomeRecord {
+            action_type: "给予".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            target_agent_id: Some("npc-b".to_string()),
+            context_hash: "loc::1".into(),
+            tick_id: 102,
+        });
+        // 无 target 的动作
+        mem.record(OutcomeRecord {
+            action_type: "进食".into(),
+            action_data: None,
+            result: OutcomeResult::Success,
+            target_agent_id: None,
+            context_hash: "loc::1".into(),
+            tick_id: 103,
+        });
+
+        let ctx = mem.to_prompt_context();
+        assert!(ctx.contains("给予 npc-a"), "should contain per-target line: {}", ctx);
+        assert!(ctx.contains("给予 npc-b"), "should contain per-target line: {}", ctx);
+        assert!(ctx.contains("进食"), "should contain no-target action: {}", ctx);
+        assert!(!ctx.contains("给予 →"), "should NOT contain action-only line: {}", ctx);
+
+        let _ = std::fs::remove_file(&db);
     }
 }
