@@ -264,6 +264,31 @@ impl StatusComponent {
         Ok(new_current)
     }
 
+    /// 从新配置刷新 metadata（decay_per_tick, death_condition 等），保留当前值和 max_modifiers
+    ///
+    /// 解决热更场景：config reload 后全局缓存更新，但已加载 agent 的 StatusComponent
+    /// 仍持有旧 metadata（如 decay_per_tick），导致新配置不生效。
+    pub fn refresh_from_config(&mut self, config: &UnifiedAttributesConfig) {
+        let fresh = Self::from_unified_config(config);
+
+        for (name, fresh_attr) in &fresh.collection.attributes {
+            if let Some(existing) = self.collection.attributes.get_mut(name) {
+                // 保留 current value，刷新 metadata
+                existing.metadata = fresh_attr.metadata.clone();
+            } else {
+                // 新配置中新增的属性（当前 agent 尚无），用默认值添加
+                self.collection.add(fresh_attr.clone());
+            }
+        }
+
+        // 移除新配置中已不存在的属性（罕见，防御性处理）
+        let fresh_names: std::collections::HashSet<_> =
+            fresh.collection.attributes.keys().cloned().collect();
+        self.collection
+            .attributes
+            .retain(|name, _| fresh_names.contains(name));
+    }
+
     /// 检查指定属性是否满足死亡条件
     pub fn check_death_condition(&self, name: &str) -> bool {
         self.collection

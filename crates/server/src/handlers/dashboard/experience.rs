@@ -35,9 +35,8 @@ pub struct ExperienceEntry {
     pub soul_cycle_metadata: Option<serde_json::Value>,
     /// 游戏日编号（从 soul_cycle_metadata.world_time 解析，无元数据时为 0）
     pub game_day: i64,
-    /// 中文天道历时间（"天道历X年X月X日X时"），供前端直接渲染
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub formatted_time: Option<String>,
+    /// 中文时间（由 `WorldTime::to_chinese()` 生成，无法解析时为 "-"），供前端直接渲染
+    pub formatted_time: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -217,9 +216,8 @@ pub struct StreamEntry {
     pub soul_cycle_metadata: Option<serde_json::Value>,
     /// 游戏日编号（0 表示无元数据）
     pub game_day: i64,
-    /// 中文天道历时间（"天道历X年X月X日X时"）
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub formatted_time: Option<String>,
+    /// 中文时间（由 `WorldTime::to_chinese()` 生成，无法解析时为 "-"），供前端直接渲染
+    pub formatted_time: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
