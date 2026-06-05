@@ -774,6 +774,7 @@ impl super::Agent {
                                             .unwrap_or_else(|| ("unknown".to_string(), None));
 
                                         if let Some(ref engine) = self.cognitive_engine {
+                                            let target_agent_id = crate::component::memory::extract_target_agent_id(&action_data);
                                             engine.record_outcome(crate::component::memory::OutcomeRecord {
                                                 action_type: action_type.clone(),
                                                 action_data: action_data.clone(),
@@ -784,6 +785,7 @@ impl super::Agent {
                                                         result.error.clone().unwrap_or_default()
                                                     )
                                                 },
+                                                target_agent_id,
                                                 context_hash: context_hash.clone(),
                                                 tick_id: result.tick_id,
                                             });
