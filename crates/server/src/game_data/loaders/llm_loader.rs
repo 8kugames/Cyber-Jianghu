@@ -6,6 +6,8 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::RwLock;
 
+use cyber_jianghu_protocol::DEFAULT_LLM_MAX_TOKENS;
+
 use super::config_format::load_config;
 
 /// LLM 配置（与 LlmConfigWrapper.data 保持一致）
@@ -73,9 +75,9 @@ impl Default for LlmConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: String::new(),
             model: "gpt-4o-mini".to_string(),
-            temperature: 0.8,
-            max_tokens: 2000,
-            request_timeout_secs: 120,
+                temperature: 0.8,
+                max_tokens: DEFAULT_LLM_MAX_TOKENS as i32,
+                request_timeout_secs: 120,
             connect_timeout_secs: 30,
             context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
         }

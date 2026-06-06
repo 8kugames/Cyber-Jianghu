@@ -215,7 +215,7 @@ impl DirectLlmClientConfig {
             api_key: api_key.map(|k| k.into()),
             model: None,
             temperature: 0.7,
-            max_tokens: 4096,
+            max_tokens: crate::config::DEFAULT_LLM_MAX_TOKENS,
             prefer_stream: false,
             enable_thinking: None,
             context_window_tokens: 32000,

@@ -503,7 +503,7 @@ impl Default for RuntimeConfig {
 
 const DEFAULT_LLM_PROVIDER: &str = "ollama";
 const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
-const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+pub(crate) use cyber_jianghu_protocol::DEFAULT_LLM_MAX_TOKENS;
 
 /// 单个模型的独立配置（允许 per-model max_tokens）
 #[derive(Debug, Clone, Serialize, Deserialize)]
