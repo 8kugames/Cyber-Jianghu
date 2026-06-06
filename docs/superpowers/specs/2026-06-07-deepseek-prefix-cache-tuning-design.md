@@ -1,7 +1,7 @@
 # DeepSeek 前缀缓存调优 v2.2：数据驱动的最小可行改造
 
 **日期**: 2026-06-07
-**状态**: Draft (v2.2.3, v2.2.2 基础上明确 PromptConfig 加载路径)
+**状态**: Draft (v2.2.3.1, v2.2.3 基础上修复 env_or 可见性 1 行)
 **前置**:
 - v1 (e25903f) 0/3 REJECT
 - v2 (1c1c73d) 2/3 通过 (Implementation 5.5/10 REJECT)
@@ -138,8 +138,8 @@
      ```
    - **理由**: `DirectLlmClient` 持有 `DirectLlmClientConfig` (不是 `LlmConfig`), KISS refactor 要读 `self.config.prompt.*` 必须字段在 `DirectLlmClientConfig` 上; PromptConfig 拥有自己的 env var 加载, 沿用 codebase `env_or` 模式 (`config.rs:647` 现有 LlmConfig::default() 实现)
 9. `crates/agent/src/component/llm/mod.rs` (扩) - **conversion 路径**
-   - `mod.rs:178-191` LlmConfig → DirectLlmClientConfig 转换处, PromptConfig 通过 `PromptConfig::default()` 在 `DirectLlmClientConfig::new()` 内部已加载, **不需 mod.rs 额外拷贝**
-   - 加载路径: env var → `PromptConfig::default()` (env_or 模式) → `DirectLlmClientConfig::new()` 内 `client_config.prompt` 字段
+   - `mod.rs:178-191` LlmConfig → DirectLlmClientConfig 转换处加 `prompt` 字段拷贝
+   - 加载路径: `LlmConfig` (env var) → `DirectLlmClientConfig.prompt` (运行时读)
 
 **Hot-reload**: agent 重启 (走 env var 启动覆盖)。WebSocket `websocket.rs:745-822` 仅 5 个 config_type 分支 (skills/actions/game_rules/world_building_rules/prompt_templates), **无 `llm` 分支**。
 
@@ -230,7 +230,7 @@ Phase 0 (9 改动):
 4.  crates/agent/src/component/llm/token_tracking.rs (扩: system_hash_distribution 字段)
 5.  crates/agent/src/infra/api/handlers/llm_config.rs (扩: /api/v1/metrics 改 Query<MetricsQuery>)
 6.  crates/agent/Cargo.toml                          (扩: sha2 = "0.10")
-7.  crates/agent/src/config.rs                       (扩: LlmConfig 加 cache_diagnostics 子结构)
+7.  crates/agent/src/config.rs                       (扩: LlmConfig 加 cache_diagnostics 子结构; **v2.2.3.1 修正**: `config.rs:647` 的 `fn env_or` 改 `pub fn env_or` —— 让 `direct_client.rs::PromptConfig::default()` 可调, 1 行)
 8.  crates/agent/src/component/llm/direct_client.rs  (扩: DirectLlmClientConfig 加 prompt 字段 [Path A])
 9.  crates/agent/src/component/llm/mod.rs            (无需修改 - DirectLlmClientConfig::new() 已加载 prompt)
 
@@ -365,6 +365,7 @@ Day 22+:   Phase 3 (TBD)
 | **v2.2.1** | (v2.2 Review 后) D8 透传 `strip_reasoning: bool` 参数贯穿 trait 链 6+ site | **KISS 修正**: 不透传参数, 在 `DirectLlmClient::complete_with_conversation_and_tools` 内**直接读** `self.config.prompt.strip_reasoning_content` | trait 链 (LlmClient/LlmClientExt/blanket impl/FallbackLlmClient) 完全不动, D8 从 3 文件改造 → 1.5 文件 (`client.rs` helper + `direct_client.rs` inline) |
 | **v2.2.2** | (v2.2.1 Review) `self.config` 实为 `DirectLlmClientConfig` (不是 `LlmConfig`); `prompt` 加在 `LlmConfig` 会被 `mod.rs:178-191` 转换丢弃, KISS refactor 会编译失败 | **Path A**: `PromptConfig` 字段加到 `DirectLlmClientConfig` (实际消费方), `mod.rs` 转换时拷贝; `LlmConfig` 只保留 `cache_diagnostics` (agent 级别), 不混入 LLM client 级别 | `direct_client.rs:178-197` 加 `prompt: PromptConfig`; `mod.rs:178-191` 加转换; KISS refactor 真正可编译 |
 | **v2.2.3** | (v2.2.2 Review) Path A 正确, 但 spec step 9 加载路径歧义: "LlmConfig (env var)" 在 Path A 下已不成立, PromptConfig 如何从 env var 加载未指定 | **显式 (a) 路径**: PromptConfig 自带 `Default impl` + `env_or` 调用 (沿用 `config.rs:647` 模式); `DirectLlmClientConfig::new()` 构造时自动调用 `PromptConfig::default()`; mod.rs **无需改** | spec §3 step 8 列出完整 `PromptConfig` + `impl Default` 代码; step 9 简化 (mod.rs 不需改); 加载路径唯一确定 |
+| **v2.2.3.1** | (v2.2.3 Review) `env_or` 在 `config.rs:647` 是 private (无 `pub`); `direct_client.rs::PromptConfig::default()` body 用 unqualified `env_or` 会编译失败 | **`config.rs:647` 改为 `pub fn env_or`** (1 行) | 加 `pub` 即可, 不影响架构 |
 
 ## 13. 待确认事项
 
