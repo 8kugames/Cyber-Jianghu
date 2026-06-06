@@ -231,6 +231,18 @@ impl super::super::Agent {
         if let Some(ref engine) = self.cognitive_engine {
             engine.invalidate_persona_cache(&self.persona);
         }
+
+        if let Some(ref store) = self.persona_store {
+            let interval = store.config_snapshot_interval();
+            if interval > 0
+                && world_state.tick_id % interval == 0
+                && let Err(e) = self
+                    .persona
+                    .read(|p| store.snapshot(p, world_state.tick_id))
+            {
+                warn!("persona 周期快照失败: {}", e);
+            }
+        }
     }
 
     /// 延迟初始化 ImmediateEventHandler（game_rules 配置到达后创建）

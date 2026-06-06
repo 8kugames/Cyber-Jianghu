@@ -8,8 +8,9 @@
 // 3. Character - 当前角色（通过 Web/API 创建）
 // ============================================================================
 
-use anyhow::{Context, Result};
 use crate::component::memory::types::EbbinghausConfig;
+use crate::component::persona::PersonaPersistenceConfig;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,6 +47,30 @@ pub fn data_base_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".cyber-jianghu")
+}
+
+/// 加载 `persona.yaml`（缺失/字段缺失一律回退到默认 (10, true, true)）。
+pub fn load_persona_persistence_config(config_dir: &Path) -> PersonaPersistenceConfig {
+    let path = config_dir.join("persona.yaml");
+    if !path.exists() {
+        return PersonaPersistenceConfig::default();
+    }
+    match fs::read_to_string(&path) {
+        Ok(content) => match serde_yaml::from_str::<PersonaPersistenceConfig>(&content) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                eprintln!(
+                    "[config] persona.yaml 解析失败: {}，回退到默认 (10, true, true)",
+                    e
+                );
+                PersonaPersistenceConfig::default()
+            }
+        },
+        Err(e) => {
+            eprintln!("[config] 读取 persona.yaml 失败: {}，回退到默认", e);
+            PersonaPersistenceConfig::default()
+        }
+    }
 }
 
 /// 保存 narrative_config 到磁盘（hash skip-optimization）

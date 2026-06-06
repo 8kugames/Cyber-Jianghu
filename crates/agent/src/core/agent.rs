@@ -17,7 +17,9 @@ use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
-use crate::component::persona::{DynamicPersona, EventTraitMapper, ThreadSafePersona};
+use crate::component::persona::{
+    DynamicPersona, EventTraitMapper, PersonaStore, ThreadSafePersona,
+};
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -168,6 +170,8 @@ pub struct Agent {
 
     /// 事件→特质映射器（每 tick 末尾 process_events 同步 events → traits）
     pub(crate) event_trait_mapper: std::sync::Arc<EventTraitMapper>,
+
+    pub(crate) persona_store: Option<std::sync::Arc<PersonaStore>>,
 }
 
 impl Agent {
@@ -244,7 +248,13 @@ impl Agent {
                 "无名侠客",
                 "你是一名行走在江湖中的侠客。",
             )),
-            event_trait_mapper: std::sync::Arc::new(EventTraitMapper::new()),
+            event_trait_mapper: std::sync::Arc::new(
+                crate::component::persona::rules_loader::load_event_trait_rules(
+                    &crate::config::config_dir().join("persona_event_rules.yaml"),
+                )
+                .expect("persona_event_rules.yaml 加载失败 — 启动终止(创世 fail-fast)"),
+            ),
+            persona_store: None,
         }
     }
 
