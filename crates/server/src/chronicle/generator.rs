@@ -9,6 +9,8 @@
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::game_data::registry::ActionRegistry;
+
 use super::collector::CollectedData;
 
 /// LLM Token 统计（全局）
@@ -39,19 +41,10 @@ pub fn record_llm_error() {
     LLM_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
-/// 动作类型中文映射（action_type 已是中文，此处仅做显示名美化）
 fn action_type_display(action_type: &str) -> String {
-    match action_type {
-        "休息" => "静修".to_string(),
-        "说话" => "交谈".to_string(),
-        "移动" => "行走".to_string(),
-        "攻击" => "战斗".to_string(),
-        "给予" => "给予".to_string(),
-        "偷窃" => "偷窃".to_string(),
-        "制造" => "锻造".to_string(),
-        "大喊" => "呼喊".to_string(),
-        _ => action_type.to_string(),
-    }
+    ActionRegistry::get(action_type)
+        .and_then(|c| c.display_name)
+        .unwrap_or_else(|| action_type.to_string())
 }
 
 /// 事件类型中文映射
@@ -469,6 +462,7 @@ mod tests {
 
     #[test]
     fn test_action_type_display() {
+        crate::game_data::init_test_registry();
         assert_eq!(action_type_display("休息"), "静修");
         assert_eq!(action_type_display("说话"), "交谈");
         assert_eq!(action_type_display("移动"), "行走");
