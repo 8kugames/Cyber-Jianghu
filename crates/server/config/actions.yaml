@@ -244,6 +244,7 @@ data:
     category: combat
     ooc_risk: medium
     transmission: silent
+    highlight_kind: combat
     base_damage: 10
     damage_formula: "10 + strength * 0.5 + weapon_bonus"
     validation:
@@ -475,6 +476,7 @@ data:
     category: social
     ooc_risk: high
     transmission: broadcast
+    highlight_kind: dialogue
     max_content_length: 500
     validation:
       required_fields:
@@ -570,6 +572,7 @@ data:
     category: economic
     ooc_risk: medium
     transmission: silent
+    highlight_kind: social
     validation:
       requires_target: true
       requires_target_alive: true
@@ -617,6 +620,7 @@ data:
     category: economic
     ooc_risk: low
     transmission: silent
+    validator_kind: recipe_knowledge
     quality_formula: "craft_skill * 0.5 + luck * 0.1"
     validation:
       required_fields:
@@ -634,6 +638,7 @@ data:
     category: social
     ooc_risk: low
     transmission: silent
+    validator_kind: teach_recipe
     validation:
       requires_target: true
       requires_target_alive: true

@@ -7,6 +7,7 @@
 // ============================================================================
 
 use crate::db::DbPool;
+use crate::game_data::types::actions::ValidatorKind;
 use crate::game_data::types::{ActionValidation, FieldValidation};
 use crate::game_data::{ActionRegistry, ActionRequirement};
 use crate::models::{AgentState, Intent};
@@ -52,14 +53,14 @@ pub async fn validate_action(
     // 验证通用需求
     validate_generic_requirements(intent, agent_state, db_pool).await?;
 
-    // 制造动作：校验配方知晓度
-    if action_str == "制造" {
-        validate_recipe_knowledge(intent, agent_state, db_pool).await?;
-    }
-
-    // 传授动作：校验传授者配方知晓度 + 同地点 + 防自传授
-    if action_str == "传授" {
-        validate_teach_recipe(intent, agent_state, all_states, db_pool).await?;
+    match config.validator_kind {
+        Some(ValidatorKind::RecipeKnowledge) => {
+            validate_recipe_knowledge(intent, agent_state, db_pool).await?;
+        }
+        Some(ValidatorKind::TeachRecipe) => {
+            validate_teach_recipe(intent, agent_state, all_states, db_pool).await?;
+        }
+        None => {}
     }
 
     // 动作冷却检查 — 需要 actions.yaml 添加 cooldown 字段
