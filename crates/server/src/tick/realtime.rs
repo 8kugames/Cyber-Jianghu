@@ -92,6 +92,18 @@ impl IntentWorker {
         }
     }
 
+    async fn close_session_if_whisper(
+        &self,
+        action_type: &str,
+        intent: &cyber_jianghu_protocol::Intent,
+    ) {
+        if action_type == "私语"
+            && let Some(ref session_id) = intent.session_id
+        {
+            self.dialogue_manager.close_session(session_id).await;
+        }
+    }
+
     /// 启动 Worker 事件循环
     ///
     /// 消费 MPSC channel 直到发送端关闭（server shutdown）。
@@ -179,11 +191,7 @@ impl IntentWorker {
                     tick_id,
                 )
                 .await;
-                if action_type == "私语"
-                    && let Some(ref session_id) = intent.session_id
-                {
-                    self.dialogue_manager.close_session(session_id).await;
-                }
+                self.close_session_if_whisper(&action_type, &intent).await;
                 return Err(e.context(format!("Intent 执行失败: agent={}", agent_id)));
             }
         };
@@ -211,11 +219,7 @@ impl IntentWorker {
                 tick_id,
             )
             .await;
-            if action_type == "私语"
-                && let Some(ref session_id) = intent.session_id
-            {
-                self.dialogue_manager.close_session(session_id).await;
-            }
+            self.close_session_if_whisper(&action_type, &intent).await;
             return Err(e).context(format!("Agent {} 状态持久化失败", agent_id));
         }
 
@@ -330,11 +334,7 @@ impl IntentWorker {
         }
 
         // 11. Whisper 执行后立即释放 session（避免同 tick 内 AlreadyInDialogue）
-        if action_type == "私语"
-            && let Some(ref session_id) = intent.session_id
-        {
-            self.dialogue_manager.close_session(session_id).await;
-        }
+        self.close_session_if_whisper(&action_type, &intent).await;
 
         Ok(())
     }
@@ -386,11 +386,8 @@ impl IntentWorker {
                     tick_id,
                 )
                 .await;
-                if intent.action_type.as_ref() == "私语"
-                    && let Some(ref session_id) = intent.session_id
-                {
-                    self.dialogue_manager.close_session(session_id).await;
-                }
+                self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+                    .await;
                 return Err(e).context("Subsequent intent 执行失败");
             }
         };
@@ -406,11 +403,8 @@ impl IntentWorker {
                 tick_id,
             )
             .await;
-            if intent.action_type.as_ref() == "私语"
-                && let Some(ref session_id) = intent.session_id
-            {
-                self.dialogue_manager.close_session(session_id).await;
-            }
+            self.close_session_if_whisper(intent.action_type.as_ref(), intent)
+                .await;
             return Err(e).context("Subsequent intent 持久化失败");
         }
 
