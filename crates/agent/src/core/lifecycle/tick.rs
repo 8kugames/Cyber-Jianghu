@@ -225,6 +225,12 @@ impl super::super::Agent {
                 });
             }
         }
+
+        // persona trait 衰减 + 缓存刷新（让下一 tick LLM 看到最新状态）
+        self.persona.write(|p| p.apply_all_decay());
+        if let Some(ref engine) = self.cognitive_engine {
+            engine.invalidate_persona_cache(&self.persona);
+        }
     }
 
     /// 延迟初始化 ImmediateEventHandler（game_rules 配置到达后创建）
