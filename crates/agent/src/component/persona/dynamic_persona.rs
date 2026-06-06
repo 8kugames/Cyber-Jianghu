@@ -11,13 +11,12 @@
 // - 追踪人设演化历史
 // ============================================================================
 
-use super::prompts::AgentPrompt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use super::trait_types::{Trait, TraitChange, TraitType, default_traits, parse_traits};
+use super::trait_types::{Trait, TraitChange, TraitType, default_traits};
 
 /// 人设状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,24 +65,8 @@ pub struct DynamicPersona {
 }
 
 impl DynamicPersona {
-    /// 从预设的 AgentPrompt 创建动态人设
-    pub fn from_preset(agent_id: Uuid, preset: &AgentPrompt) -> Self {
-        let traits = parse_traits(preset);
-
-        Self {
-            agent_id: agent_id.to_string(),
-            name: preset.name.to_string(),
-            base_description: preset.system_prompt.to_string(),
-            traits,
-            current_state: PersonaState::default(),
-            version: 1,
-        }
-    }
-
     pub fn new(agent_id: Uuid, name: &str, description: &str) -> Self {
-        let traits = super::prompts::get_agent_prompt(name)
-            .map(|p| parse_traits(&p))
-            .unwrap_or_else(default_traits);
+        let traits = default_traits();
 
         Self {
             agent_id: agent_id.to_string(),
@@ -269,18 +252,6 @@ impl ThreadSafePersona {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::persona::prompts;
-
-    #[test]
-    fn test_persona_from_preset() {
-        let agent_id = Uuid::new_v4();
-        let preset = prompts::liu_yunnang();
-        let persona = DynamicPersona::from_preset(agent_id, &preset);
-
-        assert_eq!(persona.name, "柳云娘");
-        assert!(persona.traits.contains_key("贪婪"));
-        assert!(persona.traits.contains_key("信誉"));
-    }
 
     #[test]
     fn test_trait_change() {
