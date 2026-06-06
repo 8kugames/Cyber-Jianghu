@@ -337,11 +337,8 @@ impl ChaosGenerator {
                     map.insert(field.clone(), serde_json::Value::Number(qty.into()));
                     Some(())
                 }
-                // 动作内容 — 混沌状态使用 "..."
-                "content" => {
-                    map.insert(field.clone(), serde_json::Value::String("...".into()));
-                    Some(())
-                }
+                // 动作内容 — 混沌状态无法生成有意义文本，跳过含此字段的 action
+                "content" => None,
                 // 配方 — 从已知配方中随机选
                 "recipe_id" => {
                     if world_state.self_state.recipe_details.is_empty() {

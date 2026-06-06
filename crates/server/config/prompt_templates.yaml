@@ -112,17 +112,18 @@ templates:
 
       output_format: |
         {tool_calling_guidance}
+        用以下 JSON 结构输出决策，字段名必须与下方完全一致：
         {
-          "self_status": "你的状态简述 (30字以内)",
-          "environment": "环境描述 (30字以内)",
-          "key_observations": ["观察1", "观察2"],
-          "primary_drive": "当前主要驱动力",
+          "self_status": "用一句话描述你此刻的身体和精神状况，例如：饥饿难耐、内力充沛、精神恍惚",
+          "environment": "用一句话描述你当前所在地点的景象，例如：厨房里弥漫着烟火气、大堂中三两客人低声交谈",
+          "key_observations": ["你注意到的关键事物或人物，例如：桌上有半壶酒、角落里坐着一位陌生人"],
+          "primary_drive": "此刻最强烈的内在冲动，例如：饥饿驱使觅食、好奇心驱使接近陌生人",
           "drive_intensity": 5,
-          "thought_process": "完整思考过程 (500字以内)",
+          "thought_process": "基于上述感知和驱动，推演你接下来的行动思路。必须与 actions 数组中的动作完全一致——你在思考中规划的行动就是你最终选择的动作 (500字以内)",
           "should_remember": false,
           "memory_content": "",
           "actions": [
-            {"action_type": "动作类型（中文）", "action_data": {}}
+            {"action_type": "从可用动作列表中选取的动作名称", "action_data": {"字段名": "值"}}
           ]
         }
 
@@ -132,6 +133,11 @@ templates:
         - "memory_content": 用简洁的第一人称描述要记忆的内容（必须是真实发生的事件，不允许虚构）
 
         否则设置 "should_remember": false。
+
+        ### 一致性约束（最高优先级）：
+        - **thought_process 必须与 actions 完全一致**：如果你决定攻击某人，thought_process 应描述攻击的理由和目标，而非其他行为。如果你决定说话，thought_process 应包含你想说的内容和对象
+        - 禁止在 thought_process 中规划 A 动作却在 actions 中填写 B 动作。推演即决策，决策即执行
+        - actions 中的每一个动作都必须在 thought_process 中有对应的推理依据
 
         ### actions 规则：
         - **action_type 只能填"可用动作"列表中出现的名称，只能从列表中选一个填入。工具名称（query_world、get_action_detail、list_skills、skill_view）不是动作。**
