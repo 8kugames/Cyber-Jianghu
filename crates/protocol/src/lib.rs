@@ -54,6 +54,12 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 // ============================================================================
 // LLM 配置默认值（agent + server 共享唯一来源）
 // ============================================================================
+//
+// 所有 LLM/agent 相关默认常量集中此处,避免 agent/src/config.rs 与
+// server/src/{handlers,loaders} 重复定义。env var 优先于 const 优先于
+// 调用方的 YAML 覆盖。
+//
+// 命名约定: CYBER_JIANGHU_<DOMAIN>_<FIELD> (全大写,下划线)
 
 /// LLM 输出 token 默认上限
 ///
@@ -63,6 +69,47 @@ pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// - LlmClient::retry_max_tokens_baseline/ceiling default impl 派生
 /// - Server LlmConfig (config_llm handler + llm_loader) 默认值
 pub const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+
+/// LLM provider 默认值
+pub const DEFAULT_LLM_PROVIDER: &str = "ollama";
+
+/// LLM 温度默认
+pub const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
+
+/// 连续 idle tick 达到此阈值后主动切换下一个模型
+pub const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
+
+/// 模型上下文窗口默认大小（tokens）
+///
+/// agent LlmConfig + server LlmConfig + 任何上下文窗口相关字段的单一来源。
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
+
+/// Summary 触发比例（0.0-1.0），token 数超过此比例时触发压缩
+pub const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.75;
+
+/// Summary 后保留最近 N 轮对话
+pub const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
+
+/// Agent ↔ Server 重连延迟（秒）
+pub const DEFAULT_RECONNECT_DELAY_SECS: u64 = 5;
+
+/// 等待执行结果超时（毫秒）
+pub const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;
+
+/// 灵魂周期上报重试次数
+pub const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
+
+/// 灵魂周期上报基础延迟（毫秒），指数退避
+pub const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
+
+/// NarrativeSummaryWindow 窗口大小
+pub const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 5;
+
+/// 语义去重历史窗口大小
+pub const DEFAULT_SEMANTIC_DEDUP_HISTORY: usize = 1;
+
+/// 启用 SSE 流式 LLM 调用
+pub const DEFAULT_ENABLE_STREAMING: bool = true;
 
 // ============================================================================
 // 事件类型常量

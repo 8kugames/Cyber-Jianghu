@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::Duration;
 
-use cyber_jianghu_protocol::DEFAULT_LLM_MAX_TOKENS;
+use cyber_jianghu_protocol::{DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_LLM_MAX_TOKENS};
 
 /// LLM 配置数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,8 +31,6 @@ pub struct LlmConfig {
     #[serde(default = "default_context_window_tokens")]
     pub context_window_tokens: u32,
 }
-
-const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
 
 fn default_context_window_tokens() -> u32 {
     DEFAULT_CONTEXT_WINDOW_TOKENS
