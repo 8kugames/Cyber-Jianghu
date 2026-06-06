@@ -79,6 +79,14 @@ pub struct ActionConfigEntry {
     /// 用于天魂分级审核：high → 强制 LLM, medium → 抽审, low → 跳过 LLM
     #[serde(default = "default_ooc_risk")]
     pub ooc_risk: String,
+
+    /// 显示名（用于 chronicle_generator 等展示场景，未配置时回退到 `name`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+
+    /// 传输语义（决定动作执行后如何向其他 Agent 传播，详见 `Transmission` 枚举）
+    #[serde(default)]
+    pub transmission: Transmission,
 }
 
 fn default_ooc_risk() -> String {
@@ -87,6 +95,25 @@ fn default_ooc_risk() -> String {
 
 fn default_flee_success_rate() -> f64 {
     0.5
+}
+
+// ============================================================================
+// 动作传输语义（数据驱动扩展）
+// ============================================================================
+
+/// 动作传输语义
+///
+/// 决定动作执行后的传播行为：
+/// - `Broadcast`: 公共频道广播给同 Location 的所有 Agent（默认）
+/// - `Session`: 定向 + 服务器维护 Dialogue Session（私语）
+/// - `Silent`: 触发方动作，仅修改状态不广播
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Transmission {
+    #[default]
+    Broadcast,
+    Session,
+    Silent,
 }
 
 // ============================================================================
