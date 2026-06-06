@@ -1174,6 +1174,14 @@ impl LlmClient for DirectLlmClient {
         self.config.context_window_tokens
     }
 
+    fn retry_max_tokens_baseline(&self) -> u32 {
+        self.config.max_tokens
+    }
+
+    fn retry_max_tokens_ceiling(&self) -> u32 {
+        self.config.context_window_tokens
+    }
+
     async fn send_chat_exchange(
         &self,
         messages: Vec<ChatMessage>,

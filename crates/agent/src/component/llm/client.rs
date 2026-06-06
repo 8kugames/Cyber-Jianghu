@@ -146,6 +146,21 @@ pub trait LlmClient: Send + Sync {
         32000
     }
 
+    /// 截断重试时的 max_tokens 基线
+    ///
+    /// per-call `ChatExchangeConfig.max_tokens` 为 None 时,retry 翻倍以此为起点。
+    /// `DirectLlmClient` 覆盖为 `self.config.max_tokens`(沿用全局配置)。
+    fn retry_max_tokens_baseline(&self) -> u32 {
+        4096
+    }
+
+    /// 截断重试时 max_tokens 翻倍的上限
+    ///
+    /// `DirectLlmClient` 覆盖为 `self.config.context_window_tokens`。
+    fn retry_max_tokens_ceiling(&self) -> u32 {
+        32_768
+    }
+
     /// 获取 provider 名称（用于 token 统计）
     ///
     /// 默认实现返回 "unknown"。
@@ -273,11 +288,17 @@ pub trait LlmClient: Send + Sync {
     }
 }
 
+/// JSON 结构化调用结果（含 reasoning_content）
+pub struct CompleteJsonResult<T> {
+    pub value: T,
+    pub reasoning_content: Option<String>,
+}
+
 /// LlmClient 扩展 Trait
 ///
 /// 提供 complete_json 等辅助方法
 #[async_trait]
-pub trait LlmClientExt {
+pub trait LlmClientExt: LlmClient {
     /// 完成一次结构化输出调用（JSON 模式）
     async fn complete_json<T: DeserializeOwned + Send>(&self, prompt: &str) -> Result<T>;
 
@@ -307,6 +328,49 @@ pub trait LlmClientExt {
                         "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
                         attempt + 1,
                         config.max_tokens.unwrap_or(4096),
+                        new_max
+                    );
+                    config.max_tokens = Some(new_max);
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// 完成一次结构化输出调用（遇截断自动重试），并返回 reasoning_content
+    ///
+    /// 与 `complete_json_with_config_and_retry` 唯一区别：保留最后一次
+    /// attempt 的 `reasoning_content`（供调试 / 未来 NPC SFT 数据采集）。
+    async fn complete_json_with_config_and_retry_extracted<T: DeserializeOwned + Send>(
+        &self,
+        prompt: &str,
+        mut config: super::openai_types::ChatExchangeConfig,
+        max_retries: usize,
+    ) -> Result<CompleteJsonResult<T>> {
+        let messages = vec![super::openai_types::ChatMessage::user(prompt)];
+        let baseline = self.retry_max_tokens_baseline();
+        let ceiling = self.retry_max_tokens_ceiling();
+        for attempt in 0..=max_retries {
+            let response = self
+                .send_chat_exchange(messages.clone(), None, config.clone())
+                .await?;
+            let content = response.content.unwrap_or_default();
+            match parse_json_response::<T>(&content) {
+                Ok(value) => {
+                    return Ok(CompleteJsonResult {
+                        value,
+                        reasoning_content: response.reasoning_content,
+                    });
+                }
+                Err(e) => {
+                    if !is_truncation_error(&e) || attempt == max_retries {
+                        return Err(e);
+                    }
+                    let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
+                    tracing::warn!(
+                        "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
+                        attempt + 1,
+                        config.max_tokens.unwrap_or(baseline),
                         new_max
                     );
                     config.max_tokens = Some(new_max);
