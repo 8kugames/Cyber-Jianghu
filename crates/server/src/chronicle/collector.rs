@@ -14,6 +14,8 @@ use sqlx::Row;
 use std::collections::HashMap;
 
 use super::{ActionStats, Highlight, LocationStat};
+use crate::game_data::registry::ActionRegistry;
+use crate::game_data::types::actions::HighlightKind;
 
 /// 采集的原始数据
 #[derive(Debug, Clone)]
@@ -400,8 +402,8 @@ async fn collect_highlights(
         let action_type: String = row.get("action_type");
         let agent_name: String = row.get("name");
 
-        let highlight = match action_type.as_str() {
-            "说话" => {
+        let highlight = match ActionRegistry::get(&action_type).and_then(|c| c.highlight_kind) {
+            Some(HighlightKind::Dialogue) => {
                 let narrative: String = row.get("narrative");
                 Highlight {
                     tick_id,
@@ -411,7 +413,7 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            "攻击" => {
+            Some(HighlightKind::Combat) => {
                 let result_message: Option<String> = row.get("result_message");
                 Highlight {
                     tick_id,
@@ -423,7 +425,7 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            "给予" => {
+            Some(HighlightKind::Social) => {
                 let result_message: Option<String> = row.get("result_message");
                 Highlight {
                     tick_id,
@@ -435,13 +437,13 @@ async fn collect_highlights(
                     agent_name: Some(agent_name),
                 }
             }
-            _ => continue,
+            None => continue,
         };
 
-        match action_type.as_str() {
-            "说话" => dialogues.push(highlight),
-            "攻击" => combats.push(highlight),
-            "给予" => socials.push(highlight),
+        match highlight.event_type.as_str() {
+            "dialogue" => dialogues.push(highlight),
+            "combat" => combats.push(highlight),
+            "social" => socials.push(highlight),
             _ => {}
         }
     }
