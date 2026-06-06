@@ -928,7 +928,39 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         agent_name,
         &persona_description,
     );
-    let persona = cyber_jianghu_agent::component::persona::ThreadSafePersona::new(initial_persona);
+
+    let persona_persistence_config = cyber_jianghu_agent::config::load_persona_persistence_config(
+        &cyber_jianghu_agent::config::config_dir(),
+    );
+    let persona_agent_id = character.agent_id.unwrap_or_else(Uuid::new_v4);
+    let persona_db_path = data_dir.join(format!("persona_{}.db", persona_agent_id));
+    let persona_store = match cyber_jianghu_agent::component::persona::PersonaStore::open(
+        persona_agent_id,
+        &persona_db_path,
+        persona_persistence_config,
+    ) {
+        Ok(store) => {
+            info!("PersonaStore 已初始化");
+            Some(std::sync::Arc::new(store))
+        }
+        Err(e) => {
+            warn!("PersonaStore 初始化失败: {}，继续无持久化", e);
+            None
+        }
+    };
+    let resolved_initial_persona = if let Some(ref store) = persona_store {
+        match store.load_or_default(initial_persona.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("persona 加载失败，使用默认初始值: {}", e);
+                initial_persona
+            }
+        }
+    } else {
+        initial_persona
+    };
+    let persona =
+        cyber_jianghu_agent::component::persona::ThreadSafePersona::new(resolved_initial_persona);
 
     let cognitive_config = CognitiveEngineConfig {
         agent_name: agent_name.to_string(),
@@ -941,7 +973,11 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     let outcome_db_path = data_dir.join("outcome_memory.db");
     let outcome_prompt_limit = config.memory.outcome_prompt_limit;
     let outcome_max_records = config.memory.outcome_max_records;
-    match cyber_jianghu_agent::component::memory::OutcomeMemory::with_max_records(&outcome_db_path, outcome_prompt_limit, outcome_max_records) {
+    match cyber_jianghu_agent::component::memory::OutcomeMemory::with_max_records(
+        &outcome_db_path,
+        outcome_prompt_limit,
+        outcome_max_records,
+    ) {
         Ok(mem) => {
             info!(
                 "Outcome memory initialized at {}",
@@ -1089,6 +1125,10 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     if let Some(store) = relationship_store {
         builder = builder.with_relationship_store(store);
+    }
+
+    if let Some(store) = persona_store.clone() {
+        builder = builder.with_persona_store(store);
     }
 
     builder = builder.character_config(character.clone());

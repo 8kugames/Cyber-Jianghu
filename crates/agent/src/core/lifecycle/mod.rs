@@ -912,6 +912,13 @@ impl super::Agent {
                 .load(std::sync::atomic::Ordering::Relaxed);
         }
 
+        if let Some(ref store) = self.persona_store
+            && store.config_flush_on_death()
+            && let Err(e) = self.persona.read(|p| store.snapshot_now(p, death_tick_id))
+        {
+            warn!("persona 死亡 flush 失败: {}", e);
+        }
+
         // 持久化死亡状态到 character.yaml
         if let Some(ref mut char_cfg) = self.character_config {
             char_cfg.status = CharacterStatus::Dead;
