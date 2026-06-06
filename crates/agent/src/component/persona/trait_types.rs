@@ -83,6 +83,14 @@ impl Trait {
         }
     }
 
+    pub fn min_value(&self) -> u8 {
+        self.min_value
+    }
+
+    pub fn max_value(&self) -> u8 {
+        self.max_value
+    }
+
     pub fn apply_change(&mut self, change: TraitChange, _tick_id: i64) {
         let old_value = self.value;
         let new_value = (old_value as i16 + change.delta)
