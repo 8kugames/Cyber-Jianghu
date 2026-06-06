@@ -7,8 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::prompts::AgentPrompt;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TraitType {
     Social,
@@ -123,19 +121,6 @@ impl Trait {
         self.value =
             (base_value + total_delta).clamp(self.min_value as i16, self.max_value as i16) as u8;
     }
-}
-
-pub fn parse_traits(agent_prompt: &AgentPrompt) -> HashMap<String, Trait> {
-    agent_prompt
-        .initial_traits
-        .iter()
-        .map(|(name, trait_type, value)| {
-            (
-                name.to_string(),
-                Trait::new(name.to_string(), *trait_type, *value),
-            )
-        })
-        .collect()
 }
 
 pub(crate) fn default_traits() -> HashMap<String, Trait> {
