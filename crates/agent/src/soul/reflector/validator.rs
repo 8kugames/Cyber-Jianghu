@@ -470,9 +470,21 @@ impl ReflectorSoul {
 
         // 调用 LLM（从 container 读取当前客户端，支持热重载）
         let llm_client = self.llm_container.read().await.clone();
-        let response: LlmValidationResponse = llm_client
-            .complete_json_with_system(self.reflector_prompt.system_prompt(), &prompt)
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: llm_client.model_name(),
+            temperature: llm_client.temperature(),
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = llm_client
+            .complete_json_with_system_and_retry_extracted(
+                self.reflector_prompt.system_prompt(),
+                &prompt,
+                chat_config,
+                2,
+            )
             .await?;
+        let response: LlmValidationResponse = extracted.value;
 
         thinking_log::log_llm(
             &format!("Agent({})", request.intent.agent_id),
@@ -575,9 +587,21 @@ impl ReflectorSoul {
         );
 
         let llm_client = self.llm_container.read().await.clone();
-        let response: LlmValidationResponse = llm_client
-            .complete_json_with_system(self.reflector_prompt.system_prompt(), &prompt)
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: llm_client.model_name(),
+            temperature: llm_client.temperature(),
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = llm_client
+            .complete_json_with_system_and_retry_extracted(
+                self.reflector_prompt.system_prompt(),
+                &prompt,
+                chat_config,
+                2,
+            )
             .await?;
+        let response: LlmValidationResponse = extracted.value;
 
         Ok(response.into_validation_result())
     }

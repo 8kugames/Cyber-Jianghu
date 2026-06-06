@@ -161,6 +161,13 @@ pub trait LlmClient: Send + Sync {
         32_768
     }
 
+    /// 当前 LLM 客户端使用的温度
+    ///
+    /// per-call config 构造时使用此值填充,避免调用方硬编码。
+    fn temperature(&self) -> f32 {
+        0.7
+    }
+
     /// 获取 provider 名称（用于 token 统计）
     ///
     /// 默认实现返回 "unknown"。
@@ -348,6 +355,53 @@ pub trait LlmClientExt: LlmClient {
         max_retries: usize,
     ) -> Result<CompleteJsonResult<T>> {
         let messages = vec![super::openai_types::ChatMessage::user(prompt)];
+        let baseline = self.retry_max_tokens_baseline();
+        let ceiling = self.retry_max_tokens_ceiling();
+        for attempt in 0..=max_retries {
+            let response = self
+                .send_chat_exchange(messages.clone(), None, config.clone())
+                .await?;
+            let content = response.content.unwrap_or_default();
+            match parse_json_response::<T>(&content) {
+                Ok(value) => {
+                    return Ok(CompleteJsonResult {
+                        value,
+                        reasoning_content: response.reasoning_content,
+                    });
+                }
+                Err(e) => {
+                    if !is_truncation_error(&e) || attempt == max_retries {
+                        return Err(e);
+                    }
+                    let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
+                    tracing::warn!(
+                        "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
+                        attempt + 1,
+                        config.max_tokens.unwrap_or(baseline),
+                        new_max
+                    );
+                    config.max_tokens = Some(new_max);
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// 完成一次结构化输出调用（system + user 分离，遇截断自动重试），并返回 reasoning_content
+    ///
+    /// 与 `complete_json_with_config_and_retry_extracted` 区别: 保留 system role 分离,
+    /// 用于 ReflectorSoul 等需要明确角色指令的场景。
+    async fn complete_json_with_system_and_retry_extracted<T: DeserializeOwned + Send>(
+        &self,
+        system: &str,
+        prompt: &str,
+        mut config: super::openai_types::ChatExchangeConfig,
+        max_retries: usize,
+    ) -> Result<CompleteJsonResult<T>> {
+        let messages = vec![
+            super::openai_types::ChatMessage::system(system),
+            super::openai_types::ChatMessage::user(prompt),
+        ];
         let baseline = self.retry_max_tokens_baseline();
         let ceiling = self.retry_max_tokens_ceiling();
         for attempt in 0..=max_retries {
@@ -1776,6 +1830,19 @@ pub mod mock {
 
         async fn complete_with_system(&self, _system: &str, _prompt: &str) -> Result<String> {
             Ok(self.response.lock().expect("lock poisoned").clone())
+        }
+
+        async fn send_chat_exchange(
+            &self,
+            _messages: Vec<crate::component::llm::ChatMessage>,
+            _tools: Option<&[crate::component::llm::ToolDefinition]>,
+            _config: crate::component::llm::ChatExchangeConfig,
+        ) -> Result<crate::component::llm::openai_types::ChatExchangeResponse> {
+            Ok(crate::component::llm::openai_types::ChatExchangeResponse {
+                content: Some(self.response.lock().expect("lock poisoned").clone()),
+                tool_calls: None,
+                reasoning_content: None,
+            })
         }
     }
 }
