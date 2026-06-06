@@ -179,6 +179,7 @@ pub fn init_test_registry() {
                 "data": {
                     "攻击": {
                         "description": "攻击目标，造成伤害",
+                        "display_name": "战斗",
                         "base_damage": 10,
                         "weapon_bonus": 5,
                         "weapon_bonus_multiplier": 1.0,
@@ -204,6 +205,7 @@ pub fn init_test_registry() {
                     },
                     "说话": {
                         "description": "公开说话",
+                        "display_name": "交谈",
                         "max_content_length": 500,
                         "stamina_cost": 0,
                         "validation": {
@@ -218,6 +220,7 @@ pub fn init_test_registry() {
                     },
                     "移动": {
                         "description": "移动到指定位置",
+                        "display_name": "行走",
                         "stamina_cost": 10,
                         "validation": {
                             "required_fields": ["target_location"],
@@ -272,6 +275,7 @@ pub fn init_test_registry() {
                     },
                     "休息": {
                         "description": "休息",
+                        "display_name": "静修",
                         "stamina_cost": 0,
                         "validation": {},
                         "requirements": [],
