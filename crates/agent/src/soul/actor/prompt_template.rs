@@ -14,7 +14,9 @@ use std::path::Path;
 
 use anyhow::Context;
 
-pub use cyber_jianghu_protocol::{MemoryNarrativeConfig, PromptTemplateConfig, TemplateDef};
+pub use cyber_jianghu_protocol::{
+    MemoryNarrativeConfig, PromptTemplateConfig, RuleCategoryConfig, RuleSectionsConfig, TemplateDef,
+};
 
 /// 空壳 fallback 配置的 version 标识（load 和 save 共用，避免魔法字符串）
 pub const EMPTY_FALLBACK_VERSION: &str = "empty-fallback";

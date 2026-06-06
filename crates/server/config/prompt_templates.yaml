@@ -13,6 +13,22 @@
 version: "0.0.1"
 description: "Agent prompt 模板配置"
 
+# 规则按需检索配置（Rule-On-Demand）
+# 启用后，system message 只注入极简规则索引 + 精简生存阈值，
+# 规则全文通过 EarthSoul query_rules tool 按需查询。
+rule_sections:
+  enabled: true
+  categories:
+    - id: "survival"
+      name: "生存规则"
+      description: "饥饿、健康、体力、精神阈值及生存后果"
+      sections: ["survival_rules"]
+
+    - id: "narrative"
+      name: "叙事规则"
+      description: "叙事风格限制、格式要求、世界基调"
+      sections: ["narrative_limits"]
+
 templates:
   actor_direct:
     required_sections:
@@ -42,6 +58,12 @@ templates:
         基于你的性格、价值观和当前状态，做出决策。你直接输出结构化 Intent，包含精确的 ID。
         当没有紧迫的生存压力时，优先追求你的长期目标（由你的身份和价值观定义）。
         你的价值观不是装饰——它们决定你愿意为什么冒险。
+
+      survival_rules_compact: |
+        ## 生存核心
+        饥饿值超过80将严重损害健康。健康归零即死亡。
+        体力耗尽将无法执行体力消耗动作。精神值过低会导致行为异常。
+        详细的生存阈值和后果请使用 query_rules(["survival"]) 查询。
 
       survival_rules: |
         ## 生存法则

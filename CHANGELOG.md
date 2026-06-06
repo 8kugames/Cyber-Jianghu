@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Added — Rule-On-Demand Architecture (Push→Pull 规则按需检索)
+
+- **Protocol**: `PromptTemplateConfig` 新增 `rule_sections: Option<RuleSectionsConfig>` 字段（`#[serde(default)]` 向后兼容），含 `RuleCategoryConfig`（id/name/description/sections）和 `RuleSectionsConfig`（enabled/categories）
+- **Agent**: 新增 `RuleCache` 组件（`component/rule_cache.rs`）— 持有分类配置和极简索引，按需从 PromptTemplate 渲染规则全文，不缓存文本（热更新零同步）
+- **Agent**: 新增 `query_rules` EarthSoul tool（`soul/earth/rule_tool.rs`）— LLM 推理中按类别查询规则全文，tool definition 动态生成（运行时 categories 参数）
+- **Agent**: `build_system_message()` 改造 — 有 RuleCache 时注入极简索引 + survival_rules_compact（~150 tokens），无时退化为原全量注入（向后兼容）
+- **Agent**: `CognitiveEngine` 新增 `rule_cache` 字段，冷启动从本地 prompt_template 初始化，ConfigUpdate 时重建
+- **Agent**: `compact_query_rules()` — budget 感知的规则结果截断
+- **Config**: `prompt_templates.yaml` 新增 `rule_sections` 配置块（survival/narrative 两个有内容的分类）+ `survival_rules_compact` section
+- **Token 优化**: system message 规则区从 ~1275-1575 tokens/tick 降至 ~450 tokens/tick（节省 ~825-1125 tokens），增长曲线从线性降为常数
+
 ### Changed — Phase 5: ActionType 数据驱动化 + RelationshipStore PRAGMA 迁移
 
 - **Server**: `ActionConfigEntry` 新增 `transmission: Transmission` 字段（3 变体: `Broadcast`/`Session`/`Silent`，`#[default] Broadcast` fail-fast 默认）和 `display_name: Option<String>` 字段。`actions.yaml` 20 动作全部显式标注（1 broadcast 说话 / 1 session 私语 / 18 silent），YAML 头部 schema 注释。`Transmission::Direct` 变体已删（0/20 使用，YAGNI）

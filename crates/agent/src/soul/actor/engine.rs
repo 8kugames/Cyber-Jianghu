@@ -176,6 +176,8 @@ pub struct CognitiveEngine {
     semi_static_message: std::sync::RwLock<String>,
     /// Agent 人设引用（真相源在 Agent, Engine 通过 Arc 读取快照构建 prompt）
     persona_ref: std::sync::RwLock<Option<std::sync::Arc<ThreadSafePersona>>>,
+    /// 规则缓存（EarthSoul query_rules tool 按需检索）
+    pub(super) rule_cache: std::sync::RwLock<Option<crate::component::rule_cache::RuleCache>>,
 }
 
 impl CognitiveEngine {
@@ -219,11 +221,32 @@ impl CognitiveEngine {
             last_reasoning_content: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
+            rule_cache: std::sync::RwLock::new(None),
         };
         engine.load_skill_cache_from_disk();
+        engine.init_rule_cache_from_template();
         // 初始化 semi-static 内容
         engine.rebuild_semi_static();
         engine
+    }
+
+    /// 从 PromptTemplateConfig 同步 RuleCache：有配置则重建，无则清除
+    fn sync_rule_cache(&self, config: &PromptTemplateConfig) {
+        match config.rule_sections {
+            Some(ref rs) if rs.enabled && !rs.categories.is_empty() => {
+                let cache = crate::component::rule_cache::RuleCache::new(rs);
+                *self.rule_cache.write().expect("rwlock poisoned") = Some(cache);
+                info!("RuleCache 已重建，{} 个分类", rs.categories.len());
+            }
+            _ => {
+                *self.rule_cache.write().expect("rwlock poisoned") = None;
+            }
+        }
+    }
+
+    /// 从本地 prompt_template 初始化 RuleCache（冷启动路径）
+    fn init_rule_cache_from_template(&self) {
+        self.sync_rule_cache(&self.prompt_template);
     }
 
     /// 设置 NarrativeSummaryWindow 窗口大小
@@ -317,8 +340,10 @@ impl CognitiveEngine {
             last_reasoning_content: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
+            rule_cache: std::sync::RwLock::new(None),
         };
         engine.load_skill_cache_from_disk();
+        engine.init_rule_cache_from_template();
         // 初始化 semi-static 内容
         engine.rebuild_semi_static();
         engine
@@ -425,6 +450,7 @@ impl CognitiveEngine {
             description: String::new(),
             templates: std::collections::HashMap::new(),
             memory_narrative: None,
+            rule_sections: None,
         }
     }
 
@@ -464,12 +490,13 @@ impl CognitiveEngine {
     }
 
     /// 从 Server 下发的 PromptTemplateConfig 直接更新（JSON 路径）
+    /// 锁顺序: rule_cache -> runtime_prompt_template（必须与 build_system_message 一致）
     pub fn update_prompt_template_from_config(&self, config: PromptTemplateConfig) {
-        let mut guard = self
+        self.sync_rule_cache(&config);
+        *self
             .runtime_prompt_template
             .write()
-            .expect("rwlock poisoned");
-        *guard = Some(config);
+            .expect("rwlock poisoned") = Some(config);
         info!("Prompt 模板已从 Server JSON ConfigUpdate 更新");
     }
 
@@ -933,6 +960,8 @@ impl CognitiveEngine {
                     .read()
                     .expect("rwlock poisoned")
                     .clone();
+                let rule_cache = self.rule_cache.read().expect("rwlock poisoned").clone();
+                let prompt_template_for_tool = self.prompt_template();
                 let executor = super::super::earth::EarthToolExecutor::from_context(
                     super::super::earth::EarthToolContext {
                         skill_cache: self.skill_cache.read().expect("rwlock poisoned").clone(),
@@ -945,9 +974,11 @@ impl CognitiveEngine {
                         recipe_details,
                         world_state_store,
                         available_actions,
+                        rule_cache,
+                        prompt_template: Some(std::sync::Arc::new(prompt_template_for_tool)),
                     },
                 );
-                let tools = super::super::earth::EarthToolExecutor::tool_definitions();
+                let tools = executor.tool_definitions();
 
                 match conv_data {
                     Some((turns, system, summary)) => {
