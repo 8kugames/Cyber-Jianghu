@@ -61,6 +61,9 @@ impl EpisodicMemoryBackend {
         memory.is_archived = entry.is_archived;
         memory.access_count = entry.access_count as i32;
         memory.last_accessed_at = entry.last_accessed_at.map(|dt| dt.to_rfc3339());
+        memory.encoding_valence = entry.encoding_valence;
+        memory.encoding_arousal = entry.encoding_arousal;
+        memory.encoding_emotion = entry.encoding_emotion.clone();
         memory
     }
 
@@ -80,6 +83,9 @@ impl EpisodicMemoryBackend {
             .as_ref()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
+        entry.encoding_valence = memory.encoding_valence;
+        entry.encoding_arousal = memory.encoding_arousal;
+        entry.encoding_emotion = memory.encoding_emotion.clone();
 
         entry
     }
