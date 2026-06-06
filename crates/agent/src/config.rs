@@ -656,8 +656,14 @@ impl Default for LlmConfig {
             base_url: None,
             api_key: None,
             model: None,
-            temperature: DEFAULT_LLM_TEMPERATURE,
-            max_tokens: DEFAULT_LLM_MAX_TOKENS,
+            temperature: std::env::var("CYBER_JIANGHU_LLM_TEMPERATURE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_LLM_TEMPERATURE),
+            max_tokens: std::env::var("CYBER_JIANGHU_LLM_MAX_TOKENS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
             fallback_models: Vec::new(),
             models: Vec::new(),
             idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
