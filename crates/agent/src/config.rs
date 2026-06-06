@@ -675,47 +675,6 @@ impl Default for LlmConfig {
     }
 }
 
-impl LlmConfig {
-    pub fn from_env() -> Self {
-        Self {
-            provider: std::env::var("CYBER_JIANGHU_LLM_PROVIDER")
-                .unwrap_or_else(|_| DEFAULT_LLM_PROVIDER.to_string()),
-            base_url: std::env::var("CYBER_JIANGHU_LLM_BASE_URL").ok(),
-            api_key: std::env::var("CYBER_JIANGHU_LLM_API_KEY").ok(),
-            model: std::env::var("CYBER_JIANGHU_LLM_MODEL").ok(),
-            temperature: std::env::var("CYBER_JIANGHU_LLM_TEMPERATURE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(DEFAULT_LLM_TEMPERATURE),
-            max_tokens: std::env::var("CYBER_JIANGHU_LLM_MAX_TOKENS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
-            fallback_models: std::env::var("CYBER_JIANGHU_LLM_FALLBACK_MODELS")
-                .ok()
-                .map(|s| {
-                    s.split(',')
-                        .map(|x| x.trim().to_string())
-                        .filter(|x| !x.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default(),
-            models: Vec::new(),
-            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
-            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-            summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
-            keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
-            reconnect_delay_secs: DEFAULT_RECONNECT_DELAY_SECS,
-            execution_result_timeout_ms: DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
-            soul_cycle_report_retries: DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
-            soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
-            narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
-            enable_streaming: DEFAULT_ENABLE_STREAMING,
-            enable_thinking: None,
-        }
-    }
-}
-
 impl Drop for LlmConfig {
     fn drop(&mut self) {
         if let Some(ref mut key) = self.api_key {

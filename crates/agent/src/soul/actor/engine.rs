@@ -22,7 +22,7 @@ use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use crate::component::llm::conversation::ConversationHistory;
 use crate::component::llm::{ConversationInput, ConversationTurn, LlmClient, LlmClientExt};
-use crate::component::persona::{DynamicPersona, ThreadSafePersona};
+use crate::component::persona::ThreadSafePersona;
 use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
@@ -42,16 +42,6 @@ pub struct CognitiveEngineConfig {
     pub temperature: f32,
     /// 每阶段最大 token 数
     pub max_tokens_per_stage: u32,
-}
-
-impl Default for CognitiveEngineConfig {
-    fn default() -> Self {
-        Self {
-            agent_name: "无名侠客".to_string(),
-            temperature: 0.7,
-            max_tokens_per_stage: 1024,
-        }
-    }
 }
 
 /// 单个结构化 action
@@ -547,19 +537,6 @@ impl CognitiveEngine {
     }
 
     /// 使用默认配置创建
-    pub fn with_defaults(llm_client: Arc<dyn LlmClient>) -> Self {
-        let default_persona = ThreadSafePersona::new(DynamicPersona::new(
-            Uuid::new_v4(),
-            "无名侠客",
-            "你是一名行走在江湖中的侠客。",
-        ));
-        Self::new(
-            llm_client,
-            CognitiveEngineConfig::default(),
-            &default_persona,
-        )
-    }
-
     /// 更新 Agent 名称（注册新角色后调用）
     pub fn update_agent_name(&self, new_name: &str) {
         let mut config = self.config.write().expect("rwlock poisoned");

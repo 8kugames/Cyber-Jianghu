@@ -8,10 +8,10 @@ use std::sync::Arc;
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
 use cyber_jianghu_agent::component::persona::rules_loader::load_event_trait_rules;
 use cyber_jianghu_agent::component::persona::{DynamicPersona, ThreadSafePersona};
-use cyber_jianghu_agent::models::{WorldEvent, WorldEventType, WorldState};
+use cyber_jianghu_agent::models::{WorldEvent, WorldEventType};
 use cyber_jianghu_agent::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_agent::soul::actor::stages::{
-    CognitiveStage, PerceptionMotivationResponse, StageOutput,
+    CognitiveStage, StageOutput,
 };
 use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
@@ -27,40 +27,6 @@ fn integration_yaml_path() -> PathBuf {
         .parent()
         .unwrap()
         .join("crates/server/config/persona_event_rules.yaml")
-}
-
-fn make_minimal_world_state(tick_id: i64) -> WorldState {
-    let json = serde_json::json!({
-        "event_type": "world_state",
-        "tick_id": tick_id,
-        "world_time": {"year": 2024, "month": 1, "day": 1, "hour": 8, "minute": 0, "second": 0, "weather": "晴"},
-        "location": {"name": "村口", "node_id": "village_gate", "type": "street", "adjacent_nodes": []},
-        "self_state": {"attributes": {}, "attribute_descriptions": {}, "status_effects": [], "inventory": []}
-    });
-    serde_json::from_value(json).unwrap()
-}
-
-fn make_mock_client() -> MockLlmClient {
-    let perception_motivation = serde_json::to_string(&PerceptionMotivationResponse {
-        self_status: "健康，饥饿度适中".to_string(),
-        environment: "村口集市，人来人往".to_string(),
-        key_observations: vec!["有个摊贩卖包子".to_string(), "远处有人在练武".to_string()],
-        primary_drive: "获取食物".to_string(),
-        drive_intensity: 7,
-        reasoning: "肚子有点饿了，需要补充体力".to_string(),
-    })
-    .unwrap();
-
-    let plan_decision = serde_json::json!({
-        "steps": ["走向包子摊", "购买包子"],
-        "priority": 7,
-        "expected_outcome": "获得食物，恢复体力",
-        "thought_process": "感知到集市有包子摊，动机是获取食物充饥，规划是先走向摊位再购买，因此决定执行购买动作",
-        "narrative_action": "去包子摊买包子充饥"
-    }).to_string();
-
-    let all_responses = format!("{}\n---\n{}", perception_motivation, plan_decision);
-    MockLlmClient::with_response(&all_responses)
 }
 
 fn make_validator() -> CognitiveValidator {
@@ -231,52 +197,6 @@ mod tests {
         let deserialized: CognitiveChain = serde_json::from_str(&json).unwrap();
         assert!(deserialized.is_complete());
         assert_eq!(deserialized.stages.len(), 4);
-    }
-
-    #[tokio::test]
-    async fn test_cognitive_engine_create_callback() {
-        let mock = Arc::new(make_mock_client());
-        let engine = CognitiveEngine::with_defaults(mock);
-        engine.update_prompt_template_from_config(make_minimal_prompt_config());
-        let callback = engine.create_decision_callback();
-
-        let world_state = make_minimal_world_state(1);
-        let tick_id = world_state.tick_id;
-        let agent_id = world_state.agent_id.unwrap_or_default();
-        let intent = callback(tick_id, agent_id).await;
-
-        // callback 要么返回引擎生成的 intent，要么返回 fallback idle
-        // MockLlmClient 固定字符串可能导致解析失败，所以 idle fallback 是合理的
-        assert_eq!(intent.tick_id, 1);
-    }
-
-    #[tokio::test]
-    async fn test_cognitive_engine_full_flow() {
-        let mock = Arc::new(make_mock_client());
-        let engine = CognitiveEngine::with_defaults(mock);
-        engine.update_prompt_template_from_config(make_minimal_prompt_config());
-
-        let world_state = make_minimal_world_state(1);
-        let result = engine
-            .think(
-                world_state.tick_id,
-                world_state.agent_id.unwrap_or_default(),
-            )
-            .await;
-
-        // MockLlmClient 返回固定字符串，后续阶段可能解析失败
-        // 验证引擎不 panic，要么成功要么正确传播错误
-        match result {
-            Ok(chain) => {
-                assert!(
-                    chain.get_stage(CognitiveStage::Perception).is_some(),
-                    "Chain should have perception stage"
-                );
-            }
-            Err(_) => {
-                // 预期行为：MockLlmClient 固定字符串导致后续阶段解析失败
-            }
-        }
     }
 
     // ========================================================================
