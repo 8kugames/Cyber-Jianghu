@@ -1,7 +1,7 @@
 # DeepSeek 前缀缓存调优 v2.2：数据驱动的最小可行改造
 
 **日期**: 2026-06-07
-**状态**: Draft (v2.2, 替代 v2.1)
+**状态**: Draft (v2.2.1, v2.2 基础上应用 Architecture 评审的 KISS 修正)
 **前置**:
 - v1 (e25903f) 0/3 REJECT
 - v2 (1c1c73d) 2/3 通过 (Implementation 5.5/10 REJECT)
@@ -129,7 +129,7 @@
 - hit rate 与 system_hash 稳定性的相关性
 - Per-section token 占比
 
-### Phase 1: D8 reasoning_content 剥离 (1 周, 3 文件)
+### Phase 1: D8 reasoning_content 剥离 (1 周, 1 文件 + helper)
 
 **目标**: 消除每轮 ~500 tok 的 reasoning 回传。
 
@@ -140,30 +140,33 @@
 | **位置 A**: helper 函数 | `client.rs:73-76` (在 `build_conversation_messages` 内) | `direct_client.rs:969` `complete_conversation_streaming` + `:1087` `complete_conversation` |
 | **位置 B**: inline code | `direct_client.rs:1304-1307` (在 `complete_with_conversation_and_tools` 内) | `direct_client.rs:1272` `complete_with_conversation_and_tools` (主路径) |
 
-`engine.rs:995` (主决策调用) → `client.rs:926` `complete_with_conversation_and_tools` → `direct_client.rs:1283-1308` inline code (位置 B)。**`use_tool_calling=true` 时主路径走位置 B, 不经位置 A 的 helper**。
+`engine.rs:995` (主决策调用) → `client.rs:917` (LlmClientExt blanket impl) → `direct_client.rs:1272` (DirectLlmClient impl) → `direct_client.rs:1304-1307` inline code (位置 B)。**`use_tool_calling=true` 时主路径走位置 B, 不经位置 A 的 helper**。
 
-**改造** (3 文件)：
+**v2.2.1 KISS 修正 (Architecture 评审建议)**: 不透传 `strip_reasoning: bool` 参数 (避免 trait 链 6 site 修改)，改为在 `DirectLlmClient::complete_with_conversation_and_tools` impl 内**直接读** `self.config.prompt.strip_reasoning_content`。原因：
+- `LlmConfig::prompt.strip_reasoning_content` 已是全局配置 (`DirectLlmClient` 有 `self.config: LlmConfig`)
+- 透传参数 = 复制 config 状态，违反 KISS
+- 读 config = 1 处改动，透传 = 6+ 处改动 (trait/blanket impl/FallbackLlmClient/impl 全部同步)
 
-1. `crates/agent/src/component/llm/client.rs` (扩)
+**改造** (1 文件 + 1 helper 修正)：
+
+1. `crates/agent/src/component/llm/client.rs` (扩, helper 路径)
    - `build_conversation_messages` 加 `strip_reasoning: bool` 参数 (第 6 个参数)
-   - 当 `strip_reasoning=true`, 调用 `ChatMessage::assistant_with_reasoning(&turn.assistant, None)` (line 73-76 处)
-   - **注**: 不存在独立 `ChatMessage::assistant(content)` 构造器 (v2.1 误引), 复用 `assistant_with_reasoning` 传 `None` 即可
-2. `crates/agent/src/component/llm/direct_client.rs` (扩)
+   - 当 `strip_reasoning=true`, 调用 `ChatMessage::assistant_with_reasoning(&turn.assistant, None)` (line 73-76)
+   - **注**: 不存在独立 `ChatMessage::assistant(content)` 构造器, 复用 `assistant_with_reasoning` 传 `None`
+2. `crates/agent/src/component/llm/direct_client.rs` (扩, 主路径)
    - 位置 A 调用点 (line 969, 1087): 透传 `strip_reasoning` 到 `build_conversation_messages`
-   - **位置 B inline code (line 1304-1307)**: 同样改 `assistant_with_reasoning(..., if strip_reasoning { None } else { turn.reasoning_content.clone() })`, inline 块加 `strip_reasoning: bool` 参数
-   - `complete_with_conversation_and_tools` 函数签名 (line 1272) 加 `strip_reasoning: bool` 参数
-   - 读 `prompt_config.strip_reasoning_content`
-3. `crates/agent/src/component/llm/direct_client.rs` (扩, 透传到 engine.rs 调用)
-   - `engine.rs:995` `complete_json_with_conversation_and_tools` 调用处加 `strip_reasoning` 参数
+   - **位置 B inline code (line 1304-1307)**: 改 `assistant_with_reasoning(&turn.assistant, if self.config.prompt.strip_reasoning_content { None } else { turn.reasoning_content.clone() })` — **直接读 self.config**, 不加参数
+   - `complete_with_conversation_and_tools` 函数签名 (line 1272) **不变**
+   - trait 链 (LlmClient/LlmClientExt/blanket impl/FallbackLlmClient) **不动**
 
-**配置键**: `prompt.strip_reasoning_content: true`
+**配置键**: `prompt.strip_reasoning_content: true` (在 `LlmConfig::prompt`)
 
-**5% 灰度机制 (v2.1 漏)**: **env var 部署时区分**
+**5% 灰度机制 (v2.1 漏, v2.2 引入)**: **env var 部署时区分**
 - 默认: 全部 agent 用 `prompt.strip_reasoning_content: false`
 - 5% 灰度: 5% agent 部署时设 `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT=true` 覆盖
 - 20%: 20% agent 设
 - 100%: 全量设
-- spec 不引入运行时随机采样; rollout 是部署时决策, 不是代码内 bucketing
+- spec 不引入运行时随机采样; rollout 是部署时决策
 
 **风险与缓解**:
 - LLM 失去 reasoning 影响决策 → **env var 分批部署 5% → 20% → 100%** + 24h 决策质量对比
@@ -209,10 +212,9 @@ Phase 0 (7 改动):
 6.  crates/agent/Cargo.toml                          (扩: sha2 = "0.10")
 7.  crates/agent/src/config.rs                       (扩: LlmConfig 加 cache_diagnostics + prompt 子结构)
 
-D8 (3 改动, **双路径同步**):
-8.  crates/agent/src/component/llm/client.rs         (扩: build_conversation_messages 加 strip_reasoning)
-9.  crates/agent/src/component/llm/direct_client.rs  (扩: 位置 A + 位置 B 两处都改)
-10. crates/agent/src/component/llm/direct_client.rs  (扩: complete_with_conversation_and_tools 加 strip_reasoning 参数)
+D8 (2 改动, **KISS 修正: 不透传参数, 读 self.config**):
+8.  crates/agent/src/component/llm/client.rs         (扩: build_conversation_messages 加 strip_reasoning 参数, 用于位置 A helper 路径)
+9.  crates/agent/src/component/llm/direct_client.rs  (扩: 位置 B inline code 直接读 self.config.prompt.strip_reasoning_content, **不加 trait 链参数**)
 
 D9 (3 改动 + 1 新):
 11. crates/agent/src/component/llm/canonicalize.rs   (新, ≤100 行)
@@ -338,6 +340,7 @@ Day 22+:   Phase 3 (TBD)
 | MIN 1 | `compute_system_hash` 写死 `use_tool_calling=true` | 动态 `self.llm_client.supports_tool_calling()` | `engine.rs:679` `use_tool_calling` 依 LLM 客户端变 |
 | MIN 2 | `crates/server/Cargo.toml:18` (sha2) | `crates/server/Cargo.toml:47` (实际行) | grep 验证 |
 | MIN 3 | spec §0(b) 行号 `direct_client.rs:1301-1308` 经 helper | 拆为: `direct_client.rs:1304-1307` (inline) + `client.rs:73-76` (helper) + `direct_client.rs:969, 1087` (helper 调用点) | `direct_client.rs:1283` 注释 "不使用 build_conversation_messages" |
+| **v2.2.1** | (v2.2 Review 后) D8 透传 `strip_reasoning: bool` 参数贯穿 trait 链 6+ site | **KISS 修正**: 不透传参数, 在 `DirectLlmClient::complete_with_conversation_and_tools` 内**直接读** `self.config.prompt.strip_reasoning_content` | trait 链 (LlmClient/LlmClientExt/blanket impl/FallbackLlmClient) 完全不动, D8 从 3 文件改造 → 1.5 文件 (`client.rs` helper + `direct_client.rs` inline) |
 
 ## 13. 待确认事项
 
