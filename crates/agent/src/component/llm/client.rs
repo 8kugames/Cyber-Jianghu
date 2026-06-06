@@ -288,6 +288,34 @@ pub trait LlmClientExt {
         config: super::openai_types::ChatExchangeConfig,
     ) -> Result<T>;
 
+    /// 完成一次结构化输出调用，遇截断时自动扩大 max_tokens 重试
+    async fn complete_json_with_config_and_retry<T: DeserializeOwned + Send>(
+        &self,
+        prompt: &str,
+        mut config: super::openai_types::ChatExchangeConfig,
+        max_retries: usize,
+    ) -> Result<T> {
+        for attempt in 0..=max_retries {
+            match self.complete_json_with_config::<T>(prompt, config.clone()).await {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    if !is_truncation_error(&e) || attempt == max_retries {
+                        return Err(e);
+                    }
+                    let new_max = (config.max_tokens.unwrap_or(4096) * 2).min(32_768);
+                    tracing::warn!(
+                        "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
+                        attempt + 1,
+                        config.max_tokens.unwrap_or(4096),
+                        new_max
+                    );
+                    config.max_tokens = Some(new_max);
+                }
+            }
+        }
+        unreachable!()
+    }
+
     /// 完成一次结构化输出调用（JSON 模式，system + user 分离）
     async fn complete_json_with_system<T: DeserializeOwned + Send>(
         &self,
@@ -686,6 +714,16 @@ fn repair_llm_json(input: &str) -> String {
     }
 
     fixed
+}
+
+/// 判断 LLM 错误是否由响应截断引起（用于触发 retry）
+fn is_truncation_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        let s = c.to_string();
+        s.contains("EOF while parsing")
+            || s.contains("unexpected end of input")
+            || s.contains("response body is not valid UTF-8")
+    })
 }
 
 /// 解析 LLM 响应为结构化类型（单遍修复 → serde 解析）
