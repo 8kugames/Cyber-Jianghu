@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 use crate::component::social::relationship_types::{KeyEvent, RelationshipMemory};
 
+use super::persistence;
+
 /// 关系记忆存储
 ///
 /// 使用 SQLite 存储对其他 Agent 的关系记忆
@@ -69,98 +71,8 @@ impl RelationshipStore {
 
     /// 初始化数据库结构
     fn init_schema(conn: &Connection) -> Result<()> {
-        // 创建关系表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS relationships (
-                target_agent_id TEXT PRIMARY KEY,
-                target_name TEXT NOT NULL,
-                favorability INTEGER DEFAULT 0 CHECK(favorability >= -100 AND favorability <= 100),
-                last_interaction_tick INTEGER DEFAULT 0,
-                updated_at TIMESTAMP NOT NULL,
-                self_description TEXT DEFAULT '',
-                description_tick INTEGER DEFAULT 0
-            )",
-            [],
-        )
-        .context("Failed to create relationships table")?;
-
-        // 兼容旧数据库：检查并添加新字段
-        // 使用 PRAGMA table_info 检查列是否存在
-        let has_self_description: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('relationships') WHERE name = 'self_description'",
-                [],
-                |row| row.get::<_, i32>(0).map(|c| c > 0),
-            )
-            .unwrap_or(false);
-
-        if !has_self_description {
-            conn.execute(
-                "ALTER TABLE relationships ADD COLUMN self_description TEXT DEFAULT ''",
-                [],
-            )
-            .ok();
-        }
-
-        let has_description_tick: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM pragma_table_info('relationships') WHERE name = 'description_tick'",
-                [],
-                |row| row.get::<_, i32>(0).map(|c| c > 0),
-            )
-            .unwrap_or(false);
-
-        if !has_description_tick {
-            conn.execute(
-                "ALTER TABLE relationships ADD COLUMN description_tick INTEGER DEFAULT 0",
-                [],
-            )
-            .ok();
-        }
-
-        // 创建关键事件表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS key_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                target_agent_id TEXT NOT NULL,
-                tick_id INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                favorability_delta INTEGER NOT NULL,
-                timestamp TEXT NOT NULL,
-                FOREIGN KEY (target_agent_id) REFERENCES relationships(target_agent_id) ON DELETE CASCADE
-            )",
-            [],
-        ).context("Failed to create key_events table")?;
-
-        // 创建索引
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_key_events_target
-             ON key_events(target_agent_id)",
-            [],
-        )
-        .ok();
-
-        // 按名称查找的索引
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_relationships_target_name
-             ON relationships(target_name)",
-            [],
-        )
-        .ok();
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_key_events_tick
-             ON key_events(tick_id DESC)",
-            [],
-        )
-        .ok();
-
-        // 性能优化
-        conn.execute("PRAGMA journal_mode = WAL", []).ok();
-        conn.execute("PRAGMA synchronous = NORMAL", []).ok();
-        conn.execute("PRAGMA cache_size = -32000", []).ok(); // 32MB cache
-
+        persistence::init_pragmas(conn)?;
+        persistence::init_schema(conn)?;
         Ok(())
     }
 
