@@ -36,7 +36,7 @@ pub(crate) struct OpenAIRequest {
 
 /// 聊天消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ChatMessage {
+pub struct ChatMessage {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
@@ -147,7 +147,7 @@ pub(crate) struct OpenAIChoice {
 ///
 /// 与 LLM 接入方式（HTTP / WebSocket）无关的响应类型，
 /// 由 `send_chat_exchange` trait 方法返回。
-pub(crate) struct ChatExchangeResponse {
+pub struct ChatExchangeResponse {
     pub content: Option<String>,
     pub tool_calls: Option<Vec<super::tool_types::ToolCall>>,
     pub reasoning_content: Option<String>,
