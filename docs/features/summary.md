@@ -66,7 +66,7 @@
   - [x] 交互动作 (Interaction)：给予、偷窃。
   - [ ] *未实装动作*：防御、闪避、招架、重击、跟随、潜行、下毒、修理。
   - [x] **Phase 5 ActionType 数据驱动化**：`ActionConfigEntry` 新增 `transmission` (3 变体: Broadcast/Session/Silent) + `display_name` (6 动作美化名) 字段。20 动作显式 YAML 标注。`realtime` 5 处 + `handler` 2 处 + `chronicle/generator` 8-arm 改读 `transmission` 字段与 `display_name` lookup (data-driven 完整闭环)
-  - [x] 5 契约测试 (`actions_transmission_test.rs`) 锁定反序列化行为
+  - [x] 7 契约测试 (`actions_transmission_test.rs`) 锁定反序列化行为(5 transmission/display_name + 2 validator_kind/highlight_kind)
 - [x] **[高性能状态管理](../../crates/server/docs/architecture/p0_core/high_performance_state.md)**: 保障十万级 Agent 并发读写的内存与持久化架构。
   - [x] DashMap 内存缓存层，支持高并发 Write-Through。
   - [x] PostgreSQL 异步持久化，入库成功后才更新内存状态。
