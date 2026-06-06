@@ -553,7 +553,11 @@ impl CognitiveEngine {
             "无名侠客",
             "你是一名行走在江湖中的侠客。",
         ));
-        Self::new(llm_client, CognitiveEngineConfig::default(), &default_persona)
+        Self::new(
+            llm_client,
+            CognitiveEngineConfig::default(),
+            &default_persona,
+        )
     }
 
     /// 更新 Agent 名称（注册新角色后调用）
@@ -844,8 +848,7 @@ impl CognitiveEngine {
 
     /// 每 tick 末尾调用：刷新 prompt cache 让下一 tick LLM 看到最新 traits
     pub fn invalidate_persona_cache(&self, persona: &ThreadSafePersona) {
-        let (new_desc, persona_clone) =
-            persona.read(|p| (p.generate_description(), p.clone()));
+        let (new_desc, persona_clone) = persona.read(|p| (p.generate_description(), p.clone()));
         let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
         cache.invalidate_persona(new_desc, &persona_clone);
     }
