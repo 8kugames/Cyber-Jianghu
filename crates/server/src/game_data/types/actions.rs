@@ -87,6 +87,14 @@ pub struct ActionConfigEntry {
     /// 传输语义（决定动作执行后如何向其他 Agent 传播，详见 `Transmission` 枚举）
     #[serde(default)]
     pub transmission: Transmission,
+
+    /// 预验证器种类（详见 `ValidatorKind`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validator_kind: Option<ValidatorKind>,
+
+    /// 编年史高光种类（详见 `HighlightKind`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlight_kind: Option<HighlightKind>,
 }
 
 fn default_ooc_risk() -> String {
@@ -114,6 +122,31 @@ pub enum Transmission {
     Broadcast,
     Session,
     Silent,
+}
+
+// ============================================================================
+// 预验证器种类（数据驱动扩展 — Phase 5 收尾）
+// ============================================================================
+
+/// 预验证器种类
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidatorKind {
+    RecipeKnowledge,
+    TeachRecipe,
+}
+
+// ============================================================================
+// 编年史高光种类（数据驱动扩展 — Phase 5 收尾）
+// ============================================================================
+
+/// 编年史高光种类
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HighlightKind {
+    Dialogue,
+    Combat,
+    Social,
 }
 
 // ============================================================================

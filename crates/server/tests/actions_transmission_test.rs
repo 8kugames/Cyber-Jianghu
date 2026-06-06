@@ -73,4 +73,86 @@ mod tests {
         );
         assert_eq!(with.display_name, Some("静修".to_string()));
     }
+
+    #[test]
+    fn validator_kind_optional_with_snake_case_values() {
+        let without = parse(
+            r#"
+                name: "休息"
+                description: "无预验证"
+            "#,
+        );
+        assert_eq!(without.validator_kind, None);
+
+        let recipe = parse(
+            r#"
+                name: "制造"
+                description: "..."
+                validator_kind: recipe_knowledge
+            "#,
+        );
+        assert!(matches!(
+            recipe.validator_kind,
+            Some(cyber_jianghu_server::game_data::types::actions::ValidatorKind::RecipeKnowledge)
+        ));
+
+        let teach = parse(
+            r#"
+                name: "传授"
+                description: "..."
+                validator_kind: teach_recipe
+            "#,
+        );
+        assert!(matches!(
+            teach.validator_kind,
+            Some(cyber_jianghu_server::game_data::types::actions::ValidatorKind::TeachRecipe)
+        ));
+    }
+
+    #[test]
+    fn highlight_kind_optional_with_snake_case_values() {
+        let without = parse(
+            r#"
+                name: "休息"
+                description: "无 highlight"
+            "#,
+        );
+        assert_eq!(without.highlight_kind, None);
+
+        let dialogue = parse(
+            r#"
+                name: "说话"
+                description: "..."
+                highlight_kind: dialogue
+            "#,
+        );
+        assert!(matches!(
+            dialogue.highlight_kind,
+            Some(cyber_jianghu_server::game_data::types::actions::HighlightKind::Dialogue)
+        ));
+
+        let combat = parse(
+            r#"
+                name: "攻击"
+                description: "..."
+                highlight_kind: combat
+            "#,
+        );
+        assert!(matches!(
+            combat.highlight_kind,
+            Some(cyber_jianghu_server::game_data::types::actions::HighlightKind::Combat)
+        ));
+
+        let social = parse(
+            r#"
+                name: "给予"
+                description: "..."
+                highlight_kind: social
+            "#,
+        );
+        assert!(matches!(
+            social.highlight_kind,
+            Some(cyber_jianghu_server::game_data::types::actions::HighlightKind::Social)
+        ));
+    }
 }
