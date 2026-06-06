@@ -52,6 +52,19 @@ pub use error::GameError;
 pub const PROTOCOL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // ============================================================================
+// LLM 配置默认值（agent + server 共享唯一来源）
+// ============================================================================
+
+/// LLM 输出 token 默认上限
+///
+/// 所有 LLM 相关 max_tokens 字段的单一来源,包括:
+/// - LlmConfig.max_tokens (agent 默认配置)
+/// - DirectLlmClientConfig::new() 默认值
+/// - LlmClient::retry_max_tokens_baseline/ceiling default impl 派生
+/// - Server LlmConfig (config_llm handler + llm_loader) 默认值
+pub const DEFAULT_LLM_MAX_TOKENS: u32 = 8192;
+
+// ============================================================================
 // 事件类型常量
 // ============================================================================
 

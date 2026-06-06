@@ -150,15 +150,17 @@ pub trait LlmClient: Send + Sync {
     ///
     /// per-call `ChatExchangeConfig.max_tokens` 为 None 时,retry 翻倍以此为起点。
     /// `DirectLlmClient` 覆盖为 `self.config.max_tokens`(沿用全局配置)。
+    /// 默认 = `DEFAULT_LLM_MAX_TOKENS / 2`(基线为输出预算一半,合理起点)。
     fn retry_max_tokens_baseline(&self) -> u32 {
-        4096
+        crate::config::DEFAULT_LLM_MAX_TOKENS / 2
     }
 
     /// 截断重试时 max_tokens 翻倍的上限
     ///
     /// `DirectLlmClient` 覆盖为 `self.config.context_window_tokens`。
+    /// 默认 = `DEFAULT_LLM_MAX_TOKENS * 4`(4 倍预算,合理上限)。
     fn retry_max_tokens_ceiling(&self) -> u32 {
-        32_768
+        crate::config::DEFAULT_LLM_MAX_TOKENS * 4
     }
 
     /// 当前 LLM 客户端使用的温度

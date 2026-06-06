@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::Duration;
 
+use cyber_jianghu_protocol::DEFAULT_LLM_MAX_TOKENS;
+
 /// LLM 配置数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -88,7 +90,7 @@ impl Default for LlmConfigWrapper {
                 api_key: String::new(),
                 model: "qwen2.5:14b".to_string(),
                 temperature: 0.8,
-                max_tokens: 4096,
+                max_tokens: DEFAULT_LLM_MAX_TOKENS as i32,
                 context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
             },
         }
