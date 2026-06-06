@@ -25,7 +25,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tracing::{debug, error, info, warn};
 
 use crate::dialogue::DialogueResponse;
+use crate::game_data::registry::ActionRegistry;
 use crate::game_data::registry::ItemRegistry;
+use crate::game_data::types::actions::Transmission;
 use crate::inventory::InventoryManager;
 use crate::models::Intent;
 use cyber_jianghu_protocol::{
@@ -1115,8 +1117,12 @@ async fn handle_intent(
         subsequent_intents,
     };
 
-    // 如果是 speak 动作，立即广播给同 Location 的所有在线 Agent
-    if action_type.as_str() == "说话"
+    let transmission = ActionRegistry::get(action_type.as_str())
+        .map(|c| c.transmission)
+        .unwrap_or_default();
+
+    // Broadcast: 公共频道广播给同 Location 的所有在线 Agent
+    if transmission == Transmission::Broadcast
         && let Some(content_value) = action_data.as_ref().and_then(|d| d.get("content"))
         && let Some(content_str) = content_value.as_str()
     {
@@ -1160,8 +1166,8 @@ async fn handle_intent(
         intent.already_broadcast = true;
     }
 
-    // 如果是 whisper 动作，立即创建 Dialogue Session
-    if action_type.as_str() == "私语"
+    // Session: 定向 + 创建 Dialogue Session
+    if transmission == Transmission::Session
         && let Some(target_value) = action_data.as_ref().and_then(|d| d.get("target_agent_id"))
         && let Some(target_id_str) = target_value.as_str()
         && let Ok(target_agent_id) = uuid::Uuid::parse_str(target_id_str)
