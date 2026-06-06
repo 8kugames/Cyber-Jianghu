@@ -214,8 +214,11 @@ mod tests {
     #[test]
     fn test_model_dir() {
         let dir = LocalEmbedder::model_dir();
-        assert!(dir.to_string_lossy().contains("cyber-jianghu"));
-        assert!(dir.to_string_lossy().contains("bge-small-zh-v1.5"));
+        assert!(
+            dir.ends_with("models/bge-small-zh-v1.5"),
+            "model_dir 应以 models/bge-small-zh-v1.5 结尾,实际: {}",
+            dir.display()
+        );
     }
 
     // 注意：以下测试需要模型文件存在才能通过

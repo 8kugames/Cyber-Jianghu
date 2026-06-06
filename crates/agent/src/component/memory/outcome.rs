@@ -55,10 +55,10 @@ pub struct OutcomeRecord {
 pub fn extract_target_agent_id(action_data: &Option<serde_json::Value>) -> Option<String> {
     let data = action_data.as_ref()?;
     for key in ["target_agent_id", "target_id", "target_uuid"] {
-        if let Some(id) = data.get(key).and_then(|v| v.as_str()) {
-            if !id.is_empty() {
-                return Some(id.to_string());
-            }
+        if let Some(id) = data.get(key).and_then(|v| v.as_str())
+            && !id.is_empty()
+        {
+            return Some(id.to_string());
         }
     }
     None
@@ -134,7 +134,9 @@ impl OutcomeMemory {
         )?;
         // 老库迁移：加 target_agent_id 列（拆开执行，避免 ALTER 失败导致 INDEX 跳过）
         let _ = conn.execute_batch("ALTER TABLE outcome_records ADD COLUMN target_agent_id TEXT");
-        let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id)");
+        let _ = conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id)",
+        );
         Ok(Self {
             conn: Mutex::new(conn),
             prompt_limit,
@@ -309,20 +311,29 @@ impl OutcomeMemory {
                 Some(tid) => format!("{} {}", at, tid),
                 None => at.clone(),
             };
-            let success_count = records.iter().filter(|r| matches!(r.result, OutcomeResult::Success)).count();
+            let success_count = records
+                .iter()
+                .filter(|r| matches!(r.result, OutcomeResult::Success))
+                .count();
             let fail_count = records.len() - success_count;
 
             if success_count > 0 && fail_count > 0 {
-                lines.push(format!("- {} → 成功{}次/失败{}次", label, success_count, fail_count));
+                lines.push(format!(
+                    "- {} → 成功{}次/失败{}次",
+                    label, success_count, fail_count
+                ));
             } else if success_count > 0 {
                 lines.push(format!("- {} → 成功 [{}次]", label, success_count));
-            } else if fail_count > 0 {
-                if let Some(reason) = records.iter().find_map(|r| match &r.result {
+            } else if fail_count > 0
+                && let Some(reason) = records.iter().find_map(|r| match &r.result {
                     OutcomeResult::Failed(r) => Some(r.clone()),
                     _ => None,
-                }) {
-                    lines.push(format!("- {} → 失败（{}）[{}次]", label, reason, fail_count));
-                }
+                })
+            {
+                lines.push(format!(
+                    "- {} → 失败（{}）[{}次]",
+                    label, reason, fail_count
+                ));
             }
         }
 
@@ -525,7 +536,11 @@ mod tests {
 
         let records = mem.query_by_target(target_id, 10);
         assert_eq!(records.len(), 2);
-        assert!(records.iter().all(|r| r.target_agent_id.as_deref() == Some(target_id)));
+        assert!(
+            records
+                .iter()
+                .all(|r| r.target_agent_id.as_deref() == Some(target_id))
+        );
 
         let records_c = mem.query_by_target("agent-c", 10);
         assert_eq!(records_c.len(), 1);
@@ -598,10 +613,26 @@ mod tests {
         });
 
         let ctx = mem.to_prompt_context();
-        assert!(ctx.contains("给予 npc-a"), "should contain per-target line: {}", ctx);
-        assert!(ctx.contains("给予 npc-b"), "should contain per-target line: {}", ctx);
-        assert!(ctx.contains("进食"), "should contain no-target action: {}", ctx);
-        assert!(!ctx.contains("给予 →"), "should NOT contain action-only line: {}", ctx);
+        assert!(
+            ctx.contains("给予 npc-a"),
+            "should contain per-target line: {}",
+            ctx
+        );
+        assert!(
+            ctx.contains("给予 npc-b"),
+            "should contain per-target line: {}",
+            ctx
+        );
+        assert!(
+            ctx.contains("进食"),
+            "should contain no-target action: {}",
+            ctx
+        );
+        assert!(
+            !ctx.contains("给予 →"),
+            "should NOT contain action-only line: {}",
+            ctx
+        );
 
         let _ = std::fs::remove_file(&db);
     }
