@@ -1,0 +1,189 @@
+# ============================================================================
+# 事件-特质映射规则
+# ============================================================================
+#
+# 26 rules / 10 event types
+# 创世基线,见计划书 §十六
+#
+# 加载路径: config_dir()/persona_event_rules.yaml
+#   = ~/.cyber-jianghu/config/persona_event_rules.yaml
+# 失败模式: fail-fast
+#   - 文件缺失 / YAML 损坏 / 空 rules / schema 不匹配 / 规则数 != 26
+#   - 都返回 Result::Err,启动失败(无静默 fallback)
+#
+# 字段说明:
+#   - event_type:  事件类型枚举(Attacked / Deceived / Helped / TradeSuccess / TradeFail / BattleWin / BattleLose / Hungry / Thirsty / SocialInteraction)
+#   - trait_name:  目标特质名称(中文)
+#   - base_delta:  基础变化量 [-100, +100]
+#   - weight:      权重(> 0,影响变化幅度)
+#   - design_intent: 创世意图注释,反映规则背后的世界观设计
+#
+# 调整规则前请阅读 计划书 §十六,理解每条规则的创世意图。
+# ============================================================================
+
+rules:
+  # === Attacked(被攻击) ===
+  - event_type: Attacked
+    trait_name: 愤怒
+    base_delta: 15
+    weight: 1.2
+    # design_intent: 被伤害激发对外的怒——生物本能,无须解释
+
+  - event_type: Attacked
+    trait_name: 恐惧
+    base_delta: 10
+    weight: 1.0
+    # design_intent: 自我保护触发,符合演化心理学"惊惧-逃避"通路
+
+  - event_type: Attacked
+    trait_name: 攻击性
+    base_delta: 8
+    weight: 1.0
+    # design_intent: 怒的延伸——下次遇险倾向反击
+
+  # === Deceived(被欺骗) ===
+  - event_type: Deceived
+    trait_name: 贪婪
+    base_delta: 10
+    weight: 1.0
+    # design_intent: "被骗是因贪"——反思,轻度自利偏移
+
+  - event_type: Deceived
+    trait_name: 信任
+    base_delta: -20
+    weight: 1.5
+    # design_intent: 背叛的强化系数,反映"背叛比善意更难忘"的人类认知不对称
+
+  - event_type: Deceived
+    trait_name: 愤怒
+    base_delta: 15
+    weight: 1.0
+    # design_intent: 欺骗引发背叛感——比单纯被攻击更重
+
+  - event_type: Deceived
+    trait_name: 谨慎
+    base_delta: 12
+    weight: 1.0
+    # design_intent: 学会识人之明——下次更难轻信
+
+  # === Helped(被帮助) ===
+  - event_type: Helped
+    trait_name: 信任
+    base_delta: 10
+    weight: 1.2
+    # design_intent: 善意会强化"信任"——但权重低于背叛(认知不对称)
+
+  - event_type: Helped
+    trait_name: 感激
+    base_delta: 15
+    weight: 1.0
+    # design_intent: 短期情感,会随时间衰减
+
+  - event_type: Helped
+    trait_name: 友善
+    base_delta: 8
+    weight: 1.0
+    # design_intent: 受人恩惠后倾向对外友善
+
+  # === TradeSuccess(交易成功) ===
+  - event_type: TradeSuccess
+    trait_name: 贪婪
+    base_delta: -5
+    weight: 1.0
+    # design_intent: 成功交易降低"必须赢"的执念
+
+  - event_type: TradeSuccess
+    trait_name: 精明
+    base_delta: 8
+    weight: 1.0
+    # design_intent: 交易成果转化为经验
+
+  # === TradeFail(交易失败) ===
+  - event_type: TradeFail
+    trait_name: 沮丧
+    base_delta: 12
+    weight: 1.0
+    # design_intent: 失败导致自我保护情绪
+
+  - event_type: TradeFail
+    trait_name: 谨慎
+    base_delta: 5
+    weight: 1.0
+    # design_intent: 失败教训——下次更小心
+
+  # === BattleWin(战斗胜利) ===
+  - event_type: BattleWin
+    trait_name: 自信
+    base_delta: 15
+    weight: 1.3
+    # design_intent: 战斗胜利强化自我认同——武侠叙事
+
+  - event_type: BattleWin
+    trait_name: 攻击性
+    base_delta: 10
+    weight: 1.0
+    # design_intent: 胜利鼓励"再来一次"的进攻欲
+
+  - event_type: BattleWin
+    trait_name: 勇敢
+    base_delta: 12
+    weight: 1.0
+    # design_intent: 武侠价值观——胜者更敢
+
+  # === BattleLose(战斗失败) ===
+  - event_type: BattleLose
+    trait_name: 恐惧
+    base_delta: 20
+    weight: 1.4
+    # design_intent: 失败恐惧——比 Attacked 更深(>Attacked 10),因自我卷入更深
+
+  - event_type: BattleLose
+    trait_name: 沮丧
+    base_delta: 15
+    weight: 1.0
+    # design_intent: 失败导致自我保护情绪
+
+  - event_type: BattleLose
+    trait_name: 谨慎
+    base_delta: 10
+    weight: 1.0
+    # design_intent: 失败教训——下次更小心
+
+  # === Hungry(饥饿) ===
+  - event_type: Hungry
+    trait_name: 绝望
+    base_delta: 8
+    weight: 1.0
+    # design_intent: 饥饿激发"一切皆失"的边缘情绪
+
+  - event_type: Hungry
+    trait_name: 攻击性
+    base_delta: 12
+    weight: 1.0
+    # design_intent: "饥则为盗"——武侠乱世叙事假设
+
+  # === Thirsty(口渴) ===
+  - event_type: Thirsty
+    trait_name: 绝望
+    base_delta: 5
+    weight: 1.0
+    # design_intent: 低于饥饿——口渴未至"为盗"程度
+
+  - event_type: Thirsty
+    trait_name: 虚弱
+    base_delta: 10
+    weight: 1.0
+    # design_intent: 身体性特质——与心智特质分离
+
+  # === SocialInteraction(社交互动) ===
+  - event_type: SocialInteraction
+    trait_name: 友善
+    base_delta: 3
+    weight: 1.0
+    # design_intent: 轻度强化——微调,非颠覆
+
+  - event_type: SocialInteraction
+    trait_name: 信任
+    base_delta: 2
+    weight: 1.0
+    # design_intent: 微量积累——信任来自多次正向互动
