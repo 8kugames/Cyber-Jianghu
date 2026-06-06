@@ -3,6 +3,7 @@
 // ============================================================================
 
 mod dialogue;
+mod persistence;
 mod relationship;
 mod relationship_migration;
 mod relationship_narrative;
