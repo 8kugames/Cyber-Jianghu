@@ -923,17 +923,19 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
     let agent_id = device.device_id;
     let persona_description = character.generate_system_prompt();
 
+    let initial_persona = cyber_jianghu_agent::component::persona::DynamicPersona::new(
+        agent_id,
+        agent_name,
+        &persona_description,
+    );
+    let persona = cyber_jianghu_agent::component::persona::ThreadSafePersona::new(initial_persona);
+
     let cognitive_config = CognitiveEngineConfig {
         agent_name: agent_name.to_string(),
-        persona: cyber_jianghu_agent::component::persona::DynamicPersona::new(
-            agent_id,
-            agent_name,
-            &persona_description,
-        ),
         temperature: config.llm.temperature,
         max_tokens_per_stage: config.llm.max_tokens,
     };
-    let mut engine = CognitiveEngine::new(llm_client.clone(), cognitive_config);
+    let mut engine = CognitiveEngine::new(llm_client.clone(), cognitive_config, &persona);
 
     // Outcome Memory（Hermes 模式）
     let outcome_db_path = data_dir.join("outcome_memory.db");

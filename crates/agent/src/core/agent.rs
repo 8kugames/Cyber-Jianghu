@@ -17,6 +17,7 @@ use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::ImmediateEventHandler;
 use crate::component::memory::MemoryManager;
 use crate::component::memory::backend::MemoryBackend;
+use crate::component::persona::{DynamicPersona, EventTraitMapper, ThreadSafePersona};
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -161,6 +162,12 @@ pub struct Agent {
 
     /// 当前 tick_id（原子计数，WS callback / 主循环共享）
     pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
+
+    /// 动态人设（事件演化 + 状态真相源，CU-5 唯一 source of truth）
+    pub(crate) persona: ThreadSafePersona,
+
+    /// 事件→特质映射器（每 tick 末尾 process_events 同步 events → traits）
+    pub(crate) event_trait_mapper: std::sync::Arc<EventTraitMapper>,
 }
 
 impl Agent {
@@ -232,6 +239,12 @@ impl Agent {
             consecutive_idle_count: 0,
             chaos_generator: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            persona: ThreadSafePersona::new(DynamicPersona::new(
+                Uuid::new_v4(),
+                "无名侠客",
+                "你是一名行走在江湖中的侠客。",
+            )),
+            event_trait_mapper: std::sync::Arc::new(EventTraitMapper::new()),
         }
     }
 
@@ -274,6 +287,32 @@ impl Agent {
                 engine.update_agent_name(name);
             }
         }
+    }
+
+    /// 获取 persona 引用
+    pub fn persona(&self) -> &ThreadSafePersona {
+        &self.persona
+    }
+
+    /// 获取 event_trait_mapper 引用
+    pub fn event_trait_mapper(&self) -> &std::sync::Arc<EventTraitMapper> {
+        &self.event_trait_mapper
+    }
+
+    /// 替换 event_trait_mapper（测试/扩展）
+    pub fn set_event_trait_mapper(&mut self, mapper: std::sync::Arc<EventTraitMapper>) {
+        self.event_trait_mapper = mapper;
+    }
+
+    /// 替换 persona 名称 + 基础描述（保留 traits / current_state）
+    ///
+    /// 由 `reload_character_persona` 在调用 `engine.update_persona` 之前调用，
+    /// 保证 Engine 刷新 prompt cache 看到最新 persona。
+    pub fn replace_persona_description(&self, name: &str, base_description: &str) {
+        self.persona.write(|p| {
+            p.name = name.to_string();
+            p.base_description = base_description.to_string();
+        });
     }
 
     /// 连接服务端
@@ -492,6 +531,13 @@ impl Agent {
                 .await
                 .process_events(events, cognitive_engine)
                 .await?;
+        }
+        // 同步事件 → persona traits 演化
+        let mapper = self.event_trait_mapper.clone();
+        for event in events {
+            self.persona.write(|p| {
+                mapper.apply_to_persona(event, p, event.tick_id);
+            });
         }
         Ok(())
     }

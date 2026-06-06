@@ -17,6 +17,7 @@ use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
+use crate::component::persona::{EventTraitMapper, ThreadSafePersona};
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -71,6 +72,10 @@ pub struct AgentBuilder {
     delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
     /// Attention Controller（规则过滤 + 轻量 LLM 排序）
     attention_controller: Option<crate::component::attention::AttentionController>,
+    /// 人设（CU-5：默认初始人设；调用方可通过 `with_persona` 注入）
+    persona: Option<ThreadSafePersona>,
+    /// 事件→特质映射器（默认 `EventTraitMapper::new()`）
+    event_trait_mapper: Option<std::sync::Arc<EventTraitMapper>>,
 }
 
 impl AgentBuilder {
@@ -101,6 +106,8 @@ impl AgentBuilder {
             world_state_store: None,
             delta_engine: None,
             attention_controller: None,
+            persona: None,
+            event_trait_mapper: None,
         }
     }
 
@@ -255,6 +262,18 @@ impl AgentBuilder {
         self
     }
 
+    /// 注入人设（CU-5：覆盖默认初始人设）
+    pub fn with_persona(mut self, persona: ThreadSafePersona) -> Self {
+        self.persona = Some(persona);
+        self
+    }
+
+    /// 注入事件→特质映射器
+    pub fn with_event_trait_mapper(mut self, mapper: std::sync::Arc<EventTraitMapper>) -> Self {
+        self.event_trait_mapper = Some(mapper);
+        self
+    }
+
     /// 启用即时事件处理（DB 持久化 + Session Triage LLM 架构）
     ///
     /// 创建 EventStore + ImmediateEventHandler。
@@ -376,7 +395,18 @@ impl AgentBuilder {
             engine.set_relationship_store(store.clone());
         }
 
-        Agent {
+        let persona = self.persona.unwrap_or_else(|| {
+            ThreadSafePersona::new(crate::component::persona::DynamicPersona::new(
+                Uuid::new_v4(),
+                "无名侠客",
+                "你是一名行走在江湖中的侠客。",
+            ))
+        });
+        let event_trait_mapper = self
+            .event_trait_mapper
+            .unwrap_or_else(|| std::sync::Arc::new(EventTraitMapper::new()));
+
+        let agent = Agent {
             config: self.config,
             client,
             decision_callback: self.decision_callback,
@@ -415,6 +445,15 @@ impl AgentBuilder {
             attention_controller: self.attention_controller,
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            persona,
+            event_trait_mapper,
+        };
+
+        // CU-5: Engine 需要从 Agent 拿 persona 引用（真相源在 Agent）
+        if let Some(ref engine) = agent.cognitive_engine {
+            engine.set_persona_ref(std::sync::Arc::new(agent.persona.clone()));
         }
+
+        agent
     }
 }
