@@ -108,8 +108,8 @@ pub use component::memory::{
     SearchMemoryParams, WorkingMemoryBackend,
 };
 pub use component::persona::{
-    AgentPrompt, DynamicPersona, EventTraitMapper, PersonaState, ThreadSafePersona, Trait,
-    TraitChange, TraitMappingRule, TraitType, get_agent_prompt, get_all_agent_prompts,
+    DynamicPersona, EventTraitMapper, PersonaState, ThreadSafePersona, Trait, TraitChange,
+    TraitMappingRule, TraitType,
 };
 pub use component::social::{KeyEvent, RelationshipMemory, RelationshipStore};
 
