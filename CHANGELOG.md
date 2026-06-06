@@ -22,7 +22,16 @@
 **升级影响**:
 - 老 Cyber-Jianghu Agent (无 `relationship.db` 或 `user_version=0`) 自动升级，无须手动迁移
 - `relationship.rs` 文件 800+ 行技术债已解决（842 → 754）
-- 5 项技术债登记(候选 Phase 6): validator 2 硬编码 / collector 3 硬编码 / protocol 常量 / executor 14-arm 保留 (KISS) / 候选议题 (Chronic LLM 验证 + CognitiveEngine pre-flight)
+- Issue 3 6 硬编码站点全部数据驱动化（5 done, executor 14-arm KISS 决策保留）
+
+### Fixed — Phase 5 自审闭环
+
+- **Server**: `tick/realtime.rs::close_session_if_whisper` 内部判定从字符串比较改为 `ActionRegistry::get().transmission == Transmission::Session` 字段 lookup（Phase 5 Step 3 仅去重 helper，未真正完成数据驱动闭环，本 commit 收尾）
+- **Server**: 加 `ValidatorKind`（`RecipeKnowledge` / `TeachRecipe`）+ `HighlightKind`（`Dialogue` / `Combat` / `Social`）两个 enum，`ActionConfigEntry` 加对应 2 字段（Option, `skip_serializing_if` 向后兼容）
+- **Server `actions.yaml`**: 5 动作补全配置 — `制造`/`传授` 标 `validator_kind`，`说话`/`攻击`/`给予` 标 `highlight_kind`
+- **Server `actions/validator.rs`**: 2 处 `if action_str == "制造"/"传授"` 字符串判断 → 1 个 `match config.validator_kind` dispatch
+- **Server `chronicle/collector.rs`**: 2 个 match (`"说话"/"攻击"/"给予"` 字符串) 改用 `config.highlight_kind` dispatch, 第二个 match 路由按 `highlight.event_type` 而非原始 action_type（消除 `"说话"/"攻击"/"给予"` 全部字符串字面量）
+- **Test**: `actions_transmission_test.rs` 加 2 测试（`validator_kind` + `highlight_kind` 反序列化契约, 各覆盖 None + 全部变体）
 
 ### Changed — 设备身份生命周期 v2 [BREAKING]
 
