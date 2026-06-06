@@ -323,6 +323,8 @@ pub trait LlmClientExt: LlmClient {
         mut config: super::openai_types::ChatExchangeConfig,
         max_retries: usize,
     ) -> Result<T> {
+        let baseline = self.retry_max_tokens_baseline();
+        let ceiling = self.retry_max_tokens_ceiling();
         for attempt in 0..=max_retries {
             match self.complete_json_with_config::<T>(prompt, config.clone()).await {
                 Ok(v) => return Ok(v),
@@ -330,11 +332,11 @@ pub trait LlmClientExt: LlmClient {
                     if !is_truncation_error(&e) || attempt == max_retries {
                         return Err(e);
                     }
-                    let new_max = (config.max_tokens.unwrap_or(4096) * 2).min(32_768);
+                    let new_max = (config.max_tokens.unwrap_or(baseline) * 2).min(ceiling);
                     tracing::warn!(
                         "[LLM retry] 截断检测 attempt={}, max_tokens {} -> {}",
                         attempt + 1,
-                        config.max_tokens.unwrap_or(4096),
+                        config.max_tokens.unwrap_or(baseline),
                         new_max
                     );
                     config.max_tokens = Some(new_max);
