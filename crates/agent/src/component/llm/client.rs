@@ -436,13 +436,6 @@ pub trait LlmClientExt: LlmClient {
         unreachable!()
     }
 
-    /// 完成一次结构化输出调用（JSON 模式，system + user 分离）
-    async fn complete_json_with_system<T: DeserializeOwned + Send>(
-        &self,
-        system: &str,
-        prompt: &str,
-    ) -> Result<T>;
-
     /// 使用 tool calling 的多轮对话，返回结构化 JSON
     async fn complete_json_with_tools<T: DeserializeOwned + Send>(
         &self,
@@ -903,15 +896,6 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
         let response = self.send_chat_exchange(messages, None, config).await?;
         let content = response.content.unwrap_or_default();
         parse_json_response::<D>(&content)
-    }
-
-    async fn complete_json_with_system<D: DeserializeOwned + Send>(
-        &self,
-        system: &str,
-        prompt: &str,
-    ) -> Result<D> {
-        let response = self.complete_with_system(system, prompt).await?;
-        parse_json_response::<D>(&response)
     }
 
     async fn complete_json_with_tools<D: DeserializeOwned + Send>(
