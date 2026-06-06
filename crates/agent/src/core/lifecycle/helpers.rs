@@ -32,6 +32,14 @@ impl super::super::Agent {
         if let Some(handle) = self.session_triage_handle.take() {
             handle.abort();
         }
+        if let Some(ref store) = self.persona_store
+            && store.config_flush_on_shutdown()
+        {
+            let tick_id = self.current_tick.load(std::sync::atomic::Ordering::Relaxed);
+            if let Err(e) = self.persona.read(|p| store.snapshot_now(p, tick_id)) {
+                warn!("persona 退出 flush 失败: {}", e);
+            }
+        }
         self.client.close().await;
         info!("Agent '{}' stopped", self.character_name());
         Ok(())

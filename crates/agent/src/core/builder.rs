@@ -17,7 +17,7 @@ use crate::component::dialogue::DialogueContextManager;
 use crate::component::immediate::{EventStore, ImmediateEventHandler};
 use crate::component::llm::LlmClient;
 use crate::component::memory::{MemoryManager, MemoryManagerConfig};
-use crate::component::persona::{EventTraitMapper, ThreadSafePersona};
+use crate::component::persona::{EventTraitMapper, PersonaStore, ThreadSafePersona};
 use crate::component::social::DialogueClient;
 use crate::component::social::RelationshipStore;
 use crate::config::{CharacterConfig, Config, DeviceConfig};
@@ -76,6 +76,7 @@ pub struct AgentBuilder {
     persona: Option<ThreadSafePersona>,
     /// 事件→特质映射器（默认 `EventTraitMapper::new()`）
     event_trait_mapper: Option<std::sync::Arc<EventTraitMapper>>,
+    persona_store: Option<std::sync::Arc<PersonaStore>>,
 }
 
 impl AgentBuilder {
@@ -108,6 +109,7 @@ impl AgentBuilder {
             attention_controller: None,
             persona: None,
             event_trait_mapper: None,
+            persona_store: None,
         }
     }
 
@@ -274,6 +276,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn with_persona_store(mut self, store: std::sync::Arc<PersonaStore>) -> Self {
+        self.persona_store = Some(store);
+        self
+    }
+
     /// 启用即时事件处理（DB 持久化 + Session Triage LLM 架构）
     ///
     /// 创建 EventStore + ImmediateEventHandler。
@@ -402,9 +409,14 @@ impl AgentBuilder {
                 "你是一名行走在江湖中的侠客。",
             ))
         });
-        let event_trait_mapper = self
-            .event_trait_mapper
-            .unwrap_or_else(|| std::sync::Arc::new(EventTraitMapper::new()));
+        let event_trait_mapper = self.event_trait_mapper.unwrap_or_else(|| {
+            std::sync::Arc::new(
+                crate::component::persona::rules_loader::load_event_trait_rules(
+                    &crate::config::config_dir().join("persona_event_rules.yaml"),
+                )
+                .expect("persona_event_rules.yaml 加载失败 — 启动终止(创世 fail-fast)"),
+            )
+        });
 
         let agent = Agent {
             config: self.config,
@@ -447,6 +459,7 @@ impl AgentBuilder {
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
             persona,
             event_trait_mapper,
+            persona_store: self.persona_store,
         };
 
         // CU-5: Engine 需要从 Agent 拿 persona 引用（真相源在 Agent）
