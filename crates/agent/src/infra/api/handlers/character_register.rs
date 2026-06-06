@@ -531,10 +531,23 @@ pub(crate) async fn generate_character_handler(
         enable_thinking: Some(false),
     };
     match llm_client
-        .complete_json_with_config_and_retry::<serde_json::Value>(&prompt, chat_config, 2)
+        .complete_json_with_config_and_retry_extracted::<serde_json::Value>(
+            &prompt,
+            chat_config,
+            2,
+        )
         .await
     {
-        Ok(json_value) => {
+        Ok(extracted) => {
+            if let Some(ref rc) = extracted.reasoning_content {
+                let preview: String = rc.chars().take(120).collect();
+                info!(
+                    "[character] LLM reasoning_content: {} chars, preview={:?}",
+                    rc.len(),
+                    preview
+                );
+            }
+            let json_value = extracted.value;
             // Schema validation before deserialization
             if let Err(errors) =
                 validate_against_schema(&json_value, &config.character_generation.fields)

@@ -366,10 +366,16 @@ pub(crate) async fn generate_biography_for_agent(
         prompt
     );
 
-    let output = llm_client
-        .complete_json::<BiographyOutput>(&json_prompt)
+    let chat_config = crate::component::llm::ChatExchangeConfig {
+        model: llm_client.model_name(),
+        temperature: llm_client.temperature(),
+        max_tokens: None,
+        enable_thinking: None,
+    };
+    let extracted = llm_client
+        .complete_json_with_config_and_retry_extracted::<BiographyOutput>(&json_prompt, chat_config, 2)
         .await?;
-    let bio = output.biography.trim().to_string();
+    let bio = extracted.value.biography.trim().to_string();
 
     // 来源：LLM prompt 要求"不少于100字不超过2000字"，10 为容低下限
     const BIOGRAPHY_MIN_CHARS: usize = 10;

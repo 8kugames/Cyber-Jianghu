@@ -1182,6 +1182,10 @@ impl LlmClient for DirectLlmClient {
         self.config.context_window_tokens
     }
 
+    fn temperature(&self) -> f32 {
+        self.config.temperature
+    }
+
     async fn send_chat_exchange(
         &self,
         messages: Vec<ChatMessage>,

@@ -268,10 +268,17 @@ impl SessionTriageEngine {
         let llm_ref = llm.clone();
         drop(llm);
 
-        let result: TriageLlmOutput = llm_ref
-            .complete_json_with_system(&system, &prompt)
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: llm_ref.model_name(),
+            temperature: llm_ref.temperature(),
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = llm_ref
+            .complete_json_with_system_and_retry_extracted(&system, &prompt, chat_config, 2)
             .await
             .map_err(|e| anyhow::anyhow!("LLM triage 调用失败: {}", e))?;
+        let result: TriageLlmOutput = extracted.value;
 
         // 校验 + 转换
         let decisions: Vec<TriageDecision> = result
@@ -474,10 +481,17 @@ event_id 必须是以下值之一：{event_ids}"#,
         let llm_ref = llm.clone();
         drop(llm);
 
-        let result: serde_json::Value = llm_ref
-            .complete_json_with_system(&prompt, "")
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: llm_ref.model_name(),
+            temperature: llm_ref.temperature(),
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = llm_ref
+            .complete_json_with_system_and_retry_extracted(&prompt, "", chat_config, 2)
             .await
             .map_err(|e| anyhow::anyhow!("LLM 日记生成失败: {}", e))?;
+        let result: serde_json::Value = extracted.value;
 
         let diary = result
             .get("diary")
@@ -625,17 +639,26 @@ event_id 必须是以下值之一：{event_ids}"#,
         let llm_ref = llm.clone();
         drop(llm);
 
-        let result: serde_json::Value = llm_ref
-            .complete_json_with_system(
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: llm_ref.model_name(),
+            temperature: llm_ref.temperature(),
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = llm_ref
+            .complete_json_with_system_and_retry_extracted(
                 &format!(
                     "你是{agent_name}，为{date_str}撰写今日纪要。",
                     agent_name = self.agent_name,
                     date_str = date_str
                 ),
                 &prompt,
+                chat_config,
+                2,
             )
             .await
             .map_err(|e| anyhow::anyhow!("LLM摘要生成失败: {}", e))?;
+        let result: serde_json::Value = extracted.value;
 
         let narrative = result
             .get("narrative")

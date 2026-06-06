@@ -80,13 +80,22 @@ impl super::Agent {
                 return;
             };
 
-            let deltas: std::collections::HashMap<usize, i32> = match container
-                .read()
-                .await
-                .complete_json::<Vec<serde_json::Value>>(&prompt)
-                .await
-            {
-                Ok(results) => results
+            let deltas: std::collections::HashMap<usize, i32> = {
+                let llm_client = container.read().await.clone();
+                let chat_config = crate::component::llm::ChatExchangeConfig {
+                    model: llm_client.model_name(),
+                    temperature: llm_client.temperature(),
+                    max_tokens: None,
+                    enable_thinking: None,
+                };
+                match llm_client
+                    .complete_json_with_config_and_retry_extracted::<Vec<serde_json::Value>>(
+                        &prompt, chat_config, 2,
+                    )
+                    .await
+                {
+                Ok(extracted) => extracted
+                    .value
                     .into_iter()
                     .filter_map(|v| {
                         let idx = v.get("index")?.as_u64()? as usize;
@@ -97,6 +106,7 @@ impl super::Agent {
                 Err(e) => {
                     tracing::warn!("社交事件 LLM 评估失败: {}", e);
                     return;
+                }
                 }
             };
 
