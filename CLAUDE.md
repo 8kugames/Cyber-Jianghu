@@ -207,7 +207,7 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
 ```
 
 - **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain, driven by CognitiveEngine (single LLM call with four-stage structured output: Perception→Motivation→Planning→Decision)
-- **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中（`soul/earth/`）。LLM 在推理过程中按需调用工具（`query_world`, `search_memory`, `get_action_detail` 等），非独立管道步骤
+- **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中（`soul/earth/`）。LLM 在推理过程中按需调用工具（`query_world`, `search_memory`, `get_action_detail`, `query_rules` 等），非独立管道步骤
 - **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type validation) → Layer 2 (RuleEngine validation) → Layer 3 (LLM intent review). Rejection feedback is narrative-化, ActorSoul only sees natural language
 
 #### Decision Context Pipeline
@@ -243,7 +243,7 @@ This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/co
 - `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
 - `src/soul/actor/summary_window.rs` - Sliding context window for action history
 - `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
-- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环）、`executor.rs`（工具分发调度）、`budget.rs`（从 context_window_tokens 推导的 tool result 预算）、`compactor.rs`（JSON 感知结构精简）、`loop_guard.rs`（防循环调用）、`config.rs`（EarthSoul 配置）、`*_tool.rs`（各工具实现：state/memory/skill/relationship/recipe）
+- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环）、`executor.rs`（工具分发调度）、`budget.rs`（从 context_window_tokens 推导的 tool result 预算）、`compactor.rs`（JSON 感知结构精简）、`loop_guard.rs`（防循环调用）、`config.rs`（EarthSoul 配置）、`*_tool.rs`（各工具实现：state/memory/skill/relationship/recipe/rule）
 - `src/component/memory/` - Three-tier memory system with SQLite backends
 - `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
 - `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
@@ -362,7 +362,7 @@ use super::builder::AgentBuilder;
 | Server configuration | `crates/server/config/*.yaml` |
 | World-building rules | `crates/server/config/world_building_rules.yaml` |
 | Skill definitions | `crates/server/config/skills/{category}/{skill_id}/SKILL.md` |
-| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` |
+| Prompt templates (agent) | `crates/server/config/prompt_templates.yaml` (含 `rule_sections` 按需检索配置) |
 | Database migrations | `crates/server/migrations/*.sql` |
 | Docker stack | `docker-compose.yml`, `docker-compose.prod.yml` |
 

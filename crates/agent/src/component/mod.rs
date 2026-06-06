@@ -11,3 +11,5 @@ pub mod memory;
 pub mod persona;
 pub mod social;
 pub mod state_store;
+
+pub mod rule_cache;

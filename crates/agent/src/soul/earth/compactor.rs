@@ -26,6 +26,7 @@ pub fn compact_tool_result(
         "search_memory" | "recall_archived" => compact_memory(value, budget_chars),
         "skill_view" => compact_skill(value, budget_chars),
         "get_relationship" | "list_relationships" => compact_relationship(value, budget_chars),
+        "query_rules" => compact_query_rules(value, budget_chars),
         _ => value.clone(),
     }
 }
@@ -141,6 +142,33 @@ fn compact_relationship(value: &serde_json::Value, budget: usize) -> serde_json:
     let max_rels = (budget / AVG_REL_CHARS).clamp(5, 30);
     if let Some(rels) = v.get_mut("relationships").and_then(|r| r.as_array_mut()) {
         rels.truncate(max_rels);
+    }
+    v
+}
+
+/// query_rules 紧凑化：按 category 截断 content
+const AVG_RULE_CONTENT_CHARS: usize = 200;
+const RULE_CONTENT_RATIO: f64 = 0.9;
+
+fn compact_query_rules(value: &serde_json::Value, budget: usize) -> serde_json::Value {
+    let mut v = value.clone();
+    if let Some(rules) = v.get_mut("rules").and_then(|r| r.as_array_mut()) {
+        let max_rules = (budget / AVG_RULE_CONTENT_CHARS).clamp(1, 5);
+        rules.truncate(max_rules);
+        let content_limit = (budget as f64 * RULE_CONTENT_RATIO) as usize;
+        for rule in rules.iter_mut() {
+            if let Some(content) = rule.get("content").and_then(|c| c.as_str()) {
+                if content.chars().count() > content_limit {
+                    let truncated: String = content.chars().take(content_limit).collect();
+                    if let Some(obj) = rule.as_object_mut() {
+                        obj.insert(
+                            "content".into(),
+                            serde_json::json!(format!("{}…[已截断]", truncated)),
+                        );
+                    }
+                }
+            }
+        }
     }
     v
 }
@@ -284,5 +312,49 @@ mod tests {
         let json_str = compacted.to_string();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         assert!(parsed["success"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn test_compact_query_rules_truncates_rules() {
+        let long_content: String = "生存规则内容详细描述。".repeat(50);
+        let value = serde_json::json!({
+            "success": true,
+            "rules": (0..6).map(|i| serde_json::json!({
+                "category": format!("cat-{}", i),
+                "name": format!("分类{}", i),
+                "content": long_content.clone(),
+            })).collect::<Vec<_>>(),
+        });
+
+        // budget=600 → max_rules = 600/200 = 3, content_limit = 600*0.9 = 540
+        let compacted = compact_tool_result("query_rules", &value, 600);
+        let rules = compacted["rules"].as_array().unwrap();
+        assert!(rules.len() <= 3, "应截断为最多 3 条规则");
+        // content 应被截断
+        let content = rules[0]["content"].as_str().unwrap();
+        assert!(content.contains("[已截断]"), "超长 content 应被截断");
+    }
+
+    #[test]
+    fn test_compact_query_rules_no_truncation_when_within_budget() {
+        let value = serde_json::json!({
+            "success": true,
+            "rules": [
+                {"category": "survival", "name": "生存规则", "content": "饥饿值超过80将严重损害健康。"},
+            ],
+        });
+
+        // budget=1000 足够容纳短内容
+        let compacted = compact_tool_result("query_rules", &value, 1000);
+        let rules = compacted["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert!(!rules[0]["content"].as_str().unwrap().contains("[已截断]"));
+    }
+
+    #[test]
+    fn test_compact_query_rules_empty_rules() {
+        let value = serde_json::json!({"success": true, "rules": []});
+        let compacted = compact_tool_result("query_rules", &value, 600);
+        assert_eq!(compacted["rules"].as_array().unwrap().len(), 0);
     }
 }
