@@ -22,7 +22,7 @@ use super::stages::CognitiveStage;
 use super::summary_window::{NarrativeSummary, NarrativeSummaryWindow};
 use crate::component::llm::conversation::ConversationHistory;
 use crate::component::llm::{ConversationInput, ConversationTurn, LlmClient, LlmClientExt};
-use crate::component::persona::DynamicPersona;
+use crate::component::persona::{DynamicPersona, ThreadSafePersona};
 use crate::component::social::RelationshipStore;
 use crate::infra::api::cognitive_context::load_available_actions_from_file;
 use crate::infra::api::thinking_log;
@@ -31,12 +31,13 @@ use crate::models::Intent;
 use cyber_jianghu_protocol::WorldState;
 
 /// 认知引擎配置
+///
+/// persona 不在此处：真相源是 `Agent.persona`（`ThreadSafePersona`），
+/// Engine 通过 `persona_ref` 引用读取快照。详见 CU-5 docstring on `update_persona`。
 #[derive(Clone, Debug)]
 pub struct CognitiveEngineConfig {
     /// Agent 名称
     pub agent_name: String,
-    /// Agent 动态人设
-    pub persona: DynamicPersona,
     /// 温度参数
     pub temperature: f32,
     /// 每阶段最大 token 数
@@ -45,12 +46,8 @@ pub struct CognitiveEngineConfig {
 
 impl Default for CognitiveEngineConfig {
     fn default() -> Self {
-        let agent_id = uuid::Uuid::new_v4();
-        let persona = DynamicPersona::new(agent_id, "无名侠客", "你是一名行走在江湖中的侠客。");
-
         Self {
             agent_name: "无名侠客".to_string(),
-            persona,
             temperature: 0.7,
             max_tokens_per_stage: 1024,
         }
@@ -187,18 +184,25 @@ pub struct CognitiveEngine {
     last_reasoning_content: std::sync::Mutex<Option<String>>,
     /// Semi-static prompt 内容（action index + skill index），配置更新时重建
     semi_static_message: std::sync::RwLock<String>,
+    /// Agent 人设引用（真相源在 Agent, Engine 通过 Arc 读取快照构建 prompt）
+    persona_ref: std::sync::RwLock<Option<std::sync::Arc<ThreadSafePersona>>>,
 }
 
 impl CognitiveEngine {
     /// 创建新的认知引擎
-    pub fn new(llm_client: Arc<dyn LlmClient>, config: CognitiveEngineConfig) -> Self {
-        let persona_desc = config.persona.generate_description();
+    pub fn new(
+        llm_client: Arc<dyn LlmClient>,
+        config: CognitiveEngineConfig,
+        persona: &ThreadSafePersona,
+    ) -> Self {
+        let (persona_desc, persona_for_cache) =
+            persona.read(|p| (p.generate_description(), p.clone()));
         let (action_descriptions, action_field_hints) = Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
             action_field_hints,
-            &config.persona,
+            &persona_for_cache,
         );
 
         let prompt_template = Self::load_prompt_template();
@@ -224,6 +228,7 @@ impl CognitiveEngine {
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
+            persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
         };
         engine.load_skill_cache_from_disk();
         // 初始化 semi-static 内容
@@ -288,14 +293,16 @@ impl CognitiveEngine {
         llm_client: Arc<dyn LlmClient>,
         config: CognitiveEngineConfig,
         window_size: usize,
+        persona: &ThreadSafePersona,
     ) -> Self {
-        let persona_desc = config.persona.generate_description();
+        let (persona_desc, persona_for_cache) =
+            persona.read(|p| (p.generate_description(), p.clone()));
         let (action_descriptions, action_field_hints) = Self::load_actions_list();
         let prompt_cache = PromptCache::new(
             persona_desc,
             action_descriptions,
             action_field_hints,
-            &config.persona,
+            &persona_for_cache,
         );
 
         let prompt_template = Self::load_prompt_template();
@@ -319,6 +326,7 @@ impl CognitiveEngine {
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
+            persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
         };
         engine.load_skill_cache_from_disk();
         // 初始化 semi-static 内容
@@ -540,14 +548,18 @@ impl CognitiveEngine {
 
     /// 使用默认配置创建
     pub fn with_defaults(llm_client: Arc<dyn LlmClient>) -> Self {
-        Self::new(llm_client, CognitiveEngineConfig::default())
+        let default_persona = ThreadSafePersona::new(DynamicPersona::new(
+            Uuid::new_v4(),
+            "无名侠客",
+            "你是一名行走在江湖中的侠客。",
+        ));
+        Self::new(llm_client, CognitiveEngineConfig::default(), &default_persona)
     }
 
     /// 更新 Agent 名称（注册新角色后调用）
     pub fn update_agent_name(&self, new_name: &str) {
         let mut config = self.config.write().expect("rwlock poisoned");
         config.agent_name = new_name.to_string();
-        config.persona.name = new_name.to_string();
         info!("认知引擎 agent_name 已更新: {}", new_name);
     }
 
@@ -808,31 +820,40 @@ impl CognitiveEngine {
     }
 
     /// 更新 Agent 人设（rebirth 后调用）
-    pub fn update_persona(&self, name: &str, system_prompt: &str) {
-        // BUG-FIX: 避免 self-deadlock — config.write() 和 build_system_message(config.read()) 冲突
-        // 必须释放 config + prompt_cache 锁之后再调用 build_system_message
-        let use_tool_calling = self.llm_client.supports_tool_calling();
-        {
-            let mut config = self.config.write().expect("rwlock poisoned");
-            config.agent_name = name.to_string();
-            config.persona.name = name.to_string();
-            config.persona.base_description = system_prompt.to_string();
-
-            let new_desc = config.persona.generate_description();
-            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
-            cache.invalidate_persona(new_desc, &config.persona);
-            // config + cache 在此作用域结束时释放
+    ///
+    /// 行为契约:
+    /// - 改: agent_name
+    /// - 保留: persona.traits, persona.current_state（历史事件积累的状态）
+    /// - 刷新: prompt_cache（下一 tick 重建 persona_desc 和 persona_summary）
+    ///
+    /// 实施位置: 此方法当前在 CognitiveEngine 内，persona 真相源在 Agent。
+    /// 调用方必须在调用前更新 agent.persona.name + base_description。
+    pub fn update_persona(&self, name: &str, _system_prompt: &str) {
+        self.update_agent_name(name);
+        if let Some(ref arc) = *self.persona_ref.read().expect("rwlock poisoned") {
+            self.invalidate_persona_cache(arc);
         }
 
-        // 重建 system message（persona 变更）— 此时无锁，build_system_message 可安全获取 config.read()
+        // 重建 system message（persona 变更）
+        let use_tool_calling = self.llm_client.supports_tool_calling();
         let system_msg = self.build_system_message(use_tool_calling);
         self.update_conversation_system_message(&system_msg);
 
-        info!(
-            "认知引擎人设已更新: name={}, prompt_len={}",
-            name,
-            system_prompt.len()
-        );
+        info!("认知引擎人设已更新: name={}", name);
+    }
+
+    /// 每 tick 末尾调用：刷新 prompt cache 让下一 tick LLM 看到最新 traits
+    pub fn invalidate_persona_cache(&self, persona: &ThreadSafePersona) {
+        let (new_desc, persona_clone) =
+            persona.read(|p| (p.generate_description(), p.clone()));
+        let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+        cache.invalidate_persona(new_desc, &persona_clone);
+    }
+
+    /// 设置 Agent 人设引用（Agent 构造后由 builder 调用一次）
+    pub fn set_persona_ref(&self, persona: std::sync::Arc<ThreadSafePersona>) {
+        let mut guard = self.persona_ref.write().expect("rwlock poisoned");
+        *guard = Some(persona);
     }
 
     // ========================================================================
@@ -852,10 +873,17 @@ impl CognitiveEngine {
         memory_context: &str,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
-        let (agent_name, persona) = {
+        let agent_name = {
             let cfg = self.config.read().expect("rwlock poisoned");
-            (cfg.agent_name.clone(), cfg.persona.clone())
+            cfg.agent_name.clone()
         };
+        let persona = self
+            .persona_ref
+            .read()
+            .expect("rwlock poisoned")
+            .clone()
+            .expect("persona_ref not set — call set_persona_ref after build")
+            .read(|p| p.clone());
         let tick_id = world_state.tick_id;
         let agent_id = world_state.agent_id.unwrap_or_default();
 
@@ -1205,10 +1233,17 @@ impl CognitiveEngine {
         memory_context: &str,
         validation_feedback: Option<&str>,
     ) -> Result<CognitiveChain> {
-        let (agent_name, persona) = {
+        let agent_name = {
             let cfg = self.config.read().expect("rwlock poisoned");
-            (cfg.agent_name.clone(), cfg.persona.clone())
+            cfg.agent_name.clone()
         };
+        let persona = self
+            .persona_ref
+            .read()
+            .expect("rwlock poisoned")
+            .clone()
+            .expect("persona_ref not set — call set_persona_ref after build")
+            .read(|p| p.clone());
 
         let start_time = std::time::Instant::now();
         info!("[{}-{}] 开始认知流程（旧式降级）...", agent_name, tick_id);
