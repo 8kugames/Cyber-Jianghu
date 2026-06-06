@@ -501,9 +501,16 @@ impl Default for RuntimeConfig {
 // LLM 配置（仅 Cognitive 模式使用）
 // ============================================================================
 
-const DEFAULT_LLM_PROVIDER: &str = "ollama";
-const DEFAULT_LLM_TEMPERATURE: f32 = 0.7;
-pub(crate) use cyber_jianghu_protocol::DEFAULT_LLM_MAX_TOKENS;
+// 所有 LLM/agent 相关默认常量从 protocol crate 引入,避免重复定义。
+// 单一来源原则: 改默认值仅需改 protocol/src/lib.rs 一处。
+pub(crate) use cyber_jianghu_protocol::{
+    DEFAULT_CONTEXT_WINDOW_TOKENS, DEFAULT_ENABLE_STREAMING, DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
+    DEFAULT_IDLE_ROTATE_THRESHOLD, DEFAULT_KEEP_RECENT_TURNS, DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_LLM_PROVIDER, DEFAULT_LLM_TEMPERATURE, DEFAULT_NARRATIVE_WINDOW_SIZE,
+    DEFAULT_RECONNECT_DELAY_SECS, DEFAULT_SEMANTIC_DEDUP_HISTORY,
+    DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS, DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
+    DEFAULT_SUMMARY_TRIGGER_RATIO,
+};
 
 /// 单个模型的独立配置（允许 per-model max_tokens）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -518,18 +525,6 @@ pub struct FallbackModelConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u32>,
 }
-const DEFAULT_IDLE_ROTATE_THRESHOLD: u32 = 24;
-const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 32000;
-const DEFAULT_SUMMARY_TRIGGER_RATIO: f64 = 0.75;
-const DEFAULT_KEEP_RECENT_TURNS: u32 = 4;
-const DEFAULT_RECONNECT_DELAY_SECS: u64 = 5;
-const DEFAULT_EXECUTION_RESULT_TIMEOUT_MS: u64 = 3000;
-const DEFAULT_SOUL_CYCLE_REPORT_RETRIES: u32 = 3;
-const DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS: u64 = 100;
-pub(crate) const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 5;
-/// 语义去重历史窗口：比较最近 N 条同类 intent 的语义相似度
-pub(crate) const DEFAULT_SEMANTIC_DEDUP_HISTORY: usize = 1;
-const DEFAULT_ENABLE_STREAMING: bool = true;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -649,33 +644,61 @@ fn default_llm_max_tokens() -> u32 {
     DEFAULT_LLM_MAX_TOKENS
 }
 
+fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(fallback)
+}
+
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            provider: DEFAULT_LLM_PROVIDER.to_string(),
+            provider: env_or("CYBER_JIANGHU_LLM_PROVIDER", DEFAULT_LLM_PROVIDER.to_string()),
             base_url: None,
             api_key: None,
             model: None,
-            temperature: std::env::var("CYBER_JIANGHU_LLM_TEMPERATURE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(DEFAULT_LLM_TEMPERATURE),
-            max_tokens: std::env::var("CYBER_JIANGHU_LLM_MAX_TOKENS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(DEFAULT_LLM_MAX_TOKENS),
+            temperature: env_or("CYBER_JIANGHU_LLM_TEMPERATURE", DEFAULT_LLM_TEMPERATURE),
+            max_tokens: env_or("CYBER_JIANGHU_LLM_MAX_TOKENS", DEFAULT_LLM_MAX_TOKENS),
             fallback_models: Vec::new(),
             models: Vec::new(),
-            idle_rotate_threshold: DEFAULT_IDLE_ROTATE_THRESHOLD,
-            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
-            summary_trigger_ratio: DEFAULT_SUMMARY_TRIGGER_RATIO,
-            keep_recent_turns: DEFAULT_KEEP_RECENT_TURNS,
-            reconnect_delay_secs: DEFAULT_RECONNECT_DELAY_SECS,
-            execution_result_timeout_ms: DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
-            soul_cycle_report_retries: DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
-            soul_cycle_report_base_delay_ms: DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
-            narrative_window_size: DEFAULT_NARRATIVE_WINDOW_SIZE,
-            enable_streaming: DEFAULT_ENABLE_STREAMING,
+            idle_rotate_threshold: env_or(
+                "CYBER_JIANGHU_IDLE_ROTATE_THRESHOLD",
+                DEFAULT_IDLE_ROTATE_THRESHOLD,
+            ),
+            context_window_tokens: env_or(
+                "CYBER_JIANGHU_CONTEXT_WINDOW_TOKENS",
+                DEFAULT_CONTEXT_WINDOW_TOKENS,
+            ),
+            summary_trigger_ratio: env_or(
+                "CYBER_JIANGHU_SUMMARY_TRIGGER_RATIO",
+                DEFAULT_SUMMARY_TRIGGER_RATIO,
+            ),
+            keep_recent_turns: env_or(
+                "CYBER_JIANGHU_KEEP_RECENT_TURNS",
+                DEFAULT_KEEP_RECENT_TURNS,
+            ),
+            reconnect_delay_secs: env_or(
+                "CYBER_JIANGHU_RECONNECT_DELAY_SECS",
+                DEFAULT_RECONNECT_DELAY_SECS,
+            ),
+            execution_result_timeout_ms: env_or(
+                "CYBER_JIANGHU_EXECUTION_RESULT_TIMEOUT_MS",
+                DEFAULT_EXECUTION_RESULT_TIMEOUT_MS,
+            ),
+            soul_cycle_report_retries: env_or(
+                "CYBER_JIANGHU_SOUL_CYCLE_REPORT_RETRIES",
+                DEFAULT_SOUL_CYCLE_REPORT_RETRIES,
+            ),
+            soul_cycle_report_base_delay_ms: env_or(
+                "CYBER_JIANGHU_SOUL_CYCLE_REPORT_BASE_DELAY_MS",
+                DEFAULT_SOUL_CYCLE_REPORT_BASE_DELAY_MS,
+            ),
+            narrative_window_size: env_or(
+                "CYBER_JIANGHU_NARRATIVE_WINDOW_SIZE",
+                DEFAULT_NARRATIVE_WINDOW_SIZE,
+            ),
+            enable_streaming: env_or("CYBER_JIANGHU_ENABLE_STREAMING", DEFAULT_ENABLE_STREAMING),
             enable_thinking: None,
         }
     }
