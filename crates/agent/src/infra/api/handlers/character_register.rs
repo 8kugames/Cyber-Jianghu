@@ -527,14 +527,11 @@ pub(crate) async fn generate_character_handler(
     let chat_config = crate::component::llm::ChatExchangeConfig {
         model: llm_client.model_name(),
         temperature: 0.9,
-        // 4096 = 1024 留给 thinking + 1024 给 JSON + 2048 余量
-        // 2048 对 DashScope/Kimi 风格 reasoning 模型（minimaxi M2.7）会因 thinking 耗尽 token，
-        // 永远得不到 JSON 响应。minimaxi API 文档确认 `enable_thinking` 字段被忽略。
-        max_tokens: 4096,
+        max_tokens: None,
         enable_thinking: Some(false),
     };
     match llm_client
-        .complete_json_with_config::<serde_json::Value>(&prompt, chat_config)
+        .complete_json_with_config_and_retry::<serde_json::Value>(&prompt, chat_config, 2)
         .await
     {
         Ok(json_value) => {

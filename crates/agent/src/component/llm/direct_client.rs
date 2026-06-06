@@ -1187,7 +1187,7 @@ impl LlmClient for DirectLlmClient {
             model: config.model,
             messages,
             temperature: Some(config.temperature),
-            max_tokens: Some(config.max_tokens),
+            max_tokens: config.max_tokens.or(Some(self.config.max_tokens)),
             tools: tools.map(|t| t.to_vec()),
             tool_choice: tools.and(Some(serde_json::json!("auto"))),
             enable_thinking: config.enable_thinking,
@@ -1240,7 +1240,7 @@ impl LlmClient for DirectLlmClient {
         let config = super::openai_types::ChatExchangeConfig {
             model: self.config.get_model_with_default(),
             temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
+            max_tokens: Some(self.config.max_tokens),
             enable_thinking: self.config.enable_thinking,
         };
         let result = crate::soul::earth::tool_loop::run_tool_loop(
@@ -1298,7 +1298,7 @@ impl LlmClient for DirectLlmClient {
         let config = super::openai_types::ChatExchangeConfig {
             model: self.config.get_model_with_default(),
             temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
+            max_tokens: Some(self.config.max_tokens),
             enable_thinking: self.config.enable_thinking,
         };
         let result = crate::soul::earth::tool_loop::run_tool_loop(
