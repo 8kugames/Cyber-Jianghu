@@ -48,6 +48,14 @@
 #   - martial: 江湖技能
 #   - social: 社交
 #   - economic: 经济
+#
+# transmission 字段（Phase 5 数据驱动：动作执行后如何传播）：
+#   - broadcast: 公共频道广播给同 Location 所有 Agent（当前仅 说话 用）
+#   - session:   定向 + 服务器维护 Dialogue Session（当前仅 私语 用）
+#   - silent:    触发方动作，仅修改状态不广播（默认；其他 18 动作均属此类）
+#
+# display_name 字段（chronicle_generator 展示用，未配置时回退到 name）：
+#   仅当展示名与 name 不同时配置；当前 6 个动作有美化名
 # ============================================================================
 
 version: "0.1.0"
@@ -66,9 +74,11 @@ data:
   # ==========================================================================
   休息:
     name: "休息"
+    display_name: "静修"
     description: "不执行任何主动操作，静待下一个 tick。恢复效果由 effects 定义：通常恢复 stamina 和 sanity。此动作不会拾取、使用或丢弃任何物品，也不会与任何对象产生交互。切勿将 休息 与 进食/饮水/拾取 等动作混淆。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation: {}
     requirements:
       - requirement_type: attribute
@@ -93,6 +103,7 @@ data:
     description: "对背包中的物品进行使用操作。根据物品类型产生不同效果，此动作需要指定 item_id。不会消耗或丢弃物品（除非物品本身是一次性消耗品）。注意：进食 和 饮水 是独立的进食/饮水动作，不要将 使用 误用于进食饮水。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - item_id
@@ -109,6 +120,7 @@ data:
     description: '消耗食物恢复饥饿度。长期不进食将导致饥饿值归零而死亡。必须指定食物的 item_id（如 item_id: "馒头"）。此动作从背包中移除食物并恢复 hunger 属性。'
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - item_id
@@ -130,6 +142,7 @@ data:
     description: '消耗液体恢复口渴度。长期不饮水将导致脱水死亡。必须指定液体的 item_id（如 item_id: "水"）。此动作从背包中移除液体并恢复 thirst 属性。'
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - item_id
@@ -151,6 +164,7 @@ data:
     description: "从地面拾取物品到背包。必须指定要拾取的物品 ID（item_id）和数量（quantity）。此动作从当前位置的地面物品列表中移除指定物品，添加到执行者的背包。拾取消耗 stamina。注意：拾取是将地面物品收入背包，不是饮用或进食。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - item_id
@@ -168,6 +182,7 @@ data:
     description: "从背包中丢弃物品到地面。必须指定物品 ID（item_id）和数量（quantity）。此动作从执行者背包中移除指定物品，放置到当前位置的地面。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - item_id
@@ -187,9 +202,11 @@ data:
 
   移动:
     name: "移动"
+    display_name: "行走"
     description: "移动到相邻位置。必须指定目标位置 ID（target_location）。只能移动到 WorldState 中 adjacent_nodes 列出的相邻节点，不支持非相邻节点的直接移动。移动消耗 stamina。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       required_fields:
         - target_location
@@ -207,6 +224,7 @@ data:
     description: "观察周围环境或特定角色。无目标时环顾当前所在位置，获取环境信息；有目标时注视某个角色，获取其外貌和行为信息。轻微消耗体力。此动作不产生任何战斗、社交或经济效果，纯粹用于获取信息。"
     category: survival
     ooc_risk: low
+    transmission: silent
     validation:
       optional_fields:
         - target_agent_id
@@ -221,9 +239,11 @@ data:
   # ==========================================================================
   攻击:
     name: "攻击"
+    display_name: "战斗"
     description: "对目标 Agent 发起物理攻击。必须指定目标 Agent ID（target_agent_id）。伤害由力量属性和武器加成决定，会使目标损失 HP。"
     category: combat
     ooc_risk: medium
+    transmission: silent
     base_damage: 10
     damage_formula: "10 + strength * 0.5 + weapon_bonus"
     validation:
@@ -317,6 +337,7 @@ data:
     description: "尝试脱离战斗或危险情境，移动到相邻位置。必须指定逃跑目标位置（target_location）。成功率由敏捷属性决定的公式计算，失败则留在原地但仍消耗体力。"
     category: combat
     ooc_risk: low
+    transmission: silent
     flee_success_formula: "agility * 0.03"
     default_flee_success_rate: 0.5
     validation:
@@ -338,6 +359,7 @@ data:
     description: "尝试从目标 Agent 身上偷取物品。必须指定目标 Agent ID（target_agent_id）和物品 ID（item_id）。成功率由属性决定，失败可能被目标发现并遭受惩罚。此动作需要目标存活。注意区分：给予 是主动提供，偷窃 是偷窃（目标不知情）。"
     category: martial
     ooc_risk: medium
+    transmission: silent
     success_rate_formula: "agility * 0.02 + luck * 0.01"
     detection_threshold: 0.3
     validation:
@@ -401,6 +423,7 @@ data:
     description: "通过打坐恢复内力和心神。不消耗体力，但需要一定体力才能执行。打坐是恢复理智的有效方式。注意区分：打坐 恢复内力和理智，休息 恢复体力和少量理智。"
     category: martial
     ooc_risk: low
+    transmission: silent
     validation: {}
     requirements:
       - requirement_type: attribute
@@ -426,6 +449,7 @@ data:
     description: "通过修炼提升内力上限。消耗体力，永久提升内力（qi）上限值。"
     category: martial
     ooc_risk: low
+    transmission: silent
     validation: {}
     requirements:
       - requirement_type: attribute
@@ -446,9 +470,11 @@ data:
   # ==========================================================================
   说话:
     name: "说话"
+    display_name: "交谈"
     description: "在当前位置公开说话，内容对所有在场 Agent 可见。必须指定说话内容（content）。说话消耗体力并增加口渴感。注意区分：说话 是公开说话（所有人都听到），私语 是私聊（仅双方可见）。"
     category: social
     ooc_risk: high
+    transmission: broadcast
     max_content_length: 500
     validation:
       required_fields:
@@ -474,6 +500,7 @@ data:
     description: "对目标 Agent 说悄悄话，只有目标和说话者能听到。必须指定目标 Agent ID（target_agent_id）和内容（content）。私语是私密对话，不会被在场其他 Agent 听到。注意区分：私语 是私聊（只有目标听到），说话 是公开说（所有人都听到）。"
     category: social
     ooc_risk: high
+    transmission: session
     max_content_length: 200
     validation:
       requires_target: true
@@ -498,9 +525,11 @@ data:
   #
   大喊:
     name: "大喊"
+    display_name: "呼喊"
     description: "向当前位置大声喊叫，内容可被所有在场 Agent 听到。必须指定内容（content）。消耗较多体力。注意区分：大喊 是大喊，说话 是普通说话，私语 是私聊（仅双方可见）。"
     category: social
     ooc_risk: high
+    transmission: silent
     max_content_length: 300
     validation:
       required_fields:
@@ -540,6 +569,7 @@ data:
     description: "将自己的物品给予目标 Agent。必须指定目标 Agent ID（target_agent_id）、物品 ID（item_id）和数量（quantity）。发起方单方面将物品从背包转移到目标背包。注意区分：给予 是主动给予，偷窃 是偷窃（目标不知情）。"
     category: economic
     ooc_risk: medium
+    transmission: silent
     validation:
       requires_target: true
       requires_target_alive: true
@@ -567,6 +597,7 @@ data:
     description: "从目标资源点采集物品。必须指定资源点 ID（target_id）。资源点必须是有效的采集地点（如矿点、药草点），采集可获得原材料物品。消耗体力。注意：采集 是从资源点采集原材料，制造 是使用材料制造物品。"
     category: economic
     ooc_risk: low
+    transmission: silent
     resource_yield: "1 + luck * 0.1"
     validation:
       required_fields:
@@ -581,9 +612,11 @@ data:
 
   制造:
     name: "制造"
+    display_name: "锻造"
     description: "使用配方制造物品。必须指定配方 ID（recipe_id）。制造会消耗背包中的材料（根据配方定义）并产生成品。需要较高体力。注意：制造 是制造成品，采集 是采集原材料。"
     category: economic
     ooc_risk: low
+    transmission: silent
     quality_formula: "craft_skill * 0.5 + luck * 0.1"
     validation:
       required_fields:
@@ -600,6 +633,7 @@ data:
     description: "将自己已知的配方传授给同一地点的他人。必须指定目标人物 ID（target_agent_id）和配方 ID（recipe_id）。传授会消耗体力。"
     category: social
     ooc_risk: low
+    transmission: silent
     validation:
       requires_target: true
       requires_target_alive: true
