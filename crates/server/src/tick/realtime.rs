@@ -22,7 +22,8 @@ use uuid::Uuid;
 use crate::db::DbPool;
 use crate::dialogue::DialogueManager;
 use crate::game_data::GameDataCache;
-use crate::game_data::registry::ItemRegistry;
+use crate::game_data::registry::{ActionRegistry, ItemRegistry};
+use crate::game_data::types::actions::Transmission;
 use crate::models::{AgentState, WorldEvent, WorldEventType};
 use crate::state::AgentStateCache;
 use crate::tick::decay;
@@ -97,9 +98,10 @@ impl IntentWorker {
         action_type: &str,
         intent: &cyber_jianghu_protocol::Intent,
     ) {
-        if action_type == "私语"
-            && let Some(ref session_id) = intent.session_id
-        {
+        let is_session = ActionRegistry::get(action_type)
+            .map(|c| c.transmission == Transmission::Session)
+            .unwrap_or(false);
+        if is_session && let Some(ref session_id) = intent.session_id {
             self.dialogue_manager.close_session(session_id).await;
         }
     }
