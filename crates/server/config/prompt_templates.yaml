@@ -112,6 +112,7 @@ templates:
 
       output_format: |
         {tool_calling_guidance}
+        思考简洁直入决策；详细思考过程留待事后采集。
         用以下 JSON 结构输出决策，字段名必须与下方完全一致：
         {
           "self_status": "用一句话描述你此刻的身体和精神状况，例如：饥饿难耐、内力充沛、精神恍惚",
