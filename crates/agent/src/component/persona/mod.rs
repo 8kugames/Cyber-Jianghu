@@ -5,6 +5,7 @@
 pub mod dynamic_persona;
 pub mod event_mapper;
 pub mod persistence;
+pub mod rules_loader;
 pub mod trait_types;
 
 pub use dynamic_persona::{DynamicPersona, PersonaState, ThreadSafePersona};

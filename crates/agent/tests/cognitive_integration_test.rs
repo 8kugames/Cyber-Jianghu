@@ -2,10 +2,12 @@
 //!
 //! 测试 CognitiveEngine + CognitiveValidator 的完整认知流程
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
-use cyber_jianghu_agent::component::persona::{DynamicPersona, EventTraitMapper, ThreadSafePersona};
+use cyber_jianghu_agent::component::persona::rules_loader::load_event_trait_rules;
+use cyber_jianghu_agent::component::persona::{DynamicPersona, ThreadSafePersona};
 use cyber_jianghu_agent::models::{WorldEvent, WorldEventType, WorldState};
 use cyber_jianghu_agent::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_agent::soul::actor::stages::{
@@ -17,6 +19,15 @@ use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidato
 // ============================================================================
 // 辅助函数
 // ============================================================================
+
+fn integration_yaml_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("crates/server/config/persona_event_rules.yaml")
+}
 
 fn make_minimal_world_state(tick_id: i64) -> WorldState {
     let json = serde_json::json!({
@@ -293,12 +304,8 @@ mod tests {
     fn test_event_trait_mapper_through_thread_safe_persona() {
         // 模拟 Agent.process_events 末尾的闭包模式
         let agent_id = uuid::Uuid::new_v4();
-        let persona = ThreadSafePersona::new(DynamicPersona::new(
-            agent_id,
-            "测试侠客",
-            "基础描述",
-        ));
-        let mapper = Arc::new(EventTraitMapper::new());
+        let persona = ThreadSafePersona::new(DynamicPersona::new(agent_id, "测试侠客", "基础描述"));
+        let mapper = Arc::new(load_event_trait_rules(&integration_yaml_path()).expect("YAML 加载"));
 
         // 初始: get_trait("愤怒") 因 default_traits() 不含"愤怒" 而返回 None,
         // 走 .unwrap_or(50) 默认 50
@@ -318,19 +325,19 @@ mod tests {
             initial_anger,
             after_anger
         );
-        assert!(after_anger >= 65, "愤怒权重 1.2 + base_delta 15 → 至少 65, 实际={}", after_anger);
+        assert!(
+            after_anger >= 65,
+            "愤怒权重 1.2 + base_delta 15 → 至少 65, 实际={}",
+            after_anger
+        );
     }
 
     #[test]
     fn test_apply_all_decay_after_event() {
         // 模拟 update_tick_state 末尾的闭包模式
         let agent_id = uuid::Uuid::new_v4();
-        let persona = ThreadSafePersona::new(DynamicPersona::new(
-            agent_id,
-            "测试侠客",
-            "基础描述",
-        ));
-        let mapper = Arc::new(EventTraitMapper::new());
+        let persona = ThreadSafePersona::new(DynamicPersona::new(agent_id, "测试侠客", "基础描述"));
+        let mapper = Arc::new(load_event_trait_rules(&integration_yaml_path()).expect("YAML 加载"));
 
         let event = make_attacked_event(1);
         let m = mapper.clone();
@@ -360,12 +367,8 @@ mod tests {
     fn test_cognitive_engine_invalidate_persona_cache() {
         // 验证 CU-3b: CognitiveEngine.invalidate_persona_cache 公开方法可用
         let agent_id = uuid::Uuid::new_v4();
-        let persona = ThreadSafePersona::new(DynamicPersona::new(
-            agent_id,
-            "测试侠客",
-            "基础描述",
-        ));
-        let mapper = Arc::new(EventTraitMapper::new());
+        let persona = ThreadSafePersona::new(DynamicPersona::new(agent_id, "测试侠客", "基础描述"));
+        let mapper = Arc::new(load_event_trait_rules(&integration_yaml_path()).expect("YAML 加载"));
 
         let event = make_attacked_event(1);
         let m = mapper.clone();
@@ -380,13 +383,15 @@ mod tests {
         let engine = CognitiveEngine::new(mock, config, &persona);
         engine.update_prompt_template_from_config(make_minimal_prompt_config());
 
-        let post_summary = cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
-            &persona.read(|p| p.clone()),
-        );
+        let post_summary =
+            cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
+                &persona.read(|p| p.clone()),
+            );
         engine.invalidate_persona_cache(&persona);
-        let _post_invalidate = cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
-            &persona.read(|p| p.clone()),
-        );
+        let _post_invalidate =
+            cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
+                &persona.read(|p| p.clone()),
+            );
 
         assert!(
             post_summary.contains("愤怒"),

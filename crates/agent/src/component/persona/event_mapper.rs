@@ -79,12 +79,6 @@ impl TraitMappingRule {
         self
     }
 
-    /// 创建带条件的规则
-    pub fn with_condition(mut self, condition: String) -> Self {
-        self.condition = Some(condition);
-        self
-    }
-
     /// 计算实际变化量
     pub fn calculate_delta(&self, _context: &EventContext) -> i16 {
         let mut delta = self.base_delta;
@@ -203,58 +197,19 @@ impl Default for EventTraitMapper {
 }
 
 impl EventTraitMapper {
-    /// 创建新的映射器
+    /// 创建新的映射器（无规则 — 生产路径应使用 `from_rules` + YAML 加载）
     pub fn new() -> Self {
-        Self {
-            rules: Self::default_rules(),
-        }
+        Self { rules: Vec::new() }
     }
 
-    /// 获取默认的映射规则
-    fn default_rules() -> Vec<TraitMappingRule> {
-        vec![
-            // 被攻击事件
-            TraitMappingRule::new(EventType::Attacked, "愤怒".to_string(), 15).with_weight(1.2),
-            TraitMappingRule::new(EventType::Attacked, "恐惧".to_string(), 10),
-            TraitMappingRule::new(EventType::Attacked, "攻击性".to_string(), 8),
-            // 被欺骗事件
-            TraitMappingRule::new(EventType::Deceived, "贪婪".to_string(), 10),
-            TraitMappingRule::new(EventType::Deceived, "信任".to_string(), -20).with_weight(1.5),
-            TraitMappingRule::new(EventType::Deceived, "愤怒".to_string(), 15),
-            TraitMappingRule::new(EventType::Deceived, "谨慎".to_string(), 12),
-            // 被帮助事件
-            TraitMappingRule::new(EventType::Helped, "信任".to_string(), 10).with_weight(1.2),
-            TraitMappingRule::new(EventType::Helped, "感激".to_string(), 15),
-            TraitMappingRule::new(EventType::Helped, "友善".to_string(), 8),
-            // 交易成功
-            TraitMappingRule::new(EventType::TradeSuccess, "贪婪".to_string(), -5),
-            TraitMappingRule::new(EventType::TradeSuccess, "精明".to_string(), 8),
-            // 交易失败
-            TraitMappingRule::new(EventType::TradeFail, "沮丧".to_string(), 12),
-            TraitMappingRule::new(EventType::TradeFail, "谨慎".to_string(), 5),
-            // 战斗胜利
-            TraitMappingRule::new(EventType::BattleWin, "自信".to_string(), 15).with_weight(1.3),
-            TraitMappingRule::new(EventType::BattleWin, "攻击性".to_string(), 10),
-            TraitMappingRule::new(EventType::BattleWin, "勇敢".to_string(), 12),
-            // 战斗失败
-            TraitMappingRule::new(EventType::BattleLose, "恐惧".to_string(), 20).with_weight(1.4),
-            TraitMappingRule::new(EventType::BattleLose, "沮丧".to_string(), 15),
-            TraitMappingRule::new(EventType::BattleLose, "谨慎".to_string(), 10),
-            // 饥饿事件
-            TraitMappingRule::new(EventType::Hungry, "绝望".to_string(), 8),
-            TraitMappingRule::new(EventType::Hungry, "攻击性".to_string(), 12),
-            // 口渴事件
-            TraitMappingRule::new(EventType::Thirsty, "绝望".to_string(), 5),
-            TraitMappingRule::new(EventType::Thirsty, "虚弱".to_string(), 10),
-            // 社交互动
-            TraitMappingRule::new(EventType::SocialInteraction, "友善".to_string(), 3),
-            TraitMappingRule::new(EventType::SocialInteraction, "信任".to_string(), 2),
-        ]
+    /// 从规则列表创建映射器（主要给 YAML loader 用）
+    pub fn from_rules(rules: Vec<TraitMappingRule>) -> Self {
+        Self { rules }
     }
 
-    /// 添加自定义规则
-    pub fn add_rule(&mut self, rule: TraitMappingRule) {
-        self.rules.push(rule);
+    /// 获取规则列表（只读访问,主要给测试和外部观测用）
+    pub fn rules(&self) -> &[TraitMappingRule] {
+        &self.rules
     }
 
     /// 将事件映射为特质变化列表
@@ -323,12 +278,18 @@ mod tests {
 
     #[test]
     fn test_trait_mapping_rules() {
-        let mapper = EventTraitMapper::new();
-        assert!(!mapper.rules.is_empty());
+        let yaml_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("crates/server/config/persona_event_rules.yaml");
+        let mapper = crate::component::persona::rules_loader::load_event_trait_rules(&yaml_path)
+            .expect("YAML 26 规则必须可加载");
+        assert_eq!(mapper.rules().len(), 26);
 
-        // 验证被攻击规则
         let attacked_rule = mapper
-            .rules
+            .rules()
             .iter()
             .find(|r| r.event_type == EventType::Attacked && r.trait_name == "愤怒");
         assert!(attacked_rule.is_some());
@@ -337,7 +298,14 @@ mod tests {
 
     #[test]
     fn test_map_event_to_changes() {
-        let mapper = EventTraitMapper::new();
+        let yaml_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("crates/server/config/persona_event_rules.yaml");
+        let mapper = crate::component::persona::rules_loader::load_event_trait_rules(&yaml_path)
+            .expect("YAML 26 规则必须可加载");
         let agent_id = uuid::Uuid::new_v4();
         let mut persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");
         persona.set_trait("愤怒", 50);
