@@ -139,14 +139,27 @@ impl super::CognitiveEngine {
         // 从模板渲染静态 sections
         let prompt_template = self.prompt_template();
         if let Some(tmpl) = prompt_template.get_template("actor_direct") {
-            // survival_rules / narrative_limits / task sections 不依赖变量
             let empty_vars = std::collections::HashMap::new();
-            if let Some(rendered) = tmpl.render_section("survival_rules", &empty_vars) {
-                parts.push_str(&rendered);
+
+            // Rule-On-Demand: 有 RuleCache 时注入极简索引 + 精简生存规则
+            let rc_guard = self.rule_cache.read().expect("rwlock poisoned");
+            if let Some(ref rule_cache) = *rc_guard {
+                parts.push_str(rule_cache.index_summary());
+                parts.push_str("\n\n");
+                if let Some(rendered) = tmpl.render_section("survival_rules_compact", &empty_vars) {
+                    parts.push_str(&rendered);
+                }
+            } else {
+                // 无 RuleCache 时保持原行为（向后兼容）
+                if let Some(rendered) = tmpl.render_section("survival_rules", &empty_vars) {
+                    parts.push_str(&rendered);
+                }
+                if let Some(rendered) = tmpl.render_section("narrative_limits", &empty_vars) {
+                    parts.push_str(&rendered);
+                }
             }
-            if let Some(rendered) = tmpl.render_section("narrative_limits", &empty_vars) {
-                parts.push_str(&rendered);
-            }
+            drop(rc_guard);
+
             if let Some(rendered) = tmpl.render_section("task", &empty_vars) {
                 parts.push_str(&rendered);
             }

@@ -14,6 +14,25 @@ use std::collections::HashMap;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
+/// 规则分类配置项（用于 EarthSoul query_rules tool 按需检索）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleCategoryConfig {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub sections: Vec<String>,
+}
+
+/// 规则分类配置集合
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleSectionsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub categories: Vec<RuleCategoryConfig>,
+}
+
 /// Prompt 模板配置顶层结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptTemplateConfig {
@@ -24,6 +43,9 @@ pub struct PromptTemplateConfig {
     /// 记忆叙事合成配置（独立于 templates，非标准模板结构）
     #[serde(default)]
     pub memory_narrative: Option<MemoryNarrativeConfig>,
+    /// 规则分类索引（EarthSoul query_rules tool 按需检索）
+    #[serde(default)]
+    pub rule_sections: Option<RuleSectionsConfig>,
 }
 
 /// 单个模板定义
@@ -74,6 +96,7 @@ impl PromptTemplateConfig {
             description: String::new(),
             templates: HashMap::new(),
             memory_narrative: None,
+            rule_sections: None,
         }
     }
 
@@ -286,6 +309,7 @@ mod tests {
                 map
             },
             memory_narrative: None,
+            rule_sections: None,
         };
         let result = config.validate();
         assert!(result.is_err());
