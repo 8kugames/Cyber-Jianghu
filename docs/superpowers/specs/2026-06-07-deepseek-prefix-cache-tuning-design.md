@@ -1,7 +1,7 @@
 # DeepSeek 前缀缓存调优 v2.2：数据驱动的最小可行改造
 
 **日期**: 2026-06-07
-**状态**: Draft (v2.2.1, v2.2 基础上应用 Architecture 评审的 KISS 修正)
+**状态**: Draft (v2.2.2, v2.2.1 基础上应用 Path A: `PromptConfig` 移到 `DirectLlmClientConfig`)
 **前置**:
 - v1 (e25903f) 0/3 REJECT
 - v2 (1c1c73d) 2/3 通过 (Implementation 5.5/10 REJECT)
@@ -107,19 +107,27 @@
 6. `crates/agent/Cargo.toml` (扩)
    - 加 `sha2 = "0.10"` (与 `crates/server/Cargo.toml:47` 对齐)
 7. `crates/agent/src/config.rs` (扩)
-   - `LlmConfig` 加 2 子结构:
+   - `LlmConfig` 加 1 子结构 (cache_diagnostics):
      ```rust
      pub cache_diagnostics: CacheDiagnosticsConfig,
-     pub prompt: PromptConfig,
      pub struct CacheDiagnosticsConfig {
          pub enabled: bool,                  // 默认 true
          pub system_hash_dimension: bool,    // 默认 true
      }
+     ```
+8. `crates/agent/src/component/llm/direct_client.rs` (扩) - **Path A: prompt 字段移到消费方**
+   - `DirectLlmClientConfig` (`direct_client.rs:178-197`) 加 1 字段:
+     ```rust
+     pub prompt: PromptConfig,             // 新增
      pub struct PromptConfig {
          pub strip_reasoning_content: bool,  // 默认 true (D8)
          pub canonicalize_schemas: bool,     // 默认 true (D9)
      }
      ```
+   - **理由**: `DirectLlmClient` 持有 `DirectLlmClientConfig` (不是 `LlmConfig`), KISS refactor 要读 `self.config.prompt.*` 必须字段在 `DirectLlmClientConfig` 上
+9. `crates/agent/src/component/llm/mod.rs` (扩) - **conversion 路径**
+   - `mod.rs:178-191` LlmConfig → DirectLlmClientConfig 转换处加 `prompt` 字段拷贝
+   - 加载路径: `LlmConfig` (env var) → `DirectLlmClientConfig.prompt` (运行时读)
 
 **Hot-reload**: agent 重启 (走 env var 启动覆盖)。WebSocket `websocket.rs:745-822` 仅 5 个 config_type 分支 (skills/actions/game_rules/world_building_rules/prompt_templates), **无 `llm` 分支**。
 
@@ -203,14 +211,16 @@
 ## 4. 文件级改造清单 (15 改动, 1 新文件)
 
 ```
-Phase 0 (7 改动):
+Phase 0 (9 改动):
 1.  crates/agent/src/soul/actor/engine_prompts.rs    (扩: compute_system_hash 动态跟随 use_tool)
 2.  crates/agent/src/soul/actor/engine.rs            (扩: last_system_hash 字段)
 3.  crates/agent/src/component/llm/direct_client.rs  (扩: record_token_usage 加 system_hash)
 4.  crates/agent/src/component/llm/token_tracking.rs (扩: system_hash_distribution 字段)
 5.  crates/agent/src/infra/api/handlers/llm_config.rs (扩: /api/v1/metrics 改 Query<MetricsQuery>)
 6.  crates/agent/Cargo.toml                          (扩: sha2 = "0.10")
-7.  crates/agent/src/config.rs                       (扩: LlmConfig 加 cache_diagnostics + prompt 子结构)
+7.  crates/agent/src/config.rs                       (扩: LlmConfig 加 cache_diagnostics 子结构)
+8.  crates/agent/src/component/llm/direct_client.rs  (扩: DirectLlmClientConfig 加 prompt 字段 [Path A])
+9.  crates/agent/src/component/llm/mod.rs            (扩: LlmConfig → DirectLlmClientConfig 转换加 prompt 拷贝)
 
 D8 (2 改动, **KISS 修正: 不透传参数, 读 self.config**):
 8.  crates/agent/src/component/llm/client.rs         (扩: build_conversation_messages 加 strip_reasoning 参数, 用于位置 A helper 路径)
@@ -225,7 +235,7 @@ D9 (3 改动 + 1 新):
 Phase 3 (TBD): 由 Phase 0 数据决定
 ```
 
-**对比 v2.1**: 14 改动 → 15 改动 (D8 显式分 2 个改动点)。其他一致。
+**对比 v2.1**: 14 改动 → 17 改动 (Phase 0 多 2 改动: DirectLlmClientConfig + mod.rs 转换)。其他一致。
 
 ---
 
@@ -235,8 +245,8 @@ Phase 3 (TBD): 由 Phase 0 数据决定
 |--------|------|------|--------------|
 | `cache_diagnostics.enabled` | true | `LlmConfig::cache_diagnostics` | `CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED` |
 | `cache_diagnostics.system_hash_dimension` | true | 同上 | `CYBER_JIANGHU_CACHE_DIAGNOSTICS_SYSTEM_HASH_DIMENSION` |
-| `prompt.strip_reasoning_content` | true | `LlmConfig::prompt` | `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT` (D8 5% 灰度用) |
-| `prompt.canonicalize_schemas` | true | 同上 | `CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS` (D9 5% 灰度用) |
+| `prompt.strip_reasoning_content` | true | `DirectLlmClientConfig::prompt` (v2.2.2 移到此处) | `CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT` (D8 5% 灰度用) |
+| `prompt.canonicalize_schemas` | true | 同上 (v2.2.2 移到此处) | `CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS` (D9 5% 灰度用) |
 
 **所有运行时可调项** + **5% 灰度覆盖**全部走 env var。无代码内魔法值。
 
@@ -341,6 +351,7 @@ Day 22+:   Phase 3 (TBD)
 | MIN 2 | `crates/server/Cargo.toml:18` (sha2) | `crates/server/Cargo.toml:47` (实际行) | grep 验证 |
 | MIN 3 | spec §0(b) 行号 `direct_client.rs:1301-1308` 经 helper | 拆为: `direct_client.rs:1304-1307` (inline) + `client.rs:73-76` (helper) + `direct_client.rs:969, 1087` (helper 调用点) | `direct_client.rs:1283` 注释 "不使用 build_conversation_messages" |
 | **v2.2.1** | (v2.2 Review 后) D8 透传 `strip_reasoning: bool` 参数贯穿 trait 链 6+ site | **KISS 修正**: 不透传参数, 在 `DirectLlmClient::complete_with_conversation_and_tools` 内**直接读** `self.config.prompt.strip_reasoning_content` | trait 链 (LlmClient/LlmClientExt/blanket impl/FallbackLlmClient) 完全不动, D8 从 3 文件改造 → 1.5 文件 (`client.rs` helper + `direct_client.rs` inline) |
+| **v2.2.2** | (v2.2.1 Review) `self.config` 实为 `DirectLlmClientConfig` (不是 `LlmConfig`); `prompt` 加在 `LlmConfig` 会被 `mod.rs:178-191` 转换丢弃, KISS refactor 会编译失败 | **Path A**: `PromptConfig` 字段加到 `DirectLlmClientConfig` (实际消费方), `mod.rs` 转换时拷贝; `LlmConfig` 只保留 `cache_diagnostics` (agent 级别), 不混入 LLM client 级别 | `direct_client.rs:178-197` 加 `prompt: PromptConfig`; `mod.rs:178-191` 加转换; KISS refactor 真正可编译 |
 
 ## 13. 待确认事项
 
