@@ -65,6 +65,8 @@
   - [x] 战斗动作 (Combat)：攻击、逃跑、使用（包含进食/饮水）。
   - [x] 交互动作 (Interaction)：给予、偷窃。
   - [ ] *未实装动作*：防御、闪避、招架、重击、跟随、潜行、下毒、修理。
+  - [x] **Phase 5 ActionType 数据驱动化**：`ActionConfigEntry` 新增 `transmission` (3 变体: Broadcast/Session/Silent) + `display_name` (6 动作美化名) 字段。20 动作显式 YAML 标注。`realtime` 5 处 + `handler` 2 处 + `chronicle/generator` 8-arm 改读 `transmission` 字段与 `display_name` lookup (data-driven 完整闭环)
+  - [x] 5 契约测试 (`actions_transmission_test.rs`) 锁定反序列化行为
 - [x] **[高性能状态管理](../../crates/server/docs/architecture/p0_core/high_performance_state.md)**: 保障十万级 Agent 并发读写的内存与持久化架构。
   - [x] DashMap 内存缓存层，支持高并发 Write-Through。
   - [x] PostgreSQL 异步持久化，入库成功后才更新内存状态。
@@ -202,6 +204,7 @@
   - [x] 支持物品转移（SocialInteraction）、公开说话（PublicMessage）、密语（PrivateDialogue）三种事件类型触发好感度更新。
   - [x] 名字解析链路 `name_map → store → "陌生人"`，防止已有真名被覆写。
   - [x] 控制台关系卡片化 + Modal 详情（Agent ID、密语沟通记录、关键事件）。
+  - [x] **Phase 5 PRAGMA user_version 迁移**：`social/persistence.rs` 5 自由函数 (mirror `persona/persistence.rs` 模式)。老 DB (user_version=0, 5 列) 自动迁移到 v1 (7 列 + 3 索引)。`relationship.rs` 842 → 754 行。5 迁移契约测试 (`relationship_persistence_test.rs`)
 - [x] **[玩家控制台 (Agent Control Panel)](../../crates/agent/docs/architecture/p2_enhancement/agent_control_panel.md)**: 允许人类玩家观察并干预 AI 角色的前端面板。
   - [x] SPA 架构：3 页 hash router (#/dashboard, #/characters, #/settings)，8 个 ES module 替代旧 6 页碎片化 HTML。
   - [x] 数据驱动 UI：属性面板从 API categories 动态渲染，共享 helper 集中到 ui.js。

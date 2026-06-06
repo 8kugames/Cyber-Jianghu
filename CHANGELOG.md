@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### Changed — Phase 5: ActionType 数据驱动化 + RelationshipStore PRAGMA 迁移
+
+- **Server**: `ActionConfigEntry` 新增 `transmission: Transmission` 字段（3 变体: `Broadcast`/`Session`/`Silent`，`#[default] Broadcast` fail-fast 默认）和 `display_name: Option<String>` 字段。`actions.yaml` 20 动作全部显式标注（1 broadcast 说话 / 1 session 私语 / 18 silent），YAML 头部 schema 注释。`Transmission::Direct` 变体已删（0/20 使用，YAGNI）
+- **Server**: 6 动作加 `display_name` 美化展示名（休息→静修 / 说话→交谈 / 移动→行走 / 攻击→战斗 / 制造→锻造 / 大喊→呼喊）
+- **Server**: `tick/realtime.rs::close_session_if_whisper` 5 处 inline 字符串字面量 `"私语"` 抽 helper 集中处理，**helper 内部判定从字符串比较改为 `ActionRegistry::get().transmission == Transmission::Session` 字段 lookup**（data-driven 完整闭环）
+- **Server**: `websocket/handler.rs` 2 处 `action_type == "说话"/"私语"` 字符串判断改为 `transmission == Transmission::Broadcast/Session` 字段 dispatch
+- **Server**: `chronicle/generator.rs::action_type_display` 8-arm match 删除，改读 `ActionRegistry::get(action).display_name`（fallback 为 action_type 字符串）。`game_data/test_utils.rs` 4 fixture action 加 display_name + `test_action_type_display` 加 `init_test_registry()` 调用
+- **Agent**: `component/social/persistence.rs` 新建 — `CURRENT_SCHEMA_VERSION: i64 = 1` + 5 自由函数（`init_pragmas`/`init_schema`/`apply_migration`/`set_user_version` + 隐式 `get_user_version`），mirror `persona/persistence.rs` 模式。v1 SQL 包含完整 schema (CREATE TABLE 7 列) + ALTER TABLE 兼容老 DB 5 列结构 (self_description/description_tick)
+- **Agent**: `component/social/relationship.rs` 95 行 inline schema → 2 行 `persistence::init_pragmas/init_schema` 调用，**842 → 754 行**（回 800 LOC 红线下）。老 DB (user_version=0) 打开时自动迁移到 v1
+- **Test**: `crates/server/tests/actions_transmission_test.rs` 新建 5 测试 — `transmission` 字段反序列化契约（默认 Broadcast / 3 变体 / display_name 可选 + override）
+- **Test**: `crates/agent/tests/relationship_persistence_test.rs` 新建 5 测试 — fresh DB version bump / 多次 open 幂等 / 5 列老 DB 升级路径 / 13 列存在性 / 3 索引存在性。`persistence.rs` 内嵌 3 unit test (fresh DB / 幂等 / 5 列老 DB ALTER TABLE)
+
+**升级影响**:
+- 老 Cyber-Jianghu Agent (无 `relationship.db` 或 `user_version=0`) 自动升级，无须手动迁移
+- `relationship.rs` 文件 800+ 行技术债已解决（842 → 754）
+- 5 项技术债登记(候选 Phase 6): validator 2 硬编码 / collector 3 硬编码 / protocol 常量 / executor 14-arm 保留 (KISS) / 候选议题 (Chronic LLM 验证 + CognitiveEngine pre-flight)
+
 ### Changed — 设备身份生命周期 v2 [BREAKING]
 
 - **[BREAKING] Server**: 废弃 `POST /api/v1/agent/connect`（upsert 撞库语义），拆分为两个严格语义端点：
