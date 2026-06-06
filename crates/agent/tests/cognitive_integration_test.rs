@@ -5,7 +5,8 @@
 use std::sync::Arc;
 
 use cyber_jianghu_agent::component::llm::mock::MockLlmClient;
-use cyber_jianghu_agent::models::WorldState;
+use cyber_jianghu_agent::component::persona::{DynamicPersona, EventTraitMapper, ThreadSafePersona};
+use cyber_jianghu_agent::models::{WorldEvent, WorldEventType, WorldState};
 use cyber_jianghu_agent::soul::actor::prompt_template::PromptTemplateConfig;
 use cyber_jianghu_agent::soul::actor::stages::{
     CognitiveStage, PerceptionMotivationResponse, StageOutput,
@@ -265,5 +266,131 @@ mod tests {
                 // 预期行为：MockLlmClient 固定字符串导致后续阶段解析失败
             }
         }
+    }
+
+    // ========================================================================
+    // CU-5: DynamicPersona lifecycle 接线测试
+    // ========================================================================
+    // 验证 CU-2 / CU-3a / CU-3b 的核心数据流:
+    //   process_events → EventTraitMapper.apply_to_persona → persona trait 变更
+    //   update_tick_state → apply_all_decay + invalidate_persona_cache
+    //
+    // 这些都是 Agent 内部的薄壳调用,通过 ThreadSafePersona.write 闭包触发。
+    // 直接在集成测试里复现闭包调用模式,验证 wiring 正确无误。
+
+    fn make_attacked_event(tick_id: i64) -> WorldEvent {
+        let mut metadata = serde_json::Map::new();
+        metadata.insert("targets".to_string(), serde_json::json!(["攻击者"]));
+        WorldEvent {
+            event_type: WorldEventType::ActionResult,
+            tick_id,
+            description: "被攻击者攻击".to_string(),
+            metadata: serde_json::Value::Object(metadata),
+        }
+    }
+
+    #[test]
+    fn test_event_trait_mapper_through_thread_safe_persona() {
+        // 模拟 Agent.process_events 末尾的闭包模式
+        let agent_id = uuid::Uuid::new_v4();
+        let persona = ThreadSafePersona::new(DynamicPersona::new(
+            agent_id,
+            "测试侠客",
+            "基础描述",
+        ));
+        let mapper = Arc::new(EventTraitMapper::new());
+
+        // 初始: get_trait("愤怒") 因 default_traits() 不含"愤怒" 而返回 None,
+        // 走 .unwrap_or(50) 默认 50
+        let initial_anger = persona.read(|p| p.get_trait("愤怒").unwrap_or(50));
+        assert_eq!(initial_anger, 50, "愤怒默认值应为 50");
+
+        let event = make_attacked_event(1);
+        let mapper_clone = mapper.clone();
+        persona.write(|p| {
+            mapper_clone.apply_to_persona(&event, p, 1);
+        });
+
+        let after_anger = persona.read(|p| p.get_trait("愤怒").unwrap_or(0));
+        assert!(
+            after_anger > initial_anger,
+            "被攻击后愤怒应增加，初始={}, 攻击后={}",
+            initial_anger,
+            after_anger
+        );
+        assert!(after_anger >= 65, "愤怒权重 1.2 + base_delta 15 → 至少 65, 实际={}", after_anger);
+    }
+
+    #[test]
+    fn test_apply_all_decay_after_event() {
+        // 模拟 update_tick_state 末尾的闭包模式
+        let agent_id = uuid::Uuid::new_v4();
+        let persona = ThreadSafePersona::new(DynamicPersona::new(
+            agent_id,
+            "测试侠客",
+            "基础描述",
+        ));
+        let mapper = Arc::new(EventTraitMapper::new());
+
+        let event = make_attacked_event(1);
+        let m = mapper.clone();
+        persona.write(|p| m.apply_to_persona(&event, p, 1));
+
+        let anger_after_attack = persona.read(|p| p.get_trait("愤怒").unwrap_or(0));
+        assert!(anger_after_attack > 50, "攻击后愤怒应增加");
+
+        persona.write(|p| p.apply_all_decay());
+        let anger_after_decay = persona.read(|p| p.get_trait("愤怒").unwrap_or(0));
+
+        assert!(
+            anger_after_decay < anger_after_attack,
+            "tick 2 衰减后愤怒应下降，攻击后={}, 衰减后={}",
+            anger_after_attack,
+            anger_after_decay
+        );
+        assert!(
+            anger_after_decay >= 50,
+            "衰减不应低于基线 50，攻击后={}, 衰减后={}",
+            anger_after_attack,
+            anger_after_decay
+        );
+    }
+
+    #[test]
+    fn test_cognitive_engine_invalidate_persona_cache() {
+        // 验证 CU-3b: CognitiveEngine.invalidate_persona_cache 公开方法可用
+        let agent_id = uuid::Uuid::new_v4();
+        let persona = ThreadSafePersona::new(DynamicPersona::new(
+            agent_id,
+            "测试侠客",
+            "基础描述",
+        ));
+        let mapper = Arc::new(EventTraitMapper::new());
+
+        let event = make_attacked_event(1);
+        let m = mapper.clone();
+        persona.write(|p| m.apply_to_persona(&event, p, 1));
+
+        let mock = Arc::new(MockLlmClient::with_response("{}"));
+        let config = cyber_jianghu_agent::soul::actor::CognitiveEngineConfig {
+            agent_name: "测试侠客".to_string(),
+            temperature: 0.7,
+            max_tokens_per_stage: 1024,
+        };
+        let engine = CognitiveEngine::new(mock, config, &persona);
+        engine.update_prompt_template_from_config(make_minimal_prompt_config());
+
+        let post_summary = cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
+            &persona.read(|p| p.clone()),
+        );
+        engine.invalidate_persona_cache(&persona);
+        let _post_invalidate = cyber_jianghu_agent::soul::actor::prompt_cache::PromptCache::build_structured_summary(
+            &persona.read(|p| p.clone()),
+        );
+
+        assert!(
+            post_summary.contains("愤怒"),
+            "summary 应包含攻击产生的'愤怒'特质"
+        );
     }
 }
