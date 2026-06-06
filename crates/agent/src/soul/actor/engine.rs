@@ -1063,6 +1063,7 @@ impl CognitiveEngine {
                             let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
                             cache.get_persona_simple().to_string()
                         };
+                        let temperature = self.config.read().expect("rwlock poisoned").temperature;
                         if self.enable_streaming {
                             match self
                                 .llm_client
@@ -1072,11 +1073,41 @@ impl CognitiveEngine {
                                 Ok(resp) => resp,
                                 Err(e) => {
                                     tracing::warn!("流式调用失败，降级到非流式: {}", e);
-                                    self.llm_client.complete_json(&tick_msg).await?
+                                    let chat_config = crate::component::llm::ChatExchangeConfig {
+                                        model: self.llm_client.model_name(),
+                                        temperature,
+                                        max_tokens: None,
+                                        enable_thinking: None,
+                                    };
+                                    let extracted = self
+                                        .llm_client
+                                        .complete_json_with_config_and_retry_extracted(
+                                            &tick_msg, chat_config, 2,
+                                        )
+                                        .await?;
+                                    if let Ok(mut rc) = self.last_reasoning_content.lock() {
+                                        *rc = extracted.reasoning_content;
+                                    }
+                                    extracted.value
                                 }
                             }
                         } else {
-                            self.llm_client.complete_json(&tick_msg).await?
+                            let chat_config = crate::component::llm::ChatExchangeConfig {
+                                model: self.llm_client.model_name(),
+                                temperature,
+                                max_tokens: None,
+                                enable_thinking: None,
+                            };
+                            let extracted = self
+                                .llm_client
+                                .complete_json_with_config_and_retry_extracted(
+                                    &tick_msg, chat_config, 2,
+                                )
+                                .await?;
+                            if let Ok(mut rc) = self.last_reasoning_content.lock() {
+                                *rc = extracted.reasoning_content;
+                            }
+                            extracted.value
                         }
                     }
                 }
@@ -1263,7 +1294,21 @@ impl CognitiveEngine {
             critical_preload: None,
         })?;
 
-        let response: DirectCognitiveResponse = self.llm_client.complete_json(&tick_msg).await?;
+        let temperature = self.config.read().expect("rwlock poisoned").temperature;
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: self.llm_client.model_name(),
+            temperature,
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let extracted = self
+            .llm_client
+            .complete_json_with_config_and_retry_extracted(&tick_msg, chat_config, 2)
+            .await?;
+        if let Ok(mut rc) = self.last_reasoning_content.lock() {
+            *rc = extracted.reasoning_content;
+        }
+        let response: DirectCognitiveResponse = extracted.value;
         let response_json = serde_json::to_string(&response)?;
 
         let perception = super::stages::StageOutput::with_metadata(
@@ -1505,8 +1550,24 @@ impl CognitiveEngine {
         };
 
         // 4. 调用 LLM
-        let response: MemoryNarrativeResponse = match self.llm_client.complete_json(&prompt).await {
-            Ok(r) => r,
+        let temperature = self.config.read().expect("rwlock poisoned").temperature;
+        let chat_config = crate::component::llm::ChatExchangeConfig {
+            model: self.llm_client.model_name(),
+            temperature,
+            max_tokens: None,
+            enable_thinking: None,
+        };
+        let response: MemoryNarrativeResponse = match self
+            .llm_client
+            .complete_json_with_config_and_retry_extracted(&prompt, chat_config, 2)
+            .await
+        {
+            Ok(extracted) => {
+                if let Ok(mut rc) = self.last_reasoning_content.lock() {
+                    *rc = extracted.reasoning_content;
+                }
+                extracted.value
+            }
             Err(e) => {
                 tracing::warn!("记忆叙事合成 LLM 调用失败: {}，降级", e);
                 return FALLBACK_NARRATIVE.to_string();
