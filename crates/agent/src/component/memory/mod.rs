@@ -24,7 +24,9 @@ pub use embedder::EmbedderService;
 pub use forgetting::ForgettingScheduler;
 pub use local_embedder::LocalEmbedder;
 pub use manager::{MemoryManager, MemoryManagerConfig, MemoryManagerStats};
-pub use outcome::{OutcomeMemory, OutcomeRecord, OutcomeResult, compute_context_hash, extract_target_agent_id};
+pub use outcome::{
+    OutcomeMemory, OutcomeRecord, OutcomeResult, compute_context_hash, extract_target_agent_id,
+};
 pub use registry::{AgentLifetime, GlobalMemoryRegistry, GlobalMemoryReport};
 pub use scorer::ImportanceScorer;
 pub use store::{ClientMemory, MemoryStore};

@@ -109,7 +109,11 @@ impl MemoryManager {
         };
 
         // 创建遗忘调度器
-        let forgetting_scheduler = ForgettingScheduler::new(config.ebbinghaus_config.clone(), 0, config.forgetting_interval_ticks);
+        let forgetting_scheduler = ForgettingScheduler::new(
+            config.ebbinghaus_config.clone(),
+            0,
+            config.forgetting_interval_ticks,
+        );
 
         Ok(Self {
             config,
