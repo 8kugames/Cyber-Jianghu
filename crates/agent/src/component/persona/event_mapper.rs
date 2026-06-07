@@ -215,10 +215,9 @@ impl EventTraitMapper {
         vec![
             // 被攻击事件 — 保留社交维度，情绪维度已迁移至 CoreAffect
             TraitMappingRule::new(EventType::Attacked, "攻击性".to_string(), 8),
-            // 被欺骗事件
+            // 被欺骗事件 — 愤怒已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::Deceived, "贪婪".to_string(), 10),
             TraitMappingRule::new(EventType::Deceived, "信任".to_string(), -20).with_weight(1.5),
-            TraitMappingRule::new(EventType::Deceived, "愤怒".to_string(), 15),
             TraitMappingRule::new(EventType::Deceived, "谨慎".to_string(), 12),
             // 被帮助事件 — 感激已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::Helped, "信任".to_string(), 10).with_weight(1.2),
@@ -226,8 +225,7 @@ impl EventTraitMapper {
             // 交易成功
             TraitMappingRule::new(EventType::TradeSuccess, "贪婪".to_string(), -5),
             TraitMappingRule::new(EventType::TradeSuccess, "精明".to_string(), 8),
-            // 交易失败
-            TraitMappingRule::new(EventType::TradeFail, "沮丧".to_string(), 12),
+            // 交易失败 — 沮丧已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::TradeFail, "谨慎".to_string(), 5),
             // 战斗胜利 — 勇敢已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::BattleWin, "自信".to_string(), 15).with_weight(1.3),
