@@ -26,6 +26,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// 情绪上下文快照（由 lifecycle 每 tick 传入）
+#[derive(Debug, Clone)]
+pub struct EmotionContext {
+    pub valence: f32,
+    pub arousal: f32,
+    pub emotion_label: String,
+    pub encoding_config: crate::component::emotion::config::EncodingConfig,
+    pub retrieval_config: crate::component::emotion::config::RetrievalConfig,
+}
+
 /// 记忆管理器配置
 #[derive(Debug, Clone)]
 pub struct MemoryManagerConfig {
@@ -134,19 +144,29 @@ impl MemoryManager {
         &mut self,
         events: &[WorldEvent],
         cognitive_engine: Option<&crate::soul::actor::CognitiveEngine>,
+        emotion_ctx: Option<crate::component::memory::manager::EmotionContext>,
     ) -> Result<()> {
-        // 1. 计算每个事件的 importance_score（owned WorldEvent 用于后续合成）
+        // 1. 计算每个事件的 importance_score（情绪增强或基础评分）
         let scored: Vec<(f32, WorldEvent)> = events
             .iter()
             .map(|e| {
-                let score = self
-                    .scorer
-                    .score(&e.event_type, &e.description, &e.metadata);
+                let score = match &emotion_ctx {
+                    Some(ctx) => self.scorer.score_with_emotion(
+                        &e.event_type,
+                        &e.description,
+                        &e.metadata,
+                        ctx.arousal,
+                        &ctx.encoding_config,
+                    ),
+                    None => self
+                        .scorer
+                        .score(&e.event_type, &e.description, &e.metadata),
+                };
                 (score, e.clone())
             })
             .collect();
 
-        // 2. 所有事件写入工作记忆
+        // 2. 所有事件写入工作记忆（含情绪编码字段）
         for (importance, event) in &scored {
             let mut entry = MemoryEntry::new(
                 self.config.agent_id,
@@ -156,6 +176,14 @@ impl MemoryManager {
             .with_event_type(event.event_type.to_string())
             .with_importance(*importance)
             .with_metadata(event.metadata.clone());
+
+            if let Some(ctx) = &emotion_ctx {
+                entry = entry.with_encoding_emotion(
+                    ctx.valence,
+                    ctx.arousal,
+                    ctx.emotion_label.clone(),
+                );
+            }
 
             self.working.add(&mut entry).await?;
         }
@@ -295,12 +323,26 @@ impl MemoryManager {
     /// 只展示 episodic 记忆（LLM 叙事摘要），不暴露 working memory 流水账。
     /// working memory 保留供 outcome memory / summary window 等内部使用。
     pub async fn build_llm_context(&self) -> String {
-        // 获取重要的情景记忆
-        let episodic_memories = self
-            .episodic
-            .get_top_by_importance(10)
-            .await
-            .unwrap_or_default();
+        self.build_llm_context_with_emotion(None).await
+    }
+
+    /// 构建 LLM 上下文（含效价一致性检索偏置）
+    pub async fn build_llm_context_with_emotion(
+        &self,
+        emotion_ctx: Option<&EmotionContext>,
+    ) -> String {
+        let episodic_memories = match emotion_ctx {
+            Some(ctx) => self
+                .episodic
+                .get_top_by_importance_with_bias(10, ctx.valence, &ctx.retrieval_config)
+                .await
+                .unwrap_or_default(),
+            None => self
+                .episodic
+                .get_top_by_importance(10)
+                .await
+                .unwrap_or_default(),
+        };
 
         let episodic_summary = if episodic_memories.is_empty() {
             return String::new();
@@ -429,7 +471,7 @@ mod tests {
             },
         ];
 
-        manager.process_events(&events, None).await.unwrap();
+        manager.process_events(&events, None, None).await.unwrap();
 
         let stats = manager.stats().await;
         assert_eq!(stats.working_count, 2);
@@ -454,7 +496,10 @@ mod tests {
             description: "你吃了馒头".to_string(),
             metadata: json!({}),
         }];
-        manager.process_events(&low_events, None).await.unwrap();
+        manager
+            .process_events(&low_events, None, None)
+            .await
+            .unwrap();
 
         // 无 episodic 记忆时应返回空字符串（不再展示 working memory 流水账）
         let context = manager.build_llm_context().await;
@@ -467,7 +512,10 @@ mod tests {
             description: "张三向你问好".to_string(),
             metadata: json!({}),
         }];
-        manager.process_events(&high_events, None).await.unwrap();
+        manager
+            .process_events(&high_events, None, None)
+            .await
+            .unwrap();
 
         let context = manager.build_llm_context().await;
         assert!(

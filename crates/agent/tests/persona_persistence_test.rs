@@ -17,6 +17,7 @@ fn stress_state(level: u8) -> PersonaState {
         current_goal: Some("寻找食物".to_string()),
         stress_level: level,
         last_updated: 100,
+        core_affect: None,
     }
 }
 

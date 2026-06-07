@@ -147,7 +147,12 @@ templates:
           "memory_content": "",
           "actions": [
             {"action_type": "从可用动作列表中选取的动作名称", "action_data": {"字段名": "值"}}
-          ]
+          ],
+          "constructed_emotion": {
+            "label": "一个中文情绪词（如：愤怒、感激、忐忑、释然、哀伤、欣喜）",
+            "reasoning": "为什么产生这种情绪（1-2句，结合体感信号）",
+            "intensity": 0.5
+          }
         }
 
         ### 记忆判定：
@@ -161,6 +166,12 @@ templates:
         - **thought_process 必须与 actions 完全一致**：如果你决定攻击某人，thought_process 应描述攻击的理由和目标，而非其他行为。如果你决定说话，thought_process 应包含你想说的内容和对象
         - 禁止在 thought_process 中规划 A 动作却在 actions 中填写 B 动作。推演即决策，决策即执行
         - actions 中的每一个动作都必须在 thought_process 中有对应的推理依据
+
+        ### 情绪构造：
+        根据你的体感信号（愉悦度、激动程度），构造你此刻的具体情绪。
+        - label：一个精确的中文情绪词，反映体感+语境的综合判断（不是简单重复体感标签）
+        - reasoning：为什么产生这种情绪（结合体感和当前处境）
+        - intensity：情绪强度 0.0-1.0（体感越强烈，intensity 越高）
 
         ### actions 规则：
         - **action_type 只能填"可用动作"列表中出现的名称，只能从列表中选一个填入。工具名称（query_world、get_action_detail、list_skills、skill_view）不是动作。**

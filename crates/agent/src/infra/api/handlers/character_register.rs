@@ -531,11 +531,7 @@ pub(crate) async fn generate_character_handler(
         enable_thinking: Some(false),
     };
     match llm_client
-        .complete_json_with_config_and_retry_extracted::<serde_json::Value>(
-            &prompt,
-            chat_config,
-            2,
-        )
+        .complete_json_with_config_and_retry_extracted::<serde_json::Value>(&prompt, chat_config, 2)
         .await
     {
         Ok(extracted) => {

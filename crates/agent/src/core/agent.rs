@@ -162,6 +162,12 @@ pub struct Agent {
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
 
+    /// 情绪配置（CoreAffect + encoding + retrieval + sensation）
+    pub(crate) emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
+
+    /// 核心情感状态（效价×唤醒度，Agent 级别，Cognitive/Claw 双模式共享）
+    pub(crate) core_affect: Option<crate::component::emotion::CoreAffect>,
+
     /// 当前 tick_id（原子计数，WS callback / 主循环共享）
     pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 
@@ -242,6 +248,8 @@ impl Agent {
             server_error_feedback: Arc::new(Mutex::new(None)),
             consecutive_idle_count: 0,
             chaos_generator: None,
+            emotion_config: None,
+            core_affect: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
             persona: ThreadSafePersona::new(DynamicPersona::new(
                 Uuid::new_v4(),
@@ -460,6 +468,21 @@ impl Agent {
         }
     }
 
+    /// 获取记忆上下文（含效价一致性检索偏置）
+    pub async fn get_memory_context_with_emotion(
+        &self,
+        emotion_ctx: &crate::component::memory::manager::EmotionContext,
+    ) -> String {
+        if let Some(ref manager) = self.memory_manager {
+            let manager = manager.read().await;
+            manager
+                .build_llm_context_with_emotion(Some(emotion_ctx))
+                .await
+        } else {
+            String::new()
+        }
+    }
+
     /// 检查记忆系统是否已启用
     pub fn has_memory(&self) -> bool {
         self.memory_manager.is_some()
@@ -534,12 +557,13 @@ impl Agent {
         &mut self,
         events: &[crate::models::WorldEvent],
         cognitive_engine: Option<&crate::soul::actor::CognitiveEngine>,
+        emotion_ctx: Option<&crate::component::memory::manager::EmotionContext>,
     ) -> Result<()> {
         if let Some(ref mut manager) = self.memory_manager {
             manager
                 .write()
                 .await
-                .process_events(events, cognitive_engine)
+                .process_events(events, cognitive_engine, emotion_ctx.cloned())
                 .await?;
         }
         // 同步事件 → persona traits 演化

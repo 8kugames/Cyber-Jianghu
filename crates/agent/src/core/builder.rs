@@ -77,6 +77,8 @@ pub struct AgentBuilder {
     /// 事件→特质映射器（默认 `EventTraitMapper::new()`）
     event_trait_mapper: Option<std::sync::Arc<EventTraitMapper>>,
     persona_store: Option<std::sync::Arc<PersonaStore>>,
+    /// 情绪配置
+    emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
 }
 
 impl AgentBuilder {
@@ -110,6 +112,7 @@ impl AgentBuilder {
             persona: None,
             event_trait_mapper: None,
             persona_store: None,
+            emotion_config: None,
         }
     }
 
@@ -278,6 +281,15 @@ impl AgentBuilder {
 
     pub fn with_persona_store(mut self, store: std::sync::Arc<PersonaStore>) -> Self {
         self.persona_store = Some(store);
+        self
+    }
+
+    /// 设置情绪配置
+    pub fn with_emotion_config(
+        mut self,
+        config: crate::component::emotion::config::EmotionConfig,
+    ) -> Self {
+        self.emotion_config = Some(config);
         self
     }
 
@@ -456,6 +468,8 @@ impl AgentBuilder {
             delta_engine: self.delta_engine,
             attention_controller: self.attention_controller,
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            emotion_config: self.emotion_config,
+            core_affect: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
             persona,
             event_trait_mapper,

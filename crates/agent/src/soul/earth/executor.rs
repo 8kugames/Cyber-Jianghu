@@ -262,13 +262,11 @@ impl ToolExecutor for EarthToolExecutor {
                     .unwrap_or_default();
 
                 match (&self.rule_cache, &self.prompt_template) {
-                    (Some(cache), Some(tmpl)) => {
-                        Ok(super::rule_tool::execute_query_rules(
-                            &categories,
-                            cache,
-                            tmpl,
-                        ))
-                    }
+                    (Some(cache), Some(tmpl)) => Ok(super::rule_tool::execute_query_rules(
+                        &categories,
+                        cache,
+                        tmpl,
+                    )),
                     _ => Ok(serde_json::json!({
                         "success": false,
                         "implemented": false,

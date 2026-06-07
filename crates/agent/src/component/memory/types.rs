@@ -35,6 +35,15 @@ pub struct MemoryEntry {
     pub access_count: u32,
     /// 是否已归档
     pub is_archived: bool,
+    /// 编码时的效价（用于检索偏置）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding_valence: Option<f32>,
+    /// 编码时的唤醒度（用于编码强度回溯）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding_arousal: Option<f32>,
+    /// 编码时的具体情绪标签
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding_emotion: Option<String>,
     /// 创建时间
     pub created_at: DateTime<Utc>,
 }
@@ -56,6 +65,9 @@ impl MemoryEntry {
             last_accessed_at: None,
             access_count: 0,
             is_archived: false,
+            encoding_valence: None,
+            encoding_arousal: None,
+            encoding_emotion: None,
             created_at: now,
         }
     }
@@ -85,6 +97,14 @@ impl MemoryEntry {
         self
     }
 
+    /// 设置编码时的情绪信息
+    pub fn with_encoding_emotion(mut self, valence: f32, arousal: f32, emotion: String) -> Self {
+        self.encoding_valence = Some(valence);
+        self.encoding_arousal = Some(arousal);
+        self.encoding_emotion = Some(emotion);
+        self
+    }
+
     /// 检查是否需要生成向量（按需策略）
     pub fn needs_embedding(&self) -> bool {
         self.embedding.is_none() && self.importance_score >= 0.7 && !self.is_archived
@@ -107,6 +127,9 @@ impl Default for MemoryEntry {
             last_accessed_at: None,
             access_count: 0,
             is_archived: false,
+            encoding_valence: None,
+            encoding_arousal: None,
+            encoding_emotion: None,
             created_at: Utc::now(),
         }
     }

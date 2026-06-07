@@ -46,7 +46,10 @@ impl RuleCache {
                 .map(|c| format!("{}({})", c.name, c.id))
                 .collect::<Vec<_>>()
                 .join("、");
-            format!("可查询的规则类别: {}。使用 query_rules 工具查询详情。", list)
+            format!(
+                "可查询的规则类别: {}。使用 query_rules 工具查询详情。",
+                list
+            )
         };
 
         Self {
@@ -209,10 +212,7 @@ mod tests {
     fn test_query_multiple_categories() {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
-        let results = cache.query(
-            &["survival".into(), "narrative".into()],
-            &tmpl,
-        );
+        let results = cache.query(&["survival".into(), "narrative".into()], &tmpl);
         assert_eq!(results.len(), 2);
     }
 

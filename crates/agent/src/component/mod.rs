@@ -5,6 +5,7 @@
 pub mod attention;
 pub mod delta_engine;
 pub mod dialogue;
+pub mod emotion;
 pub mod immediate;
 pub mod llm;
 pub mod memory;

@@ -288,12 +288,13 @@ mod tests {
             .expect("YAML 26 规则必须可加载");
         assert_eq!(mapper.rules().len(), 26);
 
+        // 验证被攻击规则（社交维度保留）
         let attacked_rule = mapper
             .rules()
             .iter()
-            .find(|r| r.event_type == EventType::Attacked && r.trait_name == "愤怒");
+            .find(|r| r.event_type == EventType::Attacked && r.trait_name == "攻击性");
         assert!(attacked_rule.is_some());
-        assert_eq!(attacked_rule.unwrap().base_delta, 15);
+        assert_eq!(attacked_rule.unwrap().base_delta, 8);
     }
 
     #[test]
@@ -308,7 +309,7 @@ mod tests {
             .expect("YAML 26 规则必须可加载");
         let agent_id = uuid::Uuid::new_v4();
         let mut persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");
-        persona.set_trait("愤怒", 50);
+        persona.set_trait("攻击性", 50);
 
         // 创建被攻击事件
         let mut metadata = serde_json::Map::new();
@@ -323,9 +324,9 @@ mod tests {
 
         let changes = mapper.map_event(&event, &persona, 1);
 
-        // 应该有愤怒变化
-        let anger_change = changes.iter().find(|c| c.trait_name == "愤怒");
-        assert!(anger_change.is_some());
-        assert!(anger_change.unwrap().delta > 0);
+        // 应该有攻击性变化
+        let aggression_change = changes.iter().find(|c| c.trait_name == "攻击性");
+        assert!(aggression_change.is_some());
+        assert!(aggression_change.unwrap().delta > 0);
     }
 }

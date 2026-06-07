@@ -10,9 +10,7 @@ use cyber_jianghu_agent::component::persona::rules_loader::load_event_trait_rule
 use cyber_jianghu_agent::component::persona::{DynamicPersona, ThreadSafePersona};
 use cyber_jianghu_agent::models::{WorldEvent, WorldEventType};
 use cyber_jianghu_agent::soul::actor::prompt_template::PromptTemplateConfig;
-use cyber_jianghu_agent::soul::actor::stages::{
-    CognitiveStage, StageOutput,
-};
+use cyber_jianghu_agent::soul::actor::stages::{CognitiveStage, StageOutput};
 use cyber_jianghu_agent::soul::actor::{CognitiveChain, CognitiveEngine};
 use cyber_jianghu_agent::soul::reflector::cognitive_validator::CognitiveValidator;
 
