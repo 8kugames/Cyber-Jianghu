@@ -42,60 +42,71 @@ impl super::super::Agent {
             }
         }
 
-        // 2.0 CoreAffect 更新（必须在 process_events 之前，encoding gate 需要当前 arousal）
+        // 2.0 CoreAffect 更新（Agent 级别，Cognitive/Claw 双模式共享）
         let emotion_ctx_for_memory = if let Some(ref emotion_config) = self.emotion_config {
-            let mut ctx = None;
-            if let Some(ref engine) = self.cognitive_engine {
-                let core_affect_config = &emotion_config.core_affect;
-                let attrs = &world_state.self_state.attributes;
-                let tick_id = world_state.tick_id;
+            let ca_config = &emotion_config.core_affect;
+            let attrs = &world_state.self_state.attributes;
+            let tick_id = world_state.tick_id;
 
-                engine.init_core_affect(core_affect_config);
-
-                let event_deltas = {
-                    use crate::component::emotion::CoreAffect;
-                    let scorer = crate::component::memory::scorer::ImportanceScorer::new();
-                    let mut total_v = 0.0_f32;
-                    let mut total_a = 0.0_f32;
-                    for event in &world_state.events_log {
-                        let outcome = crate::component::emotion::outcome::extract_outcome(
-                            event, &emotion_config.outcome_mapping,
-                        );
-                        let category = crate::component::emotion::outcome::event_category(event);
-                        let importance = scorer.score(
-                            &event.event_type, &event.description, &event.metadata,
-                        );
-                        let (v, a) = CoreAffect::compute_event_affect(
-                            &category, outcome.as_deref(), importance, &emotion_config.core_affect.events,
-                        );
-                        total_v += v;
-                        total_a += a;
-                    }
-                    (total_v, total_a)
-                };
-
-                let config_clone = core_affect_config.clone();
-                let attrs_clone = attrs.clone();
-
-                engine.update_core_affect(|core_affect, traits| {
-                    core_affect.update_baseline(traits, &config_clone.baseline_traits, &config_clone);
-                    let phys = crate::component::emotion::CoreAffect::compute_physiological_affect(
-                        &attrs_clone, &config_clone.attributes, config_clone.over_arousal_damping,
-                    );
-                    core_affect.update(tick_id, phys, event_deltas, &config_clone);
-                });
-
-                if let Some(ca) = engine.core_affect_snapshot() {
-                    ctx = Some(crate::component::memory::manager::EmotionContext {
-                        valence: ca.valence,
-                        arousal: ca.arousal,
-                        emotion_label: String::new(),
-                        encoding_config: emotion_config.encoding.clone(),
-                        retrieval_config: emotion_config.retrieval.clone(),
-                    });
-                }
+            // 初始化 CoreAffect（首次）
+            if self.core_affect.is_none() {
+                self.core_affect = Some(crate::component::emotion::CoreAffect::new(ca_config));
             }
-            ctx
+
+            // 计算事件 deltas（不依赖 CognitiveEngine）
+            let event_deltas = {
+                use crate::component::emotion::CoreAffect;
+                let scorer = crate::component::memory::scorer::ImportanceScorer::new();
+                let mut total_v = 0.0_f32;
+                let mut total_a = 0.0_f32;
+                for event in &world_state.events_log {
+                    let outcome = crate::component::emotion::outcome::extract_outcome(
+                        event,
+                        &emotion_config.outcome_mapping,
+                    );
+                    let category = crate::component::emotion::outcome::event_category(event);
+                    let importance =
+                        scorer.score(&event.event_type, &event.description, &event.metadata);
+                    let (v, a) = CoreAffect::compute_event_affect(
+                        &category,
+                        outcome.as_deref(),
+                        importance,
+                        &ca_config.events,
+                    );
+                    total_v += v;
+                    total_a += a;
+                }
+                (total_v, total_a)
+            };
+
+            // 更新 CoreAffect
+            if let Some(ref mut core_affect) = self.core_affect {
+                // 基线：有 CognitiveEngine 时从 traits 计算，否则跳过（使用默认基线）
+                let traits = self
+                    .cognitive_engine
+                    .as_ref()
+                    .map(|e| e.persona_traits_snapshot())
+                    .unwrap_or_default();
+                core_affect.update_baseline(&traits, &ca_config.baseline_traits, ca_config);
+
+                let phys = crate::component::emotion::CoreAffect::compute_physiological_affect(
+                    attrs,
+                    &ca_config.attributes,
+                    ca_config.over_arousal_damping,
+                );
+                core_affect.update(tick_id, phys, event_deltas, ca_config);
+            }
+
+            // 构建 EmotionContext
+            self.core_affect
+                .as_ref()
+                .map(|ca| crate::component::memory::manager::EmotionContext {
+                    valence: ca.valence,
+                    arousal: ca.arousal,
+                    emotion_label: String::new(),
+                    encoding_config: emotion_config.encoding.clone(),
+                    retrieval_config: emotion_config.retrieval.clone(),
+                })
         } else {
             None
         };
@@ -130,17 +141,18 @@ impl super::super::Agent {
             self.get_memory_context().await
         };
 
-        // 4.1 体感注入
-        if let Some(ref emotion_config) = self.emotion_config {
-            if let Some(ref engine) = self.cognitive_engine {
-                if let Some(ca) = engine.core_affect_snapshot() {
-                    let sensation = crate::component::emotion::sensation::build_internal_sensation(
-                        ca.valence, ca.arousal, &world_state.self_state.attributes, &emotion_config.sensation,
-                    );
-                    if !sensation.is_empty() {
-                        memory_context.push_str(&format!("\n{}", sensation));
-                    }
-                }
+        // 4.1 体感注入（Agent 级别，Cognitive/Claw 双模式共享）
+        if let Some(ref emotion_config) = self.emotion_config
+            && let Some(ref ca) = self.core_affect
+        {
+            let sensation = crate::component::emotion::sensation::build_internal_sensation(
+                ca.valence,
+                ca.arousal,
+                &world_state.self_state.attributes,
+                &emotion_config.sensation,
+            );
+            if !sensation.is_empty() {
+                memory_context.push_str(&format!("\n{}", sensation));
             }
         }
 

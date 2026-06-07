@@ -424,6 +424,7 @@ impl AgentBuilder {
             attention_controller: self.attention_controller,
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             emotion_config: self.emotion_config,
+            core_affect: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
