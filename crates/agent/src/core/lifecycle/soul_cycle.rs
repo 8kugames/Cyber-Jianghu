@@ -265,9 +265,21 @@ impl super::super::Agent {
                             engine.push_summary_to_window(chain, &approved, true);
 
                             // 回写 LLM 构造的情绪到 persona
-                            if let Some(emotion) = engine.take_constructed_emotion() {
-                                if !emotion.label.is_empty() {
-                                    engine.update_persona_emotion(emotion.label);
+                            if let Some(emotion) = engine.take_constructed_emotion()
+                                && !emotion.label.is_empty()
+                            {
+                                engine.update_persona_emotion(emotion.label.clone());
+                                // 情绪强度 → 特质 delta（intensity * trait_intensity_scale）
+                                if let Some(ref emotion_config) = self.emotion_config {
+                                    let trait_delta = (emotion.intensity
+                                        * emotion_config.core_affect.trait_intensity_scale)
+                                        as i16;
+                                    engine.apply_persona_trait_change(
+                                        &emotion.label,
+                                        trait_delta,
+                                        emotion.reasoning.clone(),
+                                        world_state.tick_id,
+                                    );
                                 }
                             }
                         }
