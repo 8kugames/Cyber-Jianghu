@@ -123,7 +123,12 @@ templates:
           "memory_content": "",
           "actions": [
             {"action_type": "动作类型（中文）", "action_data": {}}
-          ]
+          ],
+          "constructed_emotion": {
+            "label": "一个中文情绪词（如：愤怒、感激、忐忑、释然、哀伤、欣喜）",
+            "reasoning": "为什么产生这种情绪（1-2句，结合体感信号）",
+            "intensity": 0.5
+          }
         }
 
         ### 记忆判定：
@@ -132,6 +137,12 @@ templates:
         - "memory_content": 用简洁的第一人称描述要记忆的内容（必须是真实发生的事件，不允许虚构）
 
         否则设置 "should_remember": false。
+
+        ### 情绪构造：
+        根据你的体感信号（愉悦度、激动程度），构造你此刻的具体情绪。
+        - label：一个精确的中文情绪词，反映体感+语境的综合判断（不是简单重复体感标签）
+        - reasoning：为什么产生这种情绪（结合体感和当前处境）
+        - intensity：情绪强度 0.0-1.0（体感越强烈，intensity 越高）
 
         ### actions 规则：
         - **action_type 只能填"可用动作"列表中出现的名称，只能从列表中选一个填入。工具名称（query_world、get_action_detail、list_skills、skill_view）不是动作。**
