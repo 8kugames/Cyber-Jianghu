@@ -2,6 +2,7 @@
 // LLM 客户端抽象层
 // ============================================================================
 
+mod canonicalize;
 mod client;
 pub mod conversation;
 pub mod direct_client;
