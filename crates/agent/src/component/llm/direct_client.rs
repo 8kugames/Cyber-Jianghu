@@ -1022,6 +1022,7 @@ impl DirectLlmClient {
             summary,
             turns,
             current_prompt,
+            self.config.prompt.strip_reasoning_content,
         );
         let model = self.config.get_model_with_default();
         let request = OpenAIRequest {
@@ -1140,6 +1141,7 @@ impl DirectLlmClient {
             summary,
             turns,
             current_prompt,
+            self.config.prompt.strip_reasoning_content,
         );
 
         let model = self.config.get_model_with_default();

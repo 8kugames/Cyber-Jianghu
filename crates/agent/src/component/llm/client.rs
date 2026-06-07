@@ -52,6 +52,7 @@ pub fn build_conversation_messages(
     summary: Option<&str>,
     turns: &[ConversationTurn],
     current_tick_message: &str,
+    strip_reasoning: bool,
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
@@ -72,7 +73,11 @@ pub fn build_conversation_messages(
         messages.push(ChatMessage::user(&turn.user));
         messages.push(ChatMessage::assistant_with_reasoning(
             &turn.assistant,
-            turn.reasoning_content.clone(),
+            if strip_reasoning {
+                None
+            } else {
+                turn.reasoning_content.clone()
+            },
         ));
     }
     messages.push(ChatMessage::user(current_tick_message));
@@ -2177,5 +2182,39 @@ mod tests {
         // 编译期断言：SharedBreaker 必须能跨线程共享
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SharedBreaker>();
+    }
+
+    #[test]
+    fn build_conversation_messages_strips_reasoning_when_flag_set() {
+        let turns = vec![ConversationTurn {
+            user: "user".to_string(),
+            assistant: "reply".to_string(),
+            reasoning_content: Some("reasoning to strip".to_string()),
+        }];
+        let messages = build_conversation_messages(
+            "sys", "", None, &turns, "current",
+            true,
+        );
+        let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
+        let json = serde_json::to_value(assistant_msg).unwrap();
+        assert!(
+            json.get("reasoning_content").is_none() || json["reasoning_content"].is_null(),
+            "reasoning_content should be None when strip_reasoning=true, got: {:?}", json
+        );
+    }
+
+    #[test]
+    fn build_conversation_messages_preserves_reasoning_when_flag_unset() {
+        let turns = vec![ConversationTurn {
+            user: "u".to_string(),
+            assistant: "a".to_string(),
+            reasoning_content: Some("reasoning".to_string()),
+        }];
+        let messages = build_conversation_messages(
+            "sys", "", None, &turns, "current", false,
+        );
+        let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
+        let json = serde_json::to_value(assistant_msg).unwrap();
+        assert_eq!(json["reasoning_content"], "reasoning");
     }
 }
