@@ -408,12 +408,12 @@ async fn validate_teach_recipe(
         .and_then(|d| d.get("target_agent_id"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    if let Ok(target_uuid) = uuid::Uuid::parse_str(target_id_str) {
-        if target_uuid == agent_state.agent_id {
-            return Err(GameError::InvalidActionData {
-                reason: "不能向自己传授配方".to_string(),
-            });
-        }
+    if let Ok(target_uuid) = uuid::Uuid::parse_str(target_id_str)
+        && target_uuid == agent_state.agent_id
+    {
+        return Err(GameError::InvalidActionData {
+            reason: "不能向自己传授配方".to_string(),
+        });
     }
 
     // 传授者必须知道该配方
