@@ -511,6 +511,47 @@ impl MemoryStore {
         Ok(changes as usize)
     }
 
+    /// 效价一致性检索偏置查询
+    pub fn get_top_memories_with_valence_bias(
+        &self,
+        limit: usize,
+        current_valence: f32,
+        valence_bias_weight: f32,
+        valence_range: f32,
+        null_encoding_bonus: f32,
+    ) -> Result<Vec<ClientMemory>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM client_memories
+                 WHERE agent_id = ?1 AND is_archived = FALSE
+                 ORDER BY (importance_score +
+                     CASE WHEN encoding_valence IS NULL THEN ?2
+                     ELSE ?3 * MAX(0.0, 1.0 - ABS(encoding_valence - ?4) / ?5) END
+                 ) DESC
+                 LIMIT ?6",
+            )
+            .context("Failed to prepare valence-biased query")?;
+
+        let memories = stmt
+            .query_map(
+                params![
+                    self.agent_id.to_string(),
+                    null_encoding_bonus,
+                    valence_bias_weight,
+                    current_valence,
+                    valence_range,
+                    limit as i64,
+                ],
+                Self::row_to_memory,
+            )
+            .context("Failed to execute valence-biased query")?;
+
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
     /// 获取已归档记忆
     pub fn get_archived_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
