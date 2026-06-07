@@ -83,7 +83,7 @@ pub struct PersistedTokenStats {
 }
 
 /// in-memory 聚合：保持 API 兼容的 ModelTokenStats（跨小时求和）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelTokenStats {
     pub provider: String,
     pub model: String,
