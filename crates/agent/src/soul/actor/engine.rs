@@ -869,6 +869,12 @@ impl CognitiveEngine {
         }
     }
 
+    /// 更新 persona 情绪标签（由 soul cycle 回写）
+    pub fn update_persona_emotion(&self, emotion: String) {
+        let mut cfg = self.config.write().expect("rwlock poisoned");
+        cfg.persona.update_emotion(emotion);
+    }
+
     /// 更新 Agent 人设（rebirth 后调用）
     pub fn update_persona(&self, name: &str, system_prompt: &str) {
         // BUG-FIX: 避免 self-deadlock — config.write() 和 build_system_message(config.read()) 冲突

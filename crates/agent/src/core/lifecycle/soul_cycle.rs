@@ -263,6 +263,13 @@ impl super::super::Agent {
                             && let Some(ref engine) = self.cognitive_engine
                         {
                             engine.push_summary_to_window(chain, &approved, true);
+
+                            // 回写 LLM 构造的情绪到 persona
+                            if let Some(emotion) = engine.take_constructed_emotion() {
+                                if !emotion.label.is_empty() {
+                                    engine.update_persona_emotion(emotion.label);
+                                }
+                            }
                         }
                         batch_layers = layers;
                         batch_narrative = narrative;
