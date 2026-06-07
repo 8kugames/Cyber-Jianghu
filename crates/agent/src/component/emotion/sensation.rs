@@ -36,7 +36,7 @@ fn find_label(value: f32, labels: &[crate::component::emotion::config::Sensation
             return label.label.clone();
         }
     }
-    "未知".to_string()
+    crate::component::emotion::config::default_fallback_label()
 }
 
 fn build_distress_hint(
