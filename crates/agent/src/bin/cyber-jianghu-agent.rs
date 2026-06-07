@@ -1125,6 +1125,25 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
         info!("DeltaEngine + AttentionController 已初始化（Token 优化模式）");
     }
 
+    // Emotion 系统配置加载
+    {
+        let emotion_path = config.server_dir(&config.server.ws_url).join("emotion.yaml");
+        if emotion_path.exists() {
+            match std::fs::read_to_string(&emotion_path) {
+                Ok(content) => match serde_yaml::from_str::<cyber_jianghu_agent::component::emotion::config::EmotionConfig>(&content) {
+                    Ok(emotion_config) => {
+                        builder = builder.with_emotion_config(emotion_config);
+                        info!("情绪系统配置已加载: {}", emotion_path.display());
+                    }
+                    Err(e) => warn!("emotion.yaml 解析失败，情绪系统禁用: {}", e),
+                },
+                Err(e) => warn!("emotion.yaml 读取失败，情绪系统禁用: {}", e),
+            }
+        } else {
+            info!("emotion.yaml 不存在，情绪系统禁用");
+        }
+    }
+
     let mut agent = builder.build();
 
     // 注入 world_state_store 到 HttpApiState（供 Claw 模式 Delta Engine 使用）
