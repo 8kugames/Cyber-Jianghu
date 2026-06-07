@@ -1252,7 +1252,14 @@ impl LlmClient for DirectLlmClient {
             messages,
             temperature: Some(config.temperature),
             max_tokens: config.max_tokens.or(Some(self.config.max_tokens)),
-            tools: tools.map(|t| t.to_vec()),
+            tools: tools.map(|t| {
+                t.iter()
+                    .map(|tool| {
+                        serde_json::from_str(&tool.canonical_json())
+                            .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
+                    })
+                    .collect()
+            }),
             tool_choice: tools.and(Some(serde_json::json!("auto"))),
             enable_thinking: config.enable_thinking,
             stream: None,
