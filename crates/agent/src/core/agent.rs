@@ -159,6 +159,9 @@ pub struct Agent {
     /// 混沌意图生成器（Sanity 混沌硬逻辑）
     pub(crate) chaos_generator: Option<crate::soul::actor::ChaosGenerator>,
 
+    /// 情绪配置（CoreAffect + encoding + retrieval + sensation）
+    pub(crate) emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
+
     /// 当前 tick_id（原子计数，WS callback / 主循环共享）
     pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 }
@@ -231,6 +234,7 @@ impl Agent {
             server_error_feedback: Arc::new(Mutex::new(None)),
             consecutive_idle_count: 0,
             chaos_generator: None,
+            emotion_config: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }

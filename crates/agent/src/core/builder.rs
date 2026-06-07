@@ -71,6 +71,8 @@ pub struct AgentBuilder {
     delta_engine: Option<crate::component::delta_engine::DeltaEngine>,
     /// Attention Controller（规则过滤 + 轻量 LLM 排序）
     attention_controller: Option<crate::component::attention::AttentionController>,
+    /// 情绪配置
+    emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
 }
 
 impl AgentBuilder {
@@ -101,6 +103,7 @@ impl AgentBuilder {
             world_state_store: None,
             delta_engine: None,
             attention_controller: None,
+            emotion_config: None,
         }
     }
 
@@ -252,6 +255,12 @@ impl AgentBuilder {
         ctrl: crate::component::attention::AttentionController,
     ) -> Self {
         self.attention_controller = Some(ctrl);
+        self
+    }
+
+    /// 设置情绪配置
+    pub fn with_emotion_config(mut self, config: crate::component::emotion::config::EmotionConfig) -> Self {
+        self.emotion_config = Some(config);
         self
     }
 
@@ -411,6 +420,7 @@ impl AgentBuilder {
             delta_engine: self.delta_engine,
             attention_controller: self.attention_controller,
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
+            emotion_config: self.emotion_config,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
