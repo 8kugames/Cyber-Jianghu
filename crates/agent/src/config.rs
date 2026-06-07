@@ -644,7 +644,7 @@ fn default_llm_max_tokens() -> u32 {
     DEFAULT_LLM_MAX_TOKENS
 }
 
-fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
+pub(crate) fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
     std::env::var(key)
         .ok()
         .and_then(|s| s.parse().ok())
