@@ -1,6 +1,6 @@
 [package]
 name = "cyber-jianghu-agent"
-version = "0.1.270"
+version = "0.1.271"
 edition = "2024"
 authors = ["Cyber-Jianghu Community"]
 license = "MIT OR Apache-2.0"
@@ -74,6 +74,7 @@ rayon = "1.10"
 
 # 快速哈希（用于缓存变化检测）
 fnv = "1.0"
+sha2 = "0.10"
 
 # 随机数生成
 rand = { workspace = true }
