@@ -599,14 +599,13 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
     use crate::component::llm::snapshot_all_stats;
 
     let mut stats = snapshot_all_stats();
-    if let Some(hash_hex) = q.system_hash.as_deref() {
-        if let Ok(bytes) = hex::decode(hash_hex) {
-            if bytes.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                stats.retain(|s| s.system_hash_distribution.contains_key(&arr));
-            }
-        }
+    if let Some(hash_hex) = q.system_hash.as_deref()
+        && let Ok(bytes) = hex::decode(hash_hex)
+        && bytes.len() == 32
+    {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        stats.retain(|s| s.system_hash_distribution.contains_key(&arr));
     }
 
     let mut total_prompt: u64 = 0;
@@ -658,7 +657,6 @@ pub async fn get_metrics_handler(Query(q): Query<MetricsQuery>) -> Json<serde_js
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::component::llm::LlmProvider;
     use crate::component::llm::token_tracking::ModelTokenStats;
     use std::collections::HashMap;
