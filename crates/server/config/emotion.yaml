@@ -1,0 +1,85 @@
+# 情绪-记忆联动系统配置
+# Barrett 情绪建构论核心：CoreAffect(valence x arousal) + LLM 语义构造
+
+core_affect:
+  decay_rate: 0.05
+  default_baseline_valence: 0.0
+  default_baseline_arousal: 0.3
+  valence_range: [-1.0, 1.0]
+  arousal_range: [0.0, 1.0]
+  trait_intensity_scale: 15.0
+  over_arousal_damping: 0.5
+
+  # 属性偏离对 CoreAffect 的影响
+  attributes:
+    - attribute: hunger
+      comfort_zone: [40.0, 100.0]
+      absolute_floor: 0.0
+      valence_sensitivity: 0.3
+      arousal_sensitivity: 0.2
+    - attribute: hp
+      comfort_zone: [30.0, 100.0]
+      absolute_floor: 0.0
+      valence_sensitivity: 0.4
+      arousal_sensitivity: 0.3
+
+  # 事件冲击对 CoreAffect 的影响
+  events:
+    - event_category: action_result
+      outcome: success
+      valence_delta: 0.1
+      arousal_delta: 0.05
+    - event_category: action_result
+      outcome: failure
+      valence_delta: -0.1
+      arousal_delta: 0.15
+      negativity_multiplier: 2.5
+    - event_category: social_interaction
+      outcome: friendly
+      valence_delta: 0.15
+      arousal_delta: 0.05
+    - event_category: social_interaction
+      outcome: hostile
+      valence_delta: -0.2
+      arousal_delta: 0.2
+      negativity_multiplier: 2.0
+    - event_category: state_change
+      outcome: death
+      valence_delta: -0.5
+      arousal_delta: 0.4
+      negativity_multiplier: 1.5
+
+  # 个性特质对基线的影响
+  baseline_traits:
+    - trait_name: "攻击性"
+      valence_weight: -0.05
+      arousal_weight: 0.1
+    - trait_name: "友善"
+      valence_weight: 0.1
+      arousal_weight: -0.05
+
+encoding:
+  function: linear
+  intercept: 1.0
+  slope: 0.5
+  exponent: 1.5
+  output_range: [0.0, 1.0]
+  unknown_function_fallback: warn
+  flashbulb:
+    threshold: 0.8
+    multiplier: 1.5
+
+retrieval:
+  valence_bias_weight: 0.3
+  valence_range: 2.0
+  null_encoding_bonus: 0.0
+
+sensation:
+  distress_threshold: 30
+
+  # 社交动作到 outcome 的映射
+outcome_mapping:
+  "给予": friendly
+  "说话": friendly
+  "攻击": hostile
+  "偷窃": hostile
