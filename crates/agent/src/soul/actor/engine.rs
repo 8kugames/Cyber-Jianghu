@@ -75,6 +75,15 @@ struct MemoryNarrativeResponse {
 /// 失败降级文本（用户指定，一字不差）
 pub(crate) const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
 
+/// LLM 构造的具体情绪
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ConstructedEmotion {
+    pub label: String,
+    pub reasoning: String,
+    pub intensity: f32,
+}
+
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
 ///
 /// 支持两种 LLM 输出格式（向后兼容）：
@@ -109,6 +118,9 @@ struct DirectCognitiveResponse {
     /// 要写入记忆的内容（人魂判断，should_remember=true时必填）
     #[serde(default)]
     memory_content: Option<String>,
+    /// LLM 构造的具体情绪
+    #[serde(default)]
+    constructed_emotion: Option<ConstructedEmotion>,
 }
 
 impl DirectCognitiveResponse {
@@ -185,6 +197,8 @@ pub struct CognitiveEngine {
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等需要回传多轮对话）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// 最近一次 LLM 构造的情绪（供 lifecycle 回写 persona）
+    last_constructed_emotion: std::sync::Mutex<Option<ConstructedEmotion>>,
     /// Semi-static prompt 内容（action index + skill index），配置更新时重建
     semi_static_message: std::sync::RwLock<String>,
 }
@@ -223,6 +237,7 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_constructed_emotion: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
@@ -318,6 +333,7 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_constructed_emotion: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
         };
         engine.load_skill_cache_from_disk();
@@ -681,6 +697,14 @@ impl CognitiveEngine {
     /// 取回最近一次 LLM 调用的 reasoning_content
     pub fn take_last_reasoning_content(&self) -> Option<String> {
         self.last_reasoning_content
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
+    /// 取回 LLM 构造的情绪（消费式，取后清空）
+    pub fn take_constructed_emotion(&self) -> Option<ConstructedEmotion> {
+        self.last_constructed_emotion
             .lock()
             .ok()
             .and_then(|mut g| g.take())
@@ -1054,6 +1078,14 @@ impl CognitiveEngine {
         // 保存 reasoning_content 供 push_conversation_turn 使用
         if let Ok(mut rc) = self.last_reasoning_content.lock() {
             *rc = self.llm_client.take_last_reasoning_content();
+        }
+        // 提取 LLM 构造的情绪
+        if let Some(ref emotion) = response.constructed_emotion {
+            if !emotion.label.is_empty() {
+                if let Ok(mut guard) = self.last_constructed_emotion.lock() {
+                    *guard = Some(emotion.clone());
+                }
+            }
         }
         let response_json = serde_json::to_string(&response)?;
 
