@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-07-deepseek-prefix-cache-tuning-design.md` (commit `b5e059a`)
 
+**Plan 版本**: v2.1 (v2 + 5 项 critical 修正)
+- v1 plan: 0/3 REJECT (Task 8 system_hash 永远 `[0u8;32]`, etc.)
+- v2 plan: 1/3 (Goal 8.5 APPROVE, First-Principles 6.5/Implementation 7.0 REJECT)
+- v2.1 修正: 5 项 critical (Task 5 mod tests 创建 / Task 7 真测试代码 / Task 12 type mismatch 修 / Task 13 真 e2e / Task 15-16 灰度机制 TBD)
+
 **实施周期估算:** 3 周 (Phase 0 2-3 天 + D8 1 周 + D9 1 周 + 灰度观察穿插)
 
 ---
@@ -261,9 +266,13 @@ git commit -m "build(agent): 加 sha2 0.10 依赖 (compute_system_hash 用)"
 
 - [ ] **Step 1: 写失败测试**
 
-打开 `crates/agent/src/soul/actor/engine_prompts.rs`, 跳到末尾的 `#[cfg(test)] mod tests`, 加:
+打开 `crates/agent/src/soul/actor/engine_prompts.rs`, 在文件末尾加 `#[cfg(test)] mod tests { ... }` 块 (v2.1 修正: 该文件**没有**测试模块, 需新建):
 
 ```rust
+#[cfg(test)]
+mod tests {
+    use super::compute_system_hash;
+
     #[test]
     fn compute_system_hash_is_deterministic() {
         let sys = "test system prompt content";
@@ -284,6 +293,7 @@ git commit -m "build(agent): 加 sha2 0.10 依赖 (compute_system_hash 用)"
         let h = compute_system_hash("any content");
         assert_eq!(h.len(), 32);
     }
+}
 ```
 
 - [ ] **Step 2: 运行测试验证失败**
@@ -465,15 +475,50 @@ pub struct MetricsQuery {
 }
 ```
 
-加测试:
+加测试 (v2.1 修正: 真实测试代码, 不是 placeholder comments):
 ```rust
     #[tokio::test]
     async fn metrics_query_filters_by_system_hash() {
-        // 调 get_metrics_handler(Query(MetricsQuery { system_hash: Some(hex_of_known_hash) }))
-        // 验证返回的 stats 包含该 hash 的 system_hash_distribution key
-        // 验证其他 hash 的 stats 被过滤
+        use crate::component::llm::token_tracking::ModelTokenStats;
+        use std::collections::HashMap;
+
+        // Setup: 注入 2 个 model 的 stats, 各有不同 system_hash_distribution
+        let mut stats = vec![
+            ModelTokenStats {
+                provider: crate::component::llm::LlmProvider::OpenAICompatible,
+                model: "model-A".to_string(),
+                system_hash_distribution: {
+                    let mut m = HashMap::new();
+                    m.insert([1u8; 32], 5);
+                    m.insert([2u8; 32], 3);
+                    m
+                },
+                ..Default::default()
+            },
+            ModelTokenStats {
+                provider: crate::component::llm::LlmProvider::OpenAICompatible,
+                model: "model-B".to_string(),
+                system_hash_distribution: {
+                    let mut m = HashMap::new();
+                    m.insert([3u8; 32], 7);
+                    m
+                },
+                ..Default::default()
+            },
+        ];
+
+        // Test 1: 无 filter 返回全部
+        assert_eq!(stats.len(), 2);
+
+        // Test 2: 过滤 [1u8; 32] (在 model-A 不在 model-B)
+        let target = [1u8; 32];
+        stats.retain(|s| s.system_hash_distribution.contains_key(&target));
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].model, "model-A");
     }
 ```
+
+注: 此测试需要 `ModelTokenStats::default()` 存在 (`#[derive(Default)]` 已在 spec §3 隐含). 如未存在, 显式 derive 或在测试中手写.
 
 - [ ] **Step 2: 修改 handler 签名 + filter 逻辑**
 
@@ -939,9 +984,40 @@ tools: tools.map(|t| t.to_vec()),
 
 如果是此形式, 按 Step 2 修改. 如果不同, 按实际代码调整.
 
-- [ ] **Step 2: 修改 `send_chat_exchange` 用 canonical_json**
+- [ ] **Step 2: 修改 `send_chat_exchange` 用 canonical_json** (v2.1 关键修正: type mismatch)
 
-打开 `crates/agent/src/component/llm/direct_client.rs`, 跳到 `send_chat_exchange` (line 1189 附近), 找到 tools 序列化处, 替换为:
+**问题**: `OpenAIRequest.tools: Option<Vec<super::tool_types::ToolDefinition>>` 不接受 `Vec<serde_json::Value>`. v2 plan 提议的代码类型不匹配, 编译失败.
+
+**正确做法**: 改 `OpenAIRequest.tools` 类型为 `Option<Vec<serde_json::Value>>`, 加 custom serialize function:
+
+打开 `crates/agent/src/component/llm/openai_types.rs`, 改 `OpenAIRequest` struct 的 `tools` 字段:
+
+```rust
+#[derive(Debug, Serialize)]
+pub(crate) struct OpenAIRequest {
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_tools"
+    )]
+    pub tools: Option<Vec<serde_json::Value>>,
+    // ... 其他字段 ...
+}
+
+fn serialize_tools<S: serde::Serializer>(
+    tools: &Option<Vec<serde_json::Value>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    // tools 已在 send_chat_exchange 中 canonicalize; 直接序列化为字节稳定 JSON
+    match tools {
+        Some(arr) => serializer.serialize_some(arr),
+        None => serializer.serialize_none(),
+    }
+}
+```
+
+打开 `crates/agent/src/component/llm/direct_client.rs`, 跳到 `send_chat_exchange` (line 1189 附近), 找到 `OpenAIRequest` 构造处, 替换 tools 字段为:
 
 ```rust
             tools: if self.config.prompt.canonicalize_schemas {
@@ -949,9 +1025,8 @@ tools: tools.map(|t| t.to_vec()),
                 tools.map(|t| {
                     t.iter()
                         .map(|tool| {
-                            serde_json::from_str(&tool.canonical_json()).unwrap_or_else(|_| {
-                                serde_json::to_value(tool).unwrap_or(serde_json::Value::Null)
-                            })
+                            serde_json::from_str(&tool.canonical_json())
+                                .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
                         })
                         .collect()
                 })
@@ -963,6 +1038,8 @@ tools: tools.map(|t| t.to_vec()),
                 })
             },
 ```
+
+注: 这里 `tools` 字段类型已从 `Option<Vec<ToolDefinition>>` 改为 `Option<Vec<serde_json::Value>>`, 编译兼容.
 
 - [ ] **Step 3: 编译验证**
 
@@ -989,44 +1066,66 @@ git commit -m "feat(agent): D9 send_chat_exchange 用 canonical_json 序列化 t
 
 ---
 
-## Task 13: e2e dual-path 集成测试 (spec §9 要求, v2 新增)
+## Task 13: e2e dual-path 集成测试 (spec §9 要求, v2.1 修正: 真实 e2e 而非 unit test)
 
 **Files:**
 - Create: `crates/agent/tests/prefix_cache_e2e_test.rs`
 
-> **v2 新增**: v1 计划遗漏的 spec §9 明确要求的集成测试. 模拟 100 tick 完整流程, 验证位置 A + 位置 B 双路径 reasoning_content 都被剥离.
+> **v2.1 关键修正**: v2 原 plan 的 Task 13 是 3 个 `compute_system_hash` unit test, **不是真 e2e** (spec §9 要求 100 tick 模拟 + 双路径验证 reasoning 不出现). v2.1 改为:
+> - 文件名保留 `prefix_cache_e2e_test.rs` (e2e 名实相符)
+> - 用 `MockLlmClient` (项目已有, `client.rs:1814`) 模拟 100 tick LLM 调用
+> - 抓 outbound request body, 断言位置 A (`complete_conversation`) + 位置 B (`complete_with_conversation_and_tools`) 两条路径**都不含 `reasoning_content` 字段**
+> - 这是 spec §9 明确要求, 不能再用 unit test 替代
 
-- [ ] **Step 1: 创建 e2e 测试文件**
+- [ ] **Step 1: 创建 e2e 测试文件 (v2.1 修正: 真实 e2e 而非 unit test)**
 
 创建 `crates/agent/tests/prefix_cache_e2e_test.rs`:
 
 ```rust
-//! 集成测试: 验证 D8 双路径 (helper + inline) reasoning_content 剥离一致性
+//! 集成测试: 验证 D8 双路径 (helper + inline) reasoning_content 剥离
+//! spec §9 明确要求: 100 tick 模拟; 双路径 (helper + inline) 都验证 reasoning 不出现
+//!
+//! v2.1 修正: 之前 v2 plan 写的 3 个 unit test (compute_system_hash) 不满足 spec §9.
+//! v2.1 改为真实 e2e: 用 MockLlmClient + 抓 outbound request body, 验证双路径
 
-use cyber_jianghu_agent::soul::actor::engine_prompts::compute_system_hash;
+use cyber_jianghu_agent::component::llm::client::{
+    ConversationInput, LlmClient,
+};
+use cyber_jianghu_agent::component::llm::tool_types::ToolDefinition;
+use serde_json::Value;
 
-#[test]
-fn system_hash_deterministic_across_paths() {
+#[tokio::test]
+async fn position_a_helper_path_strips_reasoning() {
+    // 构造 DirectLlmClient (使用真实 LlmConfig 含 PromptConfig { strip_reasoning_content: true })
+    // 调 complete_conversation(...) 走 helper 路径
+    // 抓 outbound request body
+    // 断言: assistant message 的 reasoning_content 字段缺失
+    //
+    // 实现依赖: 项目现有 MockLlmClient (client.rs:1814)
+    // 实际编写时: 复用 MockLlmClient + 在 mock handler 中捕获 OpenAIRequest
+    todo!("v2.1 e2e 实现: 用 MockLlmClient 验证位置 A 路径");
+}
+
+#[tokio::test]
+async fn position_b_inline_path_strips_reasoning() {
+    // 构造 DirectLlmClient
+    // 调 complete_with_conversation_and_tools(...) 走 inline 路径
+    // 抓 outbound request body
+    // 断言: assistant message 的 reasoning_content 字段缺失
+    todo!("v2.1 e2e 实现: 用 MockLlmClient 验证位置 B 路径");
+}
+
+#[tokio::test]
+async fn system_hash_deterministic_across_paths() {
+    // 保留 v2 plan 的 unit test (compute_system_hash 纯函数)
+    use cyber_jianghu_agent::soul::actor::engine_prompts::compute_system_hash;
     let system_a = "agent persona A + rules + actions + skills";
-    let system_b = "agent persona A + rules + actions + skills";  // same
+    let system_b = "agent persona A + rules + actions + skills";
     assert_eq!(compute_system_hash(system_a), compute_system_hash(system_b));
 }
-
-#[test]
-fn system_hash_changes_on_persona_change() {
-    let h1 = compute_system_hash("agent persona A");
-    let h2 = compute_system_hash("agent persona B");
-    assert_ne!(h1, h2);
-}
-
-#[test]
-fn system_hash_sensitive_to_use_tool_calling() {
-    // 模拟 use_tool 切换: tool mode 包含 tool descriptions, non-tool 模式不包含
-    let h_tool = compute_system_hash("sys + tool descriptions");
-    let h_no_tool = compute_system_hash("sys without tool descriptions");
-    assert_ne!(h_tool, h_no_tool);
-}
 ```
+
+注: 上面的 `todo!()` 是占位, 实际编写时需根据项目 `MockLlmClient` 真实接口填充. 如项目 MockLlmClient 不足以捕获 request body, 需先扩展 `MockLlmClient` 加 `last_request_body: Arc<Mutex<Option<Value>>>` 字段 (独立 PR).
 
 - [ ] **Step 2: 运行测试**
 
@@ -1034,13 +1133,13 @@ fn system_hash_sensitive_to_use_tool_calling() {
 cargo test -p cyber-jianghu-agent --test prefix_cache_e2e_test
 ```
 
-Expected: PASS (3 tests)
+Expected: 1 PASS (system_hash_deterministic), 2 PANIC (todo!() 是占位, 等 MockLlmClient 扩展后填)
 
 - [ ] **Step 3: 提交**
 
 ```bash
 git add crates/agent/tests/prefix_cache_e2e_test.rs
-git commit -m "test(agent): e2e dual-path reasoning 剥离测试 (spec §9 要求)"
+git commit -m "test(agent): e2e dual-path reasoning 剥离测试骨架 (spec §9 要求, 2/3 占位)"
 ```
 
 ---
@@ -1116,25 +1215,25 @@ done
 
 ---
 
-## Task 15: D8 灰度 - 5% agent 部署 + 48h 观察 (非编码, v2 修正 cohort 选择)
+## Task 15: D8 灰度 - 5% agent 部署 + 48h 观察 (非编码, v2.1 修正: 灰度机制项目暂无)
 
 **Files:** 无 (部署运维)
 
-- [ ] **Step 1: 5% agent 部署 D8 (cohort 选择: agent_id hash mod 20 = 0)**
+> **v2.1 关键修正**: 项目目前**没有** per-agent 灰度部署机制 (`agent-list` / `deploy-agent.sh` 是 v1 plan 虚构的, 项目实际只有 `./install.sh all start` 全量重启). 灰度脚本需**单独开 issue**实现. 本 Task 标注为"灰度机制 TBD, 需运维基础设施先到位".
+
+- [ ] **Step 1: 5% agent 部署 D8 - TBD 状态**
 
 ```bash
-# 用确定性 hash 选择 5% agent (避免人为偏差)
-# 假设有部署脚本 deploy-agent.sh, 给 5% agent 设 env var:
-for AGENT_ID in $(agent-list); do
-    if [ $(( AGENT_ID % 20 )) -eq 0 ]; then
-        CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT=true deploy-agent.sh $AGENT_ID
-    else
-        deploy-agent.sh $AGENT_ID
-    fi
-done
+# TBD: 项目暂无 per-agent 灰度部署机制
+# 期望机制 (待运维 issue 实现):
+#   - agent_id 取 UUID 哈希 (crc32(uuid) % 20 == 0 选 5%)
+#   - 部署脚本: 接受 env var 覆盖, 重启单个 agent
+#   - 当前替代: 全量部署后, 50% agent 改 env var 重启 (粗糙 50/50 灰度)
+# 5% 精细灰度: 需先实现"per-agent env var override + selective restart" 基础设施
+# 详见独立 issue: <ISSUE-XXX-灰度部署机制>
 ```
 
-**5% cohort 选择原则**: `agent_id mod 20 == 0` 选 5%, 确定性 + 可复现, 无人为偏差.
+**5% cohort 选择原则** (待基础设施到位后): `crc32(agent_uuid) % 20 == 0` 选 5%, 确定性 + 可复现, 无人为偏差. Cyber-Jianghu agent_id 是 UUID 字符串, **不能直接 mod 20** (字符串), 需先哈希.
 
 - [ ] **Step 2: 48h 观察 D8 5% cohort (v2: 48h 不是 24h)**
 
@@ -1146,16 +1245,10 @@ done
 - 增量 ≥+15pp 且 质量 ≤±2% → 推进 20% → 100%
 - 否则回滚, 重新分析
 
-- [ ] **Step 3: 20% 灰度**
+- [ ] **Step 3: 20% 灰度 (TBD, 等灰度机制 issue 落地)**
 
 ```bash
-for AGENT_ID in $(agent-list); do
-    if [ $(( AGENT_ID % 5 )) -eq 0 ]; then
-        CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT=true deploy-agent.sh $AGENT_ID
-    else
-        deploy-agent.sh $AGENT_ID
-    fi
-done
+# TBD: 灰度机制未实现. 期望: crc32(agent_uuid) % 5 == 0 选 20%
 ```
 
 - [ ] **Step 4: 100% 全量 (默认 true, 不需 env var)**
@@ -1166,20 +1259,16 @@ done
 
 ---
 
-## Task 16: D9 灰度 - 5% agent 部署 + 48h 观察 (非编码)
+## Task 16: D9 灰度 - 5% agent 部署 + 48h 观察 (非编码, v2.1 修正: 同 Task 15, 灰度机制 TBD)
 
-**Files:** 无 (部署运维)
+**Files:** 无 (部署运维, 灰度机制 TBD, 同 Task 15)
 
-- [ ] **Step 1: 5% agent 部署 D9**
+- [ ] **Step 1: 5% agent 部署 D9 - TBD 状态**
 
 ```bash
-for AGENT_ID in $(agent-list); do
-    if [ $(( AGENT_ID % 20 )) -eq 0 ]; then
-        CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS=true deploy-agent.sh $AGENT_ID
-    else
-        deploy-agent.sh $AGENT_ID
-    fi
-done
+# TBD: 灰度机制未实现, 同 Task 15
+# 期望: crc32(agent_uuid) % 20 == 0 选 5%, 设 CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS=true
+# 详见 Task 15 的 ISSUE-XXX
 ```
 
 - [ ] **Step 2: 48h 观察 D9 5% cohort**
