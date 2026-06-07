@@ -54,6 +54,7 @@ impl super::super::Agent {
 
                 let event_deltas = {
                     use crate::component::emotion::CoreAffect;
+                    let scorer = crate::component::memory::scorer::ImportanceScorer::new();
                     let mut total_v = 0.0_f32;
                     let mut total_a = 0.0_f32;
                     for event in &world_state.events_log {
@@ -61,8 +62,11 @@ impl super::super::Agent {
                             event, &emotion_config.outcome_mapping,
                         );
                         let category = crate::component::emotion::outcome::event_category(event);
+                        let importance = scorer.score(
+                            &event.event_type, &event.description, &event.metadata,
+                        );
                         let (v, a) = CoreAffect::compute_event_affect(
-                            &category, outcome.as_deref(), 1.0, &emotion_config.core_affect.events,
+                            &category, outcome.as_deref(), importance, &emotion_config.core_affect.events,
                         );
                         total_v += v;
                         total_a += a;
