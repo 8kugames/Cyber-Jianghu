@@ -502,10 +502,7 @@ fn enrich_attributes_with_descriptions(
     // 预先收集所有 _max 字段
     let max_values: std::collections::HashMap<&str, i64> = attrs_obj
         .iter()
-        .filter_map(|(key, value)| {
-            key.strip_suffix("_max")
-                .and_then(|base| value.as_i64().map(|v| (base, v)))
-        })
+        .filter_map(|(key, value)| key.strip_suffix("_max").zip(value.as_i64()))
         .collect();
 
     // 将属性转换为带描述的格式（排除 _max 冗余字段）
