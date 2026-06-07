@@ -1,0 +1,119 @@
+# Cyber-Jianghu Integration Test - 5 Agents (Cognitive Mode, agent-4 excluded due to token exhaustion)
+# Server: local docker (cyber-jianghu-server:23333)
+# LLM 配置通过各 agent 的 config/agent.yaml 管理，不在此处设置
+
+x-agent-common: &agent-common
+  image: agent-agent:latest
+  restart: unless-stopped
+  networks:
+    - cyber-jianghu-network
+  environment: &agent-env-common
+    PORT: 23340
+    RUST_LOG: info
+    CYBER_JIANGHU_WS_ALLOW_EXTERNAL: 1
+    CYBER_JIANGHU_CONFIG_DIR: /app/config
+    CYBER_JIANGHU_DATA_DIR: /app/data
+    CYBER_JIANGHU_SERVER_WS_URL: ws://cyber-jianghu-server:23333/ws
+    CYBER_JIANGHU_SERVER_HTTP_URL: http://cyber-jianghu-server:23333
+  command: ["sh", "-c", "./agent run --port 23340"]
+
+services:
+  agent-1:
+    <<: *agent-common
+    container_name: agent-1-minimaxi
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23341:23340"
+    volumes:
+      - ./agent-1/config:/app/config
+      - ./agent-1/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-2:
+    <<: *agent-common
+    container_name: agent-2-minimaxi
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23342:23340"
+    volumes:
+      - ./agent-2/config:/app/config
+      - ./agent-2/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-3:
+    <<: *agent-common
+    container_name: agent-3-sensenova
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23343:23340"
+    volumes:
+      - ./agent-3/config:/app/config
+      - ./agent-3/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-4:
+    <<: *agent-common
+    container_name: agent-4-agnes
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23344:23340"
+    volumes:
+      - ./agent-4/config:/app/config
+      - ./agent-4/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-5:
+    <<: *agent-common
+    container_name: agent-5-longcat
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23345:23340"
+    volumes:
+      - ./agent-5/config:/app/config
+      - ./agent-5/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-6:
+    <<: *agent-common
+    container_name: agent-6-deepseek
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23346:23340"
+    volumes:
+      - ./agent-6/config:/app/config
+      - ./agent-6/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-7:
+    <<: *agent-common
+    container_name: agent-7-siliconflow
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23347:23340"
+    volumes:
+      - ./agent-7/config:/app/config
+      - ./agent-7/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+  agent-ollama:
+    <<: *agent-common
+    container_name: agent-ollama
+    environment:
+      <<: *agent-env-common
+    ports:
+      - "23349:23340"
+    volumes:
+      - ./agent-ollama/config:/app/config
+      - ./agent-ollama/data:/app/data
+      - ../crates/agent/static/panel:/app/static/panel:ro
+
+networks:
+  cyber-jianghu-network:
+    external: true

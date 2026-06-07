@@ -35,7 +35,7 @@ Cargo.lock
 .env.*.local
 
 # 日志文件
-logs/
+# logs/
 *.log
 *.log.*
 
@@ -112,6 +112,8 @@ temp/
 # 运行时数据（服务器产物，与源代码目录分离）
 .data/
 .*
+!.claude
+!.test-agents
 
 agent.yaml
 scripts/test/
