@@ -215,10 +215,16 @@ pub struct SensationConfig {
     pub valence_labels: Vec<SensationLabel>,
     #[serde(default = "default_arousal_labels")]
     pub arousal_labels: Vec<SensationLabel>,
+    #[serde(default = "default_fallback_label")]
+    pub fallback_label: String,
 }
 
 fn default_distress_threshold() -> i32 {
     30
+}
+
+pub fn default_fallback_label() -> String {
+    "未知".to_string()
 }
 
 impl Default for SensationConfig {
@@ -229,6 +235,7 @@ impl Default for SensationConfig {
             distress_threshold: 30,
             valence_labels: default_valence_labels(),
             arousal_labels: default_arousal_labels(),
+            fallback_label: default_fallback_label(),
         }
     }
 }

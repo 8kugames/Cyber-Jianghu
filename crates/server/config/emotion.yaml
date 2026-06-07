@@ -76,8 +76,9 @@ retrieval:
 
 sensation:
   distress_threshold: 30
+  fallback_label: "未知"
 
-  # 社交动作到 outcome 的映射
+# 社交动作到 outcome 的映射（顶层字段，属于 EmotionConfig）
 outcome_mapping:
   "给予": friendly
   "说话": friendly
