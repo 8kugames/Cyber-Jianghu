@@ -162,6 +162,9 @@ pub struct Agent {
     /// 情绪配置（CoreAffect + encoding + retrieval + sensation）
     pub(crate) emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
 
+    /// 核心情感状态（效价×唤醒度，Agent 级别，Cognitive/Claw 双模式共享）
+    pub(crate) core_affect: Option<crate::component::emotion::CoreAffect>,
+
     /// 当前 tick_id（原子计数，WS callback / 主循环共享）
     pub(crate) current_tick: std::sync::Arc<std::sync::atomic::AtomicI64>,
 }
@@ -235,6 +238,7 @@ impl Agent {
             consecutive_idle_count: 0,
             chaos_generator: None,
             emotion_config: None,
+            core_affect: None,
             current_tick: std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
@@ -422,7 +426,9 @@ impl Agent {
     ) -> String {
         if let Some(ref manager) = self.memory_manager {
             let manager = manager.read().await;
-            manager.build_llm_context_with_emotion(Some(emotion_ctx)).await
+            manager
+                .build_llm_context_with_emotion(Some(emotion_ctx))
+                .await
         } else {
             String::new()
         }

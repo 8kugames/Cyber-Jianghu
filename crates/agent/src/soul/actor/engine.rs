@@ -710,37 +710,7 @@ impl CognitiveEngine {
             .and_then(|mut g| g.take())
     }
 
-    /// 更新 persona 中的 CoreAffect（由 lifecycle 每 tick 调用）
-    pub fn update_core_affect<F>(&self, f: F)
-    where
-        F: FnOnce(
-            &mut crate::component::emotion::CoreAffect,
-            &std::collections::HashMap<String, crate::component::persona::Trait>,
-        ),
-    {
-        let mut cfg = self.config.write().expect("rwlock poisoned");
-        let traits = cfg.persona.traits.clone();
-        if let Some(ref mut core_affect) = cfg.persona.current_state.core_affect {
-            f(core_affect, &traits);
-        }
-    }
-
-    /// 初始化 CoreAffect（首次调用）
-    pub fn init_core_affect(&self, config: &crate::component::emotion::config::CoreAffectConfig) {
-        let mut cfg = self.config.write().expect("rwlock poisoned");
-        if cfg.persona.current_state.core_affect.is_none() {
-            cfg.persona.current_state.core_affect =
-                Some(crate::component::emotion::CoreAffect::new(config));
-        }
-    }
-
-    /// 读取当前 CoreAffect 快照
-    pub fn core_affect_snapshot(&self) -> Option<crate::component::emotion::CoreAffect> {
-        let cfg = self.config.read().expect("rwlock poisoned");
-        cfg.persona.current_state.core_affect.clone()
-    }
-
-    /// 读取当前 persona traits 引用（用于 baseline 计算）
+    /// 读取当前 persona traits 引用（用于 CoreAffect 基线计算）
     pub fn persona_traits_snapshot(
         &self,
     ) -> std::collections::HashMap<String, crate::component::persona::Trait> {
@@ -873,6 +843,19 @@ impl CognitiveEngine {
     pub fn update_persona_emotion(&self, emotion: String) {
         let mut cfg = self.config.write().expect("rwlock poisoned");
         cfg.persona.update_emotion(emotion);
+    }
+
+    /// 应用特质变化到 persona（由 ConstructedEmotion 回写调用）
+    pub fn apply_persona_trait_change(
+        &self,
+        trait_name: &str,
+        delta: i16,
+        reason: String,
+        tick_id: i64,
+    ) {
+        let mut cfg = self.config.write().expect("rwlock poisoned");
+        cfg.persona
+            .apply_trait_change(trait_name, delta, reason, tick_id);
     }
 
     /// 更新 Agent 人设（rebirth 后调用）
@@ -1126,10 +1109,9 @@ impl CognitiveEngine {
         // 提取 LLM 构造的情绪
         if let Some(ref emotion) = response.constructed_emotion
             && !emotion.label.is_empty()
+            && let Ok(mut guard) = self.last_constructed_emotion.lock()
         {
-            if let Ok(mut guard) = self.last_constructed_emotion.lock() {
-                *guard = Some(emotion.clone());
-            }
+            *guard = Some(emotion.clone());
         }
         let response_json = serde_json::to_string(&response)?;
 
