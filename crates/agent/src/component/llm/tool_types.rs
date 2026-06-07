@@ -48,6 +48,13 @@ impl ToolDefinition {
             })),
         )
     }
+
+    pub fn canonical_json(&self) -> String {
+        use super::canonicalize::canonicalize_json_schema;
+        let mut value = serde_json::to_value(self).expect("ToolDefinition serializes");
+        canonicalize_json_schema(&mut value);
+        serde_json::to_string(&value).expect("canonical value serializes")
+    }
 }
 
 /// LLM 返回的 tool call（OpenAI response.choices[].message.tool_calls[]）
@@ -254,6 +261,28 @@ mod tests {
         let delta: StreamToolCallFunctionDelta = serde_json::from_str(json).unwrap();
         assert_eq!(delta.name, "search_memory");
         assert_eq!(delta.arguments, "");
+    }
+
+    #[test]
+    fn canonical_json_is_byte_stable_across_calls() {
+        let tool = ToolDefinition::new(
+            "test_fn",
+            "test",
+            Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "z_param": {"type": "string"},
+                    "a_param": {"type": "string"},
+                },
+                "required": ["z_param", "a_param"],
+            })),
+        );
+        let json1 = tool.canonical_json();
+        let json2 = tool.canonical_json();
+        assert_eq!(json1, json2, "canonical_json must be byte-identical across calls");
+        assert!(json1.contains("\"a_param\":{\"type\":\"string\"}"));
+        assert!(json1.contains("\"properties\":{\"a_param\":"));
+        assert!(json1.contains("\"required\":[\"a_param\",\"z_param\"]"));
     }
 
     #[test]
