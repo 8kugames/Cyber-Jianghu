@@ -721,6 +721,8 @@ mod tests {
     // ---- 9. record_token_usage accepts system_hash param ----
     #[test]
     fn record_token_usage_accepts_system_hash_param() {
+        let _guard = test_lock().lock().expect("lock poisoned");
+        clear_in_memory();
         use crate::component::llm::LlmProvider;
         let system_hash: [u8; 32] = [1u8; 32];
         record_token_usage(

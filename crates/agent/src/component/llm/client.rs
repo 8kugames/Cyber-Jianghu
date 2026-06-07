@@ -1711,6 +1711,7 @@ impl LlmClient for FallbackLlmClient {
             let system = system.to_string();
             let prompt = prompt.to_string();
             let prompt_chars = (system.len() + prompt.len()) as u64;
+            let system_hash = crate::soul::actor::compute_system_hash(&system);
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
@@ -1720,8 +1721,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(
+                stream,
+                provider,
+                model,
+                system_hash,
+                prompt_chars,
+            );
             Ok(tracking_stream.into_llm_stream())
         })
     }
@@ -1744,6 +1750,7 @@ impl LlmClient for FallbackLlmClient {
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
+            let system_hash = crate::soul::actor::compute_system_hash(&system);
             let prompt_chars = {
                 let mut total = system.len();
                 total += semi_static.len();
@@ -1779,8 +1786,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(
+                stream,
+                provider,
+                model,
+                system_hash,
+                prompt_chars,
+            );
             Ok(tracking_stream.into_llm_stream())
         })
     }
