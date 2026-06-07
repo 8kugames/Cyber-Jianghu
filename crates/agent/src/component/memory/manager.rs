@@ -327,11 +327,7 @@ impl MemoryManager {
         let episodic_memories = match emotion_ctx {
             Some(ctx) => self
                 .episodic
-                .get_top_by_importance_with_bias(
-                    10,
-                    ctx.valence,
-                    &ctx.retrieval_config,
-                )
+                .get_top_by_importance_with_bias(10, ctx.valence, &ctx.retrieval_config)
                 .await
                 .unwrap_or_default(),
             None => self
@@ -493,7 +489,10 @@ mod tests {
             description: "你吃了馒头".to_string(),
             metadata: json!({}),
         }];
-        manager.process_events(&low_events, None).await.unwrap();
+        manager
+            .process_events(&low_events, None, None)
+            .await
+            .unwrap();
 
         // 无 episodic 记忆时应返回空字符串（不再展示 working memory 流水账）
         let context = manager.build_llm_context().await;
@@ -506,7 +505,10 @@ mod tests {
             description: "张三向你问好".to_string(),
             metadata: json!({}),
         }];
-        manager.process_events(&high_events, None).await.unwrap();
+        manager
+            .process_events(&high_events, None, None)
+            .await
+            .unwrap();
 
         let context = manager.build_llm_context().await;
         assert!(
