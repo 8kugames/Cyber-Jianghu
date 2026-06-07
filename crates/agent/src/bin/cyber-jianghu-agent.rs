@@ -1127,10 +1127,15 @@ async fn run_agent(port: u16, mode: String, server: Option<String>) -> Result<()
 
     // Emotion 系统配置加载
     {
-        let emotion_path = config.server_dir(&config.server.ws_url).join("emotion.yaml");
+        let emotion_path = config
+            .server_dir(&config.server.ws_url)
+            .join("emotion.yaml");
         if emotion_path.exists() {
             match std::fs::read_to_string(&emotion_path) {
-                Ok(content) => match serde_yaml::from_str::<cyber_jianghu_agent::component::emotion::config::EmotionConfig>(&content) {
+                Ok(content) => match serde_yaml::from_str::<
+                    cyber_jianghu_agent::component::emotion::config::EmotionConfig,
+                >(&content)
+                {
                     Ok(emotion_config) => {
                         builder = builder.with_emotion_config(emotion_config);
                         info!("情绪系统配置已加载: {}", emotion_path.display());
