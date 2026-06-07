@@ -119,7 +119,10 @@ impl CoreAffect {
                     }
                 })
                 .unwrap_or(0.0);
-            (v + norm * rule.valence_weight, a + norm * rule.arousal_weight)
+            (
+                v + norm * rule.valence_weight,
+                a + norm * rule.arousal_weight,
+            )
         })
     }
 
@@ -133,7 +136,10 @@ impl CoreAffect {
         let (bv, ba) = Self::compute_baseline(
             traits,
             rules,
-            (config.default_baseline_valence, config.default_baseline_arousal),
+            (
+                config.default_baseline_valence,
+                config.default_baseline_arousal,
+            ),
         );
         self.baseline_valence = bv;
         self.baseline_arousal = ba;
@@ -169,15 +175,27 @@ mod tests {
         let attrs = HashMap::from([("hunger".into(), 20), ("hp".into(), 80)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
         assert!(v < 0.0, "hunger 低于舒适区应产生负效价，got valence={}", v);
-        assert!(a > 0.0, "hunger 低于舒适区应产生正唤醒度，got arousal={}", a);
+        assert!(
+            a > 0.0,
+            "hunger 低于舒适区应产生正唤醒度，got arousal={}",
+            a
+        );
     }
 
     #[test]
     fn test_physiological_in_comfort_zone() {
         let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 80)]);
         let (v, a) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
-        assert!((v - 0.0).abs() < 0.001, "舒适区内应无偏离，got valence={}", v);
-        assert!((a - 0.0).abs() < 0.001, "舒适区内应无偏离，got arousal={}", a);
+        assert!(
+            (v - 0.0).abs() < 0.001,
+            "舒适区内应无偏离，got valence={}",
+            v
+        );
+        assert!(
+            (a - 0.0).abs() < 0.001,
+            "舒适区内应无偏离，got arousal={}",
+            a
+        );
     }
 
     #[test]
@@ -191,8 +209,10 @@ mod tests {
     #[test]
     fn test_over_arousal_damping_configurable() {
         let attrs = HashMap::from([("hunger".into(), 60), ("hp".into(), 120)]);
-        let (_, a_half) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
-        let (_, a_full) = CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 1.0);
+        let (_, a_half) =
+            CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 0.5);
+        let (_, a_full) =
+            CoreAffect::compute_physiological_affect(&attrs, &make_attribute_rules(), 1.0);
         assert!(a_full > a_half, "damping=1.0 应比 damping=0.5 唤醒度更高");
     }
 
@@ -200,10 +220,20 @@ mod tests {
     fn test_physiological_deviation_scale_consistency() {
         let attrs_hunger = HashMap::from([("hunger".into(), 20), ("hp".into(), 80)]);
         let attrs_hp = HashMap::from([("hunger".into(), 60), ("hp".into(), 15)]);
-        let (v1, _) = CoreAffect::compute_physiological_affect(&attrs_hunger, &make_attribute_rules(), 0.5);
-        let (v2, _) = CoreAffect::compute_physiological_affect(&attrs_hp, &make_attribute_rules(), 0.5);
-        assert!((v1 - (-0.15)).abs() < 0.001, "hunger 偏离 0.5 * sens 0.3 = -0.15，got {}", v1);
-        assert!((v2 - (-0.20)).abs() < 0.001, "hp 偏离 0.5 * sens 0.4 = -0.20，got {}", v2);
+        let (v1, _) =
+            CoreAffect::compute_physiological_affect(&attrs_hunger, &make_attribute_rules(), 0.5);
+        let (v2, _) =
+            CoreAffect::compute_physiological_affect(&attrs_hp, &make_attribute_rules(), 0.5);
+        assert!(
+            (v1 - (-0.15)).abs() < 0.001,
+            "hunger 偏离 0.5 * sens 0.3 = -0.15，got {}",
+            v1
+        );
+        assert!(
+            (v2 - (-0.20)).abs() < 0.001,
+            "hp 偏离 0.5 * sens 0.4 = -0.20，got {}",
+            v2
+        );
     }
 
     #[test]
@@ -226,10 +256,16 @@ mod tests {
                 negativity_multiplier: 2.5,
             },
         ];
-        let (v_success, _) = CoreAffect::compute_event_affect("action_result", Some("success"), 1.0, &rules);
-        let (v_failure, _) = CoreAffect::compute_event_affect("action_result", Some("failure"), 1.0, &rules);
+        let (v_success, _) =
+            CoreAffect::compute_event_affect("action_result", Some("success"), 1.0, &rules);
+        let (v_failure, _) =
+            CoreAffect::compute_event_affect("action_result", Some("failure"), 1.0, &rules);
         assert!((v_success - 0.1).abs() < 0.001);
-        assert!((v_failure - (-0.25)).abs() < 0.001, "failure: -0.1 * 2.5 = -0.25，got {}", v_failure);
+        assert!(
+            (v_failure - (-0.25)).abs() < 0.001,
+            "failure: -0.1 * 2.5 = -0.25，got {}",
+            v_failure
+        );
     }
 
     #[test]
@@ -239,7 +275,15 @@ mod tests {
         affect.valence = -0.5;
         affect.arousal = 0.8;
         affect.update(1, (0.0, 0.0), (0.0, 0.0), &config);
-        assert!((affect.valence - (-0.475)).abs() < 0.001, "got {}", affect.valence);
-        assert!((affect.arousal - 0.775).abs() < 0.001, "got {}", affect.arousal);
+        assert!(
+            (affect.valence - (-0.475)).abs() < 0.001,
+            "got {}",
+            affect.valence
+        );
+        assert!(
+            (affect.arousal - 0.775).abs() < 0.001,
+            "got {}",
+            affect.arousal
+        );
     }
 }

@@ -74,7 +74,8 @@ impl super::super::Agent {
                 let mut total_a = 0.0_f32;
                 for event in &world_state.events_log {
                     let outcome = crate::component::emotion::outcome::extract_outcome(
-                        event, &emotion_config.outcome_mapping,
+                        event,
+                        &emotion_config.outcome_mapping,
                     );
                     let category = crate::component::emotion::outcome::event_category(event);
                     let (v, a) = CoreAffect::compute_event_affect(
@@ -102,7 +103,11 @@ impl super::super::Agent {
                 let attrs_clone = attrs.clone();
 
                 engine.update_core_affect(|core_affect, traits| {
-                    core_affect.update_baseline(traits, &config_clone.baseline_traits, &config_clone);
+                    core_affect.update_baseline(
+                        traits,
+                        &config_clone.baseline_traits,
+                        &config_clone,
+                    );
                     let phys = crate::component::emotion::CoreAffect::compute_physiological_affect(
                         &attrs_clone,
                         &config_clone.attributes,
@@ -114,7 +119,10 @@ impl super::super::Agent {
                 // 注入体感到 memory_context
                 if let Some(ca) = engine.core_affect_snapshot() {
                     let sensation = crate::component::emotion::sensation::build_internal_sensation(
-                        ca.valence, ca.arousal, attrs, &emotion_config.sensation,
+                        ca.valence,
+                        ca.arousal,
+                        attrs,
+                        &emotion_config.sensation,
                     );
                     if !sensation.is_empty() {
                         memory_context.push_str(&format!("\n{}", sensation));

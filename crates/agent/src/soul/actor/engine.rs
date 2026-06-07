@@ -713,7 +713,10 @@ impl CognitiveEngine {
     /// 更新 persona 中的 CoreAffect（由 lifecycle 每 tick 调用）
     pub fn update_core_affect<F>(&self, f: F)
     where
-        F: FnOnce(&mut crate::component::emotion::CoreAffect, &std::collections::HashMap<String, crate::component::persona::Trait>),
+        F: FnOnce(
+            &mut crate::component::emotion::CoreAffect,
+            &std::collections::HashMap<String, crate::component::persona::Trait>,
+        ),
     {
         let mut cfg = self.config.write().expect("rwlock poisoned");
         let traits = cfg.persona.traits.clone();
@@ -726,9 +729,8 @@ impl CognitiveEngine {
     pub fn init_core_affect(&self, config: &crate::component::emotion::config::CoreAffectConfig) {
         let mut cfg = self.config.write().expect("rwlock poisoned");
         if cfg.persona.current_state.core_affect.is_none() {
-            cfg.persona.current_state.core_affect = Some(
-                crate::component::emotion::CoreAffect::new(config)
-            );
+            cfg.persona.current_state.core_affect =
+                Some(crate::component::emotion::CoreAffect::new(config));
         }
     }
 
@@ -739,7 +741,9 @@ impl CognitiveEngine {
     }
 
     /// 读取当前 persona traits 引用（用于 baseline 计算）
-    pub fn persona_traits_snapshot(&self) -> std::collections::HashMap<String, crate::component::persona::Trait> {
+    pub fn persona_traits_snapshot(
+        &self,
+    ) -> std::collections::HashMap<String, crate::component::persona::Trait> {
         let cfg = self.config.read().expect("rwlock poisoned");
         cfg.persona.traits.clone()
     }
@@ -1114,11 +1118,11 @@ impl CognitiveEngine {
             *rc = self.llm_client.take_last_reasoning_content();
         }
         // 提取 LLM 构造的情绪
-        if let Some(ref emotion) = response.constructed_emotion {
-            if !emotion.label.is_empty() {
-                if let Ok(mut guard) = self.last_constructed_emotion.lock() {
-                    *guard = Some(emotion.clone());
-                }
+        if let Some(ref emotion) = response.constructed_emotion
+            && !emotion.label.is_empty()
+        {
+            if let Ok(mut guard) = self.last_constructed_emotion.lock() {
+                *guard = Some(emotion.clone());
             }
         }
         let response_json = serde_json::to_string(&response)?;
