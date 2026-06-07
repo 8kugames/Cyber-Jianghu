@@ -16,7 +16,7 @@ pub fn canonicalize_json_schema(value: &mut Value) {
                 map.insert(k, v);
             }
             if let Some(Value::Array(arr)) = map.get_mut("required") {
-                let mut sorted_arr: Vec<Value> = arr.drain(..).collect();
+                let mut sorted_arr: Vec<Value> = std::mem::take(arr);
                 sorted_arr.sort_by(|a, b| {
                     let a_s = a.as_str().unwrap_or("");
                     let b_s = b.as_str().unwrap_or("");

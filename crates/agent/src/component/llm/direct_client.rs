@@ -1255,8 +1255,12 @@ impl LlmClient for DirectLlmClient {
             tools: tools.map(|t| {
                 t.iter()
                     .map(|tool| {
-                        serde_json::from_str(&tool.canonical_json())
-                            .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
+                        if self.config.prompt.canonicalize_schemas {
+                            serde_json::from_str(&tool.canonical_json())
+                                .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
+                        } else {
+                            serde_json::to_value(tool).unwrap_or(serde_json::Value::Null)
+                        }
                     })
                     .collect()
             }),
