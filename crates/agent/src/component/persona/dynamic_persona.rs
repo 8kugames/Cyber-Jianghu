@@ -30,6 +30,9 @@ pub struct PersonaState {
     pub stress_level: u8,
     /// 上次更新时间
     pub last_updated: i64,
+    /// 核心情感（效价 x 唤醒度）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_affect: Option<crate::component::emotion::CoreAffect>,
 }
 
 impl Default for PersonaState {
@@ -42,6 +45,7 @@ impl Default for PersonaState {
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("system time is always after UNIX_EPOCH")
                 .as_secs() as i64,
+            core_affect: None,
         }
     }
 }
