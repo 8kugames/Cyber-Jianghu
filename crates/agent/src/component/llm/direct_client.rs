@@ -194,6 +194,26 @@ pub struct DirectLlmClientConfig {
     pub enable_thinking: Option<bool>,
     /// 上下文窗口大小（tokens）
     pub context_window_tokens: u32,
+    /// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
+    pub prompt: PromptConfig,
+}
+
+/// Prompt 配置（D8 reasoning 剥离 + D9 schema 规范化开关）
+#[derive(Debug, Clone)]
+pub struct PromptConfig {
+    /// 是否从 LLM 输出中剥离 reasoning content（D8）
+    pub strip_reasoning_content: bool,  // env var: CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT
+    /// 是否规范化 tool/parameter schema 输出（D9）
+    pub canonicalize_schemas: bool,    // env var: CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS
+}
+
+impl Default for PromptConfig {
+    fn default() -> Self {
+        Self {
+            strip_reasoning_content: crate::config::env_or("CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT", true),
+            canonicalize_schemas: crate::config::env_or("CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS", true),
+        }
+    }
 }
 
 impl DirectLlmClientConfig {
@@ -219,6 +239,7 @@ impl DirectLlmClientConfig {
             prefer_stream: false,
             enable_thinking: None,
             context_window_tokens: 32000,
+            prompt: PromptConfig::default(),
         }
     }
 
