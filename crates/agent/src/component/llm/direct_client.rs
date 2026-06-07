@@ -1355,7 +1355,11 @@ impl LlmClient for DirectLlmClient {
             messages.push(ChatMessage::user(&turn.user));
             messages.push(ChatMessage::assistant_with_reasoning(
                 &turn.assistant,
-                turn.reasoning_content.clone(),
+                if self.config.prompt.strip_reasoning_content {
+                    None
+                } else {
+                    turn.reasoning_content.clone()
+                },
             ));
         }
         messages.push(ChatMessage::user(input.current_prompt));
