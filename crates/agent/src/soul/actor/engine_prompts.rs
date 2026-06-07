@@ -463,3 +463,38 @@ impl super::CognitiveEngine {
         s
     }
 }
+
+/// 计算 system segment 的 SHA256 hash (纯函数, 不依赖 self)
+/// KISS 修正: 纯函数形式让 TDD 可行, 不需要 mock LlmClient
+pub fn compute_system_hash(system: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(system.as_bytes());
+    hasher.finalize().into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_system_hash;
+
+    #[test]
+    fn compute_system_hash_is_deterministic() {
+        let sys = "test system prompt content";
+        let h1 = compute_system_hash(sys);
+        let h2 = compute_system_hash(sys);
+        assert_eq!(h1, h2, "same input must produce same hash");
+    }
+
+    #[test]
+    fn compute_system_hash_different_inputs_different_hashes() {
+        let h1 = compute_system_hash("system variant A");
+        let h2 = compute_system_hash("system variant B");
+        assert_ne!(h1, h2, "different inputs must produce different hashes");
+    }
+
+    #[test]
+    fn compute_system_hash_returns_32_bytes() {
+        let h = compute_system_hash("any content");
+        assert_eq!(h.len(), 32);
+    }
+}
