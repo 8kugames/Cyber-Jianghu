@@ -127,7 +127,11 @@ impl ImportanceScorer {
         encoding_config: &crate::component::emotion::config::EncodingConfig,
     ) -> f32 {
         let base = self.score(event_type, description, metadata);
-        crate::component::emotion::encoding::apply_emotional_encoding(base, arousal, encoding_config)
+        crate::component::emotion::encoding::apply_emotional_encoding(
+            base,
+            arousal,
+            encoding_config,
+        )
     }
 }
 

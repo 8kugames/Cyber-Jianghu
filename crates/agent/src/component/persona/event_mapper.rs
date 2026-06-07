@@ -328,7 +328,7 @@ mod tests {
         let mapper = EventTraitMapper::new();
         let agent_id = uuid::Uuid::new_v4();
         let mut persona = DynamicPersona::new(agent_id, "测试角色", "基础描述");
-        persona.set_trait("愤怒", 50);
+        persona.set_trait("攻击性", 50);
 
         // 创建被攻击事件
         let mut metadata = serde_json::Map::new();
@@ -343,9 +343,9 @@ mod tests {
 
         let changes = mapper.map_event(&event, &persona, 1);
 
-        // 应该有愤怒变化
-        let anger_change = changes.iter().find(|c| c.trait_name == "愤怒");
-        assert!(anger_change.is_some());
-        assert!(anger_change.unwrap().delta > 0);
+        // 应该有攻击性变化
+        let aggression_change = changes.iter().find(|c| c.trait_name == "攻击性");
+        assert!(aggression_change.is_some());
+        assert!(aggression_change.unwrap().delta > 0);
     }
 }

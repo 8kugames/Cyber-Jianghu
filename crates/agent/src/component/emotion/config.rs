@@ -2,20 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EmotionConfig {
-    #[serde(default)]
-    pub core_affect: CoreAffectConfig,
-    #[serde(default)]
-    pub encoding: EncodingConfig,
-    #[serde(default)]
-    pub retrieval: RetrievalConfig,
-    #[serde(default)]
-    pub sensation: SensationConfig,
-    #[serde(default)]
-    pub outcome_mapping: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoreAffectConfig {
     #[serde(default = "default_decay_rate")]
     pub decay_rate: f32,
@@ -39,12 +25,24 @@ pub struct CoreAffectConfig {
     pub over_arousal_damping: f32,
 }
 
-fn default_trait_intensity_scale() -> f32 { 15.0 }
-fn default_over_arousal_damping() -> f32 { 0.5 }
-fn default_decay_rate() -> f32 { 0.05 }
-fn default_baseline_arousal() -> f32 { 0.3 }
-fn default_valence_range() -> [f32; 2] { [-1.0, 1.0] }
-fn default_arousal_range() -> [f32; 2] { [0.0, 1.0] }
+fn default_trait_intensity_scale() -> f32 {
+    15.0
+}
+fn default_over_arousal_damping() -> f32 {
+    0.5
+}
+fn default_decay_rate() -> f32 {
+    0.05
+}
+fn default_baseline_arousal() -> f32 {
+    0.3
+}
+fn default_valence_range() -> [f32; 2] {
+    [-1.0, 1.0]
+}
+fn default_arousal_range() -> [f32; 2] {
+    [0.0, 1.0]
+}
 
 impl Default for CoreAffectConfig {
     fn default() -> Self {
@@ -89,7 +87,9 @@ pub struct AffectEventRule {
     pub negativity_multiplier: f32,
 }
 
-fn default_one() -> f32 { 1.0 }
+fn default_one() -> f32 {
+    1.0
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaselineTraitRule {
@@ -118,11 +118,21 @@ pub struct EncodingConfig {
     pub unknown_function_fallback: String,
 }
 
-fn default_encoding_function() -> String { "linear".to_string() }
-fn default_half() -> f32 { 0.5 }
-fn default_one_point_five() -> f32 { 1.5 }
-fn default_output_range() -> [f32; 2] { [0.0, 1.0] }
-fn default_fallback_warn() -> String { "warn".to_string() }
+fn default_encoding_function() -> String {
+    "linear".to_string()
+}
+fn default_half() -> f32 {
+    0.5
+}
+fn default_one_point_five() -> f32 {
+    1.5
+}
+fn default_output_range() -> [f32; 2] {
+    [0.0, 1.0]
+}
+fn default_fallback_warn() -> String {
+    "warn".to_string()
+}
 
 impl Default for EncodingConfig {
     fn default() -> Self {
@@ -146,11 +156,16 @@ pub struct FlashbulbConfig {
     pub multiplier: f32,
 }
 
-fn default_eight_tenths() -> f32 { 0.8 }
+fn default_eight_tenths() -> f32 {
+    0.8
+}
 
 impl Default for FlashbulbConfig {
     fn default() -> Self {
-        Self { threshold: 0.8, multiplier: 1.5 }
+        Self {
+            threshold: 0.8,
+            multiplier: 1.5,
+        }
     }
 }
 
@@ -164,8 +179,12 @@ pub struct RetrievalConfig {
     pub null_encoding_bonus: f32,
 }
 
-fn default_two() -> f32 { 2.0 }
-fn default_three_tenths() -> f32 { 0.3 }
+fn default_two() -> f32 {
+    2.0
+}
+fn default_three_tenths() -> f32 {
+    0.3
+}
 
 impl Default for RetrievalConfig {
     fn default() -> Self {
@@ -198,7 +217,9 @@ pub struct SensationConfig {
     pub arousal_labels: Vec<SensationLabel>,
 }
 
-fn default_distress_threshold() -> i32 { 30 }
+fn default_distress_threshold() -> i32 {
+    30
+}
 
 impl Default for SensationConfig {
     fn default() -> Self {
@@ -222,34 +243,84 @@ fn default_distress_template() -> String {
 
 fn default_valence_labels() -> Vec<SensationLabel> {
     vec![
-        SensationLabel { lo: -1.0, hi: -0.6, label: "强烈的不适与痛苦".into() },
-        SensationLabel { lo: -0.6, hi: -0.3, label: "明显的不安与不悦".into() },
-        SensationLabel { lo: -0.3, hi: -0.1, label: "轻微的低落".into() },
-        SensationLabel { lo: -0.1, hi: 0.1, label: "平静无波".into() },
-        SensationLabel { lo: 0.1, hi: 0.3, label: "轻微的舒适".into() },
-        SensationLabel { lo: 0.3, hi: 0.6, label: "明显的愉悦".into() },
-        SensationLabel { lo: 0.6, hi: 1.0, label: "强烈的欣喜与满足".into() },
+        SensationLabel {
+            lo: -1.0,
+            hi: -0.6,
+            label: "强烈的不适与痛苦".into(),
+        },
+        SensationLabel {
+            lo: -0.6,
+            hi: -0.3,
+            label: "明显的不安与不悦".into(),
+        },
+        SensationLabel {
+            lo: -0.3,
+            hi: -0.1,
+            label: "轻微的低落".into(),
+        },
+        SensationLabel {
+            lo: -0.1,
+            hi: 0.1,
+            label: "平静无波".into(),
+        },
+        SensationLabel {
+            lo: 0.1,
+            hi: 0.3,
+            label: "轻微的舒适".into(),
+        },
+        SensationLabel {
+            lo: 0.3,
+            hi: 0.6,
+            label: "明显的愉悦".into(),
+        },
+        SensationLabel {
+            lo: 0.6,
+            hi: 1.0,
+            label: "强烈的欣喜与满足".into(),
+        },
     ]
 }
 
 fn default_arousal_labels() -> Vec<SensationLabel> {
     vec![
-        SensationLabel { lo: 0.0, hi: 0.2, label: "昏沉欲睡".into() },
-        SensationLabel { lo: 0.2, hi: 0.4, label: "平静清醒".into() },
-        SensationLabel { lo: 0.4, hi: 0.6, label: "精神集中".into() },
-        SensationLabel { lo: 0.6, hi: 0.8, label: "紧张兴奋".into() },
-        SensationLabel { lo: 0.8, hi: 1.0, label: "极度亢奋".into() },
+        SensationLabel {
+            lo: 0.0,
+            hi: 0.2,
+            label: "昏沉欲睡".into(),
+        },
+        SensationLabel {
+            lo: 0.2,
+            hi: 0.4,
+            label: "平静清醒".into(),
+        },
+        SensationLabel {
+            lo: 0.4,
+            hi: 0.6,
+            label: "精神集中".into(),
+        },
+        SensationLabel {
+            lo: 0.6,
+            hi: 0.8,
+            label: "紧张兴奋".into(),
+        },
+        SensationLabel {
+            lo: 0.8,
+            hi: 1.0,
+            label: "极度亢奋".into(),
+        },
     ]
 }
 
-impl Default for EmotionConfig {
-    fn default() -> Self {
-        Self {
-            core_affect: CoreAffectConfig::default(),
-            encoding: EncodingConfig::default(),
-            retrieval: RetrievalConfig::default(),
-            sensation: SensationConfig::default(),
-            outcome_mapping: HashMap::new(),
-        }
-    }
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EmotionConfig {
+    #[serde(default)]
+    pub core_affect: CoreAffectConfig,
+    #[serde(default)]
+    pub encoding: EncodingConfig,
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
+    #[serde(default)]
+    pub sensation: SensationConfig,
+    #[serde(default)]
+    pub outcome_mapping: HashMap<String, String>,
 }

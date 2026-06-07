@@ -73,10 +73,7 @@ mod tests {
         let event = make_social_event("给予");
         let mut mapping = HashMap::new();
         mapping.insert("给予".into(), "friendly".into());
-        assert_eq!(
-            extract_outcome(&event, &mapping),
-            Some("friendly".into())
-        );
+        assert_eq!(extract_outcome(&event, &mapping), Some("friendly".into()));
     }
 
     #[test]
