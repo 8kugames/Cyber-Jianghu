@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "cyber-jianghu-agent"
-version = "0.1.273"
+version = "0.1.274"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -695,6 +695,7 @@ dependencies = [
  "fnv",
  "futures-util",
  "governor",
+ "hex",
  "http-body",
  "http-body-util",
  "instant-distance",
