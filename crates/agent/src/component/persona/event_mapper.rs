@@ -213,18 +213,15 @@ impl EventTraitMapper {
     /// 获取默认的映射规则
     fn default_rules() -> Vec<TraitMappingRule> {
         vec![
-            // 被攻击事件
-            TraitMappingRule::new(EventType::Attacked, "愤怒".to_string(), 15).with_weight(1.2),
-            TraitMappingRule::new(EventType::Attacked, "恐惧".to_string(), 10),
+            // 被攻击事件 — 保留社交维度，情绪维度已迁移至 CoreAffect
             TraitMappingRule::new(EventType::Attacked, "攻击性".to_string(), 8),
             // 被欺骗事件
             TraitMappingRule::new(EventType::Deceived, "贪婪".to_string(), 10),
             TraitMappingRule::new(EventType::Deceived, "信任".to_string(), -20).with_weight(1.5),
             TraitMappingRule::new(EventType::Deceived, "愤怒".to_string(), 15),
             TraitMappingRule::new(EventType::Deceived, "谨慎".to_string(), 12),
-            // 被帮助事件
+            // 被帮助事件 — 感激已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::Helped, "信任".to_string(), 10).with_weight(1.2),
-            TraitMappingRule::new(EventType::Helped, "感激".to_string(), 15),
             TraitMappingRule::new(EventType::Helped, "友善".to_string(), 8),
             // 交易成功
             TraitMappingRule::new(EventType::TradeSuccess, "贪婪".to_string(), -5),
@@ -232,20 +229,11 @@ impl EventTraitMapper {
             // 交易失败
             TraitMappingRule::new(EventType::TradeFail, "沮丧".to_string(), 12),
             TraitMappingRule::new(EventType::TradeFail, "谨慎".to_string(), 5),
-            // 战斗胜利
+            // 战斗胜利 — 勇敢已迁移至 CoreAffect，保留社交维度
             TraitMappingRule::new(EventType::BattleWin, "自信".to_string(), 15).with_weight(1.3),
             TraitMappingRule::new(EventType::BattleWin, "攻击性".to_string(), 10),
-            TraitMappingRule::new(EventType::BattleWin, "勇敢".to_string(), 12),
-            // 战斗失败
-            TraitMappingRule::new(EventType::BattleLose, "恐惧".to_string(), 20).with_weight(1.4),
-            TraitMappingRule::new(EventType::BattleLose, "沮丧".to_string(), 15),
+            // 战斗失败 — 恐惧/沮丧已迁移至 CoreAffect，保留道德维度
             TraitMappingRule::new(EventType::BattleLose, "谨慎".to_string(), 10),
-            // 饥饿事件
-            TraitMappingRule::new(EventType::Hungry, "绝望".to_string(), 8),
-            TraitMappingRule::new(EventType::Hungry, "攻击性".to_string(), 12),
-            // 口渴事件
-            TraitMappingRule::new(EventType::Thirsty, "绝望".to_string(), 5),
-            TraitMappingRule::new(EventType::Thirsty, "虚弱".to_string(), 10),
             // 社交互动
             TraitMappingRule::new(EventType::SocialInteraction, "友善".to_string(), 3),
             TraitMappingRule::new(EventType::SocialInteraction, "信任".to_string(), 2),
@@ -326,13 +314,13 @@ mod tests {
         let mapper = EventTraitMapper::new();
         assert!(!mapper.rules.is_empty());
 
-        // 验证被攻击规则
+        // 验证被攻击规则（社交维度保留）
         let attacked_rule = mapper
             .rules
             .iter()
-            .find(|r| r.event_type == EventType::Attacked && r.trait_name == "愤怒");
+            .find(|r| r.event_type == EventType::Attacked && r.trait_name == "攻击性");
         assert!(attacked_rule.is_some());
-        assert_eq!(attacked_rule.unwrap().base_delta, 15);
+        assert_eq!(attacked_rule.unwrap().base_delta, 8);
     }
 
     #[test]
