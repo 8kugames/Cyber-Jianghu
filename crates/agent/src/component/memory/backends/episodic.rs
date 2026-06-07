@@ -109,6 +109,27 @@ impl EpisodicMemoryBackend {
         Ok(results)
     }
 
+    /// 效价一致性检索偏置
+    pub async fn get_top_by_importance_with_bias(
+        &self,
+        limit: usize,
+        current_valence: f32,
+        retrieval_config: &crate::component::emotion::config::RetrievalConfig,
+    ) -> Result<Vec<MemoryEntry>> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        let memories = store.get_top_memories_with_valence_bias(
+            limit,
+            current_valence,
+            retrieval_config.valence_bias_weight,
+            retrieval_config.valence_range,
+            retrieval_config.null_encoding_bonus,
+        )?;
+        Ok(memories.iter().map(Self::memory_to_entry).collect())
+    }
+
     /// 获取已归档记忆数量
     pub async fn archived_count(&self) -> Result<usize> {
         let store = self
