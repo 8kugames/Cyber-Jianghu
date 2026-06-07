@@ -17,8 +17,11 @@ pub(crate) struct OpenAIRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     /// 工具定义（OpenAI function calling）
+    /// 存储为 `serde_json::Value` 而非 `ToolDefinition`, 便于在 send_chat_exchange 中
+    /// 先调 canonicalize_json_schema 规范化 (sort keys + required 数组) 再序列化,
+    /// 保证 DeepSeek 前缀缓存的 tools 字段字节级稳定。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<super::tool_types::ToolDefinition>>,
+    pub tools: Option<Vec<serde_json::Value>>,
     /// 工具选择策略（"auto" | "none" | specific）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
