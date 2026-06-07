@@ -90,23 +90,25 @@ impl super::Agent {
                 };
                 match llm_client
                     .complete_json_with_config_and_retry_extracted::<Vec<serde_json::Value>>(
-                        &prompt, chat_config, 2,
+                        &prompt,
+                        chat_config,
+                        2,
                     )
                     .await
                 {
-                Ok(extracted) => extracted
-                    .value
-                    .into_iter()
-                    .filter_map(|v| {
-                        let idx = v.get("index")?.as_u64()? as usize;
-                        let delta = v.get("delta")?.as_i64()? as i32;
-                        Some((idx, delta.clamp(-10, 10)))
-                    })
-                    .collect(),
-                Err(e) => {
-                    tracing::warn!("社交事件 LLM 评估失败: {}", e);
-                    return;
-                }
+                    Ok(extracted) => extracted
+                        .value
+                        .into_iter()
+                        .filter_map(|v| {
+                            let idx = v.get("index")?.as_u64()? as usize;
+                            let delta = v.get("delta")?.as_i64()? as i32;
+                            Some((idx, delta.clamp(-10, 10)))
+                        })
+                        .collect(),
+                    Err(e) => {
+                        tracing::warn!("社交事件 LLM 评估失败: {}", e);
+                        return;
+                    }
                 }
             };
 

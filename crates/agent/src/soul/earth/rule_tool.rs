@@ -94,7 +94,10 @@ mod tests {
 
     fn make_prompt_template() -> PromptTemplateConfig {
         let mut sections = HashMap::new();
-        sections.insert("survival_rules".into(), "饥饿值超过80将严重损害健康。".into());
+        sections.insert(
+            "survival_rules".into(),
+            "饥饿值超过80将严重损害健康。".into(),
+        );
         sections.insert("narrative_limits".into(), "叙事应使用第二人称。".into());
 
         let mut templates = HashMap::new();
@@ -121,11 +124,7 @@ mod tests {
     fn test_execute_query_rules_normal() {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
-        let result = execute_query_rules(
-            &["survival".into()],
-            &cache,
-            &tmpl,
-        );
+        let result = execute_query_rules(&["survival".into()], &cache, &tmpl);
         assert!(result["success"].as_bool().unwrap());
         let rules = result["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 1);
@@ -137,11 +136,7 @@ mod tests {
     fn test_execute_query_rules_multiple() {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
-        let result = execute_query_rules(
-            &["survival".into(), "narrative".into()],
-            &cache,
-            &tmpl,
-        );
+        let result = execute_query_rules(&["survival".into(), "narrative".into()], &cache, &tmpl);
         assert!(result["success"].as_bool().unwrap());
         assert_eq!(result["rules"].as_array().unwrap().len(), 2);
     }
@@ -150,11 +145,7 @@ mod tests {
     fn test_execute_query_rules_unknown_category() {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
-        let result = execute_query_rules(
-            &["nonexistent".into()],
-            &cache,
-            &tmpl,
-        );
+        let result = execute_query_rules(&["nonexistent".into()], &cache, &tmpl);
         assert!(!result["success"].as_bool().unwrap());
         assert!(result["message"].as_str().unwrap().contains("nonexistent"));
     }
@@ -163,13 +154,11 @@ mod tests {
     fn test_execute_query_rules_empty_category() {
         let cache = RuleCache::new(&make_rule_config());
         let tmpl = make_prompt_template();
-        let result = execute_query_rules(
-            &["empty".into()],
-            &cache,
-            &tmpl,
-        );
+        let result = execute_query_rules(&["empty".into()], &cache, &tmpl);
         assert!(result["success"].as_bool().unwrap());
-        let content = result["rules"].as_array().unwrap()[0]["content"].as_str().unwrap();
+        let content = result["rules"].as_array().unwrap()[0]["content"]
+            .as_str()
+            .unwrap();
         assert!(content.contains("暂无"));
     }
 }

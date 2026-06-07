@@ -204,6 +204,9 @@ impl GlobalMemoryRegistry {
                     last_accessed_at: None,
                     access_count: 0,
                     is_archived: false,
+                    encoding_valence: None,
+                    encoding_arousal: None,
+                    encoding_emotion: None,
                 })
             })
             .context("Failed to execute query")?;
@@ -257,6 +260,9 @@ impl GlobalMemoryRegistry {
                     last_accessed_at: None,
                     access_count: 0,
                     is_archived: false,
+                    encoding_valence: None,
+                    encoding_arousal: None,
+                    encoding_emotion: None,
                 })
             })
             .context("Failed to execute query")?;

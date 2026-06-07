@@ -157,15 +157,15 @@ fn compact_query_rules(value: &serde_json::Value, budget: usize) -> serde_json::
         rules.truncate(max_rules);
         let content_limit = (budget as f64 * RULE_CONTENT_RATIO) as usize;
         for rule in rules.iter_mut() {
-            if let Some(content) = rule.get("content").and_then(|c| c.as_str()) {
-                if content.chars().count() > content_limit {
-                    let truncated: String = content.chars().take(content_limit).collect();
-                    if let Some(obj) = rule.as_object_mut() {
-                        obj.insert(
-                            "content".into(),
-                            serde_json::json!(format!("{}…[已截断]", truncated)),
-                        );
-                    }
+            if let Some(content) = rule.get("content").and_then(|c| c.as_str())
+                && content.chars().count() > content_limit
+            {
+                let truncated: String = content.chars().take(content_limit).collect();
+                if let Some(obj) = rule.as_object_mut() {
+                    obj.insert(
+                        "content".into(),
+                        serde_json::json!(format!("{}…[已截断]", truncated)),
+                    );
                 }
             }
         }
