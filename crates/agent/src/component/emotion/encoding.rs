@@ -36,7 +36,11 @@ mod tests {
     #[test]
     fn test_linear_boost_zero_arousal() {
         let score = apply_emotional_encoding(0.5, 0.0, &default_config());
-        assert!((score - 0.5).abs() < 0.001, "arousal=0 应无增强，got {}", score);
+        assert!(
+            (score - 0.5).abs() < 0.001,
+            "arousal=0 应无增强，got {}",
+            score
+        );
     }
 
     #[test]
@@ -50,7 +54,11 @@ mod tests {
     fn test_flashbulb() {
         let score = apply_emotional_encoding(0.5, 0.9, &default_config());
         // boost = 1.0 + 0.9 * 0.5 = 1.45; * 0.5 = 0.725; * 1.5 flashbulb = 1.0875; clamp 1.0
-        assert!((score - 1.0).abs() < 0.001, "flashbulb 应 clamp 到 1.0，got {}", score);
+        assert!(
+            (score - 1.0).abs() < 0.001,
+            "flashbulb 应 clamp 到 1.0，got {}",
+            score
+        );
     }
 
     #[test]
@@ -58,7 +66,11 @@ mod tests {
         let mut cfg = default_config();
         cfg.function = "nonexistent".to_string();
         let score = apply_emotional_encoding(0.5, 0.5, &cfg);
-        assert!((score - 0.5).abs() < 0.001, "unknown function fallback，got {}", score);
+        assert!(
+            (score - 0.5).abs() < 0.001,
+            "unknown function fallback，got {}",
+            score
+        );
     }
 
     #[test]

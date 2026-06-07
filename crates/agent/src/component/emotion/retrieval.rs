@@ -41,6 +41,10 @@ mod tests {
     fn test_null_encoding() {
         let cfg = RetrievalConfig::default();
         let bonus = compute_valence_bonus(None, 0.5, &cfg);
-        assert!((bonus - 0.0).abs() < 0.001, "NULL encoding 应返回 0，got {}", bonus);
+        assert!(
+            (bonus - 0.0).abs() < 0.001,
+            "NULL encoding 应返回 0，got {}",
+            bonus
+        );
     }
 }

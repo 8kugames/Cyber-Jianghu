@@ -10,8 +10,11 @@ pub fn build_internal_sensation(
 ) -> String {
     let valence_label = find_label(valence, &config.valence_labels);
     let arousal_label = find_label(arousal, &config.arousal_labels);
-    let distress_hint =
-        build_distress_hint(attributes, &config.distress_template, config.distress_threshold);
+    let distress_hint = build_distress_hint(
+        attributes,
+        &config.distress_template,
+        config.distress_threshold,
+    );
     let hint_line = if distress_hint.is_empty() {
         String::new()
     } else {
@@ -26,10 +29,7 @@ pub fn build_internal_sensation(
         .replace("{distress_hint}", &hint_line)
 }
 
-fn find_label(
-    value: f32,
-    labels: &[crate::component::emotion::config::SensationLabel],
-) -> String {
+fn find_label(value: f32, labels: &[crate::component::emotion::config::SensationLabel]) -> String {
     for (i, label) in labels.iter().enumerate() {
         let is_last = i == labels.len() - 1;
         if value >= label.lo && (value < label.hi || is_last) {

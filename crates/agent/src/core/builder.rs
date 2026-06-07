@@ -259,7 +259,10 @@ impl AgentBuilder {
     }
 
     /// 设置情绪配置
-    pub fn with_emotion_config(mut self, config: crate::component::emotion::config::EmotionConfig) -> Self {
+    pub fn with_emotion_config(
+        mut self,
+        config: crate::component::emotion::config::EmotionConfig,
+    ) -> Self {
         self.emotion_config = Some(config);
         self
     }

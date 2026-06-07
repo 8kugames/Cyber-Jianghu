@@ -142,9 +142,9 @@ impl FtsFallback {
                         last_accessed_at: None,
                         access_count: 0,
                         is_archived: false,
-                    encoding_valence: None,
-                    encoding_arousal: None,
-                    encoding_emotion: None,
+                        encoding_valence: None,
+                        encoding_arousal: None,
+                        encoding_emotion: None,
                     })
                 },
             )
@@ -198,9 +198,9 @@ impl FtsFallback {
                         last_accessed_at: None,
                         access_count: 0,
                         is_archived: false,
-                    encoding_valence: None,
-                    encoding_arousal: None,
-                    encoding_emotion: None,
+                        encoding_valence: None,
+                        encoding_arousal: None,
+                        encoding_emotion: None,
                     })
                 },
             )
