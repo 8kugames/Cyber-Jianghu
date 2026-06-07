@@ -161,6 +161,7 @@
     - [x] 基于艾宾浩斯遗忘曲线的记忆归档机制。
     - [x] 自动基于事件类型与元数据为记忆进行重要性打分。
     - [x] **记忆叙事合成**: 高重要性事件（≥ episodic_threshold）经人魂（CognitiveEngine）LLM 批量叙事加工后写入情景记忆，解决"无意义事件进入长期记忆"问题。配置驱动（`prompt_templates.yaml` 的 `memory_narrative` section），失败降级文本: `你一阵恍惚，似乎遗漏了一些重要的记忆。`
+  - [x] **情绪-记忆联动系统 (CoreAffect)**: 基于 Barrett 情绪建构论的核心情感（效价×唤醒度），实现编码门控（arousal → importance boost）和检索偏置（valence-congruent retrieval）。Agent 级别架构，Cognitive/Claw 双模式共享。全量 YAML 配置驱动（`emotion.yaml`）。LLM 构造具体情绪回写 persona trait delta。
   - [x] **语义记忆 (Semantic Memory)**：采用 HNSW 向量索引实现相似度联想，并在失败时降级为全文检索。Docker 镜像内建 bge-small-zh-v1.5 嵌入模型（~100MB）。
 - [x] **[双栖运行模式](../../crates/agent/docs/architecture/p0_core/dual_mode.md)**:
   - [x] **Cognitive 模式**：调用内置 LLM 的独立智能体。
