@@ -651,6 +651,7 @@ impl DirectLlmClient {
                 model, actual_model
             );
         }
+        let system_hash = Self::extract_system_hash_from_request(request);
         if let Some(ref usage) = response_data.usage {
             let cache_hit = usage.cache_hit_tokens().unwrap_or(0);
             record_token_usage(
@@ -659,6 +660,7 @@ impl DirectLlmClient {
                 usage.prompt_tokens,
                 usage.completion_tokens,
                 cache_hit,
+                system_hash,
             );
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}",
@@ -682,7 +684,14 @@ impl DirectLlmClient {
                 .and_then(|c| c.message.content.as_ref())
                 .map(|s| (s.len() as u64 / 3).max(1))
                 .unwrap_or(0);
-            record_token_usage(&self.config.provider, &model, est_pt, est_ct, 0);
+            record_token_usage(
+                &self.config.provider,
+                &model,
+                est_pt,
+                est_ct,
+                0,
+                system_hash,
+            );
             debug!(
                 "Token usage (estimated): provider={}, model={}, prompt~{}, completion~{}",
                 self.config.provider.as_str(),
@@ -695,6 +704,22 @@ impl DirectLlmClient {
         Ok(response_data)
     }
 
+    /// 从 request 中提取 system 字符串（按 OpenAI 约定 messages[0] 为 system）
+    /// 若 messages[0] 不是 system role 或 content 为 None, 返回空字符串 (hash 仍可计算, 区别于 `[0u8;32]`)
+    fn extract_system_from_request(request: &OpenAIRequest) -> String {
+        request
+            .messages
+            .first()
+            .filter(|m| m.role == "system")
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default()
+    }
+
+    fn extract_system_hash_from_request(request: &OpenAIRequest) -> [u8; 32] {
+        let system = Self::extract_system_from_request(request);
+        crate::soul::actor::compute_system_hash(&system)
+    }
+
     /// 流式降级：用 streaming 收集完整响应，组装为 OpenAIResponse
     ///
     /// 当 send_request 遇到 "only support stream mode" 错误时调用此方法。
@@ -704,6 +729,7 @@ impl DirectLlmClient {
         use futures_util::StreamExt;
 
         info!("[地魂] send_request_via_stream 入口（流式路径）");
+        let system_hash = Self::extract_system_hash_from_request(request);
         let mut stream = self.send_streaming_request(request).await?;
         let mut acc = StreamAccumulator::new();
 
@@ -767,6 +793,7 @@ impl DirectLlmClient {
                     pt,
                     0,
                     0,
+                    system_hash,
                 );
             }
             anyhow::bail!(
@@ -810,6 +837,7 @@ impl DirectLlmClient {
                 final_pt,
                 ct,
                 cache_hit,
+                system_hash,
             );
             debug!(
                 "Stream token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
@@ -835,6 +863,7 @@ impl DirectLlmClient {
                 est_pt,
                 est_ct,
                 0,
+                system_hash,
             );
             debug!(
                 "Stream token usage (estimated fallback): provider={}, model={}, prompt~{}, completion~{}",
@@ -1360,11 +1389,14 @@ impl LlmClient for DirectLlmClient {
                 anyhow::bail!("LLM 调用已被停止");
             }
             let prompt_chars = (system.len() + prompt.len()) as u64;
+            let system_hash =
+                crate::soul::actor::compute_system_hash(system);
             let stream = self.complete_streaming(system, prompt).await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                system_hash,
                 prompt_chars,
             );
             Ok(tracking.into_llm_stream())
@@ -1407,10 +1439,13 @@ impl LlmClient for DirectLlmClient {
                     current_prompt,
                 )
                 .await?;
+            let system_hash =
+                crate::soul::actor::compute_system_hash(system);
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,
                 self.config.get_model_with_default(),
+                system_hash,
                 prompt_chars,
             );
             Ok(tracking.into_llm_stream())
