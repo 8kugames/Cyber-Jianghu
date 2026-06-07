@@ -415,6 +415,19 @@ impl Agent {
         }
     }
 
+    /// 获取记忆上下文（含效价一致性检索偏置）
+    pub async fn get_memory_context_with_emotion(
+        &self,
+        emotion_ctx: &crate::component::memory::manager::EmotionContext,
+    ) -> String {
+        if let Some(ref manager) = self.memory_manager {
+            let manager = manager.read().await;
+            manager.build_llm_context_with_emotion(Some(emotion_ctx)).await
+        } else {
+            String::new()
+        }
+    }
+
     /// 检查记忆系统是否已启用
     pub fn has_memory(&self) -> bool {
         self.memory_manager.is_some()
@@ -489,12 +502,13 @@ impl Agent {
         &mut self,
         events: &[crate::models::WorldEvent],
         cognitive_engine: Option<&crate::soul::actor::CognitiveEngine>,
+        emotion_ctx: Option<&crate::component::memory::manager::EmotionContext>,
     ) -> Result<()> {
         if let Some(ref mut manager) = self.memory_manager {
             manager
                 .write()
                 .await
-                .process_events(events, cognitive_engine)
+                .process_events(events, cognitive_engine, emotion_ctx.cloned())
                 .await?;
         }
         Ok(())
