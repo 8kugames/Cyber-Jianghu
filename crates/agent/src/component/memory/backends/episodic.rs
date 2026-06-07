@@ -61,6 +61,9 @@ impl EpisodicMemoryBackend {
         memory.is_archived = entry.is_archived;
         memory.access_count = entry.access_count as i32;
         memory.last_accessed_at = entry.last_accessed_at.map(|dt| dt.to_rfc3339());
+        memory.encoding_valence = entry.encoding_valence;
+        memory.encoding_arousal = entry.encoding_arousal;
+        memory.encoding_emotion = entry.encoding_emotion.clone();
         memory
     }
 
@@ -80,6 +83,9 @@ impl EpisodicMemoryBackend {
             .as_ref()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
+        entry.encoding_valence = memory.encoding_valence;
+        entry.encoding_arousal = memory.encoding_arousal;
+        entry.encoding_emotion = memory.encoding_emotion.clone();
 
         entry
     }
@@ -101,6 +107,27 @@ impl EpisodicMemoryBackend {
             .collect();
 
         Ok(results)
+    }
+
+    /// 效价一致性检索偏置
+    pub async fn get_top_by_importance_with_bias(
+        &self,
+        limit: usize,
+        current_valence: f32,
+        retrieval_config: &crate::component::emotion::config::RetrievalConfig,
+    ) -> Result<Vec<MemoryEntry>> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Lock poisoned"))?;
+        let memories = store.get_top_memories_with_valence_bias(
+            limit,
+            current_valence,
+            retrieval_config.valence_bias_weight,
+            retrieval_config.valence_range,
+            retrieval_config.null_encoding_bonus,
+        )?;
+        Ok(memories.iter().map(Self::memory_to_entry).collect())
     }
 
     /// 获取已归档记忆数量

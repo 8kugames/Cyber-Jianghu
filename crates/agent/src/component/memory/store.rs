@@ -45,6 +45,7 @@ impl MemoryStore {
 
         // 渐进式迁移：添加 embedding 向量列
         Self::migrate_embedding_column(&conn)?;
+        Self::migrate_encoding_columns(&conn)?;
 
         Ok(Self {
             conn,
@@ -159,6 +160,38 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// 渐进式迁移：添加情绪编码列（幂等操作）
+    fn migrate_encoding_columns(conn: &Connection) -> Result<()> {
+        let columns = vec![
+            ("encoding_valence", "REAL"),
+            ("encoding_arousal", "REAL"),
+            ("encoding_emotion", "TEXT"),
+        ];
+        for (column, col_type) in columns {
+            let exists: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('client_memories') WHERE name='{}'",
+                        column
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .with_context(|| format!("Failed to check column existence: {}", column))?;
+            if exists == 0 {
+                conn.execute(
+                    &format!(
+                        "ALTER TABLE client_memories ADD COLUMN {} {}",
+                        column, col_type
+                    ),
+                    [],
+                )
+                .with_context(|| format!("Failed to add column: {}", column))?;
+            }
+        }
+        Ok(())
+    }
+
     /// 更新记忆的 embedding 向量
     pub fn update_embedding(&self, memory_id: i64, embedding: &[u8]) -> Result<()> {
         self.conn
@@ -192,8 +225,9 @@ impl MemoryStore {
              (agent_id, tick_id, event_type, content, metadata,
               importance_score, sentiment_score, memory_type, is_confirmed,
               created_at, updated_at,
-              strength, last_accessed_at, access_count, is_archived)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              strength, last_accessed_at, access_count, is_archived,
+              encoding_valence, encoding_arousal, encoding_emotion)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     memory.agent_id.to_string(),
                     memory.tick_id,
@@ -210,6 +244,9 @@ impl MemoryStore {
                     memory.last_accessed_at.as_deref(),
                     memory.access_count,
                     memory.is_archived,
+                    memory.encoding_valence,
+                    memory.encoding_arousal,
+                    memory.encoding_emotion,
                 ],
             )
             .context("Failed to insert memory")?;
@@ -230,8 +267,9 @@ impl MemoryStore {
                  (agent_id, tick_id, event_type, content, metadata,
                   importance_score, sentiment_score, memory_type, is_confirmed,
                   created_at, updated_at,
-                  strength, last_accessed_at, access_count, is_archived)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                  strength, last_accessed_at, access_count, is_archived,
+                  encoding_valence, encoding_arousal, encoding_emotion)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
                 params![
                     memory.agent_id.to_string(),
                     memory.tick_id,
@@ -248,6 +286,9 @@ impl MemoryStore {
                     memory.last_accessed_at.as_deref(),
                     memory.access_count,
                     memory.is_archived,
+                    memory.encoding_valence,
+                    memory.encoding_arousal,
+                    memory.encoding_emotion,
                 ],
             )
             .context("Failed to insert memory in batch")?;
@@ -262,7 +303,8 @@ impl MemoryStore {
     /// 列顺序：id(0), agent_id(1), tick_id(2), event_type(3), content(4),
     /// metadata(5), importance_score(6), sentiment_score(7), memory_type(8),
     /// is_confirmed(9), created_at(10), updated_at(11),
-    /// strength(12), last_accessed_at(13), access_count(14), is_archived(15)
+    /// strength(12), last_accessed_at(13), access_count(14), is_archived(15),
+    /// encoding_valence(16), encoding_arousal(17), encoding_emotion(18)
     fn row_to_memory(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClientMemory> {
         Ok(ClientMemory {
             id: Some(row.get(0)?),
@@ -284,6 +326,9 @@ impl MemoryStore {
             last_accessed_at: row.get(13)?,
             access_count: row.get(14)?,
             is_archived: row.get(15)?,
+            encoding_valence: row.get(16)?,
+            encoding_arousal: row.get(17)?,
+            encoding_emotion: row.get(18)?,
         })
     }
 
@@ -466,6 +511,47 @@ impl MemoryStore {
         Ok(changes as usize)
     }
 
+    /// 效价一致性检索偏置查询
+    pub fn get_top_memories_with_valence_bias(
+        &self,
+        limit: usize,
+        current_valence: f32,
+        valence_bias_weight: f32,
+        valence_range: f32,
+        null_encoding_bonus: f32,
+    ) -> Result<Vec<ClientMemory>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM client_memories
+                 WHERE agent_id = ?1 AND is_archived = FALSE
+                 ORDER BY (importance_score +
+                     CASE WHEN encoding_valence IS NULL THEN ?2
+                     ELSE ?3 * MAX(0.0, 1.0 - ABS(encoding_valence - ?4) / ?5) END
+                 ) DESC
+                 LIMIT ?6",
+            )
+            .context("Failed to prepare valence-biased query")?;
+
+        let memories = stmt
+            .query_map(
+                params![
+                    self.agent_id.to_string(),
+                    null_encoding_bonus,
+                    valence_bias_weight,
+                    current_valence,
+                    valence_range,
+                    limit as i64,
+                ],
+                Self::row_to_memory,
+            )
+            .context("Failed to execute valence-biased query")?;
+
+        memories
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.into())
+    }
+
     /// 获取已归档记忆
     pub fn get_archived_memories(&self, limit: usize) -> Result<Vec<ClientMemory>> {
         let mut stmt = self
@@ -620,6 +706,12 @@ pub struct ClientMemory {
     pub access_count: i32,
     /// 是否已归档
     pub is_archived: bool,
+    /// 编码时的效价
+    pub encoding_valence: Option<f32>,
+    /// 编码时的唤醒度
+    pub encoding_arousal: Option<f32>,
+    /// 编码时的情绪标签
+    pub encoding_emotion: Option<String>,
 }
 
 impl ClientMemory {
@@ -642,6 +734,9 @@ impl ClientMemory {
             last_accessed_at: None,
             access_count: 0,
             is_archived: false,
+            encoding_valence: None,
+            encoding_arousal: None,
+            encoding_emotion: None,
         }
     }
 

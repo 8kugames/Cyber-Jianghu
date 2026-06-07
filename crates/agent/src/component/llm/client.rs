@@ -328,7 +328,10 @@ pub trait LlmClientExt: LlmClient {
         let baseline = self.retry_max_tokens_baseline();
         let ceiling = self.retry_max_tokens_ceiling();
         for attempt in 0..=max_retries {
-            match self.complete_json_with_config::<T>(prompt, config.clone()).await {
+            match self
+                .complete_json_with_config::<T>(prompt, config.clone())
+                .await
+            {
                 Ok(v) => return Ok(v),
                 Err(e) => {
                     if !is_truncation_error(&e) || attempt == max_retries {

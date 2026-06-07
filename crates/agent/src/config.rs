@@ -654,7 +654,10 @@ fn env_or<T: std::str::FromStr>(key: &str, fallback: T) -> T {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            provider: env_or("CYBER_JIANGHU_LLM_PROVIDER", DEFAULT_LLM_PROVIDER.to_string()),
+            provider: env_or(
+                "CYBER_JIANGHU_LLM_PROVIDER",
+                DEFAULT_LLM_PROVIDER.to_string(),
+            ),
             base_url: None,
             api_key: None,
             model: None,
@@ -674,10 +677,7 @@ impl Default for LlmConfig {
                 "CYBER_JIANGHU_SUMMARY_TRIGGER_RATIO",
                 DEFAULT_SUMMARY_TRIGGER_RATIO,
             ),
-            keep_recent_turns: env_or(
-                "CYBER_JIANGHU_KEEP_RECENT_TURNS",
-                DEFAULT_KEEP_RECENT_TURNS,
-            ),
+            keep_recent_turns: env_or("CYBER_JIANGHU_KEEP_RECENT_TURNS", DEFAULT_KEEP_RECENT_TURNS),
             reconnect_delay_secs: env_or(
                 "CYBER_JIANGHU_RECONNECT_DELAY_SECS",
                 DEFAULT_RECONNECT_DELAY_SECS,

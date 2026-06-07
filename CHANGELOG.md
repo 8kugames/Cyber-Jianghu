@@ -18,6 +18,20 @@
 - **Config**: `prompt_templates.yaml` 新增 `rule_sections` 配置块（survival/narrative 两个有内容的分类）+ `survival_rules_compact` section
 - **Token 优化**: system message 规则区从 ~1275-1575 tokens/tick 降至 ~450 tokens/tick（节省 ~825-1125 tokens），增长曲线从线性降为常数
 
+### Added — 情绪-记忆联动系统 (Emotion-Memory Integration)
+
+基于 Barrett 情绪建构论的核心情感系统，实现情绪增强记忆编码和心境一致检索的双向联动。
+
+- **CoreAffect 算法引擎**: Rust 层确定性计算核心情感（效价 x 唤醒度），含双向内稳态偏离模型、negativity bias、个性基线映射
+- **编码门控**: 唤醒度调制 memory importance（arousal → encoding boost），支持 linear/exponential 函数类型
+- **检索偏置**: 当前效价偏向检索一致效价的记忆（valence-congruent retrieval bias）
+- **LLM 情绪构造**: CognitiveEngine Perception 阶段输出 `constructed_emotion`（label/reasoning/intensity），回写 persona trait delta
+- **体感注入**: YAML 模板渲染体感信号到 LLM prompt（效价标签 + 唤醒度标签 + 困苦提示）
+- **Agent 级别架构**: CoreAffect 存储在 Agent 层面，Cognitive/Claw 双模式共享（生理计算、编码门控、检索偏置、体感注入均不依赖 CognitiveEngine）
+- **全量 YAML 配置驱动**: emotion.yaml 含 core_affect/encoding/retrieval/sensation/outcome_mapping，所有参数外部化
+- **SQLite schema 迁移**: MemoryEntry 新增 encoding_valence/encoding_arousal/encoding_emotion 列，幂等迁移
+- **EventTraitMapper 清理**: 情绪类规则（愤怒、沮丧、感激、恐惧等）迁移至 CoreAffect YAML 配置，EventTraitMapper 仅保留社交/道德维度
+
 ### Changed — Phase 5: ActionType 数据驱动化 + RelationshipStore PRAGMA 迁移
 
 - **Server**: `ActionConfigEntry` 新增 `transmission: Transmission` 字段（3 变体: `Broadcast`/`Session`/`Silent`，`#[default] Broadcast` fail-fast 默认）和 `display_name: Option<String>` 字段。`actions.yaml` 20 动作全部显式标注（1 broadcast 说话 / 1 session 私语 / 18 silent），YAML 头部 schema 注释。`Transmission::Direct` 变体已删（0/20 使用，YAGNI）

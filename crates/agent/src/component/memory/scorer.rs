@@ -116,6 +116,25 @@ impl ImportanceScorer {
     }
 }
 
+impl ImportanceScorer {
+    /// 情绪增强评分：arousal 调制 base importance
+    pub fn score_with_emotion(
+        &self,
+        event_type: &WorldEventType,
+        description: &str,
+        metadata: &Value,
+        arousal: f32,
+        encoding_config: &crate::component::emotion::config::EncodingConfig,
+    ) -> f32 {
+        let base = self.score(event_type, description, metadata);
+        crate::component::emotion::encoding::apply_emotional_encoding(
+            base,
+            arousal,
+            encoding_config,
+        )
+    }
+}
+
 impl Default for ImportanceScorer {
     fn default() -> Self {
         Self::new()

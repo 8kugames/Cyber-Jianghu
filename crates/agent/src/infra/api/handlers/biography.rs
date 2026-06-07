@@ -373,7 +373,11 @@ pub(crate) async fn generate_biography_for_agent(
         enable_thinking: None,
     };
     let extracted = llm_client
-        .complete_json_with_config_and_retry_extracted::<BiographyOutput>(&json_prompt, chat_config, 2)
+        .complete_json_with_config_and_retry_extracted::<BiographyOutput>(
+            &json_prompt,
+            chat_config,
+            2,
+        )
         .await?;
     let bio = extracted.value.biography.trim().to_string();
 

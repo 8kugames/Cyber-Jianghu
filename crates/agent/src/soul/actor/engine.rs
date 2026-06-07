@@ -62,6 +62,15 @@ struct MemoryNarrativeResponse {
 /// 失败降级文本（用户指定，一字不差）
 pub(crate) const FALLBACK_NARRATIVE: &str = "你一阵恍惚，似乎遗漏了一些重要的记忆。";
 
+/// LLM 构造的具体情绪
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct ConstructedEmotion {
+    pub label: String,
+    pub reasoning: String,
+    pub intensity: f32,
+}
+
 /// 人魂统一认知响应（单次 LLM 调用，直连 WorldState，输出结构化 Intent）
 ///
 /// 支持两种 LLM 输出格式（向后兼容）：
@@ -96,6 +105,9 @@ struct DirectCognitiveResponse {
     /// 要写入记忆的内容（人魂判断，should_remember=true时必填）
     #[serde(default)]
     memory_content: Option<String>,
+    /// LLM 构造的具体情绪
+    #[serde(default)]
+    constructed_emotion: Option<ConstructedEmotion>,
 }
 
 impl DirectCognitiveResponse {
@@ -172,6 +184,8 @@ pub struct CognitiveEngine {
         Arc<tokio::sync::RwLock<Option<crate::component::attention::FocusSummary>>>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等需要回传多轮对话）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// 最近一次 LLM 构造的情绪（供 lifecycle 回写 persona）
+    last_constructed_emotion: std::sync::Mutex<Option<ConstructedEmotion>>,
     /// Semi-static prompt 内容（action index + skill index），配置更新时重建
     semi_static_message: std::sync::RwLock<String>,
     /// Agent 人设引用（真相源在 Agent, Engine 通过 Arc 读取快照构建 prompt）
@@ -219,6 +233,7 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_constructed_emotion: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
@@ -338,6 +353,7 @@ impl CognitiveEngine {
             available_actions: std::sync::RwLock::new(Vec::new()),
             current_focus_summary: Arc::new(tokio::sync::RwLock::new(None)),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_constructed_emotion: std::sync::Mutex::new(None),
             semi_static_message: std::sync::RwLock::new(String::new()),
             persona_ref: std::sync::RwLock::new(Some(std::sync::Arc::new(persona.clone()))),
             rule_cache: std::sync::RwLock::new(None),
@@ -706,6 +722,25 @@ impl CognitiveEngine {
             .and_then(|mut g| g.take())
     }
 
+    /// 取回 LLM 构造的情绪（消费式，取后清空）
+    pub fn take_constructed_emotion(&self) -> Option<ConstructedEmotion> {
+        self.last_constructed_emotion
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
+    /// 读取当前 persona traits 引用（用于 CoreAffect 基线计算）
+    pub fn persona_traits_snapshot(
+        &self,
+    ) -> std::collections::HashMap<String, crate::component::persona::Trait> {
+        let guard = self.persona_ref.read().expect("rwlock poisoned");
+        match guard.as_ref() {
+            Some(arc) => arc.read(|p| p.traits.clone()),
+            None => std::collections::HashMap::new(),
+        }
+    }
+
     /// 检查是否需要 summary 压缩
     pub fn conversation_needs_summary(&self) -> bool {
         if let Some(ref history) = self.conversation_history
@@ -824,6 +859,28 @@ impl CognitiveEngine {
             && let Ok(mut h) = history.lock()
         {
             h.set_semi_static_message(msg);
+        }
+    }
+
+    /// 更新 persona 情绪标签（由 soul cycle 回写）
+    pub fn update_persona_emotion(&self, emotion: String) {
+        let guard = self.persona_ref.read().expect("rwlock poisoned");
+        if let Some(ref arc) = *guard {
+            arc.write(|p| p.update_emotion(emotion));
+        }
+    }
+
+    /// 应用特质变化到 persona（由 ConstructedEmotion 回写调用）
+    pub fn apply_persona_trait_change(
+        &self,
+        trait_name: &str,
+        delta: i16,
+        reason: String,
+        tick_id: i64,
+    ) {
+        let guard = self.persona_ref.read().expect("rwlock poisoned");
+        if let Some(ref arc) = *guard {
+            arc.write(|p| p.apply_trait_change(trait_name, delta, reason, tick_id));
         }
     }
 
@@ -1090,7 +1147,9 @@ impl CognitiveEngine {
                                     let extracted = self
                                         .llm_client
                                         .complete_json_with_config_and_retry_extracted(
-                                            &tick_msg, chat_config, 2,
+                                            &tick_msg,
+                                            chat_config,
+                                            2,
                                         )
                                         .await?;
                                     if let Ok(mut rc) = self.last_reasoning_content.lock() {
@@ -1109,7 +1168,9 @@ impl CognitiveEngine {
                             let extracted = self
                                 .llm_client
                                 .complete_json_with_config_and_retry_extracted(
-                                    &tick_msg, chat_config, 2,
+                                    &tick_msg,
+                                    chat_config,
+                                    2,
                                 )
                                 .await?;
                             if let Ok(mut rc) = self.last_reasoning_content.lock() {
@@ -1124,6 +1185,13 @@ impl CognitiveEngine {
         // 保存 reasoning_content 供 push_conversation_turn 使用
         if let Ok(mut rc) = self.last_reasoning_content.lock() {
             *rc = self.llm_client.take_last_reasoning_content();
+        }
+        // 提取 LLM 构造的情绪
+        if let Some(ref emotion) = response.constructed_emotion
+            && !emotion.label.is_empty()
+            && let Ok(mut guard) = self.last_constructed_emotion.lock()
+        {
+            *guard = Some(emotion.clone());
         }
         let response_json = serde_json::to_string(&response)?;
 
