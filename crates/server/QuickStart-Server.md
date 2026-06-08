@@ -1,87 +1,80 @@
 # 服务端快速开始指南
 
-本指南帮助开发者快速部署和运行游戏服务端。
+本指南帮助开发者快速部署和运行 Cyber-Jianghu 游戏服务端。
 
 ## 环境要求
 
+- Rust (Cargo)
 - Docker 和 Docker Compose
-- PostgreSQL（Docker 容器内运行）
+- PostgreSQL（可以通过 Docker 容器运行）
 
-## 安装与运行
+## 启动服务
 
-### 使用 install.sh（推荐）
+### 使用根目录的 install.sh（推荐）
+
+在项目**根目录**下使用提供的安装脚本管理服务：
 
 ```bash
-./install.sh server start        # 开发环境
-./install.sh server start --prod # 生产环境
-./install.sh server stop         # 停止
-./install.sh server restart      # 重启
-./install.sh server status       # 查看状态
-./install.sh server logs        # 查看日志
-./install.sh server build        # 构建镜像
-./install.sh server reset        # 重置数据
+# 开发环境启动（同时启动 Server 和 Agent）
+./install.sh all start
+
+# 生产环境启动
+./install.sh all start --prod
+
+# 查看服务状态
+./install.sh all status
+
+# 查看日志
+./install.sh all logs
+
+# 停止服务
+./install.sh all stop
+
+# 警告：重置所有数据库和卷数据
+./install.sh all reset
 ```
 
-### 使用 Docker Compose
+### 纯本地 Cargo 启动（用于开发调试）
+
+确保数据库已经启动（例如通过 `docker compose up -d db`），并且已经在 `crates/server/.env` 中配置好数据库连接。
 
 ```bash
 cd crates/server
 
-# 复制配置文件
+# 复制环境变量模板并修改数据库密码/连接串
 cp .env.example .env
 
-# 启动
-docker compose up -d
+# 运行服务器
+cargo run
 
-# 查看日志
-docker compose logs -f server
+# 或以 Release 模式运行
+cargo run --release
 ```
 
 ## 环境变量配置
 
+服务端启动时会加载 `crates/server/.env`。主要变量说明：
+
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| DB_PASSWORD | PostgreSQL 密码（必须修改） | changeme |
-| POSTGRES_PORT | PostgreSQL 端口 | 5432 |
-| SERVER_PORT | 服务端端口 | 23333 |
-| ADMIN_READ_TOKEN | Dashboard 只读 Token | 自动生成 |
-| ADMIN_WRITE_TOKEN | Dashboard 读写 Token | 自动生成 |
-| RUST_LOG | 日志级别 | info |
-| ENVIRONMENT | 环境标识 | development |
+| `DATABASE_URL` | PostgreSQL 连接字符串 | 无 |
+| `SERVER_HOST` | 服务端绑定 IP | `0.0.0.0` |
+| `SERVER_PORT` | 服务端监听端口 | `23333` |
+| `ADMIN_READ_TOKEN` | Dashboard 只读 Token | 未配置则自动生成 |
+| `ADMIN_WRITE_TOKEN` | Dashboard 读写 Token | 未配置则自动生成 |
+| `RUST_LOG` | 日志级别 | `info` |
 
-> **注意**：`TICK_DURATION_SECS` 环境变量已被废弃。Tick 周期通过 `config/game_rules.yaml` 的 `tick.real_seconds_per_tick` 配置。
+> **提示**：Tick 周期已不再通过环境变量配置，请修改 `config/game_rules.yaml` 中的 `tick.real_seconds_per_tick` 字段。
 
-## 访问服务
+## 服务访问
 
-- **服务端**：`http://localhost:23333`
-- **Dashboard**：`http://localhost:23333/admin`
-  - Read Token：只读监控
-  - Write Token：编辑配置并热更新
-  - Token 未设置时，服务启动自动生成并写入日志
+- **API 基础地址**：`http://localhost:23333`
+- **管理面板 (Dashboard)**：`http://localhost:23333/admin/`
+  - 如果未在环境变量配置 Token，服务器启动时会自动生成并写入到 `crates/server/logs/cyber_jianghu_admin.tmp` 文件中。
+- **健康检查**：`http://localhost:23333/health`
+- **WebSocket 接入点**：`ws://localhost:23333/ws?token=YOUR_AUTH_TOKEN`
 
-## WebSocket 连接
+## 管理与配置
 
-```
-ws://localhost:23333/ws?token=YOUR_AUTH_TOKEN
-```
-
-## 数据库访问
-
-```bash
-docker compose exec postgres psql -U postgres -d cyber_jianghu
-```
-
-## 配置热重载
-
-通过 Dashboard（Write Token）或重启服务生效
-
-## 常见问题
-
-**Q: 连接被拒绝？**
-A: 确认容器正常运行 `docker compose ps`
-
-**Q: 如何修改游戏配置？**
-A: Dashboard（Write Token）或编辑 `crates/server/config/*.yaml`
-
-**Q: Agent 部署？**
-A: 参见 crates/agent/QuickStart-Agent.md
+1. **热重载配置**：可以通过 Dashboard 发起配置热重载，或者通过 `POST /api/admin/reload-config`。
+2. **游戏数据配置**：位于 `crates/server/config/*.yaml`，可以直接编辑文件或通过 Dashboard 的编辑器进行修改。

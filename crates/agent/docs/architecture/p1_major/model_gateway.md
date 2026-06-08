@@ -1,34 +1,43 @@
-# 模型网关与调度
+# 模型网关与调度 (Model Gateway)
 
-**级别**: P1 重要特性
-**模块**: `crates/agent`
+在多 Agent 模拟环境中，API 限流 (429)、服务商宕机或余额耗尽 (403) 是极其常见的异常。为此，Agent SDK 的底层实现了一个统一的模型网关调度器。
 
-## 1. 设计目标
-提供统一的 LLM 客户端池，确保在各类不可靠的商业或开源 LLM API 上实现高可用性、容错和成本监控。
+相关代码路径：`crates/agent/src/component/llm/client.rs` 与 `direct_client.rs`。
 
-## 2. 核心机制
-### 2.1 主备切换 (Fallback Client)
-- 当主模型（如调用国外的 OpenAI）发生超时、触发并发限流 (Rate Limit) 或 5xx 错误时，网关会自动无缝切换到备用模型（如本地部署的 Ollama 或国内大模型）。
-- 切换对上层的认知引擎完全透明，保障游戏的流畅运行。
+## 统一抽象 `LlmClient`
 
-### 2.2 429 Circuit Breaker
-- HTTP 429 (Rate Limit) 触发时，标记该模型为不可用并记录禁用时间戳（`disabled_models: HashMap<usize, Instant>`）。
-- 冷却期 1 小时后自动恢复（`RATE_LIMIT_BACKOFF_SECS=3600`）。
-- 每次 fallback 调用前执行 `reenable_expired()` 检查并恢复过期模型。
-- streaming 路径同步检测 429，与 non-streaming 路径行为一致。
+系统所有需要用到大模型的地方（CognitiveEngine 人魂决策、ReflectorSoul 天魂审查、动态角色生成等），都统一依赖 `LlmClient` trait。
 
-### 2.3 自动重试机制
-- 内置指数退避（Exponential Backoff）重试策略，处理网络瞬断和偶发的幻觉输出。
+```rust
+#[async_trait]
+pub trait LlmClient: Send + Sync {
+    async fn complete(&self, prompt: &str) -> Result<String>;
+    // ... 结构化与流式方法
+}
+```
 
-### 2.4 Token 消耗监控
-- 拦截并解析 API 返回的 `usage` 字段。
-- 记录和统计每次决策的算力消耗（Prompt Tokens, Completion Tokens），输出到监控日志中，为后续的成本优化提供依据。
+## `FallbackLlmClient` (容灾降级包装器)
 
-## 3. 架构约束
-- 网关层必须实现标准的 `LlmClient` Trait。
-- 不能无限重试，通常限制在 2-3 次，超出则返回预设的默认“发呆”或“休息”动作。
+我们在配置中可以指定多个模型（包含不同 provider）：
+```yaml
+llm:
+  models:
+    - provider: sensenova
+      model: SenseChat-5
+    - provider: ollama
+      model: qwen2.5:14b
+```
 
-## 4. 代码入口
-- 接口定义: `crates/agent/src/component/llm/client.rs`
-- 直接客户端: `crates/agent/src/component/llm/direct_client.rs`
-- 备用网关实现: `crates/agent/src/component/llm/client.rs`（FallbackLlmClient 在同一文件）
+SDK 启动时会将它们组装为一个 `FallbackLlmClient`。它的调度策略如下：
+1. **优先使用当前活跃模型** (Sticky Session)
+2. **发生错误时拦截并分类** (`classify_llm_error`):
+   - `GiveUp`: 如 Prompt 过长，直接抛出。
+   - `Retry`: 网络波动，原地重试。
+   - `Fallback`: 当前模型 404 / 403 (额度耗尽)，自动切换到下一个可用模型。
+   - `FallbackAndDisable`: 当前模型触发 429 限流或服务宕机，触发**熔断**并切换到下一个。
+
+## `SharedBreaker` 熔断器 (Circuit Breaker)
+
+为了防止多个 Agent 雪崩式地重试已经被限流的服务商，系统实现了一个全局共享的熔断器 `SharedBreaker`。
+
+当某个 `provider/model` 被判定为 `FallbackAndDisable` 时，`SharedBreaker` 会记录其时间戳，在接下来的 **3600 秒 (1 小时)** 内，任何对该模型的调用（无论来自地魂 tool loop 还是主干）都会直接在本地被拦截并返回 "熔断冷却中"，从而平滑地将流量切换到本地兜底模型（如 Ollama），1小时后自动尝试恢复。

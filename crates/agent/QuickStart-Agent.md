@@ -1,73 +1,73 @@
 # Agent 快速开始指南
 
-本指南帮助开发者快速部署和运行 Agent。
+本指南帮助开发者快速部署和运行 Agent SDK。
 
 ## 前置条件
 
-服务端必须已启动（参见 crates/server/QuickStart-Server.md）
+由于 Agent 是连接服务端的桥梁，**服务端必须已启动**（参见 `crates/server/QuickStart-Server.md`）。
 
-## 安装与运行
+## 运行模式与启动
 
-### CLI 本地运行（开发调试）
+Agent 核心逻辑（认知流转、三层记忆、多重人格）均在同一套架构下运行。唯一的区别是 LLM（大语言模型）的调用位置：
+
+| 模式 | 描述 | LLM 客户端实现 | 启动命令 |
+|------|------|---------------|----------|
+| **Cognitive** (默认) | 完全自治。Agent 内部直接调用大模型，闭环生成 Intent。 | `FallbackLlmClient` | `cyber-jianghu-agent run` |
+| **Claw** | 外部大脑。通过 OpenClaw 桥接外部大模型，Agent 本身只提供上下文，决策由 OpenClaw 注入。 | `OpenClawBridge` | `cyber-jianghu-agent run --mode claw` |
+
+## 安装与部署
+
+### 1. 本地开发 (CLI)
 
 ```bash
-# 安装 CLI
+# 从源码安装 CLI
 cargo install --path crates/agent
 
-# 启动 Cognitive 模式（默认，ReflectorSoul 已内置启用）
+# 启动默认模式
 cyber-jianghu-agent run
 
-# 或启动 Claw 模式（等待外部调度器）
-cyber-jianghu-agent run --mode claw
+# 或者指定端口启动
+CYBER_JIANGHU_PORT=23340 cyber-jianghu-agent run
 ```
 
-### 运行模式说明
-
-> 两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator，仅 LLM 客户端不同。
-
-| 模式 | 说明 | LLM 位置 | 认知引擎 | ReflectorSoul |
-|------|------|----------|---------|-------------|
-| Cognitive | **默认模式**，Agent 自主决策 | 内置 | CognitiveEngine（直连） | ✅ 默认启用 |
-| Claw | 通过 OpenClaw 接入外部 LLM | 外置 | CognitiveEngine（via OpenClawBridge） | ✅ 默认启用 |
-
-### Docker 部署
+### 2. Docker 部署
 
 ```bash
 cd crates/agent
 
-# 复制配置文件
+# 配置环境变量
 cp .env.example .env
 
-# 启动
+# 启动容器
 docker compose up -d
 
 # 查看日志
 docker compose logs -f agent
 ```
 
-### 使用 install.sh
+### 3. 一键脚本
 
 ```bash
-./install.sh agent start        # 开发环境
-./install.sh agent start --prod # 生产环境
-./install.sh agent stop         # 停止
-./install.sh agent logs         # 查看日志
-./install.sh agent status        # 查看状态
-./install.sh agent reset         # 重置数据
+./install.sh agent start        # 启动 Agent
+./install.sh agent logs         # 实时查看日志
+./install.sh agent stop         # 停止服务
+./install.sh agent reset        # 重置所有本地数据
 ```
 
-## 端口配置
+## 网络与端口
 
-- Agent HTTP API：`23340-23999`（port=0 时随机分配）
-- 环境变量：`CYBER_JIANGHU_PORT`（设为 0 则随机分配，否则使用指定端口）
+Agent 会启动一个本地的 HTTP API 服务，用于管理面板、状态查询以及与 OpenClaw（在 Claw 模式下）的通信。
 
-> **注意**：当 `port=0` 或未设置时，Agent 会在 23340-23999 范围内随机选择一个可用端口。启动日志会显示实际分配的端口。
+- **默认端口范围**：`23340-23999`
+- **指定端口**：设置环境变量 `CYBER_JIANGHU_PORT=23340`。若设置为 `0` 或未设置，Agent 会自动在范围内分配可用端口。
+- **服务端连接**：必须确保 `CYBER_JIANGHU_SERVER_WS_URL` 正确指向服务端的 WebSocket 端点（如 `ws://localhost:23333/ws`）。
 
-## 多 Agent 部署
+## 多 Agent 部署 (设备与角色分离)
 
-创建 docker-compose.multi.yml 扩展不同端口：
+Agent SDK 支持在同一个设备（进程）上托管多个角色。同时，也支持启动多个 Agent 进程，分别映射到不同端口。
 
 ```yaml
+# docker-compose.multi.yml 示例
 services:
   agent-linghu:
     extends:
@@ -75,112 +75,51 @@ services:
       service: agent
     container_name: cyber-jianghu-agent-linghu
     environment:
-      CYBER_JIANGHU_SERVER_WS_URL: ws://cyber-jianghu-server:23333/ws
       CYBER_JIANGHU_PORT: 23340
     ports:
-      - "23341:23340"
+      - "23340:23340"
+
+  agent-renwoxing:
+    extends:
+      file: docker-compose.yml
+      service: agent
+    container_name: cyber-jianghu-agent-renwoxing
+    environment:
+      CYBER_JIANGHU_PORT: 23341
+    ports:
+      - "23341:23341"
 ```
 
-启动多实例：
-```bash
-docker compose -f docker-compose.yml -f docker-compose.multi.yml up -d
-```
+## 核心工作流：如何交互
 
-## 设备注册
+Agent 内部**强制使用 WebSocket** 向 Server 提交 Intent。 HTTP API 只作为辅助。
 
-Agent 首次启动自动完成：
-1. 生成设备 ID（UUID v4）
-2. 向服务端注册获取 auth_token
-3. 保存到 ~/.cyber-jianghu/agent.yaml
+1. **设备注册**：首次启动时自动生成 UUID v4 作为 Device ID，并向 Server 注册。
+2. **角色创建**：
+   ```bash
+   curl -X POST http://localhost:23340/api/v1/character/register \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "令狐冲",
+       "gender": "male",
+       "age": 24,
+       "system_prompt": "你是华山派大弟子，生性豁达..."
+     }'
+   ```
+3. **Tick 循环**：服务端每 N 秒下发 `WorldState`，Agent 接收后触发 `CognitiveEngine`（人魂），通过 LLM 推理生成 Intent。
+4. **验证与执行**：生成的 Intent 先经过 `ReflectorSoul`（天魂）的三层规则审查，通过后提交到服务端的 `IntentWorker`。
 
-## 角色创建
+## 配置管理 (Agent.yaml)
 
-**Web 面板（推荐）**：http://localhost:{实际端口}/
-
-**API 调用**：
-```bash
-curl -X POST http://localhost:23340/api/v1/character/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "令狐冲",
-    "gender": "male",
-    "age": 24,
-    "system_prompt": "你是华山派大弟子..."
-  }'
-```
-
-## OpenClaw 集成
-
-OpenClaw（外置大脑）**必须**通过 WebSocket 连接 Agent：
-
-1. 启动 Agent（Claw 模式）
-2. OpenClaw 连接 WebSocket：`ws://localhost:23340/ws`
-3. 接收实时 Tick 消息并响应
-4. **通过 WebSocket 提交意图**（禁止使用 HTTP API）
-
-> **禁止通过 HTTP API 提交意图**
->
-> `POST /api/v1/intent` 路由不存在。所有意图必须通过 WebSocket 提交。
-> Server 只接受当前 tick 的意图，HTTP 轮询无法保证实时性。
-
-### WebSocket 消息格式
-
-```json
-// 接收 Tick（含世界状态 + 叙事上下文 + 认知上下文）
-{"type": "tick", "tick_id": 123, "state": {...}, "context": "叙事化上下文（Markdown）", "cognitive_context": {...}}
-
-// 提交意图
-{"type": "intent", "tick_id": 123, "action_type": "idle", "action_data": {}, "thought_log": "思考..."}
-
-// 接收错误
-{"type": "server_error", "code": "agent_dead", "message": "Agent 已死亡"}
-
-// 死亡通知（含转世信息）
-{"type": "agent_died", "agent_id": "...", "metadata": {...}, "can_rebirth": true}
-```
-
-HTTP API 用于辅助功能（数据查询、Web 面板等）：
-- `GET /api/v1/context` - 获取叙事上下文
-- `GET /api/v1/state` - 查询世界状态
-- `GET /api/v1/memory/*` - 记忆管理
-
-## 常见问题
-
-**Q: Agent 断线会重连吗？**
-A: SDK 内置自动重连与指数退避策略
-
-**Q: 多 Agent 端口冲突？**
-A: 映射到不同宿主机端口（23341、23342 ... 23999 等）
-
-**Q: 数据存储位置？**
-A: Docker Volume 或 ~/.cyber-jianghu/
-
-**Q: 设备 ID 与角色 ID 区别？**
-A: 设备 ID 标识客户端（持久化），角色 ID 标识游戏侠客（可转世重建）
-
-## 配置管理
-
-### LLM 配置
-
-Agent 支持配置不同的 LLM 模型给 ActorSoul 和 ReflectorSoul：
+Agent 支持多级 LLM 降级配置（FallbackLlmClient），可以在 `~/.cyber-jianghu/agent.yaml` 中修改：
 
 ```yaml
-# ~/.cyber-jianghu/agent.yaml
 llm:
   provider: ollama
   model: qwen2.5:14b
-  # 备用模型（可选）：主模型 403/429/超时时自动降级，共享同一 provider/api_key
+  # 降级容灾：当主模型 403/429/超时 时，自动 fallback
   fallback_models:
     - qwen2.5:7b
     - qwen2.5:3b
-
-llm_reflector:  # 可选
-  model: qwen2.5:32b
 ```
-
-**Fallback 降级机制**：
-- 触发条件：主模型返回 403（额度耗尽）、429（限速）、或连接超时
-- 策略：按 `fallback_models` 顺序依次尝试，成功后 sticky 到该模型
-- 未配置 `fallback_models` 时，主模型失败直接降级为 idle intent
-
-配置可通过 Web 面板修改：http://localhost:<端口>/settings.html
+也可以通过 Agent 的内置 Web 面板 (`http://localhost:23340/settings.html`) 直接修改并热重载。

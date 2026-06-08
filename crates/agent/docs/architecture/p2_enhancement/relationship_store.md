@@ -3,25 +3,27 @@
 **级别**: P2 体验增强
 **模块**: `crates/agent`
 
-## 1. 设计目标
-量化和持久化 Agent 之间的互动历史与好感度，形成复杂的江湖社交图谱，影响其在交易、组队和对话中的态度。
+## 1. 第一性原理与设计目标
+在 MMO-MAS 中，社会关系的涌现需要持久化支撑。由于 Agent 存在于分布式的进程中，社会图谱不能是一个全局唯一的图数据库，而必须是**每个 Agent 主观视角下的离散记忆网络**。
+`RelationshipStore` 的目标是量化 Agent 与他人的互动历史，将其抽象为好感度和关键事件，并在每个 Tick 决策时将这些社会关系注入到工作记忆中，影响其行为动机。
 
 ## 2. 核心机制
-### 2.1 互动图谱记录
-- 使用 SQLite 存储 Agent 与其他实体之间的社交边（Edge）。
-- 每次发生特定动作（对话、交易、攻击、治疗）后，通过内部事件总线触发记录，更新对应边的权重值。
 
-### 2.2 好感度阶梯映射
-- 抽象出一套离散化的社交阶梯分类，例如从负到正：“血海深仇” -> “心生芥蒂” -> “萍水相逢” -> “互生好感” -> “生死之交”。
-- 权重分数自动映射为上述文本。
+### 2.1 社交事件记录与好感度计算
+- 使用 `rusqlite` 将每个目标的互动数据落盘至 `relationships_{agent_id}.db`。
+- **事件追加**：通过 `record_social_event` 记录每次社交动作（如交易、攻击），更新 `favorability`（-100 到 100 之间 Clamp），并采用 `INSERT OR REPLACE` 和级联清理逻辑保持 `key_events` 的数量上限（默认 20 条），避免无限膨胀。
 
-### 2.3 社交决策反哺
-- 在每次构建 Context 时，检索当前视野（WorldState）中其他实体的 ID。
-- 从 RelationshipStore 中提取对他们的好感度文本，作为社交提示注入 Prompt（如：“你看到了李四，你们是血海深仇”）。这使得人魂能产生强烈的动机去攻击或逃跑。
+### 2.2 认知上下文反哺
+- 当 Agent 的视野（WorldState）中出现其他实体时，通过异步调用 `maybe_update_narratives`（或由 `NarrativeGenerator` 进行防抖更新），提取目标的好感度和历史。
+- 将离散的数值映射为自然语言文本（如“友善”、“敌对”），并将其作为 `memory_context` 的一部分注入，使得 LLM 在推理（Perception）阶段能够自然地理解“面前这个人是仇人还是朋友”。
+
+### 2.3 动态人设与观念演变
+- 配合 `DynamicPersona`，长期且高权重的社交互动事件会触发角色世界观或性格标签的变迁。关系记忆不仅作为客观事实存在，更是塑造人格的数据源。
 
 ## 3. 架构约束
-- 数据结构必须足够简单且支持快速的全表扫描或关联查询，以便能够序列化供前端管理后台绘制关系图谱。
+- **单写多读与并发安全**：SQLite 的连接通过 `Arc<Mutex<Connection>>` 保护（因为 `rusqlite::Connection` 是 Send 但非 Sync）。必须尽量缩短锁的持有时间。
+- **无状态重构**：存储结构必须足够扁平化。复杂的查询（如按好感度过滤）应下推至 SQL 层完成，严禁将全表数据拉入内存后再进行过滤。
 
 ## 4. 代码入口
-- 社交存储: `crates/agent/src/component/social/relationship.rs`
-- 关系获取: `crates/agent/src/core/social.rs`
+- 关系存储: `crates/agent/src/component/social/relationship.rs`
+- 关系类型定义: `crates/agent/src/component/social/relationship_types.rs`
