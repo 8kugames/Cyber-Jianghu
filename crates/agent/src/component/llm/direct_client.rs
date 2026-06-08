@@ -14,8 +14,8 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{debug, error, info};
 
 /// 全局 LLM 停止标志
@@ -204,16 +204,22 @@ pub struct DirectLlmClientConfig {
 #[derive(Debug, Clone)]
 pub struct PromptConfig {
     /// 是否从 LLM 输出中剥离 reasoning content（D8）
-    pub strip_reasoning_content: bool,  // env var: CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT
+    pub strip_reasoning_content: bool, // env var: CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT
     /// 是否规范化 tool/parameter schema 输出（D9）
-    pub canonicalize_schemas: bool,    // env var: CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS
+    pub canonicalize_schemas: bool, // env var: CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS
 }
 
 impl Default for PromptConfig {
     fn default() -> Self {
         Self {
-            strip_reasoning_content: crate::config::env_or("CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT", true),
-            canonicalize_schemas: crate::config::env_or("CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS", true),
+            strip_reasoning_content: crate::config::env_or(
+                "CYBER_JIANGHU_PROMPT_STRIP_REASONING_CONTENT",
+                true,
+            ),
+            canonicalize_schemas: crate::config::env_or(
+                "CYBER_JIANGHU_PROMPT_CANONICALIZE_SCHEMAS",
+                true,
+            ),
         }
     }
 }
@@ -379,6 +385,8 @@ pub struct DirectLlmClient {
     earth_soul_config: Option<crate::soul::earth::config::EarthSoulConfig>,
     /// 最近一次 LLM 调用的 reasoning_content（DeepSeek 等模型需要回传）
     last_reasoning_content: std::sync::Mutex<Option<String>>,
+    /// 上一次请求的 system_hash（用于检测 prefix cache 失效）
+    last_system_hash: std::sync::Mutex<Option<[u8; 32]>>,
     /// 共享 circuit-breaker：由 FallbackLlmClient 注入，保证
     /// `run_tool_loop` 内部 send_chat_exchange 也走同一份禁用表
     breaker: Option<std::sync::Arc<super::client::SharedBreaker>>,
@@ -390,6 +398,7 @@ impl Clone for DirectLlmClient {
             config: self.config.clone(),
             earth_soul_config: self.earth_soul_config.clone(),
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_system_hash: std::sync::Mutex::new(None),
             breaker: self.breaker.clone(),
         }
     }
@@ -408,6 +417,7 @@ impl DirectLlmClient {
             config,
             earth_soul_config: None,
             last_reasoning_content: std::sync::Mutex::new(None),
+            last_system_hash: std::sync::Mutex::new(None),
             breaker: None,
         })
     }
@@ -657,6 +667,11 @@ impl DirectLlmClient {
                 &self.config.provider,
                 &self.config.get_model_with_default(),
             );
+            tracing::warn!(
+                "LLM response JSON parse failed: provider={}, raw_body[:500]={:?}",
+                self.config.provider.as_str(),
+                &raw_body[..raw_body.len().min(500)]
+            );
             anyhow::anyhow!("Failed to parse LLM response: {}", e)
         })?;
 
@@ -680,6 +695,7 @@ impl DirectLlmClient {
                 cache_hit,
                 system_hash,
             );
+            self.emit_cache_diagnostics(system_hash, usage.prompt_tokens, cache_hit, &model);
             debug!(
                 "Token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}",
                 self.config.provider.as_str(),
@@ -736,6 +752,48 @@ impl DirectLlmClient {
     fn extract_system_hash_from_request(request: &OpenAIRequest) -> [u8; 32] {
         let system = Self::extract_system_from_request(request);
         crate::soul::actor::compute_system_hash(&system)
+    }
+
+    fn emit_cache_diagnostics(
+        &self,
+        system_hash: [u8; 32],
+        prompt_tokens: u64,
+        cache_hit: u64,
+        model: &str,
+    ) {
+        let hash_hex = hex::encode(system_hash);
+
+        if let Ok(mut guard) = self.last_system_hash.lock() {
+            if let Some(ref prev) = *guard
+                && prev != &system_hash
+            {
+                tracing::warn!(
+                    target: "cache_diagnostics",
+                    old_hash = %hex::encode(prev),
+                    new_hash = %hash_hex,
+                    model = %model,
+                    "system_hash_changed — prefix cache invalidated"
+                );
+            }
+            *guard = Some(system_hash);
+        }
+
+        if crate::config::env_or("CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED", true) {
+            let cache_ratio = if prompt_tokens > 0 {
+                cache_hit as f64 / prompt_tokens as f64
+            } else {
+                0.0
+            };
+            tracing::info!(
+                target: "cache_diagnostics",
+                system_hash = %hash_hex,
+                prompt_tokens = prompt_tokens,
+                cache_hit_tokens = cache_hit,
+                cache_hit_rate = format!("{:.1}%", cache_ratio * 100.0),
+                model = %model,
+                "prefix_cache_tick"
+            );
+        }
     }
 
     /// 流式降级：用 streaming 收集完整响应，组装为 OpenAIResponse
@@ -875,6 +933,12 @@ impl DirectLlmClient {
                 ct,
                 cache_hit,
                 system_hash,
+            );
+            self.emit_cache_diagnostics(
+                system_hash,
+                final_pt,
+                cache_hit,
+                &self.config.get_model_with_default(),
             );
             debug!(
                 "Stream token usage: provider={}, model={}, prompt={}, completion={}, cache_hit={}, real_usage={}",
@@ -1293,8 +1357,9 @@ impl LlmClient for DirectLlmClient {
                 t.iter()
                     .map(|tool| {
                         if self.config.prompt.canonicalize_schemas {
-                            serde_json::from_str(&tool.canonical_json())
-                                .unwrap_or_else(|_| serde_json::to_value(tool).unwrap_or(serde_json::Value::Null))
+                            serde_json::from_str(&tool.canonical_json()).unwrap_or_else(|_| {
+                                serde_json::to_value(tool).unwrap_or(serde_json::Value::Null)
+                            })
                         } else {
                             serde_json::to_value(tool).unwrap_or(serde_json::Value::Null)
                         }
@@ -1443,8 +1508,7 @@ impl LlmClient for DirectLlmClient {
                 anyhow::bail!("LLM 调用已被停止");
             }
             let prompt_chars = (system.len() + prompt.len()) as u64;
-            let system_hash =
-                crate::soul::actor::compute_system_hash(system);
+            let system_hash = crate::soul::actor::compute_system_hash(system);
             let stream = self.complete_streaming(system, prompt).await?;
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
@@ -1493,8 +1557,7 @@ impl LlmClient for DirectLlmClient {
                     current_prompt,
                 )
                 .await?;
-            let system_hash =
-                crate::soul::actor::compute_system_hash(system);
+            let system_hash = crate::soul::actor::compute_system_hash(system);
             let tracking = super::streaming::UsageTrackingStream::new(
                 stream,
                 self.config.provider,

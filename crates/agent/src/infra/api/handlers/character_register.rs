@@ -178,9 +178,7 @@ fn validate_against_schema(
                     });
                 }
             },
-            FieldConstraints::Enum {
-                required, ..
-            } => match field_val {
+            FieldConstraints::Enum { required, .. } => match field_val {
                 None | Some(serde_json::Value::Null) => {
                     if *required {
                         errors.push(FieldValidationError {

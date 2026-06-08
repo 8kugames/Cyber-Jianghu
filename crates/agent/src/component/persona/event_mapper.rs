@@ -241,16 +241,16 @@ impl EventTraitMapper {
 
     /// 从 JSON 更新规则（用于 WebSocket ConfigUpdate 动态下发）
     pub fn update_from_json(&mut self, json_value: serde_json::Value) -> anyhow::Result<()> {
-        use serde::Deserialize;
         use anyhow::Context;
+        use serde::Deserialize;
 
         #[derive(Deserialize)]
         struct RulesJson {
             rules: Vec<TraitMappingRule>,
         }
 
-        let parsed: RulesJson = serde_json::from_value(json_value)
-            .context("解析 persona_event_rules JSON 失败")?;
+        let parsed: RulesJson =
+            serde_json::from_value(json_value).context("解析 persona_event_rules JSON 失败")?;
         self.rules = parsed.rules;
         Ok(())
     }

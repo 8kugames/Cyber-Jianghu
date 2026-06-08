@@ -264,7 +264,10 @@ impl Agent {
                 match mapper {
                     Ok(m) => std::sync::Arc::new(std::sync::RwLock::new(m)),
                     Err(e) => {
-                        warn!("persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}", e);
+                        warn!(
+                            "persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}",
+                            e
+                        );
                         std::sync::Arc::new(std::sync::RwLock::new(EventTraitMapper::new()))
                     }
                 }
@@ -334,7 +337,10 @@ impl Agent {
     }
 
     /// 替换 event_trait_mapper（测试/扩展）
-    pub fn set_event_trait_mapper(&mut self, mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>) {
+    pub fn set_event_trait_mapper(
+        &mut self,
+        mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>,
+    ) {
         self.event_trait_mapper = mapper;
     }
 
@@ -754,9 +760,11 @@ mod tests {
     }
 
     fn noop_decision_callback() -> crate::runtime::DecisionCallback {
-        Arc::new(|tick_id: i64, agent_id: Uuid| -> BoxFuture<'static, Intent> {
-            Box::pin(async move { Intent::new(agent_id, tick_id, "休息", None) })
-        })
+        Arc::new(
+            |tick_id: i64, agent_id: Uuid| -> BoxFuture<'static, Intent> {
+                Box::pin(async move { Intent::new(agent_id, tick_id, "休息", None) })
+            },
+        )
     }
 
     #[tokio::test]

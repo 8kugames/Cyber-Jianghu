@@ -957,19 +957,11 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
-        let content = acc.content();
-        if content.trim().is_empty() {
-            anyhow::bail!(
-                "LLM API error: response content is empty (streaming_json, prompt_tokens={}, completion_tokens={})",
-                pt,
-                ct
-            );
-        }
-
+        // 截断检测：finish_reason=length 且 JSON 不完整（在 into_parts 前执行）
         if acc.is_truncated() && !json_complete {
             tracing::warn!(
                 "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
-                content.len(),
+                acc.content().len(),
             );
             let chat_config = super::openai_types::ChatExchangeConfig {
                 model: self.model_name(),
@@ -978,16 +970,31 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
                 enable_thinking: None,
             };
             let extracted = self
-                .complete_json_with_config_and_retry_extracted::<D>(
-                    prompt,
-                    chat_config,
-                    2,
-                )
+                .complete_json_with_config_and_retry_extracted::<D>(prompt, chat_config, 2)
                 .await?;
             return Ok(extracted.value);
         }
 
-        parse_json_response::<D>(content)
+        let (content, _, reasoning_content) = acc.into_parts();
+        let json_str = if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
+            tracing::info!(
+                "[streaming] content 为空，从 reasoning_content 提取 JSON (reasoning_len={})",
+                reasoning_content.len()
+            );
+            &reasoning_content
+        } else {
+            &content
+        };
+
+        if json_str.trim().is_empty() {
+            anyhow::bail!(
+                "LLM API error: response content is empty (streaming_json, prompt_tokens={}, completion_tokens={})",
+                pt,
+                ct
+            );
+        }
+
+        parse_json_response::<D>(json_str)
     }
 
     async fn complete_json_streaming_with_conversation<D: DeserializeOwned + Send>(
@@ -1029,7 +1036,7 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
-        // 截断检测：finish_reason=length 且 JSON 不完整
+        // 截断检测：finish_reason=length 且 JSON 不完整（在 into_parts 前执行）
         // 复用已有的 complete_json_with_config_and_retry_extracted 机制
         // （当 prefer_stream=true 时，send_chat_exchange 内部走流式路径）
         if acc.is_truncated() && !json_complete {
@@ -1044,17 +1051,23 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
                 enable_thinking: None,
             };
             let extracted = self
-                .complete_json_with_config_and_retry_extracted::<D>(
-                    current_prompt,
-                    chat_config,
-                    2,
-                )
+                .complete_json_with_config_and_retry_extracted::<D>(current_prompt, chat_config, 2)
                 .await?;
             return Ok(extracted.value);
         }
 
-        let content = acc.content();
-        if content.trim().is_empty() {
+        let (content, _, reasoning_content) = acc.into_parts();
+        let json_str = if content.trim().is_empty() && !reasoning_content.trim().is_empty() {
+            tracing::info!(
+                "[streaming] content 为空，从 reasoning_content 提取 JSON (reasoning_len={})",
+                reasoning_content.len()
+            );
+            &reasoning_content
+        } else {
+            &content
+        };
+
+        if json_str.trim().is_empty() {
             anyhow::bail!(
                 "LLM API error: response content is empty (streaming_json_conv, prompt_tokens={}, completion_tokens={})",
                 pt,
@@ -1062,7 +1075,7 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
-        parse_json_response::<D>(content)
+        parse_json_response::<D>(json_str)
     }
 }
 
@@ -2104,15 +2117,13 @@ mod tests {
             assistant: "reply".to_string(),
             reasoning_content: Some("reasoning to strip".to_string()),
         }];
-        let messages = build_conversation_messages(
-            "sys", "", None, &turns, "current",
-            true,
-        );
+        let messages = build_conversation_messages("sys", "", None, &turns, "current", true);
         let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
         let json = serde_json::to_value(assistant_msg).unwrap();
         assert!(
             json.get("reasoning_content").is_none() || json["reasoning_content"].is_null(),
-            "reasoning_content should be None when strip_reasoning=true, got: {:?}", json
+            "reasoning_content should be None when strip_reasoning=true, got: {:?}",
+            json
         );
     }
 
@@ -2123,9 +2134,7 @@ mod tests {
             assistant: "a".to_string(),
             reasoning_content: Some("reasoning".to_string()),
         }];
-        let messages = build_conversation_messages(
-            "sys", "", None, &turns, "current", false,
-        );
+        let messages = build_conversation_messages("sys", "", None, &turns, "current", false);
         let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
         let json = serde_json::to_value(assistant_msg).unwrap();
         assert_eq!(json["reasoning_content"], "reasoning");
