@@ -15,24 +15,18 @@ static PAIRED_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static SELF_CLOSING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*/>\s*",
-    )
-    .expect("self-closing tag regex valid")
+    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*/>\s*")
+        .expect("self-closing tag regex valid")
 });
 
 static OPENING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>",
-    )
-    .expect("opening tag regex valid")
+    Regex::new(r"(?i)<(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>")
+        .expect("opening tag regex valid")
 });
 
 static CLOSING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>\s*",
-    )
-    .expect("closing tag regex valid")
+    Regex::new(r"(?i)</(?:think_tag|think|reasoning|thought|thinking|minimax:tool_call)[^>]*>\s*")
+        .expect("closing tag regex valid")
 });
 
 const TAG_NAMES: &[&str] = &[

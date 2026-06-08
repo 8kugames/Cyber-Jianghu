@@ -109,7 +109,7 @@ impl super::CognitiveEngine {
         let (agent_name, persona_desc) = {
             let cfg = self.config.read().expect("rwlock poisoned");
             let persona_for_prompt = {
-                let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                let cache = self.prompt_cache.read().expect("rwlock poisoned");
                 cache.get_persona_simple().to_string()
             };
             (cfg.agent_name.clone(), persona_for_prompt)

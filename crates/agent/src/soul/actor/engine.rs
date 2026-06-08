@@ -1066,7 +1066,7 @@ impl CognitiveEngine {
                     None => {
                         // Tool-calling 无对话历史（降级）
                         let persona_for_prompt = {
-                            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                            let cache = self.prompt_cache.read().expect("rwlock poisoned");
                             cache.get_persona_simple().to_string()
                         };
                         self.llm_client
@@ -1125,7 +1125,7 @@ impl CognitiveEngine {
                     }
                     None => {
                         let persona_for_prompt = {
-                            let mut cache = self.prompt_cache.write().expect("rwlock poisoned");
+                            let cache = self.prompt_cache.read().expect("rwlock poisoned");
                             cache.get_persona_simple().to_string()
                         };
                         let temperature = self.config.read().expect("rwlock poisoned").temperature;
@@ -1183,8 +1183,11 @@ impl CognitiveEngine {
             }
         };
         // 保存 reasoning_content 供 push_conversation_turn 使用
-        if let Ok(mut rc) = self.last_reasoning_content.lock() {
-            *rc = self.llm_client.take_last_reasoning_content();
+        // 仅当 LLM client 有 reasoning_content 时覆盖，避免 None 冲掉已保存值
+        if let Ok(mut rc) = self.last_reasoning_content.lock()
+            && let Some(rc_val) = self.llm_client.take_last_reasoning_content()
+        {
+            *rc = Some(rc_val);
         }
         // 提取 LLM 构造的情绪
         if let Some(ref emotion) = response.constructed_emotion

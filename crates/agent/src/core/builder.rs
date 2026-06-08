@@ -274,7 +274,10 @@ impl AgentBuilder {
     }
 
     /// 注入事件→特质映射器
-    pub fn with_event_trait_mapper(mut self, mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>) -> Self {
+    pub fn with_event_trait_mapper(
+        mut self,
+        mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>,
+    ) -> Self {
         self.event_trait_mapper = Some(mapper);
         self
     }
@@ -428,7 +431,10 @@ impl AgentBuilder {
             match mapper {
                 Ok(m) => std::sync::Arc::new(std::sync::RwLock::new(m)),
                 Err(e) => {
-                    warn!("persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}", e);
+                    warn!(
+                        "persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}",
+                        e
+                    );
                     std::sync::Arc::new(std::sync::RwLock::new(EventTraitMapper::new()))
                 }
             }

@@ -279,7 +279,10 @@ mod tests {
         );
         let json1 = tool.canonical_json();
         let json2 = tool.canonical_json();
-        assert_eq!(json1, json2, "canonical_json must be byte-identical across calls");
+        assert_eq!(
+            json1, json2,
+            "canonical_json must be byte-identical across calls"
+        );
         assert!(json1.contains("\"a_param\":{\"type\":\"string\"}"));
         assert!(json1.contains("\"properties\":{\"a_param\":"));
         assert!(json1.contains("\"required\":[\"a_param\",\"z_param\"]"));

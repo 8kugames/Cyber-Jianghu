@@ -371,9 +371,7 @@ impl WebSocketClient {
     /// 参数: Vec<TraitMappingRule>
     pub fn set_persona_event_rules_callback(
         &self,
-        callback: Arc<
-            dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync,
-        >,
+        callback: Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>,
     ) {
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();

@@ -170,7 +170,11 @@ pub fn record_token_usage(
         hour_entry.bucket.completion_tokens += completion_tokens;
         hour_entry.bucket.cache_hit_tokens += cache_hit;
         hour_entry.bucket.calls += 1;
-        *hour_entry.bucket.system_hash_distribution.entry(system_hash).or_insert(0) += 1;
+        *hour_entry
+            .bucket
+            .system_hash_distribution
+            .entry(system_hash)
+            .or_insert(0) += 1;
         if hour_entry.bucket.first_record_at.is_none() {
             hour_entry.bucket.first_record_at = Some(now_iso.clone());
         }
@@ -433,8 +437,16 @@ pub fn persist_and_reset() {
         bucket.calls += phs.bucket.calls;
         bucket.failures += phs.bucket.failures;
         // 合并时间戳：取最早 first 和最晚 last
-        merge_timestamp(&mut bucket.first_record_at, &phs.bucket.first_record_at, true);
-        merge_timestamp(&mut bucket.last_record_at, &phs.bucket.last_record_at, false);
+        merge_timestamp(
+            &mut bucket.first_record_at,
+            &phs.bucket.first_record_at,
+            true,
+        );
+        merge_timestamp(
+            &mut bucket.last_record_at,
+            &phs.bucket.last_record_at,
+            false,
+        );
     }
 
     // 重建 summary（reduce detail）

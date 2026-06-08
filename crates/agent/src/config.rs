@@ -599,15 +599,18 @@ pub struct LlmConfig {
 /// Cache 诊断配置 (Phase 0 测量用)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheDiagnosticsConfig {
-    pub enabled: bool,                  // env var: CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED
-    pub system_hash_dimension: bool,    // env var: CYBER_JIANGHU_CACHE_DIAGNOSTICS_SYSTEM_HASH_DIMENSION
+    pub enabled: bool,               // env var: CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED
+    pub system_hash_dimension: bool, // env var: CYBER_JIANGHU_CACHE_DIAGNOSTICS_SYSTEM_HASH_DIMENSION
 }
 
 impl Default for CacheDiagnosticsConfig {
     fn default() -> Self {
         Self {
             enabled: env_or("CYBER_JIANGHU_CACHE_DIAGNOSTICS_ENABLED", true),
-            system_hash_dimension: env_or("CYBER_JIANGHU_CACHE_DIAGNOSTICS_SYSTEM_HASH_DIMENSION", true),
+            system_hash_dimension: env_or(
+                "CYBER_JIANGHU_CACHE_DIAGNOSTICS_SYSTEM_HASH_DIMENSION",
+                true,
+            ),
         }
     }
 }

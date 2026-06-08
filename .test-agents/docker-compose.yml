@@ -102,18 +102,6 @@ services:
       - ./agent-7/data:/app/data
       - ../crates/agent/static/panel:/app/static/panel:ro
 
-  agent-8:
-    <<: *agent-common
-    container_name: agent-8-maas
-    environment:
-      <<: *agent-env-common
-    ports:
-      - "23348:23340"
-    volumes:
-      - ./agent-8/config:/app/config
-      - ./agent-8/data:/app/data
-      - ../crates/agent/static/panel:/app/static/panel:ro
-
   agent-ollama:
     <<: *agent-common
     container_name: agent-ollama

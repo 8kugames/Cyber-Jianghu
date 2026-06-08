@@ -3,7 +3,7 @@
 // ============================================================================
 //
 // 仅保留：
-// - persona（首轮完整，后续摘要）
+// - persona（统一摘要，结构化格式）
 // - Action Index（name-only，进程生命周期内不变）
 //
 // 动态数据（WorldState/Skills）由 FocusSummary + 地魂 tool calling 按需获取。
@@ -19,7 +19,6 @@ pub struct PromptCache {
     persona_summary: String,
     /// Action Index（name-only，详情通过地魂 get_action_detail 按需查询）
     action_descriptions: String,
-    persona_initialized: bool,
 }
 
 impl PromptCache {
@@ -35,7 +34,6 @@ impl PromptCache {
             persona_desc,
             persona_summary,
             action_descriptions,
-            persona_initialized: false,
         }
     }
 
@@ -80,20 +78,13 @@ impl PromptCache {
         )
     }
 
-    /// 获取 persona（无需 WorldState 参数）
-    ///
-    /// 首次返回完整版，后续返回摘要版
-    pub fn get_persona_simple(&mut self) -> &str {
-        if !self.persona_initialized {
-            self.persona_initialized = true;
-            &self.persona_desc
-        } else {
-            &self.persona_summary
-        }
+    /// 获取 persona（统一摘要格式）
+    pub fn get_persona_simple(&self) -> &str {
+        &self.persona_summary
     }
 
     /// 获取 persona（保留兼容接口）
-    pub fn get_persona(&mut self) -> &str {
+    pub fn get_persona(&self) -> &str {
         self.get_persona_simple()
     }
 
@@ -101,7 +92,6 @@ impl PromptCache {
     pub fn invalidate_persona(&mut self, persona_desc: String, persona: &DynamicPersona) {
         self.persona_desc = persona_desc;
         self.persona_summary = Self::build_structured_summary(persona);
-        self.persona_initialized = false;
     }
 
     /// 更新动作描述（game_rules_update 后调用）
@@ -116,11 +106,6 @@ impl PromptCache {
     /// 获取 Action Index（name-only）
     pub fn get_action_descriptions(&self) -> &str {
         &self.action_descriptions
-    }
-
-    /// 获取 persona_initialized 状态（调试用）
-    pub fn is_initialized(&self) -> bool {
-        self.persona_initialized
     }
 }
 
@@ -140,15 +125,12 @@ mod tests {
     #[test]
     fn test_structured_summary() {
         let persona = create_test_persona();
-        let mut cache = PromptCache::new(
+        let cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
             "- idle: 休息".to_string(),
             "- idle: (action_data: null)".to_string(),
             &persona,
         );
-
-        let full = cache.get_persona_simple();
-        assert_eq!(full, "你是一名行侠仗义的侠客。");
 
         let summary = cache.get_persona_simple();
         assert!(summary.contains("张三"));
@@ -156,22 +138,24 @@ mod tests {
     }
 
     #[test]
-    fn test_first_round_full_persona() {
+    fn test_always_returns_summary() {
         let persona = create_test_persona();
-        let mut cache = PromptCache::new(
+        let cache = PromptCache::new(
             "你是一名行侠仗义的侠客。".to_string(),
             "- idle: 休息".to_string(),
             "- idle: (action_data: null)".to_string(),
             &persona,
         );
 
-        let full = cache.get_persona_simple();
-        assert_eq!(full, "你是一名行侠仗义的侠客。");
-        assert!(cache.is_initialized());
+        let first = cache.get_persona_simple();
+        let second = cache.get_persona_simple();
+        assert!(first.contains("张三"));
+        assert!(second.contains("张三"));
+        assert_eq!(first, second);
     }
 
     #[test]
-    fn test_invalidate_resets_to_full() {
+    fn test_invalidate_updates_summary() {
         let persona = create_test_persona();
         let mut cache = PromptCache::new(
             "旧描述".to_string(),
@@ -180,13 +164,13 @@ mod tests {
             &persona,
         );
 
-        cache.get_persona_simple(); // initialize
-        assert!(cache.is_initialized());
+        let before = cache.get_persona_simple().to_string();
+        assert!(before.contains("张三"));
 
         cache.invalidate_persona("新描述".to_string(), &persona);
-        assert!(!cache.is_initialized());
 
-        let full = cache.get_persona_simple();
-        assert_eq!(full, "新描述");
+        let after = cache.get_persona_simple();
+        assert!(after.contains("张三"));
+        assert_eq!(before, after);
     }
 }

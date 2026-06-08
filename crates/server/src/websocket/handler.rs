@@ -510,46 +510,44 @@ async fn handle_websocket(
     if agent_id != uuid::Uuid::nil() {
         let rules_path = crate::paths::get_config_dir().join("persona_event_rules.yaml");
         match std::fs::read_to_string(&rules_path) {
-            Ok(yaml_content) => {
-                match serde_yaml::from_str::<serde_json::Value>(&yaml_content) {
-                    Ok(json_value) => {
-                        let config_update = ServerMessage::ConfigUpdate {
-                            config_type: "persona_event_rules".to_string(),
-                            update_type: "full".to_string(),
-                            version: "1.0".to_string(),
-                            content: json_value,
-                            content_hash: None,
-                            updated_items: vec![],
-                            removed_items: vec![],
-                        };
+            Ok(yaml_content) => match serde_yaml::from_str::<serde_json::Value>(&yaml_content) {
+                Ok(json_value) => {
+                    let config_update = ServerMessage::ConfigUpdate {
+                        config_type: "persona_event_rules".to_string(),
+                        update_type: "full".to_string(),
+                        version: "1.0".to_string(),
+                        content: json_value,
+                        content_hash: None,
+                        updated_items: vec![],
+                        removed_items: vec![],
+                    };
 
-                        if let Err(e) = broadcast::send_config_update(
-                            agent_id,
-                            config_update,
-                            &state.connection_manager,
-                            &state.agent_to_device_map,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "Failed to send persona_event_rules ConfigUpdate to agent {}: {}",
-                                agent_id, e
-                            );
-                        } else {
-                            debug!(
-                                "Sent persona_event_rules ConfigUpdate to agent '{}' ({})",
-                                agent_name, agent_id
-                            );
-                        }
-                    }
-                    Err(e) => {
+                    if let Err(e) = broadcast::send_config_update(
+                        agent_id,
+                        config_update,
+                        &state.connection_manager,
+                        &state.agent_to_device_map,
+                    )
+                    .await
+                    {
                         warn!(
-                            "Failed to parse persona_event_rules.yaml as JSON for agent {}: {}",
+                            "Failed to send persona_event_rules ConfigUpdate to agent {}: {}",
                             agent_id, e
+                        );
+                    } else {
+                        debug!(
+                            "Sent persona_event_rules ConfigUpdate to agent '{}' ({})",
+                            agent_name, agent_id
                         );
                     }
                 }
-            }
+                Err(e) => {
+                    warn!(
+                        "Failed to parse persona_event_rules.yaml as JSON for agent {}: {}",
+                        agent_id, e
+                    );
+                }
+            },
             Err(e) => {
                 warn!(
                     "Failed to read persona_event_rules.yaml for agent {}: {}",
