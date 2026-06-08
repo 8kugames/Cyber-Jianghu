@@ -507,7 +507,20 @@ impl DirectLlmClient {
 
         // prefer_stream: 直接走流式，避免对只支持 streaming 的模型浪费 400 降级
         if self.config.prefer_stream {
-            return self.send_request_via_stream(request).await;
+            match self.send_request_via_stream(request).await {
+                Ok(r) => return Ok(r),
+                Err(e) => {
+                    let msg = format!("{:#}", e);
+                    let is_transport = msg.contains("SSE stream error")
+                        || msg.contains("LLM streaming API request failed")
+                        || msg.contains("Failed to send request to LLM streaming API");
+                    if is_transport {
+                        tracing::warn!("[地魂] 流式传输失败，降级非流式: {}", e);
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         }
 
         let client = self.build_http_client()?;
@@ -685,15 +698,34 @@ impl DirectLlmClient {
         info!("[地魂] send_request_via_stream 入口（流式路径）");
         let mut stream = self.send_streaming_request(request).await?;
         let mut acc = StreamAccumulator::new();
+        let mut transport_error: Option<anyhow::Error> = None;
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(c) => acc.push(c),
                 Err(e) => {
-                    tracing::warn!("流式降级收集中途失败: {}", e);
+                    tracing::warn!("SSE 流中断: {}", e);
+                    transport_error = Some(e);
                     break;
                 }
             }
+        }
+
+        if let Some(e) = transport_error {
+            return Err(e);
+        }
+
+        let json_complete = acc.is_json_complete();
+        if acc.is_truncated() && !json_complete {
+            let content_len = acc.content().len();
+            tracing::warn!(
+                "[地魂] 流式截断: finish_reason=length, content_len={}, JSON不完整, 委托重试机制",
+                content_len,
+            );
+            return Err(anyhow::anyhow!(
+                "EOF while parsing a value at line 1 column 0: response truncated by max_tokens (content_len={}, via stream)",
+                content_len,
+            ));
         }
 
         let stats = acc.token_stats();
