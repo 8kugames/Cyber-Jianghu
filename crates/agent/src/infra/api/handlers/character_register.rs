@@ -179,7 +179,7 @@ fn validate_against_schema(
                 }
             },
             FieldConstraints::Enum {
-                required, options, ..
+                required, ..
             } => match field_val {
                 None | Some(serde_json::Value::Null) => {
                     if *required {
@@ -189,17 +189,8 @@ fn validate_against_schema(
                         });
                     }
                 }
-                Some(serde_json::Value::String(s)) => {
-                    if !options.contains(s) {
-                        errors.push(FieldValidationError {
-                            path: spec.path.clone(),
-                            message: format!(
-                                "invalid: \"{}\" (allowed: {})",
-                                s,
-                                options.join("\u{3001}")
-                            ),
-                        });
-                    }
+                Some(serde_json::Value::String(_)) => {
+                    // options 仅作示例，不强制校验
                 }
                 Some(other) => {
                     errors.push(FieldValidationError {
@@ -210,7 +201,6 @@ fn validate_against_schema(
             },
             FieldConstraints::EnumArray {
                 required,
-                options,
                 min_count,
                 max_count,
                 ..
@@ -223,17 +213,8 @@ fn validate_against_schema(
                         });
                     }
                 }
-                Some(serde_json::Value::String(s)) => {
-                    if !options.contains(s) {
-                        errors.push(FieldValidationError {
-                            path: spec.path.clone(),
-                            message: format!(
-                                "invalid: \"{}\" (allowed: {})",
-                                s,
-                                options.join("\u{3001}")
-                            ),
-                        });
-                    }
+                Some(serde_json::Value::String(_)) => {
+                    // options 仅作示例，不强制校验
                 }
                 Some(serde_json::Value::Array(arr)) => {
                     if arr.len() < *min_count || arr.len() > *max_count {
@@ -247,22 +228,7 @@ fn validate_against_schema(
                             ),
                         });
                     }
-                    let invalid: Vec<String> = arr
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .filter(|s| !options.iter().any(|o| o == *s))
-                        .map(|s| s.to_string())
-                        .collect();
-                    if !invalid.is_empty() {
-                        errors.push(FieldValidationError {
-                            path: spec.path.clone(),
-                            message: format!(
-                                "invalid: {} (allowed: {})",
-                                invalid.join("\u{3001}"),
-                                options.join("\u{3001}")
-                            ),
-                        });
-                    }
+                    // options 仅作示例，不强制校验元素值
                 }
                 Some(other) => {
                     errors.push(FieldValidationError {
@@ -503,7 +469,7 @@ pub(crate) async fn generate_character_handler(
     //   - 未指定时 → 提示从百家姓中自由选取，不要求计数到第 N 个
     let surname_constraint = match &body.surname_hint {
         Some(hint) => format!("姓氏必须为\"{}\"", hint),
-        None => "姓氏需从百家姓中选取".to_string(),
+        None => "姓氏需从百家姓中随机选取".to_string(),
     };
     let mut extra_vars = std::collections::HashMap::new();
     extra_vars.insert("surname_constraint".into(), surname_constraint);
