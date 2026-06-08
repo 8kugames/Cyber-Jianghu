@@ -988,6 +988,27 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
             );
         }
 
+        if acc.is_truncated() && !json_complete {
+            tracing::warn!(
+                "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
+                content.len(),
+            );
+            let chat_config = super::openai_types::ChatExchangeConfig {
+                model: self.model_name(),
+                temperature: self.temperature(),
+                max_tokens: None,
+                enable_thinking: None,
+            };
+            let extracted = self
+                .complete_json_with_config_and_retry_extracted::<D>(
+                    prompt,
+                    chat_config,
+                    2,
+                )
+                .await?;
+            return Ok(extracted.value);
+        }
+
         parse_json_response::<D>(content)
     }
 
@@ -1028,6 +1049,30 @@ impl<T: LlmClient + ?Sized> LlmClientExt for T {
                 ct,
                 stats.has_real_usage
             );
+        }
+
+        // 截断检测：finish_reason=length 且 JSON 不完整
+        // 复用已有的 complete_json_with_config_and_retry_extracted 机制
+        // （当 prefer_stream=true 时，send_chat_exchange 内部走流式路径）
+        if acc.is_truncated() && !json_complete {
+            tracing::warn!(
+                "[streaming] 截断检测: content_len={}, 委托重试机制(max_tokens翻倍)",
+                acc.content().len(),
+            );
+            let chat_config = super::openai_types::ChatExchangeConfig {
+                model: self.model_name(),
+                temperature: self.temperature(),
+                max_tokens: None,
+                enable_thinking: None,
+            };
+            let extracted = self
+                .complete_json_with_config_and_retry_extracted::<D>(
+                    current_prompt,
+                    chat_config,
+                    2,
+                )
+                .await?;
+            return Ok(extracted.value);
         }
 
         let content = acc.content();
