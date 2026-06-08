@@ -198,10 +198,11 @@ pub struct Intent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 
-    /// Pipeline 后续 Intent（multi-Intent 支持）
+    /// 原子意图队列（multi-Intent 支持）
     ///
-    /// 主 Intent 执行成功后，Server 按顺序执行 subsequent_intents。
-    /// 任一失败则跳过后续所有 Intent。
+    /// `subsequent_intents` 是一个**原子意图**的队列，绝不是复合动作。
+    /// 主 Intent 独立执行成功后，Server 按顺序将后续 Intent 当作独立的原子意图逐个执行。
+    /// 任一失败则仅回滚该失败的原子意图，并跳过后续所有排队的 Intent（已成功的保持成功）。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subsequent_intents: Vec<Intent>,
 }

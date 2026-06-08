@@ -78,10 +78,10 @@ pub struct ConstructedEmotion {
 /// - 旧格式: `action_type + action_data` — 单个 action（自动转换为 actions 数组）
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct DirectCognitiveResponse {
-    /// 状态感知
-    self_status: String,
-    /// 环境描述
-    environment: String,
+    #[serde(default)]
+    self_status: serde_json::Value,
+    #[serde(default)]
+    environment: serde_json::Value,
     /// 关键观察
     key_observations: Vec<String>,
     /// 主要驱动力
