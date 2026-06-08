@@ -1081,7 +1081,7 @@ impl CognitiveEngine {
                     }
                 }
             } else {
-                // 非 tool-calling 路径：streaming 优先，失败降级非流式
+                // 非 tool-calling 路径：非流式优先（默认），仅启用时尝试 streaming
                 // 注意：streaming 不支持 tool-calling 组合
                 match conv_data {
                     Some((turns, system, summary)) => {

@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tracing::{debug, error, info};
 
 /// 全局 LLM 停止标志
@@ -189,7 +190,8 @@ pub struct DirectLlmClientConfig {
     /// 最大 tokens
     pub max_tokens: u32,
     /// 优先使用流式调用（避免对只支持 streaming 的模型浪费 400 降级）
-    pub prefer_stream: bool,
+    /// 使用 Arc<AtomicBool> 实现 sticky 自动翻转：首次 400+"stream" 降级后设为 true
+    pub prefer_stream: Arc<AtomicBool>,
     /// DashScope/Kimi 等模型的 enable_thinking 参数（None = 不发送该字段）
     pub enable_thinking: Option<bool>,
     /// 上下文窗口大小（tokens）
@@ -236,7 +238,7 @@ impl DirectLlmClientConfig {
             model: None,
             temperature: 0.7,
             max_tokens: crate::config::DEFAULT_LLM_MAX_TOKENS,
-            prefer_stream: false,
+            prefer_stream: Arc::new(AtomicBool::new(false)),
             enable_thinking: None,
             context_window_tokens: 32000,
             prompt: PromptConfig::default(),
@@ -526,20 +528,13 @@ impl DirectLlmClient {
         // 共享 breaker 守门：模型在冷却期直接拒绝
         self.check_breaker()?;
 
-        // prefer_stream: 直接走流式，避免对只支持 streaming 的模型浪费 400 降级
-        if self.config.prefer_stream {
+        // prefer_stream=false: 优先走非流式，失败后降级流式
+        // 非流式路径自带 400→stream 兜底（line 616），确保只支持 streaming 的模型正常工作
+        if self.config.prefer_stream.load(Ordering::Relaxed) {
             match self.send_request_via_stream(request).await {
                 Ok(r) => return Ok(r),
                 Err(e) => {
-                    let msg = format!("{:#}", e);
-                    let is_transport = msg.contains("SSE stream error")
-                        || msg.contains("LLM streaming API request failed")
-                        || msg.contains("Failed to send request to LLM streaming API");
-                    if is_transport {
-                        tracing::warn!("[地魂] 流式传输失败，降级非流式: {}", e);
-                    } else {
-                        return Err(e);
-                    }
+                    tracing::warn!("[地魂] 流式请求失败，降级非流式: {}", e);
                 }
             }
         }
@@ -568,7 +563,7 @@ impl DirectLlmClient {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "None".to_string()),
                 request.stream,
-                self.config.prefer_stream,
+                self.config.prefer_stream.load(Ordering::Relaxed),
             );
         }
 
@@ -614,7 +609,8 @@ impl DirectLlmClient {
 
             // 400 + "stream"：模型强制要求流式，自动用流式重试
             if status.as_u16() == 400 && error_body.contains("stream") {
-                info!("模型要求流式调用，自动切换到 streaming 重试");
+                info!("模型要求流式调用，自动切换到 streaming 重试，后续将直接走流式");
+                self.config.prefer_stream.store(true, Ordering::Relaxed);
                 return self.send_request_via_stream(request).await;
             }
 
@@ -632,6 +628,15 @@ impl DirectLlmClient {
             .context("Failed to read response body")?;
         let raw_body = String::from_utf8(raw_bytes.to_vec())
             .context("LLM response body is not valid UTF-8")?;
+
+        if raw_body.trim().is_empty() {
+            super::token_tracking::record_failure(
+                &self.config.provider,
+                &self.config.get_model_with_default(),
+            );
+            anyhow::bail!("LLM returned empty response body");
+        }
+
         debug!(
             "[地魂] raw_body 前200字符: {}",
             raw_body.chars().take(2000).collect::<String>()

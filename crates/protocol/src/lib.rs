@@ -109,7 +109,7 @@ pub const DEFAULT_NARRATIVE_WINDOW_SIZE: usize = 5;
 pub const DEFAULT_SEMANTIC_DEDUP_HISTORY: usize = 1;
 
 /// 启用 SSE 流式 LLM 调用
-pub const DEFAULT_ENABLE_STREAMING: bool = true;
+pub const DEFAULT_ENABLE_STREAMING: bool = false;
 
 // ============================================================================
 // 事件类型常量

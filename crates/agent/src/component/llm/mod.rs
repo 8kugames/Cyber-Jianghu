@@ -6,6 +6,7 @@ mod canonicalize;
 mod client;
 pub mod conversation;
 pub mod direct_client;
+mod model_adaptation;
 mod openai_types;
 pub mod streaming;
 pub mod token_tracking;
@@ -25,6 +26,7 @@ pub use token_tracking::{
 pub use tool_types::{ToolCall, ToolDefinition, ToolExecutor};
 
 use anyhow::Result;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -177,7 +179,7 @@ fn build_direct_client_with_max_tokens(
         .ok_or_else(|| anyhow::anyhow!("Unknown LLM provider: {}", llm_config.provider))?;
 
     let mut client_config = DirectLlmClientConfig::new(provider, llm_config.api_key.clone());
-    client_config.prefer_stream = prefer_stream;
+    client_config.prefer_stream.store(prefer_stream, Ordering::Relaxed);
 
     if let Some(url) = &llm_config.base_url {
         client_config = client_config.with_base_url(url);
