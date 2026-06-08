@@ -1,156 +1,43 @@
-# Cyber-Jianghu Agent SDK
+# 虚境：江湖 - 智能体 SDK (众生)
 
-Agent SDK 是连接虚境：江湖服务端的桥梁。它为开发者提供了与游戏世界交互的基础设施，并且内置了记忆、认知、对话等高级 AI 模块，支持两种运行模式：
+智能体（Agent）SDK 是连接“天道”服务端的桥梁，为开发者提供了与游戏世界交互的基础设施。它内置了记忆、认知、对话、情感等高级 AI 模块，采用完全基于第一性原理的架构构建，确保 AI 的行为既符合逻辑又极具人性。
 
-- **Cognitive 模式（默认）**：内置 LLM 客户端，使用 CognitiveEngine 自主决策
-- **Claw 模式**：通过 OpenClawBridge 桥接外部 LLM，使用相同的 CognitiveEngine 架构
+## 核心架构原则
 
-## 核心设计原则
+### 灵活的模块化组装
 
-### COI (Composition Over Inheritance)
+智能体的能力不再是死板的继承关系，而是像搭积木一样按需组合。通过组装不同的能力模块（如记忆系统、大模型客户端、即时事件处理引擎、世界状态缓存等），可以灵活定制智能体的行为基础。
 
-Agent 采用组合优于继承的设计，通过 `AgentBuilder` 灵活组合各种功能：
+### 三魂架构 (智能体的精神内核)
 
-```rust
-let agent = AgentBuilder::new(config, decision)
-    .with_review_store(review_store)      // ReflectorSoul 审查
-    .with_memory_manager(memory_manager)    // 三层记忆系统
-    .with_llm_client(llm_client, Some(world_rules)) // 统一三层审查器
-    .with_reconnect_rx(reconnect_rx)       // Claw 热切换
-    .build();
-```
+智能体的思考和决策过程被划分为三个相互协作的“灵魂”模块：
 
-### ActorSoul + ReflectorSoul 架构
+- **人魂 (行动之魂)**：智能体的主脑。它直接感知客观世界的状态，无需经过复杂的中间翻译，直接由大模型一口气完成“感知环境 -> 产生动机 -> 制定计划 -> 做出决定”的完整推演，并输出具体的行动意图。
+- **地魂 (能力之魂)**：内嵌在人魂思考过程中的“工具箱”。它为大模型提供了查询记忆、翻阅技能、查看人际关系等工具，让 AI 在思考时能够随时拉取精确的客观数据，确保决策有理有据。
+- **天魂 (守护之魂)**：智能体内部的看门人与合规审查官。在行动真正提交给服务端之前，天魂会进行三层严格把关：检查动作是否合法、物理规则是否允许，以及该行为是否严重偏离了角色的人设（防出戏）。一旦发现违规，天魂会立刻拦截，并以自然语言的形式驳回，要求人魂重新思考。
 
-- **ActorSoul (人魂/行动之魂)**：直连 WorldState，输出含精确 ID 的结构化 Intent
-- **地魂 (能力之魂)**：提供 tool calling 工具池，行动落地层（嵌入 ActorSoul）
-- **ReflectorSoul (天魂/守护之魂)**：三层审查，世界观一致性审查
-- **共享内存通信**：通过 `ReviewStore` 进行进程内通信
+### 统一的双模式运行
 
-### 分级审核策略
+为了适应不同的运行环境，智能体 SDK 支持两种运行模式：
 
-| 策略 | 说明 | 适用场景 |
-|------|------|---------|
-| Always | 完整三层审核 | speak/shout/whisper 等高优先级动作 |
-| Adaptive | 根据动作字段和风险关键词动态判断是否需要 LLM | steal/trade/give/move 等风险动作 |
-| Skip | 仅 RuleEngine 校验 | idle/wait 等低风险动作 |
+- **内置模式 (默认)**：智能体自带大模型客户端，所有的思考、决策和记忆检索都在本地闭环完成。
+- **外置模式**：智能体只作为“躯壳”，具体的思考决策交由外部的调度节点（如 OpenClaw）来控制。
+> **核心一致**：无论是哪种模式，智能体底层的认知引擎、记忆系统、混沌生成器等核心模块完全一致，唯一的区别仅仅是谁在负责与大模型通信。
 
-### multi-Intent Pipeline
+## 核心模块概览
 
-单 tick 可提交多 Intent，顺序执行；后续步骤失败会中断批次，但不会回滚已成功步骤：
-- `max_intents_per_tick`: 每 tick 最大 Intent 数（默认 5）
-- `max_retries`: 三魂循环最大重试次数（协议默认 12，实际以 Server 下发配置为准）
+- **记忆与情感系统**：包含短期工作记忆、带遗忘曲线的事件情景记忆、支持模糊联想的长期语义记忆，以及从行动结果中吸取教训的经验记忆。这些记忆的形成和提取都会受到智能体当前核心情感（积极/消极、激动/平静）的调控。
+- **动态人设**：角色的性格并非一成不变，而是会随着经历的事件和互动的反馈动态演化。
+- **即时事件处理**：专门处理那些不在常规时间流转中的突发事件（如别人突然对你说话），确保智能体能对外界刺激做出及时反应。
+- **防发散与优化**：通过严格的上下文过滤和增量比对，只把最关键的环境变化交给大模型处理，极大节省了运算资源。
 
-### 两种运行模式
+## API 与通信设计
 
-> **架构统一**: 两种模式共享 CognitiveEngine、OutcomeMemory、ChaosGenerator、回调注册，仅 LLM 客户端实现不同。
+**智能体与服务端的所有核心行动交互，强制通过 WebSocket 实时长连接进行。** 
+HTTP 接口仅作为辅助手段，用于控制面板展示、状态查询和后台管理，不参与任何改变游戏世界状态的行动提交。
 
-| 特性 | Cognitive 模式 | Claw 模式 |
-|------|---------------|-----------|
-| LLM 位置 | **内置** (Agent 内部) | **外置** (OpenClaw) |
-| 认知引擎 | CognitiveEngine（直连） | CognitiveEngine（via OpenClawBridge） |
-| ReflectorSoul | ✅ 默认启用 | ✅ 默认启用 |
-| OutcomeMemory | ✅ 已初始化 | ✅ 已初始化 |
-| ChaosGenerator | ✅ 已初始化 | ✅ 已初始化 |
-| HTTP API | ✅ 完整支持（含 /api/v1/context enrichment） | ✅ 完整支持（含 /api/v1/context enrichment） |
-| 适用场景 | 独立运行、低延迟 | 复杂推理、外部大脑 |
+## 快速入口
 
-## 快速开始
-
-```bash
-# 安装
-cargo install --path crates/agent
-
-# Cognitive 模式（默认，ReflectorSoul 内置启用）
-cyber-jianghu-agent run
-
-# Claw 模式
-cyber-jianghu-agent run --mode claw
-```
-
-## 架构文档
-
-详见 `docs/architecture/`
-
-### P0 核心
-
-| 文档 | 说明 |
-|------|------|
-| [three_soul.md](docs/architecture/p0_core/three_soul.md) | 三魂架构 |
-| [cognitive_engine.md](docs/architecture/p0_core/cognitive_engine.md) | 认知流转引擎 |
-| [memory_system.md](docs/architecture/p0_core/memory_system.md) | 三级记忆系统 |
-| [dual_mode.md](docs/architecture/p0_core/dual_mode.md) | 双栖运行模式 |
-
-### P1 重要特性
-
-| 文档 | 说明 |
-|------|------|
-| [model_gateway.md](docs/architecture/p1_major/model_gateway.md) | 模型网关与调度 |
-| [outcome_memory.md](docs/architecture/p1_major/outcome_memory.md) | 经验结果记忆 (Hermes) |
-| [dynamic_persona.md](docs/architecture/p1_major/dynamic_persona.md) | 动态角色演化 |
-
-### P2 体验增强
-
-| 文档 | 说明 |
-|------|------|
-| [session_triage.md](docs/architecture/p2_enhancement/session_triage.md) | 异步即时事件引擎 |
-| [relationship_store.md](docs/architecture/p2_enhancement/relationship_store.md) | 人际社交网络 |
-| [agent_control_panel.md](docs/architecture/p2_enhancement/agent_control_panel.md) | 玩家控制台 |
-| [cli.md](docs/architecture/p2_enhancement/cli.md) | 命令行工具 |
-
-### WebSocket (主通道)
-
-- `ws://localhost:23340/ws` - OpenClaw 连接（Claw 模式）
-
-### HTTP API (辅助功能)
-
-**核心**:
-- `GET /api/v1/state` - 获取当前世界状态
-- `GET /api/v1/context` - 获取叙事上下文 + DecisionContextSnapshot
-- `GET /api/v1/cognitive` - 结构化认知上下文
-
-**角色管理**:
-- `GET /api/v1/character` - 角色信息
-- `POST /api/v1/character/generate` - LLM 一键生成角色
-- `POST /api/v1/character/register` - 注册新角色
-- `POST /api/v1/character/rebirth` - 角色转世重生
-- `GET /api/v1/character/soul-cycles` - 灵魂循环记录
-- `GET /api/v1/character/biography` - 获取纪传体传记
-- `POST /api/v1/character/biography` - LLM 生成传记
-- `GET/POST /api/v1/character/dream` - 托梦注入（持续 N 轮思想注入）
-
-**多角色**:
-- `GET /api/v1/characters` - 列出所有角色
-- `POST /api/v1/characters/switch` - 切换当前角色
-- `GET /api/v1/characters/{agent_id}` - 按 ID 获取角色
-
-**记忆与关系**:
-- `GET /api/v1/memory/recent` - 近期记忆
-- `GET /api/v1/memory/daily-summaries` - 每日摘要
-- `POST /api/v1/memory/search` - 语义搜索记忆
-- `GET /api/v1/relationship/list` - 所有人际关系
-
-**属性与状态**:
-- `GET /api/v1/attributes` - 属性值
-- `GET /api/v1/tick` - Tick 状态
-- `GET /api/v1/lifespan` - 寿命状态
-
-**审查与验证**:
-- `POST /api/v1/validate` - 验证意图
-- `GET /api/v1/review/pending` - 待审查意图
-- `POST /api/v1/review/{id}` - 提交审查结果
-
-**配置**:
-- `GET/POST /api/v1/config/llm` - LLM 配置
-- `GET /api/v1/config/llm/providers` - 支持的 LLM 提供商
-- `GET /api/v1/config/llm/usage` - Token 累计用量
-- `GET/POST /api/v1/config/llm-disabled` - LLM 开关
-- `GET/POST /api/v1/config/auto-rebirth` - 自动重生开关
-- `POST /api/v1/config/reload` - 热重载配置
-
-**事件流**:
-- `GET /api/v1/events` - 死亡事件 SSE 流
-
-## 许可证
-
-MIT OR Apache-2.0
+- **[智能体快速开始指南](QuickStart-Agent.md)**
+- **[核心架构说明](docs/architecture/p0_core/)**
+- **[进阶特性说明](docs/architecture/p1_major/)**

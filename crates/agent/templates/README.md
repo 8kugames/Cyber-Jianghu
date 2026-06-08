@@ -25,10 +25,4 @@ curl -X POST http://localhost:23333/api/v1/agent/register \
   -d @agent-001-liuyunniang.json
 ```
 
-### 通过 cyber-jianghu-agent CLI (规划中)
 
-未来 CLI 将支持直接加载模板：
-
-```bash
-cyber-jianghu-agent register --template agent-001-liuyunniang.json
-```

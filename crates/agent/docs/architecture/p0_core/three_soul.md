@@ -1,36 +1,50 @@
-# 三魂架构 (Three-Soul)
+# 三魂架构 (Three-Soul Architecture)
 
-**级别**: P0 核心基石
-**模块**: `crates/agent`
+虚境：江湖中的每个 Agent 都不是单一的大模型调用，而是由三个职责分明的“魂”组成的分布式认知系统。这种架构实现了**“思维发散”与“规则收敛”**的平衡。
 
-## 1. 设计目标
-Agent 决策的哲学分层模型，彻底隔离认知推演、物理执行与自我审查，实现高度解耦。使得大模型（LLM）的创造力与游戏系统的确定性得以安全融合。
+相关代码路径：`crates/agent/src/soul/`
 
-## 2. 核心机制
-### 2.1 人魂 (ActorSoul)：感性与理性大脑
-- **职能**：主导动机推演与规划。
-- **直连环境**：接收并解析 Server 下发的 `WorldState`，结合工作记忆和社交关系生成最终的动作意图（Intent）。
-- **混沌注入器**：内置低 San 值（理智值）混沌行为检测。当 San 值低于阈值时，人魂可能无视正常逻辑，强制生成非理性行为（如发疯、喃喃自语）。
+## 整体设计思想
 
-### 2.2 地魂 (EarthSoul)：工具执行池
-- **职能**：对接物理世界的桥梁与大模型工具箱（Tool-Calling）。
-- **执行**：负责提供工具调用能力（如记忆检索、技能查阅等）并返回结构化结果，不负责最终 Intent 发包。
-- **检索与查阅**：提供 `search_memory`（检索情景/语义记忆）、`recall_archived` 和 `skill_view`（查阅武功等长文本技能详情）工具，供 LLM 在决策中途按需调用，避免撑爆 System Prompt。
-- **共享循环**：`tool_loop.rs` 提供 `run_tool_loop()` 共享函数（从 DirectLlmClient 提取），Cognitive/Claw 模式共用。集成了 ToolResultBudget（F1 预算控制）、LoopGuard（F2 循环检测）和 Error Signaling（F3 错误格式化）。
+- **ActorSoul (人魂 / 认知之魂)**：负责“我想做什么”。直连世界状态，发散思维，主动思考。
+- **EarthSoul (地魂 / 能力之魂)**：负责“我能查什么”。内嵌在人魂思考过程中的工具池。
+- **ReflectorSoul (天魂 / 守护之魂)**：负责“我允许做什么”。作为看门人，严格审查人魂的意图是否合法。
 
-### 2.3 天魂 (ReflectorSoul)：三段式审查官
-- **统一入口**：运行时三层审查统一由 `ReflectorSoul` 执行，`lifecycle` 只负责把人魂产出的 Intent 送入天魂，并在驳回后把原因回灌给人魂重提。
-- **Layer 1 动作校验**：基础 ActionType 合法性验证，拦截非法动作名和格式哨兵值。
-- **Layer 2 物理规则 (RuleEngine)**：本地确定性规则校验，如连续 `follow` 限制、物品/地点 ID 可达性校验。当前实现是本地 RuleEngine 默认规则，不是 YAML 热加载的通用物理引擎。
-- **Layer 3 角色 OOC 审查**：将暂定动作与角色 Persona 送入专属 LLM 审查 Prompt 中，拦截出戏行为。被天魂驳回的原因会直接反馈给人魂，驱动同一轮决策闭环内的重新提交。
+## 1. ActorSoul (人魂)
 
-## 3. 架构约束
-- 三魂之间严禁越权调用。人魂只管“想”，地魂只管“做”和“查”，天魂只管“审”。
-- 天魂拦截必须快，Layer 1 和 2 是纯本地运算；Layer 3 是否开启由分级验证配置决定。`Skip`/`Adaptive`/`Always` 的路由判断发生在天魂内部。
+人魂是整个 Agent 的驱动核心（实现位于 `crates/agent/src/soul/actor/engine.rs` 中的 `CognitiveEngine`）。
 
-## 4. 代码入口
-- 人魂引擎: `crates/agent/src/soul/actor/engine.rs`
-- 地魂工具: `crates/agent/src/soul/earth/executor.rs`
-- 地魂共享循环: `crates/agent/src/soul/earth/tool_loop.rs`
-- 天魂本体: `crates/agent/src/soul/reflector/validator.rs`
-- Agent 编排: `crates/agent/src/core/reflector_ext.rs`
+- **输入**：`WorldState`（当前世界客观物理状态）、`ThreadSafePersona`（当前人设状态）、`MemoryContext`（记忆）。
+- **处理**：一次端到端的 LLM 推理。内部逻辑经过 Perception（感知）→ Motivation（动机）→ Planning（规划）→ Decision（决策）四个阶段。
+- **输出**：一组精确的可执行动作（例如 `action_type: "move", action_data: {"target_node": "inn"}`），称为 `Intent`。
+
+## 2. EarthSoul (地魂)
+
+地魂**不再是一个独立的流水线阶段**，而是作为 Tool Calling（工具调用）插件，内嵌于人魂的大模型推理循环中（实现位于 `crates/agent/src/soul/earth/`）。
+
+- **工作方式**：当人魂大模型在推理过程中发现缺少信息（例如：“李四的详细好感度是多少？”或“如何制作金创药？”），它会暂停推理，调用地魂提供的 `relationship_tool` 或 `recipe_tool`。
+- **工具池**：
+  - `memory_tool`: 检索遥远的语义记忆。
+  - `skill_tool`: 查阅拥有的技能详细规则。
+  - `rule_tool`: 查阅世界的客观物理规则。
+  - `state_tool`: 检索复杂的实体详情。
+- **Budget 机制**：为了防止大模型死循环调用工具，地魂中实现了 `ToolResultBudget` 和 `LoopGuard`，严格限制工具调用的次数和返回字符量。
+
+## 3. ReflectorSoul (天魂)
+
+天魂是意图离开 Agent 提交给 Server 之前的最后一道关卡（实现位于 `crates/agent/src/soul/reflector/validator.rs`）。它的核心职责是“拒绝不合理的行为”。
+
+审查分为三层（Layered Validation）：
+
+1. **Layer 1: Schema 审查**：检查 action_type 是否合法，必须字段是否缺失。
+2. **Layer 2: RuleEngine 审查**：硬性物理规则检查（例如：移动目标不存在、吃的东西没有在背包里、冷却时间未到）。这部分是**完全基于代码和状态**的，不消耗 Token。
+3. **Layer 3: LLM 认知审查**：如果开启了强力审查（如针对 `speak`），会调用 LLM 进行软性审查：这句话是否符合角色人设？是否包含现代词汇破坏了江湖沉浸感？
+
+### 分级审查策略 (Graded Validation)
+
+为了平衡成本与安全性，天魂采用分级审查（根据配置中的 `GradedValidationConfig`）：
+- `Always`: 强制三层审查（通常用于 `speak` / `shout` 等高风险社交动作）。
+- `Skip`: 跳过 LLM 审查，只进行 Schema 和 RuleEngine 检查（如 `idle`, `move`）。
+- `Adaptive`: 动态判断，根据上下文和历史失败率决定是否启用 LLM。
+
+当天魂驳回一个人魂的意图时，它会将生硬的技术错误（如 `ERR_ITEM_NOT_FOUND`）通过 `narrativize_rejection` 转化为叙事化反馈（如“你翻了翻口袋，发现里面并没有这个东西”），并在下一 Tick 作为惩罚反馈给 ActorSoul。

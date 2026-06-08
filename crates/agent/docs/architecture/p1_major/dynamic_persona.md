@@ -1,27 +1,47 @@
-# 动态角色演化 (DynamicPersona)
+# 动态角色演化 (Dynamic Persona)
 
-**级别**: P1 重要特性
-**模块**: `crates/agent`
+在虚境：江湖中，Agent 的人设不是一成不变的文本，而是会随着游戏事件的发生而产生动态演化（Evolution）。这种演化机制保证了角色的成长和性格转变。
 
-## 1. 设计目标
-打破静态设定的局限，让 Agent 的性格和世界观随江湖阅历发生演化，产生“成长”与“黑化”等戏剧性变化。
+相关代码路径：`crates/agent/src/component/persona/`
 
-## 2. 核心机制
-### 2.1 特征标签 (Trait) 系统
-- Agent 在初始化时拥有核心配置中的初始 Trait 集合（如“嗜血”、“谨慎”、“贪财”）。
-- `PersonaManager` 在内存中维护这些 Trait 及其权重。
+## 核心数据结构
 
-### 2.2 事件驱动的演化
-- 在经历特定极端事件（如濒死体验、挚友死亡、获得绝世武功）后，系统会触发演化校验。
-- 结合大模型对这段经历的总结，赋予 Agent 新的 Trait，或者剥离/削弱旧的 Trait（例如多次被人背叛后，从“轻信”变为“多疑”）。
+### `DynamicPersona`
 
-### 2.3 提示词注入与影响
-- 更新后的 Persona 描述实时反映在下一次的决策 Prompt（System Prompt）中，潜移默化地改变 Agent 的后续选择偏好。
+`DynamicPersona` 是 Agent 当前身份的唯一真相源 (Source of Truth)。它包含：
+- **静态部分**：`base_description` (即初始设定的背景故事)
+- **动态特质**：`traits`，包含 `Social` (社交), `Moral` (道德), `Capability` (能力), `Emotional` (情绪), `Survival` (生存) 五个维度。
+- **状态快照**：`PersonaState`，记录了当前的情绪 (Emotion)、目标 (Goal)、压力值 (Stress) 以及核心情感坐标 (CoreAffect，即效价与唤醒度)。
 
-## 3. 架构约束
-- 演化机制需要收敛，必须设置演化的频率限制和权重阈值，避免频繁摇摆导致人设彻底崩塌（精神分裂）。
-- 核心底色（如性别、门派归属）不允许轻易被演化覆盖。
+### 线程安全包装
 
-## 4. 代码入口
-- 角色管理: `crates/agent/src/component/persona/mod.rs`
-- 提示词缓存更新: `crates/agent/src/soul/actor/prompt_cache.rs`
+为了支持 Web 控制面板、HTTP API 与内部 `CognitiveEngine` 的并发访问，使用了 `ThreadSafePersona`：
+```rust
+pub struct ThreadSafePersona {
+    inner: Arc<RwLock<DynamicPersona>>,
+}
+```
+这使得我们可以在 `WebSocket` 接收到事件时实时修改人设，并在下一次 Tick 触发时立刻生效。
+
+## 事件驱动的演化机制 (Event-Trait Mapping)
+
+Agent 每次从 Server 接收到 `WorldEvent` 列表时，会触发演化引擎。
+
+1. **规则加载**：启动时，`rules_loader.rs` 会加载 `persona_event_rules.yaml`（此文件由 Server 下发/同步）。
+2. **模式匹配**：`EventTraitMapper` 会逐个检查事件，若事件类型和过滤条件匹配，则触发对应的 `TraitChange`。
+3. **特质修正**：特质的 `value` (0-100) 根据 `delta` 发生偏移，并产生一条带 `reason` 和 `timestamp` 的历史记录。
+
+```rust
+// crates/agent/src/core/agent.rs -> process_events
+for event in events {
+    self.persona.write(|p| {
+        mapper_guard.apply_to_persona(event, p, event.tick_id);
+    });
+}
+```
+
+## 与 CognitiveEngine 的整合
+
+每次大模型推理前，`CognitiveEngine` 都会通过 `persona_ref` 提取出当前 `DynamicPersona` 的状态，并生成一个整合后的描述（包含基础设定 + 当前特质评价 + 当前状态），作为 `System Prompt` 注入。
+
+这种机制使得如果一个 Agent 连续经历失败导致 `Survival` 特质极低，或者压力值 `stress_level` 极高，他在下一次 LLM 生成时的 `System Prompt` 就会带有“你当前感到极度恐慌和无助”的上下文，进而影响最终决策。
