@@ -648,9 +648,10 @@ impl Agent {
         }
     }
 
-    /// 组装 Pipeline Intent
+    /// 组装原子意图队列
     ///
-    /// 将多个 Intent 组装为 primary + subsequent_intents 的 Pipeline 结构
+    /// 将多个独立的原子 Intent 组装为主 Intent + subsequent_intents 队列的结构
+    /// （注：这不是复合动作，而是原子动作排队执行）
     pub(crate) fn assemble_pipeline(intents: Vec<Intent>) -> Intent {
         if intents.is_empty() {
             return Intent::new(uuid::Uuid::nil(), 0, "休息", None);

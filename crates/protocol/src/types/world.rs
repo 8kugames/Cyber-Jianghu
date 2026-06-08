@@ -535,7 +535,7 @@ mod tests {
     }
 
     /// 协议层不强制输入合法性——这些值在业务层由 WorldTime 上界守护。
-    /// 测试目的是记录当前数学行为，防止未来无意中变更。
+    /// 测试目的是记录当前数学行为，防止无意中变更。
     #[test]
     fn game_day_from_world_time_out_of_range_inputs() {
         let cal = default_calendar();

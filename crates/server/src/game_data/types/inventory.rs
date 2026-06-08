@@ -34,7 +34,7 @@ pub struct InitialInventoryItem {
 
 /// 初始物品数据
 ///
-/// 包装结构，用于支持未来扩展（如初始装备、初始金币等）
+/// 初始物品数据包装结构
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct InitialInventoryData {
     /// 初始物品列表
