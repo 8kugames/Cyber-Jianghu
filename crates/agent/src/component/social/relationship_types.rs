@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 /// 关系等级定义（阈值从高到低排列）
 ///
-/// 数据来源：`crates/server/config/relationship_levels.yaml`（未来可配置化）
+/// 数据来源：`crates/server/config/relationship_levels.yaml`
 /// 当前内联定义，保持单一真相源。
 const RELATIONSHIP_LEVELS: &[(i32, &str, &str)] = &[
     (80, "best", "至交好友"),

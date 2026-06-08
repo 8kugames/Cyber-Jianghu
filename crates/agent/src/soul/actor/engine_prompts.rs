@@ -15,7 +15,7 @@ use cyber_jianghu_protocol::AvailableAction;
 
 /// 构造空 WorldState（降级路径用，如 legacy think_with_memory_and_feedback）
 ///
-/// WorldState 无 Default derive，且未来字段增减时此函数会编译报错（结构性保证）。
+/// WorldState 无 Default derive，且字段增减时此函数会编译报错（结构性保证）。
 pub(super) fn empty_world_state() -> cyber_jianghu_protocol::WorldState {
     use cyber_jianghu_protocol::*;
     WorldState {

@@ -359,7 +359,7 @@ pub trait LlmClientExt: LlmClient {
     /// 完成一次结构化输出调用（遇截断自动重试），并返回 reasoning_content
     ///
     /// 与 `complete_json_with_config_and_retry` 唯一区别：保留最后一次
-    /// attempt 的 `reasoning_content`（供调试 / 未来 NPC SFT 数据采集）。
+    /// attempt 的 `reasoning_content`（供调试）。
     async fn complete_json_with_config_and_retry_extracted<T: DeserializeOwned + Send>(
         &self,
         prompt: &str,
