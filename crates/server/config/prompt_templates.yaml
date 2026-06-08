@@ -211,11 +211,7 @@ templates:
       planning_description: 100
       tool_calling_history_turns: 8
 
-    # LLM 调用参数配置（独立于 truncation，语义分离）
-    # 注意：此值当前未被代码读取（engine.rs 使用 llm_param fallback），
-    # 保留供未来 prompt_template 驱动的参数加载使用
-    llm_parameters:
-      max_tool_rounds: 2
+
 
   # RuleEngine reject 反馈模板
   # 规则验证失败时，向 LLM 提供可用选项的上下文，帮助其自纠正
