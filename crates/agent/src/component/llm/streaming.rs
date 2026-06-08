@@ -36,6 +36,8 @@ pub enum StreamChunk {
     },
     /// 流结束，但服务端未返回 usage（需要估算）
     DoneEstimation { completion_chars: u64 },
+    /// 服务端因 max_tokens 截断（finish_reason=length），累积的 JSON 不完整
+    Truncated,
 }
 
 /// SSE 流类型
@@ -161,6 +163,7 @@ pub struct StreamAccumulator {
     cache_hit_tokens: Option<u64>,
     tool_call_acc: super::tool_types::StreamToolCallAccumulator,
     has_tool_calls: bool,
+    truncated: bool,
 }
 
 impl Default for StreamAccumulator {
@@ -180,6 +183,7 @@ impl StreamAccumulator {
             cache_hit_tokens: None,
             tool_call_acc: super::tool_types::StreamToolCallAccumulator::new(),
             has_tool_calls: false,
+            truncated: false,
         }
     }
 
@@ -209,6 +213,9 @@ impl StreamAccumulator {
                 self.completion_tokens = (completion_chars / 3).max(1);
                 self.has_real_usage = false;
             }
+            StreamChunk::Truncated => {
+                self.truncated = true;
+            }
         }
     }
 
@@ -222,6 +229,11 @@ impl StreamAccumulator {
     /// 使用大括号计数，从第一个 `{` 到其闭合 `}` 为止
     pub fn is_json_complete(&self) -> bool {
         find_first_json_end(&self.content).is_some()
+    }
+
+    /// 服务端是否因 max_tokens 截断了输出（finish_reason=length）
+    pub fn is_truncated(&self) -> bool {
+        self.truncated
     }
 
     /// 消费累积器，返回最终文本
@@ -357,6 +369,17 @@ pub fn parse_sse_stream(response: reqwest::Response) -> LlmStream {
                                     chunk_count,
                                     completion_content.len(),
                                 );
+                            }
+                            // 检测 finish_reason=length：服务端因 max_tokens 截断
+                            let is_length = resp.choices.iter().any(|c| {
+                                c.finish_reason.as_deref() == Some("length")
+                            });
+                            if is_length {
+                                tracing::warn!(
+                                    "[SSE] finish_reason=length, content_len={}, JSON可能不完整",
+                                    completion_content.len()
+                                );
+                                yield Ok(StreamChunk::Truncated);
                             }
                             // 记录 usage（即使不是最后一个 chunk）
                             if let Some(ref usage) = resp.usage {
