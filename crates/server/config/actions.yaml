@@ -262,77 +262,6 @@ data:
         min: 5
         cost: 5
 
-  # NOTE: 以下战斗动作仅有 generic fallback（扣体力+返回成功），无实际战斗逻辑
-  # 取消注释前需实现对应 executor：
-  #   - defend: 需 StateChange::DefendStance + 减伤计算
-  #   - dodge: 需 StateChange::DodgeAttempt + 闪避率判定
-  #   - parry: 需 StateChange::ParryCounter + 反弹伤害计算
-  #   - heavy_strike: 需 CombatActionExecutor::execute_heavy_strike
-  #   - flee: 需 StateChange::FleeAttempt + 逃跑率判定 [已实装]
-  #
-  # defend:
-  #   name: "防御"
-  #   description: "进入防御姿态，减少受到的伤害。"
-  #   category: combat
-  #   ooc_risk: low
-  #   damage_reduction: 0.5
-  #   duration_ticks: 1
-  #   validation: {}
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 10
-  #       cost: 8
-  #
-  # dodge:
-  #   name: "闪避"
-  #   description: "尝试闪避攻击或危险，成功时可完全避免受到伤害。"
-  #   category: combat
-  #   ooc_risk: low
-  #   dodge_chance_formula: "agility * 0.01 + luck * 0.005"
-  #   validation: {}
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 8
-  #       cost: 6
-  #
-  # parry:
-  #   name: "招架"
-  #   description: "对目标发起招架反击，成功后可反弹部分伤害。"
-  #   category: combat
-  #   ooc_risk: medium
-  #   parry_chance_formula: "strength * 0.02"
-  #   validation:
-  #     requires_target: true
-  #     requires_target_alive: true
-  #     required_fields:
-  #       - target_agent_id
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 12
-  #       cost: 10
-  #
-  # heavy_strike:
-  #   name: "重击"
-  #   description: "对目标发起重击，造成比普通攻击更高的伤害。"
-  #   category: combat
-  #   ooc_risk: medium
-  #   base_damage: 25
-  #   damage_formula: "25 + strength * 0.8"
-  #   stamina_cost_multiplier: 2.0
-  #   validation:
-  #     requires_target: true
-  #     requires_target_alive: true
-  #     required_fields:
-  #       - target_agent_id
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 20
-  #       cost: 20
-  #
   逃跑:
     name: "逃跑"
     description: "尝试脱离战斗或危险情境，移动到相邻位置。必须指定逃跑目标位置（target_location）。成功率由敏捷属性决定的公式计算，失败则留在原地但仍消耗体力。"
@@ -379,46 +308,7 @@ data:
         min: 5
         cost: 5
 
-  # NOTE: 以下江湖技能动作仅有 generic fallback，无实际效果
-  # 取消注释前需实现对应 executor：
-  #   - stealth: 需 AgentState.stealth_status + 发现概率判定
-  #   - poison: 需 StateChange::PoisonApplied + 多 tick 持续伤害
-  #   - practice: 需 AgentState.skills + 技能进度系统
-  #
-  # stealth:
-  #   name: "潜行"
-  #   description: "进入潜行状态，降低被其他 Agent 发现的概率。"
-  #   category: martial
-  #   ooc_risk: low
-  #   stealth_level_formula: "agility * 0.5 + luck * 0.3"
-  #   duration_ticks: 5
-  #   validation: {}
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 10
-  #       cost: 8
-  #
-  # poison:
-  #   name: "下毒"
-  #   description: "对目标使用毒药。"
-  #   category: martial
-  #   ooc_risk: medium
-  #   poison_damage: 5
-  #   poison_duration_ticks: 3
-  #   success_rate: 0.6
-  #   validation:
-  #     requires_target: true
-  #     requires_target_alive: true
-  #     required_fields:
-  #       - target_agent_id
-  #       - poison_item_id
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 10
-  #       cost: 8
-  #
+
   打坐:
     name: "打坐"
     description: "通过打坐恢复内力和心神。不消耗体力，但需要一定体力才能执行。打坐是恢复理智的有效方式。注意区分：打坐 恢复内力和理智，休息 恢复体力和少量理智。"
@@ -522,9 +412,7 @@ data:
         min: 0
         cost: 2
 
-  # NOTE: 以下社交动作仅有 generic fallback，无实际效果
-  #   - follow: 需 AgentState.following + 移动同步逻辑
-  #
+
   大喊:
     name: "大喊"
     display_name: "呼喊"
@@ -546,22 +434,7 @@ data:
         attribute: stamina
         min: 5
         cost: 3
-  #
-  # follow:
-  #   name: "跟随"
-  #   description: "跟随目标 Agent，保持在同一位置同行。"
-  #   category: social
-  #   ooc_risk: low
-  #   follow_distance: 3
-  #   validation:
-  #     requires_target: true
-  #     required_fields:
-  #       - target_agent_id
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 0
-  #       cost: 1
+
 
   # ==========================================================================
   # 经济
@@ -654,26 +527,4 @@ data:
         attribute: stamina
         min: 10
 
-  # repair:
-  #   name: "修理"
-  #   description: "修理装备的耐久度"
-  #   category: economic
-  #   durability_restore: 50
-  #   validation:
-  #     required_fields:
-  #       - item_id
-  #     optional_fields:
-  #       - target_agent_id  # 可选：不填则修理自己，背包中他人物品则修理他人
-  #   requirements:
-  #     - requirement_type: attribute
-  #       attribute: stamina
-  #       min: 8
-  #       cost: 6
-  #
-  # NOTE: 修理动作暂未实现，依赖以下前置工作：
-  #   1. 数据库: agent_inventory 添加 durability / max_durability 列
-  #   2. 配置: items.yaml 添加 durability 属性定义
-  #   3. 模型: 添加 RepairData 结构体
-  #   4. StateChange: 添加 ItemRepaired 变体
-  #   5. 执行器: InteractionActionExecutor::execute_repair
-  #   6. 动作分发: executor/mod.rs 添加 repair case
+
