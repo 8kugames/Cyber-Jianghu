@@ -112,8 +112,6 @@ pub struct RuleValidationContext {
     pub world_context: String,
     /// 当前 Tick ID
     pub tick_id: i64,
-    /// 历史意图（保留字段，未来可用于上下文感知验证）
-    pub history_intents: Vec<Intent>,
     /// 额外的属性数据（用于规则检查）
     pub attributes: HashMap<String, serde_json::Value>,
     /// 可用物品 ID 列表（从 WorldState.inventory 提取）
@@ -126,7 +124,6 @@ impl RuleValidationContext {
     /// 从 ValidationRequest 创建上下文
     pub fn from_request(
         request: ValidationRequest,
-        history_intents: Vec<Intent>,
         attributes: HashMap<String, serde_json::Value>,
     ) -> Self {
         let tick_id = request.intent.tick_id;
@@ -140,7 +137,6 @@ impl RuleValidationContext {
             persona_info: request.persona,
             world_context: request.world_context,
             tick_id,
-            history_intents,
             attributes,
             available_item_ids,
             reachable_node_ids,
@@ -273,7 +269,6 @@ mod tests {
             persona_info: PersonaInfo::default(),
             world_context: String::new(),
             tick_id: 1,
-            history_intents: vec![],
             attributes: HashMap::new(),
             available_item_ids: vec![],
             reachable_node_ids: vec![],
@@ -299,7 +294,6 @@ mod tests {
             persona_info: PersonaInfo::default(),
             world_context: String::new(),
             tick_id: 1,
-            history_intents: vec![],
             attributes,
             available_item_ids: vec![],
             reachable_node_ids: vec![],
@@ -329,14 +323,12 @@ mod tests {
             runtime: crate::soul::reflector::ValidationRuntimeConfig::default(),
         };
 
-        let history_intents = vec![];
         let attributes = HashMap::new();
 
-        let context = RuleValidationContext::from_request(request, history_intents, attributes);
+        let context = RuleValidationContext::from_request(request, attributes);
 
         assert_eq!(context.tick_id, 1);
         assert_eq!(context.world_context, "test world");
-        assert!(context.history_intents.is_empty());
         assert!(context.attributes.is_empty());
     }
 

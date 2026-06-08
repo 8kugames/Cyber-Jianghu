@@ -298,7 +298,6 @@ impl ReflectorSoul {
             persona_info: request.persona.clone(),
             world_context: request.world_context.clone(),
             tick_id: world_state.tick_id,
-            history_intents: vec![],
             attributes: std::collections::HashMap::new(),
             available_item_ids,
             reachable_node_ids,
