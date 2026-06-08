@@ -183,6 +183,37 @@
 - **Agent**: 联调诊断修复 — LLM chaos 主动轮换、prompt-estimate 可观测性日志、空响应诊断日志
 - **Server**: `INTENT_BATCH_MAX_RETRIES` fallback 3→12，与 `game_rules.yaml` 默认值对齐
 
+### Added — DeepSeek 前缀缓存调优 (Prefix Cache Tuning)
+
+针对 DeepSeek API 33% 缓存命中率, 引入 3 阶段数据驱动调优: Phase 0 测量 → D8 reasoning 剥离 → D9 schema 规范化。所有阈值/开关由环境变量驱动, 0 硬编码。
+
+- **Protocol**: 无变更 — 仅 agent crate 内部改造, API 向后兼容
+- **Agent - 配置层**:
+  - `LlmConfig` 新增 `cache_diagnostics: CacheDiagnosticsConfig` 字段（含 `enabled` + `system_hash_dimension` 子开关, env var `CYBER_JIANGHU_CACHE_DIAGNOSTICS_*` 驱动）
+  - `DirectLlmClientConfig` 新增 `prompt: PromptConfig` 字段（含 `strip_reasoning_content` + `canonicalize_schemas` 子开关, env var `CYBER_JIANGHU_PROMPT_*` 驱动）
+- **Agent - Phase 0 测量**:
+  - `record_token_usage` 签名扩展为 6 参数, 接受 `system_hash: [u8; 32]`
+  - `HourBucketStats` / `ModelTokenStats` 新增 `system_hash_distribution: HashMap<[u8; 32], u64>` 字段（持久化到磁盘）
+  - `UsageTrackingStream` 新增 `system_hash` 字段, 7 处 `record_token_usage` 调用点全部传真实 hash
+  - `compute_system_hash(system: &str) -> [u8; 32]` 纯函数 (SHA256, 0 副作用)
+  - 新增 HTTP endpoint `GET /api/v1/metrics?system_hash=<hex64>` 按 system_hash 过滤 models
+- **Agent - D8 reasoning 剥离**:
+  - `build_conversation_messages` 加 `strip_reasoning: bool` 参数, helper 路径正确传递
+  - `complete_with_conversation_and_tools` inline 路径直接读 `self.config.prompt.strip_reasoning_content`
+- **Agent - D9 schema 规范化**:
+  - 新增 `canonicalize.rs` 模块（sort object keys + sort `required` 数组, 递归处理）
+  - `ToolDefinition::canonical_json()` 字节级稳定序列化
+  - `send_chat_exchange` 序列化 tools 字段前按 `prompt.canonicalize_schemas` 条件调用
+- **测试**: 13 个新单元测试, 1 个 e2e 测试骨架（3 unit PASS, 2 e2e `todo!()` 占位跟踪 `ISSUE-FOLLOWUP-MOCK-CAPTURE`）
+- **依赖**: `sha2 = "0.10"` + `hex = "0.4"` 新增到 agent crate（运行时依赖, 非 dev-only）
+- **Cognitive/Claw 双模式**: 0 功能差分, `compute_system_hash` / `record_token_usage` / `UsageTrackingStream` 在两模式共享路径上同步改造
+- **Follow-up**: 灰度部署基础设施 (per-agent 5% cohort) 需独立 issue 后才能推进 Tasks 14-16
+
+### Fixed — DeepSeek 前缀缓存调优 follow-up 修
+
+- `canonicalize_schemas` 配置项实际生效（先前实现无条件 canonicalize, 配置项是 no-op, 违反数据驱动原则）
+- `llm_config.rs` collapsible-if 改 let-chain; `canonicalize.rs` `drain_collect` 改 `mem::take`; 移除 unused import — `cargo clippy -- -D warnings` 全清
+
 ---
 
 ## [0.1.1 ~ 0.1.116] — 认知架构完善 (2026-04 ~ 2026-05)

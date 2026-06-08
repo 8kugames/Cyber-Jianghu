@@ -52,6 +52,7 @@ pub fn build_conversation_messages(
     summary: Option<&str>,
     turns: &[ConversationTurn],
     current_tick_message: &str,
+    strip_reasoning: bool,
 ) -> Vec<super::openai_types::ChatMessage> {
     use super::openai_types::ChatMessage;
 
@@ -72,7 +73,11 @@ pub fn build_conversation_messages(
         messages.push(ChatMessage::user(&turn.user));
         messages.push(ChatMessage::assistant_with_reasoning(
             &turn.assistant,
-            turn.reasoning_content.clone(),
+            if strip_reasoning {
+                None
+            } else {
+                turn.reasoning_content.clone()
+            },
         ));
     }
     messages.push(ChatMessage::user(current_tick_message));
@@ -1756,6 +1761,7 @@ impl LlmClient for FallbackLlmClient {
             let system = system.to_string();
             let prompt = prompt.to_string();
             let prompt_chars = (system.len() + prompt.len()) as u64;
+            let system_hash = crate::soul::actor::compute_system_hash(&system);
             let (stream, provider_str, model) = self
                 .call_streaming_with_fallback(move |client: Arc<dyn LlmClient>| {
                     let system = system.clone();
@@ -1765,8 +1771,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(
+                stream,
+                provider,
+                model,
+                system_hash,
+                prompt_chars,
+            );
             Ok(tracking_stream.into_llm_stream())
         })
     }
@@ -1789,6 +1800,7 @@ impl LlmClient for FallbackLlmClient {
             let summary_owned = summary.map(|s| s.to_string());
             let turns = turns.to_vec();
             let current_prompt = current_prompt.to_string();
+            let system_hash = crate::soul::actor::compute_system_hash(&system);
             let prompt_chars = {
                 let mut total = system.len();
                 total += semi_static.len();
@@ -1824,8 +1836,13 @@ impl LlmClient for FallbackLlmClient {
                 .await?;
 
             let provider = LlmProvider::parse(&provider_str).unwrap_or(LlmProvider::OpenClaw);
-            let tracking_stream =
-                super::streaming::UsageTrackingStream::new(stream, provider, model, prompt_chars);
+            let tracking_stream = super::streaming::UsageTrackingStream::new(
+                stream,
+                provider,
+                model,
+                system_hash,
+                prompt_chars,
+            );
             Ok(tracking_stream.into_llm_stream())
         })
     }
@@ -2210,5 +2227,39 @@ mod tests {
         // 编译期断言：SharedBreaker 必须能跨线程共享
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<SharedBreaker>();
+    }
+
+    #[test]
+    fn build_conversation_messages_strips_reasoning_when_flag_set() {
+        let turns = vec![ConversationTurn {
+            user: "user".to_string(),
+            assistant: "reply".to_string(),
+            reasoning_content: Some("reasoning to strip".to_string()),
+        }];
+        let messages = build_conversation_messages(
+            "sys", "", None, &turns, "current",
+            true,
+        );
+        let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
+        let json = serde_json::to_value(assistant_msg).unwrap();
+        assert!(
+            json.get("reasoning_content").is_none() || json["reasoning_content"].is_null(),
+            "reasoning_content should be None when strip_reasoning=true, got: {:?}", json
+        );
+    }
+
+    #[test]
+    fn build_conversation_messages_preserves_reasoning_when_flag_unset() {
+        let turns = vec![ConversationTurn {
+            user: "u".to_string(),
+            assistant: "a".to_string(),
+            reasoning_content: Some("reasoning".to_string()),
+        }];
+        let messages = build_conversation_messages(
+            "sys", "", None, &turns, "current", false,
+        );
+        let assistant_msg = messages.iter().find(|m| m.role == "assistant").unwrap();
+        let json = serde_json::to_value(assistant_msg).unwrap();
+        assert_eq!(json["reasoning_content"], "reasoning");
     }
 }
