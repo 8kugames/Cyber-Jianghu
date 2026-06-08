@@ -49,6 +49,7 @@ pub struct UsageTrackingStream {
     inner: LlmStream,
     provider: super::direct_client::LlmProvider,
     model: String,
+    system_hash: [u8; 32],
     prompt_chars: u64,
     recorded: bool,
 }
@@ -58,12 +59,14 @@ impl UsageTrackingStream {
         inner: LlmStream,
         provider: super::direct_client::LlmProvider,
         model: String,
+        system_hash: [u8; 32],
         prompt_chars: u64,
     ) -> Self {
         Self {
             inner,
             provider,
             model,
+            system_hash,
             prompt_chars,
             recorded: false,
         }
@@ -98,6 +101,7 @@ impl Stream for UsageTrackingStream {
                             *prompt_tokens,
                             *completion_tokens,
                             *cache_hit_tokens,
+                            self.system_hash,
                         );
                         tracing::debug!(
                             "UsageTrackingStream recorded: provider={}, model={}, prompt={}, completion={}",
@@ -116,6 +120,7 @@ impl Stream for UsageTrackingStream {
                             est_pt,
                             est_ct,
                             0,
+                            self.system_hash,
                         );
                         tracing::debug!(
                             "UsageTrackingStream recorded (est): provider={}, model={}, prompt_est={}, completion_est={}",

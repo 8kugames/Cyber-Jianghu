@@ -11,6 +11,7 @@ pub mod chain;
 pub mod chaos;
 pub mod engine;
 mod engine_prompts; // Prompt 构建方法拆分
+pub use engine_prompts::compute_system_hash;
 pub mod prompt_cache; // Prompt 缓存模块 - 叙事冗余优化
 pub mod prompt_template; // Prompt 模板配置加载器
 pub mod stages;

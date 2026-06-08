@@ -472,7 +472,7 @@ use super::builder::AgentBuilder;
 - `POST /api/v1/config/server` - Set server address
 - `GET /api/v1/setup/status` - Get setup status
 - `GET /api/v1/actions` - Get action type mapping
-- `GET /api/v1/metrics` - LLM performance metrics
+- `GET /api/v1/metrics` - LLM performance metrics (支持 `?system_hash=<hex64>` 按 system_hash 维度过滤, Phase 0 测量用)
 
 ### Admin Web Panel
 - `GET /admin/` - Main dashboard

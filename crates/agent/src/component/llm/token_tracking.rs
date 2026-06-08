@@ -41,6 +41,8 @@ pub struct HourBucketStats {
     pub calls: u64,
     #[serde(default)]
     pub failures: u64,
+    #[serde(default)]
+    pub system_hash_distribution: HashMap<[u8; 32], u64>,
 }
 
 /// 持久化：summary 中按 provider/model 聚合后的最终统计（含 avg 字段）
@@ -81,19 +83,21 @@ pub struct PersistedTokenStats {
 }
 
 /// in-memory 聚合：保持 API 兼容的 ModelTokenStats（跨小时求和）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ModelTokenStats {
     pub provider: String,
     pub model: String,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     #[serde(skip)]
-    pub total_tokens: u64, // 仅在聚合时使用，不序列化
+    pub total_tokens: u64,
     pub calls: u64,
     #[serde(default)]
     pub failures: u64,
     #[serde(default)]
     pub cache_hit_tokens: u64,
+    #[serde(default)]
+    pub system_hash_distribution: HashMap<[u8; 32], u64>,
 }
 
 static TOKEN_STATS: OnceLock<
@@ -147,6 +151,7 @@ pub fn record_token_usage(
     prompt_tokens: u64,
     completion_tokens: u64,
     cache_hit: u64,
+    system_hash: [u8; 32],
 ) {
     let key = model_key(provider, model);
     let hk = hour_key(Utc::now());
@@ -157,6 +162,7 @@ pub fn record_token_usage(
         hour_entry.bucket.completion_tokens += completion_tokens;
         hour_entry.bucket.cache_hit_tokens += cache_hit;
         hour_entry.bucket.calls += 1;
+        *hour_entry.bucket.system_hash_distribution.entry(system_hash).or_insert(0) += 1;
     }
 }
 
@@ -197,12 +203,16 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
         .map(|(key, hours)| {
             let (provider, model) = split_model_key(key);
             let mut agg = HourBucketStats::default();
+            let mut system_hash_distribution: HashMap<[u8; 32], u64> = HashMap::new();
             for phs in hours.values() {
                 agg.prompt_tokens += phs.bucket.prompt_tokens;
                 agg.completion_tokens += phs.bucket.completion_tokens;
                 agg.cache_hit_tokens += phs.bucket.cache_hit_tokens;
                 agg.calls += phs.bucket.calls;
                 agg.failures += phs.bucket.failures;
+                for (hash, count) in &phs.bucket.system_hash_distribution {
+                    *system_hash_distribution.entry(*hash).or_insert(0) += count;
+                }
             }
             let total = agg.prompt_tokens + agg.completion_tokens;
             ModelTokenStats {
@@ -214,6 +224,7 @@ pub fn snapshot_all_stats() -> Vec<ModelTokenStats> {
                 calls: agg.calls,
                 failures: agg.failures,
                 cache_hit_tokens: agg.cache_hit_tokens,
+                system_hash_distribution,
             }
         })
         .collect()
@@ -468,9 +479,9 @@ mod tests {
         // 手动调用 record_token_usage：但 record_token_usage 内部用 Utc::now()，不可注入时间
         // → 改用 in-memory helper：直接构造 entries 然后 snapshot
         // 这里走真实 API：连续调用 record，验证 detail 至少有 1 个 hour bucket
-        record_token_usage(&prov(), m1(), 100, 50, 30);
-        record_token_usage(&prov(), m1(), 200, 80, 60);
-        record_token_usage(&prov(), m2(), 50, 20, 0);
+        record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
+        record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32]);
+        record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32]);
         record_failure(&prov(), m1());
 
         let snap = snapshot_all_stats();
@@ -525,6 +536,7 @@ mod tests {
                 cache_hit_tokens: 600,
                 calls: 5,
                 failures: 0,
+                system_hash_distribution: HashMap::new(),
             },
         );
         p.detail.insert("2026-06-01-01".to_string(), h01);
@@ -538,6 +550,7 @@ mod tests {
                 cache_hit_tokens: 1000,
                 calls: 10,
                 failures: 2,
+                system_hash_distribution: HashMap::new(),
             },
         );
         p.detail.insert("2026-06-01-02".to_string(), h02);
@@ -590,9 +603,9 @@ mod tests {
             env::set_var("CYBER_JIANGHU_DATA_DIR", &dir);
         }
 
-        record_token_usage(&prov(), m1(), 100, 50, 30);
-        record_token_usage(&prov(), m1(), 200, 80, 60);
-        record_token_usage(&prov(), m2(), 50, 20, 0);
+        record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
+        record_token_usage(&prov(), m1(), 200, 80, 60, [0u8; 32]);
+        record_token_usage(&prov(), m2(), 50, 20, 0, [0u8; 32]);
 
         persist_and_reset();
 
@@ -631,7 +644,7 @@ mod tests {
         );
 
         // 4) 二次 persist_and_reset + 旧数据合并：再 record + persist，detail 应累加
-        record_token_usage(&prov(), m1(), 100, 50, 30);
+        record_token_usage(&prov(), m1(), 100, 50, 30, [0u8; 32]);
         persist_and_reset();
         let content2 = fs::read_to_string(&log_path).expect("read log 2");
         let parsed2: PersistedTokenStats = serde_json::from_str(&content2).expect("parse 2");
@@ -680,7 +693,7 @@ mod tests {
 
         // 触发 persist_and_reset（in-memory 空 → 早返，不动文件）
         // 但我们需要 in-memory 有数据才会写。先 record 一条
-        record_token_usage(&prov(), m1(), 1, 1, 0);
+        record_token_usage(&prov(), m1(), 1, 1, 0, [0u8; 32]);
         persist_and_reset();
 
         // 读回：应是新结构，旧数据已被覆盖
@@ -703,5 +716,22 @@ mod tests {
 
         // 清理
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- 9. record_token_usage accepts system_hash param ----
+    #[test]
+    fn record_token_usage_accepts_system_hash_param() {
+        let _guard = test_lock().lock().expect("lock poisoned");
+        clear_in_memory();
+        use crate::component::llm::LlmProvider;
+        let system_hash: [u8; 32] = [1u8; 32];
+        record_token_usage(
+            &LlmProvider::OpenAICompatible,
+            "test-model",
+            100,
+            50,
+            10,
+            system_hash,
+        );
     }
 }
