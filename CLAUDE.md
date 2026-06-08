@@ -128,7 +128,7 @@ The server is the authoritative "physics engine" of the world:
 - **IntentWorker**: Real-time intent processing (single consumer, MPSC channel)
 - **WebSocket/HTTP**: Handles Agent connections via Axum
 - **Game Data System**: Loads YAML configs from `crates/server/config/*.yaml` (JSON fallback)
-- **Action System**: Data-driven action validation and execution
+- **Action System**: Data-driven action validation and execution (`actions.yaml` defines transmission, display_name, validators, highlights)
 - **Formula Engine**: Dynamic expression evaluation using `evalexpr` crate for attribute calculations
 
 **Real-time Architecture** (0.1.0+):
@@ -142,11 +142,6 @@ Agent 提交 Intent ──> handler.rs (try_send) ──> IntentWorker (MPSC cha
                         │ 4. Update DashMap (write-through)
                         │ 5. Send ExecutionResult to Agent
                         │ 6. Broadcast events to co-located Agents
-
-TickScheduler (每 N 秒):
-                        │ 1. Send TickBoundary → IntentWorker (decay + death handling)
-                        │ 2. Broadcast WorldState
-                        │ 3. Chronicle generation (每 7 游戏日)
 ```
 
 **State Management** (DashMap write-through):
@@ -156,11 +151,9 @@ TickScheduler (每 N 秒):
 
 **Conflict Resolution**: FIFO via single IntentWorker (zero race conditions)
 
-**Multi-Intent Pipeline**:
-- Single tick can submit multiple Intents, executed in order
-- `IntentBatchConfig`: `max_intents_per_tick`, `max_retries`, `pipeline_execution_enabled`
-- `GradedValidationConfig`: Always (force)/Adaptive (dynamic)/Skip (skip) three strategies
-- Failed Intent triggers Saga rollback
+**Atomic Intent Queue**:
+- Single tick can submit multiple independent ATOMIC Intents (`subsequent_intents`), executed in order
+- Failed Intent triggers rollback ONLY for itself and aborts the rest of the queue (previously successful intents in the queue are kept)
 
 Key server modules:
 - `src/tick/scheduler.rs` - Pure clock scheduler (decay + broadcast)
@@ -169,36 +162,15 @@ Key server modules:
 - `src/actions/` - Action execution with data-driven ActionType
 - `src/game_data/` - Config loading, caching, and formula evaluation
 - `src/websocket/` - WebSocket connection management
-- `src/handlers/` - HTTP API endpoints (含 `dashboard/` 子模块: agents, experience, maintenance, stats, status_config, types)
-- `src/state.rs` - Shared AppState, AgentStateCache, rate limiting
+- `src/handlers/` - HTTP API endpoints (dashboard SPA via `/admin/*`)
+- `src/state.rs` - Shared AppState, AgentStateCache
 - `src/chronicle/` - Chronicle generation (群像传记): auto-generates every 7 game days
-- `src/dialogue/` - Dialogue system
-- `src/inventory/` - Inventory management
-- `src/items/` - Item definitions and registry
-- `src/models/` - Database models (AgentState, Agent, etc.)
-- `src/db/` - Database connection pool and migrations
 
 ### Agent Architecture
 
-The agent crate implements a **unified Agent SDK** with cognitive engine, memory, persona, and two runtime modes. Both modes share identical initialization and core architecture — the **only difference** is the LLM client implementation.
+The agent crate implements a **unified Agent SDK** with cognitive engine, memory, persona, and two runtime modes. Both modes share identical initialization and core architecture.
 
-> **CRITICAL: WebSocket is REQUIRED for intent submission**
->
-> `POST /api/v1/intent` is **not implemented** (route absent). All intent submission goes through WebSocket.
-
-#### Runtime Modes
-
-| | Cognitive (default) | Claw |
-|---|---|---|
-| LLM Client | `FallbackLlmClient` (built-in) | `OpenClawBridge` (external OpenClaw) |
-| CognitiveEngine | DirectLlmClient | OpenClawBridge |
-| Init | Unified (Phase 1: LLM, Phase 2: shared) | Same |
-| OutcomeMemory | Yes | Yes |
-| ChaosGenerator | Yes | Yes |
-| Three-Soul | Yes | Yes |
-| Callbacks | Yes | Yes (+ downstream forwarding) |
-
-#### Three-Soul Architecture (shared by both modes)
+#### Three-Soul Architecture
 
 ```
 ActorSoul (人魂) → ReflectorSoul (天魂)
@@ -206,71 +178,30 @@ ActorSoul (人魂) → ReflectorSoul (天魂)
   内嵌 EarthSoul tool calling（LLM 推理中按需调用）
 ```
 
-- **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with precise IDs + CognitiveChain, driven by CognitiveEngine (single LLM call with four-stage structured output: Perception→Motivation→Planning→Decision)
-- **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中（`soul/earth/`）。LLM 在推理过程中按需调用工具（`query_world`, `search_memory`, `get_action_detail`, `query_rules` 等），非独立管道步骤
-- **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type validation) → Layer 2 (RuleEngine validation) → Layer 3 (LLM intent review). Rejection feedback is narrative-化, ActorSoul only sees natural language
-
-#### Decision Context Pipeline
-
-`lifecycle/` (mod.rs + 7 sub-modules) assembles complete decision context each tick:
-
-1. Memory context (three-tier memory + survival warnings + sanity + deferred dialogue + dream)
-2. Summary context (action history sliding window)
-3. Outcome context (action result learning from OutcomeMemory)
-4. Action context (descriptions + field schema from prompt cache)
-
-This context is written to `DecisionContextSnapshot` and exposed via `/api/v1/context` enrichment for both modes.
+- **ActorSoul** (人魂/行动之魂): 直连 WorldState, outputs structured Intent with CognitiveChain, driven by CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
+- **EarthSoul** (地魂/能力之魂): tool calling 工具池，嵌入 ActorSoul 的 LLM 推理循环中。LLM 按需调用工具（`query_world`, `search_memory`, `skill_view`, `list_skills` 等）
+- **ReflectorSoul** (天魂/守护之魂): 三层审查 — Layer 1 (action_type) → Layer 2 (RuleEngine) → Layer 3 (LLM OOC review).
 
 #### Memory System (Three-Tier Architecture)
 
-- **Working Memory**: Short-term context, recent events — auto-injected into every decision prompt
-- **Episodic Memory**: Event-based memories with timestamps (SQLite) — top 10 by importance auto-injected per tick
-- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (instant-distance) — on-demand retrieval via EarthSoul `search_memory` tool, NOT auto-injected per tick (avoids per-tick vector search overhead)
-- **Outcome Memory (Hermes)**: SQLite action result learning — feeds back via DecisionContextSnapshot and memory narrative synthesis
+- **Working Memory**: Short-term context, recent events
+- **Episodic Memory**: Event-based memories with timestamps (SQLite)
+- **Semantic Memory**: Vector-based knowledge store using HNSW indexing (bge-small-zh-v1.5)
+- **Outcome Memory**: Action result learning
+- **CoreAffect**: Emotion-memory linkage driven by Barrett's theory (valence×arousal)
 
-#### Key Agent Modules
-
-- `src/core/lifecycle/` - Main decision loop (mod.rs orchestrator + 7 sub-modules: callbacks, context, death, helpers, reporting, soul_cycle, tick)
-- `src/core/agent.rs` - Agent struct with all component references
-- `src/core/builder.rs` - AgentBuilder (fluent API)
-- `src/core/reflector_ext.rs` - ReflectorSoul three-layer validation + graded audit
-- `src/core/social.rs` - Social event processing + LLM favorability evaluation
-- `src/soul/actor/engine.rs` - CognitiveEngine (four-stage: Perception→Motivation→Planning→Decision)
-- `src/soul/actor/chain.rs` - CognitiveChain (causal reasoning trace)
-- `src/soul/actor/translation.rs` - Translation layer cleared (alias accommodation removed; LLM must output precise values, ReflectorSoul rejects incorrect output)
-- `src/soul/actor/chaos.rs` - Sanity chaos generator (low-sanity random behavior)
-- `src/soul/actor/prompt_template.rs` - YAML-driven prompt template loader
-- `src/soul/actor/prompt_cache.rs` - Prompt cache (persona + actions)
-- `src/soul/actor/summary_window.rs` - Sliding context window for action history
-- `src/soul/reflector/` - ReflectorSoul: three-layer validation (single entry point)
-- `src/soul/earth/` - EarthSoul: tool calling 工具池，行动落地层。含 `tool_loop.rs`（共享 tool calling 循环）、`executor.rs`（工具分发调度）、`budget.rs`（从 context_window_tokens 推导的 tool result 预算）、`compactor.rs`（JSON 感知结构精简）、`loop_guard.rs`（防循环调用）、`config.rs`（EarthSoul 配置）、`*_tool.rs`（各工具实现：state/memory/skill/relationship/recipe/rule）
-- `src/component/memory/` - Three-tier memory system with SQLite backends
-- `src/component/memory/outcome.rs` - Outcome Memory (Hermes): action result learning
-- `src/component/persona/` - Dynamic persona, trait evolution (lifespan is server-authoritative)
-- `src/component/llm/` - LLM client abstraction (`DirectLlmClient` + `FallbackLlmClient` + `OpenClawBridge`)。`LlmClient` trait 含 `send_chat_exchange` 方法支持模式无关原始消息交换，429 circuit breaker 1h 自动恢复
-- `src/component/social/` - RelationshipStore (SQLite, social graph)
-- `src/component/immediate/` - ImmediateEventHandler (instant event processing)
-- `src/infra/transport/` - WebSocket communication layer
-- `src/infra/api/` - HTTP API server: handlers, context generation, services
-
-### Protocol Layer
-
-The `protocol` crate defines all shared types:
-- `ServerMessage` - Server → Agents (registered, world_state, game_rules_update, agent_died)
-- `ClientMessage` - Agents → Server (intent, dialogue)
-- `WorldState` - Complete world snapshot sent each tick
-- `Intent` - Agent decision structure
+#### Token Optimization & Performance
+- **AttentionController & DeltaEngine**: Lean prompts via WorldStateStore diffing and two-stage focus summarization
+- **DeepSeek Cache Tuning**: system_hash metric tracking, reasoning stripping (D8), and schema canonicalization (D9)
 
 ### Data-Driven Design
 
-All game mechanics configured via YAML in `crates/server/config/` (JSON fallback):
+All game mechanics configured via YAML in `crates/server/config/`:
 - `actions.yaml`, `attributes.yaml`, `items.yaml`, `locations.yaml`
-- `game_rules.yaml`, `time.yaml`, `inventory.yaml`, `recipes.yaml`
-- `skills/` — AI Procedural Skills (SKILL.md meta-cognitive frameworks, see below)
+- `game_rules.yaml`, `time.yaml`, `emotion.yaml`, `narrative_config.yaml`
+- `skills/` — AI Procedural Skills (SKILL.md)
 
-**AI Procedural Skills**: Skills are SKILL.md files (YAML frontmatter + markdown body) that define meta-cognitive behavioral frameworks — not RPG skills, not domain expertise, but "how to think" tools. 5 frameworks: social/trust-reading (识人之明), social/conflict-navigation (进退之道), cognitive/risk-assessment (审时度势), cognitive/resource-planning (未雨绸缪), survival/situational-awareness (见微知著). Path: `config/skills/{category}/{skill_id}/SKILL.md`. Skill acquisition: experience-threshold based — Agent executes actions → `action_counts` by category increments → when threshold met (configured in `game_rules.yaml` `skill_acquisition`), `StateChange::SkillLearned` triggered automatically. Server pushes `SkillContent` via `ConfigUpdate` WebSocket message. Agent persists to `skill_cache.json` locally and reads from memory cache at prompt-build time.
-
-**Formula Engine**: Dynamic calculations use `evalexpr` syntax.
+**AI Procedural Skills**: 5 meta-cognitive behavioral frameworks. Acquired via experience thresholds automatically, pushed via WebSocket `ConfigUpdate`, cached locally.
 
 ## Code Style Conventions
 

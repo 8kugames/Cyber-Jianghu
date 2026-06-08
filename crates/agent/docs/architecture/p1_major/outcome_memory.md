@@ -1,25 +1,51 @@
-# 经验结果记忆 (Outcome Memory)
+# 经验结果记忆 (Outcome Memory / Hermes)
 
-**级别**: P1 重要特性
-**模块**: `crates/agent`
+Outcome Memory（内部代号 Hermes）是 Agent 独有的一套**行动结果反馈学习系统**。它的核心目标是解决大模型“在同一个坑里反复摔倒”的问题。
 
-## 1. 设计目标
-赋予 Agent 失败学习和经验总结的能力，打破“金鱼记忆”，避免其在同一个错误上反复栽跟头（如反复尝试推开一扇锁着的门）。
+相关代码路径：`crates/agent/src/component/memory/outcome.rs`
 
-## 2. 核心机制
-### 2.1 结果捕获
-- 每当 Agent 提交 Intent 后，Server 或天魂（ReflectorSoul）会返回 `ExecutionResult`。
-- 如果判定为失败（如距离过远、体力不足、目标不存在），该结果及其附带的中文 `GameError` 会被写入 `OutcomeMemory` 的 SQLite 库中。
+## 设计动机
 
-### 2.2 前置规避注入
-- 在下一次构建 `CognitiveEngine` 的 Prompt 时，系统会从 `OutcomeMemory` 中拉取最近的失败记录。
-- 将这些教训作为 Context 的一部分（如：“【系统提示】你上次尝试攻击李四失败了，原因是：距离过远。请先移动到同一地点。”）注入给 LLM。
-- LLM 结合此信息，自然会调整策略（如先执行 `move` 动作）。
+在 MMO 环境中，Agent 可能会做出不符合当前物理规则的行动（例如“给李四 100 文钱”，但实际上余额不足，或者李四不在旁边）。当服务端驳回（Reject）这个意图时，如果不加以记录，下一次遇到类似情况时，大模型由于其无状态的本质，极大概率会**再次尝试相同的错误操作**。
 
-## 3. 架构约束
-- 必须能够将抽象的错误码转化为 LLM 易读的自然语言教训。
-- 历史教训应当具有时效性，过久的失败记录不应干扰当前的决策。
+Hermes 系统通过记录每一条 `Intent` 的最终执行结果 (`Success` 或 `Failed`)，并结合当时的环境哈希 (`context_hash`)，让大模型在决策前就能“想起”以前的教训。
 
-## 4. 代码入口
-- 内存组件: `crates/agent/src/component/memory/outcome.rs`
-- 注入逻辑: `crates/agent/src/core/lifecycle.rs` (上下文组装)
+## 数据结构：OutcomeRecord
+
+每一条行动记录都被保存在 SQLite 中：
+
+```rust
+pub struct OutcomeRecord {
+    pub action_type: String,             // 动作类型 (如 "give")
+    pub action_data: Option<Value>,      // 核心参数 (精简版)
+    pub result: OutcomeResult,           // 成功或失败(带原因)
+    pub target_agent_id: Option<String>, // 交互目标 (如果是社交动作)
+    pub context_hash: String,            // 环境哈希指纹
+    pub tick_id: i64,                    // 发生时间
+}
+```
+
+### Context Hash (环境指纹)
+
+为了匹配“相似场景”，Hermes 在记录时会生成当前 `WorldState` 的指纹 `context_hash`。
+指纹提取了：当前位置 (Location ID)、周围的实体类型概览等核心要素。
+当 Agent 再次处于相同的 `context_hash` 时，系统会优先检索该环境下的失败记录。
+
+## 记忆注入管线
+
+每次大模型推理前，系统会自动向 Prompt 中注入两类 Outcome 记录：
+
+1. **同场景经验**：根据当前的 `context_hash` 查询该场景下最近发生的成功/失败经验。
+2. **同动作经验**：大模型可以通过 EarthSoul 的 tool calling 主动查询某个特定 `action_type` 的过往经验。
+
+### 示例
+
+注入给 LLM 的 Prompt 可能是这样的：
+
+```markdown
+## 历史经验 (Outcome Memory)
+- [Tick 105] 你尝试在当前场景执行 `trade` 失败了。原因：你没有足够的碎银。
+- [Tick 108] 你尝试对 `npc_002` 执行 `whisper` 成功了。
+```
+
+这种硬性反馈机制能极大地收敛大模型的幻觉，迫使其在反复失败后主动寻找其他 `action_type`（比如去赚钱，而不是继续强行购买）。

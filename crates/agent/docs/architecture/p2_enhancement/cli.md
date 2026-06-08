@@ -3,29 +3,32 @@
 **级别**: P2 体验增强
 **模块**: `crates/agent`
 
-## 1. 设计目标
-提供便捷、标准的 Unix 风格运维手段，方便在终端快速启动、调试和管理成百上千个 Agent 实例。
+## 1. 第一性原理与设计目标
+Agent 需要作为独立的进程在各种环境中运行（开发、测试、生产）。CLI 必须提供标准化的入口，通过简单的参数支持不同的运行模式（Cognitive 与 Claw），并能优雅地处理网络端口分配、配置加载和设备注册。
 
 ## 2. 核心机制
-### 2.1 子命令支持 (Subcommands)
-基于 `clap` 框架构建，支持以下核心指令：
-- `run`：启动 Agent 主进程，建立 WebSocket 连接并开始思考循环。
-- `config`：检查并打印当前加载的环境变量和 YAML 配置路径。
-- `create-character`：引导式创建一个新的角色配置文件。
-- `show` / `reset`：查看或清空 Agent 本地的 SQLite 记忆库。
 
-### 2.2 自动端口探测
-- 每个 Agent 自身也暴露一组 HTTP API（用于控制台或集群调度）。
-- 在大规模启动时，支持传入 `--port 0` 参数，由操作系统自动寻找可用端口，避免端口冲突，并在启动日志中输出绑定的端口号。
+### 2.1 运行模式切换 (Runtime Mode)
+CLI 是 Agent 架构“双模式统一”的直接体现：
+- `run --mode cognitive`：内置 LLM 客户端，自闭环进行思维推演。
+- `run --mode claw`：桥接模式，不直接调用 LLM，而是通过 WebSocket 将 Prompt 和意图转发给外部的 OpenClaw 集群（`OpenClawBridge`）。
+- **统一抽象**：两者的唯一差异在于 `create_llm_client` 返回的是 `FallbackLlmClient` 还是 `OpenClawBridge`，其余组件（记忆、关系、三魂引擎）完全一致。
 
-### 2.3 环境隔离
-- 支持通过 `--env` 参数加载不同的 `.env` 配置文件（如 `.env.test`, `.env.prod`）。
-- 确保不同环境下的数据库存储目录和 Server 地址互不干扰。
+### 2.2 自动端口探测与 HTTP API 挂载
+- 允许通过 `--port 0` 参数让操作系统自动选择空闲端口（优先尝试 `23340`，如果占用则在 `23340~23999` 范围内随机探测）。
+- 这解决了在单机大规模部署成百上千个 Agent 时遇到的端口冲突问题。
+- 启动后自动挂载 HTTP API 和前端静态面板。
+
+### 2.3 设备与角色解耦 (Device-Character Separation)
+- **设备注册**：首次运行会调用 `/device/register` 自动向 Server 注册设备（分配 `device_id` 与 `auth_token`）并持久化到本地。
+- **配置加载与热重载**：提供 `config` 命令更新本地环境配置，并支持运行时通过 API 触发配置热重载。
+- 提供 `create-character` 子命令，允许绕过 Web 页面直接在终端创建角色并上报给 Server。
 
 ## 3. 架构约束
-- 必须构建清晰的帮助文档 (`--help`) 和严格的参数类型校验。
-- 所有的错误（如配置文件找不到）必须在启动的最初阶段被捕捉并输出友好的错误信息，禁止在运行时隐式 panic。
+- **Fail Fast**：CLI 在启动时必须执行严格的配置校验（如 `earth_soul.validate()`），如果关键配置（如设备 YAML 状态与 Server 失去同步）不一致，必须立即退出并要求用户明确处理，禁止在运行时隐式 Panic。
+- **无锁阻塞**：CLI 作为 Agent 进程的入口，在初始化期间可安全使用 `tokio::task::block_in_place` 或 `block_on` 处理配置拉取，但进入主循环后必须全异步。
 
 ## 4. 代码入口
-- CLI 定义: `crates/agent/src/bin/cyber-jianghu-agent.rs`
-- 配置解析: `crates/agent/src/config.rs`
+- CLI 核心定义与启动: `crates/agent/src/bin/cyber-jianghu-agent.rs`
+- 运行时模式配置: `crates/agent/src/config.rs`
+- OpenClaw 桥接入口: `crates/agent/src/runtime/claw/`
