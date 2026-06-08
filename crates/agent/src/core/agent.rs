@@ -175,7 +175,8 @@ pub struct Agent {
     pub(crate) persona: ThreadSafePersona,
 
     /// 事件→特质映射器（每 tick 末尾 process_events 同步 events → traits）
-    pub(crate) event_trait_mapper: std::sync::Arc<EventTraitMapper>,
+    /// 使用 RwLock 保证 WebSocket 回调能原位更新规则
+    pub(crate) event_trait_mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>,
 
     pub(crate) persona_store: Option<std::sync::Arc<PersonaStore>>,
 }
@@ -256,12 +257,18 @@ impl Agent {
                 "无名侠客",
                 "你是一名行走在江湖中的侠客。",
             )),
-            event_trait_mapper: std::sync::Arc::new(
-                crate::component::persona::rules_loader::load_event_trait_rules(
+            event_trait_mapper: {
+                let mapper = crate::component::persona::rules_loader::load_event_trait_rules(
                     &crate::config::config_dir().join("persona_event_rules.yaml"),
-                )
-                .expect("persona_event_rules.yaml 加载失败 — 启动终止(创世 fail-fast)"),
-            ),
+                );
+                match mapper {
+                    Ok(m) => std::sync::Arc::new(std::sync::RwLock::new(m)),
+                    Err(e) => {
+                        warn!("persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}", e);
+                        std::sync::Arc::new(std::sync::RwLock::new(EventTraitMapper::new()))
+                    }
+                }
+            },
             persona_store: None,
         }
     }
@@ -281,27 +288,36 @@ impl Agent {
     /// 用于注册确认、重连后恢复人设。如果 character.yaml 存在，加载完整人设
     /// 并刷新 PromptCache；否则仅更新名称。
     pub(crate) fn reload_character_persona(&mut self, agent_id: Uuid, name: &str) {
-        if let Some(ref engine) = self.cognitive_engine {
-            let server_dir = self.config.server_dir(&self.config.server.ws_url);
-            let char_yaml = server_dir
-                .join("characters")
-                .join(agent_id.to_string())
-                .join("character.yaml");
+        let server_dir = self.config.server_dir(&self.config.server.ws_url);
+        let char_yaml = server_dir
+            .join("characters")
+            .join(agent_id.to_string())
+            .join("character.yaml");
 
-            if char_yaml.exists() {
-                match crate::config::CharacterConfig::from_file(&char_yaml) {
-                    Ok(char_config) => {
-                        let prompt = char_config.generate_system_prompt();
+        if char_yaml.exists() {
+            match crate::config::CharacterConfig::from_file(&char_yaml) {
+                Ok(char_config) => {
+                    let prompt = char_config.generate_system_prompt();
+                    self.replace_persona_description(name, &prompt);
+                    if let Some(ref engine) = self.cognitive_engine {
                         engine.update_persona(name, &prompt);
-                        self.character_config = Some(char_config);
-                        info!("已从 character.yaml 重新加载人设并更新认知引擎");
                     }
-                    Err(e) => {
-                        warn!("加载 character.yaml 失败，仅更新名称: {}", e);
+                    self.character_config = Some(char_config);
+                    info!("已从 character.yaml 重新加载人设并更新认知引擎");
+                }
+                Err(e) => {
+                    warn!("加载 character.yaml 失败，仅更新名称: {}", e);
+                    let base_description = self.persona.read(|p| p.base_description.clone());
+                    self.replace_persona_description(name, &base_description);
+                    if let Some(ref engine) = self.cognitive_engine {
                         engine.update_agent_name(name);
                     }
                 }
-            } else {
+            }
+        } else {
+            let base_description = self.persona.read(|p| p.base_description.clone());
+            self.replace_persona_description(name, &base_description);
+            if let Some(ref engine) = self.cognitive_engine {
                 engine.update_agent_name(name);
             }
         }
@@ -313,12 +329,12 @@ impl Agent {
     }
 
     /// 获取 event_trait_mapper 引用
-    pub fn event_trait_mapper(&self) -> &std::sync::Arc<EventTraitMapper> {
+    pub fn event_trait_mapper(&self) -> &std::sync::Arc<std::sync::RwLock<EventTraitMapper>> {
         &self.event_trait_mapper
     }
 
     /// 替换 event_trait_mapper（测试/扩展）
-    pub fn set_event_trait_mapper(&mut self, mapper: std::sync::Arc<EventTraitMapper>) {
+    pub fn set_event_trait_mapper(&mut self, mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>) {
         self.event_trait_mapper = mapper;
     }
 
@@ -568,11 +584,13 @@ impl Agent {
         }
         // 同步事件 → persona traits 演化
         let mapper = self.event_trait_mapper.clone();
+        let mapper_guard = mapper.read().unwrap();
         for event in events {
             self.persona.write(|p| {
-                mapper.apply_to_persona(event, p, event.tick_id);
+                mapper_guard.apply_to_persona(event, p, event.tick_id);
             });
         }
+        drop(mapper_guard);
         Ok(())
     }
 
@@ -708,5 +726,55 @@ impl Agent {
         let state = self.http_api_state.as_ref()?;
         let agent_id = *state.agent_id.read().await;
         state.soul_recorder_for(agent_id).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::future::BoxFuture;
+
+    fn test_config() -> Config {
+        Config {
+            server: crate::config::ServerConfig::default(),
+            runtime: crate::config::RuntimeConfig::default(),
+            llm: crate::config::LlmConfig::default(),
+            llm_reflector: None,
+            memory: crate::config::MemoryConfig::default(),
+            game_rules: None,
+            config_path: PathBuf::from("/tmp/test-agent-config.yaml"),
+            servers_dir: PathBuf::from("/tmp/test-agent-servers"),
+            earth_soul: crate::soul::earth::config::EarthSoulConfig::default(),
+            token_optimization: crate::config::TokenOptimizationConfig::default(),
+            character_generation: crate::config::CharacterGenerationConfig {
+                world_setting: "测试世界".to_string(),
+                fields: Vec::new(),
+            },
+        }
+    }
+
+    fn noop_decision_callback() -> crate::runtime::DecisionCallback {
+        Arc::new(|tick_id: i64, agent_id: Uuid| -> BoxFuture<'static, Intent> {
+            Box::pin(async move { Intent::new(agent_id, tick_id, "休息", None) })
+        })
+    }
+
+    #[tokio::test]
+    async fn test_reload_character_persona_updates_persona_name_without_engine() {
+        let repo_config_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("agent crate parent")
+            .join("server/config");
+        unsafe {
+            std::env::set_var("CYBER_JIANGHU_CONFIG_DIR", &repo_config_dir);
+        }
+
+        let mut agent = Agent::new(test_config(), noop_decision_callback(), None, None).await;
+
+        assert_eq!(agent.persona.read(|p| p.name.clone()), "无名侠客");
+
+        agent.reload_character_persona(Uuid::new_v4(), "裴无咎");
+
+        assert_eq!(agent.persona.read(|p| p.name.clone()), "裴无咎");
     }
 }

@@ -129,10 +129,9 @@ impl OutcomeMemory {
             );
             CREATE INDEX IF NOT EXISTS idx_outcome_action ON outcome_records(action_type);
             CREATE INDEX IF NOT EXISTS idx_outcome_context ON outcome_records(context_hash);
-            CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id);
             ",
         )?;
-        // 老库迁移：加 target_agent_id 列（拆开执行，避免 ALTER 失败导致 INDEX 跳过）
+        // 老库迁移：先加列，再加索引（顺序关键：旧库无 target_agent_id 列）
         let _ = conn.execute_batch("ALTER TABLE outcome_records ADD COLUMN target_agent_id TEXT");
         let _ = conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_outcome_target ON outcome_records(target_agent_id)",

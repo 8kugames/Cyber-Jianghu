@@ -105,6 +105,10 @@ struct ConnectionState {
         Option<Arc<dyn Fn(cyber_jianghu_protocol::PromptTemplateConfig) + Send + Sync>>,
     /// 上次收到的 prompt_templates content_hash（用于 skip-optimization）
     prompt_template_hash: Option<String>,
+    /// 事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
+    /// 参数: Vec<TraitMappingRule>
+    persona_event_rules_callback:
+        Option<Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>>,
 
     // ---- 后台任务架构 ----
     /// 后台 WebSocket 任务句柄
@@ -144,6 +148,7 @@ impl WebSocketClient {
                 skill_update_callback: None,
                 prompt_template_callback: None,
                 prompt_template_hash: None,
+                persona_event_rules_callback: None,
                 reader_task: None,
                 shutdown_tx: None,
                 intent_tx: None,
@@ -358,6 +363,23 @@ impl WebSocketClient {
             rt.block_on(async {
                 let mut state = self.state.write().await;
                 state.prompt_template_callback = Some(callback);
+            });
+        });
+    }
+
+    /// 设置事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
+    /// 参数: Vec<TraitMappingRule>
+    pub fn set_persona_event_rules_callback(
+        &self,
+        callback: Arc<
+            dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync,
+        >,
+    ) {
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = self.state.write().await;
+                state.persona_event_rules_callback = Some(callback);
             });
         });
     }
@@ -701,7 +723,7 @@ async fn websocket_background_task(
                 match msg_result {
                     Some(Ok(Message::Text(text))) => {
                         // 克隆回调（避免在处理中持有锁）
-                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
+                        let (game_rules_cb, dialogue_cb, wb_rules_cb, action_update_cb, skill_update_cb, prompt_template_cb, persona_event_rules_cb, server_msg_cb, ws_tx, reg_tx, exec_result_tx) = {
                             let state_guard = state.read().await;
                             (
                                 state_guard.game_rules_callback.clone(),
@@ -710,6 +732,7 @@ async fn websocket_background_task(
                                 state_guard.action_update_callback.clone(),
                                 state_guard.skill_update_callback.clone(),
                                 state_guard.prompt_template_callback.clone(),
+                                state_guard.persona_event_rules_callback.clone(),
                                 state_guard.server_msg_callback.clone(),
                                 state_guard.worldstate_tx.clone(),
                                 state_guard.registered_tx.clone(),
@@ -819,6 +842,25 @@ async fn websocket_background_task(
                                             }
                                         } else {
                                             debug!("prompt_templates skip: hash unchanged");
+                                        }
+                                    // 处理 persona_event_rules 配置更新
+                                    } else if config_type == "persona_event_rules" {
+                                        #[derive(serde::Deserialize)]
+                                        struct RulesJson {
+                                            rules: Vec<crate::component::persona::TraitMappingRule>,
+                                        }
+                                        match serde_json::from_value::<RulesJson>(content.clone()) {
+                                            Ok(parsed) => {
+                                                if let Some(ref cb) = persona_event_rules_cb {
+                                                    cb(parsed.rules);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    "Failed to parse persona_event_rules content from ConfigUpdate: {}",
+                                                    e
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -1145,6 +1187,15 @@ impl AgentClient {
     ) {
         let client = self.client.read().await;
         client.set_prompt_template_callback(callback);
+    }
+
+    /// 设置事件特质规则更新回调（ConfigUpdate with config_type="persona_event_rules"）
+    pub async fn set_persona_event_rules_callback(
+        &self,
+        callback: Arc<dyn Fn(Vec<crate::component::persona::TraitMappingRule>) + Send + Sync>,
+    ) {
+        let client = self.client.read().await;
+        client.set_persona_event_rules_callback(callback);
     }
 
     /// 设置 Server 消息透传回调（用于 OpenClaw 集成）

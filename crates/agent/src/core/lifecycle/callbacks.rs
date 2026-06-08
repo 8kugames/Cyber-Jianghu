@@ -83,6 +83,27 @@ impl super::super::Agent {
             );
         }
 
+        let agent_name_for_event_rules = self.character_name().to_string();
+        let event_trait_mapper_for_rules = self.event_trait_mapper.clone();
+        self.client
+            .set_persona_event_rules_callback(Arc::new(
+                move |rules: Vec<crate::component::persona::TraitMappingRule>| {
+                    info!(
+                        "Agent '{}' received persona_event_rules update: {} rules",
+                        agent_name_for_event_rules,
+                        rules.len()
+                    );
+                    let new_mapper = crate::component::persona::EventTraitMapper::from_rules(rules);
+                    if let Ok(mut guard) = event_trait_mapper_for_rules.write() {
+                        *guard = new_mapper;
+                        debug!("EventTraitMapper updated from Server ConfigUpdate");
+                    } else {
+                        warn!("EventTraitMapper RwLock poisoned — cannot update rules");
+                    }
+                },
+            ))
+            .await;
+
         if self.validator.is_some() {
             let validator = self.validator.clone();
             let agent_name_for_rules = self.character_name().to_string();

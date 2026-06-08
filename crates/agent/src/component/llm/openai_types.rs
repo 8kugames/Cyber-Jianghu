@@ -53,7 +53,7 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// DeepSeek/SenseNova 等模型的思考内容，多轮对话必须回传
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", alias = "reasoning")]
     pub reasoning_content: Option<String>,
 }
 
@@ -196,7 +196,7 @@ pub(crate) struct OpenAIDelta {
     pub tool_calls: Option<Vec<super::tool_types::StreamToolCallDelta>>,
     /// 推理/思考内容（SenseNova、DeepSeek 等模型在 thinking 模式下返回）
     /// 这些 token 计入 completion_tokens 但不进入 content 字段
-    #[serde(default)]
+    #[serde(default, alias = "reasoning")]
     pub reasoning_content: Option<String>,
 }
 

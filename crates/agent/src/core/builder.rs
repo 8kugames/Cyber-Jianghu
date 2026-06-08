@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tokio::sync::broadcast;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::component::dialogue::DialogueContextManager;
@@ -75,7 +75,7 @@ pub struct AgentBuilder {
     /// 人设（CU-5：默认初始人设；调用方可通过 `with_persona` 注入）
     persona: Option<ThreadSafePersona>,
     /// 事件→特质映射器（默认 `EventTraitMapper::new()`）
-    event_trait_mapper: Option<std::sync::Arc<EventTraitMapper>>,
+    event_trait_mapper: Option<std::sync::Arc<std::sync::RwLock<EventTraitMapper>>>,
     persona_store: Option<std::sync::Arc<PersonaStore>>,
     /// 情绪配置
     emotion_config: Option<crate::component::emotion::config::EmotionConfig>,
@@ -274,7 +274,7 @@ impl AgentBuilder {
     }
 
     /// 注入事件→特质映射器
-    pub fn with_event_trait_mapper(mut self, mapper: std::sync::Arc<EventTraitMapper>) -> Self {
+    pub fn with_event_trait_mapper(mut self, mapper: std::sync::Arc<std::sync::RwLock<EventTraitMapper>>) -> Self {
         self.event_trait_mapper = Some(mapper);
         self
     }
@@ -422,12 +422,16 @@ impl AgentBuilder {
             ))
         });
         let event_trait_mapper = self.event_trait_mapper.unwrap_or_else(|| {
-            std::sync::Arc::new(
-                crate::component::persona::rules_loader::load_event_trait_rules(
-                    &crate::config::config_dir().join("persona_event_rules.yaml"),
-                )
-                .expect("persona_event_rules.yaml 加载失败 — 启动终止(创世 fail-fast)"),
-            )
+            let mapper = crate::component::persona::rules_loader::load_event_trait_rules(
+                &crate::config::config_dir().join("persona_event_rules.yaml"),
+            );
+            match mapper {
+                Ok(m) => std::sync::Arc::new(std::sync::RwLock::new(m)),
+                Err(e) => {
+                    warn!("persona_event_rules.yaml 加载失败(等待 Server 推送): {:#}", e);
+                    std::sync::Arc::new(std::sync::RwLock::new(EventTraitMapper::new()))
+                }
+            }
         });
 
         let agent = Agent {
